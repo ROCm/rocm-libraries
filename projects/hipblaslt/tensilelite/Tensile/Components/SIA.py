@@ -465,6 +465,10 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     # put everything in the header:
     writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
+    writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSA)
+    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA)
+    writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSB)
+    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
     writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
     writer.codes.unrollLoopHeader.add(globalReadIncACode)
@@ -476,6 +480,8 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
 
 def prepareGRInstToSched(writer, kernel, isNGLL):
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadA.header)
+    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA.header)
+    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadB.header)
 
     # Add all loads from middle as individual schedulable items
@@ -486,9 +492,13 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
     elif kernel["PrefetchGlobalRead"] >= 2:
         itemsGRToSched =  []
         itemsGRToSchedLater = list(writer.codes.globalReadA.middle.items()) + \
+                         list(writer.codes.globalReadMXSA.middle.items()) + \
+                         list(writer.codes.globalReadMXSB.middle.items()) + \
                          list(writer.codes.globalReadB.middle.items())
     else:
         itemsGRToSched =  list(writer.codes.globalReadA.middle.items()) + \
+                        list(writer.codes.globalReadMXSA.middle.items()) + \
+                        list(writer.codes.globalReadMXSB.middle.items()) + \
                         list(writer.codes.globalReadB.middle.items())
         itemsGRToSchedLater = []
 
@@ -614,6 +624,10 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
     # insert dtlsM0UpdateACode dtlsM0UpdateBCode code
     if writer.codes.globalReadA.middle.items():
         writer.codes.globalReadA.middle.getItem(0).add(writer.codes.dtlsM0UpdateA, 0)
+    if writer.codes.globalReadMXSA.middle.items():
+        writer.codes.globalReadMXSA.middle.getItem(0).add(writer.codes.dtlsM0UpdateMXSA, 0)
+    if writer.codes.globalReadMXSB.middle.items():
+        writer.codes.globalReadMXSB.middle.getItem(0).add(writer.codes.dtlsM0UpdateMXSB, 0)
     if writer.codes.globalReadB.middle.items():
         writer.codes.globalReadB.middle.getItem(0).add(writer.codes.dtlsM0UpdateB, 0)
 
@@ -640,6 +654,8 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
     assert not itemsGRToSched # should have scheduled everything already, itemsGRToSched should be empty
 
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadA.footer)
+    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSA.footer)
+    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSB.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadB.footer)
     return lastLoadIter
 
@@ -675,22 +691,42 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
     insertDummyTop = False
     if kernel["PrefetchGlobalRead"] >= 2:
         # PrefetchGlobalRead + DirectToLds/DirectToVgpr case, need to add dummy list to insert global read
-        lenA = len(list(writer.codes.globalReadA.middle.items()))
-        lenB = len(list(writer.codes.globalReadB.middle.items()))
-        lenAFooter = len(list(writer.codes.globalReadA.footer.items()))
-        lenBFooter = len(list(writer.codes.globalReadB.footer.items()))
+        lenA    = len(list(writer.codes.globalReadA.middle.items()))
+        lenMXSA = len(list(writer.codes.globalReadMXSA.middle.items()))
+        lenMXSB = len(list(writer.codes.globalReadMXSB.middle.items()))
+        lenB    = len(list(writer.codes.globalReadB.middle.items()))
+
+        lenAFooter    = len(list(writer.codes.globalReadA.footer.items()))
+        lenMXSAFooter = len(list(writer.codes.globalReadMXSA.footer.items()))
+        lenMXSBFooter = len(list(writer.codes.globalReadMXSB.footer.items()))
+        lenBFooter    = len(list(writer.codes.globalReadB.footer.items()))
+
         # A/B swap check for DTV. NGLL case, no swap
         swapped = writer.isSwapGlobalReadOrderForDtvOrDtl(kernel) and (not isNGLL)
         insertDummyTop = True
         if swapped:
           # swap A and B (SwapGlobalReadOrder case, the actual content is swapped (B is in globalReadACode). Need adjustment)
           lenA, lenB = lenB, lenA
+          lenMXSA, lenMXSB = lenMXSB, lenMXSA
+
         if kernel["DirectToLdsA"] or kernel["DirectToVgprA"]:
             if kernel["DirectToLdsA"]:
               # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
               lenA -= lenAFooter
             numDummy += lenA
             insertDummyTop = (not swapped)
+        if kernel["ProblemType"]["MXBlockA"] and (kernel["DirectToLdsMXSA"] or kernel["DirectToVgprMXSA"]):
+            if kernel["DirectToLdsMXSA"]:
+              # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
+              lenMXSA -= lenMXSAFooter
+            numDummy += lenMXSA
+            insertDummyTop = (not swapped)
+        if kernel["ProblemType"]["MXBlockB"] and (kernel["DirectToLdsMXSB"] or kernel["DirectToVgprMXSB"]):
+            if kernel["DirectToLdsMXSB"]:
+              # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
+              lenMXSB -= lenMXSBFooter
+            numDummy += lenMXSB
+            insertDummyTop = swapped
         if kernel["DirectToLdsB"] or kernel["DirectToVgprB"]:
             if kernel["DirectToLdsB"]:
               # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
@@ -868,8 +904,11 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             if hasHolder:
                                 readsToWaitAdjust = readsToWait
                                 if kernel["NoLdsWriteCode"]:
-                                    # DirectToLds for both A and B case, use  the number of global read for both A and B as vlcnt (only for PGR=1)
-                                    readsToWaitAdjust = len(list(writer.codes.globalReadA.middle.items())) + len(list(writer.codes.globalReadB.middle.items()))
+                                    # DirectToLds for both A and B case, use  the number of global read for both A and B as vmcnt (only for PGR=1)
+                                    readsToWaitAdjust = len(list(writer.codes.globalReadA.middle.items())) + \
+                                                        len(list(writer.codes.globalReadMXSA.middle.items())) + \
+                                                        len(list(writer.codes.globalReadMXSB.middle.items())) + \
+                                                        len(list(writer.codes.globalReadB.middle.items()))
                                 for wc in wcList:
                                     replaceHolder(wc, (readsToWaitAdjust))
                 if itemsLWToSchedIndexForSplitDS in additionalIndexList:
