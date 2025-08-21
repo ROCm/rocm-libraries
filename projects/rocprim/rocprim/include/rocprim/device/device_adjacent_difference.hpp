@@ -204,24 +204,18 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        hipError_t launch_err
-            = launch_adjacent_difference<config, InPlace, Right>(target_arch,
-                                                                 input + offset,
-                                                                 output + offset,
-                                                                 size,
-                                                                 op,
-                                                                 previous_values + starting_block,
-                                                                 starting_block,
-                                                                 current_blocks,
-                                                                 block_size,
-                                                                 0,
-                                                                 stream);
-
-        if(launch_err != hipSuccess)
-        {
-            return launch_err;
-        }
-
+        ROCPRIM_RETURN_ON_ERROR(
+            launch_adjacent_difference<config, InPlace, Right>(target_arch,
+                                                               input + offset,
+                                                               output + offset,
+                                                               size,
+                                                               op,
+                                                               previous_values + starting_block,
+                                                               starting_block,
+                                                               current_blocks,
+                                                               block_size,
+                                                               0,
+                                                               stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("adjacent_difference_kernel",
                                                     current_size,
                                                     start);

@@ -1273,22 +1273,16 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
     // Launch batch_memcpy_non_blev_kernel.
     start_timer();
 
-    hipError_t launch_err
-        = launch_kernel<config,
-                        decltype(non_blev_memcpy_kernel),
-                        non_blev_batch_memcpy_kernel_config_selector>(target_arch,
-                                                                      non_blev_memcpy_kernel,
-                                                                      batch_memcpy_grid_size,
-                                                                      non_blev_block_size,
-                                                                      0,
-                                                                      stream);
-
+    ROCPRIM_RETURN_ON_ERROR(
+        launch_kernel<config,
+                      decltype(non_blev_memcpy_kernel),
+                      non_blev_batch_memcpy_kernel_config_selector>(target_arch,
+                                                                    non_blev_memcpy_kernel,
+                                                                    batch_memcpy_grid_size,
+                                                                    non_blev_block_size,
+                                                                    0,
+                                                                    stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("non_blev_memcpy_kernel", num_copies, start);
-
-    if(launch_err != hipSuccess)
-    {
-        return launch_err;
-    }
 
     // Launch batch_memcpy_blev_kernel.
     start_timer();

@@ -283,7 +283,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
              typename CompareFunction,
              typename BinaryFunction,
              typename LookbackScanState>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto device_scan_by_key_kernel_impl(
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto device_scan_by_key_kernel_impl(
         KeyInputIterator                              keys,
         InputIterator                                 values,
         OutputIterator                                output,
@@ -326,7 +326,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto device_scan_by_key_kernel_impl(
         constexpr auto store_method = params.block_store_method;
         using store_unwrap = unwrap_store<block_size, items_per_thread, result_type, store_method>;
 
-    ROCPRIM_SHARED_MEMORY union
+        ROCPRIM_SHARED_MEMORY union
         {
             typename load_flagged::storage_type    load;
             typename block_scan_type::storage_type scan;

@@ -89,38 +89,34 @@ inline hipError_t launch_block_reduce(detail::target_arch arch,
         std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
     }
 
-#define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                              \
-    do                                                                                           \
-    {                                                                                            \
-        detail::target_arch target_arch;                                                         \
-        hipError_t          result = detail::host_target_arch(stream, target_arch);              \
-        if(result != hipSuccess)                                                                 \
-        {                                                                                        \
-            return result;                                                                       \
-        }                                                                                        \
-        if(debug_synchronous)                                                                    \
-        {                                                                                        \
-            start = std::chrono::steady_clock::now();                                            \
-        }                                                                                        \
-                                                                                                 \
-        hipError_t launch_err                                                                    \
-            = launch_block_reduce<config, WithInitialValue, fit_larger, fit_items, result_type>( \
-                target_arch,                                                                     \
-                input,                                                                           \
-                size,                                                                            \
-                output,                                                                          \
-                initial_value,                                                                   \
-                reduce_op,                                                                       \
-                dim3(1),                                                                         \
-                dim3(block_size),                                                                \
-                0,                                                                               \
-                stream);                                                                         \
-        if(launch_err != hipSuccess)                                                             \
-        {                                                                                        \
-            return result;                                                                       \
-        }                                                                                        \
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);         \
-    }                                                                                            \
+#define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                            \
+    do                                                                                         \
+    {                                                                                          \
+        detail::target_arch target_arch;                                                       \
+        hipError_t          result = detail::host_target_arch(stream, target_arch);            \
+        if(result != hipSuccess)                                                               \
+        {                                                                                      \
+            return result;                                                                     \
+        }                                                                                      \
+        if(debug_synchronous)                                                                  \
+        {                                                                                      \
+            start = std::chrono::steady_clock::now();                                          \
+        }                                                                                      \
+                                                                                               \
+        ROCPRIM_RETURN_ON_ERROR(                                                               \
+            launch_block_reduce<config, WithInitialValue, fit_larger, fit_items, result_type>( \
+                target_arch,                                                                   \
+                input,                                                                         \
+                size,                                                                          \
+                output,                                                                        \
+                initial_value,                                                                 \
+                reduce_op,                                                                     \
+                dim3(1),                                                                       \
+                dim3(block_size),                                                              \
+                0,                                                                             \
+                stream));                                                                      \
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);       \
+    }                                                                                          \
     while(0)
 
 template<bool WithInitialValue, // true when inital_value should be used in reduction
