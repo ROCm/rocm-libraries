@@ -5,6 +5,9 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ## hipCUB-4.1.0 for ROCm 7.1
 
 ### Added
+* Added `::hipcub::extents`, with limited parity to C++23's `std::extents`. Only `static extents` is supported; `dynamic extents` is not. Helper structs have been created to perform computations on `::hipcub::extents` only when the backend is rocPRIM. For the CUDA backend, similar functionality exists.
+* Added `projects/hipcub/hipcub/include/hipcub/backend/rocprim/util_mdspan.hpp` to support `::hipcub::extents`.
+* Added `::hipcub::ForEachInExtents` API.
 
 ### Removed
 * Removed `TexRefInputIterator`, which was removed from CUB after CCCL's 2.6.0 release. This API should have already been removed, but somehow it remained and was not tested.
