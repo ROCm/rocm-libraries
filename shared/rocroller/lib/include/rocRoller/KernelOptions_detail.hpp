@@ -131,7 +131,7 @@ namespace rocRoller
         /**
          * Enable/Disable the RemoveSetCoordinate transformation
          */
-        bool removeSetCoordinate = false;
+        bool removeSetCoordinate = true;
 
         std::string toString() const;
     };

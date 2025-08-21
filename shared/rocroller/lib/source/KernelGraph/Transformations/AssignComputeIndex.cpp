@@ -462,7 +462,7 @@ namespace rocRoller
 
                 // 1. Set register coordinates
                 // Transformer xform(&kgraph.coordinates);
-                auto xform = kgraph.getTransformer(tag);
+                auto xform = kgraph.buildTransformer(tag);
 
                 auto const maybeForLoop = findContainingOperation<ForLoopOp>(tag, kgraph);
                 auto fullStop  = [&](int tag) { return tag == increment; };
