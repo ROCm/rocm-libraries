@@ -98,9 +98,10 @@ ConvSolution Op4dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
         Get4dParams(problem, true);
 
     auto&& [RD_BLCK, READ_TYPE] =
-        GetRDBLCKandREADTYPE(cTensorDesc.GetElementSize(), bTensorDesc.GetType());
+        GetRDBLCKandREADTYPEHIP(cTensorDesc.GetElementSize(), bTensorDesc.GetType());
 
     size_t total_work = std::max(cTensorDesc.GetElementSize() / RD_BLCK, size_t(1));
+    constexpr int max_num_wg = 4096;
 
     const std::array<size_t, 3> vld{local_threads, 1, 1};
     const std::array<size_t, 3> vgd{global_threads, 1, 1};
@@ -112,11 +113,12 @@ ConvSolution Op4dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
     build_params.Define("USE_4D_TENSOR_LITE");
     build_params.Define("RD_BLCK", std::to_string(RD_BLCK));
     build_params.Define("READ_TYPE", READ_TYPE);
+    build_params.Define("MAX_NUM_WG", std::to_string(max_num_wg));
 
     auto kernel = KernelInfo{};
 
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
-    kernel.kernel_file  = "MIOpenTensorKernels.cl";
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+    kernel.kernel_file  = "MIOpenTensorKernelsHip.cpp";
     kernel.kernel_name  = "Op4dTensorLite";
 
     using std::begin, std::end;

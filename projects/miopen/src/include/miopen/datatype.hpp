@@ -38,47 +38,56 @@ namespace miopen {
 
 inline std::string GetDataType(miopenDataType_t type)
 {
-    std::string type_str;
     switch(type)
     {
-    case miopenFloat: {
-        type_str = "float";
+    case miopenFloat:
+        return "float";
+    case miopenHalf:
+        return "half";
+    case miopenBFloat16:
+        return "bfloat16";
+    case miopenInt8:
+        return "int8_t";
+    case miopenInt32:
+        return "int";
+    case miopenDouble:
+        return "double";
+    case miopenFloat8_fnuz:
+        return "float8_fnuz";
+    case miopenBFloat8_fnuz:
+        return "bfloat8_fnuz";
+    case miopenInt64:
+        return "int64";
+    default:
+        return "";
     }
-    break;
-    case miopenHalf: {
-        type_str = "half";
+}
+
+inline std::string GetHipDataType(miopenDataType_t type)
+{
+    switch(type)
+    {
+    case miopenFloat:
+        return "float";
+    case miopenHalf:
+        return "float16";
+    case miopenBFloat16:
+        return "bfloat16";
+    case miopenInt8:
+        return "int8_t";
+    case miopenInt32:
+        return "int";
+    case miopenDouble:
+        return "double";
+    case miopenFloat8_fnuz:
+        return "float8_fnuz";
+    case miopenBFloat8_fnuz:
+        return "bfloat8_fnuz";
+    case miopenInt64:
+        return "int64";
+    default:
+        return "";
     }
-    break;
-    case miopenBFloat16: {
-        type_str = "bfloat16";
-    }
-    break;
-    case miopenInt8: {
-        type_str = "int8_t";
-    }
-    break;
-    case miopenInt32: {
-        type_str = "int";
-    }
-    break;
-    case miopenDouble: {
-        type_str = "double";
-    }
-    break;
-    case miopenFloat8_fnuz: {
-        type_str = "float8_fnuz";
-    }
-    break;
-    case miopenBFloat8_fnuz: {
-        type_str = "bfloat8_fnuz";
-    }
-    break;
-    case miopenInt64: {
-        type_str = "int64";
-    }
-    break;
-    }
-    return type_str;
 }
 
 inline std::size_t get_data_size(miopenDataType_t type)
@@ -181,9 +190,11 @@ inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type)
     return kbp;
 }
 
-inline std::string GetDataTypeKernelParams(miopenDataType_t type)
+inline std::string GetDataTypeKernelParams(miopenDataType_t type, bool for_hip = false)
 {
-    return " " + GetDataTypeKBP(type).GenerateFor(kbp::OpenCL{});
+    auto params = for_hip ? GetDataTypeKBP(type).GenerateFor(kbp::HIP{})
+                          : GetDataTypeKBP(type).GenerateFor(kbp::OpenCL{});
+    return " " + params;
 }
 
 } // namespace miopen
