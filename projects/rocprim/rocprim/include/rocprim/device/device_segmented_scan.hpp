@@ -72,28 +72,38 @@ struct transform_op_t
     }
 };
 
-template<bool Exclusive,
-         class Config,
+template<class Config,
+         bool Exclusive,
          class ResultType,
          class InputIterator,
          class OutputIterator,
          class OffsetIterator,
          class InitValueType,
          class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
-    segmented_scan_kernel(InputIterator  input,
-                          OutputIterator output,
-                          OffsetIterator begin_offsets,
-                          OffsetIterator end_offsets,
-                          InitValueType  initial_value,
-                          BinaryFunction scan_op)
+inline hipError_t launch_segmented_scan(detail::target_arch arch,
+                                        InputIterator       input,
+                                        OutputIterator      output,
+                                        OffsetIterator      begin_offsets,
+                                        OffsetIterator      end_offsets,
+                                        InitValueType       initial_value,
+                                        BinaryFunction      scan_op,
+                                        dim3                grid,
+                                        dim3                block,
+                                        size_t              shmem,
+                                        hipStream_t         stream)
 {
-    segmented_scan<Exclusive, Config, ResultType>(input,
-                                                  output,
-                                                  begin_offsets,
-                                                  end_offsets,
-                                                  static_cast<ResultType>(initial_value),
-                                                  scan_op);
+    auto kernel = [=](auto arch_config)
+    {
+        segmented_scan<decltype(arch_config), Exclusive, ResultType>(
+            input,
+            output,
+            begin_offsets,
+            end_offsets,
+            static_cast<ResultType>(initial_value),
+            scan_op);
+    };
+
+    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<bool Exclusive,
@@ -126,7 +136,7 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
     {
         return result;
     }
-    const scan_config_params params = dispatch_target_arch<config>(target_arch);
+    const scan_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size = params.kernel_config.block_size;
 
@@ -144,17 +154,17 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
     std::chrono::steady_clock::time_point start;
     if(debug_synchronous)
         start = std::chrono::steady_clock::now();
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_scan_kernel<Exclusive, config, result_type>),
-                       dim3(segments),
-                       dim3(block_size),
-                       0,
-                       stream,
-                       input,
-                       output,
-                       begin_offsets,
-                       end_offsets,
-                       initial_value,
-                       scan_op);
+    ROCPRIM_RETURN_ON_ERROR(launch_segmented_scan<config, Exclusive, result_type>(target_arch,
+                                                                                  input,
+                                                                                  output,
+                                                                                  begin_offsets,
+                                                                                  end_offsets,
+                                                                                  initial_value,
+                                                                                  scan_op,
+                                                                                  dim3(segments),
+                                                                                  dim3(block_size),
+                                                                                  0,
+                                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_scan", segments, start);
     return hipSuccess;
 }
