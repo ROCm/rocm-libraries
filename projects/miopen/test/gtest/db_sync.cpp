@@ -763,13 +763,14 @@ void CheckFDBEntry(size_t thread_index,
             if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not solv.IsApplicable(ctx, problem))
             {
                 MIOPEN_LOG_W("Inapplicable solver found fdb-key:"
-                             << kinder.first << ", Solver" << val.solver_id << ":"
-                             << ", Removing entry from fdb and pdb");
+                             << kinder.first << ", pdb-key:" << pdb_key << ", solver:"
+                             << val.solver_id << ", Removing entry from fdb, pdb and updb");
                 find_db_rw.Remove(kinder.first, id.ToString());
                 perf_db_rw.Remove(pdb_key, id.ToString()); // remove from system pdb
                 db.Remove(problem, id.ToString());         // remove from user pdb
-                MIOPEN_LOG_W("Removal Complete fdb-key:" << kinder.first << ": solver"
-                                                         << val.solver_id);
+                MIOPEN_LOG_W("Removal complete for fdb-key:" << kinder.first
+                                                             << ", pdb-key:" << pdb_key
+                                                             << ", solver:" << val.solver_id);
                 continue;
             }
             else
@@ -807,14 +808,15 @@ void CheckFDBEntry(size_t thread_index,
                     bool res = solv.TestPerfCfgParams(ctx, problem, perf_cfg);
                     if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not res)
                     {
-                        MIOPEN_LOG_W("Invalid perf config found fdb-key:"
-                                     << kinder.first << ", Solver" << val.solver_id << ":"
-                                     << perf_cfg << ", Removing entry from fdb and pdb");
+                        MIOPEN_LOG_W("Inapplicable solver found fdb-key:"
+                                     << kinder.first << ", pdb-key:" << pdb_key << ", solver:"
+                                     << val.solver_id << ", Removing entry from fdb, pdb and updb");
                         find_db_rw.Remove(kinder.first, id.ToString());
                         perf_db_rw.Remove(pdb_key, id.ToString()); // remove from system pdb
                         db.Remove(problem, id.ToString());         // remove from user pdb
-                        MIOPEN_LOG_W("Removal Complete fdb-key:" << kinder.first << ": solver"
-                                                                 << val.solver_id);
+                        MIOPEN_LOG_W("Removal complete for fdb-key:"
+                                     << kinder.first << ", pdb-key:" << pdb_key
+                                     << ", solver:" << val.solver_id);
                         continue;
                     }
                     else
@@ -942,15 +944,19 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
         miopen::ReadonlyRamDb::GetCached(miopen::DbKinds::FindDb, fdb_file_path.string(), true);
     auto& find_db_rw =
         miopen::RamDb::GetCached(miopen::DbKinds::FindDb, fdb_file_path.string(), false);
-    // assert that find_db.cache is not empty, since that indicates the file was not readable
-    ASSERT_TRUE(!find_db.GetCacheMap().empty()) << "Find DB does not have any entries";
+    // Ensure that find_db.cache is not empty, since that indicates the file was not readable
+    EXPECT_TRUE(!find_db.GetCacheMap().empty())
+        << "Find DB does not have any entries; the file may not be readable.";
 
     const auto& perf_db =
         miopen::ReadonlyRamDb::GetCached(miopen::DbKinds::PerfDb, pdb_file_path.string(), true);
     auto& perf_db_rw =
         miopen::RamDb::GetCached(miopen::DbKinds::PerfDb, pdb_file_path.string(), false);
-    // assert that perf_db.cache is not empty, since that indicates the file was not readable
-    ASSERT_TRUE(!perf_db.GetCacheMap().empty()) << "Perf DB does not have any entries";
+    // Ensure that perf_db.cache is not empty, since that indicates the file was not readable
+    EXPECT_TRUE(!perf_db.GetCacheMap().empty())
+        << "Perf DB does not have any entries; the file may not be readable.";
+    ASSERT_TRUE(!find_db.GetCacheMap().empty() && !perf_db.GetCacheMap().empty())
+        << "Aborting test due to empty/unreadable db(s).";
 
     // Convert the map to a vector
     std::vector<FDBLine> fdb_data;
