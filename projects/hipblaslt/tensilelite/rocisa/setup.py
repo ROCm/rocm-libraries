@@ -11,11 +11,12 @@ class CMakeBuild(build_ext):
         try:
             os.makedirs(self.build_temp, exist_ok=True)
             os.makedirs(self.build_lib, exist_ok=True)
-            source_dir = os.path.abspath(os.path.dirname(__file__))
+            source_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', '..')
             rocm_path = os.environ.get('ROCM_PATH', '/opt/rocm')
             compilerpath = os.path.join(rocm_path, 'bin/amdclang++')
             cmakeargs = [
                 "cmake",
+                "--preset rocisa",
                 f"-S{source_dir}",
                 f"-B{self.build_temp}",
                 f"-DCMAKE_CXX_COMPILER={compilerpath}",
@@ -36,7 +37,7 @@ class CMakeBuild(build_ext):
             ]
             subprocess.check_call(make_args)
             ext_suffix = ".so" if sys.platform != "win32" else ".pyd"
-            build_module = glob.glob(os.path.join(self.build_temp, "lib", f"rocisa*{ext_suffix}"))[0]
+            build_module = glob.glob(os.path.join(self.build_temp, 'tensilelite', 'rocisa', "lib", f"rocisa*{ext_suffix}"))[0]
             target_module = os.path.join(self.build_lib, os.path.basename(build_module))
             shutil.copy2(build_module, target_module)
         except subprocess.CalledProcessError as e:
