@@ -23,6 +23,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Analytical_gtest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
@@ -33,6 +34,8 @@ target_sources(tensilelite-tests
 )
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+target_compile_definitions(tensilelite-tests PRIVATE YAML_PATH="${CMAKE_SOURCE_DIR}")
 
 if(HIPBLASLT_ENABLE_LLVM)
     target_sources(tensilelite-tests

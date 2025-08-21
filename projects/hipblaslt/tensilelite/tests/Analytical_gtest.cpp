@@ -34,7 +34,7 @@
 // Parse Analytical_gtest.yaml to get the test data
 std::vector<MyTestData> parseYamlManually(const std::string& filename)
 {
-    std::string   YamlfullPath = std::string(YAML_PATH) + "/testlib/source/" + filename;
+    std::string   YamlfullPath = std::string(YAML_PATH) + "/tensilelite/tests/" + filename;
     std::ifstream file(YamlfullPath);
     if(!file)
     {
