@@ -101,6 +101,7 @@ namespace TensileLite
         // Reads happen every MT, Writes happen every K-complete tile.
         size_t compute_CU_loads(size_t MT_M, size_t MT_N, size_t MT_K, bool debug);
 
+<<<<<<< HEAD
         // Estimates the l2 hit-rate
         double estimate_l2_hit(const Hardware& hardware,
                                size_t          M,
@@ -113,6 +114,12 @@ namespace TensileLite
                                size_t          element_size,
                                int             WGM,
                                size_t          splittingFactor);
+=======
+        // Computes the number of active compute units if there is only one wave and it is partial
+        // Otherwise, returns hardware.N_CU
+        size_t compute_active_CU(
+            const Hardware& hardware, size_t M, size_t N, size_t batch, size_t MT_M, size_t MT_N);
+>>>>>>> 4463180acd (Add yaml based Analytical testing)
 
         // Estimates the mall hit-rate
         double estimate_mall_hit(const Hardware& hardware,
@@ -132,6 +139,8 @@ namespace TensileLite
                                       size_t          M,
                                       size_t          N,
                                       size_t          K,
+                                      bool            transA,
+                                      bool            transB,                                      
                                       size_t          batch,
                                       size_t          MT_M,
                                       size_t          MT_N,
@@ -229,6 +238,8 @@ namespace TensileLite
                                    size_t          N,
                                    size_t          K,
                                    size_t          batch,
+                                   bool            transA,
+                                   bool            transB,                                   
                                    size_t          MT_M,
                                    size_t          MT_N,
                                    size_t          MT_K,
@@ -238,6 +249,7 @@ namespace TensileLite
                                    size_t          element_size_A,
                                    size_t          element_size_B,
                                    size_t          element_size_out,
+                                   DataType        miDataType,
                                    int             WGM,
                                    bool            debug);
     } // namespace analytical
