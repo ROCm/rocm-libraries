@@ -355,9 +355,9 @@ class GSUOn(GSU):
             if divider != 1:
                 depthUDiv = depthU // divider
                 gsuOffsetStr = "gsuOffset = DepthU/%s*bpeGR*GSUSumIdx"%(divider)
-        gsucLabelStr = "GSUC_%s"%( "A" if tP["isA"] else "B" if tP["isB"] else "M" )
-        gsucLabel    = Label(label=writer.labels.getNameInc(gsucLabelStr), comment="")
-        gsucLabelEnd = Label(label=writer.labels.getNameInc("%s_End"%(gsucLabelStr)), comment="")
+
+        gsucLabel    = Label(label=writer.labels.getNameInc(f"GSUC_{tc}"), comment="")
+        gsucLabelEnd = Label(label=writer.labels.getNameInc(f"GSUC_{tc}_End"), comment="")
         module.add(SAndB32(dst=sgpr(stmp), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
         module.add(SCBranchSCC1(labelName=gsucLabel.getLabelName(), comment="branch if GSUC == 1"))
         gsuOffsetStr = "gsuOffset = DepthU*GSUSumIdx"
