@@ -406,8 +406,12 @@ class CodeModules:
   localWriteB: Optional[Module]               = None
   dtlsM0UpdateA: Optional[Module]             = None
   dtlsM0UpdateB: Optional[Module]             = None
+  dtlsM0UpdateMXSA: Optional[Module]          = None
+  dtlsM0UpdateMXSB: Optional[Module]          = None
   globalReadA: Optional[Module]               = None
   globalReadB: Optional[Module]               = None
+  globalReadMXSA: Optional[Module]            = None
+  globalReadMXSB: Optional[Module]            = None
   globalReadIncrements: Optional[Module]      = None
   ## MFMA
   unrollLoopHeader: Optional[Module]                                  = None
@@ -442,6 +446,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.do["PreLoop"]     = True
     self.do["GlobalReadA"] = True
     self.do["GlobalReadB"] = True
+    self.do["GlobalReadMXSA"] = True
+    self.do["GlobalReadMXSB"] = True
     self.do["GlobalInc"]   = True
     self.do["LocalWriteA"]  = True
     self.do["LocalWriteB"]  = True
@@ -449,6 +455,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.do["LocalWriteCVT"]  = True
     self.do["LocalReadA"]  = True
     self.do["LocalReadB"]  = True
+    self.do["LocalReadMXSA"] = True
+    self.do["LocalReadMXSB"] = True
     self.do["LocalReadMetadata"]  = True
     self.do["Wait"]        = True
     self.do["Sync"]        = True
@@ -2483,6 +2491,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # init lds read pointers before each unrolled loop
     module.addComment0("local read addresses: init pointers a")
     module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))
+    if kernel["ProblemType"]["MXBlockA"]:
+      module.addComment0("local read addresses: init pointers mxsa")
+      module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      module.addComment0("local read addresses: init pointers mxsb")
+      module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"]))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.addComment0("local read addresses: init pointers metadata")
       module.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
@@ -2511,6 +2525,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st)
       module.add(replaceHolder(moduleTmp, 0))
       module.add(self.globalReadDo(kernel, 0, tensorParameters1st))
+      if "MX" in tensorParameters1st:
+        moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st["MX"])
+        module.add(replaceHolder(moduleTmp, 0))
+        module.add(self.globalReadDo(kernel, 0, tensorParameters1st["MX"]))
+      if "MX" in tensorParameters2nd:
+        moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters2nd["MX"])
+        module.add(replaceHolder(moduleTmp, 0))
+        module.add(self.globalReadDo(kernel, 0, tensorParameters2nd["MX"]))
       skip2ndWaitForDtl = kernel["DirectToLds%s"%tensorParameters1st["tensorChar"]]
       moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters2nd, skip2ndWaitForDtl)
       module.add(replaceHolder(moduleTmp, 0))
@@ -2610,6 +2632,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.codes.globalReadA = self.globalReadDo(kernel, 1, tensorParametersA, unrollLoopIdx=0, g2lBufIdx=vregSetIdxGR)
           else:
             self.codes.globalReadA = StructuredModule() # empty
+          if ("MX" in tensorParametersA) and kernel["DirectToVgprMXSA"]:
+            self.codes.globalReadMXSA = self.globalReadDo(kernel, 1, tensorParametersA["MX"], unrollLoopIdx=0, g2lBufIdx=vregSetIdxGR)
+          else:
+            self.codes.globalReadMXSA = StructuredModule() # empty
+          # DirectToVgprB + PGR2: we need DTVB GR in NGLL
+          if ("MX" in tensorParametersB) and kernel["DirectToVgprMXSB"]:
+            self.codes.globalReadMXSB = self.globalReadDo(kernel, 1, tensorParametersB["MX"], unrollLoopIdx=0, g2lBufIdx=vregSetIdxGR)
+          else:
+            self.codes.globalReadMXSB = StructuredModule() # empty
           # DirectToVgprB + PGR2: we need DTVB GR in NGLL
           if kernel["DirectToVgprB"]:
             self.codes.globalReadB = self.globalReadDo(kernel, 1, tensorParametersB, unrollLoopIdx=0, g2lBufIdx=vregSetIdxGR)
@@ -2937,11 +2968,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.perIterLocalWriteCanSkip = [ 0 for i in range (kernel["LoopIters"]) ]
       if kernel["ExpandPointerSwap"] == 1:
         self.codes.globalReadA = StructuredModule() # empty
+        self.codes.globalReadMXSA = StructuredModule() # empty
+        self.codes.globalReadMXSB = StructuredModule() # empty
         self.codes.globalReadB = StructuredModule() # empty
     #else:
     if not isNGLL:
       self.codes.dtlsM0UpdateA = StructuredModule()
       self.codes.globalReadA = StructuredModule() # empty
+      self.codes.dtlsM0UpdateMXSA = StructuredModule()
+      self.codes.globalReadMXSA = StructuredModule() # empty
+      self.codes.dtlsM0UpdateMXSB = StructuredModule()
+      self.codes.globalReadMXSB = StructuredModule() # empty
       self.codes.dtlsM0UpdateB = StructuredModule()
       self.codes.globalReadB = StructuredModule() # empty
       # PGR2 + DTV case, we still need global read inc code in NLL
@@ -3026,6 +3063,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # unrolled loop: global read A, B
     # M0 update for directToLds, skip if using custom main loop schedule
     self.codes.dtlsM0UpdateA = self.directToLdsM0Update(kernel, 1, tensorParameters1st, kernel["UseCustomMainLoopSchedule"])
+    if "MX" in tensorParameters1st:
+      self.codes.dtlsM0UpdateMXSA = self.directToLdsM0Update(kernel, 1, tensorParameters1st["MX"])
+    else:
+      self.codes.dtlsM0UpdateMXSA = StructuredModule()
+    if "MX" in tensorParameters2nd:
+      self.codes.dtlsM0UpdateMXSB = self.directToLdsM0Update(kernel, 1, tensorParameters2nd["MX"])
+    else:
+      self.codes.dtlsM0UpdateMXSB = StructuredModule()
     # skip wait for DTL if global load 1st is DTL
     skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1] or kernel["UseCustomMainLoopSchedule"]
     self.codes.dtlsM0UpdateB = self.directToLdsM0Update(kernel, 1, tensorParameters2nd, skip2ndWaitForDtl)
@@ -3035,6 +3080,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # use second buffer
       g2lBufIdx1st = 1
     self.codes.globalReadA = self.globalReadDo(kernel, 1, tensorParameters1st, unrollLoopIdx=lc, g2lBufIdx=g2lBufIdx1st)
+    if "MX" in tensorParameters1st:
+      g2lBufIdx1st = 0
+      if grBA==True or (kernel["DirectToVgprMXS%s"%tc1] and isDTVGRSecondBuf):
+        # use second buffer
+        g2lBufIdx1st = 1
+      self.codes.globalReadMXSA = self.globalReadDo(kernel, 1, tensorParameters1st["MX"], unrollLoopIdx=lc, g2lBufIdx=g2lBufIdx1st)
+    else:
+      self.codes.globalReadMXSA = StructuredModule()
+
+    if "MX" in tensorParameters2nd:
+      g2lBufIdx2nd = 0
+      if grBA==True or (kernel["DirectToVgprMXS%s"%tc2] and isDTVGRSecondBuf):
+        # use second buffer
+        g2lBufIdx2nd = 1
+      self.codes.globalReadMXSB = self.globalReadDo(kernel, 1, tensorParameters2nd["MX"], unrollLoopIdx=lc, g2lBufIdx=g2lBufIdx2nd)
+    else:
+      self.codes.globalReadMXSB = StructuredModule()
     g2lBufIdx2nd = 0
     if grBA==True or (kernel["DirectToVgpr%s"%tc2] and isDTVGRSecondBuf):
       # use second buffer
@@ -3599,7 +3661,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
             tc1, tc2 = tc2, tc1
           # skip second PGR if DTV is true
           skip1st = kernel["DirectToVgpr%s"%tc1]
+          skipMXS1st = kernel["DirectToVgprMXS%s"%tc1] if ("MX" in tensorParameters1st) else True
+          skipMXS2nd = kernel["DirectToVgprMXS%s"%tc2] if ("MX" in tensorParameters2nd) else True
           skip2nd = kernel["DirectToVgpr%s"%tc2]
+
           # skip wait for DTL if global load 1st is DTL
           skip1stWaitForDtl = idxPgr > 1 or kernel["NoLdsWriteCode"]
           skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1] or idxPgr > 1
@@ -3610,6 +3675,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
               g2lBufIdx1st = 1
             module.add(self.directToLdsM0Update(kernel, 1, tensorParameters1st, skip1stWaitForDtl))
             module.add(self.globalReadDo(kernel, 0, tensorParameters1st, g2lBufIdx=g2lBufIdx1st))
+          if not skipMXS1st:
+            g2lBufIdx1st = 0
+            if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgprMXS%s"%tc1]:
+              # use second buffer
+              g2lBufIdx1st = 1
+            module.add(self.directToLdsM0Update(kernel, 1, tensorParameters1st["MX"]))
+            module.add(self.globalReadDo(kernel, 0, tensorParameters1st["MX"], g2lBufIdx=g2lBufIdx1st))
+          if not skipMXS2nd:
+            g2lBufIdx2nd = 0
+            if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgprMXS%s"%tc2]:
+              # use second buffer
+              g2lBufIdx2nd = 1
+            module.add(self.directToLdsM0Update(kernel, 1, tensorParameters2nd["MX"]))
+            module.add(self.globalReadDo(kernel, 0, tensorParameters2nd["MX"], g2lBufIdx=g2lBufIdx2nd))
           if not skip2nd:
             g2lBufIdx2nd = 0
             if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgpr%s"%tc2]:
@@ -4096,6 +4175,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(labelDoneKRS)
           else:
             module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st))
+
+          #TODO: To handle KRS with MX
+          if "MX" in tensorParameters1st:
+            module.addComment1("Update M0 for DTLDS")
+            moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters1st["MX"])
+            module.add(replaceHolder(moduleTmp, 0))
+            module.addComment1("Tail global read MXS%s"%tc1)
+            if tailLoopOpt1st and (globalReadMode1st == 2):
+              module.add(self.doTailLoopOpt(kernel, tensorParameters1st["MX"]))
+            else:
+              module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st["MX"]))
+
+          if "MX" in tensorParameters2nd:
+            module.addComment1("Update M0 for DTLDS")
+            moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters2nd["MX"])
+            module.add(replaceHolder(moduleTmp, 0))
+            module.addComment1("Tail global read MXS%s"%tc2)
+            if tailLoopOpt2nd and (globalReadMode2nd == 2):
+              module.add(self.doTailLoopOpt(kernel, tensorParameters2nd["MX"]))
+            else:
+              module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd["MX"]))
 
           module.addComment1("Update M0 for DTLDS")
           moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters2nd, skip2ndWaitForDtl)

@@ -9603,11 +9603,12 @@ class KernelWriterAssembly(KernelWriter):
     record[1] = True if tc == "B" else False
     def globalReadBody(tP):
       tc = tP["tensorChar"]
+      isAB = tc in ("A", "B")
       self.vgprs.globalReadRegisters[tc] = []
       graIdx = 0
       g2lIdx = 0
       loadWidth = tP["globalReadInstruction"].totalWidth # load width in elements?
-      bpe = tP["bpeGR"] if not tP["isM"] else tP["bpe"]
+      bpe = tP["bpeGR"] if isAB else tP["bpe"]
       bpl = bpe * tP["glvw"]  # bytes per load
       isGlc = bool(tP["NonTemporal"] & 0x1)
       isSlc = bool(tP["NonTemporal"] & 0x2)
@@ -9724,7 +9725,7 @@ class KernelWriterAssembly(KernelWriter):
               loadModule = Module("load%u"%loopCnt)
               imod.middle.add(loadModule)
 
-              if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]) and not tP["isM"]:
+              if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]) and isAB:
                 numVgprG2L = self.states.a.numVgprG2L if tc == 'A' else self.states.b.numVgprG2L if tc =='B' else self.states.m.numVgprG2L
                 eccBpe = tP["bpeDS"] if kernel["ConvertAfterDS"] else max(tP["bpeGR"], tP["bpe"])
                 eccOffset = _getEccOffset(loadWidth, bpr=self.states.bpr, bpe=eccBpe, \
@@ -9792,14 +9793,14 @@ class KernelWriterAssembly(KernelWriter):
                   self.vgprs.globalReadRegisters[tc].append(0)
                 else:
                   g2lIdxM = i * max(loadWidth * tP["bpeRatio"], 1)
-                  destVgpr = destVgprPrefix + "+%u"%((g2lIdx+eccOffset+tP["shiftGR"]) if not tP["isM"] else g2lIdxM)
-                  self.vgprs.globalReadRegisters[tc].append(g2lIdx+eccOffset+tP["shiftGR"] if not tP["isM"] else g2lIdxM)
+                  destVgpr = destVgprPrefix + "+%u"%((g2lIdx+eccOffset+tP["shiftGR"]) if isAB else g2lIdxM)
+                  self.vgprs.globalReadRegisters[tc].append(g2lIdx+eccOffset+tP["shiftGR"] if isAB else g2lIdxM)
                   if tP["isM"]:
                     assert(graIdx <= self.states.m.numVgprG2LAllocated)
 
                 # TODO: is it possible to load only hi16 when no in tail? (need to check INT8 too)
                 datatype = kernel["ProblemType"]["DataType%s"%tc] if kernel["ConvertAfterDS"] else kernel["ProblemType"]["DataType"]
-                isHigh16Bits = (datatype.isHalf() or datatype.isBFloat16()) and loopCnt%2==1 if not tP["isM"] else False
+                isHigh16Bits = (datatype.isHalf() or datatype.isBFloat16()) and loopCnt%2==1 if isAB else False
                 if tc == "A" and record[0] == True:
                   self.globalread_gpr_record.a.addrVgpr.append(offsetVgpr)
                   self.globalread_gpr_record.a.offset.append(soffset)
