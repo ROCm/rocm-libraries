@@ -8,33 +8,45 @@
  rocPRIM documentation
 ********************************************************************
 
-rocPRIM is a header-only library that provides HIP parallel primitives. The purpose of the library is to ease the maintainability of performant, yet portable GPU-accelerated code on the AMD ROCm platform. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs. For more information refer to :ref:`rocprim-intro`.
+rocPRIM is a header-only library that provides HIP parallel primitives. The purpose of the library is to provide a set of portable, commonly used, GPU-accelerated parallel primitive algorithms. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs.
 
-The code is open and hosted at: https://github.com/ROCmSoftwarePlatform/rocPRIM
+The rocPRIM public repository is located at https://github.com/ROCmSoftwarePlatform/rocPRIM.
 
-The rocPRIM documentation is structured as follows:
+.. grid:: 2
 
+  .. grid-item-card:: Installation
+
+    * :doc:`rocPRIM prerequisites <install/rocPRIM-prerequisites>`
+    * :doc:`Install rocPRIM on Linux <install/rocPRIM-build-install-linux>`
+    * :doc:`Install rocPRIM on Windows <install/rocPRIM-build-install-windows>`
+  
 .. grid:: 2
 
   .. grid-item-card:: Conceptual
 
-    * :ref:`rocprim-intro`
+    * :doc:`Scope of rocPRIM operations <./conceptual/rocPRIM-scope>`
+    * :doc:`rocPRIM operations <./conceptual/rocPRIM-operations>`
+    * :doc:`rocPRIM performance tuning <./conceptual/rocPRIM-performance-tuning>`
+    * :doc:`Block and stripe arrangements <./conceptual/rocPRIM-stripe-block>`
+
+  .. grid-item-card:: How-to
+
+    * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
+   
+  .. grid-item-card:: Reference
+
     * :ref:`glossary`
-    * :ref:`tuning`
-    * :ref:`developer`
-    * :ref:`spirv`
-
-  .. grid-item-card:: API reference
-
-    * :ref:`ops-summary`
     * :ref:`data-type-support`
+    * :ref:`types`
+    * :ref:`type_traits`
+    * :ref:`iterators` 
+    * :ref:`intrinsics` 
     * :ref:`dev-index`
     * :ref:`block-index`
     * :ref:`warp-index` 
     * :ref:`thread-index`
-    * :ref:`iterators` 
-    * :ref:`intrinsics` 
-    * :ref:`type_traits`
+    * :ref:`developer`
+
 
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

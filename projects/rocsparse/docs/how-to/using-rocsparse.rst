@@ -834,8 +834,8 @@ Similar to the vector and matrix results, the scalar result is only available wh
 
 .. _rocsparse_logging:
 
-Activity logging
-================
+Activity logging [Deprecated]
+=============================
 
 Four different environment variables can be set to enable logging in rocSPARSE:
 ``ROCSPARSE_LAYER``, ``ROCSPARSE_LOG_TRACE_PATH``, ``ROCSPARSE_LOG_BENCH_PATH``, and ``ROCSPARSE_LOG_DEBUG_PATH``.
@@ -871,6 +871,9 @@ To capture activity logging in a file, set the following environment variables a
 .. note::
 
    If the file cannot be opened, the logging output is streamed to ``stderr``.
+
+.. warning::
+  Trace, debug, and bench logging is deprecated and will be removed in a future release
 
 ROC-TX support in rocSPARSE
 ============================
