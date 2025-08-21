@@ -55,15 +55,24 @@ function(hip_cuda_detect_lowest_cc out_variable)
         WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/"
         RESULT_VARIABLE __nvcc_res OUTPUT_VARIABLE __nvcc_out
     )
-    message(STATUS "hipcc executable: ${HIP_HIPCC_EXECUTABLE}")
-    message(STATUS "nvcc file: ${__cufile}")
-    message(STATUS "nvcc status: ${__nvcc_res} ${__nvcc_out}")
+
     if(__nvcc_res EQUAL 0)
         set(HIP_CUDA_lowest_cc ${__nvcc_out} CACHE INTERNAL "The lowest CC of installed NV GPUs" FORCE)
+    else()
+        # fallback method which uses nvidia-smi to get min CC; requires CUDA Toolkit 11.6 or newer
+        execute_process(
+            COMMAND nvidia-smi "--query-gpu=compute_cap" "--format=csv,noheader"
+            RESULT_VARIABLE __nvsmi_res OUTPUT_VARIABLE __nvsmi_out
+        )
+
+        if(__nvsmi_res EQUAL 0)
+            string(REPLACE "." "" __nvsmi_out_nodot ${__nvsmi_out})
+            string(REPLACE "\n" "" HIP_CUDA_lowest_cc ${__nvsmi_out_nodot})
+        endif()
     endif()
 
     if(NOT HIP_CUDA_lowest_cc)
-        set(HIP_CUDA_lowest_cc "50")
+        set(HIP_CUDA_lowest_cc "35")
         set(${out_variable} ${HIP_CUDA_lowest_cc} PARENT_SCOPE)
     else()
         set(${out_variable} ${HIP_CUDA_lowest_cc} PARENT_SCOPE)
