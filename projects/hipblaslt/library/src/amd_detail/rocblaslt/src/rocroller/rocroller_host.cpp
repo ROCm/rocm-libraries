@@ -30,6 +30,8 @@
 
 #include "rocroller_host.hpp"
 #include "rocroller_host_internal.hpp"
+#include "parameter_selection.hpp"
+#include "solution_selection.hpp"
 #include "Debug.hpp"
 #include "handle.h"
 #include "utility.hpp"
@@ -44,87 +46,7 @@
 
 using namespace rocRoller;
 
-const int DEFAULT_WGM                  = 2;
-const int MAX_BITS_WORKGROUPTILE_M     = 8;
-const int MAX_BITS_WORKGROUPTILE_N     = 8;
-const int MAX_BITS_WORKGROUPTILE_K     = 7;
-const int MAX_BITS_PREFETCH_IN_FLIGHT  = 4;
-const int REQUIRED_MULTIPLE_M_N        = 16;
-const int REQUIRED_MULTIPLE_K          = 32;
-const int SWIZZLE_BLOCK_SIZE           = 64;
-const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
-
-/**
- * @brief SolutionIndex Parameters
- *
- * All of the parameters that are used to generated a unique solution index.
- * There can be multiple kernels of the same KernelType that have different
- * SolutionIndexParameters.
- *
- */
-struct SolutionIndexParameters
-{
-    WorkGroupTileSize workgroupTile;
-    int               prefetchInFlight;
-    bool              workgroupMapping;
-};
-
-/**
- * @brief Solution Parameters
- *
- * Everything needed to generate a kernel
- *
- */
-struct SolutionParameters
-{
-    // Datatype of inputs and outputs
-    KernelType kernelType;
-
-    // Workgroup Tile size
-    WorkGroupTileSize workgroupTile;
-
-    // Machine Instruction
-    MachineInstructionSize machineInstruction;
-
-    // Number of wave tiles to execute per workgroup
-    uint wavefrontSize  = 64;
-    int  workgroupSizeX = 2 * wavefrontSize;
-    int  workgroupSizeY = 2;
-
-    // Other options
-    bool loadLDSA    = true;
-    bool loadLDSB    = true;
-    bool storeLDSD   = false;
-    bool direct2LDSA = true;
-    bool direct2LDSB = true;
-
-    bool prefetch          = true;
-    int  prefetchInFlight  = 2;
-    int  prefetchLDSFactor = 1;
-    bool prefetchMixMemOps = true;
-    bool betaInFma         = true;
-
-    // Unroll Options
-    unsigned int unrollX = 0;
-    unsigned int unrollY = 0;
-
-    std::string scheduler;
-
-    bool streamK        = false;
-    bool streamKTwoTile = false;
-
-    // Scale options
-    bool loadLDSScaleA = false;
-    bool loadLDSScaleB = false;
-    bool swizzleScale  = true;
-    bool prefetchScale = true;
-
-    // Workgroup Mapping
-    int workgroupMappingDim = 0;
-    bool workgroupRemapXCC = true;
-
-    std::string toString() const;
-};
+const int DEFAULT_WGM = 2;
 
 /**
  * @brief GemmKernel
@@ -194,63 +116,6 @@ void rocroller_create_handle(void** handle)
 void rocroller_destroy_handle(void* handle)
 {
     delete static_cast<RocRollerHandle*>(handle);
-}
-
-// Hash function for a SolutionIndexParameters
-// A hash function is used because we can only store a 64bit value in a
-// rocblaslt_matmul_algo data field for a solution index.
-namespace std
-{
-    template <>
-    struct hash<SolutionIndexParameters>
-    {
-        std::size_t operator()(const SolutionIndexParameters& params) const
-        {
-            size_t       result = params.workgroupTile.k / REQUIRED_MULTIPLE_K;
-            unsigned int pos    = MAX_BITS_WORKGROUPTILE_K;
-            result |= ((params.workgroupTile.n / REQUIRED_MULTIPLE_M_N) << pos);
-            pos += MAX_BITS_WORKGROUPTILE_N;
-            result |= ((params.workgroupTile.m / REQUIRED_MULTIPLE_M_N) << pos);
-            pos += MAX_BITS_WORKGROUPTILE_M;
-            result |= (params.prefetchInFlight << pos);
-            pos += MAX_BITS_PREFETCH_IN_FLIGHT;
-            result |= ((params.workgroupMapping ? 1 : 0) << pos);
-
-            AssertFatal(result < INT_MAX, "Solution Index is too large");
-            // Set top bit indicating it is a rocRoller index
-            result |= (1 << 31);
-            return result;
-        }
-    };
-}
-
-inline unsigned int mask(unsigned int numBits)
-{
-    return (1 << numBits) - 1;
-}
-
-/**
- * Convert a solution index back into SolutionIndexParameters
- */
-SolutionIndexParameters indexToParameters(int index)
-{
-    SolutionIndexParameters result;
-    unsigned int            pos = 0;
-
-    result.workgroupTile.k
-        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_K)) * REQUIRED_MULTIPLE_K;
-    pos += MAX_BITS_WORKGROUPTILE_K;
-    result.workgroupTile.n
-        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_N)) * REQUIRED_MULTIPLE_M_N;
-    pos += MAX_BITS_WORKGROUPTILE_N;
-    result.workgroupTile.m
-        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_M)) * REQUIRED_MULTIPLE_M_N;
-    pos += MAX_BITS_WORKGROUPTILE_M;
-    result.prefetchInFlight = (index >> pos) & mask(MAX_BITS_PREFETCH_IN_FLIGHT);
-    pos += MAX_BITS_PREFETCH_IN_FLIGHT;
-    result.workgroupMapping = (index >> pos) & 1;
-
-    return result;
 }
 
 inline std::string scaleModeOption(RocblasltContractionProblem::ScalingFormat scale)
@@ -477,29 +342,6 @@ inline void logExtendedProfile(const RocblasltContractionProblem& prob,
                 kernelName);
 }
 
-std::string SolutionParameters::toString() const
-{
-    std::stringstream result;
-
-    result << "WorkGroupTile:" << workgroupTile.m << "x" << workgroupTile.n << "x"
-           << workgroupTile.k << std::endl;
-    result << "MachineInstruction:" << machineInstruction.m << "x" << machineInstruction.n << "x"
-           << machineInstruction.k << std::endl;
-    result << "WorkgroupSize:" << workgroupSizeX << "x" << workgroupSizeY << std::endl;
-    result << "LDS Usage";
-    result << " A:" << (direct2LDSA ? "DirectToLDS" : (loadLDSA ? "On" : "Off"));
-    result << " B:" << (direct2LDSB ? "DirectToLDS" : (loadLDSB ? "On" : "Off"));
-    result << " D:" << (storeLDSD ? "On" : "Off") << std::endl;
-    result << "Workgroup Mapping: Dim:" << workgroupMappingDim << " RemapXCC:" << workgroupRemapXCC << std::endl;
-    result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight
-           << " LDSFactor:" << prefetchLDSFactor << " MixMemOps:" << prefetchMixMemOps << std::endl;
-    result << "Block Scale Options:" << " Swizzle Scale:" << swizzleScale
-           << " Prefetch Scale:" << prefetchScale << " loadLDS A:" << loadLDSScaleA
-           << " loadLDS B:" << loadLDSScaleB << std::endl;
-
-    return result.str();
-}
-
 /**
  * @brief Convert hipDataType to a rocRoller::Datatype
  *
@@ -635,103 +477,6 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
     return kernelType;
 }
 
-
-/**
- * @brief Choose the SolutionIndexParameters to use for a given problem
- *
- * Examine the KernelType and problem size to determine the kernel to use
- * to compute the problem.
- *
- * Return a list of SolutionIndexParameters, in sorted order, based on how many kernels are requested.
- *
- * @param kernelType
- * @param prob
- * @return std::vector<SolutionIndexParameters>
- */
-std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
-    const KernelType& kernelType, const RocblasltContractionProblem& prob, int requestedAlgoCount)
-{
-    std::vector<SolutionIndexParameters> params;
-
-    std::vector<TensileLite::analytical::TileTuple> tile_list = getTileListForKernelType(kernelType);
-
-    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits;
-    size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
-    size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits;
-
-    TensileLite::analytical::DataType dataType;
-    if (elementSizeA_bits < elementSizeB_bits)
-        dataType = rocroller_type_to_analytical_type(kernelType.typeB);
-    else
-        dataType = rocroller_type_to_analytical_type(kernelType.typeA);
-
-    const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
-
-    int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
-
-    auto selected_tiles = TensileLite::analytical::select_best_macro_tile_size(
-        prob.m,
-        prob.n,
-        prob.k,
-        prob.batch_count,
-        prob.trans_a == hipblasOperation_t::HIPBLAS_OP_T,
-        prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T,
-        analaytical_hardware,
-        tile_list,
-        elementSizeA_bits,
-        elementSizeB_bits,
-        elementSizeC_bits,
-        dataType,
-        kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize, //Handle A vs B block size.
-        0.8,
-        false,
-        false,
-        WGM);
-
-    for(auto const& selected_tile : selected_tiles)
-    {
-        WorkGroupTileSize wgt{(int)std::get<1>(selected_tile), (int)std::get<2>(selected_tile), (int)std::get<3>(selected_tile)};
-        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt);
-        wgt.k /= unrollAmount;
-
-        if((requestedAlgoCount == -1)
-           || (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % wgt.k == 0))
-        {
-            // FP8 kernels run out of registers with larger tile sizes
-            if((kernelType.typeA == rocRoller::DataType::FP8
-                || kernelType.typeA == rocRoller::DataType::BF8
-                || kernelType.typeB == rocRoller::DataType::FP8
-                || kernelType.typeB == rocRoller::DataType::BF8)
-               && wgt.m + wgt.n > 256)
-                continue;
-
-            // 6bit datatypes only work with power of 2 tile sizes
-            if((kernelType.typeA == rocRoller::DataType::FP6
-                || kernelType.typeA == rocRoller::DataType::BF6
-                || kernelType.typeB == rocRoller::DataType::FP6
-                || kernelType.typeB == rocRoller::DataType::BF6)
-               && (!std::has_single_bit(static_cast<uint>(wgt.m))
-                   || !std::has_single_bit(static_cast<uint>(wgt.n))))
-                continue;
-
-            params.push_back({wgt, 1, true});
-            while (unrollAmount > 1 && (prob.k % (wgt.k * unrollAmount) != 0))
-            {
-                unrollAmount = unrollAmount / 2;
-            }
-
-            params.back().prefetchInFlight = unrollAmount;
-
-            if (prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
-            {
-                params.back().workgroupMapping = false;
-            }
-        }
-    }
-
-    return params;
-}
-
 int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
                           const RocblasltContractionProblem& prob)
 {
@@ -774,173 +519,7 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
     return result;
 }
 
-std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
-{
-    int x = 2;
-    int y = 2;
 
-    int requiredX = -1;
-    int requiredY = -1;
-
-    if(gemm->workgroupTile.m / gemm->machineInstruction.m == 1)
-        requiredX = 1;
-    if(gemm->workgroupTile.n / gemm->machineInstruction.n == 1)
-        requiredY = 1;
-
-    //Swizzle Scale only works with certain combinations of workgroup sizes
-    if(gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % x != 0)
-        requiredX = 1;
-    if(gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % y != 0)
-        requiredY = 1;
-
-    if(requiredX != -1 && requiredY == -1)
-    {
-        x = requiredX;
-        if (gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % 4 == 0)
-            y = 4;
-    }
-    else if (requiredX == -1 && requiredY != -1)
-    {
-        y = requiredY;
-        if (gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % 4 == 0)
-            x = 4;
-    }
-    else if (requiredX != -1 && requiredY != -1)
-    {
-        x = requiredX;
-        y = requiredY;
-    }
-
-    return {x * gemm->wavefrontSize, y};
-}
-
-/**
- * @brief Generate all of the solution parameters needed to create a kernel.
- *
- * This should only take into account the KernelType and SolutionIndexParameters
- * when deciding on the rest of the parameters to use for the kernel.
- *
- * @param kernelType
- * @param solutionIndexParameters
- * @return std::shared_ptr<SolutionParameters>
- */
-std::shared_ptr<SolutionParameters>
-    genSolutionParameters(const KernelType&              kernelType,
-                          const SolutionIndexParameters& solutionIndexParameters)
-{
-    auto gemm = std::make_shared<SolutionParameters>();
-
-    gemm->kernelType = kernelType;
-
-    gemm->workgroupTile = solutionIndexParameters.workgroupTile;
-
-    gemm->machineInstruction = pickMI(gemm->kernelType.typeA, gemm->kernelType.typeB, gemm->workgroupTile);
-
-    if(solutionIndexParameters.prefetchInFlight == 1)
-    {
-        gemm->prefetch = false;
-    }
-    else
-    {
-        gemm->prefetchInFlight = solutionIndexParameters.prefetchInFlight;
-    }
-
-    // Swizzle Scale only support in certain situations
-    // Swizzle Scale also runs out of registers with FP8
-    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate || 
-        kernelType.scaleBMode != rocRoller::Operations::ScaleMode::Separate)
-    {
-        gemm->swizzleScale = false;
-        gemm->prefetchScale = false;
-        gemm->loadLDSScaleA = false;
-        gemm->loadLDSScaleB = false;
-    }
-    else if(solutionIndexParameters.workgroupTile.m >= 128
-        && solutionIndexParameters.workgroupTile.n >= 128)
-    {
-        gemm->swizzleScale  = true;
-        gemm->loadLDSScaleA = false;
-        gemm->loadLDSScaleB = false;
-    }
-    else
-    {
-        gemm->swizzleScale  = false;
-        gemm->prefetchScale = false;
-        gemm->loadLDSScaleA = true;
-        gemm->loadLDSScaleB = true;
-    }
-
-    auto workgroupSize = pickWorkgroupSize(gemm);
-    gemm->workgroupSizeX = workgroupSize.first;
-    gemm->workgroupSizeY = workgroupSize.second;
-
-    // Direct To LDS only supported in certain situations
-    if(kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6)
-        gemm->direct2LDSA = false;
-    if(kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6)
-        gemm->direct2LDSB = false;
-    if((kernelType.typeA == rocRoller::DataType::FP4
-        || kernelType.typeB == rocRoller::DataType::FP4)
-       && (solutionIndexParameters.workgroupTile.m <= 64
-           || solutionIndexParameters.workgroupTile.n <= 64))
-    {
-        gemm->direct2LDSA = false;
-        gemm->direct2LDSB = false;
-    }
-
-    if(gemm->direct2LDSA == false || gemm->direct2LDSB == false)
-    {
-        gemm->prefetchLDSFactor = 2;
-    }
-
-    // LDS can only be used for scaling data with certain workgroup tile sizes
-    auto workgroupSizeTotal = gemm->workgroupSizeX * gemm->workgroupSizeY;
-    auto numScaleElementsA = 0;
-    if(gemm->kernelType.scaleABlockRowSize * gemm->kernelType.scaleABlockColSize != 0)
-    {
-        numScaleElementsA = gemm->workgroupTile.m
-          * (gemm->workgroupTile.k
-             / (gemm->kernelType.scaleABlockRowSize * gemm->kernelType.scaleABlockColSize));
-    }
-    auto numScaleElementsB = 0;
-    if(gemm->kernelType.scaleBBlockRowSize * gemm->kernelType.scaleBBlockColSize != 0)
-    {
-        numScaleElementsB = gemm->workgroupTile.n
-          * (gemm->workgroupTile.k
-             / (gemm->kernelType.scaleBBlockRowSize * gemm->kernelType.scaleBBlockColSize));
-    }
-    if(numScaleElementsA % workgroupSizeTotal != 0)
-    {
-        gemm->loadLDSScaleA     = false;
-        gemm->prefetchMixMemOps = false;
-    }
-    if(numScaleElementsB % workgroupSizeTotal != 0)
-    {
-        gemm->loadLDSScaleB     = false;
-        gemm->prefetchMixMemOps = false;
-    }
-
-    if(!solutionIndexParameters.workgroupMapping)
-    {
-        gemm->workgroupMappingDim = -1;
-        gemm->workgroupRemapXCC = false;
-    }
-    else
-    {
-        gemm->workgroupMappingDim = 0;
-        gemm->workgroupRemapXCC = true;
-    }
-
-    // TODO: StreamK is not currently working with prefetching or workgroup mapping
-    if(gemm->streamK)
-    {
-        gemm->prefetch = false;
-        gemm->workgroupMappingDim = -1;
-        gemm->workgroupRemapXCC = false;
-    }
-
-    return gemm;
-}
 
 /**
  * @brief Set the required conditions in order to run a provided kernel
@@ -1567,7 +1146,7 @@ rocblaslt_status
         if(requestedAlgoCount != -1 && i >= requestedAlgoCount)
             break;
 
-        index = static_cast<int>(std::hash<SolutionIndexParameters>{}(solutionIndexParameter));
+        index = parametersToIndex(solutionIndexParameter);
         auto existingSolutionIndex = rocroller_handle->generatedKernels[kernelType].find(index);
         std::shared_ptr<GemmKernel> kernel;
         // If kernel doesn't already exist, generate it
@@ -1613,7 +1192,7 @@ rocblaslt_status
                              std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                              size_t                                          maxWorkSpaceBytes)
 {
-    heuristicResults.resize(possibleTileSizes.size());
+    heuristicResults.resize(maxNumberSolutions());
     int  returnAlgoCount;
     auto result
         = getRocRollerBestSolutions(handle, prob, -1, heuristicResults.data(), maxWorkSpaceBytes, &returnAlgoCount);

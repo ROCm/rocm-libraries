@@ -5,7 +5,9 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     add_library(hipblaslt-rocroller OBJECT)
     target_sources(hipblaslt-rocroller
         PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/parameter_selection.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_host.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/solution_selection.cpp"
     )
     target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
     set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -18,6 +20,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     target_compile_definitions(hipblaslt-rocroller PRIVATE HIPBLASLT_USE_ROCROLLER)
     target_include_directories(hipblaslt-rocroller
         PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/../include"
             "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
             "${PROJECT_BINARY_DIR}/library/include"
