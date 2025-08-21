@@ -5,10 +5,13 @@ Required environment variables:
   - SUBTREES
 """
 
+import fnmatch
 import json
 import logging
+import subprocess
+import sys
 from therock_matrix import subtree_to_project_map, project_map
-from typing import Mapping
+from typing import Mapping, Optional, Iterable
 import os
 
 logging.basicConfig(level=logging.INFO)
@@ -25,8 +28,45 @@ def set_github_output(d: Mapping[str, str]):
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
         
+def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
+    """Returns the paths of modified files relative to the base reference."""
+    try:
+        return subprocess.run(
+            ["git", "diff", "--name-only", base_ref],
+            stdout=subprocess.PIPE,
+            check=True,
+            text=True,
+            timeout=60,
+        ).stdout.splitlines()
+    except TimeoutError:
+        print(
+            "Computing modified files timed out. Not using PR diff to determine"
+            " jobs to run.",
+            file=sys.stderr,
+        )
+        return None
+    
+GITHUB_WORKFLOWS_CI_PATTERNS = [
+    "therock*",
+]
+
+
+def is_path_workflow_file_related_to_ci(path: str) -> bool:
+    return any(
+        fnmatch.fnmatch(path, ".github/workflows/" + pattern)
+        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+    ) or any(
+        fnmatch.fnmatch(path, ".github/scripts/" + pattern)
+        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+    ) 
+    
+def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> bool:
+    if paths is None:
+        return False
+    return any(is_path_workflow_file_related_to_ci(p) for p in paths)
+
         
-def retrieve_projects(args):
+def retrieve_projects(args):    
     if args.get("is_pull_request"):
         subtrees = args.get("input_subtrees").split("\n")
     
@@ -38,6 +78,14 @@ def retrieve_projects(args):
     
     # If a push event to develop happens, we run tests on all subtrees
     if args.get("is_push"):
+        subtrees = list(subtree_to_project_map.keys())
+        
+    # If .github/*/therock* were changed, run all subtrees
+    base_ref = args.get("base_ref")
+    modified_paths = get_modified_paths(base_ref)
+    print("modified_paths (max 200):", modified_paths[:200])
+    related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
+    if related_to_therock_ci:
         subtrees = list(subtree_to_project_map.keys())
     
     projects = set()
@@ -73,6 +121,8 @@ if __name__ == "__main__":
     
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+    
+    args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
     
     logging.info(f"Retrieved arguments {args}")
 
