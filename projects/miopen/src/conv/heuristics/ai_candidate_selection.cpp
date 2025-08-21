@@ -437,13 +437,6 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                                 {
                                     value    = static_cast<float>(kv.second);
                                     found_ws = true;
-                                    // TODO consider decreasing this verbosity
-                                    {
-                                        MIOPEN_LOG_I2(
-                                            "Found whitespace-stripped match for output parameter: "
-                                            << param_name << " with value '" << param_value
-                                            << "' matching '" << kv.first << "' in metadata.");
-                                    }
                                     break;
                                 }
                             }
