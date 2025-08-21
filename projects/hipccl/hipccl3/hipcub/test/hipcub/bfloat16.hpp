@@ -32,8 +32,9 @@
  * Utilities for interacting with the opaque CUDA __nv_bfloat16 type
  */
 
-#include <stdint.h>
+#include <hipcub/config.hpp>
 #include <hipcub/util_type.hpp>
+#include <stdint.h>
 
 #include <ostream>
 
@@ -285,7 +286,17 @@ struct hipcub::FpLimits<bfloat16_t>
     static __host__ __device__ __forceinline__ bfloat16_t Lowest() { return bfloat16_t::lowest(); }
 };
 
+#if defined(__HIP_PLATFORM_NVIDIA__)
+_CCCL_SUPPRESS_DEPRECATED_PUSH
+#else
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+#endif
 template <> struct hipcub::NumericTraits<bfloat16_t> : hipcub::BaseTraits<FLOATING_POINT, true, false, unsigned short, bfloat16_t> {};
+#if defined(__HIP_PLATFORM_NVIDIA__)
+_CCCL_SUPPRESS_DEPRECATED_POP
+#else
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+#endif
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop

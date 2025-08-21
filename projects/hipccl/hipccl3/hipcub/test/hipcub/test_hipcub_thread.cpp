@@ -114,7 +114,7 @@ void thread_load_kernel(Type* volatile const device_input, Type* device_output)
 #else
         device_output[index] = hipcub::ThreadLoadVolatilePointer(
             device_input + index,
-            hipcub::Int2Type<std::is_fundamental<Type>::value>());
+            std::bool_constant<std::is_fundamental<Type>::value>());
 #endif
     }
 }
@@ -312,7 +312,7 @@ void thread_store_kernel(Type* const device_input, Type* device_output)
 #else
         hipcub::ThreadStoreVolatilePtr(device_output + index,
                                        device_input[index],
-                                       hipcub::Int2Type<std::is_fundamental<Type>::value>());
+                                       std::bool_constant<std::is_fundamental<Type>::value>());
 #endif
     }
 }
@@ -395,14 +395,13 @@ void iterate_thread_kernel(Type* const device_input, Type* device_output)
 
     if(id % 2 == 0)
     {
-        hipcub::IterateThreadStore<0, ItemsPerThread>::Dereference(device_output + index,
-                                                                   device_input + index);
+        hipcub::detail::iterate_thread_store<0, ItemsPerThread>::Dereference(device_output + index,
+                                                                             device_input + index);
     }
     else
     {
-        hipcub::IterateThreadStore<0, ItemsPerThread>::template Store<hipcub::STORE_DEFAULT>(
-            device_output + index,
-            device_input + index);
+        hipcub::detail::iterate_thread_store<0, ItemsPerThread>::template Store<
+            hipcub::STORE_DEFAULT>(device_output + index, device_input + index);
     }
 }
 

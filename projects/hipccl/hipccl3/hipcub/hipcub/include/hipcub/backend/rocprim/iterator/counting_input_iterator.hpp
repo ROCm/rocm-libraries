@@ -31,6 +31,7 @@
 #define HIPCUB_ROCPRIM_ITERATOR_COUNTING_INPUT_ITERATOR_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include "iterator_category.hpp"
 #include "iterator_wrapper.hpp"
@@ -44,7 +45,8 @@ BEGIN_HIPCUB_NAMESPACE
 #ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 template<class Incrementable, class Difference = std::ptrdiff_t>
-class CountingInputIterator
+class HIPCUB_DEPRECATED_BECAUSE(
+    "Use rocprim::counting_iterator or rocthrust::counting_iterator instead") CountingInputIterator
     : public detail::IteratorWrapper<rocprim::counting_iterator<Incrementable, Difference>,
                                      CountingInputIterator<Incrementable, Difference>>
 {

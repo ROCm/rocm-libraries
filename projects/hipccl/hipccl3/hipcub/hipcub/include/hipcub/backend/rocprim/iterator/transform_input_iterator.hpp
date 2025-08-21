@@ -51,7 +51,9 @@ template<class ValueType,
          class InputIteratorT,
          class OffsetT = std::ptrdiff_t // ignored
          >
-class TransformInputIterator
+class HIPCUB_DEPRECATED_BECAUSE(
+    "Use rocprim::transform_iterator or rocthrust::transform_iterator instead")
+    TransformInputIterator
     : public detail::IteratorWrapper<
           rocprim::transform_iterator<InputIteratorT, ConversionOp, ValueType>,
           TransformInputIterator<ValueType, ConversionOp, InputIteratorT, OffsetT>>

@@ -38,9 +38,10 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-
-template <typename T>
-HIPCUB_DEVICE __forceinline__ void Swap(T &lhs, T &rhs)
+// Should be deprecated once hip::std::swap is available in this scope.
+template<typename T>
+HIPCUB_DEVICE
+HIPCUB_FORCEINLINE void Swap(T& lhs, T& rhs)
 {
   T temp = lhs;
   lhs    = rhs;

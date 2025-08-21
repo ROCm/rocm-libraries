@@ -31,6 +31,7 @@
 #define HIPCUB_ROCPRIM_ITERATOR_CONSTANT_INPUT_ITERATOR_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include "iterator_category.hpp"
 #include "iterator_wrapper.hpp"
@@ -44,7 +45,8 @@ BEGIN_HIPCUB_NAMESPACE
 #ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 template<class ValueType, class Difference = std::ptrdiff_t>
-class ConstantInputIterator
+class HIPCUB_DEPRECATED_BECAUSE(
+    "Use rocprim::constant_iterator or rocthrust::constant_iterator instead") ConstantInputIterator
     : public detail::IteratorWrapper<rocprim::constant_iterator<ValueType, Difference>,
                                      ConstantInputIterator<ValueType, Difference>>
 {

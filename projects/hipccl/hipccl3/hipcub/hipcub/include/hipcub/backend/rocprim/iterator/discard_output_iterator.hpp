@@ -31,8 +31,11 @@
 #define HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include "iterator_category.hpp"
+
+#include <rocprim/iterator/discard_iterator.hpp> // IWYU pragma: export
 
 #include <iterator>
 #include <iostream>
@@ -48,8 +51,9 @@ BEGIN_HIPCUB_NAMESPACE
 /**
  * \brief A discard iterator
  */
-template <typename OffsetT = ptrdiff_t>
-class DiscardOutputIterator
+template<typename OffsetT = ptrdiff_t>
+class HIPCUB_DEPRECATED_BECAUSE(
+    "Use rocprim::discard_iterator or rocthrust::discard_iterator instead") DiscardOutputIterator
 {
 public:
     // Required iterator traits
@@ -209,11 +213,13 @@ public:
     * @typedef self_type
     * @brief ostream operator
     */
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     friend std::ostream& operator<<(std::ostream& os, const self_type& itr)
     {
         os << "[" << itr.offset << "]";
         return os;
     }
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 };
 
 END_HIPCUB_NAMESPACE
