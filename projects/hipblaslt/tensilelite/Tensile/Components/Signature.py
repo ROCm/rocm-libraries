@@ -215,7 +215,7 @@ class SignatureDefault(Signature):
                 signature.addArg("skGrid",                         SVK.SIG_VALUE, "u32")
                 signature.addArg("skTiles",                        SVK.SIG_VALUE, "u32")
                 signature.addArg("skExtraIters",                   SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.gemmArgumentSize += 8
+                userArgumentsInfo.gemmArgumentSize += 12
                 # "dpTilesPerWG"
 
         if kernel["ProblemType"]["UseScaleAB"]:
