@@ -52,128 +52,84 @@ int main(int argc, char* argv[])
     hipsparseHandle_t handle;
     HIPSPARSE_CHECK(hipsparseCreate(&handle));
 
-    // Define parameters for the batched tridiagonal systems
-    int m          = 4; // Dimension of each tridiagonal system (number of rows/columns)
-    int batchCount = 2; // Number of tridiagonal systems to solve in batch
+    // Size of each square tridiagonal matrix
+    int m = 6;
 
-    // Host arrays for lower diagonal (dl), main diagonal (d), upper diagonal (du),
-    // and right-hand side (f) vectors.
-    // These arrays will be prepared in interleaved storage format.
-    // Total elements:
-    // (m-1) * batchCount for dl_interleaved and du_interleaved
-    // m * batchCount for d_interleaved, f_interleaved, and x_interleaved
+    // Number of batches
+    int batchCount = 4;
 
-    // Example System 1 (4x4 tridiagonal matrix):
-    // ( 2 -1  0  0 ) (x0)   (1)
-    // (-1  2 -1  0 ) (x1) = (2)
-    // ( 0 -1  2 -1 ) (x2)   (3)
-    // ( 0  0 -1  2 ) (x3)   (4)
+    // Can be Thomas algorithm (0), LU (1), or QR (2)
+    int algo = 1;
 
-    // Example System 2 (4x4 tridiagonal matrix):
-    // ( 3 -1  0  0 ) (x0)   (5)
-    // (-1  3 -1  0 ) (x1) = (6)
-    // ( 0 -1  3 -1 ) (x2)   (7)
-    // ( 0  0 -1  3 ) (x3)   (8)
+    // Host tridiagonal matrix
+    std::vector<float> hdl(m * batchCount);
+    std::vector<float> hd(m * batchCount);
+    std::vector<float> hdu(m * batchCount);
 
-    // Prepare host data in interleaved storage
-    // hdl_interleaved: (m-1) * batchCount elements
-    // hd_interleaved: m * batchCount elements
-    // hdu_interleaved: (m-1) * batchCount elements
-    // hf_interleaved: m * batchCount elements
-    // hx_interleaved: m * batchCount elements (for solutions)
-
-    std::vector<float> hdl_interleaved((m - 1) * batchCount);
-    std::vector<float> hd_interleaved(m * batchCount);
-    std::vector<float> hdu_interleaved((m - 1) * batchCount);
-    std::vector<float> hf_interleaved(m * batchCount);
-    std::vector<float> hx_interleaved(m * batchCount); // Solution vector
-
-    // Populate interleaved data
-    // Indexing: element `i` of batch `b` is at `(i * batchCount) + b`
-    for(int i = 0; i < m; ++i)
+    // Solve multiple tridiagonal matrix systems by interleaving matrices for better memory access:
+    //
+    //      4 2 0 0 0 0        5 3 0 0 0 0        6 4 0 0 0 0        7 5 0 0 0 0
+    //      2 4 2 0 0 0        3 5 3 0 0 0        4 6 4 0 0 0        5 7 5 0 0 0
+    // A1 = 0 2 4 2 0 0   A2 = 0 3 5 3 0 0   A3 = 0 4 6 4 0 0   A4 = 0 5 7 5 0 0
+    //      0 0 2 4 2 0        0 0 3 5 3 0        0 0 4 6 4 0        0 0 5 7 5 0
+    //      0 0 0 2 4 2        0 0 0 3 5 3        0 0 0 4 6 4        0 0 0 5 7 5
+    //      0 0 0 0 2 4        0 0 0 0 3 5        0 0 0 0 4 6        0 0 0 0 5 7
+    //
+    // hdl = 0 0 0 0 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5
+    // hd  = 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7
+    // hdu = 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 0 0 0 0
+    for(int b = 0; b < batchCount; ++b)
     {
-        // Main diagonal (d)
-        hd_interleaved[i * batchCount + 0] = 2.0f; // System 1
-        hd_interleaved[i * batchCount + 1] = 3.0f; // System 2
+        for(int i = 0; i < m; ++i)
+        {
+            hdl[batchCount * i + b] = 2 + b;
+            hd[batchCount * i + b]  = 4 + b;
+            hdu[batchCount * i + b] = 2 + b;
+        }
 
-        // Right-hand side (f)
-        hf_interleaved[i * batchCount + 0] = (float)(i + 1); // System 1
-        hf_interleaved[i * batchCount + 1] = (float)(i + 5); // System 2
+        hdl[batchCount * 0 + b]       = 0.0f;
+        hdu[batchCount * (m - 1) + b] = 0.0f;
     }
 
-    for(int i = 0; i < m - 1; ++i)
-    {
-        // Lower diagonal (dl)
-        hdl_interleaved[i * batchCount + 0] = -1.0f; // System 1
-        hdl_interleaved[i * batchCount + 1] = -1.0f; // System 2
+    // Host dense rhs
+    std::vector<float> hx(m * batchCount);
 
-        // Upper diagonal (du)
-        hdu_interleaved[i * batchCount + 0] = -1.0f; // System 1
-        hdu_interleaved[i * batchCount + 1] = -1.0f; // System 2
+    for(int b = 0; b < batchCount; ++b)
+    {
+        for(int i = 0; i < m; ++i)
+        {
+            hx[batchCount * i + b] = static_cast<float>(b + 1);
+        }
     }
 
-    // Device memory pointers
-    float* d_dl_interleaved;
-    float* d_d_interleaved;
-    float* d_du_interleaved;
-    float* d_x_interleaved;
-    float* d_f_interleaved;
+    float* ddl = nullptr;
+    float* dd  = nullptr;
+    float* ddu = nullptr;
+    float* dx  = nullptr;
+    HIP_CHECK(hipMalloc((void**)&ddl, sizeof(float) * m * batchCount));
+    HIP_CHECK(hipMalloc((void**)&dd, sizeof(float) * m * batchCount));
+    HIP_CHECK(hipMalloc((void**)&ddu, sizeof(float) * m * batchCount));
+    HIP_CHECK(hipMalloc((void**)&dx, sizeof(float) * m * batchCount));
 
-    HIP_CHECK(hipMalloc((void**)&d_dl_interleaved, sizeof(float) * (m - 1) * batchCount));
-    HIP_CHECK(hipMalloc((void**)&d_d_interleaved, sizeof(float) * m * batchCount));
-    HIP_CHECK(hipMalloc((void**)&d_du_interleaved, sizeof(float) * (m - 1) * batchCount));
-    HIP_CHECK(hipMalloc((void**)&d_x_interleaved, sizeof(float) * m * batchCount));
-    HIP_CHECK(hipMalloc((void**)&d_f_interleaved, sizeof(float) * m * batchCount));
-
-    // Copy host data to device
-    HIP_CHECK(hipMemcpy(d_dl_interleaved,
-                        hdl_interleaved.data(),
-                        sizeof(float) * (m - 1) * batchCount,
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_d_interleaved,
-                        hd_interleaved.data(),
-                        sizeof(float) * m * batchCount,
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_du_interleaved,
-                        hdu_interleaved.data(),
-                        sizeof(float) * (m - 1) * batchCount,
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_f_interleaved,
-                        hf_interleaved.data(),
-                        sizeof(float) * m * batchCount,
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(ddl, hdl.data(), sizeof(float) * m * batchCount, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dd, hd.data(), sizeof(float) * m * batchCount, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(ddu, hdu.data(), sizeof(float) * m * batchCount, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dx, hx.data(), sizeof(float) * m * batchCount, hipMemcpyHostToDevice));
 
     // 1. Get buffer size
     size_t bufferSize = 0;
-    HIPSPARSE_CHECK(hipsparseSgtsvInterleavedBatch_bufferSizeExt(handle,
-                                                                 m,
-                                                                 batchCount,
-                                                                 d_dl_interleaved,
-                                                                 d_d_interleaved,
-                                                                 d_du_interleaved,
-                                                                 d_x_interleaved,
-                                                                 d_f_interleaved,
-                                                                 &bufferSize));
+    HIPSPARSE_CHECK(hipsparseSgtsvInterleavedBatch_bufferSizeExt(
+        handle, algo, m, ddl, dd, ddu, dx, batchCount, &bufferSize));
 
     void* dbuffer = nullptr;
     HIP_CHECK(hipMalloc((void**)&dbuffer, bufferSize));
 
     // 2. Perform batched tridiagonal solve
-    HIPSPARSE_CHECK(hipsparseSgtsvInterleavedBatch(handle,
-                                                   m,
-                                                   batchCount,
-                                                   d_dl_interleaved,
-                                                   d_d_interleaved,
-                                                   d_du_interleaved,
-                                                   d_x_interleaved,
-                                                   d_f_interleaved,
-                                                   dbuffer));
+    HIPSPARSE_CHECK(
+        hipsparseSgtsvInterleavedBatch(handle, algo, m, ddl, dd, ddu, dx, batchCount, dbuffer));
 
     // Copy solution back to host
-    HIP_CHECK(hipMemcpy(hx_interleaved.data(),
-                        d_x_interleaved,
-                        sizeof(float) * m * batchCount,
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hx.data(), dx, sizeof(float) * m * batchCount, hipMemcpyDeviceToHost));
 
     // Print the solutions
     printf("Solutions for batched tridiagonal systems:\n");
@@ -182,16 +138,15 @@ int main(int argc, char* argv[])
         printf("  Batch %d:\n", b);
         for(int i = 0; i < m; ++i)
         {
-            printf("    x[%d] = %f\n", i, hx_interleaved[i * batchCount + b]);
+            printf("    x[%d] = %f\n", i, hx[i * batchCount + b]);
         }
     }
 
     // Clean up
-    HIP_CHECK(hipFree(d_dl_interleaved));
-    HIP_CHECK(hipFree(d_d_interleaved));
-    HIP_CHECK(hipFree(d_du_interleaved));
-    HIP_CHECK(hipFree(d_x_interleaved));
-    HIP_CHECK(hipFree(d_f_interleaved));
+    HIP_CHECK(hipFree(ddl));
+    HIP_CHECK(hipFree(dd));
+    HIP_CHECK(hipFree(ddu));
+    HIP_CHECK(hipFree(dx));
     HIP_CHECK(hipFree(dbuffer));
 
     HIPSPARSE_CHECK(hipsparseDestroy(handle));

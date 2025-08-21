@@ -117,104 +117,46 @@ int main(int argc, char* argv[])
     hipsparseMatDescr_t descrC;
     HIPSPARSE_CHECK(hipsparseCreateMatDescr(&descrC));
 
-    size_t bufferSize;
-    HIPSPARSE_CHECK(hipsparseScsrgeam2_bufferSizeExt(handle,
-                                                     m,
-                                                     n,
-                                                     &alpha,
-                                                     descrA,
-                                                     nnzA,
-                                                     dcsrValA,
-                                                     dcsrRowPtrA,
-                                                     dcsrColIndA,
-                                                     &beta,
-                                                     descrB,
-                                                     nnzB,
-                                                     dcsrValB,
-                                                     dcsrRowPtrB,
-                                                     dcsrColIndB,
-                                                     descrC,
-                                                     nullptr,
-                                                     dcsrRowPtrC,
-                                                     nullptr,
-                                                     &bufferSize));
-
-    void* dbuffer = nullptr;
-    HIP_CHECK(hipMalloc((void**)&dbuffer, bufferSize));
-
     int nnzC;
-    HIPSPARSE_CHECK(hipsparseXcsrgeam2Nnz(handle,
-                                          m,
-                                          n,
-                                          descrA,
-                                          nnzA,
-                                          dcsrRowPtrA,
-                                          dcsrColIndA,
-                                          descrB,
-                                          nnzB,
-                                          dcsrRowPtrB,
-                                          dcsrColIndB,
-                                          descrC,
-                                          dcsrRowPtrC,
-                                          &nnzC,
-                                          dbuffer));
+    HIPSPARSE_CHECK(hipsparseXcsrgeamNnz(handle,
+                                         m,
+                                         n,
+                                         descrA,
+                                         nnzA,
+                                         dcsrRowPtrA,
+                                         dcsrColIndA,
+                                         descrB,
+                                         nnzB,
+                                         dcsrRowPtrB,
+                                         dcsrColIndB,
+                                         descrC,
+                                         dcsrRowPtrC,
+                                         &nnzC));
 
     int*   dcsrColIndC = nullptr;
     float* dcsrValC    = nullptr;
     HIP_CHECK(hipMalloc((void**)&dcsrColIndC, sizeof(int) * nnzC));
     HIP_CHECK(hipMalloc((void**)&dcsrValC, sizeof(float) * nnzC));
 
-    HIPSPARSE_CHECK(hipsparseScsrgeam2(handle,
-                                       m,
-                                       n,
-                                       &alpha,
-                                       descrA,
-                                       nnzA,
-                                       dcsrValA,
-                                       dcsrRowPtrA,
-                                       dcsrColIndA,
-                                       &beta,
-                                       descrB,
-                                       nnzB,
-                                       dcsrValB,
-                                       dcsrRowPtrB,
-                                       dcsrColIndB,
-                                       descrC,
-                                       dcsrValC,
-                                       dcsrRowPtrC,
-                                       dcsrColIndC,
-                                       dbuffer));
-
-    std::vector<int>   hcsrRowPtrC(m + 1);
-    std::vector<int>   hcsrColIndC(nnzC);
-    std::vector<float> hcsrValC(nnzC);
-
-    // Copy back to the host
-    HIP_CHECK(
-        hipMemcpy(hcsrRowPtrC.data(), dcsrRowPtrC, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(hcsrColIndC.data(), dcsrColIndC, sizeof(int) * nnzC, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(hcsrValC.data(), dcsrValC, sizeof(float) * nnzC, hipMemcpyDeviceToHost));
-
-    std::cout << "C" << std::endl;
-    for(int i = 0; i < m; i++)
-    {
-        int start = hcsrRowPtrC[i];
-        int end   = hcsrRowPtrC[i + 1];
-
-        std::vector<float> temp(n, 0.0f);
-        for(int j = start; j < end; j++)
-        {
-            temp[hcsrColIndC[j]] - hcsrValC[j];
-        }
-
-        for(int j = 0; j < n; j++)
-        {
-            std::cout << temp[j] << " ";
-        }
-        std::cout << "" << std::endl;
-    }
-    std::cout << "" << std::endl;
+    HIPSPARSE_CHECK(hipsparseScsrgeam(handle,
+                                      m,
+                                      n,
+                                      &alpha,
+                                      descrA,
+                                      nnzA,
+                                      dcsrValA,
+                                      dcsrRowPtrA,
+                                      dcsrColIndA,
+                                      &beta,
+                                      descrB,
+                                      nnzB,
+                                      dcsrValB,
+                                      dcsrRowPtrB,
+                                      dcsrColIndB,
+                                      descrC,
+                                      dcsrValC,
+                                      dcsrRowPtrC,
+                                      dcsrColIndC));
 
     HIP_CHECK(hipFree(dcsrRowPtrA));
     HIP_CHECK(hipFree(dcsrColIndA));
@@ -225,8 +167,6 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipFree(dcsrRowPtrC));
     HIP_CHECK(hipFree(dcsrColIndC));
     HIP_CHECK(hipFree(dcsrValC));
-
-    HIP_CHECK(hipFree(dbuffer));
 
     HIPSPARSE_CHECK(hipsparseDestroyMatDescr(descrA));
     HIPSPARSE_CHECK(hipsparseDestroyMatDescr(descrB));

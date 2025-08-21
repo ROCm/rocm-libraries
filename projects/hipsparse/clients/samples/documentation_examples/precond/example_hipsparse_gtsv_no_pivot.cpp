@@ -54,85 +54,67 @@ int main(int argc, char* argv[])
     hipsparseHandle_t handle;
     HIPSPARSE_CHECK(hipsparseCreate(&handle));
 
-    // Define the size of the tridiagonal system
-    int m = 4; // Dimension of the square matrix
+    // Size of square tridiagonal matrix
+    int m = 5;
 
-    // A sample tridiagonal linear system Ax = f, where:
-    // ( d0  u0   0   0 )
-    // ( l0  d1  u1   0 )
-    // ( 0   l1  d2  u2 )
-    // ( 0   0   l2  d3 )
+    // Number of columns in right-hand side (column ordered) matrix
+    int n = 3;
 
-    // The system is chosen to be diagonally dominant for numerical stability
-    // and thus suitable for a no-pivoting solver.
-    // Matrix:
-    // ( 2  1  0  0 )
-    // ( 1  3  1  0 )
-    // ( 0  1  4  1 )
-    // ( 0  0  1  5 )
-    // Right-hand side vector: f = [1, 2, 3, 4]
+    // Leading dimension of right-hand side (column ordered) matrix
+    int ldb = m;
 
-    // Host arrays for lower diagonal (l), main diagonal (d), upper diagonal (u),
-    // and right-hand side (f) vectors.
-    std::vector<float> h_dl(m - 1); // Lower diagonal (m-1 elements)
-    std::vector<float> h_d(m); // Main diagonal (m elements)
-    std::vector<float> h_du(m - 1); // Upper diagonal (m-1 elements)
-    std::vector<float> h_f(m); // Right-hand side vector (m elements)
-    std::vector<float> h_x(m); // Solution vector (m elements)
+    // Host tri-diagonal matrix
+    //  2 -1  0  0  0
+    // -1  2 -1  0  0
+    //  0 -1  2 -1  0
+    //  0  0 -1  2 -1
+    //  0  0  0 -1  2
+    std::vector<float> hdl = {0.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+    std::vector<float> hd  = {2.0f, 2.0f, 2.0f, 2.0f, 2.0f};
+    std::vector<float> hdu = {-1.0f, -1.0f, -1.0f, -1.0f, 0.0f};
 
-    // Populate host data
-    h_dl = {1.0f, 1.0f, 1.0f};
-    h_d  = {2.0f, 3.0f, 4.0f, 5.0f};
-    h_du = {1.0f, 1.0f, 1.0f};
-    h_f  = {1.0f, 2.0f, 3.0f, 4.0f};
+    // Host right-hand side column vectors
+    std::vector<float> hB(ldb * n, 1.0f);
 
-    // Device memory pointers
-    float* d_dl;
-    float* d_d;
-    float* d_du;
-    float* d_f;
-    float* d_x;
+    float* ddl = nullptr;
+    float* dd  = nullptr;
+    float* ddu = nullptr;
+    float* dB  = nullptr;
+    HIP_CHECK(hipMalloc((void**)&ddl, sizeof(float) * m));
+    HIP_CHECK(hipMalloc((void**)&dd, sizeof(float) * m));
+    HIP_CHECK(hipMalloc((void**)&ddu, sizeof(float) * m));
+    HIP_CHECK(hipMalloc((void**)&dB, sizeof(float) * ldb * n));
 
-    HIP_CHECK(hipMalloc((void**)&d_dl, sizeof(float) * (m - 1)));
-    HIP_CHECK(hipMalloc((void**)&d_d, sizeof(float) * m));
-    HIP_CHECK(hipMalloc((void**)&d_du, sizeof(float) * (m - 1)));
-    HIP_CHECK(hipMalloc((void**)&d_f, sizeof(float) * m));
-    HIP_CHECK(hipMalloc((void**)&d_x, sizeof(float) * m));
+    HIP_CHECK(hipMemcpy(ddl, hdl.data(), sizeof(float) * m, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dd, hd.data(), sizeof(float) * m, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(ddu, hdu.data(), sizeof(float) * m, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dB, hB.data(), sizeof(float) * ldb * n, hipMemcpyHostToDevice));
 
-    // Copy host data to device
-    HIP_CHECK(hipMemcpy(d_dl, h_dl.data(), sizeof(float) * (m - 1), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_d, h_d.data(), sizeof(float) * m, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_du, h_du.data(), sizeof(float) * (m - 1), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_f, h_f.data(), sizeof(float) * m, hipMemcpyHostToDevice));
-
-    // 1. Get buffer size
-    size_t bufferSize = 0;
+    // Obtain required buffer size
+    size_t bufferSize;
     HIPSPARSE_CHECK(
-        hipsparseSgtsv2_nopivot_bufferSizeExt(handle, m, d_dl, d_d, d_du, d_f, &bufferSize));
+        hipsparseSgtsv2_nopivot_bufferSizeExt(handle, m, n, ddl, dd, ddu, dB, ldb, &bufferSize));
 
-    void* dbuffer = nullptr;
-    HIP_CHECK(hipMalloc((void**)&dbuffer, bufferSize));
+    void* dbuffer;
+    HIP_CHECK(hipMalloc(&dbuffer, bufferSize));
 
-    // 2. Perform tridiagonal solve without pivoting
-    // The solution is computed and stored in the d_f vector.
-    HIPSPARSE_CHECK(hipsparseSgtsv2_nopivot(handle, m, d_dl, d_d, d_du, d_f, dbuffer));
+    HIPSPARSE_CHECK(hipsparseSgtsv2_nopivot(handle, m, n, ddl, dd, ddu, dB, ldb, dbuffer));
 
-    // Copy solution back to host from d_f
-    HIP_CHECK(hipMemcpy(h_x.data(), d_f, sizeof(float) * m, hipMemcpyDeviceToHost));
+    // Copy right-hand side to host
+    HIP_CHECK(hipMemcpy(hB.data(), dB, sizeof(float) * ldb * n, hipMemcpyDeviceToHost));
 
     // Print the solution
     printf("Solution for the tridiagonal system:\n");
     for(int i = 0; i < m; ++i)
     {
-        printf("  x[%d] = %f\n", i, h_x[i]);
+        printf("  x[%d] = %f\n", i, hB[i]);
     }
 
     // Clean up
-    HIP_CHECK(hipFree(d_dl));
-    HIP_CHECK(hipFree(d_d));
-    HIP_CHECK(hipFree(d_du));
-    HIP_CHECK(hipFree(d_f));
-    HIP_CHECK(hipFree(d_x)); // not strictly needed as result is in d_f, but good practice
+    HIP_CHECK(hipFree(ddl));
+    HIP_CHECK(hipFree(dd));
+    HIP_CHECK(hipFree(ddu));
+    HIP_CHECK(hipFree(dB));
     HIP_CHECK(hipFree(dbuffer));
 
     HIPSPARSE_CHECK(hipsparseDestroy(handle));
