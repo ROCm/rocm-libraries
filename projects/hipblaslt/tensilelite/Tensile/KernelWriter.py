@@ -4687,10 +4687,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("SKItersPerWG", 1)
       self.states.numSgprStreamK += 3
       if kernel["StreamK"] >= 2: # Two-tile SK
-        self.defineSgpr("skGridAndTiles", 1)
+        self.defineSgpr("skGrid", 1)
+        self.defineSgpr("skTiles", 1)
         self.defineSgpr("skExtraIters", 1)
         # self.defineSgpr("dpTilesPerWG", 1, kernarg=True)
-        self.states.numSgprStreamK += 2
+        self.states.numSgprStreamK += 3
 
     if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("LocalWriteAddrA", 1)
