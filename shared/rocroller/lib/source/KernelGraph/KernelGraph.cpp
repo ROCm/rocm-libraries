@@ -136,9 +136,16 @@ namespace rocRoller
             auto [iter, _] = m_transformers.insert_or_assign(op, &coordinates);
 
             auto const stk = controlStack(op, control);
+            auto theOne = 216;
+            if (op == theOne)
+            {
+                std::cout << "controlStack size " << stk.size() << std::endl;
+            }
 
             for(int index : stk | std::views::reverse)
             {
+                if (op == theOne)
+                    std::cout << "index " << index << std::endl;
                 std::visit(
                     [&](auto&& node) {
                         using OpType = std::decay_t<decltype(node)>;
@@ -152,6 +159,10 @@ namespace rocRoller
                         }
                     },
                     control.getNode(index));
+            }
+            if (op == theOne)
+            {
+                std::cout << "end  buildTransformer " << std::endl;
             }
             return iter->second;
         }

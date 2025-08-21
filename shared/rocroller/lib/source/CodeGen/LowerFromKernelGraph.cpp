@@ -1093,7 +1093,9 @@ namespace rocRoller
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::Int64, 1);
 
+                std::cout << "Before buildTransformer StoreSGPR tag " << tag << std::endl;
                 auto indexes = m_graph->buildTransformer(tag).forward({userTag});
+                std::cout << "After buildTransformer StoreSGPR tag " << tag << std::endl;
 
                 co_yield Instruction::Comment("GEN: StoreSGPR; user index");
                 co_yield generateOffset(

@@ -116,11 +116,6 @@ namespace rocRoller
             {
                 return m_transformers;
             }
-            void setRestricted()
-            {
-                control.setRestricted();
-                coordinates.setRestricted();
-            }
 
             /**
             *  Set both control and coordinate graphs to be restricted mode.
