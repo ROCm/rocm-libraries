@@ -742,10 +742,26 @@ namespace TensileLite
                 uint32_t skItersPerWG = skTiles * itersPerTile / skGrid;
                 uint32_t skExtraIters = skTiles * itersPerTile % (skGrid);
 
-                args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                args.template append<uint32_t>("skGrid", skGrid);
-                args.template append<uint32_t>("skTiles", skTiles);
-                args.template append<uint32_t>("skExtraIters", skExtraIters);
+                if(sizeMapping.customKernelName.empty())
+                {
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid",       skGrid);
+                    args.template append<uint32_t>("skTiles",      skTiles);
+                    args.template append<uint32_t>("skExtraIters", skExtraIters);
+                }
+                else
+                {
+                    uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);
+                    // safe guard
+                    if(skGrid > 65535 || skTiles > 65535)
+                    {
+                        throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
+                    }
+
+                    args.template append<uint32_t>("SKItersPerWG",   skItersPerWG);
+                    args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
+                    args.template append<uint32_t>("skExtraIters",   skExtraIters);
+                }
             }
         }
 
