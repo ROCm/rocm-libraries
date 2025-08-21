@@ -16,7 +16,7 @@ find_path(BLIS_INCLUDE_DIR
         "${BLIS_PATH_4_1_0}/include_ILP64"
         "${BLIS_PATH_4_0}/include_ILP64"
         "${CMAKE_CURRENT_BINARY_DIR}/../deps/blis/include/blis"
-        "${CMAKE_CURRENT_BINARY_DIR}/deps/amd-blis/include/ILP64"
+        "${CMAKE_CURRENT_BINARY_DIR}/../deps/amd-blis/include/ILP64"
         "${PROJECT_BINARY_DIR}/deps/blis/include/blis"
         "${PROJECT_BINARY_DIR}/deps/amd-blis/include/ILP64"
         "/usr/local/include/blis"
