@@ -145,7 +145,9 @@ using WarpSortParamsIntegralMultiThread = ::testing::Types<warp_sort_param_type(
                                                            warp_sort_param_type(int, 4),
                                                            warp_sort_param_type(__custom_int2, 4),
                                                            warp_sort_param_type(uint8_t, 4),
-                                                           warp_sort_param_type(int8_t, 4)>;
+                                                           warp_sort_param_type(int8_t, 4),
+                                                           warp_sort_param_type(int8_t, 8),
+                                                           warp_sort_param_type(int8_t, 16)>;
 
 using BlockParamsIntegral = ::testing::Types<block_param_type(int, __custom_int2),
                                              block_param_type(uint8_t, short),
