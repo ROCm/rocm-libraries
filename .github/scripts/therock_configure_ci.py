@@ -6,6 +6,7 @@ Required environment variables:
 """
 
 import fnmatch
+from github_cli_client import GitHubCLIClient
 import json
 import logging
 import subprocess
@@ -29,7 +30,7 @@ def set_github_output(d: Mapping[str, str]):
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
         
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
-    """Returns the paths of modified files relative to the base reference."""
+    # """Returns the paths of modified files relative to the base reference."""
     try:
         return subprocess.run(
             ["git", "diff", "--name-only", base_ref],
