@@ -243,7 +243,8 @@ namespace rocRoller
                 };
 
                 auto exchangeTileTag = graph.mapper.get<MacroTile>(exchangeTag);
-                for(auto edge : graph.coordinates.getNeighbours<GD::Downstream>(exchangeTileTag))
+                for(auto const edge :
+                    graph.coordinates.getNeighbours<GD::Downstream>(exchangeTileTag))
                 {
                     auto maybeIndex = graph.coordinates.get<Index>(edge);
                     if(!maybeIndex)
@@ -998,7 +999,7 @@ namespace rocRoller
 
                 std::map<int, int> scaleLoadU;
 
-                for(auto exchangeTag : exchanges)
+                for(auto const exchangeTag : exchanges)
                 {
                     auto prefetchGlobalU
                         = (m_exchangeSegment[exchangeTag] + numInFlight) % numUnroll;
@@ -1007,7 +1008,8 @@ namespace rocRoller
                     AssertFatal(loadTag.has_value(),
                                 "couldn't find the load associated with the exchange");
 
-                    if(auto search = scaleLoadU.find(loadTag.value()); search != scaleLoadU.end())
+                    if(auto const search = scaleLoadU.find(loadTag.value());
+                       search != scaleLoadU.end())
                     {
                         if(search->second > prefetchGlobalU)
                             scaleLoadU[loadTag.value()] = prefetchGlobalU;
@@ -1016,14 +1018,14 @@ namespace rocRoller
                         scaleLoadU[loadTag.value()] = prefetchGlobalU;
                 }
 
-                for(auto pair : scaleLoadU)
+                for(auto const pair : scaleLoadU)
                 {
                     std::unordered_set<int> orderBeforeTags;
-                    for(auto info : loadsByUnroll[pair.second])
+                    for(auto const info : loadsByUnroll[pair.second])
                         orderBeforeTags.insert(info.globalChain);
 
                     auto topOp = getTopSetCoordinate(graph, pair.first);
-                    for(auto orderBeforeTag : orderBeforeTags)
+                    for(auto const orderBeforeTag : orderBeforeTags)
                         graph.control.addElement(Sequence(), {topOp}, {orderBeforeTag});
                 }
             }

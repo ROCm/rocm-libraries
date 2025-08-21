@@ -46,8 +46,8 @@ namespace rocRoller
             auto root = graph.control.roots().only();
 
             std::unordered_set<int> scaleTiles;
-            for(auto multiplyTag : filter(graph.control.isElemType<Multiply>(),
-                                          graph.control.depthFirstVisit(root.value())))
+            for(auto const multiplyTag : filter(graph.control.isElemType<Multiply>(),
+                                                graph.control.depthFirstVisit(root.value())))
             {
                 auto [scaleMacTag, scaleMac] = graph.getDimension<MacroTile>(
                     multiplyTag, Connections::typeArgument<MacroTile>(arg));
@@ -60,7 +60,7 @@ namespace rocRoller
             };
 
             std::map<int, int> scaleLoads;
-            for(auto loadTag : filter(isLoad, graph.control.depthFirstVisit(root.value())))
+            for(auto const loadTag : filter(isLoad, graph.control.depthFirstVisit(root.value())))
             {
                 auto tileTag = graph.mapper.get<MacroTile>(loadTag);
                 if(scaleTiles.contains(tileTag))
@@ -82,8 +82,8 @@ namespace rocRoller
         {
             auto root = graph.control.roots().only();
 
-            for(auto multiplyTag : filter(graph.control.isElemType<Multiply>(),
-                                          graph.control.depthFirstVisit(root.value())))
+            for(auto const multiplyTag : filter(graph.control.isElemType<Multiply>(),
+                                                graph.control.depthFirstVisit(root.value())))
             {
 
                 auto [tileTag, tile] = graph.getDimension<MacroTile>(
@@ -108,7 +108,7 @@ namespace rocRoller
             for(auto load = scaleLoads.cbegin(); load != scaleLoads.cend(); load++)
             {
                 auto unrollMap = colouring.operationColour.at(load->first);
-                for(auto u : unrollMap)
+                for(auto const u : unrollMap)
                     rv.insert(std::make_pair(load->first, unrollMap));
             }
 
@@ -491,7 +491,7 @@ namespace rocRoller
 
                 // (slowDimVal1, slowDimVal0, fastDimVal, load)
                 std::map<int, std::map<int, std::map<int, int>>> unrollLoadMap;
-                for(auto load : loadUnrollMap)
+                for(auto const load : loadUnrollMap)
                 {
                     auto unrollMap = loadUnrollMap[load.first];
                     AssertFatal(unrollMap.contains(fastDim), ShowValue(fastDim));
@@ -499,7 +499,7 @@ namespace rocRoller
                     AssertFatal(slowDim1 == -1 || unrollMap.contains(slowDim1),
                                 ShowValue(slowDim1));
                     int slowDimVal1 = (slowDim1 == -1) ? 0 : unrollMap[slowDim1];
-                    for(auto unroll : unrollMap)
+                    for(auto const unroll : unrollMap)
                     {
                         if(unroll.first == fastDim)
                         {
@@ -639,7 +639,7 @@ namespace rocRoller
             for(auto const load : mergeables)
             {
                 // add coordinate connections for LoadTiled
-                for(auto& dc : loadConnections)
+                for(auto const& dc : loadConnections)
                 {
                     graph.mapper.connect(load.first, dc.coordinate, dc.connectionSpec);
                 }
@@ -655,7 +655,7 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {topOp}, {exchange});
 
                 // add coordinate connections for Exchange
-                for(auto& dc : exchangeConnections)
+                for(auto const& dc : exchangeConnections)
                 {
                     graph.mapper.connect(exchange, dc.coordinate, dc.connectionSpec);
                 }
@@ -705,7 +705,7 @@ namespace rocRoller
                         graph.control.addElement(Sequence(), {replaceOp}, {exchange});
 
                         // add coordinate connections for Exchange
-                        for(auto& dc : exchangeConnections)
+                        for(auto const& dc : exchangeConnections)
                         {
                             graph.mapper.connect(exchange, dc.coordinate, dc.connectionSpec);
                         }

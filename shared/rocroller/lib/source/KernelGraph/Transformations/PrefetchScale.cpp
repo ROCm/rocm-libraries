@@ -46,7 +46,7 @@ namespace rocRoller
         {
             auto preNOP = graph.control.addElement(NOP());
             auto prev   = preNOP;
-            for(auto next : preLoopLoads)
+            for(auto const next : preLoopLoads)
             {
                 graph.control.addElement(Sequence(), {prev}, {next});
                 prev = next;
@@ -55,7 +55,7 @@ namespace rocRoller
             std::optional<int> unrollKVal;
             std::optional<int> prevLoad;
             std::optional<int> nextLoad;
-            for(auto load : loads)
+            for(auto const load : loads)
             {
                 auto unrollMap  = colouring.operationColour.at(load);
                 auto unrollKDim = graph.mapper.get<Unroll>(load, 2);
@@ -94,7 +94,7 @@ namespace rocRoller
             std::optional<int> unrollKVal;
             std::optional<int> prevLoad;
             std::optional<int> nextLoad;
-            for(auto loopLoad : loopLoads)
+            for(auto const loopLoad : loopLoads)
             {
                 auto unrollMap  = colouring.operationColour.at(loopLoad);
                 auto unrollKDim = graph.mapper.get<Unroll>(loopLoad, 2);
@@ -112,7 +112,7 @@ namespace rocRoller
 
             auto postNOP = graph.control.addElement(NOP());
             auto prev    = postNOP;
-            for(auto [loadChain, _ignore] : inLoopLoads)
+            for(auto const [loadChain, _ignore] : inLoopLoads)
             {
                 graph.control.addElement(Sequence(), {prev}, {loadChain});
                 prev = loadChain;
@@ -123,7 +123,7 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {prev}, {nextTopOp});
 
             // Update SetCoordinates
-            for(auto [loadChain, unrollCoord] : inLoopLoads)
+            for(auto const [loadChain, unrollCoord] : inLoopLoads)
             {
                 std::optional<int> maybeOperation = loadChain;
                 while(maybeOperation)
@@ -158,14 +158,14 @@ namespace rocRoller
 
         void insertInLoopCopies(KernelGraph& graph, auto const& copies)
         {
-            for(auto copy : copies)
+            for(auto const copy : copies)
             {
                 auto exchangeTags = copy.second;
                 std::sort(exchangeTags.begin(),
                           exchangeTags.end(),
                           TopologicalCompare(std::make_shared<KernelGraph>(graph)));
                 insertBefore(graph, exchangeTags[0], copy.first, copy.first);
-                for(auto exchangeTag : exchangeTags)
+                for(auto const exchangeTag : exchangeTags)
                     graph.control.addElement(Sequence(), {copy.first}, {exchangeTag});
             }
         }
@@ -193,7 +193,7 @@ namespace rocRoller
                       loads.end(),
                       TopologicalCompare(std::make_shared<KernelGraph>(graph)));
 
-            for(auto loadTag : loads)
+            for(auto const loadTag : loads)
             {
                 auto macTileTag = graph.mapper.get<MacroTile>(loadTag);
                 auto macTile    = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -263,7 +263,8 @@ namespace rocRoller
                             edge, {exchangeTileTag.value()}, {destMacTileTag});
 
                         std::optional<int> exchangeTag;
-                        for(auto c : graph.mapper.getCoordinateConnections(exchangeTileTag.value()))
+                        for(auto const c :
+                            graph.mapper.getCoordinateConnections(exchangeTileTag.value()))
                         {
                             auto maybeExchange = graph.control.get<Exchange>(c.control);
                             if(maybeExchange)
