@@ -107,11 +107,8 @@ set(HIP_NVCC_FLAGS " ${HIP_NVCC_FLAGS} -Wno-deprecated-gpu-targets -Xcompiler -W
 set(DEFAULT_NVGPU_TARGETS "")
 # If NVGPU_TARGETS is empty get default value for it
 if("x${NVGPU_TARGETS}" STREQUAL "x")
-    message(STATUS "equal x")
     hip_cuda_detect_lowest_cc(lowest_cc)
     set(DEFAULT_NVGPU_TARGETS "${lowest_cc}")
-else()
-    message(STATUS "not equal x")
 endif()
 set(NVGPU_TARGETS "${DEFAULT_NVGPU_TARGETS}"
     CACHE STRING "List of NVIDIA GPU targets (compute capabilities), for example \"35;50\""
