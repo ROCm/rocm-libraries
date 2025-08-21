@@ -39,7 +39,7 @@ PYBIND11_MODULE(origami, m)
         .value("Float4", origami::data_type_t::Float4)
         .export_values();
 
-    m.def("intTodata_type_t",
+    m.def("int_to_data_type",
           &origami::int_to_data_type,
           "Convert int to data_type_t.");
 
@@ -65,11 +65,11 @@ PYBIND11_MODULE(origami, m)
         .def_readwrite("L2_capacity", &Hardware::L2_capacity)
         .def_readwrite("CU_per_L2", &Hardware::CU_per_L2)
         .def_readwrite("compute_clock_ghz", &Hardware::compute_clock_ghz)
-        .def_readwrite("parallel_MI_CU", &Hardware::parallel_MI_CU)
+        .def_readwrite("parallel_mi_cu", &Hardware::parallel_mi_cu)
         .def_readwrite("percent_bw_per_wg", &Hardware::percent_bw_per_wg)
         .def_readwrite("NUM_XCD", &Hardware::NUM_XCD);
 
-    m.def("getHardwareForDevice",
+    m.def("get_hardware_for_device",
           &Hardware::get_hardware_for_device,
           "This gets a hardware object for a device.");
 

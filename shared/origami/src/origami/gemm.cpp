@@ -194,7 +194,7 @@ namespace origami
 
     // Computes total data loads per CU per MT from A and B
     // Reads happen every MT, Writes happen every K-complete tile.
-    size_t compute_CU_loads(size_t MT_M, size_t MT_N, size_t MT_K, bool debug)
+    size_t compute_cu_loads(size_t MT_M, size_t MT_N, size_t MT_K, bool debug)
     {
         // Total loads are loads from A and loads from B
         size_t Ld_A_value = compute_A_loads(MT_M, MT_K, debug);
@@ -206,7 +206,7 @@ namespace origami
 
     // Computes the number of active compute units if there is only one wave and it is partial
     // Otherwise, returns hardware.N_CU
-    size_t compute_active_CU(
+    size_t compute_active_cu(
         const hardware_t& hardware, size_t M, size_t N, size_t batch, size_t MT_M, size_t MT_N)
     {
         size_t num_mt_m        = safe_ceil_div(M, MT_M);
@@ -284,7 +284,7 @@ namespace origami
             Ld_CU_bytes += num_scales_B; //One Byte per scale
         }
         // 3) occupancy
-        size_t active_cu = compute_active_CU(hardware, M, N, batch, MT_M, MT_N) * split;
+        size_t active_cu = compute_active_cu(hardware, M, N, batch, MT_M, MT_N) * split;
         active_cu        = std::min(active_cu, hardware.N_CU);
         // 4) total loads by all CUs
         double total_Ld = Ld_CU_bytes * static_cast<double>(active_cu);
@@ -474,7 +474,7 @@ namespace origami
 
 
         // 4) Epilogue: writes from all active CUs with limited bandwidth
-        size_t active_cu       = compute_active_CU(hardware, M, N, batch, MT_M, MT_N);
+        size_t active_cu       = compute_active_cu(hardware, M, N, batch, MT_M, MT_N);
         double epilogue_limite = 1;
 
         epilogue_limite = (static_cast<double>(active_cu) / static_cast<double>(hardware.N_CU));
@@ -553,7 +553,7 @@ namespace origami
         WGM = std::max(WGM, 1); // WGM can't be less than one.
 
         // Get number of active CUs
-        int num_cus = compute_active_CU(hardware, M, N, batch, MT_M, MT_N);
+        int num_cus = compute_active_cu(hardware, M, N, batch, MT_M, MT_N);
 
         // Distribute CUs per XCD. Ensure at least 1.
         int cu_per_xcd = std::max(safe_ceil_div(num_cus, hardware.NUM_XCD), 1);
@@ -634,7 +634,7 @@ namespace origami
         int grid_n = static_cast<int>(std::ceil(static_cast<double>(N) / MT_N));
         int grid_k = static_cast<int>(std::ceil(static_cast<double>(K) / MT_K));
 
-        int num_cus = compute_active_CU(hardware, M, N, batch, MT_M, MT_N);
+        int num_cus = compute_active_cu(hardware, M, N, batch, MT_M, MT_N);
 
         // If the 2D grid is smaller than the number of CUs, not all will be active
         if((grid_m * grid_n * batch) < num_cus)
@@ -765,7 +765,7 @@ namespace origami
 
         //Enable Customized Heuristics.
         bool enable_heuristics = true;
-        size_t active_cu = compute_active_CU(hardware, M, N, batch, MT_M, MT_N);
+        size_t active_cu = compute_active_cu(hardware, M, N, batch, MT_M, MT_N);
         if(active_cu < hardware.N_CU && K > 16384 && enable_heuristics) //TODO This is heuristicy
         {
             //If this is the case, we assume we're going to try and get an even split that fills the most CUs.

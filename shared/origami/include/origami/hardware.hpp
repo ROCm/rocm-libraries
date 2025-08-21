@@ -286,21 +286,21 @@ namespace origami
             double mem1_perf_ratio;
             double mem2_perf_ratio;
             double mem3_perf_ratio;
-            size_t parallel_MI_CU;
+            size_t parallel_mi_cu;
             double percent_bw_per_wg;
             double mem_clock_ratio;
             architecture_constants(size_t num_xcds,
                                     double mem1_perf_ratio,
                                     double mem2_perf_ratio,
                                     double mem3_perf_ratio,
-                                    size_t parallel_MI_CU,
+                                    size_t parallel_mi_cu,
                                     double percent_bw_per_wg,
                                     double mem_clock_ratio) //Obtained through microbenchmarking
                 : num_xcds(num_xcds)
                 , mem1_perf_ratio(mem1_perf_ratio)
                 , mem2_perf_ratio(mem2_perf_ratio)
                 , mem3_perf_ratio(mem3_perf_ratio)
-                , parallel_MI_CU(parallel_MI_CU)
+                , parallel_mi_cu(parallel_mi_cu)
                 , percent_bw_per_wg(percent_bw_per_wg)
                 , mem_clock_ratio(mem_clock_ratio)
             {
@@ -322,7 +322,7 @@ namespace origami
         size_t       L2_capacity; // Capacity of L2 in bytes
         size_t       CU_per_L2; // Number of compute units per L2 domain
         double       compute_clock_ghz;
-        size_t       parallel_MI_CU; // The number of parallel MI in a CU
+        size_t       parallel_mi_cu; // The number of parallel MI in a CU
         double       percent_bw_per_wg;
         size_t       NUM_XCD;
 
@@ -335,7 +335,7 @@ namespace origami
                     double       mem3_perf_ratio,
                     size_t       L2_capacity,
                     double       compute_clock_ghz,
-                    size_t       parallel_MI_CU,
+                    size_t       parallel_mi_cu,
                     double       percent_bw_per_wg)
             : arch(arch)
             , N_CU(N_CU)
@@ -346,7 +346,7 @@ namespace origami
             , L2_capacity(L2_capacity)
             , CU_per_L2(N_CU / NUM_XCD)
             , compute_clock_ghz(compute_clock_ghz)
-            , parallel_MI_CU(parallel_MI_CU)
+            , parallel_mi_cu(parallel_mi_cu)
             , percent_bw_per_wg(percent_bw_per_wg)
             , NUM_XCD(NUM_XCD)
         {
@@ -371,7 +371,7 @@ namespace origami
             , L2_capacity(other.L2_capacity)
             , CU_per_L2(other.CU_per_L2)
             , compute_clock_ghz(other.compute_clock_ghz)
-            , parallel_MI_CU(other.parallel_MI_CU)
+            , parallel_mi_cu(other.parallel_mi_cu)
             , percent_bw_per_wg(other.percent_bw_per_wg)
             , NUM_XCD(other.NUM_XCD)
         {
@@ -399,7 +399,7 @@ namespace origami
                             1e9 * constants.mem3_perf_ratio / properties.memoryClockRate,
                             properties.l2CacheSize,
                             properties.clockRate / 1e6,
-                            constants.parallel_MI_CU,
+                            constants.parallel_mi_cu,
                             constants.percent_bw_per_wg);
         }
 
@@ -434,7 +434,7 @@ namespace origami
             std::cout << "L2 Cache capacity         : " << L2_capacity << " bytes\n";
             std::cout << "CUs per L2 domain         : " << CU_per_L2 << "\n";
             std::cout << "Compute clock (GHz)       : " << compute_clock_ghz << "\n";
-            std::cout << "Parallel MI/CU            : " << parallel_MI_CU << "\n";
+            std::cout << "Parallel MI/CU            : " << parallel_mi_cu << "\n";
             std::cout << "Number of XCDs (NUM_XCD)  : " << NUM_XCD << "\n";
             std::cout << "percent_bw_per_wg         : " << percent_bw_per_wg << "\n\n";
 
@@ -494,14 +494,14 @@ namespace origami
             auto it = instruction_map.find(key);
             if(it != instruction_map.end())
             {
-                return it->second / parallel_MI_CU;
+                return it->second / parallel_mi_cu;
             }
             else
             {
                 std::cerr << "Warning: Latency not found for MI_M=" << MI_M << ", MI_N=" << MI_N
                             << ", MI_K=" << MI_K << ", mi_input_type=" << to_string(mi_input_type)
                             << ". Returning latency value of 32 (really slow).\n";
-                return 32 / parallel_MI_CU; // Default latency if instruction is not found
+                return 32 / parallel_mi_cu; // Default latency if instruction is not found
             }
         }
 

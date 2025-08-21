@@ -70,11 +70,11 @@ namespace origami
 
     // Computes total data loads per CU per MT from A and B
     // Reads happen every MT, Writes happen every K-complete tile.
-    size_t compute_CU_loads(size_t MT_M, size_t MT_N, size_t MT_K, bool debug);
+    size_t compute_cu_loads(size_t MT_M, size_t MT_N, size_t MT_K, bool debug);
 
     // Computes the number of active compute units if there is only one wave and it is partial
     // Otherwise, returns hardware.N_CU
-    size_t compute_active_CU(
+    size_t compute_active_cu(
         const hardware_t& hardware, size_t M, size_t N, size_t MT_M, size_t MT_N);
 
     double compute_memory_latency(const hardware_t& hardware,

@@ -61,7 +61,7 @@ def parseArguments():
 def main():
     args = parseArguments()
 
-    hardware = origami.getHardwareForDevice(args.device)
+    hardware = origami.get_hardware_for_device(args.device)
 
     if args.print:
         hardware.print()
