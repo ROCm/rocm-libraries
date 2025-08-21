@@ -48,15 +48,29 @@ template<class Config,
          class OffsetIterator,
          class ResultType,
          class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    segmented_reduce_kernel(InputIterator  input,
-                            OutputIterator output,
-                            OffsetIterator begin_offsets,
-                            OffsetIterator end_offsets,
-                            BinaryFunction reduce_op,
-                            ResultType     initial_value)
+inline hipError_t launch_segmented_reduce(detail::target_arch arch,
+                                          InputIterator       input,
+                                          OutputIterator      output,
+                                          OffsetIterator      begin_offsets,
+                                          OffsetIterator      end_offsets,
+                                          BinaryFunction      reduce_op,
+                                          ResultType          initial_value,
+                                          dim3                grid,
+                                          dim3                block,
+                                          size_t              shmem,
+                                          hipStream_t         stream)
 {
-    segmented_reduce<Config>(input, output, begin_offsets, end_offsets, reduce_op, initial_value);
+    auto kernel = [=](auto arch_config)
+    {
+        segmented_reduce<decltype(arch_config)>(input,
+                                                output,
+                                                begin_offsets,
+                                                end_offsets,
+                                                reduce_op,
+                                                initial_value);
+    };
+
+    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class Config,
@@ -88,7 +102,7 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
     {
         return result;
     }
-    const reduce_config_params params = dispatch_target_arch<config>(target_arch);
+    const reduce_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size = params.kernel_config.block_size;
 
@@ -107,17 +121,17 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
 
     if(debug_synchronous)
         start = std::chrono::steady_clock::now();
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_reduce_kernel<config>),
-                       dim3(segments),
-                       dim3(block_size),
-                       0,
-                       stream,
-                       input,
-                       output,
-                       begin_offsets,
-                       end_offsets,
-                       reduce_op,
-                       static_cast<result_type>(initial_value));
+    ROCPRIM_RETURN_ON_ERROR(launch_segmented_reduce<config>(target_arch,
+                                                            input,
+                                                            output,
+                                                            begin_offsets,
+                                                            end_offsets,
+                                                            reduce_op,
+                                                            static_cast<result_type>(initial_value),
+                                                            dim3(segments),
+                                                            dim3(block_size),
+                                                            0,
+                                                            stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", segments, start);
 
     return hipSuccess;

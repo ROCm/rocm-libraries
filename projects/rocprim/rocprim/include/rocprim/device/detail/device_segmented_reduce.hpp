@@ -41,7 +41,7 @@ namespace detail
 {
 
 template<
-    class Config,
+    class ArchConfig,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
@@ -58,7 +58,7 @@ void segmented_reduce(InputIterator input,
 {
     using offset_type = typename std::iterator_traits<OffsetIterator>::value_type;
 
-    static constexpr reduce_config_params params = device_params<Config>();
+    static constexpr reduce_config_params params = ArchConfig::params;
 
     constexpr unsigned int block_size       = params.kernel_config.block_size;
     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
