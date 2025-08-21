@@ -106,7 +106,8 @@ struct Max
     HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
         operator()(T&& t, U&& u) const
     {
-        return HIPCUB_MAX(t, u);
+        // TODO: change to use hip::std::max after libhipcxx is ready
+        return (((u) > (t)) ? (u) : (t));
     }
 };
 
@@ -116,7 +117,8 @@ struct Min
     HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
         operator()(T&& t, U&& u) const
     {
-        return HIPCUB_MIN(t, u);
+        // TODO: change to use hip::std::min after libhipcxx is ready
+        return (((u) < (t)) ? (u) : (t));
     }
 };
 

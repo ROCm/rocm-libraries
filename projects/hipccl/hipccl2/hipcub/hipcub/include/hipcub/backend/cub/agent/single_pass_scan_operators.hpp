@@ -53,10 +53,11 @@ using TilePrefixCallbackOp
 
 template<typename ValueT,
          typename KeyT,
-         bool SINGLE_WORD = (Traits<ValueT>::PRIMITIVE) && (sizeof(ValueT) + sizeof(KeyT) < 16)>
+         bool SINGLE_WORD
+         = (cub::detail::is_primitive<ValueT>::value) && (sizeof(ValueT) + sizeof(KeyT) < 16)>
 using ReduceByKeyScanTileState = cub::ReduceByKeyScanTileState<ValueT, KeyT, SINGLE_WORD>;
 
-template<typename T, bool SINGLE_WORD = Traits<T>::PRIMITIVE>
+template<typename T, bool SINGLE_WORD = cub::detail::is_primitive<T>::value>
 struct ScanTileState : cub::ScanTileState<T, SINGLE_WORD>
 {
     HIPCUB_HOST_DEVICE

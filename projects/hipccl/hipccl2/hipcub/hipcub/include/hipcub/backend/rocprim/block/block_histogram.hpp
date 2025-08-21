@@ -133,7 +133,7 @@ public:
                    CounterT histogram[BINS])
     {
         base_type::init_histogram(histogram);
-        CTA_SYNC();
+        __syncthreads();
         base_type::composite(items, histogram, temp_storage_);
     }
 

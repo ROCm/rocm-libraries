@@ -77,8 +77,7 @@ struct DeviceFor
                             hipError_t>
     {
         using T              = typename std::iterator_traits<RandomAccessIteratorT>::value_type;
-        using OutputIterator = typename hipcub::DiscardOutputIterator<OffsetT>;
-
+        using OutputIterator = typename rocprim::discard_iterator;
         detail::bulk::OpWrapper<T, OpT> wrapper_op = {op};
 
         OutputIterator output;
@@ -220,10 +219,8 @@ HIPCUB_RUNTIME_FUNCTION
     static hipError_t Bulk(ShapeT shape, OpT op, hipStream_t stream = 0)
     {
         static_assert(std::is_integral<ShapeT>::value, "ShapeT must be an integral type");
-
-        using InputIterator  = typename hipcub::CountingInputIterator<ShapeT>;
-        using OutputIterator = typename hipcub::DiscardOutputIterator<ShapeT>;
-
+        using InputIterator  = typename rocprim::counting_iterator<ShapeT>;
+        using OutputIterator = typename rocprim::discard_iterator;
         detail::bulk::OpWrapper<ShapeT, OpT> wrapper_op = {op};
 
         InputIterator  input(ShapeT(0));
