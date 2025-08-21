@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "CustomMatchers.hpp"
+#include "ExpressionMatchers.hpp"
 #include "TestContext.hpp"
 
 #include <common/Utilities.hpp>
@@ -140,4 +141,36 @@ TEST_CASE("CustomDeviceScalarMatcher works", "[meta-test][gpu]")
 
         CHECK(differentValueChecker.match(gpuValue));
     }
+}
+
+TEST_CASE("Expression matchers work", "[meta-test]")
+{
+    using namespace rocRoller::Expression;
+
+    auto context = TestContext::ForDefaultTarget();
+
+    auto v0 = rocRoller::Register::Value::Placeholder(
+        context.get(), rocRoller::Register::Type::Vector, rocRoller::DataType::Int32, 1);
+    v0->allocateNow();
+
+    auto v0Ex = v0->expression();
+
+    auto one = literal(1);
+    auto two = literal(2);
+
+    CHECK_THAT(v0Ex, IdenticalTo(v0->expression()));
+    CHECK_THAT(v0Ex, EquivalentTo(v0->expression()));
+    CHECK_THAT(v0Ex, SimplifiesTo(v0->expression()));
+
+    CHECK_THAT(v0Ex + two, IdenticalTo(v0->expression() + two));
+    CHECK_THAT(v0Ex + two, EquivalentTo(v0->expression() + two));
+    CHECK_THAT(v0Ex + two, SimplifiesTo(v0->expression() + two));
+
+    CHECK_THAT(v0Ex + two, !IdenticalTo(two + v0Ex));
+    CHECK_THAT(v0Ex + two, EquivalentTo(two + v0Ex));
+    CHECK_THAT(v0Ex + two, SimplifiesTo(two + v0Ex));
+
+    CHECK_THAT(v0Ex * one, !IdenticalTo(v0Ex));
+    CHECK_THAT(v0Ex * one, !EquivalentTo(v0Ex));
+    CHECK_THAT(v0Ex * one, SimplifiesTo(v0Ex));
 }
