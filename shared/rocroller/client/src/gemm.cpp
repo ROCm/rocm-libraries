@@ -1181,7 +1181,7 @@ int main(int argc, const char* argv[])
         .numInner  = 2,
         .check     = true,
         .visualize = false,
-        .rotatingBuffSize = 32e6,
+        .rotatingBuffSize = 32'000'000ull,
     };
 
     rocRoller::Client::GEMMClient::IOParameters io{
