@@ -937,8 +937,8 @@ namespace TensileLite
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
 
-    inline void ContractionSolution::calculateAutoGSU(Problem const&  problem,
-                                                      Hardware const* hardware) const
+    void ContractionSolution::calculateAutoGSU(Problem const&  problem,
+                                               Hardware const* hardware) const
     {
         // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
@@ -967,44 +967,6 @@ namespace TensileLite
         uint32_t GSULimit1    = max(1, (uint32_t)std::floor(numCUs / numWGs));
         uint32_t GSULimit2    = max(1, (uint32_t)std::floor((float)K / (float)MT2 / 3.0));
         autoGSU               = min(GSULimit2, max(1, GSULimit1));
-
-        // WorkspaceCheck
-        if(autoGSU > 1)
-        {
-            int    elemC    = sizeMapping.workspaceSizePerElemC * autoGSU;
-            int    elemBias = sizeMapping.workspaceSizePerElemBias * autoGSU;
-            size_t rs       = 0;
-            // 2d reduction
-            if(problem.useGradient() && problem.useBias()
-               && problem.getParams().biasEnum() != rocisa::DataType::None)
-            {
-                if(problem.biasSrc() == ContractionProblemGemm::TENSOR::D && (elemC == 0))
-                    rs += problem.d().totalLogicalElements() * problem.computeTypeElementSize();
-                else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::A)
-                {
-                    rs += M * elemBias;
-                }
-                else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::B)
-                {
-                    rs += N * elemBias;
-                }
-            }
-
-            size_t tiles = problem.getNumTiles(sizeMapping, 1) * B;
-            size_t tileSize = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
-            size_t bufSize = tiles * tileSize;
-
-            if(problem.groupedGemm())
-            {
-                assert(problem.workspaceSizeGroupedGemm() <= problem.workspaceSize());
-                autoGSU = min(autoGSU,
-                              (problem.workspaceSizeGroupedGemm() - rs)
-                                  / bufSize);
-            }
-            else
-                autoGSU = min(autoGSU,
-                              (problem.workspaceSize() - rs) / bufSize);
-        }
 
         // WorkgroupNumberCheck
 #define MAX_WORKGROUP_NUMBER 16777216
