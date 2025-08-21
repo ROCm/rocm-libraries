@@ -223,7 +223,7 @@ def getDockerImageName(dockerArgs)
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
     echo "Docker tag hash: ${docker_hash}"
-    image = "${image}:ci_${docker_hash}"
+    image = "${image}/miopen_ci:ci_${docker_hash}"
     if(params.DOCKER_IMAGE_OVERRIDE && !params.DOCKER_IMAGE_OVERRIDE.empty)
     {
         echo "Overriding the base docker image with ${params.DOCKER_IMAGE_OVERRIDE}"
