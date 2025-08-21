@@ -210,6 +210,7 @@ namespace rocRoller::KernelGraph
         }
     }
 
+    // It can be removed once trackConnections can be used
     void ControlFlowRWTracer::trackOffsetAndStride(int                            control,
                                                     ReadWrite                      rw)
     {
