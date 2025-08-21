@@ -165,10 +165,10 @@ void ComputeMemoryLatency(const TensileLite::analytical::Hardware& hardware,
                                       size_t          mx_block_size)
 {
     auto mem_latency_small = TensileLite::analytical::compute_memory_latency(
-        hardware, M, N, K, batch, transA, transB, MT_M, MT_N, MT_K, split, H_mem, element_size_A, element_size_B, mx_block_size, false);
+        hardware, M, N, K, transA, transB, batch, MT_M, MT_N, MT_K, split, H_mem, element_size_A, element_size_B, mx_block_size, false);
 
     auto mem_latency_large = TensileLite::analytical::compute_memory_latency(
-        hardware, M, N, K, batch, transA, transB, MT_M * 2, MT_N * 2, MT_K * 2, split, H_mem, element_size_A, element_size_B, mx_block_size, false);
+        hardware, M, N, K, transA, transB, batch, MT_M * 2, MT_N * 2, MT_K * 2, split, H_mem, element_size_A, element_size_B, mx_block_size, false);
 
     EXPECT_LT(mem_latency_small, mem_latency_large);
 }
@@ -410,12 +410,12 @@ void ComputePerfGflops(size_t          M,
                                                                      MI_M,
                                                                      MI_N,
                                                                      MI_K,
-                                                                     H_mem,
-                                                                     WGM,
                                                                      element_size_A,
                                                                      element_size_B,
                                                                      element_size_out,
                                                                      TensileLite::analytical::DataType::BFloat16,
+                                                                     H_mem,
+                                                                     WGM,                                                                     
                                                                      false);
     double flops_fast = TensileLite::analytical::compute_perf_gflops(gfx942_fast,
                                                                      M,
@@ -430,12 +430,12 @@ void ComputePerfGflops(size_t          M,
                                                                      MI_M,
                                                                      MI_N,
                                                                      MI_K,
-                                                                     H_mem,
-                                                                     WGM,
                                                                      element_size_A,
                                                                      element_size_B,
                                                                      element_size_out,
                                                                      TensileLite::analytical::DataType::BFloat16,
+                                                                     H_mem,
+                                                                     WGM,                                                                     
                                                                      false);
     EXPECT_GT(flops_fast, flops_slow); // faster clock = higher flops
 }

@@ -106,9 +106,9 @@ namespace TensileLite
                                       size_t          M,
                                       size_t          N,
                                       size_t          K,
-                                      size_t          batch,
                                       bool            transA,
-                                      bool            transB,                                      
+                                      bool            transB,
+                                      size_t          batch,
                                       size_t          MT_M,
                                       size_t          MT_N,
                                       size_t          MT_K,
@@ -227,12 +227,12 @@ namespace TensileLite
                                    size_t          MI_M,
                                    size_t          MI_N,
                                    size_t          MI_K,
-                                   double          H_mem1,                                   
-                                   int             WGM,
                                    size_t          element_size_A,
                                    size_t          element_size_B,
                                    size_t          element_size_out,
                                    DataType        miDataType,
+                                   double          H_mem1,                                   
+                                   int             WGM,                                   
                                    bool            debug);
 
         // Check if MT fits in LDS
