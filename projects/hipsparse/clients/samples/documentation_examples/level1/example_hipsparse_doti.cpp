@@ -27,7 +27,6 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vector>
 
 #define HIP_CHECK(stat)                                               \
     {                                                                 \
@@ -50,78 +49,53 @@
 //! [doc example]
 int main(int argc, char* argv[])
 {
+    // Number of non-zeros of the sparse vector
+    const int nnz = 3;
+
+    // Number of entries in the dense vector
+    const int size = 9;
+
+    // Sparse index vector
+    int hxInd[nnz] = {0, 3, 5};
+
+    // Sparse value vector
+    float hxVal[nnz] = {1.0f, 2.0f, 3.0f};
+
+    // Dense vector
+    float hy[size] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
+
+    // Index base
+    hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
+
+    // Offload data to device
+    int*   dxInd;
+    float* dxVal;
+    float* dy;
+
+    HIP_CHECK(hipMalloc((void**)&dxInd, sizeof(int) * nnz));
+    HIP_CHECK(hipMalloc((void**)&dxVal, sizeof(float) * nnz));
+    HIP_CHECK(hipMalloc((void**)&dy, sizeof(float) * size));
+
+    HIP_CHECK(hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dxVal, hxVal, sizeof(float) * nnz, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dy, hy, sizeof(float) * size, hipMemcpyHostToDevice));
+
     // hipSPARSE handle
     hipsparseHandle_t handle;
     HIPSPARSE_CHECK(hipsparseCreate(&handle));
 
-    // alpha * ( 1.0  0.0  2.0 ) * ( 1.0 ) + beta * ( 4.0 ) = (  31.1 )
-    //         ( 3.0  0.0  4.0 ) * ( 2.0 )          ( 5.0 ) = (  62.0 )
-    //         ( 5.0  6.0  0.0 ) * ( 3.0 )          ( 6.0 ) = (  70.7 )
-    //         ( 7.0  0.0  8.0 ) *                  ( 7.0 ) = ( 123.8 )
+    // Call sdoti to compute the dot product
+    float dot;
+    HIPSPARSE_CHECK(hipsparseSdoti(handle, nnz, dxVal, dxInd, dy, &dot, idxBase));
 
-    int m   = 4;
-    int n   = 3;
-    int nnz = 8;
-
-    // CSR row pointers
-    int hcsrRowPtr[5] = {0, 2, 4, 6, 8};
-
-    // CSR column indices
-    int hcsrColInd[8] = {0, 2, 0, 2, 0, 1, 0, 2};
-
-    // CSR values
-    double hcsrVal[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
-
-    // Transposition of the matrix
-    hipsparseOperation_t trans = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-
-    // Scalar alpha and beta
-    double alpha = 3.7;
-    double beta  = 1.3;
-
-    // x and y
-    double hx[3] = {1.0, 2.0, 3.0};
-    double hy[4] = {4.0, 5.0, 6.0, 7.0};
-
-    // Matrix descriptor
-    hipsparseMatDescr_t descr;
-    HIPSPARSE_CHECK(hipsparseCreateMatDescr(&descr));
-
-    // Offload data to device
-    int*    dcsrRowPtr;
-    int*    dcsrColInd;
-    double* dcsrVal;
-    double* dx;
-    double* dy;
-
-    HIP_CHECK(hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1)));
-    HIP_CHECK(hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz));
-    HIP_CHECK(hipMalloc((void**)&dcsrVal, sizeof(double) * nnz));
-    HIP_CHECK(hipMalloc((void**)&dx, sizeof(double) * n));
-    HIP_CHECK(hipMalloc((void**)&dy, sizeof(double) * m));
-
-    HIP_CHECK(hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dcsrVal, hcsrVal, sizeof(double) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dx, hx, sizeof(double) * n, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dy, hy, sizeof(double) * m, hipMemcpyHostToDevice));
-
-    // Call dcsrmv to perform y = alpha * A x + beta * y
-    HIPSPARSE_CHECK(hipsparseDcsrmv(
-        handle, trans, m, n, nnz, &alpha, descr, dcsrVal, dcsrRowPtr, dcsrColInd, dx, &beta, dy));
-
-    // Copy result back to host
-    HIP_CHECK(hipMemcpy(hy, dy, sizeof(double) * m, hipMemcpyDeviceToHost));
+    std::cout << "dot: " << dot << std::endl;
 
     // Clear hipSPARSE
-    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(descr));
     HIPSPARSE_CHECK(hipsparseDestroy(handle));
 
     // Clear device memory
-    HIP_CHECK(hipFree(dcsrRowPtr));
-    HIP_CHECK(hipFree(dcsrColInd));
-    HIP_CHECK(hipFree(dcsrVal));
-    HIP_CHECK(hipFree(dx));
+    HIP_CHECK(hipFree(dxInd));
+    HIP_CHECK(hipFree(dxVal));
     HIP_CHECK(hipFree(dy));
 
     return 0;

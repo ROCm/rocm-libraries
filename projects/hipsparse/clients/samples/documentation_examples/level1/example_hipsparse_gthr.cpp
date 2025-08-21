@@ -27,7 +27,6 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vector>
 
 #define HIP_CHECK(stat)                                               \
     {                                                                 \
@@ -51,16 +50,19 @@
 int main(int argc, char* argv[])
 {
     // Number of non-zeros of the sparse vector
-    int nnz = 3;
+    const int nnz = 3;
+
+    // Number of entries in the dense vector
+    const int size = 9;
 
     // Sparse index vector
-    int hxInd[3] = {0, 3, 5};
+    int hxInd[nnz] = {0, 3, 5};
 
     // Sparse value vector
-    float hxVal[3] = {1.0f, 2.0f, 3.0f};
+    float hxVal[nnz];
 
     // Dense vector
-    float hy[9] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
+    float hy[size] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
 
     // Index base
     hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
@@ -72,19 +74,27 @@ int main(int argc, char* argv[])
 
     HIP_CHECK(hipMalloc((void**)&dxInd, sizeof(int) * nnz));
     HIP_CHECK(hipMalloc((void**)&dxVal, sizeof(float) * nnz));
-    HIP_CHECK(hipMalloc((void**)&dy, sizeof(float) * 9));
+    HIP_CHECK(hipMalloc((void**)&dy, sizeof(float) * size));
 
     HIP_CHECK(hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dxVal, hxVal, sizeof(float) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dy, hy, sizeof(float) * 9, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dy, hy, sizeof(float) * size, hipMemcpyHostToDevice));
 
     // hipSPARSE handle
     hipsparseHandle_t handle;
     HIPSPARSE_CHECK(hipsparseCreate(&handle));
 
-    // Call sdoti to compute the dot product
-    float dot;
-    HIPSPARSE_CHECK(hipsparseSdoti(handle, nnz, dxVal, dxInd, dy, &dot, idxBase));
+    // Call sgthr
+    HIPSPARSE_CHECK(hipsparseSgthr(handle, nnz, dy, dxVal, dxInd, idxBase));
+
+    // Copy result back to host
+    HIP_CHECK(hipMemcpy(hxVal, dxVal, sizeof(float) * nnz, hipMemcpyDeviceToHost));
+
+    std::cout << "hxVal" << std::endl;
+    for(int i = 0; i < nnz; i++)
+    {
+        std::cout << hxVal[i] << " ";
+    }
+    std::cout << "" << std::endl;
 
     // Clear hipSPARSE
     HIPSPARSE_CHECK(hipsparseDestroy(handle));

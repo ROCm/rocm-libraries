@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,6 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-
-#include "utility.hpp"
 
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
@@ -50,54 +48,70 @@
 //! [doc example]
 int main(int argc, char* argv[])
 {
-    // Number of non-zeros of the sparse vector
-    int nnz = 3;
+    // A, B, and C are m×k, k×n, and m×n
+    const int m = 3, n = 5, k = 4;
+    const int lda = m, ldc = m;
+    const int nnz_A = m * k, nnz_B = 10, nnz_C = m * n;
 
-    // Sparse index vector
-    int hxInd[3] = {0, 3, 5};
+    // alpha and beta
+    float alpha = 0.5f;
+    float beta  = 0.25f;
 
-    // Sparse value vector
-    double hxVal[3] = {1.0, 2.0, 3.0};
+    std::vector<int>   hcscColPtr = {0, 2, 5, 7, 8, 10};
+    std::vector<int>   hcscRowInd = {0, 2, 0, 1, 3, 1, 3, 2, 0, 2};
+    std::vector<float> hcsc_val   = {1, 6, 2, 4, 9, 5, 2, 7, 3, 8};
 
-    // Dense vector
-    double hy[9] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
+    std::vector<float> hA(nnz_A, 1.0f);
+    std::vector<float> hC(nnz_C, 1.0f);
 
-    // Scalar alpha
-    double alpha = 3.7;
+    int*   dcscColPtr;
+    int*   dcscRowInd;
+    float* dcsc_val;
+    HIP_CHECK(hipMalloc((void**)&dcscColPtr, sizeof(int) * (n + 1)));
+    HIP_CHECK(hipMalloc((void**)&dcscRowInd, sizeof(int) * nnz_B));
+    HIP_CHECK(hipMalloc((void**)&dcsc_val, sizeof(float) * nnz_B));
 
-    // Index base
-    hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
+    HIP_CHECK(
+        hipMemcpy(dcscColPtr, hcscColPtr.data(), sizeof(int) * (n + 1), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcscRowInd, hcscRowInd.data(), sizeof(int) * nnz_B, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dcsc_val, hcsc_val.data(), sizeof(float) * nnz_B, hipMemcpyHostToDevice));
 
-    // Offload data to device
-    int*    dxInd;
-    double* dxVal;
-    double* dy;
-
-    HIP_CHECK(hipMalloc((void**)&dxInd, sizeof(int) * nnz));
-    HIP_CHECK(hipMalloc((void**)&dxVal, sizeof(double) * nnz));
-    HIP_CHECK(hipMalloc((void**)&dy, sizeof(double) * 9));
-
-    HIP_CHECK(hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dxVal, hxVal, sizeof(double) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dy, hy, sizeof(double) * 9, hipMemcpyHostToDevice));
-
-    // hipSPARSE handle
     hipsparseHandle_t handle;
     HIPSPARSE_CHECK(hipsparseCreate(&handle));
 
-    // Call daxpyi to perform y = y + alpha * x
-    HIPSPARSE_CHECK(hipsparseDaxpyi(handle, nnz, &alpha, dxVal, dxInd, dy, idxBase));
+    // Allocate memory for the matrix A
+    float* dA;
+    HIP_CHECK(hipMalloc((void**)&dA, sizeof(float) * nnz_A));
+    HIP_CHECK(hipMemcpy(dA, hA.data(), sizeof(float) * nnz_A, hipMemcpyHostToDevice));
 
-    // Copy result back to host
-    HIP_CHECK(hipMemcpy(hy, dy, sizeof(double) * 9, hipMemcpyDeviceToHost));
+    // Allocate memory for the resulting matrix C
+    float* dC;
+    HIP_CHECK(hipMalloc((void**)&dC, sizeof(float) * nnz_C));
+    HIP_CHECK(hipMemcpy(dC, hC.data(), sizeof(float) * nnz_C, hipMemcpyHostToDevice));
 
-    // Clear hipSPARSE
+    // Perform operation
+    HIPSPARSE_CHECK(hipsparseSgemmi(
+        handle, m, n, k, nnz_B, &alpha, dA, lda, dcsc_val, dcscColPtr, dcscRowInd, &beta, dC, ldc));
+
+    // Copy device to host
+    HIP_CHECK(hipMemcpy(hC.data(), dC, sizeof(float) * nnz_C, hipMemcpyDeviceToHost));
+
+    std::cout << "hC" << std::endl;
+    for(int i = 0; i < nnz_C; i++)
+    {
+        std::cout << hC[i] << " ";
+    }
+    std::cout << "" << std::endl;
+
+    // Destroy matrix descriptors and handles
     HIPSPARSE_CHECK(hipsparseDestroy(handle));
 
-    // Clear device memory
-    HIP_CHECK(hipFree(dxInd));
-    HIP_CHECK(hipFree(dxVal));
-    HIP_CHECK(hipFree(dy));
+    HIP_CHECK(hipFree(dcscColPtr));
+    HIP_CHECK(hipFree(dcscRowInd));
+    HIP_CHECK(hipFree(dcsc_val));
+    HIP_CHECK(hipFree(dA));
+    HIP_CHECK(hipFree(dC));
+
     return 0;
 }
 //! [doc example]

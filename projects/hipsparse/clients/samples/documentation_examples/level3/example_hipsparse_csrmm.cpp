@@ -25,7 +25,6 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vector>
 
 #define HIP_CHECK(stat)                                               \
     {                                                                 \
@@ -57,20 +56,20 @@ int main(int argc, char* argv[])
     //     0 0 0 7 8 0
     //     0 0 1 2 4 1
 
-    int                  m   = 4;
-    int                  k   = 6;
-    int                  nnz = 11;
-    hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
+    const int                  m   = 4;
+    const int                  k   = 6;
+    const int                  nnz = 11;
+    const hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
 
-    int   hcsrRowPtr[4 + 1] = {0, 3, 5, 7, 11};
-    int   hcsrColInd[11]    = {0, 1, 3, 1, 2, 3, 4, 2, 3, 4, 5};
-    float hcsrVal[11]       = {1, 2, 3, 4, 5, 7, 8, 1, 2, 4, 1};
+    int   hcsrRowPtr[m + 1] = {0, 3, 5, 7, 11};
+    int   hcsrColInd[nnz]   = {0, 1, 3, 1, 2, 3, 4, 2, 3, 4, 5};
+    float hcsrVal[nnz]      = {1, 2, 3, 4, 5, 7, 8, 1, 2, 4, 1};
 
     // Set dimension n of B
-    int n = 3;
+    const int n = 3;
 
     // Allocate and generate dense matrix B (k x n)
-    float hB[6 * 3] = {1.0f,
+    float hB[k * n] = {1.0f,
                        2.0f,
                        3.0f,
                        4.0f,
@@ -137,6 +136,13 @@ int main(int argc, char* argv[])
     // Copy results to host
     float hC[6 * 3];
     HIP_CHECK(hipMemcpy(hC, dC, sizeof(float) * m * n, hipMemcpyDeviceToHost));
+
+    std::cout << "hC" << std::endl;
+    for(int i = 0; i < m * n; i++)
+    {
+        std::cout << hC[i] << " ";
+    }
+    std::cout << "" << std::endl;
 
     HIP_CHECK(hipFree(dcsrRowPtr));
     HIP_CHECK(hipFree(dcsrColInd));

@@ -25,7 +25,6 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vector>
 
 #define HIP_CHECK(stat)                                               \
     {                                                                 \
@@ -57,23 +56,23 @@ int main(int argc, char* argv[])
     //     0 0 0 7 8 0
     //     0 0 1 2 4 1
 
-    int                  blockDim = 2;
-    int                  mb       = 2;
-    int                  kb       = 3;
-    int                  nnzb     = 4;
-    hipsparseDirection_t dir      = HIPSPARSE_DIRECTION_ROW;
+    const int                  blockDim = 2;
+    const int                  mb       = 2;
+    const int                  kb       = 3;
+    const int                  nnzb     = 4;
+    const hipsparseDirection_t dir      = HIPSPARSE_DIRECTION_ROW;
 
-    int   hbsrRowPtr[2 + 1]  = {0, 2, 4};
-    int   hbsrColInd[4]      = {0, 1, 1, 2};
-    float hbsrVal[4 * 2 * 2] = {1, 2, 0, 4, 0, 3, 5, 0, 0, 7, 1, 2, 8, 0, 4, 1};
+    int   hbsrRowPtr[mb + 1]                  = {0, 2, 4};
+    int   hbsrColInd[nnzb]                    = {0, 1, 1, 2};
+    float hbsrVal[nnzb * blockDim * blockDim] = {1, 2, 0, 4, 0, 3, 5, 0, 0, 7, 1, 2, 8, 0, 4, 1};
 
     // Set dimension n of B
-    int n = 3;
-    int m = mb * blockDim;
-    int k = kb * blockDim;
+    const int n = 3;
+    const int m = mb * blockDim;
+    const int k = kb * blockDim;
 
     // Allocate and generate dense matrix B (k x n)
-    float hB[6 * 3] = {1.0f,
+    float hB[k * n] = {1.0f,
                        2.0f,
                        3.0f,
                        4.0f,
@@ -142,8 +141,15 @@ int main(int argc, char* argv[])
                                     m));
 
     // Copy results to host
-    float hC[6 * 3];
+    float hC[m * n];
     HIP_CHECK(hipMemcpy(hC, dC, sizeof(float) * m * n, hipMemcpyDeviceToHost));
+
+    std::cout << "hC" << std::endl;
+    for(int i = 0; i < m * n; i++)
+    {
+        std::cout << hC[i] << " ";
+    }
+    std::cout << "" << std::endl;
 
     HIP_CHECK(hipFree(dbsrRowPtr));
     HIP_CHECK(hipFree(dbsrColInd));

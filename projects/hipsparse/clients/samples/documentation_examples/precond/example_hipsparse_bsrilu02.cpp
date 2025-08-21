@@ -15,19 +15,16 @@
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  *
  * ************************************************************************ */
 
-#include "utility.hpp"
-
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vector>
 
 #define HIP_CHECK(stat)                                               \
     {                                                                 \
@@ -54,32 +51,30 @@ int main(int argc, char* argv[])
     hipsparseHandle_t handle;
     HIPSPARSE_CHECK(hipsparseCreate(&handle));
 
-    // A sample symmetric positive definite matrix A (4x4)
-    // with a block size of 1. This example effectively uses BSR format
-    // for a CSR-like matrix.
+    // A sample square matrix A (4x4) in BSR format for ILU(0) factorization.
+    // The 'S' in Sbsrilu02 indicates single precision float.
+    // We'll use a block size of 1 for simplicity, making it behave like CSR ILU.
     // Matrix A:
-    // ( 4  1  0  0 )
-    // ( 1  5  2  0 )
-    // ( 0  2  3  1 )
-    // ( 0  0  1  2 )
+    // ( 1  2  0  0 )
+    // ( 3  4  5  0 )
+    // ( 0  6  7  8 )
+    // ( 0  0  9 10 )
 
     int m    = 4; // Number of rows
     int n    = 4; // Number of columns
     int bs   = 1; // Block size
     int mb   = m / bs; // Number of block rows
     int nb   = n / bs; // Number of block columns
-    int nnzb = 8; // Number of non-zero blocks
+    int nnzb = 10; // Number of non-zero blocks
 
     // BSR row pointers
-    int hbsrRowPtr[5] = {0, 2, 4, 6, 8};
+    int hbsrRowPtr[5] = {0, 2, 5, 8, 10};
 
     // BSR column indices
-    int hbsrColInd[8] = {0, 1, 0, 1, 1, 2, 2, 3};
+    int hbsrColInd[10] = {0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
 
-    // BSR values (single precision float for 'S'bsric02)
-    // Values are stored column-major within each block, but with bs=1, this is simple.
-    // The values correspond to the upper triangular part of the matrix.
-    float hbsrVal[8] = {4.0f, 1.0f, 1.0f, 5.0f, 2.0f, 3.0f, 1.0f, 2.0f};
+    // BSR values (single precision float)
+    float hbsrVal[10] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
 
     // Matrix descriptor
     hipsparseMatDescr_t descr;
@@ -88,18 +83,17 @@ int main(int argc, char* argv[])
     // Set index base on descriptor
     HIPSPARSE_CHECK(hipsparseSetMatIndexBase(descr, HIPSPARSE_INDEX_BASE_ZERO));
 
-    // Set fill mode to lower and diagonal type to unit (required for IC02)
-    HIPSPARSE_CHECK(hipsparseSetMatFillMode(descr, HIPSPARSE_FILL_MODE_LOWER));
+    // For ILU(0), the L factor often has a unit diagonal.
     HIPSPARSE_CHECK(hipsparseSetMatDiagType(descr, HIPSPARSE_DIAG_TYPE_UNIT));
 
-    // BSRIC02 info
-    bsric02Info_t info;
-    HIPSPARSE_CHECK(hipsparseCreateBsric02Info(&info));
+    // BSRILU02 info
+    bsrilu02Info_t info;
+    HIPSPARSE_CHECK(hipsparseCreateBsrilu02Info(&info));
 
     // Offload data to device
     int*   dbsrRowPtr;
     int*   dbsrColInd;
-    float* dbsrVal;
+    float* dbsrVal; // This will store the factorized L and U values
 
     HIP_CHECK(hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1)));
     HIP_CHECK(hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb));
@@ -111,38 +105,9 @@ int main(int argc, char* argv[])
 
     // 1. Get buffer size
     int bufferSize = 0;
-    HIPSPARSE_CHECK(hipsparseSbsric02_bufferSize(handle,
-                                                 HIPSPARSE_DIRECTION_COLUMN,
-                                                 mb,
-                                                 nnzb,
-                                                 descr,
-                                                 dbsrVal,
-                                                 dbsrRowPtr,
-                                                 dbsrColInd,
-                                                 bs,
-                                                 info,
-                                                 &bufferSize));
-
-    void* dbuffer = nullptr;
-    HIP_CHECK(hipMalloc((void**)&dbuffer, bufferSize));
-
-    // 2. Perform analysis (symbolic factorization)
-    HIPSPARSE_CHECK(hipsparseSbsric02_analysis(handle,
-                                               HIPSPARSE_DIRECTION_COLUMN,
-                                               mb,
-                                               nnzb,
-                                               descr,
-                                               dbsrVal,
-                                               dbsrRowPtr,
-                                               dbsrColInd,
-                                               bs,
-                                               info,
-                                               HIPSPARSE_SOLVE_POLICY_USE_LEVEL,
-                                               dbuffer));
-
-    // 3. Perform factorization (numerical computation)
-    HIPSPARSE_CHECK(hipsparseSbsric02(handle,
-                                      HIPSPARSE_DIRECTION_COLUMN,
+    HIPSPARSE_CHECK(
+        hipsparseSbsrilu02_bufferSize(handle,
+                                      HIPSPARSE_DIRECTION_COLUMN, // Block storage direction
                                       mb,
                                       nnzb,
                                       descr,
@@ -151,26 +116,64 @@ int main(int argc, char* argv[])
                                       dbsrColInd,
                                       bs,
                                       info,
-                                      HIPSPARSE_SOLVE_POLICY_USE_LEVEL,
-                                      dbuffer));
+                                      &bufferSize));
+
+    void* dbuffer = nullptr;
+    HIP_CHECK(hipMalloc((void**)&dbuffer, bufferSize));
+
+    // 2. Perform analysis (symbolic factorization)
+    // This step analyzes the sparsity pattern of A to determine the structure of L and U.
+    HIPSPARSE_CHECK(
+        hipsparseSbsrilu02_analysis(handle,
+                                    HIPSPARSE_DIRECTION_COLUMN,
+                                    mb,
+                                    nnzb,
+                                    descr,
+                                    dbsrVal,
+                                    dbsrRowPtr,
+                                    dbsrColInd,
+                                    bs,
+                                    info,
+                                    HIPSPARSE_SOLVE_POLICY_USE_LEVEL, // Policy for analysis
+                                    dbuffer));
+
+    // 3. Perform factorization (numerical computation)
+    // This step computes the actual numerical values of L and U, stored in dbsrVal.
+    HIPSPARSE_CHECK(hipsparseSbsrilu02(handle,
+                                       HIPSPARSE_DIRECTION_COLUMN,
+                                       mb,
+                                       nnzb,
+                                       descr,
+                                       dbsrVal,
+                                       dbsrRowPtr,
+                                       dbsrColInd,
+                                       bs,
+                                       info,
+                                       HIPSPARSE_SOLVE_POLICY_USE_LEVEL, // Policy for factorization
+                                       dbuffer));
 
     // 4. Check for zero pivots
-    int zeroPivot = 0;
-    HIPSPARSE_CHECK(hipsparseXbsric02_zeroPivot(handle, info, &zeroPivot));
+    // A zero pivot can occur during factorization, indicating a numerical breakdown.
+    int zeroPivot = 0; // -1 if no zero pivot, otherwise the block row index of the first zero pivot
+    HIPSPARSE_CHECK(hipsparseXbsrilu02_zeroPivot(handle, info, &zeroPivot));
     if(zeroPivot != -1)
     {
-        printf("Error: Zero pivot detected at index %d\n", zeroPivot);
-        // Handle error, e.g., by returning an error code
+        printf("Error: Zero pivot detected during ILU0 factorization at block row index %d\n",
+               zeroPivot);
+        // Handle the error (e.g., return, use a different preconditioner, etc.)
+    }
+    else
+    {
+        printf("BSRILU0 factorization completed successfully (no zero pivots detected).\n");
     }
 
-    // Copy the factorized values back to host
+    // Copy the factorized values (L and U combined) back to host
     float* hbsrVal_result = new float[nnzb * bs * bs];
     HIP_CHECK(
         hipMemcpy(hbsrVal_result, dbsrVal, sizeof(float) * nnzb * bs * bs, hipMemcpyDeviceToHost));
 
-    // Print the result (the values of the factorized matrix)
-    printf("Successfully computed incomplete Cholesky factorization.\n");
-    printf("Factorized BSR values:\n");
+    // Print the result (the values of the factorized L and U combined)
+    printf("\nFactorized BSR values (L and U combined):\n");
     for(int i = 0; i < nnzb * bs * bs; ++i)
     {
         printf("val[%d] = %f\n", i, hbsrVal_result[i]);
@@ -179,7 +182,7 @@ int main(int argc, char* argv[])
     // Clean up
     delete[] hbsrVal_result;
 
-    HIPSPARSE_CHECK(hipsparseDestroyBsric02Info(info));
+    HIPSPARSE_CHECK(hipsparseDestroyBsrilu02Info(info));
     HIPSPARSE_CHECK(hipsparseDestroyMatDescr(descr));
     HIPSPARSE_CHECK(hipsparseDestroy(handle));
 

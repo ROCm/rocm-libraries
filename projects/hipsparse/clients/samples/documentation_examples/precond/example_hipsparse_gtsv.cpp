@@ -55,7 +55,8 @@ int main(int argc, char* argv[])
     HIPSPARSE_CHECK(hipsparseCreate(&handle));
 
     // Define the size of the tridiagonal system
-    int m = 4; // Dimension of the square matrix
+    int m   = 4; // Dimension of the square matrix
+    int ldb = 4;
 
     // A sample tridiagonal linear system Ax = f, where:
     // A is not necessarily diagonally dominant, so a solver with pivoting is a safer choice.
@@ -101,14 +102,15 @@ int main(int argc, char* argv[])
 
     // 1. Get buffer size
     size_t bufferSize = 0;
-    HIPSPARSE_CHECK(hipsparseSgtsv2_bufferSizeExt(handle, m, d_dl, d_d, d_du, d_f, &bufferSize));
+    HIPSPARSE_CHECK(
+        hipsparseSgtsv2_bufferSizeExt(handle, m, m, d_dl, d_d, d_du, d_f, ldb, &bufferSize));
 
     void* dbuffer = nullptr;
     HIP_CHECK(hipMalloc((void**)&dbuffer, bufferSize));
 
     // 2. Perform tridiagonal solve with pivoting
     // The solution is computed and stored in the d_f vector.
-    HIPSPARSE_CHECK(hipsparseSgtsv2(handle, m, d_dl, d_d, d_du, d_f, dbuffer));
+    HIPSPARSE_CHECK(hipsparseSgtsv2(handle, m, m, d_dl, d_d, d_du, d_f, ldb, dbuffer));
 
     // Copy solution back to host from d_f
     HIP_CHECK(hipMemcpy(h_x.data(), d_f, sizeof(float) * m, hipMemcpyDeviceToHost));

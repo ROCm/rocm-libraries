@@ -27,7 +27,6 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vector>
 
 #define HIP_CHECK(stat)                                               \
     {                                                                 \
@@ -60,23 +59,27 @@ int main(int argc, char* argv[])
     //         ( 7.0  0.0  8.0 ) *                  ( 7.0 ) = ( 123.8 )
 
     // BSR block dimension
-    int bsr_dim = 2;
+    const int bsr_dim = 2;
 
     // Number of block rows and columns
-    int mb = 2;
-    int nb = 2;
+    const int mb = 2;
+    const int nb = 2;
 
     // Number of non-zero blocks
-    int nnzb = 4;
+    const int nnzb = 4;
+
+    // Number of rows and columns
+    const int m = mb * bsr_dim;
+    const int n = nb * bsr_dim;
 
     // BSR row pointers
-    int hbsrRowPtr[3] = {0, 2, 4};
+    int hbsrRowPtr[mb + 1] = {0, 2, 4};
 
     // BSR column indices
-    int hbsrColInd[4] = {0, 1, 0, 1};
+    int hbsrColInd[nnzb] = {0, 1, 0, 1};
 
     // BSR values
-    double hbsrVal[16]
+    double hbsrVal[nnzb * bsr_dim * bsr_dim]
         = {1.0, 3.0, 0.0, 0.0, 2.0, 4.0, 0.0, 0.0, 5.0, 7.0, 6.0, 0.0, 0.0, 8.0, 0.0, 0.0};
 
     // Block storage in column major
@@ -90,8 +93,8 @@ int main(int argc, char* argv[])
     double beta  = 1.3;
 
     // x and y
-    double hx[4] = {1.0, 2.0, 3.0, 0.0};
-    double hy[4] = {4.0, 5.0, 6.0, 7.0};
+    double hx[n] = {1.0, 2.0, 3.0, 0.0};
+    double hy[m] = {4.0, 5.0, 6.0, 7.0};
 
     // Matrix descriptor
     hipsparseMatDescr_t descr;
@@ -107,15 +110,15 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1)));
     HIP_CHECK(hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb));
     HIP_CHECK(hipMalloc((void**)&dbsrVal, sizeof(double) * nnzb * bsr_dim * bsr_dim));
-    HIP_CHECK(hipMalloc((void**)&dx, sizeof(double) * nb * bsr_dim));
-    HIP_CHECK(hipMalloc((void**)&dy, sizeof(double) * mb * bsr_dim));
+    HIP_CHECK(hipMalloc((void**)&dx, sizeof(double) * n));
+    HIP_CHECK(hipMalloc((void**)&dy, sizeof(double) * m));
 
     HIP_CHECK(hipMemcpy(dbsrRowPtr, hbsrRowPtr, sizeof(int) * (mb + 1), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dbsrColInd, hbsrColInd, sizeof(int) * nnzb, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(
         dbsrVal, hbsrVal, sizeof(double) * nnzb * bsr_dim * bsr_dim, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dx, hx, sizeof(double) * nb * bsr_dim, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dy, hy, sizeof(double) * mb * bsr_dim, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dx, hx, sizeof(double) * n, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dy, hy, sizeof(double) * m, hipMemcpyHostToDevice));
 
     // Call dbsrmv to perform y = alpha * A x + beta * y
     HIPSPARSE_CHECK(hipsparseDbsrmv(handle,
@@ -135,7 +138,14 @@ int main(int argc, char* argv[])
                                     dy));
 
     // Copy result back to host
-    HIP_CHECK(hipMemcpy(hy, dy, sizeof(double) * mb * bsr_dim, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hy, dy, sizeof(double) * m, hipMemcpyDeviceToHost));
+
+    std::cout << "hy" << std::endl;
+    for(int i = 0; i < m; i++)
+    {
+        std::cout << hy[i] << " ";
+    }
+    std::cout << "" << std::endl;
 
     // Clear hipSPARSE
     HIPSPARSE_CHECK(hipsparseDestroyMatDescr(descr));

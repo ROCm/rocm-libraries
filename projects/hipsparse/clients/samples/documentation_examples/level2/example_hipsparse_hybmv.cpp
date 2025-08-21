@@ -25,7 +25,6 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <vector>
 
 #define HIP_CHECK(stat)                                               \
     {                                                                 \
@@ -111,6 +110,13 @@ int main(int argc, char* argv[])
 
     // Copy result back to host
     HIP_CHECK(hipMemcpy(hy, dy, sizeof(double) * m, hipMemcpyDeviceToHost));
+
+    std::cout << "hy" << std::endl;
+    for(int i = 0; i < m; i++)
+    {
+        std::cout << hy[i] << " ";
+    }
+    std::cout << "" << std::endl;
 
     // Clear up on device
     HIPSPARSE_CHECK(hipsparseDestroyHybMat(hybA));
