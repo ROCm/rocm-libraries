@@ -137,6 +137,42 @@ void mfma_inst(nb::module_ m_mfma)
             return new rocisa::MFMAInstruction(self);
         });
 
+    nb::class_<rocisa::MXMFMAInstruction, rocisa::Instruction>(m_mfma, "MXMFMAInstruction")
+        .def(nb::init<rocisa::InstType,
+                      rocisa::InstType,
+                      const std::vector<int>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      int,
+                      const std::string&>(),
+             nb::arg("instType"),
+             nb::arg("accType"),
+             nb::arg("variant"),
+             nb::arg("acc"),
+             nb::arg("a"),
+             nb::arg("b"),
+             nb::arg("acc2"),
+             nb::arg("mxsa"),
+             nb::arg("mxsb"),
+             nb::arg("block"),
+             nb::arg("comment") = "")
+        .def_rw("a", &rocisa::MXMFMAInstruction::a)
+        .def_rw("b", &rocisa::MXMFMAInstruction::b)
+        .def_rw("mxsa", &rocisa::MXMFMAInstruction::mxsa)
+        .def_rw("mxsb", &rocisa::MXMFMAInstruction::mxsb)
+        .def_rw("acc", &rocisa::MXMFMAInstruction::acc)
+        .def_rw("acc2", &rocisa::MXMFMAInstruction::acc2)
+        .def("getParams", &rocisa::MXMFMAInstruction::getParams)
+        .def("__str__", &rocisa::MXMFMAInstruction::toString)
+        .def("__deepcopy__", [](const rocisa::MXMFMAInstruction& self, const nb::dict&) {
+            return new rocisa::MXMFMAInstruction(self);
+        });
+
+
     nb::class_<rocisa::SMFMAInstruction, rocisa::Instruction>(m_mfma, "SMFMAInstruction")
         .def(nb::init<rocisa::InstType,
                       rocisa::InstType,
