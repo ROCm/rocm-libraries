@@ -45,9 +45,10 @@ namespace detail
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         std::enable_if_t<hipcub::NumericTraits<Key>::CATEGORY == hipcub::SIGNED_INTEGER
-                              || hipcub::NumericTraits<Key>::CATEGORY == hipcub::UNSIGNED_INTEGER,
-                          int>
+         HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH std::enable_if_t<
+             hipcub::NumericTraits<Key>::CATEGORY == hipcub::SIGNED_INTEGER
+                 || hipcub::NumericTraits<Key>::CATEGORY == hipcub::UNSIGNED_INTEGER,
+             int> HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
          = 0>
 Key to_bits(const Key key)
 {
@@ -62,8 +63,10 @@ Key to_bits(const Key key)
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         std::enable_if_t<hipcub::NumericTraits<Key>::CATEGORY == hipcub::FLOATING_POINT, int> = 0>
-auto to_bits(const Key key)
+         HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+             std::enable_if_t<hipcub::NumericTraits<Key>::CATEGORY == hipcub::FLOATING_POINT, int>
+         = 0>
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP auto to_bits(const Key key)
 {
     using unsigned_bits_type = typename hipcub::NumericTraits<Key>::UnsignedBits;
 
@@ -109,12 +112,15 @@ auto to_bits(const Key& key)
     auto bit_key_lower = static_cast<unsigned_bits_type>(to_bits<0, sizeof(key.y) * 8>(key.y));
 
     // Flip sign bit to properly order signed types
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     if(::hipcub::NumericTraits<inner_t>::CATEGORY == hipcub::SIGNED_INTEGER)
-    {
-        constexpr auto sign_bit = static_cast<unsigned_bits_type>(1) << (sizeof(inner_t) * 8 - 1);
-        bit_key_upper ^= sign_bit;
-        bit_key_lower ^= sign_bit;
-    }
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+        {
+            constexpr auto sign_bit = static_cast<unsigned_bits_type>(1)
+                                      << (sizeof(inner_t) * 8 - 1);
+            bit_key_upper ^= sign_bit;
+            bit_key_lower ^= sign_bit;
+        }
 
     // Create the result containing both parts
     const auto bit_key

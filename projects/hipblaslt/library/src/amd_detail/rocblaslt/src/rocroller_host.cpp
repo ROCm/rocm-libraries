@@ -39,6 +39,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
+#include <Tensile/analytical/StreamK.hpp>
 #include <Tensile/analytical/Utils.hpp>
 
 using namespace rocRoller;
@@ -148,7 +149,11 @@ struct GemmKernel
     Operations::OperationTag tagTensorScaleA;
     Operations::OperationTag tagTensorScaleB;
 
+    Operations::OperationTag tagScratch;
+    Operations::OperationTag tagSKGrid;
     Operations::OperationTag tagWGM;
+
+    int occupancy;
 };
 
 /**
@@ -573,6 +578,31 @@ rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_t
     }
 }
 
+TensileLite::analytical::DataType rocroller_type_to_analytical_type(rocRoller::DataType type)
+{
+    switch(type)
+    {
+        case rocRoller::DataType::Half:
+            return TensileLite::analytical::DataType::Half;
+        case rocRoller::DataType::Float:
+            return TensileLite::analytical::DataType::Float;
+        case rocRoller::DataType::BFloat16:
+            return TensileLite::analytical::DataType::BFloat16;
+        case rocRoller::DataType::FP8:
+            return TensileLite::analytical::DataType::Float8;
+        case rocRoller::DataType::BF8:
+            return TensileLite::analytical::DataType::BFloat8;
+        case rocRoller::DataType::FP6:
+            return TensileLite::analytical::DataType::Float6;
+        case rocRoller::DataType::BF6:
+            return TensileLite::analytical::DataType::BFloat6;
+        case rocRoller::DataType::FP4:
+            return TensileLite::analytical::DataType::Float4;
+        default:
+            return TensileLite::analytical::DataType::None;
+    }
+}
+
 /**
  * @brief Generate a KernelType from a RocblasltContractionProblem
  *
@@ -625,16 +655,15 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
     std::vector<TensileLite::analytical::TileTuple> tile_list = getTileListForKernelType(kernelType);
 
-    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits; 
+    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
-    size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits; 
+    size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits;
 
-    size_t maxAB_bits = std::max(elementSizeA_bits, elementSizeB_bits);
-    TensileLite::analytical::DataType dataType = TensileLite::analytical::DataType::Float8;
-    if(maxAB_bits == 6)
-        dataType = TensileLite::analytical::DataType::Float6;
-    else if(maxAB_bits == 4)
-        dataType = TensileLite::analytical::DataType::Float4;
+    TensileLite::analytical::DataType dataType;
+    if (elementSizeA_bits < elementSizeB_bits)
+        dataType = rocroller_type_to_analytical_type(kernelType.typeB);
+    else
+        dataType = rocroller_type_to_analytical_type(kernelType.typeA);
 
     const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
 
@@ -688,7 +717,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             params.push_back({wgt, 1, true});
             while (unrollAmount > 1 && (prob.k % (wgt.k * unrollAmount) != 0))
             {
-                unrollAmount--;
+                unrollAmount = unrollAmount / 2;
             }
 
             params.back().prefetchInFlight = unrollAmount;
@@ -701,6 +730,48 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     }
 
     return params;
+}
+
+int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
+                          const RocblasltContractionProblem& prob)
+{
+    const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
+
+    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeA).elementBits;
+    size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeB).elementBits;
+    size_t elementSizeD_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeD).elementBits;
+    size_t elementSizeAcc = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeAcc).elementBytes;
+
+    TensileLite::analytical::DataType dataType;
+    if (elementSizeA_bits < elementSizeB_bits)
+        dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeB);
+    else
+        dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA);
+
+    auto result = TensileLite::analytical::streamk::select_streamk_grid(prob.m,
+        prob.n,
+        prob.k,
+        prob.batch_count,
+        prob.trans_a == HIPBLAS_OP_T,
+        prob.trans_b == HIPBLAS_OP_T,
+        elementSizeA_bits,
+        elementSizeB_bits,
+        elementSizeD_bits,
+        dataType,
+        prob.workspaceSize,
+        gemm->params->workgroupTile.m,
+        gemm->params->workgroupTile.n,
+        gemm->params->workgroupTile.k,
+        gemm->params->machineInstruction.m,
+        gemm->params->machineInstruction.n,
+        gemm->params->machineInstruction.k,
+        DEFAULT_WGM,
+        elementSizeAcc,
+        gemm->occupancy,
+        analaytical_hardware,
+        6);
+
+    return result;
 }
 
 std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
@@ -776,7 +847,15 @@ std::shared_ptr<SolutionParameters>
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
-    if(solutionIndexParameters.workgroupTile.m >= 128
+    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate || 
+        kernelType.scaleBMode != rocRoller::Operations::ScaleMode::Separate)
+    {
+        gemm->swizzleScale = false;
+        gemm->prefetchScale = false;
+        gemm->loadLDSScaleA = false;
+        gemm->loadLDSScaleB = false;
+    }
+    else if(solutionIndexParameters.workgroupTile.m >= 128
         && solutionIndexParameters.workgroupTile.n >= 128)
     {
         gemm->swizzleScale  = true;
@@ -850,6 +929,14 @@ std::shared_ptr<SolutionParameters>
     {
         gemm->workgroupMappingDim = 0;
         gemm->workgroupRemapXCC = true;
+    }
+
+    // TODO: StreamK is not currently working with prefetching or workgroup mapping
+    if(gemm->streamK)
+    {
+        gemm->prefetch = false;
+        gemm->workgroupMappingDim = -1;
+        gemm->workgroupRemapXCC = false;
     }
 
     return gemm;
@@ -1009,7 +1096,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
                 ShowValue(gemm->kernelType.scaleBMode));
 
     std::optional<Operations::OperationTag> tagTensorScaleA, tagLoadScaleA, tagBlockScaleA,
-        tagTensorScaleB, tagLoadScaleB, tagBlockScaleB, tagWGM;
+        tagTensorScaleB, tagLoadScaleB, tagBlockScaleB, tagScratch, tagSKGrid, tagWGM;
 
     if(gemm->kernelType.scaleAMode == Operations::ScaleMode::Separate)
     {
@@ -1095,12 +1182,22 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
     }
 
-    auto tagScratch = command->allocateTag();
-    command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                              tagScratch,
-                              ArgumentType::Value,
-                              DataDirection::ReadWrite,
-                              rocRoller::SCRATCH);
+    if (gemm->streamK)
+    {
+        tagSKGrid = command->allocateTag();
+        command->allocateArgument(DataType::UInt32,
+                                *tagSKGrid,
+                                ArgumentType::Value,
+                                DataDirection::ReadOnly,
+                                rocRoller::NUMWGS);
+
+        tagScratch = command->allocateTag();
+        command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                                *tagScratch,
+                                ArgumentType::Value,
+                                DataDirection::ReadWrite,
+                                rocRoller::SCRATCH);
+    }
 
     if(gemm->workgroupMappingDim != -1)
     {
@@ -1280,6 +1377,14 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->workgroupRemapXCC = 8;
     }
 
+    if(gemm->streamK)
+    {
+        params->streamK = true;
+        params->loopOverOutputTilesDimensions = {0, 1};
+        if(gemm->streamKTwoTile)
+            params->streamKTwoTile = true;
+    }
+
     params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
     params->setManualWavefrontCount(
         {static_cast<uint>(gemm->workgroupTile.m / gemm->machineInstruction.m
@@ -1296,6 +1401,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     commandKernel->setContext(context);
     commandKernel->setCommandParameters(params);
     commandKernel->generateKernel();
+    commandKernel->loadKernel();
 
     // -------------------------------------------------------------
     // Create GemmKernel
@@ -1319,10 +1425,25 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     if(tagTensorScaleB)
         gemmKernel->tagTensorScaleB = *tagTensorScaleB;
 
+    if(tagScratch)
+        gemmKernel->tagScratch = *tagScratch;
+
+    if(tagSKGrid)
+        gemmKernel->tagSKGrid = *tagSKGrid;
+
     if(tagWGM)
         gemmKernel->tagWGM = *tagWGM;
 
     setPredicates(gemmKernel);
+
+    auto flatWorkgroupSize = workgroupSizeX;
+    int occupancy;
+    AssertFatal(
+        hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
+            &occupancy, commandKernel->getHipFunction(), flatWorkgroupSize, 0)
+        == (hipError_t)HIP_SUCCESS);
+
+    gemmKernel->occupancy = occupancy;
 
     return gemmKernel;
 }
@@ -1353,6 +1474,25 @@ rocblaslt_status
 }
 
 /**
+ * @brief Return the amount of workspace that is required to execute a kernel.
+ * 
+ * Note: This only takes into account the workspace required for StreamK kernels.
+ */
+size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
+{
+    CommandArguments commandArgs = gemm->command->createArguments();
+
+    if(gemm->params->streamK)
+    {
+        commandArgs.setArgument(gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
+    }
+
+    auto runtimeArgs = commandArgs.runtimeArguments();
+
+    return gemm->commandKernel->scratchSpaceRequired(runtimeArgs);
+}
+
+/**
  * @brief Find the best rocRoller kernels for a given problem
  *
  * This mimics the functionality of getBestSolutions in tensile_host.cpp
@@ -1370,6 +1510,7 @@ rocblaslt_status
  * @param prob
  * @param requestedAlgoCount
  * @param heuristicResultsArray
+ * @param maxWorkSpaceBytes
  * @param returnAlgoCount
  * @return rocblaslt_status
  */
@@ -1378,6 +1519,7 @@ rocblaslt_status
                               const RocblasltContractionProblem& prob,
                               int                                requestedAlgoCount,
                               rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
+                              size_t                             maxWorkSpaceBytes,
                               int*                               returnAlgoCount)
 {
     RocRollerHandle* rocroller_handle = static_cast<RocRollerHandle*>(handle->rocroller_handle);
@@ -1427,14 +1569,18 @@ rocblaslt_status
 
         index = static_cast<int>(std::hash<SolutionIndexParameters>{}(solutionIndexParameter));
         auto existingSolutionIndex = rocroller_handle->generatedKernels[kernelType].find(index);
+        std::shared_ptr<GemmKernel> kernel;
         // If kernel doesn't already exist, generate it
         if(existingSolutionIndex == rocroller_handle->generatedKernels[kernelType].end())
         {
-            std::shared_ptr<GemmKernel> kernel;
             auto                        status = genKernelFromSolutionIndexParameters(
                 rocroller_handle, kernelType, solutionIndexParameter, index, kernel);
             if(status != rocblaslt_status_success)
                 continue;
+        }
+        else
+        {
+            kernel = existingSolutionIndex->second;
         }
 
         // Fill out heuristicResultsArray
@@ -1442,10 +1588,10 @@ rocblaslt_status
         memset(heuristicResultsArray[i].algo.data, 0, sizeof(heuristicResultsArray[i].algo.data));
         int* solutionIndex = (int*)(heuristicResultsArray[i].algo.data);
         *solutionIndex     = index;
-        heuristicResultsArray[i].algo.max_workspace_bytes = 0;
+        heuristicResultsArray[i].algo.max_workspace_bytes = maxWorkSpaceBytes;
         heuristicResultsArray[i].algo.fallback            = false;
         heuristicResultsArray[i].state                    = rocblaslt_status_success;
-        heuristicResultsArray[i].workspaceSize            = 0;
+        heuristicResultsArray[i].workspaceSize            = workspaceRequired(kernel, prob);
         i++;
     }
 
@@ -1470,7 +1616,7 @@ rocblaslt_status
     heuristicResults.resize(possibleTileSizes.size());
     int  returnAlgoCount;
     auto result
-        = getRocRollerBestSolutions(handle, prob, -1, heuristicResults.data(), &returnAlgoCount);
+        = getRocRollerBestSolutions(handle, prob, -1, heuristicResults.data(), maxWorkSpaceBytes, &returnAlgoCount);
     heuristicResults.resize(returnAlgoCount);
     return result;
 }
@@ -1576,6 +1722,11 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
         commandArgs.setArgument(gemm->tagWGM, ArgumentType::Value, wgm);
     }
 
+    if(gemm->params->streamK)
+    {
+        commandArgs.setArgument(gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
+    }
+
     return commandArgs;
 }
 
@@ -1635,9 +1786,14 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
     if(status != rocblaslt_status_success)
         return status;
 
-    auto commandArgs = createCommandArguments(kernel, prob, DEFAULT_WGM);
+    auto workSpaceRequired = workspaceRequired(kernel, prob);
 
+    if(workSpaceRequired > prob.workspaceSize)
+        return rocblaslt_status_invalid_value;
+
+    auto commandArgs = createCommandArguments(kernel, prob, DEFAULT_WGM);
     auto runtimeArgs = commandArgs.runtimeArguments();
+
     if(!kernel->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
     {
         return rocblaslt_status_invalid_value;
@@ -1656,7 +1812,29 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
 rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
                                const RocblasltContractionProblem& prob)
 {
+    auto workSpaceRequired = workspaceRequired(gemm, prob);
+
+    if(workSpaceRequired > prob.workspaceSize)
+    {
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "Input workspace size " << prob.workspaceSize
+                << " is less than the required workspace size ";
+            msg << workSpaceRequired << std::endl;
+            log_info(__func__, msg.str());
+        }
+        return rocblaslt_status_invalid_value;
+    }
+
     auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
+
+    // Add scratch space
+    if(workSpaceRequired > 0)
+    {
+        commandArgs.setArgument(
+            gemm->tagScratch, ArgumentType::Value, static_cast<unsigned char*>(prob.workspace));
+    }
 
     auto runtimeArgs = commandArgs.runtimeArguments();
 
@@ -1664,8 +1842,6 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
     {
         return rocblaslt_status_invalid_value;
     }
-
-    // TODO: Add scratch space when needed
 
     gemm->commandKernel->launchKernel(runtimeArgs, prob.stream);
     return rocblaslt_status_success;
@@ -1694,7 +1870,7 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
     {
         int  returnAlgoCount;
         auto status
-            = getRocRollerBestSolutions(handle, prob, 1, &heuristicResult, &returnAlgoCount);
+            = getRocRollerBestSolutions(handle, prob, 1, &heuristicResult, prob.workspaceSize, &returnAlgoCount);
         if(status != rocblaslt_status_success)
             return status;
         if(returnAlgoCount == 0)

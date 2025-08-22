@@ -169,3 +169,11 @@ if(TARGET rocsparse)
     add_rocsparse_fortran_example(example_fortran_roti.f90)
   endif()
 endif()
+
+# Build documentation examples
+FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
+
+foreach(file ${DOCUMENTATION_EXAMPLES})
+    message(STATUS "Found .cpp file: ${file}")
+    add_rocsparse_example(${file})
+endforeach()
