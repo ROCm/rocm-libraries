@@ -884,8 +884,7 @@ TYPED_TEST(HipcubDeviceReduceLargeIndicesTests, LargeIndices)
 
     using T            = typename TestFixture::input_type;
     using U            = typename TestFixture::output_type;
-    using IteratorType = hipcub::ConstantInputIterator<T>;
-
+    using IteratorType                  = rocprim::constant_iterator<T>;
     const std::vector<size_t> exponents = {30, 31, 32, 33, 34};
     for(auto exponent : exponents)
     {

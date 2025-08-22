@@ -84,51 +84,7 @@ extern "C" {
 *  \retval rocsparse_status_internal_error an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*      // Number of non-zeros of the sparse vector
-*      rocsparse_int nnz = 3;
-*
-*      // Sparse index vector
-*      rocsparse_int hx_ind[3] = {0, 3, 5};
-*
-*      // Sparse value vector
-*      float hx_val[3] = {1.0f, 2.0f, 3.0f};
-*
-*      // Dense vector
-*      float hy[9] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*      // Index base
-*      rocsparse_index_base idx_base = rocsparse_index_base_zero;
-*
-*      // Offload data to device
-*      rocsparse_int* dx_ind;
-*      float*        dx_val;
-*      float*        dy;
-*
-*      hipMalloc((void**)&dx_ind, sizeof(rocsparse_int) * nnz);
-*      hipMalloc((void**)&dx_val, sizeof(float) * nnz);
-*      hipMalloc((void**)&dy, sizeof(float) * 9);
-*
-*      hipMemcpy(dx_ind, hx_ind, sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dx_val, hx_val, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(float) * 9, hipMemcpyHostToDevice);
-*
-*      // rocSPARSE handle
-*      rocsparse_handle handle;
-*      rocsparse_create_handle(&handle);
-*
-*      // Call sdoti to compute the dot product
-*      float dot;
-*      rocsparse_sdoti(handle, nnz, dx_val, dx_ind, dy, &dot, idx_base);
-*
-*      // Clear rocSPARSE
-*      rocsparse_destroy_handle(handle);
-*
-*      // Clear device memory
-*      hipFree(dx_ind);
-*      hipFree(dx_val);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_rocsparse_doti.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

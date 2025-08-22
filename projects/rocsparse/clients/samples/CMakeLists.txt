@@ -74,9 +74,6 @@ add_rocsparse_example(example_gebsrmv.cpp)
 add_rocsparse_example(example_gemvi.cpp)
 add_rocsparse_example(example_v2_spmv_csr.cpp)
 
-
-
-
 set_source_files_properties(
   example_spmv_coo.cpp
   PROPERTIES
@@ -94,7 +91,6 @@ set_source_files_properties(
   PROPERTIES
   COMPILE_FLAGS "-Wno-deprecated-declarations"
 )
-
 
 # Level 3
 add_rocsparse_example(example_bsrmm.cpp)
