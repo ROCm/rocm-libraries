@@ -1,6 +1,6 @@
 - {MinimumRequiredVersion: 4.33.0}
 - gfx1103
-- [Device 6863]
+- [Device 15bf]
 - AllowNoFreeDims: false
   AssignedDerivedParameters: true
   Batched: true
