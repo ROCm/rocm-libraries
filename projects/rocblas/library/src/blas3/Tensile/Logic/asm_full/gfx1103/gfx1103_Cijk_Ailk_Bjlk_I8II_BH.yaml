@@ -1,7 +1,6 @@
 - {MinimumRequiredVersion: 4.35.0}
-- navi33
 - gfx1103
-- [Device 73f0]
+- [Device 15bf]
 - AllowNoFreeDims: false
   AssignedDerivedParameters: true
   Batched: true
