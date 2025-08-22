@@ -125,12 +125,14 @@ Arguments setup_spsm_csr_arguments(spsm_csr_bin_tuple tup)
     std::string bin_file = std::get<9>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
 TEST(spsm_csr_bad_arg, spsm_csr_float)
 {
     testing_spsm_csr_bad_arg();

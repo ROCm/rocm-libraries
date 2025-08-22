@@ -118,13 +118,15 @@ Arguments setup_spmm_batched_coo_arguments(spmm_batched_coo_bin_tuple tup)
     std::string bin_file = std::get<8>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
 // batched_coo format not supported in cusparse
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 TEST(spmm_batched_coo_bad_arg, spmm_batched_coo_float)
 {
     testing_spmm_batched_coo_bad_arg();
@@ -155,7 +157,7 @@ TEST_P(parameterized_spmm_batched_coo_bin, spmm_batched_coo_bin_i32_float)
 }
 
 // 64 bit indices not supported in cusparse for all algorithms
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 TEST_P(parameterized_spmm_batched_coo, spmm_batched_coo_i64_double)
 {
     Arguments arg = setup_spmm_batched_coo_arguments(GetParam());

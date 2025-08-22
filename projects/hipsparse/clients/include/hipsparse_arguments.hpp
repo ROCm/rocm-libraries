@@ -116,8 +116,8 @@ struct Arguments
     int timing;
     int iters;
 
-    std::string filename;
-    std::string function_name;
+    char filename[128]; // nos2.bin, bmwcra_1.bin, etc
+    char function[64]; // axpby, spmv_csr, etc
 
     Arguments()
     {
@@ -192,8 +192,8 @@ struct Arguments
         this->timing     = 0;
         this->iters      = 10;
 
-        this->filename      = "";
-        this->function_name = "";
+        this->filename[0] = '\0';
+        this->function[0] = '\0';
     }
 
     template <typename T>

@@ -93,12 +93,14 @@ Arguments setup_csrgeam2_arguments(csrgeam2_bin_tuple tup)
     std::string bin_file = std::get<5>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 TEST(csrgeam2_bad_arg, csrgeam2_float)
 {
     testing_csrgeam2_bad_arg<float>();

@@ -46,14 +46,14 @@ std::vector<double> spmv_coo_aos_beta_range  = {1.0};
 hipsparseOperation_t spmv_coo_aos_transA_range[] = {HIPSPARSE_OPERATION_NON_TRANSPOSE};
 hipsparseIndexBase_t spmv_coo_aos_idxbase_range[]
     = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 hipsparseSpMVAlg_t spmv_coo_aos_alg_range[]
     = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_COO_ALG1, HIPSPARSE_SPMV_COO_ALG2};
 #else // coo_aos format not supported in cusparse 12 or later
-#if(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#if (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
 hipsparseSpMVAlg_t spmv_coo_aos_alg_range[]
     = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_COO_ALG1, HIPSPARSE_SPMV_COO_ALG2};
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
 hipsparseSpMVAlg_t spmv_coo_aos_alg_range[] = {HIPSPARSE_MV_ALG_DEFAULT, HIPSPARSE_COOMV_ALG};
 #endif
 #endif
@@ -116,13 +116,15 @@ Arguments setup_spmv_coo_aos_arguments(spmv_coo_aos_bin_tuple tup)
     std::string bin_file = std::get<5>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
 // coo_aos format not supported in cusparse 12.0 or later
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000))
+#if (!defined(CUDART_VERSION) || (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000))
 TEST(spmv_coo_aos_bad_arg, spmv_coo_aos_float)
 {
     testing_spmv_coo_aos_bad_arg();

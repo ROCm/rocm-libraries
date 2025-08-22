@@ -94,12 +94,14 @@ Arguments setup_csr2csc_arguments(csr2csc_bin_tuple tup)
     std::string bin_file = std::get<2>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST(csr2csc_bad_arg, csr2csc)
 {
     testing_csr2csc_bad_arg<float>();

@@ -97,12 +97,14 @@ Arguments setup_hybmv_arguments(hybmv_bin_tuple tup)
     std::string bin_file = std::get<5>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST(hybmv_bad_arg, hybmv_float)
 {
     testing_hybmv_bad_arg<float>();

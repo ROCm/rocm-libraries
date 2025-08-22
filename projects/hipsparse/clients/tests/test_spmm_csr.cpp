@@ -68,23 +68,23 @@ hipsparseOrder_t     spmm_csr_orderB_range[] = {HIPSPARSE_ORDER_COL, HIPSPARSE_O
 hipsparseOrder_t     spmm_csr_orderC_range[] = {HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW};
 hipsparseIndexBase_t spmm_csr_idxbase_range[]
     = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 hipsparseSpMMAlg_t spmm_csr_alg_range[] = {HIPSPARSE_SPMM_ALG_DEFAULT,
                                            HIPSPARSE_SPMM_CSR_ALG1,
                                            HIPSPARSE_SPMM_CSR_ALG2,
                                            HIPSPARSE_SPMM_CSR_ALG3};
 #else
 // Alg3 not supported when A is transposed or conjugate transposed or when B is conjugate transposed
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
 hipsparseSpMMAlg_t spmm_csr_alg_range[]
     = {HIPSPARSE_SPMM_ALG_DEFAULT, HIPSPARSE_SPMM_CSR_ALG1, HIPSPARSE_SPMM_CSR_ALG2};
-#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
 hipsparseSpMMAlg_t spmm_csr_alg_range[]
     = {HIPSPARSE_SPMM_ALG_DEFAULT, HIPSPARSE_SPMM_CSR_ALG1, HIPSPARSE_SPMM_CSR_ALG2};
-#elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
 hipsparseSpMMAlg_t spmm_csr_alg_range[]
     = {HIPSPARSE_SPMM_ALG_DEFAULT, HIPSPARSE_SPMM_CSR_ALG1, HIPSPARSE_SPMM_CSR_ALG2};
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
 hipsparseSpMMAlg_t spmm_csr_alg_range[] = {HIPSPARSE_MM_ALG_DEFAULT, HIPSPARSE_CSRMM_ALG1};
 #endif
 #endif
@@ -148,12 +148,14 @@ Arguments setup_spmm_csr_arguments(spmm_csr_bin_tuple tup)
     std::string bin_file = std::get<8>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
 TEST(spmm_csr_bad_arg, spmm_csr_float)
 {
     testing_spmm_csr_bad_arg();
@@ -184,7 +186,7 @@ TEST_P(parameterized_spmm_csr_bin, spmm_csr_bin_i32_float)
 }
 
 // 64 bit indices not supported in cusparse for all algorithms
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 TEST_P(parameterized_spmm_csr, spmm_csr_i64_double)
 {
     Arguments arg = setup_spmm_csr_arguments(GetParam());

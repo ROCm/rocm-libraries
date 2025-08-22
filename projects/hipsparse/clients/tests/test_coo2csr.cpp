@@ -94,7 +94,9 @@ Arguments setup_coo2csr_arguments(coo2csr_bin_tuple tup)
     arg.timing           = 0;
     std::string bin_file = std::get<1>(tup);
 
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }

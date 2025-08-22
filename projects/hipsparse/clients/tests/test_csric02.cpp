@@ -83,12 +83,14 @@ Arguments setup_csric02_arguments(csric02_bin_tuple tup)
     // Get current executables absolute path
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(csric02_bad_arg, csric02_float)
 {
     testing_csric02_bad_arg<float>();

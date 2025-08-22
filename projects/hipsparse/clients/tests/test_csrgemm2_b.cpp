@@ -87,12 +87,14 @@ Arguments setup_csrgemm2_b_arguments(csrgemm2_b_bin_tuple tup)
     std::string bin_file = std::get<3>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 TEST(csrgemm2_b_bad_arg, csrgemm2_b_float)
 {
     testing_csrgemm2_b_bad_arg<float>();

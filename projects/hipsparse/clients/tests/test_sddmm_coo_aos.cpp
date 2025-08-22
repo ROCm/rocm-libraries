@@ -127,13 +127,15 @@ Arguments setup_sddmm_coo_aos_arguments(sddmm_coo_aos_bin_tuple tup)
     std::string bin_file = std::get<8>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
 // COO_AOS format not supported in cusparse
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 TEST(sddmm_coo_aos_bad_arg, sddmm_coo_aos_float)
 {
     testing_sddmm_coo_aos_bad_arg();

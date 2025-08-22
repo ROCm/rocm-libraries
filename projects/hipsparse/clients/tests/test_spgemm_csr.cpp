@@ -46,7 +46,7 @@ int spgemm_csr_K_range[] = {649, 2148};
 
 std::vector<double> spgemm_csr_alpha_range = {2.0};
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 hipsparseIndexBase_t spgemm_csr_idxbaseA_range[]
     = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 hipsparseIndexBase_t spgemm_csr_idxbaseB_range[]
@@ -112,12 +112,14 @@ Arguments setup_spgemm_csr_arguments(spgemm_csr_bin_tuple tup)
     std::string bin_file = std::get<5>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 TEST(spgemm_csr_bad_arg, spgemm_csr_float)
 {
     testing_spgemm_csr_bad_arg();
@@ -148,7 +150,7 @@ TEST_P(parameterized_spgemm_csr_bin, spgemm_csr_bin_i32_float)
 }
 
 // 64 bit indices not supported in cusparse
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 TEST_P(parameterized_spgemm_csr, spgemm_csr_i64_double)
 {
     Arguments arg = setup_spgemm_csr_arguments(GetParam());

@@ -103,12 +103,14 @@ Arguments setup_csrsm2_arguments(csrsm2_bin_tuple tup)
     std::string bin_file = std::get<8>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    std::string filename = get_filename(bin_file);
+    strncpy(arg.filename, filename.c_str(), filename.length());
+    arg.filename[filename.length()] = '\0';
 
     return arg;
 }
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
 TEST(csrsm2_bad_arg, csrsm2_float)
 {
     testing_csrsm2_bad_arg<float>();
