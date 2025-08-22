@@ -66,8 +66,12 @@ function(hip_cuda_detect_lowest_cc out_variable)
         )
 
         if(__nvsmi_res EQUAL 0)
+            message(STATUS "nvidia-smi reported CC: ${__nvsmi_out}")
             string(REPLACE "." "" __nvsmi_out_nodot ${__nvsmi_out})
-            string(REPLACE "\n" "" HIP_CUDA_lowest_cc ${__nvsmi_out_nodot})
+            string(REPLACE "\n" "" __nvsmi_out_formatted ${__nvsmi_out_nodot})
+            set(HIP_CUDA_lowest_cc ${__nvsmi_out_formatted} CACHE INTERNAL "The lowest CC of installed NV GPUs" FORCE)
+        else()
+            message(STATUS "nvidia-smi command returned error code ${__nvsmi_res}.  Defaulting to cc_35")
         endif()
     endif()
 
