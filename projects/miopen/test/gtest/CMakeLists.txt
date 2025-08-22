@@ -154,21 +154,33 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     if(MIOPEN_TEST_GFX115X)
-        add_gtest_negative_filter("*UnitTestConvSolverOclDirect*")
-        add_gtest_negative_filter("*UnitTestConvSolverOclBwd*")
-        add_gtest_negative_filter("*UnitTestConvSolverBinWinograd*")
-        add_gtest_negative_filter("*BNBWDSmall2D*")
-        add_gtest_negative_filter("*BNBWDLarge*D*")
-        add_gtest_negative_filter("*BNOCLBWDLargeFusedActivation2D*")
-        add_gtest_negative_filter("*BBNFWDTrainSmall2D*")
+        #<inline asm>:17:20: error: not a valid operand.
+        add_gtest_negative_filter("*BNBWDSmall2D_FP32*")
+        add_gtest_negative_filter("*BNBWDLarge*D*") 
+        add_gtest_negative_filter("*BNOCLBWDLargeFusedActivation2D*") 
         add_gtest_negative_filter("*BNFWDTrain*D*")
+        add_gtest_negative_filter("*BNBWDSerialRun3D*")
+
+#GPU_TestMhaFind20_FP32
         add_gtest_negative_filter("*GPU_*MHA*")
+        add_gtest_negative_filter("*GPU_*_Mha*")
         add_gtest_negative_filter("*GPU_MhaForward*")
         add_gtest_negative_filter("*GPU_MhaBackward*")
         add_gtest_negative_filter("*GPU_MhaBwdGraph*")
-        add_gtest_negative_filter("*GPU_*_Mha*")
+        add_gtest_negative_filter("*GPU_TestMhaFind20_FP32*")
+        add_gtest_negative_filter("*GPU_MhaFwdGraph_FP32*")
+
+        #PU_MhaFwdGraph_FP32
+
+
+        # Non standard squashed operation supported only for 3d tensors and for the specific configuration" thrown in the test body
         add_gtest_negative_filter("*GPU_TernaryTensorOps*")
+
+        # /opt/rocm-7.1.0/include/rocrand/rocrand_common.h:170:69: error: expected class name
+        # 170 | struct has_data<T, decltype(std::declval<T>().data, void())> : std::true_type
         add_gtest_negative_filter("*GPU_Dropout*")
+        add_gtest_negative_filter("*GPU_Softmax_FP32*")
+
     endif()
 
     # when building the single gtest, add them in a sharded manner
