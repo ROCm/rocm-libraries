@@ -5,7 +5,7 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_HISTOGRAM_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-histogram_config<kernel_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}>, {{ measurement['cfg']['max_grid_size'] }}, {{ measurement['cfg']['shared_impl_max_bins'] }}, {{ measurement['cfg']['shared_impl_histograms'] }}> { };
+histogram_config<kernel_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}>, {{ measurement['cfg']['max_grid_size'] }}, {{ measurement['cfg']['shared_impl_max_bins'] }}, {{ measurement['cfg']['shared_impl_histograms'] }}, kernel_config<{{ measurement['cfg']['global_hist_bs'] }}, {{ measurement['cfg']['global_hist_ipt'] }}>> { };
 {%- endmacro %}
 
 {% macro general_case() -%}
