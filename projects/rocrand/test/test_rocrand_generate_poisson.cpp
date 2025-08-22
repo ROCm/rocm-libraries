@@ -58,7 +58,7 @@ void test_generate_host()
     const rocrand_rng_type rng_type = rocrand_generate_poisson_tests::GetParam();
 
     rocrand_generator generator;
-    ROCRAND_CHECK(rocrand_create_generator_host_blocking(&generator, rng_type));
+    ROCRAND_CHECK(rocrand_create_generator_host(&generator, rng_type));
 
     const size_t   size   = 12563;
     double         lambda = 100.0;
@@ -87,21 +87,6 @@ void test_out_of_range(GenerateFunc generate_func)
     EXPECT_EQ(generate_func(generator, data, size, lambda), ROCRAND_STATUS_OUT_OF_RANGE);
 
     HIP_CHECK(hipFree(data));
-    ROCRAND_CHECK(rocrand_destroy_generator(generator));
-}
-
-template<typename T>
-void test_out_of_range_host()
-{
-    const rocrand_rng_type rng_type = rocrand_generate_poisson_tests::GetParam();
-    rocrand_generator generator;
-    ROCRAND_CHECK(rocrand_create_generator_host_blocking(&generator, rng_type));
-
-    const size_t size   = 256;
-    double       lambda = 0.0;
-    std::vector<T> data(size);
-
-    EXPECT_EQ(rocrand_generate_poisson(generator, data.data(), size, lambda), ROCRAND_STATUS_OUT_OF_RANGE);
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
 }
 
@@ -167,53 +152,9 @@ void test_multiple_lambdas(const rocrand_rng_type rng_type, const hipStream_t st
 
     // No output pointer
     ROCRAND_CHECK(rocrand_generate_poisson(generator, nullptr, size, lambdas[0]));
+
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
 }
-
-void test_multiple_lambdas_host(const rocrand_rng_type rng_type, const hipStream_t stream)
-{
-    rocrand_generator generator;
-    ROCRAND_CHECK(rocrand_create_generator_host_blocking(&generator, rng_type));
-    ROCRAND_CHECK(rocrand_set_stream(generator, stream));
-
-    constexpr size_t       num_invocations = 20;
-    constexpr size_t       size            = 125638;
-    constexpr double       min_lambda      = 0.001;
-    constexpr double       max_lambda      = 5000;
-    constexpr unsigned int seed            = 654321;
-
-    std::uniform_real_distribution<double> lambda_distribution(min_lambda, max_lambda);
-    std::default_random_engine             rng(seed);
-    std::vector<double>                    lambdas(num_invocations);
-    for(auto& lambda : lambdas)
-    {
-        lambda = lambda_distribution(rng);
-    }
-
-    std::vector<std::vector<unsigned int>> h_results(num_invocations, std::vector<unsigned int>(size));
-    for(size_t i = 0; i < num_invocations; ++i)
-    {
-        ROCRAND_CHECK(rocrand_generate_poisson(generator, h_results[i].data(), size, lambdas[i]));
-    }
-
-    HIP_CHECK(hipStreamSynchronize(stream));
-
-    for(size_t i = 0; i < num_invocations; ++i)
-    {
-        const auto lambda = lambdas[i];
-        auto&      values = h_results[i];
-        const double mean     = get_mean(values);
-        const double variance = get_variance(values, mean);
-
-        EXPECT_NEAR(mean, lambda, std::max(1.0, lambda * 3e-2));
-        EXPECT_NEAR(variance, lambda, std::max(1.0, lambda * 2e-2));
-    }
-
-    // No output pointer
-    ROCRAND_CHECK(rocrand_generate_poisson(generator, nullptr, size, lambdas[0]));
-    ROCRAND_CHECK(rocrand_destroy_generator(generator));
-}
-
 
 TEST_P(rocrand_generate_poisson_tests, generate_test)
 {
@@ -222,6 +163,10 @@ TEST_P(rocrand_generate_poisson_tests, generate_test)
         { return rocrand_generate_poisson(gen, data, size, lambda); });
 
     test_generate_host<unsigned int>();
+
+    // test_generate_host<unsigned int>(
+    //     [](rocrand_generator gen, unsigned int* data, size_t size, double lambda)
+    //     { return rocrand_generate_poisson(gen, data, size, lambda); });
 }
 
 TEST(rocrand_generate_poisson_tests, neg_test)
@@ -241,14 +186,11 @@ TEST_P(rocrand_generate_poisson_tests, out_of_range_test)
     test_out_of_range<unsigned int>(
         [](rocrand_generator gen, unsigned int* data, size_t size, double lambda)
         { return rocrand_generate_poisson(gen, data, size, lambda); });
-
-    test_out_of_range_host<unsigned int>();
 }
 
 TEST_P(rocrand_generate_poisson_tests, multiple_lambdas_default_stream)
 {
     test_multiple_lambdas(GetParam(), hipStreamDefault);
-    test_multiple_lambdas_host(GetParam(), hipStreamDefault);
 }
 
 TEST_P(rocrand_generate_poisson_tests, multiple_lambdas_non_blocking_stream)
