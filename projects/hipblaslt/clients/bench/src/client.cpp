@@ -744,15 +744,15 @@ try
     {
         if(skgrid_vector[i] < 0 || skgrid_vector[i] > 65535)
         {
-            hipblaslt_cerr << "stream-k grid is 16-bit unsigned type" << std::endl;
+            hipblaslt_cerr << "Invalid stream-k grid value" << skgrid_vector[i] << ". Expected in range [1, 65535]" << std::endl;
             return 1;
         }
         arg.skgrid_vector[i] = skgrid_vector[i];
         max_skgrid           = max(max_skgrid, arg.skgrid_vector[i]);
     }
-    if((max_skgrid > 0) && (api_method == 0))
+    if(max_skgrid > 0 && api_method == 0)
     {
-        hipblaslt_cerr << "Currently streamk gird only supports api_method mix or cpp."
+        hipblaslt_cerr << "Currently streamk grid only supports api_method mix or cpp."
                        << std::endl;
         return 1;
     }
