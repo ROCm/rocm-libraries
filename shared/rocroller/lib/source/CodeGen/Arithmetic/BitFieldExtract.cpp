@@ -39,43 +39,6 @@ namespace rocRoller
             getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);
     }
 
-    // Template to hold the actual generate implementation
-    // Makes partial specialization of the template feasible
-    template <bool IS_INTEGRAL, bool DO_SIGNED>
-    class BFEGeneratorBase
-    {
-    public:
-        // Method to generate instructions
-        static Generator<Instruction> generate(Register::ValuePtr                 dst,
-                                               Register::ValuePtr                 arg,
-                                               Expression::BitFieldExtract const& expr);
-    };
-
-    template <DataType DATATYPE>
-    Generator<Instruction> BitFieldExtractGenerator<DATATYPE>::generate(
-        Register::ValuePtr dst, Register::ValuePtr arg, Expression::BitFieldExtract const& expr)
-    {
-        if(Expression::getComment(expr) != "")
-        {
-            co_yield Instruction::Comment(Expression::getComment(expr));
-        }
-        else
-        {
-            co_yield Instruction::Comment(concatenate("BitFieldExtract<",
-                                                      static_cast<int>(expr.offset),
-                                                      ",",
-                                                      static_cast<int>(expr.width),
-                                                      ">(",
-                                                      arg->description(),
-                                                      ")"));
-        }
-        co_yield BFEGeneratorBase<EnumTypeInfo<DATATYPE>::IsIntegral,
-                                  EnumTypeInfo<DATATYPE>::IsIntegral
-                                      && EnumTypeInfo<DATATYPE>::IsSigned>::generate(dst,
-                                                                                     arg,
-                                                                                     expr);
-    }
-
     template <bool DO_SIGNED>
     class BFEGeneratorBase<true, DO_SIGNED>
     {
