@@ -679,6 +679,10 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
             "1wait for global read"))
         imod.addComment1("local write A")
         imod.add(writer.codes.localWriteA)
+        imod.addComment1("local write MXSA")
+        imod.add(writer.codes.localWriteMXSA)
+        imod.addComment1("local write MXSB")
+        imod.add(writer.codes.localWriteMXSB)
         imod.addComment1("local write B")
         imod.add(writer.codes.localWriteB)
 
@@ -686,7 +690,10 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
     #################
     # create a plan #
     #################
-    itemsLWToSched = list(writer.codes.localWriteA.items()) + list(writer.codes.localWriteB.items())
+    itemsLWToSched = list(writer.codes.localWriteA.items()) + \
+                     list(writer.codes.localWriteMXSA.items()) + \
+                     list(writer.codes.localWriteMXSB.items()) + \
+                     list(writer.codes.localWriteB.items())
     numDummy = 0
     insertDummyTop = False
     if kernel["PrefetchGlobalRead"] >= 2:
@@ -800,7 +807,9 @@ def getReadsToWait(writer, kernel):
              countDSStoreB192(writer.codes.localWriteA)
     lwBcnt = len(list(writer.codes.localWriteB.items())) + \
              countDSStoreB192(writer.codes.localWriteB)
-    readsToWait = lwAcnt + lwBcnt
+    lwMXAcnt = len(list(writer.codes.localWriteMXSA.items()))
+    lwMXBcnt = len(list(writer.codes.localWriteMXSB.items()))
+    readsToWait = lwAcnt + lwBcnt + lwMXAcnt + lwMXBcnt
     readsToWaitNGLL = readsToWait
     return readsToWait, readsToWaitNGLL
 
