@@ -35,8 +35,10 @@
 #include <cub/grid/grid_barrier.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
-
-class GridBarrierLifetime : public ::cub::GridBarrierLifetime
+_CCCL_SUPPRESS_DEPRECATED_PUSH
+// This API will be deprecated, suggest to use hip cooperative groups apis.
+class HIPCUB_DEPRECATED_BECAUSE("Use the APIs from cooperative groups instead") GridBarrierLifetime
+    : public ::cub::GridBarrierLifetime
 {
 public:
     hipError_t HostReset()
@@ -46,9 +48,6 @@ public:
         );
     }
 
-
-
-
     hipError_t Setup(int sweep_grid_size)
     {
         return hipCUDAErrorTohipError(
@@ -56,7 +55,7 @@ public:
         );
     }
 };
-
+_CCCL_SUPPRESS_DEPRECATED_POP
 END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_CUB_GRID_GRID_BARRIER_HPP_
