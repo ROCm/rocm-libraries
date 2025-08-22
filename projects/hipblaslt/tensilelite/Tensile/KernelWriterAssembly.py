@@ -5357,6 +5357,10 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=0, comment="if StaggerUIter is 0 (means StaggerU is 0), skip remove stagger"))
       imod.add(SCBranchSCC1(labelName=labelRemoveSUEnd.getLabelName(), comment="skip remove stagger"))
     imod.add(self.removeStagger(kernel, tPA))
+    if kernel["ProblemType"]["MXBlockA"]:
+      imod.add(self.removeStagger(kernel, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      imod.add(self.removeStagger(kernel, tPB["MX"]))
     imod.add(self.removeStagger(kernel, tPB))
     if kernel["PrefetchGlobalRead"] >= 3:
       imod.add(labelRemoveSUEnd)
@@ -6484,6 +6488,10 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["PrefetchGlobalRead"]:
           module.addComment0("openLoop - reset LRO for possible odd-iter exit")
           module.add(self.localReadResetOffsets(kernel, tPA))
+          if kernel["ProblemType"]["MXBlockA"]:
+            module.add(self.localReadResetOffsets(kernel, tPA["MX"]))
+          if kernel["ProblemType"]["MXBlockB"]:
+            module.add(self.localReadResetOffsets(kernel, tPB["MX"]))
           module.add(self.localReadResetOffsets(kernel, tPB))
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
@@ -6688,11 +6696,15 @@ class KernelWriterAssembly(KernelWriter):
             if kernel["ExpertSchedulingMode"] > 0:
               oddIterCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
             oddIterCode.add(self.localReadSwapOffsets(kernel, False, tPA))
+            if kernel["ProblemType"]["MXBlockA"]:
+              oddIterCode.add(self.localReadSwapOffsets(kernel, False, tPA["MX"]))
           # Generate local read address code only if DirectToVgpr is not enabled
           if not kernel["DirectToVgprB"] and not kernel["StoreSwapAddr"]:
             if kernel["ExpertSchedulingMode"] > 0:
               oddIterCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
             oddIterCode.add(self.localReadSwapOffsets(kernel, False, tPB))
+            if kernel["ProblemType"]["MXBlockB"]:
+              oddIterCode.add(self.localReadSwapOffsets(kernel, False, tPB["MX"]))
 
           if kernel["ProblemType"]["Sparse"]:
             if kernel["DirectToVgprSparseMetadata"]:
@@ -11001,17 +11013,23 @@ class KernelWriterAssembly(KernelWriter):
     tc=tP["tensorChar"]
     if (not self.do["LocalRead%s"%tc]):
       return Module("localReadSwapOffsets (no local read)")
-    if kernel["1LDSBuffer"] or ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
+    if kernel["1LDSBuffer"] or ((tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
       return Module("localReadSwapOffsets (Empty)")
     module = Module("localReadSwapOffsets")
 
     numLra = 0
-    if tP["isA"]:
+    if tc == "A":
       numLra = self.states.a.numVgprLocalReadAddr
-    elif tP["isB"]:
+    elif tc == "B":
       numLra = self.states.b.numVgprLocalReadAddr
-    elif tP["isM"]:
+    elif tc == "Metadata":
       numLra = self.states.m.numVgprLocalReadAddr
+    elif tc == "MXSA":
+      numLra = self.states.mxsa.numVgprLocalReadAddr
+    elif tc == "MXSB":
+      numLra = self.states.mxsb.numVgprLocalReadAddr
+    else:
+      raise Exception(f"unsupport tc %s{tc}")
 
     if self.states.IncLdsBufSwitch:
       # IncLdsBufSwitch case, we do not use xor. Instead, use add and max check for round back
@@ -11068,9 +11086,11 @@ class KernelWriterAssembly(KernelWriter):
   # This is called from the tail loop to reset read offsets?
   ##############################################################################
   def localReadResetOffsets(self, kernel, tP):
-    tc=tP["tensorChar"]
-    if not self.do["LocalRead%s"%tc]: return Module("localReadResetOffsets (no local read)")
-    if kernel["1LDSBuffer"] or ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
+    tc = tP["tensorChar"]
+    if not self.do["LocalRead%s"%tc]:
+      return Module("localReadResetOffsets (no local read)")
+    # no local read code if DirectToVgpr is enabled
+    if kernel["1LDSBuffer"] or ((tP["isA"] or tP["isB"] or tP["isMXSA"] or tP["isMXSB"]) and kernel["DirectToVgpr%s"%tc]):
       return Module("localReadResetOffsets (Empty)")
     module = Module("localReadResetOffsets")
     if tP["localReadInstruction"].numOffsets == 1:
@@ -11084,8 +11104,14 @@ class KernelWriterAssembly(KernelWriter):
       numLra = self.states.a.numVgprLocalReadAddr
     elif tP["isB"]:
       numLra = self.states.b.numVgprLocalReadAddr
+    elif tP["isMXSA"]:
+      numLra = self.states.mxsa.numVgprLocalReadAddr
+    elif tP["isMXSB"]:
+      numLra = self.states.mxsb.numVgprLocalReadAddr
     elif tP["isM"]:
       numLra = self.states.m.numVgprLocalReadAddr
+    else:
+      raise Exception(f"unsupport tc %s{tc}")
 
     if self.states.IncLdsBufSwitch:
       # 3 or more LDS block case, round back to 0 and set LocalReadAddrOrig to LocalReadAddr
@@ -11170,13 +11196,21 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def localReadInc(self, kernel, iui, tP):
     tc = tP["tensorChar"]
-    if (not self.do["LocalRead%s" % tc]) or ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
+    if (not self.do["LocalRead%s" % tc]) or ((tc in ("A", "MXSA", "B", "MXSB")) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
       return Module("localReadInc (Empty)")
 
     module = Module("localReadInc")
 
     offsetInc = 0
     LdsPad = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
+
+    if kernel["EnableMatrixInstruction"]:
+      # TODO: remove ceil
+      matrixInstK = kernel["MatrixInstK"]
+      if tc == "MXSA":
+        matrixInstK = ceil(kernel["MatrixInstK"] / kernel["ProblemType"]["MXBlockA"])
+      elif tc == "MXSB":
+        matrixInstK = ceil(kernel["MatrixInstK"] / kernel["ProblemType"]["MXBlockB"])
 
     if self.states.inTailLoop:
       if kernel["UseDotInstruction"]:
@@ -11187,9 +11221,11 @@ class KernelWriterAssembly(KernelWriter):
         inc = (kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad) * tP["bpeDS"]
         comment = " ((MT+PAD)*bpeDS)"
       if kernel["EnableMatrixInstruction"]:
-        matrixInstK = kernel["MatrixInstK"]
         if kernel["UnrollMajorLDS%s" % tc]:
-          inc = tP["bpeDS"] * max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB)
+          if tc in ("MXSA", "MXSB"):
+            inc = tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
+          else:
+            inc = tP["bpeDS"] * max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB)
           comment = " (bpeDS)"
         inc *= matrixInstK
         if kernel["ProblemType"]["Sparse"]:
@@ -11215,14 +11251,19 @@ class KernelWriterAssembly(KernelWriter):
 
       with self.allocTmpSgpr(1) as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
-        module.add(SMovB32(dst=sgpr(tmpSgpr), src=(int(inc + padd)), comment="inc"))
+        module.add(SMovB32(dst=sgpr(tmpSgpr), src=int(inc+padd), comment="inc"))
         numLra = 0
         if tP["isA"]:
           numLra = self.states.a.numVgprLocalReadAddr
         elif tP["isB"]:
           numLra = self.states.b.numVgprLocalReadAddr
+        elif tP["isMXSA"]:
+          numLra = self.states.mxsa.numVgprLocalReadAddr
+        elif tP["isMXSB"]:
+          numLra = self.states.mxsb.numVgprLocalReadAddr
         elif tP["isM"]:
           numLra = self.states.m.numVgprLocalReadAddr
+
         for i in range(numLra):
           module.add(VAddCOU32(
               dst=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], i)), \
@@ -11234,7 +11275,10 @@ class KernelWriterAssembly(KernelWriter):
       if tP["localReadInstruction"].numOffsets == 1:
         if kernel["EnableMatrixInstruction"]:
           if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
-            offsetInc = kernel["MatrixInstK"] * max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB)
+            if tc in ("MXSA", "MXSB"):
+              offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
+            else:
+              offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedA, self.states.numReadsIterCoalescedB)
             if kernel["ProblemType"]["Sparse"]:
               if (kernel["ProblemType"]["Sparse"] == 2 and tc == "B") or (kernel["ProblemType"]["Sparse"] == 1 and tc == "A"):
                 offsetInc //= 2
@@ -11263,6 +11307,8 @@ class KernelWriterAssembly(KernelWriter):
                   offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadA"]-kernel["MIInputPerThreadA"]*(lrvw//kernel["MIInputPerThreadA"]-1))
                 if sparseA:
                   offsetInc //= 2
+            elif tc in ("MXSA", "MXSB"):
+              offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (matrixInstK)
             elif tc == "Metadata":
               lrvw = kernel["LocalReadVectorWidth"] // 8
               if lrvw < kernel["MIInputPerThreadMetadata"]:
@@ -11274,7 +11320,7 @@ class KernelWriterAssembly(KernelWriter):
               else:
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadMetadata"]-kernel["MIInputPerThreadMetadata"]*(lrvw//kernel["MIInputPerThreadMetadata"]-1))
                 offsetInc //= 8
-            else:
+            elif tc == "B":
               sparseB = kernel["ProblemType"]["Sparse"] == 2
               lrvw = kernel["LocalReadVectorWidth"] // (2 if sparseB else 1)
               wlr = lrvw//kernel["MIInputPerThreadB"]
@@ -11299,15 +11345,15 @@ class KernelWriterAssembly(KernelWriter):
 
                 if sparseB:
                   offsetInc //= 2
+            else:
+              raise Exception(f"unsupport tc %s{tc}")
         else:
           # dot2
           offsetInc = self.states.lrvwUnrollA * kernel["NumWaveSplitK"] if kernel["UseDotInstruction"] else (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad)
         tP["localReadOffset"] += offsetInc
         module.addComment0("N/A, lro->%d" % tP["localReadOffset"])
-        if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-          module.addComment0("self.localReadDoCntA %d self.localReadDoCntB %d self.localReadDoCntMetadata %d" % (self.states.localReadDoCntA,self.states.localReadDoCntB, self.states.localReadDoCntMetadata))
-        else:
-          module.addComment0("self.localReadDoCntA %d self.localReadDoCntB %d" % (self.states.localReadDoCntA,self.states.localReadDoCntB))
+        module.addComment0("localReadDoCntA %d localReadDoCntMXSA %d localReadDoCntB %d localReadDoCntMXSB %d localReadDoCntM %d" \
+            % (self.states.localReadDoCntA, self.states.localReadDoCntMXSA, self.states.localReadDoCntB, self.states.localReadDoCntMXSB, self.states.localReadDoCntMetadata))
       else:
         inc = (kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad)
         numLra = 0
@@ -11315,6 +11361,10 @@ class KernelWriterAssembly(KernelWriter):
           numLra = self.states.a.numVgprLocalReadAddr
         elif tP["isB"]:
           numLra = self.states.b.numVgprLocalReadAddr
+        elif tP["isMXSA"]:
+          numLra = self.states.mxsa.numVgprLocalReadAddr
+        elif tP["isMXSB"]:
+          numLra = self.states.mxsb.numVgprLocalReadAddr
         elif tP["isM"]:
           numLra = self.states.m.numVgprLocalReadAddr
         for i in range(numLra):
@@ -11350,15 +11400,27 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def saveLocalPointers(self, kernel, tPA, tPB):
     tPA["savedLocalReadOffset"] = tPA["localReadOffset"]
+    if kernel["ProblemType"]["MXBlockA"]:
+      tPA["MX"]["savedLocalReadOffset"] = tPA["MX"]["localReadOffset"]
+    if kernel["ProblemType"]["MXBlockB"]:
+      tPB["MX"]["savedLocalReadOffset"] = tPB["MX"]["localReadOffset"]
     tPB["savedLocalReadOffset"] = tPB["localReadOffset"]
     tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       tPM["savedLocalReadOffset"] = tPM["localReadOffset"]
     self.states.savedLocalReadDoCntA = self.states.localReadDoCntA
+    if kernel["ProblemType"]["MXBlockA"]:
+      self.states.savedLocalReadDoCntMXSA = self.states.localReadDoCntMXSA
+    if kernel["ProblemType"]["MXBlockB"]:
+      self.states.savedLocalReadDoCntMXSB = self.states.localReadDoCntMXSB
     self.states.savedLocalReadDoCntB = self.states.localReadDoCntB
     self.states.savedLocalReadDoCntMetadata = self.states.localReadDoCntMetadata
     if kernel["ExpandPointerSwap"]:
       tPA["savedLocalWriteSwapByteOffset"] = tPA["localWriteSwapByteOffset"]
+      if kernel["ProblemType"]["MXBlockA"]:
+        tPA["MX"]["savedLocalWriteSwapByteOffset"] = tPA["MX"]["localWriteSwapByteOffset"]
+      if kernel["ProblemType"]["MXBlockB"]:
+        tPB["MX"]["savedLocalWriteSwapByteOffset"] = tPB["MX"]["localWriteSwapByteOffset"]
       tPB["savedLocalWriteSwapByteOffset"] = tPB["localWriteSwapByteOffset"]
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         tPM["savedLocalWriteSwapByteOffset"] = tPM["localWriteSwapByteOffset"]
@@ -11368,15 +11430,27 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def restoreLocalPointers(self, kernel, tPA, tPB):
     tPA["localReadOffset"] = tPA["savedLocalReadOffset"]
+    if kernel["ProblemType"]["MXBlockA"]:
+      tPA["MX"]["localReadOffset"] = tPA["MX"]["savedLocalReadOffset"]
+    if kernel["ProblemType"]["MXBlockB"]:
+      tPB["MX"]["localReadOffset"] = tPB["MX"]["savedLocalReadOffset"]
     tPB["localReadOffset"] = tPB["savedLocalReadOffset"]
     tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       tPM["localReadOffset"] = tPM["savedLocalReadOffset"]
     self.states.localReadDoCntA = self.states.savedLocalReadDoCntA
+    if kernel["ProblemType"]["MXBlockA"]:
+      self.states.localReadDoCntMXSA = self.states.savedLocalReadDoCntMXSA
+    if kernel["ProblemType"]["MXBlockB"]:
+      self.states.localReadDoCntMXSB = self.states.savedLocalReadDoCntMXSB
     self.states.localReadDoCntB = self.states.savedLocalReadDoCntB
     self.states.localReadDoCntMetadata = self.states.savedLocalReadDoCntMetadata
     if kernel["ExpandPointerSwap"]:
       tPA["localWriteSwapByteOffset"] = tPA["savedLocalWriteSwapByteOffset"]
+      if kernel["ProblemType"]["MXBlockA"]:
+        tPA["MX"]["localWriteSwapByteOffset"] = tPA["MX"]["savedLocalWriteSwapByteOffset"]
+      if kernel["ProblemType"]["MXBlockB"]:
+        tPB["MX"]["localWriteSwapByteOffset"] = tPB["MX"]["savedLocalWriteSwapByteOffset"]
       tPB["localWriteSwapByteOffset"] = tPB["savedLocalWriteSwapByteOffset"]
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         tPM["localWriteSwapByteOffset"] = tPM["savedLocalWriteSwapByteOffset"]

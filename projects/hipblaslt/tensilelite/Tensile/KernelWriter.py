@@ -299,6 +299,8 @@ class StateValues:
   localReadDoCntMXSB: int                = 0
   localReadDoCntMetadata: int            = 0
   savedLocalReadDoCntA: int              = 0
+  savedLocalReadDoCntMXSA: int           = 0
+  savedLocalReadDoCntMXSB: int           = 0
   savedLocalReadDoCntB: int              = 0
   savedLocalReadDoCntMetadata: int       = 0
 
@@ -508,6 +510,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Only works if the problem uses full tiles (no edges)
     # Mismatches will assert (generate GPUVM fault)
     self.db["CheckValue1A"] = self.debugConfig.enableDebugA
+    self.db["CheckValue1MXSA"] = False
+    self.db["CheckValue1MXSB"] = False
     self.db["CheckValue1B"] = self.debugConfig.enableDebugB
     self.db["CheckValue1Metadata"] = False
     # Check value in C matrix.
@@ -2754,16 +2758,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
       needNextBufLR = not needExtraDTVLocalReadDo
       hasLiveLdsData = hasLiveLdsData or needExtraDTVLocalReadDo
       # reads for current loop are done in previous iteration because of wider local read
-      doReadA = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadA - self.states.numItersPLR)
-      doReadB = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadB - self.states.numItersPLR)
-      doReadM = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadMetadata - self.states.numItersPLR)
+      doReadA    = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadA - self.states.numItersPLR)
+      doReadMXSA = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadMXSA - self.states.numItersPLR)
+      doReadMXSB = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadMXSB - self.states.numItersPLR)
+      doReadB    = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadB - self.states.numItersPLR)
+      doReadM    = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadMetadata - self.states.numItersPLR)
       if kernel["ForceUnrollSubIter"]:
         doReadA = 1 if u == 0 else 0
+        doReadMXSA = 1 if u == 0 else 0
+        doReadMXSB = 1 if u == 0 else 0
         doReadB = 1 if u == 0 else 0
         doReadM = 1 if u == 0 else 0
       # reads for next loop
       doNext = uNext > localWriteEndIter
       doReadA = doReadA or (hasLiveLdsData and doNext)
+      doReadMXSA = doReadMXSA or (hasLiveLdsData and doNext)
+      doReadMXSA = doReadMXSA and kernel["ProblemType"]["MXBlockA"]
+      doReadMXSB = doReadMXSB or (hasLiveLdsData and doNext)
+      doReadMXSB = doReadMXSB and kernel["ProblemType"]["MXBlockB"]
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
@@ -2773,8 +2785,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         usePLRPackB = self.states.doFullPackCodePrefetch and (doNext or kernel["ForceUnrollSubIter"])
         usePLRPackBNext = usePLRPackB and (kernel["ForceUnrollSubIter"] and u == 0)
         doReadA = doReadA and iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]
+        doReadMXSA = doReadMXSA and iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]
+        doReadMXSB = doReadMXSB and iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]
         doReadB = doReadB and iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]
         doReadM = doReadM and iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]
+        if (doReadA or doReadB or doReadM or doReadMXSA or doReadMXSB) and kernel["ForceUnrollSubIter"]:
+          pack[1] = Module()
         if doReadA:
           localReads.addComment1("local read a")
           bufferIdx = plrIdx*self.states.numIterPerCoalescedReadA
@@ -2796,6 +2812,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
           else:
             pack[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
+          if kernel["ForceUnrollSubIter"]:
+            pack[1].add(packCodeA)
+        if doReadMXSA:
+          localReads.addComment1("local read mxsa")
+          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadMXSA
+          if self.states.packDTVA or self.states.convDTVA:
+            # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
+            bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSA + vregSetIdxLR * kernel["LoopIters"]
+          localReadCodeMXSA, packCodeMXSA = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedMXSA, 0, tensorParametersA["MX"])
+          if needNextBufLR:
+            localReads.add(localReadCodeMXSA)
+          pack[plrIdx*self.states.numIterPerCoalescedReadMXSA].add(packCodeMXSA)
+          if kernel["ForceUnrollSubIter"]:
+            pack[1].add(packCodeMXSA)
         if doReadM:
           localReads.addComment1("local read metadata")
           localReadCodeM, packCodeM, packPreM = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMetadata, iui*self.states.numReadsIterCoalescedMetadata, 0, tPM)
@@ -2804,6 +2834,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
           pack[plrIdx*self.states.numIterPerCoalescedReadMetadata].add(packCodeM)
           if kernel["ForceUnrollSubIter"]:
             pack[1].add(packCodeM)
+        if doReadMXSB:
+          localReads.addComment1("local read mxsb")
+          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadMXSB
+          if self.states.packDTVB or self.states.convDTVB:
+            # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
+            bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSB + vregSetIdxLR * kernel["LoopIters"]
+          localReadCodeMXSB, packCodeMXSB = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedMXSB, 0, tensorParametersB["MX"])
+          if needNextBufLR:
+            localReads.add(localReadCodeMXSB)
+          pack[plrIdx*self.states.numIterPerCoalescedReadMXSB].add(packCodeMXSB)
+          if kernel["ForceUnrollSubIter"]:
+            pack[1].add(packCodeMXSB)
         if doReadB:
           localReads.addComment1("local read b")
           bufferIdx = plrIdx*self.states.numIterPerCoalescedReadB
@@ -2832,9 +2874,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if doReadA:
             localReads.addComment1("local read increment a")
             localReads.add(self.localReadInc(kernel, iui, tensorParametersA))
+          if doReadMXSA:
+            localReads.addComment1("local read increment mxsa")
+            localReads.add(self.localReadInc(kernel, iui, tensorParametersA["MX"]))
           if doReadM:
             localReads.addComment1("local read increment metadata")
             localReads.add(self.localReadInc(kernel, iui, tPM))
+          if doReadMXSB:
+            localReads.addComment1("local read increment mxsb")
+            localReads.add(self.localReadInc(kernel, iui, tensorParametersB["MX"]))
           if doReadB:
             localReads.addComment1("local read increment b")
             localReads.add(self.localReadInc(kernel, iui, tensorParametersB))
@@ -2875,6 +2923,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
             if not kernel["ForceUnrollSubIter"] or (doReadA and (u<localWriteEndIter)):
               pointerLRCode.addComment1("local read swap offsets a")
               pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA))
+            if kernel["ProblemType"]["MXBlockA"] and (not kernel["ForceUnrollSubIter"] or (doReadMXSA and (u<localWriteEndIter))):
+              pointerLRCode.addComment1("local read swap offsets mxsa")
+              pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA["MX"]))
+            if kernel["ProblemType"]["MXBlockB"] and (not kernel["ForceUnrollSubIter"] or (doReadMXSB and (u<localWriteEndIter))):
+              pointerLRCode.addComment1("local read swap offsets mxsb")
+              pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB["MX"]))
             if not kernel["ForceUnrollSubIter"] or (doReadB and (u<localWriteEndIter)):
               pointerLRCode.addComment1("local read swap offsets b")
               pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB))
@@ -2886,6 +2940,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isResetLroIter: # ResetLroIter
           pointerLRCode.addComment1("local read init pointers a")
           pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))
+          if kernel["ProblemType"]["MXBlockA"]:
+            pointerLRCode.addComment1("local read init pointers mxsa")
+            pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA["MX"]))
+          if kernel["ProblemType"]["MXBlockB"]:
+            pointerLRCode.addComment1("local read init pointers mxsb")
+            pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"]))
           pointerLRCode.addComment1("local read init pointers b")
           pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
@@ -3211,6 +3271,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(localReadCodeA)
             pack[plrIdx].add(packPreA) # no packPre scheduling for PGR0
             pack[plrIdx].add(packCodeA)
+          if kernel["ProblemType"]["MXBlockA"]:
+            if iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]:
+              module.addComment1("prefetch local mxsa")
+              localReadCodeMXSA, packCodeMXSA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSA, iui*self.states.numReadsIterCoalescedMXSA, 0, tensorParametersA["MX"])
+              module.add(localReadCodeMXSA)
+              pack[plrIdx].add(packCodeMXSA)
+          if kernel["ProblemType"]["MXBlockB"]:
+            if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
+              module.addComment1("prefetch local mxsb")
+              localReadCodeMXSB, packCodeMXSB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSB, iui*self.states.numReadsIterCoalescedMXSB, 0, tensorParametersB["MX"])
+              module.add(localReadCodeMXSB)
+              pack[plrIdx].add(packCodeMXSB)
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             if iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]: # no local read code if DirectToVgpr is enabled
               module.addComment1("prefetch local metadata")
@@ -3228,6 +3300,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]:
             module.addComment0("local read increment a")
             module.add(self.localReadInc(kernel, iui, tensorParametersA))
+          if kernel["ProblemType"]["MXBlockA"]:
+            if iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]:
+              module.addComment0("local read increment mxsa")
+              module.add(self.localReadInc(kernel, iui, tensorParametersA["MX"]))
+          if kernel["ProblemType"]["MXBlockB"]:
+            if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
+              module.addComment0("local read increment mxsb")
+              module.add(self.localReadInc(kernel, iui, tensorParametersB["MX"]))
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             numReadsIterCoalesced = self.states.numReadsIterCoalescedB if kernel["ProblemType"]["Sparse"] == 2 else self.states.numReadsIterCoalescedA
             if iui*numReadsIterCoalesced < kernel["InnerUnroll"]:
@@ -3237,7 +3317,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.addComment0("local read increment b")
             module.add(self.localReadInc(kernel, iui, tensorParametersB))
 
-    pflr     = self.states.numItersPLR  # how many pf already done above
+    pflr = self.states.numItersPLR  # how many pf already done above
 
     # Store instruction streams across all iterations
     MfmaCodeAllIters = Module()
@@ -3348,6 +3428,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       localReads = Module()
       localReadsA = Module()
+      localReadsMXSA = Module()
+      localReadsMXSB = Module()
       localReadsB = Module()
       localReadsM = Module()
 
@@ -3360,18 +3442,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       hasLiveLdsData = kernel["PrefetchGlobalRead"]
       # reads for current loop are done in previous iteration because of wider local read
-      doReadA = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadA - self.states.numItersPLR)
-      doReadB = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadB - self.states.numItersPLR)
-      doReadM = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadMetadata - self.states.numItersPLR)
+      doReadA    = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadA - self.states.numItersPLR)
+      doReadMXSA = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadMXSA - self.states.numItersPLR)
+      doReadMXSB = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadMXSB - self.states.numItersPLR)
+      doReadB    = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadB - self.states.numItersPLR)
+      doReadM    = (u < kernel["LoopIters"]/self.states.numIterPerCoalescedReadMetadata - self.states.numItersPLR)
 
       if kernel["ForceUnrollSubIter"]:
         doReadA = 1 if u == 0 else 0
+        doReadMXSA = 1 if u == 0 else 0
+        doReadMXSB = 1 if u == 0 else 0
         doReadB = 1 if u == 0 else 0
         doReadM = 1 if u == 0 else 0
 
       # reads for next loop
       doNext = uNext > localWriteEndIter
       doReadA = doReadA or (hasLiveLdsData and doNext)
+      doReadMXSA = doReadMXSA or (hasLiveLdsData and doNext)
+      doReadMXSA = doReadMXSA and kernel["ProblemType"]["MXBlockA"]
+      doReadMXSB = doReadMXSB or (hasLiveLdsData and doNext)
+      doReadMXSB = doReadMXSB and kernel["ProblemType"]["MXBlockB"]
       doReadB = doReadB or (hasLiveLdsData and doNext)
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
@@ -3381,8 +3471,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         usePLRPackB = self.states.doFullPackCodePrefetch and (doNext or kernel["ForceUnrollSubIter"])
         usePLRPackBNext = usePLRPackB and (kernel["ForceUnrollSubIter"] and u == 0)
         doReadA = doReadA and iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]
+        doReadMXSA = doReadMXSA and iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]
+        doReadMXSB = doReadMXSB and iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]
         doReadB = doReadB and iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]
         doReadM = doReadM and iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]
+        if (doReadA or doReadMXSA or doReadMXSB or doReadB or doReadM) and kernel["ForceUnrollSubIter"]:
+          pack[1] = Module()
         if doReadA:
           localReads.addComment1("local read a")
           bufferIdx = plrIdx*self.states.numIterPerCoalescedReadA
@@ -3409,6 +3503,32 @@ class KernelWriter(metaclass=abc.ABCMeta):
             LRCodeAAllIters[uIdx].add(localReadCodeA)
             PackCodeAAllIters[uIdx].add(packPreA)
             PackCodeAAllIters[uIdx].add(packCodeA)
+          if kernel["ForceUnrollSubIter"]:
+            pack[1].add(packCodeA)
+        if doReadMXSA:
+          localReads.addComment1("local read maxa")
+          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadMXSA
+          if self.states.packDTVA or self.states.convDTVA:
+            # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
+            bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSA + vregSetIdxLR * kernel["LoopIters"]
+          localReadCodeMXSA, packCodeMXSA = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedMXSA, 0, tensorParametersA["MX"])
+          localReads.add(localReadCodeMXSA)
+          localReadsMXSA.add(localReadCodeMXSA)
+          pack[plrIdx*self.states.numIterPerCoalescedReadMXSA].add(packCodeMXSA)
+          if kernel["ForceUnrollSubIter"]:
+            pack[1].add(packCodeMXSA)
+        if doReadMXSB:
+          localReads.addComment1("local read mxsb")
+          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadMXSB
+          if self.states.packDTVB or self.states.convDTVB:
+            # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
+            bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSB + vregSetIdxLR * kernel["LoopIters"]
+          localReadCodeMXSB, packCodeMXSB = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedMXSB, 0, tensorParametersB["MX"])
+          localReads.add(localReadCodeMXSB)
+          localReadsMXSB.add(localReadCodeMXSB)
+          pack[plrIdx*self.states.numIterPerCoalescedReadMXSB].add(packCodeMXSB)
+          if kernel["ForceUnrollSubIter"]:
+            pack[1].add(packCodeMXSB)
         if doReadM:
           localReads.addComment1("local read metadata")
           plrIdxM = plrIdx*self.states.numIterPerCoalescedReadMetadata
@@ -3453,6 +3573,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if doReadA:
             localReads.addComment1("local read increment a")
             localReads.add(self.localReadInc(kernel, iui, tensorParametersA))
+          if doReadMXSA:
+            localReads.addComment1("local read increment mxsa")
+            localReads.add(self.localReadInc(kernel, iui, tensorParametersA["MX"]))
+          if doReadMXSB:
+            localReads.addComment1("local read increment mxsb")
+            localReads.add(self.localReadInc(kernel, iui, tensorParametersB["MX"]))
           if doReadM:
             localReads.addComment1("local read increment metadata")
             localReads.add(self.localReadInc(kernel, iui, tPM))
@@ -3489,6 +3615,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # local write for next iter, used to have local writes here
           pointerLWCode.addComment1("local write swap offsets a")
           pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
+          if kernel["ProblemType"]["MXBlockA"]:
+            pointerLWCode.addComment1("local write swap offsets mxsa")
+            pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+          if kernel["ProblemType"]["MXBlockB"]:
+            pointerLWCode.addComment1("local write swap offsets mxsb")
+            pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
           pointerLWCode.addComment1("local write swap offsets b")
           pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
           if kernel["UseCustomMainLoopSchedule"]:
@@ -3504,6 +3636,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
             pointerLRCode.add(self.localReadSwapOffsets(kernel, expand, tensorParametersA))
             if kernel["UseCustomMainLoopSchedule"]:
               LRSwapAAllIters.add(self.localReadSwapOffsets(kernel, expand, tensorParametersA))
+          if kernel["ProblemType"]["MXBlockA"] and (not kernel["ForceUnrollSubIter"] or (doReadMXSA and (u<localWriteEndIter))):
+            pointerLRCode.addComment1("local read swap offsets mxsa")
+            pointerLRCode.add(self.localReadSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+          if kernel["ProblemType"]["MXBlockB"] and (not kernel["ForceUnrollSubIter"] or (doReadMXSB and (u<localWriteEndIter))):
+            pointerLRCode.addComment1("local read swap offsets mxsb")
+            pointerLRCode.add(self.localReadSwapOffsets(kernel, expand, tensorParametersB["MX"]))
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and\
              (not kernel["ForceUnrollSubIter"] or (doReadM and (u<localWriteEndIter))):
             pointerLRCode.addComment1("local read swap offsets metadata")
@@ -3518,6 +3656,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if isResetLroIter: # ResetLroIter
         pointerLRCode.addComment1("local read init pointers a")
         pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))
+        if kernel["ProblemType"]["MXBlockA"]:
+          pointerLRCode.addComment1("local read init pointers mxsa")
+          pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA["MX"]))
+        if kernel["ProblemType"]["MXBlockB"]:
+          pointerLRCode.addComment1("local read init pointers mxsb")
+          pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"]))
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
           pointerLRCode.addComment1("local read init pointers metadata")
           pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
@@ -3832,6 +3976,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   packPrePrefetchA.add(packCodeA)
                 else:
                   pack[plrIdx].add(packCodeA)
+              if kernel["ProblemType"]["MXBlockA"]:
+                if iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]:
+                  module.addComment1("local read prefetch mxsa")
+                  localReadCodeMXSA, packCodeMXSA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSA, iui*self.states.numReadsIterCoalescedMXSA, espi, tensorParametersA["MX"])
+                  module.add(localReadCodeMXSA)
+                  pack[plrIdx].add(packCodeMXSA)
+              if kernel["ProblemType"]["MXBlockB"]:
+                if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
+                  module.addComment1("local read prefetch mxsb")
+                  localReadCodeMXSB, packCodeMXSB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSB, iui*self.states.numReadsIterCoalescedMXSB, espi, tensorParametersB["MX"])
+                  module.add(localReadCodeMXSB)
+                  pack[plrIdx].add(packCodeMXSB)
               if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
                 if iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]:
                   module.addComment1("local read prefetch metadata")
@@ -3858,6 +4014,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]):
                 module.addComment1("local read inc a")
                 module.add(self.localReadInc(kernel, iui, tensorParametersA))
+              if kernel["ProblemType"]["MXBlockA"] and (not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"])):
+                if iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]:
+                  module.addComment1("local read inc mxsa")
+                  module.add(self.localReadInc(kernel, iui, tensorParametersA["MX"]))
+              if kernel["ProblemType"]["MXBlockB"] and (not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"])):
+                if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
+                  module.addComment1("local read inc mxsb")
+                  module.add(self.localReadInc(kernel, iui, tensorParametersB["MX"]))
               if not kernel["ForceUnrollSubIter"] and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]):
                 if iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]: # no local read code if DirectToVgpr is enabled
                   module.addComment1("local read inc metadata")
@@ -4894,13 +5058,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numReadsIterCoalescedB = self.states.lrvwUnrollB // kernel["NumDotElements"] if kernel["UseDotInstruction"] else 1
     self.states.numIterPerCoalescedReadA = max(1,self.states.numReadsIterCoalescedA//kernel["InnerUnroll"])
     self.states.numIterPerCoalescedReadB = max(1,self.states.numReadsIterCoalescedB//kernel["InnerUnroll"])
-    if kernel["ProblemType"]["MXBlockA"]:
-      self.states.numReadsIterCoalescedMXSA  = 1
-      self.states.numIterPerCoalescedReadMXSA = max(1, self.states.numReadsIterCoalescedMXSA // kernel["InnerUnroll"])
-    if kernel["ProblemType"]["MXBlockB"]:
-      self.states.numReadsIterCoalescedMXSB  = 1
-      self.states.numIterPerCoalescedReadMXSB = max(1, self.states.numReadsIterCoalescedMXSB // kernel["InnerUnroll"])
-
+    self.states.numReadsIterCoalescedMXSA  = 1
+    self.states.numIterPerCoalescedReadMXSA = max(1, self.states.numReadsIterCoalescedMXSA // kernel["InnerUnroll"])
+    self.states.numReadsIterCoalescedMXSB  = 1
+    self.states.numIterPerCoalescedReadMXSB = max(1, self.states.numReadsIterCoalescedMXSB // kernel["InnerUnroll"])
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       if kernel["EnableMatrixInstruction"]:
@@ -5819,9 +5980,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
     def GNLCOInit(tc):
-      abmatrixinfo = self.states.a if tc == 'A' else self.states.b
-      if kernel["DirectToLds%s"%tc] and kernel["UseGeneralizedNLCOne%s"%tc]:
+      abmatrixinfo = self.states.a
+      if tc == 'A':
+        abmatrixinfo = self.states.a
+      elif tc == 'B':
+        abmatrixinfo = self.states.b
+      elif tc == 'MXSA':
+        abmatrixinfo = self.states.mxsa
+      elif tc == 'MXSB':
+        abmatrixinfo = self.states.mxsb
+      elif tc == 'Metadata':
+        abmatrixinfo = self.states.m
 
+      if (tc in ("A", "B")) and kernel["DirectToLds%s"%tc] and kernel["UseGeneralizedNLCOne%s"%tc]:
         isMixedPrec = (kernel["ProblemType"]["DataTypeA"].numBytes() != kernel["ProblemType"]["DataTypeB"].numBytes())
         lrvw = kernel["LocalReadVectorWidth"]
         grvw = kernel["GlobalReadVectorWidth%c"%tc]
@@ -5865,6 +6036,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     GNLCOInit('A')
     GNLCOInit('B')
+    GNLCOInit('MXSA')
+    GNLCOInit('MXSB')
+    GNLCOInit('Metadata')
 
     numVgprAddressDbg = self.states.rpga if self.debugConfig.debugKernel else 0
 
