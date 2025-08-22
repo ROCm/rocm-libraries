@@ -509,7 +509,7 @@ namespace rocRoller
     }
 
     template <>
-    inline void Component::ComponentFactory<
+    void Component::ComponentFactory<
         BinaryArithmeticGenerator<Expression::SRConvert<DataType::FP8>>>::registerImplementations()
     {
         Component::ComponentFactory<BinaryArithmeticGenerator<Expression::SRConvert<
@@ -517,7 +517,7 @@ namespace rocRoller
     }
 
     template <>
-    inline void Component::ComponentFactory<
+    void Component::ComponentFactory<
         BinaryArithmeticGenerator<Expression::SRConvert<DataType::BF8>>>::registerImplementations()
     {
         Component::ComponentFactory<BinaryArithmeticGenerator<Expression::SRConvert<

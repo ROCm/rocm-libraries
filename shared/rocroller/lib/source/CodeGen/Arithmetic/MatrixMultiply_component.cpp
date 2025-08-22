@@ -30,7 +30,7 @@
 namespace rocRoller
 {
     template <>
-    inline void Component::ComponentFactory<
+    void Component::ComponentFactory<
         InstructionGenerators::MatrixMultiply>::registerImplementations()
     {
         Component::ComponentFactory<InstructionGenerators::MatrixMultiply>::registerComponent<
