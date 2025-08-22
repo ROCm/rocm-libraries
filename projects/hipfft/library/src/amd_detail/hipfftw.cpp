@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "hipfft/hipfftw.h"
+#include "../../../shared/environment.h"
 #include "rocfft/rocfft.h"
 #include <algorithm>
 #include <array>
@@ -31,9 +32,6 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
-#ifdef WIN32
-#include <windows.h> // GetEnvironmentVariableA
-#endif
 
 // anonymous namespace for implementation details
 namespace
@@ -75,7 +73,7 @@ namespace
     struct hipfftw_runtime_error : public std::runtime_error
     {
         const hipError_t hip_error;
-        hipfftw_runtime_error(const std::string& info, hipError_t hip_status = hipSuccess)
+        hipfftw_runtime_error(const std::string& info, hipError_t hip_status)
             : std::runtime_error::runtime_error(info)
             , hip_error(hip_status)
 
@@ -188,7 +186,6 @@ namespace
     {
         H2D = static_cast<std::underlying_type_t<hipMemcpyKind>>(hipMemcpyHostToDevice),
         D2H = static_cast<std::underlying_type_t<hipMemcpyKind>>(hipMemcpyDeviceToHost),
-        D2D = static_cast<std::underlying_type_t<hipMemcpyKind>>(hipMemcpyDeviceToDevice),
         NONE
     };
     enum class hipfftw_memcpy_direction
@@ -270,17 +267,23 @@ namespace
         }
 
         template <hipfftw_memcpy_direction dir>
-        hipfftw_memcpy_kind get_copy_kind(int deviceId) const
+        hipfftw_memcpy_kind get_copy_kind(int plan_device_id) const
         {
+            if(attributes.type != hipMemoryType::hipMemoryTypeUnregistered
+               && attributes.device != plan_device_id)
+            {
+                throw hipfftw_invalid_arg(
+                    "if using registered data allocation for I/O, hipfftw requires them to be "
+                    "visible to the device used at plan creation.");
+            }
             static_assert(dir == hipfftw_memcpy_direction::TO
                           || dir == hipfftw_memcpy_direction::FROM);
             switch(attributes.type)
             {
-            case hipMemoryType::hipMemoryTypeManaged:
-                return hipfftw_memcpy_kind::NONE; // the runtime is supposed to manage it
+            case hipMemoryType::hipMemoryTypeManaged: // the runtime is supposed to manage it
+                [[fallthrough]];
             case hipMemoryType::hipMemoryTypeDevice:
-                return attributes.device != deviceId ? hipfftw_memcpy_kind::D2D
-                                                     : hipfftw_memcpy_kind::NONE;
+                return hipfftw_memcpy_kind::NONE;
             case hipMemoryType::hipMemoryTypeUnregistered:
             case hipMemoryType::hipMemoryTypeHost:
                 // TODO: check if device is APU and return false (systematically?) in that case
@@ -342,45 +345,21 @@ namespace
     }
 
     // helper routine for assigning a device allocation to an owning data_ptr_bundle
+    // (the current device is used)
     void hipfftw_set_device_allocation(hipfftw_data_ptr_bundle<hipfftw_owns_it>& bundle,
                                        size_t                                    alloc_size,
-                                       const std::string&                        buffer_qualifier,
-                                       int                                       desired_device_id)
+                                       const std::string&                        buffer_qualifier)
     {
         void* temp = nullptr;
         if(alloc_size > 0)
         {
-            std::ostringstream info;
-            const auto         original_device_id = hipfftw_get_current_device_id();
-            hipError_t         hip_status         = hipSuccess;
-            // set device id to the desired one
-            if(original_device_id != desired_device_id)
-            {
-                hip_status = hipSetDevice(desired_device_id);
-                if(hip_status != hipSuccess)
-                {
-                    info << "the device ID could not be set temporarily to " << desired_device_id
-                         << " when creating the " << buffer_qualifier << " buffer.";
-                    throw hipfftw_runtime_error(info.str(), hip_status);
-                }
-            }
-            hip_status = hipMalloc(&temp, alloc_size);
+            const auto hip_status = hipMalloc(&temp, alloc_size);
             if(hip_status != hipSuccess || !temp)
             {
+                std::ostringstream info;
                 info << "device memory could not be allocated for the " << buffer_qualifier
                      << " buffer.";
                 throw hipfftw_bad_gpu_alloc(info.str(), alloc_size, hip_status);
-            }
-            // reset device id to what it was
-            if(original_device_id != desired_device_id)
-            {
-                hip_status = hipSetDevice(original_device_id);
-                if(hip_status != hipSuccess)
-                {
-                    info << "the device ID could not be reset to to " << original_device_id
-                         << " upon creation of the " << buffer_qualifier << " buffer.";
-                    throw hipfftw_runtime_error(info.str(), hip_status);
-                }
             }
         }
         bundle.set(temp);
@@ -683,7 +662,7 @@ namespace
             // create and set device work buffer
             if(work_buffer_size > 0)
             {
-                hipfftw_set_device_allocation(work_buffer, work_buffer_size, "work", device_id);
+                hipfftw_set_device_allocation(work_buffer, work_buffer_size, "work");
                 if(rocfft_execution_info_set_work_buffer(
                        internal_rocfft_info, work_buffer.get_data_ptr(), work_buffer_size)
                    != rocfft_status_success)
@@ -714,14 +693,14 @@ namespace
                && intended_execute_in.get_copy_kind<hipfftw_memcpy_direction::TO>(device_id)
                       != hipfftw_memcpy_kind::NONE)
             {
-                hipfftw_set_device_allocation(in_device, in_bytes, "input", device_id);
+                hipfftw_set_device_allocation(in_device, in_bytes, "input");
             }
 
             if(plan_placement != rocfft_placement_inplace && !out_device
                && intended_execute_out.get_copy_kind<hipfftw_memcpy_direction::FROM>(device_id)
                       != hipfftw_memcpy_kind::NONE)
             {
-                hipfftw_set_device_allocation(out_device, out_bytes, "output", device_id);
+                hipfftw_set_device_allocation(out_device, out_bytes, "output");
             }
             return;
         }
@@ -778,8 +757,8 @@ namespace
             if(exec_out.is_host_accessible())
             {
                 // results must be accessible from the host upon completion
-                hipfftw_raii_event sync_ev;
-                sync_ev.record().sync();
+                hipfftw_raii_event synchronizing_event;
+                synchronizing_event.record().sync();
             }
             return;
         }
@@ -865,18 +844,9 @@ namespace
     {
         try
         {
-#ifdef WIN32
-            // no more than 8*sizeof(size_t) + 3 characters for valid values
-            // (if variable defined in binary representation "0b[...]")
-            char       tmp[8 * sizeof(size_t) + 3];
-            const auto sz = GetEnvironmentVariableA(env_var, tmp, sizeof(tmp));
-            if(sz == 0 || sz > sizeof(tmp))
+            const std::string tmp = rocfft_getenv(env_var);
+            if(tmp.empty())
                 return default_val;
-#else
-            const char* tmp = std::getenv(env_var);
-            if(!tmp)
-                return default_val;
-#endif
             const auto ret = std::stoull(tmp);
             return ret > std::numeric_limits<size_t>::max() ? std::numeric_limits<size_t>::max()
                                                             : static_cast<size_t>(ret);
@@ -947,7 +917,7 @@ namespace
     {
         if(hipfftw_handler_is_verbose())
         {
-            std::cerr << "A hipfftw-specific runtime error was detected and reported by "
+            std::cerr << "A hip-specific runtime error was detected and reported by "
                       << user_facing_function << ". Details: " << e.what();
             if(e.hip_error != hipSuccess)
                 std::cerr << "\nThe hip error code was " << e.hip_error << ".";
