@@ -403,7 +403,8 @@ def generate(test, function):
         # For sequence arguments, they are expanded into scalars
         elif (type(test[key]) in (tuple, list) and
               key not in param['lists_to_not_expand']):
-            if key == "filename" and test[key] != "*":
+            if key == "matrix_filename" and test[key] != "*":
+                print("test[key]: " + test[key])
                 cleanlist=[]
                 for test[key] in test[key]:
                     #

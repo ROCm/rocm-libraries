@@ -99,10 +99,26 @@ Datatypes:
         HIPSPARSE_FORMAT_COO: 3
         HIPSPARSE_FORMAT_COO_AOS: 4
         HIPSPARSE_FORMAT_BLOCKED_ELL: 5
+  - hipsparseCsr2CscAlg_t:
+      bases: [c_int ]
+      attr:
+        HIPSPARSE_CSR2CSC_ALG_DEFAULT: 0
+  - hipsparseDenseToSparseAlg_t:
+      bases: [c_int ]
+      attr:
+        HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT: 0
+  - hipsparseSparseToDenseAlg_t:
+      bases: [c_int ]
+      attr:
+        HIPSPARSE_SPARSETODENSE_ALG_DEFAULT: 0
   - hipsparseSDDMMAlg_t:
       bases: [c_int ]
       attr:
         HIPSPARSE_SDDMM_ALG_DEFAULT: 0
+  - hipsparseSpGEMMAlg_t:
+      bases: [c_int ]
+      attr:
+        HIPSPARSE_SPGEMM_DEFAULT: 0
   - hipsparseSpMVAlg_t:
       bases: [c_int ]
       attr:
@@ -287,15 +303,15 @@ Arguments:
   - orderC: hipsparseOrder_t
   - formatA: hipsparseFormat_t
   - formatB: hipsparseFormat_t
-  - csr2csc_alg: c_int
-  - dense2sparse_alg: c_int
-  - sparse2dense_alg: c_int
-  - sddmm_alg: c_int
-  - spgemm_alg: c_int
-  - spmm_alg: c_int
-  - spmv_alg: c_int
-  - spsm_alg: c_int
-  - spsv_alg: c_int
+  - csr2csc_alg: hipsparseCsr2CscAlg_t
+  - dense2sparse_alg: hipsparseDenseToSparseAlg_t
+  - sparse2dense_alg: hipsparseSparseToDenseAlg_t
+  - sddmm_alg: hipsparseSDDMMAlg_t
+  - spgemm_alg: hipsparseSpGEMMAlg_t
+  - spmm_alg: hipsparseSpMMAlg_t
+  - spmv_alg: hipsparseSpMVAlg_t
+  - spsm_alg: hipsparseSpSMAlg_t
+  - spsv_alg: hipsparseSpSVAlg_t
   - numericboost: c_int
   - boosttol: c_double
   - boostval: c_double
@@ -307,9 +323,8 @@ Arguments:
   - unit_check: c_int
   - timing: c_int
   - iters: c_int
-  - filename: c_char*128
+  - matrix_filename: c_char*128
   - function: c_char*64
-  - function_name: c_char*64
   - category: c_char*32
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
@@ -391,15 +406,15 @@ Defaults:
   orderC: HIPSPARSE_ORDER_COL
   formatA: HIPSPARSE_FORMAT_CSR
   formatB: HIPSPARSE_FORMAT_CSR
-  csr2csc_alg: 0
-  dense2sparse_alg: 0
-  sparse2dense_alg: 0
-  sddmm_alg: 0
-  spgemm_alg: 0
-  spmm_alg: 0
-  spmv_alg: 0
-  spsm_alg: 0
-  spsv_alg: 0
+  csr2csc_alg: HIPSPARSE_CSR2CSC_ALG_DEFAULT
+  dense2sparse_alg: HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT
+  sparse2dense_alg: HIPSPARSE_SPARSETODENSE_ALG_DEFAULT
+  sddmm_alg: HIPSPARSE_SDDMM_ALG_DEFAULT
+  spgemm_alg: HIPSPARSE_SPGEMM_DEFAULT
+  spmm_alg: HIPSPARSE_SPMM_ALG_DEFAULT
+  spmv_alg: HIPSPARSE_SPMV_ALG_DEFAULT
+  spsm_alg: HIPSPARSE_SPSM_ALG_DEFAULT
+  spsv_alg: HIPSPARSE_SPSV_ALG_DEFAULT
   numericboost: 0
   boosttol: 0.0
   boostval: 1.0
@@ -411,7 +426,6 @@ Defaults:
   unit_check: 1
   timing: 0
   iters: 10
-  filename: '*'
+  matrix_filename: '*'
   function: '*'
-  function_name: '*'
   category: '*'

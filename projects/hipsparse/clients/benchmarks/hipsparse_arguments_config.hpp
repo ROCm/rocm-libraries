@@ -30,9 +30,10 @@ struct hipsparse_arguments_config : Arguments
 {
 
 public:
-    char precision{};
-    char indextype{};
-    int  device_id{};
+    char        precision{};
+    char        indextype{};
+    int         device_id{};
+    std::string function_name{};
 
 private:
     char b_transA{};

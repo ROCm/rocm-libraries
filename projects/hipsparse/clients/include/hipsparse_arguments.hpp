@@ -116,10 +116,11 @@ struct Arguments
     int timing;
     int iters;
 
-    char filename[128];
-    char function[64];
-    char function_name[64];
-    char category[32];
+    char matrix_filename[128]; // nos2.bin, bmwcra_1.bin, etc
+    char function[64]; // axpby, spmv_csr, etc
+    char category[32]; // quick, pre_checkin, etc
+
+    std::string filename;
 
     Arguments()
     {
@@ -326,9 +327,8 @@ struct Arguments
         HIPSPARSE_FORMAT_CHECK(unit_check);
         HIPSPARSE_FORMAT_CHECK(timing);
         HIPSPARSE_FORMAT_CHECK(iters);
-        HIPSPARSE_FORMAT_CHECK(filename);
+        HIPSPARSE_FORMAT_CHECK(matrix_filename);
         HIPSPARSE_FORMAT_CHECK(function);
-        HIPSPARSE_FORMAT_CHECK(function_name);
         HIPSPARSE_FORMAT_CHECK(category);
     }
 
@@ -399,9 +399,8 @@ private:
             delim = ',';
         };
 
-        print("filename", arg.filename);
+        print("matrix_filename", arg.matrix_filename);
         print("function", arg.function);
-        print("function_name", arg.function_name);
         print("category", arg.category);
         print("M", arg.M);
         print("N", arg.N);
