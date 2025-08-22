@@ -123,6 +123,71 @@ function(add_gtest TEST_NAME TEST_CPP)
     else()
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR} PROPERTIES ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
     endif()
+  else()
+    set(MIOPEN_GTEST_PREFIX)
+    set(MIOPEN_GTEST_FILTER_NEGATIVE)
+
+    if (MIOPEN_TEST_ALL)
+      set(MIOPEN_GTEST_PREFIX "")
+    else()
+      set(MIOPEN_GTEST_PREFIX "Smoke")
+    endif()
+
+    if (NOT MIOPEN_TEST_MLIR)
+        add_gtest_negative_filter("*MLIRTest*")
+    endif()
+
+    if (NOT MIOPEN_TEST_DBSYNC)
+        add_gtest_negative_filter("*DBSync*")
+    endif()
+
+    if (NOT MIOPEN_TEST_DEEPBENCH)
+        add_gtest_negative_filter("*DeepBench*")
+    endif()
+    
+    if (NOT MIOPEN_TEST_CONV)
+        add_gtest_negative_filter("*MIOpenTestConv*")
+    endif()
+
+    if(MIOPEN_NO_GPU)
+        add_gtest_negative_filter("*GPU*")
+    endif()
+
+    if(MIOPEN_TEST_GFX115X)
+        add_gtest_negative_filter("*UnitTestConvSolverOclDirect*")
+        add_gtest_negative_filter("*UnitTestConvSolverOclBwd*")
+        add_gtest_negative_filter("*UnitTestConvSolverBinWinograd*")
+        add_gtest_negative_filter("*BNBWDSmall2D*")
+        add_gtest_negative_filter("*BNBWDLarge*D*")
+        add_gtest_negative_filter("*BNOCLBWDLargeFusedActivation2D*")
+        add_gtest_negative_filter("*BBNFWDTrainSmall2D*")
+        add_gtest_negative_filter("*BNFWDTrain*D*")
+        add_gtest_negative_filter("*GPU_*MHA*")
+        add_gtest_negative_filter("*GPU_MhaForward*")
+        add_gtest_negative_filter("*GPU_MhaBackward*")
+        add_gtest_negative_filter("*GPU_MhaBwdGraph*")
+        add_gtest_negative_filter("*GPU_*_Mha*")
+        add_gtest_negative_filter("*GPU_TernaryTensorOps*")
+        add_gtest_negative_filter("*GPU_Dropout*")
+    endif()
+
+    # when building the single gtest, add them in a sharded manner
+    # loop over GTEST_PARALLEL_LEVEL
+    set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
+
+    message(STATUS "TEST_FILTER ${MIOPEN_GTEST_FILTER}")
+
+    foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
+      add_test(NAME ${TEST_NAME}_shard${i}
+        COMMAND ${TEST_NAME} --gtest_filter=${MIOPEN_GTEST_FILTER}
+        WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}"
+      )
+      math(EXPR SHARD_INDEX "${i} - 1")
+      set_tests_properties(${TEST_NAME}_shard${i} PROPERTIES
+        ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=${GTEST_PARALLEL_LEVEL};GTEST_SHARD_INDEX=${SHARD_INDEX}"
+      )
+    endforeach()
+
   endif()
   target_link_libraries(${TEST_NAME} BZip2::BZip2)
   if(WIN32)

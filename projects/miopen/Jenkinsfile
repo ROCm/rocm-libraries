@@ -181,7 +181,7 @@ pipeline {
         REPO_DIR        = "${repoDir}"
         REPO_NAME       = "${repoName}"
 
-        gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF "
+        single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
     }
     stages{
         stage('Build Docker'){
@@ -288,6 +288,10 @@ pipeline {
             }
             parallel{
                 stage('Hip Tidy') {
+                    when {
+                        beforeAgent true
+                        expression { params.BUILD_PACKAGE_AND_CHECKS } //temp disable so I can test other job
+                    }
                     agent{ label rocmnode("nogpu") }
                     environment{
                         setup_cmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
@@ -537,14 +541,20 @@ pipeline {
                     }
                     agent{ label rocmnode("strix") }
                     environment{
-                        execute_cmd_gtest = "python3 ../vars/gtest_sharder.py ./bin/miopen_gtest --gtest_filter=-*DBSync*:*DeepBench*:*MIOpenTestConv*:*GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamic* --num_shards=4"
-                        single_gtest_build_command = "LLVM_PATH=/opt/rocm/llvm make -j\$(nproc) miopen_gtest MIOpenDriver"
+                        single_gtest_build_command = "LLVM_PATH=/opt/rocm/llvm make -j\$(nproc) miopen_gtest check"
+                        gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
+                        
                         build_timeout_minutes = 420
                     }
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(lfs_pull:true, setup_flags: gtest_flags + Full_test, build_cmd: single_gtest_build_command, execute_cmd: execute_cmd_gtest, needs_reboot:false, build_timeout:build_timeout_minutes)
+                                utils.buildHipClangJobAndReboot(
+                                    lfs_pull:true, 
+                                    setup_flags: single_gtest_flags + gfx115x_filter_flags + Full_test, 
+                                    build_cmd: single_gtest_build_command, 
+                                    needs_reboot:false, 
+                                    build_timeout:build_timeout_minutes)
                             }
                         }
                     }
