@@ -1094,8 +1094,19 @@ namespace rocRoller
                     m_context, Register::Type::Scalar, DataType::Int64, 1);
 
                 std::cout << "Before buildTransformer StoreSGPR tag " << tag << std::endl;
-                auto indexes = m_graph->buildTransformer(tag).forward({userTag});
+                auto xform = m_graph->buildTransformer(tag);
                 std::cout << "After buildTransformer StoreSGPR tag " << tag << std::endl;
+
+                auto indexes_info = xform.getIndexes();
+                std::cout << "print indexes" << std::endl;
+                for (const auto pair : indexes_info)
+                {
+                    std::cout << pair.first << " -> " << pair.second << '\n';
+                }
+                std::cout << "Before forward userTag tag " << userTag << std::endl;
+                auto indexes = xform.forward({userTag});
+                std::cout << "After forward userTag tag " << userTag << std::endl;
+                
 
                 co_yield Instruction::Comment("GEN: StoreSGPR; user index");
                 co_yield generateOffset(
