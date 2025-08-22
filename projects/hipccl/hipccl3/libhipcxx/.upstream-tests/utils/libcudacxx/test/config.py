@@ -723,11 +723,21 @@ class Configuration(object):
         pre_gfx90a = True
         pre_gfx942 = True
         pre_gfx908 = True
+        pre_gfx1030 = True
+        pre_gfx1100 = True
+        pre_gfx1101 = True
+        pre_gfx1200 = True
+        pre_gfx1201 = True
         # TODO(HIP/AMD): does it make sense to add variants for gfx941 and gfx942?
         if compute_archs and (self.cxx.type == 'nvcc' or self.cxx.type == 'clang' or self.cxx.type == 'nvrtcc'):
             pre_gfx90a = False
             pre_gfx942 = False
             pre_gfx908 = False
+            pre_gfx1030 = False
+            pre_gfx1100 = False
+            pre_gfx1101 = False
+            pre_gfx1200 = False
+            pre_gfx1201 = False
             pre_sm_32 = False
             pre_sm_60 = False
             pre_sm_70 = False
@@ -764,6 +774,11 @@ class Configuration(object):
             pre_gfx90a = False
             pre_gfx908 = False
             pre_gfx942 = False
+            pre_gfx1030 = False
+            pre_gfx1100 = False
+            pre_gfx1101 = False
+            pre_gfx1200 = False
+            pre_gfx1201 = False
             pre_sm_32  = False
             pre_sm_60  = False
             pre_sm_70  = False
@@ -774,9 +789,21 @@ class Configuration(object):
                 if arch == "gfx908": 
                     pre_gfx90a = True
                     pre_gfx942 = True
+                    pre_gfx1200 = True
+                    pre_gfx1201 = True
                 elif arch == "gfx90a":
                     pre_gfx942 = True
-                if arch in ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx1100"]:
+                    pre_gfx1200 = True
+                    pre_gfx1201 = True
+                elif arch == "gfx1030": # RDNA2
+                    pre_gfx1100 = True
+                    pre_gfx1101 = True
+                    pre_gfx1200 = True
+                    pre_gfx1201 = True
+                elif arch == "gfx1100" or arch == "gfx1101": # RDNA3
+                    pre_gfx1200 = True
+                    pre_gfx1201 = True
+                if arch in ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201"]:
                   arch_flag = '--offload-arch={0}'.format(arch)
                   self.cxx.compile_flags += [arch_flag]
         if pre_gfx908:
@@ -785,6 +812,16 @@ class Configuration(object):
             self.config.available_features.add("pre-gfx90a")
         if pre_gfx942:
             self.config.available_features.add("pre-gfx942")
+        if pre_gfx1030:
+            self.config.available_features.add("pre-gfx1030")
+        if pre_gfx1100:
+            self.config.available_features.add("pre-gfx1100")
+        if pre_gfx1101:
+            self.config.available_features.add("pre-gfx1101")
+        if pre_gfx1200:
+            self.config.available_features.add("pre-gfx1200")
+        if pre_gfx1201:
+            self.config.available_features.add("pre-gfx1201")
         if pre_sm_32:
             self.config.available_features.add("pre-sm-32")
         if pre_sm_60:

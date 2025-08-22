@@ -89,7 +89,7 @@ function section_separator {
 LIBCXX_LOG=$(mktemp)
 LIBCUDACXX_LOG=$(mktemp)
 
-KNOWN_COMPUTE_ARCHS="gfx940 gfx941 gfx942 gfx90a gfx908 gfx1100"
+KNOWN_COMPUTE_ARCHS="gfx940 gfx941 gfx942 gfx90a gfx908 gfx1030 gfx1100 gfx1101 gfx1200 gfx1201"
 
 function report_and_exit {
   # If any of the lines searched for below aren't present in the log files, the
@@ -286,7 +286,7 @@ then
     report_and_exit 1
   fi
 
-  DEVICE_0_COMPUTE_ARCH=$(egrep '^Device 0:' ${ARCH_DETECTION_LOG} | sed 's/^Device 0: ".*", Selected, CDNA \(gfx[0-9a-f]\{3\}\).*/\1/')
+  DEVICE_0_COMPUTE_ARCH=$(egrep '^Device 0:' ${ARCH_DETECTION_LOG} | sed 's/^Device 0: ".*", Selected, CDNA \(gfx[0-9a-f]\{3,4\}\).*/\1/')
 
   rm -f ${ARCH_DETECTION_LOG}
 

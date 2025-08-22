@@ -105,8 +105,8 @@ libhipcxx aims to be a conforming implementation of the
 # Requirements 
 - CMake >=3.12
 - ROCm with HIP >=6.2.0 
-- AMD MI100, MI200, MI300, RDNA3 GPU/gfx1100 (NVIDIA GPUs are currently not supported)
-- Linux OS (Windows is not supported, currently tested with Ubuntu only)
+- AMD Architectures CDNA, CDNA2, CDNA3, RDNA2, RDNA3, RDNA4. See [ROCm docs](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html) for more details about supported architectures. (NVIDIA GPUs are currently not supported)
+- Linux OS (Windows is currently not supported)
 
 For running the integrated LIT unit tests:
 - Python 3
