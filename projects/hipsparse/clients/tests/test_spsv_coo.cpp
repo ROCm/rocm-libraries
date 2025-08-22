@@ -119,7 +119,7 @@ Arguments setup_spsv_coo_arguments(spsv_coo_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
 TEST(spsv_coo_bad_arg, spsv_coo_float)
 {
     testing_spsv_coo_bad_arg();

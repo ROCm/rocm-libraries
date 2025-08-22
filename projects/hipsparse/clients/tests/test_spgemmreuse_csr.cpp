@@ -46,7 +46,7 @@ int spgemmreuse_csr_K_range[] = {64, 1723};
 
 std::vector<double> spgemmreuse_csr_alpha_range = {2.0};
 
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 hipsparseIndexBase_t spgemmreuse_csr_idxbaseA_range[]
     = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 hipsparseIndexBase_t spgemmreuse_csr_idxbaseB_range[]
@@ -119,7 +119,7 @@ Arguments setup_spgemmreuse_csr_arguments(spgemmreuse_csr_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 TEST(spgemmreuse_csr_bad_arg, spgemmreuse_csr_float)
 {
     testing_spgemmreuse_csr_bad_arg();
@@ -150,7 +150,7 @@ TEST_P(parameterized_spgemmreuse_csr_bin, spgemmreuse_csr_bin_i32_float)
 }
 
 // 64 bit indices not supported in cusparse
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 TEST_P(parameterized_spgemmreuse_csr, spgemmreuse_csr_i64_double)
 {
     Arguments arg = setup_spgemmreuse_csr_arguments(GetParam());

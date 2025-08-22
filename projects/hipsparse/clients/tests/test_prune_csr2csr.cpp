@@ -97,7 +97,7 @@ Arguments setup_prune_csr2csr_arguments(prune_csr2csr_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(prune_csr2csr_bad_arg, prune_csr2csr)
 {
     testing_prune_csr2csr_bad_arg<float>();

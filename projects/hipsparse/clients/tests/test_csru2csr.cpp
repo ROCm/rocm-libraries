@@ -85,7 +85,7 @@ Arguments setup_csru2csr_arguments(csru2csr_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(csru2csr_bad_arg, csru2csr)
 {
     testing_csru2csr_bad_arg();

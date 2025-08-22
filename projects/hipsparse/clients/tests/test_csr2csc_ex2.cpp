@@ -108,7 +108,7 @@ Arguments setup_csr2csc_ex2_arguments(csr2csc_ex2_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 TEST(csr2csc_ex2_bad_arg, csr2csc_ex2)
 {
     testing_csr2csc_ex2_bad_arg<float>();

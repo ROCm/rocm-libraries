@@ -135,7 +135,7 @@ Arguments setup_sddmm_csc_arguments(sddmm_csc_bin_tuple tup)
 }
 
 // CSC format not supported in cusparse
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 TEST(sddmm_csc_bad_arg, sddmm_csc_float)
 {
     testing_sddmm_csc_bad_arg();

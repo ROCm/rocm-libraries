@@ -43,10 +43,10 @@ base         csrilu02_idxbase_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_IN
 solve_policy csrilu02_solve_policy_range[]
     = {HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL};
 
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 std::string csrilu02_bin[] = {
     "mac_econ_fwd500.bin", "rma10.bin", "nos1.bin", "nos2.bin", "nos3.bin", "nos5.bin", "nos6.bin"};
-#elif (CUDART_VERSION >= 11080)
+#elif(CUDART_VERSION >= 11080)
 std::string csrilu02_bin[] = {"mac_econ_fwd500.bin", "nos3.bin", "nos5.bin", "nos6.bin"};
 #else
 // Note: There was a bug in csrilu02 where an infinite loop could occur on large matrices.
@@ -109,7 +109,7 @@ Arguments setup_csrilu02_arguments(csrilu02_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(csrilu02_bad_arg, csrilu02_float)
 {
     testing_csrilu02_bad_arg<float>();

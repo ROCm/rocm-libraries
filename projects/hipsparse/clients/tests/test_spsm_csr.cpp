@@ -132,7 +132,7 @@ Arguments setup_spsm_csr_arguments(spsm_csr_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
 TEST(spsm_csr_bad_arg, spsm_csr_float)
 {
     testing_spsm_csr_bad_arg();

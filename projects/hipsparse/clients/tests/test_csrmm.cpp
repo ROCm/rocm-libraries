@@ -106,7 +106,7 @@ Arguments setup_csrmm_arguments(csrmm_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST(csrmm_bad_arg, csrmm_float)
 {
     testing_csrmm_bad_arg<float>();

@@ -90,7 +90,7 @@ Arguments setup_csric02_arguments(csric02_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(csric02_bad_arg, csric02_float)
 {
     testing_csric02_bad_arg<float>();

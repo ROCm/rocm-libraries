@@ -110,7 +110,7 @@ Arguments setup_csrsm2_arguments(csrsm2_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 TEST(csrsm2_bad_arg, csrsm2_float)
 {
     testing_csrsm2_bad_arg<float>();

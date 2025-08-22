@@ -97,7 +97,7 @@ Arguments setup_sparse_to_dense_csc_arguments(sparse_to_dense_csc_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
 TEST(sparse_to_dense_csc_bad_arg, sparse_to_dense_csc_float)
 {
     testing_sparse_to_dense_csc_bad_arg();

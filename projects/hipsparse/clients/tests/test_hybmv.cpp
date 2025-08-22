@@ -104,7 +104,7 @@ Arguments setup_hybmv_arguments(hybmv_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST(hybmv_bad_arg, hybmv_float)
 {
     testing_hybmv_bad_arg<float>();

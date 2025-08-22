@@ -123,7 +123,7 @@ Arguments setup_csrgeam_arguments(csrgeam_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST(csrgeam_bad_arg, csrgeam_float)
 {
     testing_csrgeam_bad_arg<float>();

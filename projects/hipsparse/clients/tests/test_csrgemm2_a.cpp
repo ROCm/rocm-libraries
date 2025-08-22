@@ -100,7 +100,7 @@ Arguments setup_csrgemm2_a_arguments(csrgemm2_a_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 TEST(csrgemm2_a_bad_arg, csrgemm2_a_float)
 {
     testing_csrgemm2_a_bad_arg<float>();

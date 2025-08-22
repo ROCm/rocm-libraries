@@ -109,7 +109,7 @@ Arguments setup_csrmv_arguments(csrmv_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST(csrmv_bad_arg, csrmv_float)
 {
     testing_csrmv_bad_arg<float>();

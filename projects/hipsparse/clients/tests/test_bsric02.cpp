@@ -97,7 +97,7 @@ Arguments setup_bsric02_arguments(bsric02_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(bsric02_bad_arg, bsric02_float)
 {
     testing_bsric02_bad_arg<float>();

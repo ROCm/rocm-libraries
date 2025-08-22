@@ -120,7 +120,7 @@ Arguments setup_bsrsm2_arguments(bsrsm2_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(bsrsm2_bad_arg, bsrsm2_float)
 {
     testing_bsrsm2_bad_arg();

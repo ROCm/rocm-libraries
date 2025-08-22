@@ -68,23 +68,23 @@ hipsparseOrder_t     spmm_csc_orderC_range[] = {HIPSPARSE_ORDER_COL, HIPSPARSE_O
 hipsparseIndexBase_t spmm_csc_idxbase_range[]
     = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 hipsparseSpMMAlg_t spmm_csc_alg_range[] = {HIPSPARSE_SPMM_ALG_DEFAULT,
                                            HIPSPARSE_SPMM_CSR_ALG1,
                                            HIPSPARSE_SPMM_CSR_ALG2,
                                            HIPSPARSE_SPMM_CSR_ALG3};
 #else
 // Alg3 not supported for CSC format
-#if (CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12000)
 hipsparseSpMMAlg_t spmm_csc_alg_range[]
     = {HIPSPARSE_SPMM_ALG_DEFAULT, HIPSPARSE_SPMM_CSR_ALG1, HIPSPARSE_SPMM_CSR_ALG2};
-#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
 hipsparseSpMMAlg_t spmm_csc_alg_range[]
     = {HIPSPARSE_SPMM_ALG_DEFAULT, HIPSPARSE_SPMM_CSR_ALG1, HIPSPARSE_SPMM_CSR_ALG2};
-#elif (CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
+#elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
 hipsparseSpMMAlg_t spmm_csc_alg_range[]
     = {HIPSPARSE_SPMM_ALG_DEFAULT, HIPSPARSE_SPMM_CSR_ALG1, HIPSPARSE_SPMM_CSR_ALG2};
-#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
+#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
 hipsparseSpMMAlg_t spmm_csc_alg_range[] = {HIPSPARSE_MM_ALG_DEFAULT, HIPSPARSE_CSRMM_ALG1};
 #endif
 #endif
@@ -155,7 +155,7 @@ Arguments setup_spmm_csc_arguments(spmm_csc_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11010)
 TEST(spmm_csc_bad_arg, spmm_csc_float)
 {
     testing_spmm_csc_bad_arg();
@@ -186,7 +186,7 @@ TEST_P(parameterized_spmm_csc_bin, spmm_csc_bin_i32_float)
 }
 
 // 64 bit indices not supported in cusparse for all algorithms
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 TEST_P(parameterized_spmm_csc, spmm_csc_i64_double_complex)
 {
     Arguments arg = setup_spmm_csc_arguments(GetParam());

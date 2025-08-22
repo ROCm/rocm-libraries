@@ -111,7 +111,7 @@ Arguments setup_bsrsv2_arguments(bsrsv2_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(bsrsv2_bad_arg, bsrsv2_float)
 {
     testing_bsrsv2_bad_arg<float>();

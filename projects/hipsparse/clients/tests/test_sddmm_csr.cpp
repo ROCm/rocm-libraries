@@ -135,7 +135,7 @@ Arguments setup_sddmm_csr_arguments(sddmm_csr_bin_tuple tup)
 }
 
 // csr format not supported in cusparse
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 TEST(sddmm_csr_bad_arg, sddmm_csr_float)
 {
     testing_sddmm_csr_bad_arg();

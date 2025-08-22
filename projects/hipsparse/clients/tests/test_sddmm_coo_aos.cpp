@@ -135,7 +135,7 @@ Arguments setup_sddmm_coo_aos_arguments(sddmm_coo_aos_bin_tuple tup)
 }
 
 // COO_AOS format not supported in cusparse
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
 TEST(sddmm_coo_aos_bad_arg, sddmm_coo_aos_float)
 {
     testing_sddmm_coo_aos_bad_arg();

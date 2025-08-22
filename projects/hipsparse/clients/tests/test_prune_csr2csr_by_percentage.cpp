@@ -109,7 +109,7 @@ Arguments setup_prune_csr2csr_by_percentage_arguments(prune_csr2csr_by_percentag
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 TEST(prune_csr2csr_by_percentage_bad_arg, prune_csr2csr_by_percentage)
 {
     testing_prune_csr2csr_by_percentage_bad_arg<float>();

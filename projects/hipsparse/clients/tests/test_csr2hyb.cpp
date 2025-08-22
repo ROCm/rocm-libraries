@@ -97,7 +97,7 @@ Arguments setup_csr2hyb_arguments(csr2hyb_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST(csr2hyb_bad_arg, csr2hyb)
 {
     testing_csr2hyb_bad_arg<float>();

@@ -112,7 +112,7 @@ Arguments setup_csrsv2_arguments(csrsv2_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 TEST(csrsv2_bad_arg, csrsv2_float)
 {
     testing_csrsv2_bad_arg<float>();

@@ -90,7 +90,7 @@ Arguments setup_gemmi_arguments(gemmi_bin_tuple tup)
     return arg;
 }
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 TEST(gemmi_bad_arg, gemmi_float)
 {
     testing_gemmi_bad_arg<float>();
