@@ -170,9 +170,6 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*GPU_TestMhaFind20_FP32*")
         add_gtest_negative_filter("*GPU_MhaFwdGraph_FP32*")
 
-        #PU_MhaFwdGraph_FP32
-
-
         # Non standard squashed operation supported only for 3d tensors and for the specific configuration" thrown in the test body
         add_gtest_negative_filter("*GPU_TernaryTensorOps*")
 

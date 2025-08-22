@@ -228,6 +228,10 @@ Checks: >-
   -readability-suspicious-call-argument,
   -readability-uppercase-literal-suffix,
   -readability-use-std-min-max,
+  -readability-container-contains,
+  -modernize-use-integer-sign-comparison,
+  -portability-template-virtual-member-function,
+  -bugprone-nondeterministic-pointer-iteration-order,
 
 CheckOptions:
   - key: google-readability-braces-around-statements.ShortStatementLines
