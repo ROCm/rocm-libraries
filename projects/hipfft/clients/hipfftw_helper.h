@@ -569,7 +569,7 @@ private:
                 // creation will be considered "valid". If there exists one (usable) candidate s.t.
                 // creation_options == candidate however, this choice is considered "enforced"
                 // (e.g. for function-specific argument validation testing purposes)
-                if(creation_options == candidate || is_supported_for_creation_with(candidate))
+                if(creation_options == candidate || can_create_plan_with(candidate))
                     valid_candidates.push_back(candidate);
             }
         }
@@ -991,34 +991,40 @@ public:
         return is_valid_for_creation_with(hipfftw_plan_creation_func::ANY);
     }
     // check expected support by (any of) the given option(s)
-    bool is_supported_for_creation_with(hipfftw_plan_creation_func creation_options) const
+    bool has_unsupported_args_for(hipfftw_plan_creation_func creation_options) const
     {
-        if(!hipfftw_creation_options_are_well_defined(creation_options))
-            throw std::invalid_argument(
-                "invalid creation_option for is_supported_for_creation_with");
-
-        if(!is_valid_for_creation_with(creation_options))
-            return false;
         // extra conditions for configurations supported by hipfftw:
-        if(rank < 1 || rank > 3)
-            return false;
+        if(rank > 3)
+            return true;
         if(flags & FFTW_WISDOM_ONLY)
-            return false;
+            return true;
         if(dft_kind == fft_transform_type_real_inverse && rank > 1 && (flags & FFTW_PRESERVE_INPUT))
-            return false;
-        if(!(creation_options & hipfftw_plan_creation_func::PLAN_GURU64))
+            return true;
+        if(!(creation_options & hipfftw_plan_creation_func::PLAN_GURU64) && has_valid_rank()
+           && has_valid_lengths())
         {
             // cannot handle data sizes involving more elements than the
             // largest representable int value
             if(get_num_elements_in(fft_io_in) > std::numeric_limits<int>::max()
                || get_num_elements_in(fft_io_out) > std::numeric_limits<int>::max())
-                return false;
+                return true;
         }
+        return false;
+    }
+    bool can_create_plan_with(hipfftw_plan_creation_func creation_options) const
+    {
+        if(!hipfftw_creation_options_are_well_defined(creation_options))
+            throw std::invalid_argument("invalid creation_option for can_create_plan_with");
+
+        if(!is_valid_for_creation_with(creation_options))
+            return false;
+        if(has_unsupported_args_for(creation_options))
+            return false;
         return true;
     }
-    bool is_supported_for_creation() const
+    bool can_create_plan() const
     {
-        return is_supported_for_creation_with(hipfftw_plan_creation_func::ANY);
+        return can_create_plan_with(hipfftw_plan_creation_func::ANY);
     }
     // create a token consistent with other tests to enable kernel precompilation
     // for valid cases, and/or capturing all required details about members otherwise
@@ -1044,7 +1050,7 @@ public:
         }
 
         // report rank if invalid
-        if(!has_valid_rank())
+        if(!has_valid_rank() || lengths.empty())
             ret << "_invalid_rank" << (rank < 0 ? "_negative_" : "_") << std::abs(rank);
         ret << "_len";
         if(lengths.empty())
