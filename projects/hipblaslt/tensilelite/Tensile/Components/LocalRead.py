@@ -563,11 +563,18 @@ class LocalReadMFMA(LocalRead):
 
         tc = tP["tensorChar"]
         if tc == "A":
-            writer.states.localReadDoCntA += 1
+           writer.states.localReadDoCntA += 1
+        elif tc == "MXSA":
+            writer.states.localReadDoCntMXSA += 1
         elif tc == "Metadata":
             writer.states.localReadDoCntMetadata += 1
-        else:
+        elif tc == "B":
             writer.states.localReadDoCntB += 1
+        elif tc == "MXSB":
+            writer.states.localReadDoCntMXSB += 1
+        else:
+            raise Exception(f"unsupport tc %s{tc}")
+
         tile01           = tP["tile01Idx"]
         instruction      = tP["localReadInstruction"]
         bpr              = 4 # bytes/register
@@ -599,18 +606,27 @@ class LocalReadMFMA(LocalRead):
         numReadsPerUnroll = int(ceil(tP["bpeDS"] * kernel["MIInputPerThread%s"%tc] / (unrollBlockWidth * bpr)))
         numVgpr  = int(ceil(blockWidth))
         tmpvgprFP32 = []
+
         if tc == 'A':
             lrvwTile = writer.states.lrvwTileA
+            abmatrixinfo = writer.states.a
+        elif tc == "MXSA":
+            lrvwTile = writer.states.lrvwTileMXSA
+            abmatrixinfo = writer.states.mxsa
         elif tc == 'B':
             lrvwTile = writer.states.lrvwTileB
+            abmatrixinfo = writer.states.b
+        elif tc == "MXSB":
+            lrvwTile = writer.states.lrvwTileMXSB
+            abmatrixinfo = writer.states.mxsb
         elif tc == "Metadata":
             lrvwTile = writer.states.lrvwTileMetadata
+            abmatrixinfo = writer.states.m
         else:
-            lrvwTile = 1
-        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+            raise Exception(f"unsupport tc %s{tc}")
 
-        abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
-        perpStride   = abmatrixinfo.gNLCPerpStride
+        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+        perpStride = abmatrixinfo.gNLCPerpStride
 
         # pack register
         if writer.states.archCaps["HasEccHalf"] or not writer.states.asmCaps["HasWMMA_V1"]:
