@@ -41,8 +41,7 @@ inline void hipsparse_test_name_suffix_generator_print(std::ostream& s, T item)
 
 HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseIndexType_t,
                                                       hipsparse_indextype2string);
-HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipDataType,
-                                                      hipsparse_datatype2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipDataType, hipsparse_datatype2string);
 HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseIndexBase_t,
                                                       hipsparse_indexbase2string);
 HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseOperation_t,
@@ -60,18 +59,18 @@ HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseDirection_t,
                                                       hipsparse_direction2string);
 HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseOrder_t, hipsparse_order2string);
 HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseFormat_t, hipsparse_format2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_sddmm_alg,
-//                                                       hipsparse_sddmmalg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_spmv_alg, hipsparse_spmvalg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_spsv_alg, hipsparse_spsvalg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_spsm_alg, hipsparse_spsmalg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_spmm_alg, hipsparse_spmmalg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_spgemm_alg,
-//                                                       hipsparse_spgemmalg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_sparse_to_dense_alg,
-//                                                       hipsparse_sparsetodensealg2string);
-// HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_dense_to_sparse_alg,
-//                                                       hipsparse_densetosparsealg2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseSDDMMAlg_t,
+                                                      hipsparse_sddmmalg2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseSpMVAlg_t, hipsparse_spmvalg2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseSpSVAlg_t, hipsparse_spsvalg2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseSpSMAlg_t, hipsparse_spsmalg2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseSpMMAlg_t, hipsparse_spmmalg2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseSpGEMMAlg_t,
+                                                      hipsparse_spgemmalg2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseSparseToDenseAlg_t,
+                                                      hipsparse_sparsetodensealg2string);
+HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparseDenseToSparseAlg_t,
+                                                      hipsparse_densetosparsealg2string);
 // HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_gtsv_interleaved_alg,
 //                                                       hipsparse_gtsvinterleavedalg2string);
 // HIPSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(hipsparse_gpsv_interleaved_alg,

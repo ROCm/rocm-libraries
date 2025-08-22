@@ -27,7 +27,7 @@
 
 #include <hipsparse.h>
 
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 static void print_cuda_12_0_0_to_12_5_1_support_string()
@@ -106,7 +106,7 @@ struct routine_support
     // Level 1
     static bool is_axpyi_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
         return true;
 #else
         return false;
@@ -114,7 +114,7 @@ struct routine_support
     }
     static bool is_doti_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
         return true;
 #else
         return false;
@@ -122,7 +122,7 @@ struct routine_support
     }
     static bool is_dotci_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
         return true;
 #else
         return false;
@@ -130,7 +130,7 @@ struct routine_support
     }
     static bool is_gthr_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
         return true;
 #else
         return false;
@@ -138,7 +138,7 @@ struct routine_support
     }
     static bool is_gthrz_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
         return true;
 #else
         return false;
@@ -146,7 +146,7 @@ struct routine_support
     }
     static bool is_roti_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
         return true;
 #else
         return false;
@@ -154,7 +154,7 @@ struct routine_support
     }
     static bool is_sctr_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
         return true;
 #else
         return false;
@@ -164,7 +164,7 @@ struct routine_support
     // Level2
     static bool is_bsrsv2_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
         return true;
 #else
         return false;
@@ -172,8 +172,8 @@ struct routine_support
     }
     static bool is_coomv_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+#if (!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
         return true;
 #else
         return false;
@@ -181,8 +181,8 @@ struct routine_support
     }
     static bool is_csrmv_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+#if (!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
         return true;
 #else
         return false;
@@ -190,7 +190,7 @@ struct routine_support
     }
     static bool is_csrsv_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
         return true;
 #else
         return false;
@@ -198,7 +198,7 @@ struct routine_support
     }
     static bool is_gemvi_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
         return true;
 #else
         return false;
@@ -206,7 +206,7 @@ struct routine_support
     }
     static bool is_hybmv_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
         return true;
 #else
         return false;
@@ -216,7 +216,7 @@ struct routine_support
     // Level3
     static bool is_bsrmm_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
         return true;
 #else
         return false;
@@ -224,7 +224,7 @@ struct routine_support
     }
     static bool is_bsrsm2_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
         return true;
 #else
         return false;
@@ -232,7 +232,7 @@ struct routine_support
     }
     static bool is_coomm_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
         return true;
 #else
         return false;
@@ -240,7 +240,7 @@ struct routine_support
     }
     static bool is_cscmm_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
         return true;
 #else
         return false;
@@ -248,7 +248,7 @@ struct routine_support
     }
     static bool is_csrmm_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
         return true;
 #else
         return false;
@@ -256,7 +256,7 @@ struct routine_support
     }
     static bool is_coosm_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
         return true;
 #else
         return false;
@@ -264,7 +264,7 @@ struct routine_support
     }
     static bool is_csrsm_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
         return true;
 #else
         return false;
@@ -272,7 +272,7 @@ struct routine_support
     }
     static bool is_gemmi_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
         return true;
 #else
         return false;
@@ -281,7 +281,7 @@ struct routine_support
     // Extra
     static bool is_csrgeam_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
         return true;
 #else
         return false;
@@ -289,7 +289,7 @@ struct routine_support
     }
     static bool is_csrgemm_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
         return true;
 #else
         return false;
@@ -298,7 +298,7 @@ struct routine_support
     // Precond
     static bool is_bsric02_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
         return true;
 #else
         return false;
@@ -306,7 +306,7 @@ struct routine_support
     }
     static bool is_bsrilu02_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
         return true;
 #else
         return false;
@@ -314,7 +314,7 @@ struct routine_support
     }
     static bool is_csric02_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
         return true;
 #else
         return false;
@@ -322,7 +322,7 @@ struct routine_support
     }
     static bool is_csrilu02_supported()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
         return true;
 #else
         return false;
@@ -425,306 +425,306 @@ struct routine_support
     // Level 1
     static void print_axpyi_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
     static void print_doti_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_10_2_0_support_string();
 #endif
     }
     static void print_dotci_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_10_2_0_support_string();
 #endif
     }
     static void print_gthr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
     static void print_gthrz_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
     static void print_roti_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
     static void print_sctr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
     // Level 2
     static void print_bsrsv2_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_coomv_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csrmv_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csrsv_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
     static void print_gemvi_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
     static void print_hybmv_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_10_2_0_support_string();
 #endif
     }
     // Level 3
     static void print_bsrmm_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_bsrsm2_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_coomm_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_cscmm_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csrmm_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_coosm_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_11_3_1_to_12_5_1_support_string();
 #endif
     }
     static void print_csrsm_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_11_3_1_to_12_5_1_support_string();
 #endif
     }
     static void print_gemmi_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
     // Extra
     static void print_csrgeam_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_10_2_0_support_string();
 #endif
     }
     static void print_csrgemm_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_10_2_0_support_string();
 #endif
     }
     // Precond
     static void print_bsric02_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_bsrilu02_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csric02_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csrilu02_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_gtsv2_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_gtsv2_nopivot_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_gtsv2_strided_batch_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_gtsv_interleaved_batch_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_gpsv_interleaved_batch_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     // Conversion
     static void print_bsr2csr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csr2coo_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csr2csc_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csr2hyb_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csr2bsr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csr2gebsr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csr2csr_compress_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_coo2csr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_hyb2csr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csr2dense_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_11_2_0_to_12_5_1_support_string();
 #endif
     }
     static void print_csc2dense_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_11_2_0_to_12_5_1_support_string();
 #endif
     }
     static void print_coo2dense_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_11_2_0_to_12_5_1_support_string();
 #endif
     }
     static void print_dense2csr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_11_2_0_to_12_5_1_support_string();
 #endif
     }
     static void print_dense2csc_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_11_2_0_to_12_5_1_support_string();
 #endif
     }
     static void print_dense2coo_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_11_2_0_to_12_5_1_support_string();
 #endif
     }
     static void print_gebsr2csr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_gebsr2gebsc_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
     static void print_gebsr2gebsr_support_warning()
     {
-#if(defined(CUDART_VERSION))
+#if (defined(CUDART_VERSION))
         print_cuda_10_0_0_to_12_5_1_support_string();
 #endif
     }
@@ -732,14 +732,14 @@ struct routine_support
 
 struct csr2csc_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseCsr2CscAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return HIPSPARSE_CSR2CSC_ALG_DEFAULT;
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return HIPSPARSE_CSR2CSC_ALG_DEFAULT;
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
         return HIPSPARSE_CSR2CSC_ALG1;
 #else
         return -1;
@@ -749,14 +749,14 @@ struct csr2csc_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return "Indicates what algorithm to use when running csr2csc. Possible choices are "
                "default: 0, Alg1: 1, Alg2: 2 (default:0)";
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return "Indicates what algorithm to use when running csr2csc. Possible choices are "
                "default: 0, Alg1: 1 (default:0)";
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
         return "Indicates what algorithm to use when running csr2csc. Possible choices are "
                "default: 1, Alg1: 1, Alg2: 2 (default:1)";
 #else
@@ -767,13 +767,13 @@ struct csr2csc_alg_support
 
     static std::vector<int> get_supported_algorithms()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return std::vector<int>(
             {HIPSPARSE_CSR2CSC_ALG_DEFAULT, HIPSPARSE_CSR2CSC_ALG1, HIPSPARSE_CSR2CSC_ALG2});
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return std::vector<int>({HIPSPARSE_CSR2CSC_ALG_DEFAULT, HIPSPARSE_CSR2CSC_ALG1});
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
         return std::vector<int>({HIPSPARSE_CSR2CSC_ALG1, HIPSPARSE_CSR2CSC_ALG2});
 #endif
 #endif
@@ -783,9 +783,9 @@ struct csr2csc_alg_support
 
 struct dense2sparse_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseDenseToSparseAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
         return HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT;
 #else
         return -1;
@@ -794,7 +794,7 @@ struct dense2sparse_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
         return "Indicates what algorithm to use when running dense2sparse. Possible choices are "
                "default: 0 (default:0)";
 #else
@@ -805,9 +805,9 @@ struct dense2sparse_alg_support
 
 struct sparse2dense_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSparseToDenseAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
         return HIPSPARSE_SPARSETODENSE_ALG_DEFAULT;
 #else
         return -1;
@@ -816,7 +816,7 @@ struct sparse2dense_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
         return "Indicates what algorithm to use when running sparse2dense. Possible choices are "
                "default: 0 (default:0)";
 #else
@@ -827,9 +827,9 @@ struct sparse2dense_alg_support
 
 struct sddmm_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSDDMMAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
         return HIPSPARSE_SDDMM_ALG_DEFAULT;
 #else
         return -1;
@@ -838,7 +838,7 @@ struct sddmm_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
         return "Indicates what algorithm to use when running sddmm. Possible choices are default: "
                "0 (default:0)";
 #else
@@ -849,16 +849,16 @@ struct sddmm_alg_support
 
 struct spgemm_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpGEMMAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return HIPSPARSE_SPGEMM_DEFAULT;
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return HIPSPARSE_SPGEMM_DEFAULT;
-#elif(CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
         return HIPSPARSE_SPGEMM_DEFAULT;
-#elif(CUDART_VERSION >= 11000)
+#elif (CUDART_VERSION >= 11000)
         return HIPSPARSE_SPGEMM_DEFAULT;
 #else
         return -1;
@@ -868,17 +868,17 @@ struct spgemm_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return "Indicates what algorithm to use when running spgemm. Possible choices are default: "
                "0, Deterministic: 1, Non-Deterministic: 2, Alg1: 3, Alg2: 4, Alg3: 5 (default:0)";
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return "Indicates what algorithm to use when running spgemm. Possible choices are default: "
                "0, Deterministic: 1, Non-Deterministic: 2, Alg1: 3, Alg2: 4, Alg3: 5 (default:0)";
-#elif(CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11031 && CUDART_VERSION < 12000)
         return "Indicates what algorithm to use when running spgemm. Possible choices are default: "
                "0, Deterministic: 1, Non-Deterministic: 2 (default:0)";
-#elif(CUDART_VERSION >= 11000)
+#elif (CUDART_VERSION >= 11000)
         return "Indicates what algorithm to use when running spgemm. Possible choices are default: "
                "0 (default:0)";
 #else
@@ -890,18 +890,18 @@ struct spgemm_alg_support
 
 struct spmm_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpMMAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return HIPSPARSE_SPMM_ALG_DEFAULT;
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return HIPSPARSE_SPMM_ALG_DEFAULT;
-#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
         return HIPSPARSE_SPMM_ALG_DEFAULT;
-#elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
         return HIPSPARSE_SPMM_ALG_DEFAULT;
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
         return HIPSPARSE_MM_ALG_DEFAULT;
 #else
         return -1;
@@ -911,24 +911,24 @@ struct spmm_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5, CSR Alg2: 6, "
                "CSR Alg3: 12, Blocked ELL Alg1: 13 (default:0)";
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5 CSR Alg2: 6, "
                "CSR Alg3: 12, Blocked ELL Alg1: 13 (default:0)";
-#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5, CSR Alg2: 6, "
                "CSR Alg3: 12, Blocked ELL Alg1: 13 (default:0)";
-#elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5, CSR Alg2: 6, "
                "Blocked ELL Alg1: 13 (default:0)";
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
         return "Indicates what algorithm to use when running spmm. Possible choices are default: "
                "0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4  (default:0)";
 #else
@@ -940,16 +940,16 @@ struct spmm_alg_support
 
 struct spmv_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpMVAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return HIPSPARSE_SPMV_ALG_DEFAULT;
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return HIPSPARSE_SPMV_ALG_DEFAULT;
-#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
         return HIPSPARSE_SPMV_ALG_DEFAULT;
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
         return HIPSPARSE_MV_ALG_DEFAULT;
 #else
         return -1;
@@ -959,17 +959,17 @@ struct spmv_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
         return "Indicates what algorithm to use when running spmv. Possible choices are default: "
                "0, COO Alg1: 1, CSR Alg1: 2, CSR Alg2: 3, COO Alg2: 4 (default:0)";
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
         return "Indicates what algorithm to use when running spmv. Possible choices are default: "
                "0, COO Alg1: 1, CSR Alg1: 2, CSR Alg2: 3, COO Alg2: 4 (default:0)";
-#elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
         return "Indicates what algorithm to use when running spmv. Possible choices are default: "
                "0, COO Alg1: 1, CSR Alg1: 2, CSR Alg2: 3, COO Alg2: 4 (default:0)";
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
         return "Indicates what algorithm to use when running spmv. Possible choices are default: "
                "0, COO Alg: 1, CSR Alg1: 2, CSR Alg2: 3 (default:0)";
 #else
@@ -981,9 +981,9 @@ struct spmv_alg_support
 
 struct spsm_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpSMAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
         return HIPSPARSE_SPSM_ALG_DEFAULT;
 #else
         return -1;
@@ -992,7 +992,7 @@ struct spsm_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
         return "Indicates what algorithm to use when running spsm. Possible choices are default: 0 "
                "(default:0)";
 #else
@@ -1003,9 +1003,9 @@ struct spsm_alg_support
 
 struct spsv_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpSVAlg_t get_default_algorithm()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
         return HIPSPARSE_SPSV_ALG_DEFAULT;
 #else
         return -1;
@@ -1014,7 +1014,7 @@ struct spsv_alg_support
 
     static std::string get_description()
     {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
         return "Indicates what algorithm to use when running spsv. Possible choices are default: 0 "
                "(default:0)";
 #else

@@ -49,6 +49,17 @@ private:
     int  b_orderC{};
     int  b_formatA{};
     int  b_formatB{};
+
+    int b_csr2csc_alg{};
+    int b_dense2sparse_alg{};
+    int b_sparse2dense_alg{};
+    int b_sddmm_alg{};
+    int b_spgemm_alg{};
+    int b_spmm_alg{};
+    int b_spmv_alg{};
+    int b_spsm_alg{};
+    int b_spsv_alg{};
+
     char b_diag{};
     char b_uplo{};
     char b_spol{};

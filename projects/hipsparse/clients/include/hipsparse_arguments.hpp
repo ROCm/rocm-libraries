@@ -92,15 +92,15 @@ struct Arguments
     hipsparseFormat_t    formatA;
     hipsparseFormat_t    formatB;
 
-    int csr2csc_alg;
-    int dense2sparse_alg;
-    int sparse2dense_alg;
-    int sddmm_alg;
-    int spgemm_alg;
-    int spmm_alg;
-    int spmv_alg;
-    int spsm_alg;
-    int spsv_alg;
+    hipsparseCsr2CscAlg_t       csr2csc_alg;
+    hipsparseDenseToSparseAlg_t dense2sparse_alg;
+    hipsparseSparseToDenseAlg_t sparse2dense_alg;
+    hipsparseSDDMMAlg_t         sddmm_alg;
+    hipsparseSpGEMMAlg_t        spgemm_alg;
+    hipsparseSpMMAlg_t          spmm_alg;
+    hipsparseSpMVAlg_t          spmv_alg;
+    hipsparseSpSMAlg_t          spsm_alg;
+    hipsparseSpSVAlg_t          spsv_alg;
 
     int    numericboost;
     double boosttol;
@@ -239,7 +239,6 @@ struct Arguments
         ifs >> arg;
         ifs.read(trailer, sizeof(trailer));
 
-
         for(int i = 0; i < 10; i++)
         {
             std::cout << header[i] << std::endl;
@@ -249,7 +248,6 @@ struct Arguments
         {
             std::cout << trailer[i] << std::endl;
         }
-
 
         if(strcmp(header, "hipSPARSE"))
             error("header");
@@ -335,7 +333,6 @@ struct Arguments
     }
 
 private:
-
     // Function to read Structures data from stream
     friend std::istream& operator>>(std::istream& str, Arguments& arg)
     {
@@ -445,15 +442,15 @@ private:
         print("orderC", hipsparse_order2string(arg.orderC));
         print("formatA", hipsparse_format2string(arg.formatA));
         print("formatB", hipsparse_format2string(arg.formatB));
-        // print("csr2csc_alg", hipsparse_sparsetodensealg2string(arg.csr2csc_alg));
-        // print("dense2sparse_alg", hipsparse_sparsetodensealg2string(arg.dense2sparse_alg));
-        // print("sparse2dense_alg", hipsparse_densetosparsealg2string(arg.sparse2dense_alg));
-        // print("sddmm_alg", hipsparse_sddmmalg2string(arg.sddmm_alg));
-        // print("spgemm_alg", hipsparse_spgemmalg2string(arg.spgemm_alg));
-        // print("spmm_alg", hipsparse_spmmalg2string(arg.spmm_alg));
-        // print("spmv_alg", hipsparse_spmvalg2string(arg.spmv_alg));
-        // print("spsm_alg", hipsparse_spsmalg2string(arg.spsm_alg));
-        // print("spsv_alg", hipsparse_spsvalg2string(arg.spsv_alg));
+        print("csr2csc_alg", hipsparse_csr2cscalg2string(arg.csr2csc_alg));
+        print("dense2sparse_alg", hipsparse_densetosparsealg2string(arg.dense2sparse_alg));
+        print("sparse2dense_alg", hipsparse_sparsetodensealg2string(arg.sparse2dense_alg));
+        print("sddmm_alg", hipsparse_sddmmalg2string(arg.sddmm_alg));
+        print("spgemm_alg", hipsparse_spgemmalg2string(arg.spgemm_alg));
+        print("spmm_alg", hipsparse_spmmalg2string(arg.spmm_alg));
+        print("spmv_alg", hipsparse_spmvalg2string(arg.spmv_alg));
+        print("spsm_alg", hipsparse_spsmalg2string(arg.spsm_alg));
+        print("spsv_alg", hipsparse_spsvalg2string(arg.spsv_alg));
         print("csr2csc_alg", arg.csr2csc_alg);
         print("dense2sparse_alg", arg.dense2sparse_alg);
         print("sparse2dense_alg", arg.sparse2dense_alg);
