@@ -167,8 +167,10 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     // Compute reference answer
     SpmvGold(csr_matrix, vector_x, vector_y_in, vector_y_out, alpha_const, beta_const);
 
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     // Allocate and initialize GPU problem
-    hipcub::DeviceSpmv::SpmvParams<T, OffsetType> params;
+    hipcub::DeviceSpmv::SpmvParams<T, OffsetType> params{};
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
     HIP_CHECK(
         g_allocator.DeviceAllocate((void**)&params.d_values, sizeof(T) * csr_matrix.num_nonzeros));
@@ -213,6 +215,7 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     void*  d_temp_storage     = nullptr;
 
     // Get amount of temporary storage needed
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     HIP_CHECK(hipcub::DeviceSpmv::CsrMV(d_temp_storage,
                                         temp_storage_bytes,
                                         params.d_values,
@@ -224,6 +227,7 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
                                         params.num_cols,
                                         params.num_nonzeros,
                                         stream));
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
     // Allocate
     //HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes);
@@ -234,6 +238,7 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     if(TestFixture::use_graphs)
         gHelper.startStreamCapture(stream);
 
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     HIP_CHECK(hipcub::DeviceSpmv::CsrMV(d_temp_storage,
                                         temp_storage_bytes,
                                         params.d_values,
@@ -245,6 +250,7 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
                                         params.num_cols,
                                         params.num_nonzeros,
                                         stream));
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
     if(TestFixture::use_graphs)
         gHelper.createAndLaunchGraph(stream);
