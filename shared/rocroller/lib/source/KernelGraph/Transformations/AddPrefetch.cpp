@@ -1008,13 +1008,8 @@ namespace rocRoller
                     AssertFatal(loadTag.has_value(),
                                 "couldn't find the load associated with the exchange");
 
-                    if(auto const search = scaleLoadU.find(loadTag.value());
-                       search != scaleLoadU.end())
-                    {
-                        if(search->second > prefetchGlobalU)
-                            scaleLoadU[loadTag.value()] = prefetchGlobalU;
-                    }
-                    else
+                    auto const search = scaleLoadU.find(loadTag.value());
+                    if(search == scaleLoadU.end() || search->second > prefetchGlobalU)
                         scaleLoadU[loadTag.value()] = prefetchGlobalU;
                 }
 
