@@ -145,9 +145,18 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
     }
 }
 
+template<typename T>
+struct Wrapper
+{
+    T value;
+};
+
 template<typename T, int NumOps>
 __global__
-void texture_iterator_kernel(rocprim::texture_cache_iterator<T> it, T* input, int* output)
+void texture_iterator_kernel(rocprim::texture_cache_iterator<T>          it,
+                             rocprim::texture_cache_iterator<Wrapper<T>> it_wrap,
+                             T*                                          input,
+                             int*                                        output)
 {
     const int i = threadIdx.x * NumOps;
 
@@ -183,21 +192,24 @@ void texture_iterator_kernel(rocprim::texture_cache_iterator<T> it, T* input, in
     auto it_minus = it_plus - 2;
     output[i + 9] = (*it_minus == input[2]);
 
+    // Test ->
+    output[i + 10] = (((it_wrap + 2)->value) == input[2]);
+
     auto begin = it - 2;
     auto end   = it + 2;
 
     // Comparisons
-    output[i + 10] = (begin == begin) ? true : false;
-    output[i + 11] = (begin != end) ? true : false;
-    output[i + 12] = (begin < end) ? true : false;
-    output[i + 13] = (end > begin) ? true : false;
-    output[i + 14] = (begin <= begin) ? true : false;
-    output[i + 15] = (begin <= end) ? true : false;
-    output[i + 16] = (end >= begin) ? true : false;
-    output[i + 17] = (end >= end) ? true : false;
+    output[i + 11] = (begin == begin) ? true : false;
+    output[i + 12] = (begin != end) ? true : false;
+    output[i + 13] = (begin < end) ? true : false;
+    output[i + 14] = (end > begin) ? true : false;
+    output[i + 15] = (begin <= begin) ? true : false;
+    output[i + 16] = (begin <= end) ? true : false;
+    output[i + 17] = (end >= begin) ? true : false;
+    output[i + 18] = (end >= end) ? true : false;
 
     // Substracting iterators
-    output[i + 18] = ((end - begin) == 4);
+    output[i + 19] = ((end - begin) == 4);
 }
 
 TYPED_TEST(RocprimTextureCacheIteratorTests, DeviceIteratorOps)
@@ -219,9 +231,10 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, DeviceIteratorOps)
 
     using T        = typename TestFixture::input_type;
     using Iterator = rocprim::texture_cache_iterator<T>;
+    using WrappedIterator = rocprim::texture_cache_iterator<Wrapper<T>>;
 
     constexpr int num_threads  = 10;
-    constexpr int num_ops      = 19;
+    constexpr int num_ops      = 20;
     constexpr int result_count = num_threads * num_ops;
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
@@ -232,14 +245,24 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, DeviceIteratorOps)
 
         std::vector<T> input = test_utils::get_random_data_wrapped<T>(10, 1, 200, seed_value);
 
-        common::device_ptr<T>   d_input(input);
-        common::device_ptr<int> d_output(result_count);
+        std::vector<Wrapper<T>> input_wrapped(input.size());
+        for(size_t i = 0; i < input.size(); i++)
+        {
+            input_wrapped[i].value = input[i];
+        }
+
+        common::device_ptr<T>          d_input(input);
+        common::device_ptr<Wrapper<T>> d_input_wrapped(input_wrapped);
+        common::device_ptr<int>        d_output(result_count);
 
         Iterator it;
         HIP_CHECK(it.bind_texture(d_input.get(), sizeof(T) * input.size()));
 
+        WrappedIterator it_wrap;
+        HIP_CHECK(it_wrap.bind_texture(d_input_wrapped.get(), sizeof(Wrapper<T>) * input.size()));
+
         texture_iterator_kernel<T, num_ops>
-            <<<dim3(1), dim3(num_threads), 0, 0>>>(it, d_input.get(), d_output.get());
+            <<<dim3(1), dim3(num_threads), 0, 0>>>(it, it_wrap, d_input.get(), d_output.get());
 
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipGetLastError());

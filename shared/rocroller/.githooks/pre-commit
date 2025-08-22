@@ -35,7 +35,7 @@ export PATH=/opt/clang-format/bin:/usr/bin:/bin::/usr/local/sbin:/usr/local/bin:
 exec >&2
 
 # Do everything from top - level
-cd $(git rev-parse --show-toplevel)/shared/rocroller/
+cd $(git rev-parse --show-toplevel)
 
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
     against=HEAD
@@ -45,9 +45,9 @@ else
 fi
 
 if [[ "$1" == "--reformat" ]]; then
-    files=$(git ls-files --exclude-standard)
+    files=$(git ls-files --exclude-standard -- shared/rocroller/)
 else
-    files=$(git diff-index --cached --name-only $against)
+    files=$(git diff-index --cached --name-only $against -- shared/rocroller/)
 fi
 
 [[ -z "$files" ]] && exit
