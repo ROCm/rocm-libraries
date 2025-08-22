@@ -31,7 +31,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(CooperativeScheduler);
         static_assert(Component::Component<CooperativeScheduler>);
 
         CooperativeScheduler::CooperativeScheduler(ContextPtr ctx, CostFunction cmp)

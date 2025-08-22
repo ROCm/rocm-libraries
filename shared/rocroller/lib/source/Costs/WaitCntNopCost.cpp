@@ -30,7 +30,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(WaitCntNopCost);
         static_assert(Component::Component<WaitCntNopCost>);
 
         WaitCntNopCost::WaitCntNopCost(ContextPtr ctx)

@@ -30,7 +30,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(RoundRobinScheduler);
         static_assert(Component::Component<RoundRobinScheduler>);
 
         RoundRobinScheduler::RoundRobinScheduler(ContextPtr ctx)

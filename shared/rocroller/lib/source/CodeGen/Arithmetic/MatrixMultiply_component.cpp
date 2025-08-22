@@ -24,24 +24,16 @@
  *
  *******************************************************************************/
 
-#include <gtest/gtest.h>
-#include <iostream>
-#include <rocRoller/Utilities/TestSingleton.hpp>
+#include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
-#include "SimpleFixture.hpp"
-
-namespace rocRollerTest
+namespace rocRoller
 {
-    class LazySingletonTest : public SimpleFixture
+    template <>
+    inline void Component::ComponentFactory<
+        InstructionGenerators::MatrixMultiply>::registerImplementations()
     {
-    };
-
-    TEST_F(LazySingletonTest, Basic)
-    {
-        rocRoller::TestSingleton<int>::getInstance()->storeVal(99);
-        EXPECT_EQ(1, rocRoller::TestSingleton<int>::getInstance()->dontDoAnything(1));
-        EXPECT_EQ("true",
-                  rocRoller::TestSingleton<std::string>::getInstance()->dontDoAnything("true"));
-        EXPECT_EQ(99, rocRoller::TestSingleton<int>::getInstance()->getVal());
+        Component::ComponentFactory<InstructionGenerators::MatrixMultiply>::registerComponent<
+            InstructionGenerators::MatrixMultiplyGenerator>();
     }
 }

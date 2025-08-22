@@ -73,6 +73,6 @@ namespace rocRoller
                                         Expression::BitFieldExtract const& expr);
 
         inline static const std::string Name
-            = concatenate("BitFieldExtractGenerator<", typeid(DATATYPE).hash_code(), ">");
+            = concatenate("BitFieldExtractGenerator<", toString(DATATYPE), ">");
     };
 }

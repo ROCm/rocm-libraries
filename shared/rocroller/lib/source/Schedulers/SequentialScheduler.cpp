@@ -30,8 +30,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(SequentialScheduler);
-
         static_assert(Component::Component<SequentialScheduler>);
 
         SequentialScheduler::SequentialScheduler(ContextPtr ctx)

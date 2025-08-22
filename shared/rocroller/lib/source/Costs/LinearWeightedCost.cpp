@@ -205,7 +205,6 @@ namespace rocRoller
                                             .outOfRegisters     = 1000000000.0,
                                             .zeroFreeBarriers   = true};
 
-        // RegisterComponent(LinearWeightedCost);
         static_assert(Component::Component<LinearWeightedCost>);
 
         LinearWeightedCost::LinearWeightedCost(ContextPtr ctx)

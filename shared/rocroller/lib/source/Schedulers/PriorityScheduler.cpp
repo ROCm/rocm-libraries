@@ -31,7 +31,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(PriorityScheduler);
         static_assert(Component::Component<PriorityScheduler>);
 
         PriorityScheduler::PriorityScheduler(ContextPtr ctx, CostFunction cmp)

@@ -31,7 +31,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(RandomScheduler);
         static_assert(Component::Component<RandomScheduler>);
 
         RandomScheduler::RandomScheduler(ContextPtr ctx)

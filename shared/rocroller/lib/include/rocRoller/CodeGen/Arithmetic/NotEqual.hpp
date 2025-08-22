@@ -84,11 +84,8 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::NotEqual const&);
 
-        inline static const std::string Name = concatenate("NotEqualGenerator<",
-                                                           typeid(REGISTER_TYPE).hash_code(),
-                                                           ", ",
-                                                           typeid(DATATYPE).hash_code(),
-                                                           ">");
+        inline static const std::string Name = concatenate(
+            "NotEqualGenerator<", toString(REGISTER_TYPE), ", ", toString(DATATYPE), ">");
     };
 
     // Specializations for supported Register Type / DataType combinations

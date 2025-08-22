@@ -507,4 +507,20 @@ namespace rocRoller
         Component::ComponentFactory<BinaryArithmeticGenerator<Expression::Subtract>>::
             registerComponent<SubtractGenerator<Register::Type::Vector, DataType::Double>>();
     }
+
+    template <>
+    inline void Component::ComponentFactory<
+        BinaryArithmeticGenerator<Expression::SRConvert<DataType::FP8>>>::registerImplementations()
+    {
+        Component::ComponentFactory<BinaryArithmeticGenerator<Expression::SRConvert<
+            DataType::FP8>>>::registerComponent<SRConvertGenerator<DataType::FP8>>();
+    }
+
+    template <>
+    inline void Component::ComponentFactory<
+        BinaryArithmeticGenerator<Expression::SRConvert<DataType::BF8>>>::registerImplementations()
+    {
+        Component::ComponentFactory<BinaryArithmeticGenerator<Expression::SRConvert<
+            DataType::BF8>>>::registerComponent<SRConvertGenerator<DataType::BF8>>();
+    }
 }

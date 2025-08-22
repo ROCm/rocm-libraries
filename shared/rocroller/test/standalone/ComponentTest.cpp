@@ -52,8 +52,6 @@ struct Printer
 
 const std::string Printer::Basename = "Printer";
 
-// RegisterComponentBase(Printer);
-
 static_assert(ComponentBase<Printer>);
 
 struct APrinter : public Printer
@@ -104,11 +102,11 @@ struct BPrinter : public Printer
     }
 };
 
+const std::string APrinter::Name = "APrinter";
+const std::string BPrinter::Name = "BPrinter";
+
 static_assert(Component<APrinter>);
 static_assert(Component<BPrinter>);
-
-// RegisterComponent(APrinter);
-// RegisterComponent(BPrinter);
 
 using myarr = std::array<int, 4>;
 
@@ -150,6 +148,6 @@ int main(int argc, const char* argv[])
 template <>
 void ComponentFactory<Printer>::registerImplementations()
 {
-    // ComponentFactory<Printer>::registerComponent<APrinter>();
-    // ComponentFactory<Printer>::registerComponent<BPrinter>();
+    ComponentFactory<Printer>::registerComponent<APrinter>();
+    ComponentFactory<Printer>::registerComponent<BPrinter>();
 }

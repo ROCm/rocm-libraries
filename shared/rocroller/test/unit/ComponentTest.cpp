@@ -52,8 +52,6 @@ namespace rocRollerTest
         virtual std::string name() = 0;
     };
 
-    // RegisterComponentBase(Interface);
-
     const std::string Interface::Basename = "Interface";
 
     static_assert(ComponentBase<Interface>);
@@ -106,11 +104,11 @@ namespace rocRollerTest
         }
     };
 
+    const std::string AImpl::Name = "AImpl";
+    const std::string BImpl::Name = "BImpl";
+
     static_assert(Component<AImpl>);
     static_assert(Component<BImpl>);
-
-    // RegisterComponent(AImpl);
-    // RegisterComponent(BImpl);
 
     TEST_F(ComponentTest, Basic)
     {
@@ -160,8 +158,8 @@ namespace rocRollerTest
 template <>
 void rocRoller::Component::ComponentFactory<rocRollerTest::Interface>::registerImplementations()
 {
-    // rocRoller::Component::ComponentFactory<rocRollerTest::Interface>::registerComponent<
-    //     rocRollerTest::AImpl>();
-    // rocRoller::Component::ComponentFactory<rocRollerTest::Interface>::registerComponent<
-    //     rocRollerTest::BImpl>();
+    rocRoller::Component::ComponentFactory<rocRollerTest::Interface>::registerComponent<
+        rocRollerTest::AImpl>();
+    rocRoller::Component::ComponentFactory<rocRollerTest::Interface>::registerComponent<
+        rocRollerTest::BImpl>();
 }

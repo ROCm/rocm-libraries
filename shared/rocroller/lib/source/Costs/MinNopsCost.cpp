@@ -30,7 +30,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(MinNopsCost);
         static_assert(Component::Component<MinNopsCost>);
 
         MinNopsCost::MinNopsCost(ContextPtr ctx)

@@ -175,7 +175,7 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::SRConvert<DATATYPE> const&) override;
 
-        inline static const std::string Name;
+        inline static const std::string Name = concatenate("SRConvert<", toString(DATATYPE), ">");
     };
 
 }

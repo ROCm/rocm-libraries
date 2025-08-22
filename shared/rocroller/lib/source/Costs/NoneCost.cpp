@@ -31,7 +31,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(NoneCost);
         static_assert(Component::Component<NoneCost>);
 
         NoneCost::NoneCost(ContextPtr ctx)

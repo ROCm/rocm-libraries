@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2024-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,38 +24,16 @@
  *
  *******************************************************************************/
 
-#pragma once
-
-#include <iostream>
-
-#include <rocRoller/Utilities/LazySingleton.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ScaledMatrixMultiply.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {
-    template <typename T>
-    class TestSingleton : public LazySingleton<TestSingleton<T>>
+    template <>
+    inline void Component::ComponentFactory<
+        InstructionGenerators::ScaledMatrixMultiply>::registerImplementations()
     {
-    public:
-        T val;
-
-        void storeVal(T value)
-        {
-            val = value;
-        }
-
-        T getVal()
-        {
-            return val;
-        }
-
-        T dontDoAnything(T value)
-        {
-            return value;
-        }
-
-        void print(T value)
-        {
-            std::cout << "Value is: " << value << std::endl;
-        }
-    };
+        Component::ComponentFactory<InstructionGenerators::ScaledMatrixMultiply>::registerComponent<
+            InstructionGenerators::ScaledMatrixMultiplyGenerator>();
+    }
 }

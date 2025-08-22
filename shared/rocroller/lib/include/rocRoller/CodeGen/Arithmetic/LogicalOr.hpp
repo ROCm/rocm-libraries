@@ -81,11 +81,8 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::LogicalOr const&);
 
-        inline static const std::string Name = concatenate("LogicalOrGenerator<",
-                                                           typeid(REGISTER_TYPE).hash_code(),
-                                                           ", ",
-                                                           typeid(DATATYPE).hash_code(),
-                                                           ">");
+        inline static const std::string Name = concatenate(
+            "LogicalOrGenerator<", toString(REGISTER_TYPE), ", ", toString(DATATYPE), ">");
     };
 
     // Specializations for supported Register Type / DataType combinations

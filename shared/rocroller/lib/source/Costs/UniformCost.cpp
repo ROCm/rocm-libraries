@@ -30,7 +30,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        // RegisterComponent(UniformCost);
         static_assert(Component::Component<UniformCost>);
 
         UniformCost::UniformCost(ContextPtr ctx)

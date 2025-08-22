@@ -513,9 +513,6 @@ namespace rocRoller
         Throw<FatalError>("Convert to Double not supported");
     }
 
-    RegisterComponentTemplateSpec(SRConvertGenerator, DataType::FP8);
-    RegisterComponentTemplateSpec(SRConvertGenerator, DataType::BF8);
-
 #define DefineSpecializedGetGeneratorSRConvert(dtype)                                             \
     template <>                                                                                   \
     std::shared_ptr<BinaryArithmeticGenerator<Expression::SRConvert<DataType::dtype>>>            \

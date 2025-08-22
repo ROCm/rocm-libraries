@@ -77,11 +77,8 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::LessThanEqual const&);
 
-        inline static const std::string Name = concatenate("LessThanEqualGenerator<",
-                                                           typeid(REGISTER_TYPE).hash_code(),
-                                                           ", ",
-                                                           typeid(DATATYPE).hash_code(),
-                                                           ">");
+        inline static const std::string Name = concatenate(
+            "LessThanEqualGenerator<", toString(REGISTER_TYPE), ", ", toString(DATATYPE), ">");
     };
 
     // Specializations for supported Register Type / DataType combinations

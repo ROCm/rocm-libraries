@@ -86,11 +86,8 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::Multiply const&);
 
-        inline static const std::string Name = concatenate("MultiplyGenerator<",
-                                                           typeid(REGISTER_TYPE).hash_code(),
-                                                           ", ",
-                                                           typeid(DATATYPE).hash_code(),
-                                                           ">");
+        inline static const std::string Name = concatenate(
+            "MultiplyGenerator<", toString(REGISTER_TYPE), ", ", toString(DATATYPE), ">");
     };
 
     // Specializations for supported Register Type / DataType combinations

@@ -86,11 +86,8 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::Modulo const&);
 
-        inline static const std::string Name = concatenate("ModuloGenerator<",
-                                                           typeid(REGISTER_TYPE).hash_code(),
-                                                           ", ",
-                                                           typeid(DATATYPE).hash_code(),
-                                                           ">");
+        inline static const std::string Name = concatenate(
+            "ModuloGenerator<", toString(REGISTER_TYPE), ", ", toString(DATATYPE), ">");
     };
 
     // Specializations for supported Register Type / DataType combinations
