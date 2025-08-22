@@ -87,7 +87,7 @@ namespace rocRoller
                 // TODO: Remove this when RemoveSetCoordinate transformation is enabled
                 //       as RemoveSetCoordinate will build all transformers.
                 //
-                if(m_graph->getAllTransformers().empty())
+                if(!m_context->kernelOptions()->removeSetCoordinate)
                     m_graph->buildAllTransformers();
 
                 //
@@ -1093,20 +1093,7 @@ namespace rocRoller
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::Int64, 1);
 
-                std::cout << "Before buildTransformer StoreSGPR tag " << tag << std::endl;
-                auto xform = m_graph->buildTransformer(tag);
-                std::cout << "After buildTransformer StoreSGPR tag " << tag << std::endl;
-
-                auto indexes_info = xform.getIndexes();
-                std::cout << "print indexes" << std::endl;
-                for (const auto pair : indexes_info)
-                {
-                    std::cout << pair.first << " -> " << pair.second << '\n';
-                }
-                std::cout << "Before forward userTag tag " << userTag << std::endl;
-                auto indexes = xform.forward({userTag});
-                std::cout << "After forward userTag tag " << userTag << std::endl;
-                
+                auto indexes = m_graph->buildTransformer(tag).forward({userTag});   
 
                 co_yield Instruction::Comment("GEN: StoreSGPR; user index");
                 co_yield generateOffset(

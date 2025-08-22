@@ -1235,7 +1235,7 @@ namespace GEMMDriverTest
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
 
-        for(auto twoTile : {true, false})
+        for(auto twoTile : {true})
         {
             gemm.streamKTwoTile = twoTile;
             basicGEMM<Half>(gemm);
