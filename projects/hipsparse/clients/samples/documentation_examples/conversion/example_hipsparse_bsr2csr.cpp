@@ -116,6 +116,36 @@ int main(int argc, char* argv[])
                                       dcsrRowPtr,
                                       dcsrColInd));
 
+    std::vector<int>   hcsrRowPtr(m + 1);
+    std::vector<int>   hcsrColInd(nnz);
+    std::vector<float> hcsrVal(nnz);
+
+    // Copy back to the host
+    HIP_CHECK(
+        hipMemcpy(hcsrRowPtr.data(), dcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hcsrColInd.data(), dcsrColInd, sizeof(int) * nnz, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hcsrVal.data(), dcsrVal, sizeof(float) * nnz, hipMemcpyDeviceToHost));
+
+    std::cout << "C" << std::endl;
+    for(int i = 0; i < m; i++)
+    {
+        int start = hcsrRowPtr[i];
+        int end   = hcsrRowPtr[i + 1];
+
+        std::vector<float> temp(n, 0.0f);
+        for(int j = start; j < end; j++)
+        {
+            temp[hcsrColInd[j]] = hcsrVal[j];
+        }
+
+        for(int j = 0; j < n; j++)
+        {
+            std::cout << temp[j] << " ";
+        }
+        std::cout << "" << std::endl;
+    }
+    std::cout << "" << std::endl;
+
     HIP_CHECK(hipFree(dbsrRowPtr));
     HIP_CHECK(hipFree(dbsrColInd));
     HIP_CHECK(hipFree(dbsrVal));

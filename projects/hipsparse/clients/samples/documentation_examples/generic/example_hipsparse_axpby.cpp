@@ -103,6 +103,13 @@ int main(int argc, char* argv[])
     // Copy result back to host
     HIP_CHECK(hipMemcpy(hy.data(), dy, sizeof(float) * size, hipMemcpyDeviceToHost));
 
+    std::cout << "hy" << std::endl;
+    for(size_t i = 0; i < hy.size(); i++)
+    {
+        std::cout << hy[i] << " ";
+    }
+    std::cout << "" << std::endl;
+
     // Clear hipSPARSE
     HIPSPARSE_CHECK(hipsparseDestroySpVec(vecX));
     HIPSPARSE_CHECK(hipsparseDestroyDnVec(vecY));

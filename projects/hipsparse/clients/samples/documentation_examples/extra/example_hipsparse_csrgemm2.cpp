@@ -245,7 +245,7 @@ int main(int argc, char* argv[])
         std::vector<float> temp(n, 0.0f);
         for(int j = start; j < end; j++)
         {
-            temp[hcsrColIndC[j]] - hcsrValC[j];
+            temp[hcsrColIndC[j]] = hcsrValC[j];
         }
 
         for(int j = 0; j < n; j++)
