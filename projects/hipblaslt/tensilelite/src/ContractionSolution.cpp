@@ -742,6 +742,8 @@ namespace TensileLite
                 uint32_t skItersPerWG = skTiles * itersPerTile / skGrid;
                 uint32_t skExtraIters = skTiles * itersPerTile % (skGrid);
 
+                // TODO - This should be removed as soon as we have a way to automatically modify
+                // custom kernels ABI
                 if(sizeMapping.customKernelName.empty())
                 {
                     args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
