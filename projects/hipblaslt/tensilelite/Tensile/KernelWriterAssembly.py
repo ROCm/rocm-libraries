@@ -8546,7 +8546,7 @@ class KernelWriterAssembly(KernelWriter):
           tmpS =    incLower + 2
           tmpIncSparse = incLower + 3
           suStr = "StaggerUIter"
-          tcOther = "B" if tP["isA"] else "A"
+          tcOther = tc.replace("A", "B")  if ("A" in tc) else tc.replace("B", "A")
           if kernel["PrefetchGlobalRead"] >= 2 and (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc] and (not kernel["DirectToVgpr%s"%tcOther]):
             suStr += "DTV"
           if prefetchIndex:
@@ -8657,9 +8657,13 @@ class KernelWriterAssembly(KernelWriter):
     incCodeA = imod.add(Module("globalReadIncrementA"))
     if tPA != None:
       self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA, prefetchIndex)
+      if "MX" in tPA:
+        self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
     incCodeB = imod.add(Module("globalReadIncrementB"))
     if tPB != None:
       self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB, prefetchIndex)
+      if "MX" in tPB:
+        self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
     return imod
 
   ##############################################################################
