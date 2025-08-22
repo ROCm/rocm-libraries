@@ -404,6 +404,8 @@ class CodeModules:
   mulAlphaOther: Optional[Module]             = None
   localWriteA: Optional[Module]               = None
   localWriteB: Optional[Module]               = None
+  localWriteMXSA: Optional[Module]            = None
+  localWriteMXSB: Optional[Module]            = None
   dtlsM0UpdateA: Optional[Module]             = None
   dtlsM0UpdateB: Optional[Module]             = None
   dtlsM0UpdateMXSA: Optional[Module]          = None
@@ -451,6 +453,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.do["GlobalInc"]   = True
     self.do["LocalWriteA"]  = True
     self.do["LocalWriteB"]  = True
+    self.do["LocalWriteMXSA"]  = True
+    self.do["LocalWriteMXSB"]  = True
     self.do["LocalWriteMetadata"]  = True
     self.do["LocalWriteCVT"]  = True
     self.do["LocalReadA"]  = True
@@ -534,6 +538,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.db["ForceInputValueA"] = False
     self.db["ForceInputValueB"] = False
+    self.db["ForceInputValueMXSA"] = False
+    self.db["ForceInputValueMXSB"] = False
     self.db["ForceInputValueMetadata"] = False
     self.db["ForceValueA"] = 1.0
     self.db["ForceValueB"] = 1.0
@@ -2622,9 +2628,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # In the current scheduling, we always schedule lwa first then lwb second.
             # Put B in lwa code can easily change the order.
             self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersB, swapAB=1)
+            if "MX" in tensorParametersB:
+              self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersB["MX"], swapAB=1)
+            else:
+              self.codes.localWriteMXSA = Module()
+            if "MX" in tensorParametersA:
+              self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersA["MX"], swapAB=1)
+            else:
+              self.codes.localWriteMXSB = Module()
             self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersA, swapAB=1)
           else:
             self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)  # local write in loopcnt N targets data for loopcnt N+1
+            if "MX" in tensorParametersA:
+              self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])  # local write in loopcnt N targets data for loopcnt N+1
+            else:
+              self.codes.localWriteMXSA = Module()
+            if "MX" in tensorParametersB:
+              self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+            else:
+              self.codes.localWriteMXSB = Module()
             self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
           # unrolled loop: global read A, B
           # DirectToVgprA + PGR2: we need DTVA GR in NGLL
@@ -2650,6 +2672,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         else:
           self.codes.localWriteA = Module()
           self.codes.localWriteB = Module()
+          self.codes.localWriteMXSA = Module()
+          self.codes.localWriteMXSB = Module()
 
         if not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
           (kernel["PrefetchGlobalRead"] >= 3 and isNGLL) or \
@@ -3110,9 +3134,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if not kernel["NoLdsWriteCode"]:
       self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
+      if "MX" in tensorParametersA:
+        self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
+      else:
+        self.codes.localWriteMXSA = Module()
+      if "MX" in tensorParametersB:
+        self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+      else:
+        self.codes.localWriteMXSB = Module()
       self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
     else:
       self.codes.localWriteA = Module()
+      self.codes.localWriteMXSA = Module()
+      self.codes.localWriteMXSB = Module()
       self.codes.localWriteB = Module()
 
     # localWriteEndIter is used to determine which iteration to put sync
@@ -3135,6 +3169,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("local write a")
         tempLWCodeModA = self.localWriteDo(kernel, tensorParametersA)
         module.add(tempLWCodeModA)
+        if "MX" in tensorParametersA:
+          module.addComment1("local write mxsa")
+          tempLWCodeModMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
+          module.add(tempLWCodeModMXSA)
+        if "MX" in tensorParametersB:
+          module.addComment1("local write mxsb")
+          tempLWCodeModMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+          module.add(tempLWCodeModMXSB)
         module.addComment1("local write b")
         tempLWCodeModB = self.localWriteDo(kernel, tensorParametersB)
         module.add(tempLWCodeModB)
@@ -3219,12 +3261,30 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if not kernel["NoLdsWriteCode"]:
           if dsWriteBA:
             self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersB, swapAB=1)
+            if "MX" in tensorParametersB:
+              self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersB["MX"], swapAB=1)
+            else:
+              self.codes.localWriteMXSA = Module()
+            if "MX" in tensorParametersA:
+              self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersA["MX"], swapAB=1)
+            else:
+              self.codes.localWriteMXSB = Module()
             self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersA, swapAB=1)
           else:
             self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
+            if "MX" in tensorParametersA:
+              self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
+            else:
+              self.codes.localWriteMXSA = Module()
+            if "MX" in tensorParametersB:
+              self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+            else:
+              self.codes.localWriteMXSB = Module()
             self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
         else:
           self.codes.localWriteA = Module()
+          self.codes.localWriteMXSA = Module()
+          self.codes.localWriteMXSB = Module()
           self.codes.localWriteB = Module()
 
         if not unrollLoopHeaderCodeScheduled:
@@ -4258,6 +4318,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("local write a")
         tempLWCodeModA = self.localWriteDo(kernel, tensorParametersA)
         module.add(tempLWCodeModA)
+        if "MX" in tensorParametersA:
+          module.addComment1("local write mxsa")
+          tempLWCodeModMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
+          module.add(tempLWCodeModMXSA)
+        if "MX" in tensorParametersB:
+          module.addComment1("local write mxsb")
+          tempLWCodeModMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+          module.add(tempLWCodeModMXSB)
         module.addComment1("local write b")
         tempLWCodeModB = self.localWriteDo(kernel, tensorParametersB)
         module.add(tempLWCodeModB)
