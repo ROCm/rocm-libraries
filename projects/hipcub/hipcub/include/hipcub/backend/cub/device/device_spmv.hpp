@@ -38,89 +38,101 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-class DeviceSpmv
+class HIPCUB_DEPRECATED_BECAUSE("Use the cuSPARSE library instead") DeviceSpmv
 {
 
 public:
+    template<typename ValueT, ///< Matrix and vector value type
+             typename OffsetT> ///< Signed integer type for sequence offsets
+    struct HIPCUB_DEPRECATED_BECAUSE("Use the cuSPARSE library instead") SpmvParams
+    {
+        ValueT*
+            d_values; ///< Pointer to the array of \p num_nonzeros values of the corresponding nonzero elements of matrix <b>A</b>.
+        OffsetT*
+            d_row_end_offsets; ///< Pointer to the array of \p m offsets demarcating the end of every row in \p d_column_indices and \p d_values
+        OffsetT*
+            d_column_indices; ///< Pointer to the array of \p num_nonzeros column-indices of the corresponding nonzero elements of matrix <b>A</b>.  (Indices are zero-valued.)
+        ValueT*
+            d_vector_x; ///< Pointer to the array of \p num_cols values corresponding to the dense input vector <em>x</em>
+        ValueT*
+            d_vector_y; ///< Pointer to the array of \p num_rows values corresponding to the dense output vector <em>y</em>
+        int    num_rows; ///< Number of rows of matrix <b>A</b>.
+        int    num_cols; ///< Number of columns of matrix <b>A</b>.
+        int    num_nonzeros; ///< Number of nonzero elements of matrix <b>A</b>.
+        ValueT alpha; ///< Alpha multiplicand
+        ValueT beta; ///< Beta addend-multiplicand
 
-template <
-    typename        ValueT,              ///< Matrix and vector value type
-    typename        OffsetT>             ///< Signed integer type for sequence offsets
-struct SpmvParams
-{
-    ValueT*         d_values;            ///< Pointer to the array of \p num_nonzeros values of the corresponding nonzero elements of matrix <b>A</b>.
-    OffsetT*        d_row_end_offsets;   ///< Pointer to the array of \p m offsets demarcating the end of every row in \p d_column_indices and \p d_values
-    OffsetT*        d_column_indices;    ///< Pointer to the array of \p num_nonzeros column-indices of the corresponding nonzero elements of matrix <b>A</b>.  (Indices are zero-valued.)
-    ValueT*         d_vector_x;          ///< Pointer to the array of \p num_cols values corresponding to the dense input vector <em>x</em>
-    ValueT*         d_vector_y;          ///< Pointer to the array of \p num_rows values corresponding to the dense output vector <em>y</em>
-    int             num_rows;            ///< Number of rows of matrix <b>A</b>.
-    int             num_cols;            ///< Number of columns of matrix <b>A</b>.
-    int             num_nonzeros;        ///< Number of nonzero elements of matrix <b>A</b>.
-    ValueT          alpha;               ///< Alpha multiplicand
-    ValueT          beta;                ///< Beta addend-multiplicand
+        ::cub::TexObjInputIterator<ValueT, OffsetT> t_vector_x;
+    };
 
-    ::cub::TexObjInputIterator<ValueT, OffsetT> t_vector_x;
-};
+    template<typename ValueT>
+    HIPCUB_DEPRECATED_BECAUSE("Use the cuSPARSE library instead")
+    HIPCUB_RUNTIME_FUNCTION static hipError_t CsrMV(void*       d_temp_storage,
+                                                    size_t&     temp_storage_bytes,
+                                                    ValueT*     d_values,
+                                                    int*        d_row_offsets,
+                                                    int*        d_column_indices,
+                                                    ValueT*     d_vector_x,
+                                                    ValueT*     d_vector_y,
+                                                    int         num_rows,
+                                                    int         num_cols,
+                                                    int         num_nonzeros,
+                                                    hipStream_t stream = 0)
+    {
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
+        ::cub::SpmvParams<ValueT, int> spmv_params;
+        _CCCL_SUPPRESS_DEPRECATED_POP
+        spmv_params.d_values          = d_values;
+        spmv_params.d_row_end_offsets = d_row_offsets + 1;
+        spmv_params.d_column_indices  = d_column_indices;
+        spmv_params.d_vector_x        = d_vector_x;
+        spmv_params.d_vector_y        = d_vector_y;
+        spmv_params.num_rows          = num_rows;
+        spmv_params.num_cols          = num_cols;
+        spmv_params.num_nonzeros      = num_nonzeros;
+        spmv_params.alpha             = 1.0;
+        spmv_params.beta              = 0.0;
 
-template<typename ValueT>
-HIPCUB_RUNTIME_FUNCTION static hipError_t CsrMV(void*       d_temp_storage,
-                                                size_t&     temp_storage_bytes,
-                                                ValueT*     d_values,
-                                                int*        d_row_offsets,
-                                                int*        d_column_indices,
-                                                ValueT*     d_vector_x,
-                                                ValueT*     d_vector_y,
-                                                int         num_rows,
-                                                int         num_cols,
-                                                int         num_nonzeros,
-                                                hipStream_t stream = 0)
-{
-    ::cub::SpmvParams<ValueT, int> spmv_params;
-    spmv_params.d_values          = d_values;
-    spmv_params.d_row_end_offsets = d_row_offsets + 1;
-    spmv_params.d_column_indices  = d_column_indices;
-    spmv_params.d_vector_x        = d_vector_x;
-    spmv_params.d_vector_y        = d_vector_y;
-    spmv_params.num_rows          = num_rows;
-    spmv_params.num_cols          = num_cols;
-    spmv_params.num_nonzeros      = num_nonzeros;
-    spmv_params.alpha             = 1.0;
-    spmv_params.beta              = 0.0;
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
+        return static_cast<hipError_t>(
+            ::cub::DispatchSpmv<ValueT, int>::Dispatch(d_temp_storage,
+                                                       temp_storage_bytes,
+                                                       spmv_params,
+                                                       stream));
+        _CCCL_SUPPRESS_DEPRECATED_POP
+    }
 
-    return static_cast<hipError_t>(::cub::DispatchSpmv<ValueT, int>::Dispatch(d_temp_storage,
-                                                                              temp_storage_bytes,
-                                                                              spmv_params,
-                                                                              stream));
-}
-
-template<typename ValueT>
-HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-    CsrMV(void*       d_temp_storage,
-          size_t&     temp_storage_bytes,
-          ValueT*     d_values,
-          int*        d_row_offsets,
-          int*        d_column_indices,
-          ValueT*     d_vector_x,
-          ValueT*     d_vector_y,
-          int         num_rows,
-          int         num_cols,
-          int         num_nonzeros,
-          hipStream_t stream,
-          bool        debug_synchronous)
-{
-    HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-    return CsrMV(d_temp_storage,
-                 temp_storage_bytes,
-                 d_values,
-                 d_row_offsets,
-                 d_column_indices,
-                 d_vector_x,
-                 d_vector_y,
-                 num_rows,
-                 num_cols,
-                 num_nonzeros,
-                 stream);
-}
+    template<typename ValueT>
+    HIPCUB_DEPRECATED_BECAUSE("Use the cuSPARSE library instead")
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        CsrMV(void*       d_temp_storage,
+              size_t&     temp_storage_bytes,
+              ValueT*     d_values,
+              int*        d_row_offsets,
+              int*        d_column_indices,
+              ValueT*     d_vector_x,
+              ValueT*     d_vector_y,
+              int         num_rows,
+              int         num_cols,
+              int         num_nonzeros,
+              hipStream_t stream,
+              bool        debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        _CCCL_SUPPRESS_DEPRECATED_PUSH
+        return CsrMV(d_temp_storage,
+                     temp_storage_bytes,
+                     d_values,
+                     d_row_offsets,
+                     d_column_indices,
+                     d_vector_x,
+                     d_vector_y,
+                     num_rows,
+                     num_cols,
+                     num_nonzeros,
+                     stream);
+        _CCCL_SUPPRESS_DEPRECATED_POP
+    }
 };
 
 END_HIPCUB_NAMESPACE
