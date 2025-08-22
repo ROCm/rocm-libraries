@@ -6534,6 +6534,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
         return 0, 0
       self.states.a.useDirect32XEmulationThis = self.states.a.useDirect32XEmulationNext = kernel["UseDirect32XEmulation"]
       self.states.b.useDirect32XEmulationThis = self.states.b.useDirect32XEmulationNext = kernel["UseDirect32XEmulation"]
+      self.states.mxsa.useDirect32XEmulation = False
+      self.states.mxsb.useDirect32XEmulation = False
+      self.states.a.TF32EmuUseTransposeCode = False
+      self.states.b.TF32EmuUseTransposeCode = False
+      self.states.mxsa.TF32EmuUseTransposeCode = False
+      self.states.mxsb.TF32EmuUseTransposeCode = False
+      self.states.a.TF32EmuInterleaveTreg = False
+      self.states.b.TF32EmuInterleaveTreg = False
+      self.states.mxsa.TF32EmuInterleaveTreg = False
+      self.states.mxsb.TF32EmuInterleaveTreg = False
       # do prefetch and scheduling for full pack code
       # this sceduling opt is for non CMS. No need to enable it for CMS
       self.states.doFullPackCodePrefetch = kernel["UsePLRPack"] and not kernel["UseCustomMainLoopSchedule"]

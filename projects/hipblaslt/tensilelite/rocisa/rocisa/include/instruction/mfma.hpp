@@ -284,6 +284,120 @@ namespace rocisa
         }
     };
 
+    struct MXMFMAInstruction : public Instruction
+    {
+        InstType                           accType;
+        std::vector<int>                   variant;
+        std::shared_ptr<RegisterContainer> acc;
+        std::shared_ptr<RegisterContainer> a;
+        std::shared_ptr<RegisterContainer> b;
+        std::shared_ptr<RegisterContainer> acc2;
+        std::shared_ptr<RegisterContainer> mxsa;
+        std::shared_ptr<RegisterContainer> mxsb;
+        int                                block;
+
+        MXMFMAInstruction(InstType                                  instType,
+                          InstType                                  accType,
+                          const std::vector<int>&                   variant,
+                          const std::shared_ptr<RegisterContainer>& acc,
+                          const std::shared_ptr<RegisterContainer>& a,
+                          const std::shared_ptr<RegisterContainer>& b,
+                          const std::shared_ptr<RegisterContainer>& acc2,
+                          const std::shared_ptr<RegisterContainer>& mxsa,
+                          const std::shared_ptr<RegisterContainer>& mxsb,
+                          int                                       block,
+                          const std::string&                        comment = "")
+            : Instruction(instType, comment)
+            , accType(accType)
+            , variant(variant)
+            , acc(acc)
+            , a(a)
+            , b(b)
+            , acc2(acc2)
+            , mxsa(mxsa)
+            , mxsb(mxsb)
+            , block(block)
+        {
+        }
+
+        MXMFMAInstruction(const MXMFMAInstruction& other)
+            : Instruction(other.instType, other.comment)
+            , accType(other.accType)
+            , variant(other.variant)
+            , acc(other.acc ? other.acc->clone2() : nullptr)
+            , a(other.a ? other.a->clone2() : nullptr)
+            , b(other.b ? other.b->clone2() : nullptr)
+            , acc2(other.acc2 ? other.acc2->clone2() : nullptr)
+            , mxsa(other.mxsa ? other.mxsa->clone2() : nullptr)
+            , mxsb(other.mxsb ? other.mxsb->clone2() : nullptr)
+            , block(other.block)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<MXMFMAInstruction>(*this);
+        }
+
+        std::string typeConvert(InstType iType) const
+        {
+            return "f8f6f4";
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {acc, a, b, acc2, mxsa, mxsb, block};
+        }
+
+        std::string preStr() const override
+        {
+            std::string blkStr = (block == 16) ? "16" : "";
+            return "v_wmma_scale" + blkStr + "_f32_16x16x128_f8f6f4";
+        }
+
+        std::string getArgStr() const
+        {
+            std::string inputPermuteStr = "";
+            switch(instType)
+            {
+            case InstType::INST_F8:
+                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                break;
+            case InstType::INST_BF8:
+                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                break;
+            case InstType::INST_F8_BF8:
+                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                break;
+            case InstType::INST_BF8_F8:
+                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                break;
+            case InstType::INST_F6:
+                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                break;
+            case InstType::INST_BF6:
+                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                break;
+            case InstType::INST_F4:
+                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                break;
+            default:
+                break;
+            }
+            return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
+                   + acc2->toString() + ", " + mxsa->toString() + ", " + mxsb->toString() + inputPermuteStr;
+        }
+
+        std::string toString() const override
+        {
+            auto        newInstStr = preStr();
+            std::string kStr       = newInstStr + " " + getArgStr();
+            setMsb(kStr, {a, b, acc2}, acc);
+            return formatWithComment(kStr);
+        }
+    };
+
+
     struct SMFMAInstruction : public Instruction
     {
         InstType                           accType;
