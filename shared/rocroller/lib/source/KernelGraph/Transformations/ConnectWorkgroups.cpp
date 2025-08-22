@@ -41,13 +41,6 @@ namespace rocRoller
 
         namespace ConnectWorkgroupsDetail
         {
-
-            Expression::ExpressionPtr toInt32(Expression::ExpressionPtr expr)
-            {
-                return std::make_shared<Expression::Expression>(
-                    Expression::Convert{{.arg{expr}}, DataType::Int32});
-            }
-
             void TileSizeInfo::recordSize(int dim, int tileNumTag, auto direction, auto expr)
             {
                 // TODO: Is there a way to make this safer?
@@ -58,14 +51,13 @@ namespace rocRoller
                 //
                 // should fit within a Int32
 
-                AssertFatal(0 <= dim && dim < 3);
+                AssertFatal(0 <= dim && dim < 3, ShowValue(dim));
 
                 if(expr != nullptr)
                 {
                     if(sizes[dim] == nullptr)
                     {
-                        sizes[dim]
-                            = resultType(expr).varType != DataType::Int32 ? toInt32(expr) : expr;
+                        sizes[dim] = convert(DataType::Int32, expr);
                     }
                     else
                     {
@@ -237,19 +229,14 @@ namespace rocRoller
                 auto one  = Expression::literal(1);
                 auto zero = Expression::literal(0);
 
-                auto PA = [](int slot) {
-                    return std::make_shared<Expression::Expression>(
-                        Expression::PositionalArgument{slot});
-                };
-
                 auto parallelSize      = info.sizes[dimension];
                 auto perpendicularSize = info.sizes[1 - dimension];
 
-                auto blockSize = toInt32(size * perpendicularSize);
+                auto blockSize = convert(DataType::Int32, size * perpendicularSize);
                 setComment(blockSize, "WGM block size");
-                auto mainBlockSize = toInt32(totalSize / blockSize) * blockSize;
+                auto mainBlockSize = convert(DataType::Int32, totalSize / blockSize) * blockSize;
                 setComment(mainBlockSize, "WGM main block size");
-                auto tailBlockSize = toInt32(parallelSize % size);
+                auto tailBlockSize = convert(DataType::Int32, parallelSize % size);
                 setComment(tailBlockSize, "WGM tail block size");
 
                 auto groupNumber = graph.coordinates.addElement(Linear());
@@ -269,12 +256,14 @@ namespace rocRoller
                     = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
 
                 // 0 argument is mainBlockNumber
-                auto condition = PA(0) == Expression::literal(0);
+                auto condition
+                    = Expression::positionalArgument(0, Register::Type::Scalar, DataType::UInt32)
+                      == Expression::literal(0);
 
                 ExpressionPtrVectorPair stridesParallel{{zero, size, one, zero},
                                                         {zero, zero, zero, one}};
-                ExpressionPtrPair       initialValuesParallel{nullptr,
-                                                        toInt32(parallelSize / size) * size};
+                ExpressionPtrPair       initialValuesParallel{
+                    nullptr, convert(DataType::Int32, parallelSize / size) * size};
 
                 ExpressionPtrVectorPair stridesPerpendicular{{zero, one, zero}, {zero, zero, one}};
                 ExpressionPtrPair       initialValuesPerpendicular{nullptr, nullptr};
@@ -356,13 +345,10 @@ namespace rocRoller
                 auto cu
                     = graph.coordinates.addElement(Linear(ceilDiv(size, numXCCLiteral), nullptr));
 
-                auto PA = [](int slot) {
-                    return std::make_shared<Expression::Expression>(
-                        Expression::PositionalArgument{slot});
-                };
-
                 // 0 argument is XCC, 1 argument is CU
-                auto condition = PA(0) <= (size % numXCCLiteral);
+                auto condition
+                    = Expression::positionalArgument(0, Register::Type::Scalar, DataType::UInt32)
+                      <= (size % numXCCLiteral);
 
                 ExpressionPtrVectorPair strides{{ceilDiv(size, numXCCLiteral), one},
                                                 {size / numXCCLiteral, one}};
@@ -389,9 +375,14 @@ namespace rocRoller
             }
         }
 
-        ConnectWorkgroups::ConnectWorkgroups(CommandParametersPtr params, ContextPtr context)
-            : m_params(params)
-            , m_context(context)
+        ConnectWorkgroups::ConnectWorkgroups(ContextPtr                context,
+                                             std::optional<int>        workgroupMappingDim,
+                                             std::optional<int>        workgroupRemapXCC,
+                                             Expression::ExpressionPtr workgroupMappingValue)
+            : m_context(context)
+            , m_workgroupMappingDim(workgroupMappingDim)
+            , m_workgroupRemapXCC(workgroupRemapXCC)
+            , m_workgroupMappingValue(workgroupMappingValue)
         {
         }
 
@@ -402,17 +393,17 @@ namespace rocRoller
             auto kgraph = original;
             auto info   = getTileSizeInfo(original);
 
-            if(m_params->workgroupMapping)
+            if(m_workgroupMappingDim.has_value())
             {
-                auto [dimension, size] = m_params->workgroupMapping.value();
-                connectWorkgroupsWithMapping(info, kgraph, dimension, size);
+                connectWorkgroupsWithMapping(
+                    info, kgraph, m_workgroupMappingDim.value(), m_workgroupMappingValue);
             }
             else
             {
                 connectWorkgroupsNoMapping(info, kgraph);
             }
 
-            if(m_params->workgroupRemapXCC)
+            if(m_workgroupRemapXCC.has_value())
             {
                 auto const& arch = m_context->targetArchitecture();
                 AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
@@ -421,7 +412,7 @@ namespace rocRoller
                 auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
                 for(auto workgroupTag : workgroupTags)
                 {
-                    remapWorkgroupXCC(kgraph, workgroupTag, m_params->workgroupRemapXCC.value());
+                    remapWorkgroupXCC(kgraph, workgroupTag, m_workgroupRemapXCC.value());
                 }
             }
 

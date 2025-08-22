@@ -146,7 +146,7 @@ hipError_t select(void * temporary_storage,
     using unary_predicate_type = ::rocprim::empty_type;
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
-    using offset_type = unsigned int;
+    using offset_type                    = size_t;
     rocprim::empty_type* const no_values = nullptr; // key only
 
     using output_key_iterator_tuple = tuple<OutputIterator, ::rocprim::empty_type>;
@@ -281,7 +281,7 @@ hipError_t select(void * temporary_storage,
 {
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
-    using offset_type = unsigned int;
+    using offset_type = size_t;
     flag_type * flags = nullptr;
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
@@ -425,7 +425,7 @@ inline hipError_t select(void*                       temporary_storage,
 {
     // Dummy inequality operation
     using inequality_op_type             = ::rocprim::empty_type;
-    using offset_type                    = unsigned int;
+    using offset_type                    = size_t;
     rocprim::empty_type* const no_values = nullptr; // key only
 
     using output_key_iterator_tuple = tuple<OutputIterator, ::rocprim::empty_type>;

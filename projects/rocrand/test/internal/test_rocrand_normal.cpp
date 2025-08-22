@@ -21,24 +21,14 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include "../test_common.hpp"
+
+#include <cmath>
 #include <numeric>
 #include <random>
 
 #undef ROCRAND_DETAIL_BM_NOT_IN_STATE
 #include <rocrand/rocrand_normal.h>
-
-#define HIP_CHECK(cmd)                                                                         \
-    do                                                                                         \
-    {                                                                                          \
-        auto error = (cmd);                                                                    \
-        if(error != hipSuccess)                                                                \
-        {                                                                                      \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " \
-                      << __LINE__ << " in file " << __FILE__ << "\n";                          \
-            exit(-1);                                                                          \
-        }                                                                                      \
-    }                                                                                          \
-    while(0)
 
 #define ROCRAND_CHECK(cmd)                                                                \
     do                                                                                    \
@@ -301,7 +291,7 @@ TYPED_TEST(NormalDistributionRocRandStateTest, rocrand_host_state_tests)
     {
         auto mean_func = [](out_type x) { return x; };
         auto std_dev_func
-            = [](out_type x, out_type actual_mean) { return std::powf(x - actual_mean, 2); };
+            = [](out_type x, out_type actual_mean) { return POWF(x - actual_mean, 2); };
         if constexpr(std::is_same_v<out_type, float>)
         {
             run_host_prng_test<out_type, T, out_size, rocrand_state>(
@@ -321,7 +311,7 @@ TYPED_TEST(NormalDistributionRocRandStateTest, rocrand_host_state_tests)
     {
         auto mean_func    = [](out_type x) { return x.x + x.y; };
         auto std_dev_func = [](out_type x, T actual_mean)
-        { return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2); };
+        { return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2); };
 
         if constexpr(std::is_same_v<out_type, float2>)
         {
@@ -343,8 +333,8 @@ TYPED_TEST(NormalDistributionRocRandStateTest, rocrand_host_state_tests)
         auto mean_func    = [](out_type x) { return x.x + x.y + x.w + x.z; };
         auto std_dev_func = [](out_type x, T actual_mean)
         {
-            return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2)
-                   + std::powf(x.w - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
+            return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2)
+                   + POWF(x.w - actual_mean, 2) + POWF(x.z - actual_mean, 2);
         };
 
         if constexpr(std::is_same_v<out_type, float4>)
@@ -371,8 +361,7 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint_in_float_ou
     constexpr size_t OutputSize = 1;
 
     auto mean_func = [](OutputType x) { return x; };
-    auto std_dev_func
-        = [](OutputType x, double actual_mean) { return std::powf(x - actual_mean, 2); };
+    auto std_dev_func = [](OutputType x, double actual_mean) { return POWF(x - actual_mean, 2); };
 
     run_host_numeric_test<OutputType, InputType, OutputSize>(
         [=](std::uniform_int_distribution<InputType>& dis, std::mt19937& gen)
@@ -388,8 +377,7 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ullint_in_float_
     constexpr size_t OutputSize = 1;
 
     auto mean_func = [](OutputType x) { return x; };
-    auto std_dev_func
-        = [](OutputType x, double actual_mean) { return std::powf(x - actual_mean, 2); };
+    auto std_dev_func = [](OutputType x, double actual_mean) { return POWF(x - actual_mean, 2); };
 
     run_host_numeric_test<OutputType, InputType, OutputSize>(
         [=](std::uniform_int_distribution<InputType>& dis, std::mt19937& gen)
@@ -406,7 +394,7 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_2uint_in_float2_
 
     auto mean_func    = [](OutputType x) { return x.x + x.y; };
     auto std_dev_func = [](OutputType x, double actual_mean)
-    { return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2); };
+    { return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2); };
 
     run_host_numeric_test<OutputType, InputType, OutputSize>(
         [=](std::uniform_int_distribution<InputType>& dis, std::mt19937& gen)
@@ -423,7 +411,7 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint2_in_float2_
 
     auto mean_func    = [](OutputType x) { return x.x + x.y; };
     auto std_dev_func = [](OutputType x, double actual_mean)
-    { return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2); };
+    { return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2); };
 
     run_host_numeric_test<OutputType, InputType, OutputSize>(
         [=](std::uniform_int_distribution<InputType>& dis, std::mt19937& gen) {
@@ -441,7 +429,7 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ull_in_float2_ou
 
     auto mean_func    = [](OutputType x) { return x.x + x.y; };
     auto std_dev_func = [](OutputType x, double actual_mean)
-    { return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2); };
+    { return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2); };
 
     run_host_numeric_test<OutputType, InputType, OutputSize>(
         [=](std::uniform_int_distribution<InputType>& dis, std::mt19937& gen)
@@ -459,8 +447,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint4_in_float4_
     auto mean_func    = [](OutputType x) { return x.w + x.x + x.y + x.z; };
     auto std_dev_func = [](OutputType x, double actual_mean)
     {
-        return std::powf(x.w - actual_mean, 2) + std::powf(x.x - actual_mean, 2)
-               + std::powf(x.y - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
+        return POWF(x.w - actual_mean, 2) + POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2)
+               + POWF(x.z - actual_mean, 2);
     };
 
     run_host_numeric_test<OutputType, InputType, OutputSize>(
@@ -482,8 +470,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_longlong2_in_flo
     auto mean_func    = [](OutputType x) { return x.w + x.x + x.y + x.z; };
     auto std_dev_func = [](OutputType x, double actual_mean)
     {
-        return std::powf(x.w - actual_mean, 2) + std::powf(x.x - actual_mean, 2)
-               + std::powf(x.y - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
+        return POWF(x.w - actual_mean, 2) + POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2)
+               + POWF(x.z - actual_mean, 2);
     };
 
     run_host_numeric_test<OutputType, InputType, OutputSize>(
@@ -503,8 +491,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_2ull_in_float4_o
     auto mean_func    = [](OutputType x) { return x.w + x.x + x.y + x.z; };
     auto std_dev_func = [](OutputType x, double actual_mean)
     {
-        return std::powf(x.w - actual_mean, 2) + std::powf(x.x - actual_mean, 2)
-               + std::powf(x.y - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
+        return POWF(x.w - actual_mean, 2) + POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2)
+               + POWF(x.z - actual_mean, 2);
     };
 
     run_host_numeric_test<OutputType, InputType, OutputSize>(
@@ -648,7 +636,7 @@ template<typename OutType, class RocRandPrngType, class GenFunc>
 __global__
 void normal_distribution_kernel(OutType*         device_output,
                                 RocRandPrngType* device_prngs,
-                                const GenFunc&   gf)
+                                const GenFunc    gf)
 {
     const size_t offset = (GlobalSizes::items_per_block * blockIdx.x)
                           + (GlobalSizes::items_per_thread * threadIdx.x);
@@ -669,10 +657,10 @@ template<typename T,
          class GenFunc,
          class ReadMeanFunc,
          class ReadStdFunc>
-void run_device_prng_test(const GenFunc&      gf,
-                          const ReadMeanFunc& rmf,
-                          const ReadStdFunc&  rsf,
-                          const size_t        out_size)
+void run_device_prng_test(const GenFunc      gf,
+                          const ReadMeanFunc rmf,
+                          const ReadStdFunc  rsf,
+                          const size_t       out_size)
 {
     RocRandPrngType* prngs;
     HIP_CHECK(
@@ -723,6 +711,91 @@ void run_device_prng_test(const GenFunc&      gf,
     HIP_CHECK(hipFree(device_output));
 }
 
+template<class rocrand_state, int size, class out_type>
+struct normal
+{
+
+    __device__ __host__
+    auto operator()(rocrand_state* state) const
+    {
+        if constexpr(size == 1)
+        {
+            if constexpr(std::is_same_v<out_type, float>)
+            {
+                return rocrand_normal(state);
+            }
+            else
+            {
+                return rocrand_normal_double(state);
+            }
+        }
+        else if constexpr(size == 2)
+        {
+            if constexpr(std::is_same_v<out_type, float>)
+            {
+                return rocrand_normal2(state);
+            }
+            else
+            {
+                return rocrand_normal_double2(state);
+            }
+        }
+        else if constexpr(size == 4)
+        {
+            if constexpr(std::is_same_v<out_type, float>)
+            {
+                return rocrand_normal4(state);
+            }
+            else
+            {
+                return rocrand_normal_double4(state);
+            }
+        }
+    }
+
+    struct mean
+    {
+        template<class T>
+        __device__ __host__
+        auto operator()(T x) const
+        {
+            if constexpr(size == 1)
+            {
+                return x;
+            }
+            else if constexpr(size == 2)
+            {
+                return x.x + x.y;
+            }
+            else if constexpr(size == 4)
+            {
+                return x.x + x.y + x.w + x.z;
+            }
+        }
+    };
+
+    struct std_dev
+    {
+        template<class T, class R>
+        __device__ __host__
+        auto operator()(T x, R actual_mean) const
+        {
+            if constexpr(size == 1)
+            {
+                return POWF(x - actual_mean, 2);
+            }
+            else if constexpr(size == 2)
+            {
+                return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2);
+            }
+            else if constexpr(size == 4)
+            {
+                return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2)
+                       + POWF(x.w - actual_mean, 2) + POWF(x.z - actual_mean, 2);
+            }
+        }
+    };
+};
 TYPED_TEST(NormalDistributionRocRandStateTest, rocrand_device_state_tests)
 {
     using out_type            = typename TestFixture::out_type;
@@ -733,75 +806,10 @@ TYPED_TEST(NormalDistributionRocRandStateTest, rocrand_device_state_tests)
                               || std::is_same_v<out_type, float4>),
                              float,
                              double>;
-    if constexpr(out_size == 1)
-    {
-        auto read_mean = [](out_type x) { return x; };
-        auto read_std  = [](out_type x, T actual_mean) { return std::powf(x - actual_mean, 2); };
-        if constexpr(std::is_same_v<out_type, float>)
-        {
-            run_device_prng_test<T, out_type, rocrand_state>([=](rocrand_state* state)
-                                                             { return rocrand_normal(state); },
-                                                             read_mean,
-                                                             read_std,
-                                                             out_size);
-        }
-        else
-        {
-            run_device_prng_test<T, out_type, rocrand_state>(
-                [=](rocrand_state* state) { return rocrand_normal_double(state); },
-                read_mean,
-                read_std,
-                out_size);
-        }
-    }
+    using context = normal<rocrand_state, out_size, T>;
 
-    if constexpr(out_size == 2)
-    {
-        auto read_mean = [](out_type x) { return x.x + x.y; };
-        auto read_std  = [](out_type x, T actual_mean)
-        { return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2); };
-
-        if constexpr(std::is_same_v<out_type, float2>)
-        {
-            run_device_prng_test<T, out_type, rocrand_state>([=](rocrand_state* state)
-                                                             { return rocrand_normal2(state); },
-                                                             read_mean,
-                                                             read_std,
-                                                             out_size);
-        }
-        else
-        {
-            run_device_prng_test<T, out_type, rocrand_state>(
-                [=](rocrand_state* state) { return rocrand_normal_double2(state); },
-                read_mean,
-                read_std,
-                out_size);
-        }
-    }
-    else if constexpr(out_size == 4)
-    {
-        auto read_mean = [](out_type x) { return x.w + x.x + x.y + x.z; };
-        auto read_std  = [](out_type x, T actual_mean)
-        {
-            return std::powf(x.w - actual_mean, 2) + std::powf(x.x - actual_mean, 2)
-                   + std::powf(x.y - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
-        };
-
-        if constexpr(std::is_same_v<out_type, float4>)
-        {
-            run_device_prng_test<T, out_type, rocrand_state>([=](rocrand_state* state)
-                                                             { return rocrand_normal4(state); },
-                                                             read_mean,
-                                                             read_std,
-                                                             out_size);
-        }
-        else
-        {
-            run_device_prng_test<T, out_type, rocrand_state>(
-                [=](rocrand_state* state) { return rocrand_normal_double4(state); },
-                read_mean,
-                read_std,
-                out_size);
-        }
-    }
+    run_device_prng_test<T, out_type, rocrand_state>(context{},
+                                                     typename context::mean{},
+                                                     typename context::std_dev{},
+                                                     out_size);
 }
