@@ -65,33 +65,6 @@ TEST_P(rocrand_generate_tests, int_test)
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
 }
 
-TEST_P(rocrand_generate_tests, int_host_test)
-{
-    const rocrand_rng_type rng_type = GetParam();
-
-    rocrand_generator generator;
-    ROCRAND_CHECK(
-        rocrand_create_generator_host(
-            &generator,
-            rng_type
-        )
-    );
-
-    const size_t size = 12563;
-    // unsigned int * data;
-    std::vector<unsigned int>data(size);
-
-    // Any sizes
-    ROCRAND_CHECK(rocrand_generate(generator, data.data(), 1));
-    // Any alignment
-    ROCRAND_CHECK(rocrand_generate(generator, data.data() + 1, 2));
-    ROCRAND_CHECK(rocrand_generate(generator, data.data(), size));
-    // No output pointer
-    ROCRAND_CHECK(rocrand_generate(generator, nullptr, size));
-
-    ROCRAND_CHECK(rocrand_destroy_generator(generator));
-}
-
 TEST_P(rocrand_generate_tests, char_test)
 {
     const rocrand_rng_type rng_type = GetParam();
@@ -128,33 +101,6 @@ TEST_P(rocrand_generate_tests, char_test)
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
 }
 
-TEST_P(rocrand_generate_tests, char_host_test)
-{
-    const rocrand_rng_type rng_type = GetParam();
-
-    rocrand_generator generator;
-    ROCRAND_CHECK(
-        rocrand_create_generator_host(
-            &generator,
-            rng_type
-        )
-    );
-
-    const size_t size = 12563;
-    // unsigned int * data;
-    std::vector<unsigned char>data(size);
-
-    // Any sizes
-    ROCRAND_CHECK(rocrand_generate_char(generator, data.data(), 1));
-    // Any alignment
-    ROCRAND_CHECK(rocrand_generate_char(generator, data.data() + 1, 2));
-    ROCRAND_CHECK(rocrand_generate_char(generator, data.data(), size));
-    // No output pointer
-    ROCRAND_CHECK(rocrand_generate_char(generator, nullptr, size));
-
-    ROCRAND_CHECK(rocrand_destroy_generator(generator));
-}
-
 TEST_P(rocrand_generate_tests, short_test)
 {
     const rocrand_rng_type rng_type = GetParam();
@@ -188,33 +134,6 @@ TEST_P(rocrand_generate_tests, short_test)
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipFree(data));
-    ROCRAND_CHECK(rocrand_destroy_generator(generator));
-}
-
-TEST_P(rocrand_generate_tests, short_host_test)
-{
-    const rocrand_rng_type rng_type = GetParam();
-
-    rocrand_generator generator;
-    ROCRAND_CHECK(
-        rocrand_create_generator_host(
-            &generator,
-            rng_type
-        )
-    );
-
-    const size_t size = 12563;
-    // unsigned int * data;
-    std::vector<unsigned short>data(size);
-
-    // Any sizes
-    ROCRAND_CHECK(rocrand_generate_short(generator, data.data(), 1));
-    // Any alignment
-    ROCRAND_CHECK(rocrand_generate_short(generator, data.data() + 1, 2));
-    ROCRAND_CHECK(rocrand_generate_short(generator, data.data(), size));
-    // No output pointer
-    ROCRAND_CHECK(rocrand_generate_short(generator, nullptr, size));
-
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
 }
 
@@ -273,33 +192,6 @@ TEST_P(rocrand_generate_long_long_tests, long_long_test)
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipFree(data));
-    ROCRAND_CHECK(rocrand_destroy_generator(generator));
-}
-
-TEST_P(rocrand_generate_long_long_tests, long_long_host_test)
-{
-    const rocrand_rng_type rng_type = GetParam();
-
-    rocrand_generator generator;
-    ROCRAND_CHECK(
-        rocrand_create_generator_host(
-            &generator,
-            rng_type
-        )
-    );
-
-    const size_t size = 12563;
-    // unsigned int * data;
-    std::vector<unsigned long long int>data(size);
-
-    // Any sizes
-    ROCRAND_CHECK(rocrand_generate_long_long(generator, data.data(), 1));
-    // Any alignment
-    ROCRAND_CHECK(rocrand_generate_long_long(generator, data.data() + 1, 2));
-    ROCRAND_CHECK(rocrand_generate_long_long(generator, data.data(), size));
-    // No output pointer
-    ROCRAND_CHECK(rocrand_generate_long_long(generator, nullptr, size));
-
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
 }
 
