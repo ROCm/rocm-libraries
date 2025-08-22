@@ -547,7 +547,7 @@ TYPED_TEST(RocprimDeviceBatchMemcpyTests, IteratorTest)
         hipMemcpy(h_data_out.data(), d_data_out, sizeof(int) * num_outputs, hipMemcpyDeviceToHost));
 
     std::vector<unsigned int> expected = {4, 4, 2, 2, 2, 7, 3, 3, 3, 1, 1, 1, 1, 1};
-    test_utils::assert_eq(expected, h_data_out);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(expected, h_data_out));
 
     // Clean up
     HIP_CHECK(hipFree(d_temp_storage));

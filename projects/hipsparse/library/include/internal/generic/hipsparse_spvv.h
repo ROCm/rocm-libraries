@@ -133,6 +133,7 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *  <tr><td>HIP_R_8I  <td>HIP_R_32I
 *  <tr><td>HIP_R_8I  <td>HIP_R_32F
 *  <tr><td>HIP_R_16F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  @param[in]

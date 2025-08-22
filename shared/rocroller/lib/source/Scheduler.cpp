@@ -33,6 +33,11 @@ namespace rocRoller
     {
         RegisterComponentBase(Scheduler);
 
+        std::ostream& operator<<(std::ostream& stream, StreamId val)
+        {
+            return stream << static_cast<uint32_t>(val);
+        }
+
         std::string toString(SchedulerProcedure proc)
         {
             switch(proc)
@@ -123,7 +128,7 @@ namespace rocRoller
             lock(dependency, 0);
         }
 
-        void LockState::lock(Dependency dep, int streamId)
+        void LockState::lock(Dependency dep, StreamId streamId)
         {
             AssertFatal(dep != Dependency::Count && dep != Dependency::None);
 
@@ -141,21 +146,20 @@ namespace rocRoller
                     topDep == dep && m_depToStream.at(dep) == streamId,
                     "Only the same stream can acquire the top dependency lock multiple times.",
                     ShowValue(dep),
-                    ShowValue(m_depToStream[dep]),
+                    ShowValue(m_depToStream.at(dep)),
                     ShowValue(streamId));
             }
 
             m_streamToStack[streamId].push(dep);
-            m_depToStream[dep] = streamId;
+            m_depToStream.insert_or_assign(dep, streamId);
             m_locks.insert(dep);
 
             if(isNonPreemptibleDependency(dep))
                 m_nonPreemptibleStream = streamId;
         }
 
-        void LockState::unlock(Dependency dep, int streamId)
+        void LockState::unlock(Dependency dep, StreamId streamId)
         {
-            AssertFatal(streamId >= 0);
             AssertFatal(m_streamToStack.contains(streamId));
             AssertFatal(m_streamToStack[streamId].size() > 0);
             AssertFatal(dep != Dependency::Count);
@@ -209,10 +213,10 @@ namespace rocRoller
             }
         }
 
-        bool LockState::isSchedulable(Instruction const& instr, int streamId) const
+        bool LockState::isSchedulable(Instruction const& instr, StreamId streamId) const
         {
             auto dep = instr.getDependency();
-            AssertFatal(dep != Dependency::Count && streamId >= 0);
+            AssertFatal(dep != Dependency::Count);
 
             auto topDep = getTopDependency(streamId);
             // check if the order of the dependencies satisfies
@@ -266,7 +270,7 @@ namespace rocRoller
             return true;
         }
 
-        void LockState::add(Instruction const& instruction, int streamId)
+        void LockState::add(Instruction const& instruction, StreamId streamId)
         {
             // TODO: Enable lockCheck after fixing the locking around
             //       the instruction(s) that hasImplicitAccess() and
@@ -298,17 +302,17 @@ namespace rocRoller
             }
         }
 
-        bool LockState::isNonPreemptibleStream(int streamId) const
+        bool LockState::isNonPreemptibleStream(StreamId streamId) const
         {
             return m_nonPreemptibleStream.has_value() && streamId == m_nonPreemptibleStream.value();
         }
 
-        bool LockState::isLocked(Dependency dep, int streamId) const
+        bool LockState::isLocked(Dependency dep, StreamId streamId) const
         {
             return m_depToStream.contains(dep) && m_depToStream.at(dep) == streamId;
         }
 
-        void LockState::lockCheck(Instruction const& instruction, int streamId) const
+        void LockState::lockCheck(Instruction const& instruction, StreamId streamId) const
         {
             auto               context      = m_ctx.lock();
             const auto&        architecture = context->targetArchitecture();
@@ -332,7 +336,7 @@ namespace rocRoller
                             " reads a special register, it should only be used within a lock."));
         }
 
-        Dependency LockState::getTopDependency(int streamId) const
+        Dependency LockState::getTopDependency(StreamId streamId) const
         {
             if(m_streamToStack.contains(streamId) && !(m_streamToStack.at(streamId).empty()))
                 return m_streamToStack.at(streamId).top();
@@ -340,16 +344,13 @@ namespace rocRoller
             return Dependency::None;
         }
 
-        int LockState::getLockDepth(int streamId) const
+        int LockState::getLockDepth(StreamId streamId) const
         {
-            if(m_streamToStack.contains(streamId))
-                return m_streamToStack.at(streamId).size();
-
-            return 0;
+            return m_streamToStack.contains(streamId) ? m_streamToStack.at(streamId).size() : 0;
         }
 
         Generator<Instruction> Scheduler::yieldFromStream(Generator<Instruction>::iterator& iter,
-                                                          int streamId)
+                                                          StreamId streamId)
         {
             do
             {

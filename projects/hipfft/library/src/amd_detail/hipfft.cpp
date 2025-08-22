@@ -1603,7 +1603,7 @@ try
     else if(type == HIPFFT_PATCH_LEVEL)
         *value = patch;
     else
-        return HIPFFT_INVALID_TYPE;
+        return HIPFFT_INVALID_VALUE;
 
     return HIPFFT_SUCCESS;
 }
