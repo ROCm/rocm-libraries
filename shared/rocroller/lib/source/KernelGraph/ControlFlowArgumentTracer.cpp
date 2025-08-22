@@ -102,17 +102,6 @@ namespace rocRoller::KernelGraph
 
     struct ControlFlowArgumentVisitor : public TopoControlGraphVisitor<ControlFlowArgumentVisitor>
     {
-        void call(int node)
-        {
-            auto op = m_graph.control.getNode(node);
-            call(node, op);
-        }
-
-        void call(int node, CG::Operation const& op)
-        {
-            std::visit(*this, singleVariant(node), op);
-        }
-
         void incorporate(int node, Expression::ExpressionPtr const& expr)
         {
             incorporate(node, referencedKernelArguments(expr, m_tagManager));
@@ -440,7 +429,7 @@ namespace rocRoller::KernelGraph
             streamJoin(msg, m_neverReferencedArguments, ", ");
             msg << " are never referenced!";
 
-            Log::warn(msg.str());
+            Log::debug(msg.str());
         }
     }
 
