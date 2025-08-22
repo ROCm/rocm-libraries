@@ -90,11 +90,16 @@ namespace rocRoller
             return retval;
         }
 
+        float Cost::operator()(Instruction const& inst) const
+        {
+            auto status = m_ctx.lock()->peek(inst);
+            return cost(inst, status);
+        }
+
         float Cost::operator()(Generator<Instruction>::iterator& iter) const
         {
-            auto const& inst   = *iter;
-            auto        status = m_ctx.lock()->peek(inst);
-            return cost(inst, status);
+            auto const& inst = *iter;
+            return (*this)(inst);
         }
     }
 }

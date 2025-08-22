@@ -104,27 +104,27 @@ namespace rocsparse
                     shared_val[wid][PADDED_BSR_BLOCK_DIM * lid]
                         = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                         + BSR_BLOCK_DIM * local_row]
-                                              : static_cast<T>(0);
+                                              : static_cast<A>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 1]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * local_row + 1]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 2]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * local_row + 2]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 3]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * local_row + 3]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                 }
                 else
@@ -141,27 +141,27 @@ namespace rocsparse
                     shared_val[wid][PADDED_BSR_BLOCK_DIM * lid]
                         = (k < block_row_end)
                               ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row]
-                              : static_cast<T>(0);
+                              : static_cast<A>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 1]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * 1 + local_row]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 2]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * 2 + local_row]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 3]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * 3 + local_row]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                 }
 
@@ -309,27 +309,27 @@ namespace rocsparse
                     shared_val[wid][PADDED_BSR_BLOCK_DIM * lid]
                         = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                         + BSR_BLOCK_DIM * local_row]
-                                              : static_cast<T>(0);
+                                              : static_cast<A>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 1]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * local_row + 1]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 2]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * local_row + 2]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 3]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * local_row + 3]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                 }
                 else
@@ -346,27 +346,27 @@ namespace rocsparse
                     shared_val[wid][PADDED_BSR_BLOCK_DIM * lid]
                         = (k < block_row_end)
                               ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row]
-                              : static_cast<T>(0);
+                              : static_cast<A>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 1]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * 1 + local_row]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                     if(BSR_BLOCK_DIM >= 3)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 2]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * 2 + local_row]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                     if(BSR_BLOCK_DIM >= 4)
                     {
                         shared_val[wid][PADDED_BSR_BLOCK_DIM * lid + 3]
                             = (k < block_row_end) ? bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k
                                                             + BSR_BLOCK_DIM * 3 + local_row]
-                                                  : static_cast<T>(0);
+                                                  : static_cast<A>(0);
                     }
                 }
 

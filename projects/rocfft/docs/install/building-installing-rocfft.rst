@@ -32,7 +32,8 @@ You can use the GitHub releases tab to download the source code. This might prov
 than the prebuilt packages.
 
 rocFFT uses the AMD clang++ compiler and CMake. You can specify several options to customize your build.
-Use the following commands to build a shared library for the supported AMD GPUs:
+Use the following commands to build a shared library for the supported AMD GPUs.
+Run these commands from the ``rocm-libraries/projects/rocfft`` directory:
 
 .. code-block:: shell
 
@@ -78,7 +79,7 @@ rocFFT uses version 1.11 of GoogleTest.
 
 You can build the clients separately from the main library.
 For example, to build all the clients with an existing rocFFT library, invoke CMake from
-within the ``rocFFT-src/clients`` folder using these commands:
+within the ``rocm-libraries/projects/rocfft/rocFFT-src/clients`` folder using these commands:
 
 .. code-block:: shell
 

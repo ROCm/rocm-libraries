@@ -35,15 +35,9 @@ rocRAND has the following prerequisites:
 
       If GoogleTest is not already installed, it will be automatically downloaded and built.
 
-The following additional components are required to use rocRAND on AMD platforms:
-
 *  ROCm (see the :doc:`ROCm installation guide <rocm-install-on-linux:install/quick-start>`)
 *  A HIP-clang compiler, which must be set as the C++ compiler on the ROCm platform.
 
-The following additional components are required to use rocRAND on NVIDIA CUDA platforms:
-
-*  HIP
-*  The latest CUDA SDK
 
 Install using prebuilt packages
 ===============================
@@ -153,9 +147,7 @@ To build rocRAND, use CMake with the following configuration:
    # Install
    [sudo] make install
 
-To build for the ROCm platform, ``<compiler>`` should be set to ``hipcc``. To build for CUDA,
-``<compiler>`` should be set to the host compiler. For CUDA, if the location of ``nvcc`` isn't on the path, it might need to be
-passed explicitly using ``-DCMAKE_CUDA_COMPILER=<path-to-nvcc>``.
+To build for the ROCm platform, ``<compiler>`` should be set to ``hipcc``.
 Additionally, the directory where ``FindHIP.cmake`` is installed needs to be passed explicitly
 using ``-DCMAKE_MODULE_PATH``. By default, this file is installed in ``/opt/rocm/hip/cmake``.
 

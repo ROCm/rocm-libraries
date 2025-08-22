@@ -181,8 +181,8 @@ void testing_spmm_coo(const Arguments& arg)
     host_vector<C> hC_gold(nnz_C, 0);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, nnz_B, 1, 1);
-    rocsparse_init<C>(hC_1, nnz_C, 1, 1);
+    rocsparse_init<B>(hB, nnz_B, 1, 1, arg.convert_to_int);
+    rocsparse_init<C>(hC_1, nnz_C, 1, 1, arg.convert_to_int);
 
     hC_2    = hC_1;
     hC_gold = hC_1;
@@ -400,5 +400,7 @@ INSTANTIATE_MIXED(int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 
 void testing_spmm_coo_extra(const Arguments& arg) {}

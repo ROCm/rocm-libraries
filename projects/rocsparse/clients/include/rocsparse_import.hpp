@@ -49,7 +49,7 @@ rocsparse_status rocsparse_import_sparse_gebsr(rocsparse_importer<IMPORTER>& imp
                                                J&                            col_block_dim,
                                                rocsparse_index_base          base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_direction  import_dir;
     rocsparse_index_base import_base;
@@ -109,7 +109,7 @@ rocsparse_status rocsparse_import_sparse_csr(rocsparse_importer<IMPORTER>& impor
                                              I&                            nnz,
                                              rocsparse_index_base          base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_direction  dir;
     rocsparse_index_base import_base;
@@ -167,7 +167,7 @@ rocsparse_status rocsparse_import_sparse_coo(rocsparse_importer<IMPORTER>& impor
                                              int64_t&                      nnz,
                                              rocsparse_index_base          base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_index_base import_base;
     rocsparse_status     status = importer.import_sparse_coo(&M, &N, &nnz, &import_base);
