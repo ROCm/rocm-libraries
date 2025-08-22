@@ -230,33 +230,32 @@ namespace rocRoller
             auto sizeDataType
                 = vtype == DataType::None ? Expression::resultVariableType(size) : vtype;
 
-            auto unitStride = Expression::literal(1, sizeDataType);
+            auto one = Expression::literal(1, sizeDataType);
 
-            auto rangeK = graph.coordinates.addElement(CT::Linear(size, unitStride));
-
-            int dimK = forLoopCoord;
+            auto iteratorCoord = graph.coordinates.addElement(CT::Linear(size, one));
             if(forLoopCoord <= 0)
-                dimK = graph.coordinates.addElement(CT::ForLoop(size, unitStride));
+                forLoopCoord = graph.coordinates.addElement(CT::ForLoop(size, one));
+            graph.coordinates.addElement(CT::DataFlow(), {iteratorCoord}, {forLoopCoord});
 
-            auto exprK = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{rangeK, Register::Type::Scalar, sizeDataType});
+            auto iterator = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{iteratorCoord, Register::Type::Scalar, sizeDataType});
 
-            auto forK  = graph.control.addElement(CG::ForLoopOp{exprK < size, loopName});
-            auto initK = graph.control.addElement(
+            auto forLoop = graph.control.addElement(CG::ForLoopOp{iterator < size, loopName});
+            graph.mapper.connect(forLoop, iteratorCoord, NaryArgument::DEST);
+            graph.mapper.connect<CT::ForLoop>(forLoop, forLoopCoord);
+
+            auto initialAssign = graph.control.addElement(
                 CG::Assign{Register::Type::Scalar, Expression::literal(0, sizeDataType)});
-            auto incrementK
-                = graph.control.addElement(CG::Assign{Register::Type::Scalar, exprK + unitStride});
+            graph.mapper.connect(initialAssign, iteratorCoord, NaryArgument::DEST);
 
-            graph.coordinates.addElement(CT::DataFlow(), {rangeK}, {dimK});
-            graph.control.addElement(CG::Initialize(), {forK}, {initK});
-            graph.control.addElement(CG::ForLoopIncrement(), {forK}, {incrementK});
+            auto incrementAssign
+                = graph.control.addElement(CG::Assign{Register::Type::Scalar, iterator + one});
+            graph.mapper.connect(incrementAssign, iteratorCoord, NaryArgument::DEST);
 
-            graph.mapper.connect(forK, rangeK, NaryArgument::DEST);
-            graph.mapper.connect<CT::ForLoop>(forK, dimK);
-            graph.mapper.connect(initK, rangeK, NaryArgument::DEST);
-            graph.mapper.connect(incrementK, rangeK, NaryArgument::DEST);
+            graph.control.addElement(CG::Initialize(), {forLoop}, {initialAssign});
+            graph.control.addElement(CG::ForLoopIncrement(), {forLoop}, {incrementAssign});
 
-            return {dimK, forK};
+            return {forLoopCoord, forLoop};
         }
 
         int cloneForLoop(KernelGraph& graph, int tag)
