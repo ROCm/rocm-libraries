@@ -307,7 +307,8 @@ try
     std::vector<int64_t>  m, n, k;
     std::vector<int64_t>  lda, ldb, ldc, ldd, lde;
     std::vector<int64_t>  stride_a, stride_b, stride_c, stride_d, stride_e;
-    std::vector<uint32_t> gsu_vector, wgm_vector, skgrid_vector;
+    std::vector<uint32_t> gsu_vector, wgm_vector;
+    std::vector<uint64_t> skgrid_vector;
     
     arg.init(); // set all defaults
     const char* tuningEnv          = getenv("HIPBLASLT_TUNING_FILE");
@@ -621,7 +622,7 @@ try
          "[Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)")
         
         ("skgrid",
-         valueVec<uint32_t>(&skgrid_vector),
+         valueVec<uint64_t>(&skgrid_vector),
          "[Tuning parameter] Set stream-K grid for a solution. Given preference over env flag. If not specified use the default workflow.(Only support GEMM + api_method mix or cpp)")
 
         ("flush",
@@ -733,7 +734,7 @@ try
                        << std::endl;
         return 1;
     }
-    uint64_t max_skgrid = 0;
+    uint32_t max_skgrid = 0;
     if(skgrid_vector.size() > MAX_SUPPORTED_NUM_PROBLEMS)
     {
         hipblaslt_cerr << "Too many sk grid parameters, maximum is: " << MAX_SUPPORTED_NUM_PROBLEMS
@@ -742,9 +743,14 @@ try
     }
     for(size_t i = 0; i < skgrid_vector.size(); i++)
     {
-        if(skgrid_vector[i] < 0 || skgrid_vector[i] > 65535)
+        hipblaslt_cout << skgrid_vector[i] << " ";
+    }
+    hipblaslt_cout << std::endl;
+    for(size_t i = 0; i < skgrid_vector.size(); i++)
+    {
+        if(skgrid_vector[i] < 0 || skgrid_vector[i] > std::numeric_limits<uint32_t>::max())
         {
-            hipblaslt_cerr << "Invalid stream-k grid value" << skgrid_vector[i] << ". Expected in range [1, 65535]" << std::endl;
+            hipblaslt_cerr << "Invalid stream-k grid value" << skgrid_vector[i] << ". Expected in range [1, " << std::numeric_limits<uint32_t>::max() << "]" << std::endl;
             return 1;
         }
         arg.skgrid_vector[i] = skgrid_vector[i];

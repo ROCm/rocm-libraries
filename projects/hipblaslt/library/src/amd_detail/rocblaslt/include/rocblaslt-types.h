@@ -659,7 +659,7 @@ namespace rocblaslt
     public:
         uint16_t gsu = 0;
         int16_t  wgm = 0;
-        uint16_t skgrid = 0;
+        uint32_t skgrid = 0;
     };
 
     struct RocGemmInputsV2

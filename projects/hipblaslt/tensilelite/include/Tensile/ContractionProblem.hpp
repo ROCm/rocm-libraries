@@ -58,12 +58,12 @@ namespace TensileLite
             return m_gsu;
         }
 
-        void setSKGrid(uint16_t skgrid)
+        void setSKGrid(uint32_t skgrid)
         {
             m_skgrid = skgrid;
         }
 
-        uint16_t skgrid() const
+        uint32_t skgrid() const
         {
             return m_skgrid;
         }
@@ -168,7 +168,7 @@ namespace TensileLite
         int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
         bool             m_gsuwgmrr       = false; // default value
-        uint16_t         m_skgrid         = 0; // default value
+        uint32_t         m_skgrid         = 0; // default value
         int16_t          m_wgm            = 0; // default value
         uint16_t         m_wgmxcc         = 0; // default value
         int16_t          m_wgmxccg        = 0; // default value

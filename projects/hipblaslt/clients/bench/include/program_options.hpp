@@ -389,6 +389,12 @@ namespace roc
                     match = argc && sscanf(*argv, "%" SCNu32, &val) == 1;
                     ptr->actual_value(val);
                 }
+                else if(auto* ptr = dynamic_cast<valueVec<uint64_t>*>(m_val.get()))
+                {
+                    uint64_t val;
+                    match = argc && sscanf(*argv, "%" SCNu64, &val) == 1;
+                    ptr->actual_value(val);
+                }
                 else if(auto* ptr = dynamic_cast<valueVec<int64_t>*>(m_val.get()))
                 {
                     int64_t val;
@@ -584,6 +590,15 @@ namespace roc
                         else if(dynamic_cast<const valueVec<uint32_t>*>(val))
                         {
                             auto& vec = dynamic_cast<const valueVec<uint32_t>*>(val)->get_value();
+                            left << vec[0];
+                            for(size_t i = 1; i < vec.size(); i++)
+                            {
+                                left << ", " << vec[i];
+                            }
+                        }
+                        else if(dynamic_cast<const valueVec<uint64_t>*>(val))
+                        {
+                            auto& vec = dynamic_cast<const valueVec<uint64_t>*>(val)->get_value();
                             left << vec[0];
                             for(size_t i = 1; i < vec.size(); i++)
                             {
