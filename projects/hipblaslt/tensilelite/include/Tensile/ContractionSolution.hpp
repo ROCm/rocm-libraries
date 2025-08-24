@@ -568,7 +568,7 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        inline void      calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
+        void             calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
         mutable uint32_t autoGSU = 0;
     };
 

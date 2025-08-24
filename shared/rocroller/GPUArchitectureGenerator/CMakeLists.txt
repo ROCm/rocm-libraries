@@ -77,6 +77,7 @@ if(NOT ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF)
     add_custom_target(amd-mrisa
         DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
     )
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/split_yamls)
     add_custom_command(
         OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
         COMMAND

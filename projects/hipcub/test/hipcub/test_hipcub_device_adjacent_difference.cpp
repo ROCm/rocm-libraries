@@ -481,11 +481,8 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
             HIP_CHECK(hipMemset(d_counter, 0, sizeof(*d_counter)));
 
             OutputIterator output(d_incorrect_flag, d_counter);
-
-            const auto input = hipcub::CountingInputIterator<T>(T{0});
-
+            const auto            input    = rocprim::counting_iterator<T>(T{0});
             static constexpr auto left_tag = std::integral_constant<bool, left>{};
-
             static constexpr auto copy_tag = std::integral_constant<bool, copy>{};
 
             FocusIndex<left> op;

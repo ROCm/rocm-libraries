@@ -74,8 +74,9 @@ struct BlockScanRunningPrefixOp
 };
 
 // Forward declare for use in detail namespace.
-// CUB uses cub::Trait<T>::PRIMITIVE for deducing SINGLE_WORD, but this isn't needed by the rocPRIM backend.
-template<typename T, bool SINGLE_WORD = (sizeof(T) <= 7) /* hipcub::Traits<T>::PRIMITIVE */>
+// CUB uses cub::detail::is_primitive<T>::value for deducing SINGLE_WORD, but this isn't needed by the rocPRIM backend.
+template<typename T,
+         bool SINGLE_WORD = (sizeof(T) <= 7) /* hipcub::detail::is_primitive<T>::value */>
 class ScanTileState;
 
 namespace detail
@@ -465,7 +466,7 @@ public:
     }
 };
 
-// CUB uses cub::Trait<T>::PRIMITIVE for deducing SINGLE_WORD, but this isn't needed by the rocPRIM backend.
+// CUB uses cub::detail::is_primitive<T>::value for deducing SINGLE_WORD, but this isn't needed by the rocPRIM backend.
 template<typename ValueT, typename KeyT, bool SINGLE_WORD = (sizeof(ValueT) + sizeof(KeyT) <= 7)>
 struct ReduceByKeyScanTileState : hipcub::ScanTileState<KeyValuePair<KeyT, ValueT>>
 {

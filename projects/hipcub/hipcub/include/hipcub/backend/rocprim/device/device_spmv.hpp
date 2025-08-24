@@ -41,29 +41,32 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-class DeviceSpmv
+class HIPCUB_DEPRECATED_BECAUSE("Use the hipSPARSE library instead") DeviceSpmv
 {
 
 public:
+    template<typename ValueT, ///< Matrix and vector value type
+             typename OffsetT> ///< Signed integer type for sequence offsets
+    struct HIPCUB_DEPRECATED_BECAUSE("Use the rocSPARSE library instead") SpmvParams
+    {
+        ValueT*
+            d_values; ///< Pointer to the array of \p num_nonzeros values of the corresponding nonzero elements of matrix <b>A</b>.
+        OffsetT*
+            d_row_end_offsets; ///< Pointer to the array of \p m offsets demarcating the end of every row in \p d_column_indices and \p d_values
+        OffsetT*
+            d_column_indices; ///< Pointer to the array of \p num_nonzeros column-indices of the corresponding nonzero elements of matrix <b>A</b>.  (Indices are zero-valued.)
+        ValueT*
+            d_vector_x; ///< Pointer to the array of \p num_cols values corresponding to the dense input vector <em>x</em>
+        ValueT*
+            d_vector_y; ///< Pointer to the array of \p num_rows values corresponding to the dense output vector <em>y</em>
+        int    num_rows; ///< Number of rows of matrix <b>A</b>.
+        int    num_cols; ///< Number of columns of matrix <b>A</b>.
+        int    num_nonzeros; ///< Number of nonzero elements of matrix <b>A</b>.
+        ValueT alpha; ///< Alpha multiplicand
+        ValueT beta; ///< Beta addend-multiplicand
 
-template <
-    typename        ValueT,              ///< Matrix and vector value type
-    typename        OffsetT>             ///< Signed integer type for sequence offsets
-struct SpmvParams
-{
-    ValueT*         d_values;            ///< Pointer to the array of \p num_nonzeros values of the corresponding nonzero elements of matrix <b>A</b>.
-    OffsetT*        d_row_end_offsets;   ///< Pointer to the array of \p m offsets demarcating the end of every row in \p d_column_indices and \p d_values
-    OffsetT*        d_column_indices;    ///< Pointer to the array of \p num_nonzeros column-indices of the corresponding nonzero elements of matrix <b>A</b>.  (Indices are zero-valued.)
-    ValueT*         d_vector_x;          ///< Pointer to the array of \p num_cols values corresponding to the dense input vector <em>x</em>
-    ValueT*         d_vector_y;          ///< Pointer to the array of \p num_rows values corresponding to the dense output vector <em>y</em>
-    int             num_rows;            ///< Number of rows of matrix <b>A</b>.
-    int             num_cols;            ///< Number of columns of matrix <b>A</b>.
-    int             num_nonzeros;        ///< Number of nonzero elements of matrix <b>A</b>.
-    ValueT          alpha;               ///< Alpha multiplicand
-    ValueT          beta;                ///< Beta addend-multiplicand
-
-    ::hipcub::TexObjInputIterator<ValueT, OffsetT> t_vector_x;
-};
+        ::hipcub::TexObjInputIterator<ValueT, OffsetT> t_vector_x;
+    };
 
 static constexpr uint32_t CsrMVKernel_MaxThreads = 256;
 
@@ -107,6 +110,7 @@ CsrMVKernel(SpmvParams<ValueT, int> spmv_params)
 }
 
 template<typename ValueT>
+HIPCUB_DEPRECATED_BECAUSE("Use the rocSPARSE library instead")
 HIPCUB_RUNTIME_FUNCTION static hipError_t CsrMV(void*       d_temp_storage,
                                                 size_t&     temp_storage_bytes,
                                                 ValueT*     d_values,
@@ -119,7 +123,9 @@ HIPCUB_RUNTIME_FUNCTION static hipError_t CsrMV(void*       d_temp_storage,
                                                 int         num_nonzeros,
                                                 hipStream_t stream = 0)
 {
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     SpmvParams<ValueT, int> spmv_params;
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     spmv_params.d_values          = d_values;
     spmv_params.d_row_end_offsets = d_row_offsets + 1;
     spmv_params.d_column_indices  = d_column_indices;
@@ -147,28 +153,29 @@ HIPCUB_RUNTIME_FUNCTION static hipError_t CsrMV(void*       d_temp_storage,
         {
             start = std::chrono::high_resolution_clock::now();
         }
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         CsrMVKernel<<<grid_size, block_size, 0, stream>>>(spmv_params);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         HIPCUB_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("CsrMV", block_size * grid_size, start);
     }
     return hipSuccess;
 }
 
 template<typename ValueT>
-HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-    CsrMV(void*       d_temp_storage,
-          size_t&     temp_storage_bytes,
-          ValueT*     d_values,
-          int*        d_row_offsets,
-          int*        d_column_indices,
-          ValueT*     d_vector_x,
-          ValueT*     d_vector_y,
-          int         num_rows,
-          int         num_cols,
-          int         num_nonzeros,
-          hipStream_t stream,
-          bool        debug_synchronous)
+HIPCUB_DEPRECATED_BECAUSE("Use the rocSPARSE library instead")
+HIPCUB_RUNTIME_FUNCTION static hipError_t CsrMV(void*       d_temp_storage,
+                                                size_t&     temp_storage_bytes,
+                                                ValueT*     d_values,
+                                                int*        d_row_offsets,
+                                                int*        d_column_indices,
+                                                ValueT*     d_vector_x,
+                                                ValueT*     d_vector_y,
+                                                int         num_rows,
+                                                int         num_cols,
+                                                int         num_nonzeros,
+                                                hipStream_t stream,
+                                                bool /*debug_synchronous*/)
 {
-    HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
     return CsrMV(d_temp_storage,
                  temp_storage_bytes,
                  d_values,

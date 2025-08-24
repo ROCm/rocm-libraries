@@ -75,52 +75,7 @@ extern "C" {
 *              invalid.
 *
 *  \par Example
-*  \code{.c}
-*      // Number of non-zeros of the sparse vector
-*      rocsparse_int nnz = 3;
-*
-*      // Sparse index vector
-*      rocsparse_int hx_ind[3] = {0, 3, 5};
-*
-*      // Sparse value vector
-*      float hx_val[3];
-*
-*      // Dense vector
-*      float hy[9] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
-*
-*      // Index base
-*      rocsparse_index_base idx_base = rocsparse_index_base_zero;
-*
-*      // Offload data to device
-*      rocsparse_int* dx_ind;
-*      float*         dx_val;
-*      float*         dy;
-*
-*      hipMalloc((void**)&dx_ind, sizeof(rocsparse_int) * nnz);
-*      hipMalloc((void**)&dx_val, sizeof(float) * nnz);
-*      hipMalloc((void**)&dy, sizeof(float) * 9);
-*
-*      hipMemcpy(dx_ind, hx_ind, sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(float) * 9, hipMemcpyHostToDevice);
-*
-*      // rocSPARSE handle
-*      rocsparse_handle handle;
-*      rocsparse_create_handle(&handle);
-*
-*      // Call sgthr
-*      rocsparse_sgthr(handle, nnz, dy, dx_val, dx_ind, idx_base);
-*
-*      // Copy result back to host
-*      hipMemcpy(hx_val, dx_val, sizeof(float) * nnz, hipMemcpyDeviceToHost);
-*
-*      // Clear rocSPARSE
-*      rocsparse_destroy_handle(handle);
-*
-*      // Clear device memory
-*      hipFree(dx_ind);
-*      hipFree(dx_val);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_rocsparse_gthr.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

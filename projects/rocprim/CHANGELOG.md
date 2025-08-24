@@ -4,6 +4,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 4.1.0 for ROCm 7.1
 
+### Added
+
+* Added `get_sreg_lanemask_lt`, `get_sreg_lanemask_le`, `get_sreg_lanemask_gt` and `get_sreg_lanemask_ge`.
+
 ### Upcoming changes
 
 * Deprecated the `->` operator for the `zip_iterator`.
@@ -13,6 +17,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Fixed `device_select`, `device_merge`, and `device_merge_sort` not allocating the correct amount of virtual shared memory on the host.
 * Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
   * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
+
 
 ## rocPRIM 4.0.0 for ROCm 7.0
 

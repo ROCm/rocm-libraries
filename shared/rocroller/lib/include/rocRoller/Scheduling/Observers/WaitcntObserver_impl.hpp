@@ -170,29 +170,6 @@ namespace rocRoller
             }
         }
 
-        inline bool WaitcntObserver::isDirect2LDS(Instruction const& inst)
-        {
-            if(GPUInstructionInfo::isVMEMRead(inst.getOpCode()))
-            {
-                for(auto const& mod : inst.getModifiers())
-                {
-                    if(mod == "lds")
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        inline void WaitcntObserver::observeWaitDirect2LDS(Instruction const& inst)
-        {
-            if(isDirect2LDS(inst))
-                m_needsWaitDirect2LDS = true;
-
-            if(GPUInstructionInfo::isSBarrier(inst.getOpCode()))
-                m_needsWaitDirect2LDS = false;
-        }
     };
 
 }
