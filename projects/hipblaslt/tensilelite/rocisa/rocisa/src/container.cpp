@@ -463,8 +463,7 @@ void init_containers(nb::module_ m)
         .def("__deepcopy__", [](const rocisa::True16Modifiers& self, nb::dict&) { return rocisa::True16Modifiers(self); })
         .def("__getstate__", [](const rocisa::True16Modifiers& self) { return std::make_tuple(self.high_bit); })
         .def("__setstate__", [](rocisa::True16Modifiers& self, std::tuple<const rocisa::HighBitSel> t) {
-            new(&self) rocisa::True16Modifiers(std::get<0>(t))
-            ;
+            new(&self) rocisa::True16Modifiers(std::get<0>(t));
         });
 
     nb::class_<rocisa::EXEC, rocisa::Container>(m_con, "EXEC")

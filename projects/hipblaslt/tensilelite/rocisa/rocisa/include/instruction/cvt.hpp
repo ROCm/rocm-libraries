@@ -53,10 +53,8 @@ namespace rocisa
             : CommonInstruction(InstType::INST_CVT, dst, srcs, std::nullopt, sdwa, vop3, comment)
             , cvtType(cvtType)
         {
-            for (auto i = 0; i < true16Arg.size(); i++)
-            {
-                true16.push_back(true16Arg[i]);
-            }
+            std::transform(true16Arg.begin(), true16Arg.end(), std::back_inserter(true16),
+                           [](int arg) { return arg; });
         }
 
         VCvtInstruction(const VCvtInstruction& other)
