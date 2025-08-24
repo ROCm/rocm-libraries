@@ -349,6 +349,20 @@ struct target_config
     constexpr static auto arch      = Arch;
 };
 
+template<typename Config, target_arch Arch>
+struct segmented_radix_sort_warp_sort_small_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_small;
+};
+
+template<typename Config, target_arch Arch>
+struct segmented_radix_sort_warp_sort_meduim_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_medium;
+};
+
 // Trampoline that is fully specialized at compile-time for a single GPU architecture.
 // By instantiating this template once per supported `target_arch`,the correct tuned config
 // will be derived from the template

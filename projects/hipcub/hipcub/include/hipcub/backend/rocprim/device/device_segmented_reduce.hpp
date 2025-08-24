@@ -103,7 +103,7 @@ inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target_arch arc
         }
     };
 
-    return ::rocprim::launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return ::rocprim::detail::launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 /// Dispatch function similar to \p rocprim::segmented_reduce but writes \p empty_value for empty
@@ -138,7 +138,7 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
         return result;
     }
     const ::rocprim::detail::reduce_config_params params
-        = ::rocprim::detail::dispatch_target_arch<config>(target_arch);
+        = ::rocprim::detail::dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size = params.kernel_config.block_size;
 
@@ -159,18 +159,19 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
     {
         start = std::chrono::high_resolution_clock::now();
     }
-    ROCPRIM_RETURN_ON_ERROR(launch_segmented_arg_minmax(target_arch,
-                                                        input,
-                                                        output,
-                                                        begin_offsets,
-                                                        end_offsets,
-                                                        reduce_op,
-                                                        static_cast<result_type>(initial_value),
-                                                        static_cast<result_type>(empty_value),
-                                                        dim3(segments),
-                                                        dim3(block_size),
-                                                        0,
-                                                        stream));
+    ROCPRIM_RETURN_ON_ERROR(
+        launch_segmented_arg_minmax<config>(target_arch,
+                                            input,
+                                            output,
+                                            begin_offsets,
+                                            end_offsets,
+                                            reduce_op,
+                                            static_cast<result_type>(initial_value),
+                                            static_cast<result_type>(empty_value),
+                                            dim3(segments),
+                                            dim3(block_size),
+                                            0,
+                                            stream));
     HIPCUB_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_arg_minmax", segments, start);
 
     return hipSuccess;
