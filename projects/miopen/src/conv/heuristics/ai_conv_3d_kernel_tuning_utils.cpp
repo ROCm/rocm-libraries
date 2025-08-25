@@ -267,7 +267,7 @@ template bool RunParameterPredictionModel<float>(
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
-template bool RunParameterPredictionModel<ck::half_t>(
+template bool RunParameterPredictionModel<int8_t>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -276,7 +276,8 @@ template bool RunParameterPredictionModel<ck::half_t>(
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
-template bool RunParameterPredictionModel<int8_t>(
+#if MIOPEN_USE_COMPOSABLEKERNEL
+template bool RunParameterPredictionModel<ck::half_t>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -294,6 +295,7 @@ template bool RunParameterPredictionModel<ck::bhalf_t>(
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
+#endif
 
 // helper function to get a dummy execution context for when we do not have a real context
 const miopen::ExecutionContext& GetDummyCtx()

@@ -69,7 +69,7 @@ extern template bool RunParameterPredictionModel<float>(
     std::string&,
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
     std::string);
-
+#if MIOPEN_USE_COMPOSABLEKERNEL
 extern template bool RunParameterPredictionModel<ck::half_t>(
     const miopen::ExecutionContext&,
     const miopen::conv::ProblemDescription&,
@@ -89,6 +89,7 @@ extern template bool RunParameterPredictionModel<ck::bhalf_t>(
     std::string&,
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>,
     std::string);
+#endif
 } // namespace conv
 } // namespace solver
 } // namespace miopen
