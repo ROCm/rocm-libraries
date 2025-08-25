@@ -381,9 +381,13 @@ namespace rocisa
         auto& instance = rocIsa::getInstance();
         if(instance.getAsmCaps()["HasBF16CVT"])
         {
-            if(instance.getAsmCaps()["NoSDWA"])
+            if(instance.getArchCaps()["NoSDWA"])
             {
                 auto vop3     = VOP3PModifiers();
+                if(vop3.op_sel.empty())
+                {
+                    vop3.op_sel.resize(1, 0);
+                }
                 vop3.op_sel[0] = vi % 2;
                 return std::make_shared<PVCvtBF16toFP32>(dst, src, std::nullopt, vop3, "cvt bf16 to f32");
             }

@@ -10457,13 +10457,13 @@ class KernelWriterAssembly(KernelWriter):
                       if ti.getArchCaps()["NoSDWA"]:
                         src_sel = 1 if isHigh16Bits else 0
                         dst_sel = 1 if isHigh16Bits else 0
-                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , vop3=VOP3PModifiers(byte_sel=[src_sel]), comment="convert C to fp32vvv"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), true16=[dst_sel], comment="convert C to fp16vvv"))
+                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , vop3=VOP3PModifiers(byte_sel=[src_sel]), comment="convert C to fp32"))
+                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), true16=[dst_sel], comment="convert C to fp16"))
                       else:
                         src_sel = SelectBit.BYTE_2 if isHigh16Bits else SelectBit.BYTE_0
                         dst_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
-                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32xxx"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16xxx"))
+                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
+                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
                     self.vgprPool.checkIn(vgprTmp)
                   else:
                     if isCvtHighBits and isHigh16Bits:
