@@ -43,7 +43,7 @@ using namespace hipsparse_test;
 template <typename T>
 hipsparseStatus_t testing_csrilusv(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     hipsparseIndexBase_t idx_base = argus.baseA;
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
