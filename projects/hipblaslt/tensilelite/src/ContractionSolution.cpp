@@ -739,27 +739,29 @@ namespace TensileLite
                     skTiles = min(skTiles, tiles);
                 }
 
-                // If we have reached the maxGridLimit
-                if(skGrid == 65535)
-                {
-                    skTiles = 65535;
-                }
-
                 uint32_t skItersPerWG = skTiles * itersPerTile / skGrid;
                 uint32_t skExtraIters = skTiles * itersPerTile % (skGrid);
 
-                // Pack skGrid and skTiles into a single uint32_t such that the upper 16 bits
-                // represent skGrid and the lower 16 bits represent skTiles
-                uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);                
-                if(skGrid > 65535 || skTiles > 65535)
+                if(sizeMapping.customKernelName.empty())
                 {
-                    // We should never reach here
-                    throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid",       skGrid);
+                    args.template append<uint32_t>("skTiles",      skTiles);
+                    args.template append<uint32_t>("skExtraIters", skExtraIters);
                 }
+                else
+                {
+                    uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);
+                    // safe guard
+                    if(skGrid > 65535 || skTiles > 65535)
+                    {
+                        throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
+                    }
 
-                args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
-                args.template append<uint32_t>("skExtraIters", skExtraIters);
+                    args.template append<uint32_t>("SKItersPerWG",   skItersPerWG);
+                    args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
+                    args.template append<uint32_t>("skExtraIters",   skExtraIters);
+                }
             }
         }
 
@@ -937,8 +939,8 @@ namespace TensileLite
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
 
-    inline void ContractionSolution::calculateAutoGSU(Problem const&  problem,
-                                                      Hardware const* hardware) const
+    void ContractionSolution::calculateAutoGSU(Problem const&  problem,
+                                               Hardware const* hardware) const
     {
         // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
@@ -967,44 +969,6 @@ namespace TensileLite
         uint32_t GSULimit1    = max(1, (uint32_t)std::floor(numCUs / numWGs));
         uint32_t GSULimit2    = max(1, (uint32_t)std::floor((float)K / (float)MT2 / 3.0));
         autoGSU               = min(GSULimit2, max(1, GSULimit1));
-
-        // WorkspaceCheck
-        if(autoGSU > 1)
-        {
-            int    elemC    = sizeMapping.workspaceSizePerElemC * autoGSU;
-            int    elemBias = sizeMapping.workspaceSizePerElemBias * autoGSU;
-            size_t rs       = 0;
-            // 2d reduction
-            if(problem.useGradient() && problem.useBias()
-               && problem.getParams().biasEnum() != rocisa::DataType::None)
-            {
-                if(problem.biasSrc() == ContractionProblemGemm::TENSOR::D && (elemC == 0))
-                    rs += problem.d().totalLogicalElements() * problem.computeTypeElementSize();
-                else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::A)
-                {
-                    rs += M * elemBias;
-                }
-                else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::B)
-                {
-                    rs += N * elemBias;
-                }
-            }
-
-            size_t tiles = problem.getNumTiles(sizeMapping, 1) * B;
-            size_t tileSize = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
-            size_t bufSize = tiles * tileSize;
-
-            if(problem.groupedGemm())
-            {
-                assert(problem.workspaceSizeGroupedGemm() <= problem.workspaceSize());
-                autoGSU = min(autoGSU,
-                              (problem.workspaceSizeGroupedGemm() - rs)
-                                  / bufSize);
-            }
-            else
-                autoGSU = min(autoGSU,
-                              (problem.workspaceSize() - rs) / bufSize);
-        }
 
         // WorkgroupNumberCheck
 #define MAX_WORKGROUP_NUMBER 16777216
@@ -3116,12 +3080,6 @@ namespace TensileLite
             skGrid = cuCount;
         }
 
-        size_t maxSkGrid = 65535; // We should be able to store it in 16 bits
-        if(skGrid > maxSkGrid)
-        {
-            skGrid = maxSkGrid;
-        }
-        
         return skGrid;
     }
 
