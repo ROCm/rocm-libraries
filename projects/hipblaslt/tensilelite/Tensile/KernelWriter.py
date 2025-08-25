@@ -1095,8 +1095,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       ####
       if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
         instPerRegPack = 1 / kernel["ProblemType"]["DataType"].numRegisters() - 1
+        instPerRegPackMX = 4 - 1
       else:
         instPerRegPack = 1 if (kernel["ProblemType"]["DataType"].numRegisters() == 0.25) else 0
+        instPerRegPackMX = 1
+      instPerPackMXSA = 0
+      instPerPackMXSB = 0
+      if kernel["ProblemType"]["MXBlockA"] and (not kernel["UnrollMajorLDSMXSA"]):
+        instPerPackMXSA = int(kernel["MIInputPerThreadMXSA"] * kernel["ProblemType"]["DataTypeMXSA"].numRegisters() * instPerRegPackMX)
+      if kernel["ProblemType"]["MXBlockB"] and (not kernel["UnrollMajorLDSMXSB"]):
+        instPerPackMXSB = int(kernel["MIInputPerThreadMXSB"] * kernel["ProblemType"]["DataTypeMXSB"].numRegisters() * instPerRegPackMX)
+
       instPerPackA    = 0 if kernel["UnrollMajorLDSA"] else int(kernel["MIInputPerThreadA"] * kernel["ProblemType"]["DataType"].numRegisters() * instPerRegPack)
       instPerPackB    = 0 if kernel["UnrollMajorLDSB"] else int(kernel["MIInputPerThreadB"] * kernel["ProblemType"]["DataType"].numRegisters() * instPerRegPack)
       if kernel["ConvertAfterDS"]:
@@ -1170,25 +1179,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
       packItems = []
       packItemsA = []
       packItemsB = []
+      packItemsMXSA = []
+      packItemsMXSB = []
       packItemsM = []
       packPreItems = []
       packPreItemsA = []
       packPreItemsB = []
       scheduleTF32Emu = kernel["UseF32XEmulation"]
+      maxReadIterCoal = max(self.states.numReadsIterCoalescedA, self.states.numReadsIterCoalescedB, self.states.numReadsIterCoalescedMetadata, \
+                            self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
       for iui in range(kernel["InnerUnroll"]):
-        packINtems = [ [] for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)) ]
+        packINtems = [ [] for j in range(maxReadIterCoal) ]
         packINtemsA = packINtems
         packINtemsB = packINtems
+        packINtemsMXSA = packINtems
+        packINtemsMXSB = packINtems
         packINtemsM = packINtems
         if schedulePackConsiderMetadata:
-          packINtemsA = [ [] for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)) ]
-          packINtemsB = [ [] for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)) ]
-          packINtemsM = [ [] for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)) ]
+          packINtemsA    = [ [] for j in range(maxReadIterCoal) ]
+          packINtemsB    = [ [] for j in range(maxReadIterCoal) ]
+          packINtemsMXSA = [ [] for j in range(maxReadIterCoal) ]
+          packINtemsMXSB = [ [] for j in range(maxReadIterCoal) ]
+          packINtemsM    = [ [] for j in range(maxReadIterCoal) ]
 
         # Add pack pre and pack code (put pack pre first)
         # They can be in either packCode or packPreCode)
         packA = packCode.findNamedItem("packA_I%s Pre"%(iui))
         packB = packCode.findNamedItem("packB_I%s Pre"%(iui))
+        #TODO: do we nned packPreMXSA?
+        packMXSA = packCode.findNamedItem("packMXSA_I%s"%(iui))
+        packMXSB = packCode.findNamedItem("packMXSB_I%s"%(iui))
         packA2 = packCode.findNamedItem("packA_I%s"%(iui))
         packB2 = packCode.findNamedItem("packB_I%s"%(iui))
         packM = packCode.findNamedItem("packMetadata_I%s"%(iui))
@@ -1220,6 +1240,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if packB2:
           packB.add(packB2)
         packBItems = packB.flatitems()
+        if not packMXSA:
+          packMXSA = Module()
+        packMXSAItems = packMXSA.flatitems()
+        if not packMXSB:
+          packMXSB = Module()
+        packMXSBItems = packMXSB.flatitems()
         if not packM:
           packM = Module()
         packMItems = packM.flatitems()
@@ -1239,6 +1265,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
             for j in range(self.states.numReadsIterCoalescedA):
               for n in range(instPerPackA):
                 packINtemsA[j].append(packAItems.pop(0))
+
+        if packMXSAItems:
+          for j in range(self.states.numReadsIterCoalescedMXSA):
+            for n in range(instPerPackMXSA):
+              packINtemsMXSA[j].append(packMXSAItems.pop(0))
+
+        if packMXSBItems:
+          for j in range(self.states.numReadsIterCoalescedMXSB):
+            for n in range(instPerPackMXSB):
+              packINtemsMXSB[j].append(packMXSBItems.pop(0))
 
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
           # for j in range(self.states.numReadsIterCoalescedMetadata):
@@ -1281,6 +1317,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     packINtemsA[j].append(packAItems.pop(0))
                   else:
                     break
+          while packMXSAItems:
+            for j in range(self.states.numReadsIterCoalescedMXSA):
+              for n in range(instPerPackMXSA):
+                if packMXSAItems:
+                  packINtemsMXSA[j].append(packMXSAItems.pop(0))
+                else:
+                  break
+          while packMXSBItems:
+            for j in range(self.states.numReadsIterCoalescedMXSB):
+              for n in range(instPerPackMXSB):
+                if packMXSBItems:
+                  packINtemsMXSB[j].append(packMXSBItems.pop(0))
+                else:
+                  break
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             while packMItems:
               # for j in range(self.states.numReadsIterCoalescedMetadata):
@@ -1304,16 +1354,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   else:
                     break
 
-        for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)):
+        for j in range(maxReadIterCoal):
           if schedulePackConsiderMetadata:
-            packItemsA += packINtemsA.pop(0)
-            packItemsB += packINtemsB.pop(0)
-            packItemsM += packINtemsM.pop(0)
+            packItemsA    += packINtemsA.pop(0)
+            packItemsB    += packINtemsB.pop(0)
+            packItemsMXSA += packINtemsMXSA.pop(0)
+            packItemsMXSB += packINtemsMXSB.pop(0)
+            packItemsM    += packINtemsM.pop(0)
           elif not scheduleTF32Emu:
             packItems += packINtems.pop(0)
 
         if schedulePackConsiderMetadata:
-          packItems = packItemsA + packItemsB + packItemsM
+          packItems = packItemsA + packItemsB + packItemsMXSA + packItemsMXSB + packItemsM
 
       packPreItemsThisLoop = packPreItems if iteration < isBarrier else []
       # no need to generate pack Pre code for next loop in NLL last case (no next loop)
@@ -1878,6 +1930,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   if packItems:
                     iterCode.add(packItems.pop(0))
                     curPackIdx += 1
+              for j in range(instPerPackMXSA):
+                if packItems:
+                  iterCode.add(packItems.pop(0))
+                  curPackIdx += 1
+              for j in range(instPerPackMXSB):
+                if packItems:
+                  iterCode.add(packItems.pop(0))
+                  curPackIdx += 1
               if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
                 for j in range(ceil(instPerPackM)):
                   if packItems:
