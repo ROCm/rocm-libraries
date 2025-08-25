@@ -1013,13 +1013,13 @@ namespace rocRoller
                         scaleLoadU[loadTag.value()] = prefetchGlobalU;
                 }
 
-                for(auto const pair : scaleLoadU)
+                for(auto const [loadTag, u] : scaleLoadU)
                 {
                     std::unordered_set<int> orderBeforeTags;
-                    for(auto const info : loadsByUnroll[pair.second])
+                    for(auto const info : loadsByUnroll[u])
                         orderBeforeTags.insert(info.globalChain);
 
-                    auto topOp = getTopSetCoordinate(graph, pair.first);
+                    auto topOp = getTopSetCoordinate(graph, loadTag);
                     for(auto const orderBeforeTag : orderBeforeTags)
                         graph.control.addElement(Sequence(), {topOp}, {orderBeforeTag});
                 }
