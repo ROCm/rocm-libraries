@@ -63,7 +63,6 @@ class XCCMappingOn(XCCMapping):
         module = Module("XCCMapping On")
 
         with writer.allocTmpSgpr(4) as tmpSgprRes:
-            skGrid = tmpSgprRes.idx
             sXCC   = tmpSgprRes.idx
             sGridC = tmpSgprRes.idx + 1
             sGridF = tmpSgprRes.idx + 2
@@ -77,12 +76,11 @@ class XCCMappingOn(XCCMapping):
                 sTmpRes  = ContinuousRegister(idx=sTmp, size=2)
 
             # sGridC = ceil(grid / xccm)
-            module.add(SLShiftRightB32(dst=sgpr(skGrid), shiftHex=hex(16), src=sgpr("skGridAndTiles"), comment="Get skGrid"))
-            module.add(SAddU32(dst=sgpr(sGridC), src0=sgpr(skGrid), src1=hex(kernel["StreamKXCCMapping"] - 1), comment="ceil(grid/xccm)"))
+            module.add(SAddU32(dst=sgpr(sGridC), src0=sgpr("skGrid"), src1=hex(kernel["StreamKXCCMapping"] - 1), comment="ceil(grid/xccm)"))
             module.add(scalarStaticDivideAndRemainder(qReg=sGridC, rReg=-1, dReg=sGridC, divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes, doRemainder=0))
             # sGridF = floor(grid / xccm)
             # sGridM = grid % xccm
-            module.add(scalarStaticDivideAndRemainder(qReg=sGridF, rReg=sGridM, dReg=skGrid, divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes))
+            module.add(scalarStaticDivideAndRemainder(qReg=sGridF, rReg=sGridM, dReg="skGrid", divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes))
             # sXCC = wg0 % xccm
             # sqtmp is temp register for quotient for non-power-of-2 case
             # sqtmp overlaps temp registers, works in this case and output is discarded
@@ -1665,8 +1663,7 @@ class StreamKTwoTileOriginal(StreamK):
         # clamp to end of sk iterations
         # TODO maybe remove clamp, since extra iters code should guarantee total iterations match
         sTmp = writer.sgprPool.checkOut(1, "TotalSKIters", preventOverflow=False)
-        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr("skGridAndTiles"), src1=hex(65535), comment="Get skTiles"))
-        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr("ItersPerTile"), comment="Total SK iters"))
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("skTiles"), src1=sgpr("ItersPerTile"), comment="Total SK iters"))
         module.add(SMinU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIterEnd"), src1=sgpr(sTmp), comment="Cap ending iter at total SK iters"))
         writer.sgprPool.checkIn(sTmp)
         # check if this WG has no work to do
@@ -1693,13 +1690,11 @@ class StreamKTwoTileOriginal(StreamK):
         # Increment StreamK iteration
         # If moving from SK to DP, next iteration is first DP
         # sTmp = offset to first DP tile
-        module.add(SAndB32(dst=sgpr(sTmp+3), src0=sgpr("skGridAndTiles"), src1=hex(65535), comment="Get skTiles"))
-        module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr("ItersPerTile"), comment="Offset to first DP tile"))
+        module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr("skTiles"), src1=sgpr("ItersPerTile"), comment="Offset to first DP tile"))
         module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr("StreamKIdx"), src1=sgpr("ItersPerTile"), comment="WG tile offset"))
         module.add(SAddU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr(sTmp+1), comment="DP start offset + WG offset"))
         # If already in DP, add dpShift
-        module.add(SLShiftRightB32(dst=sgpr(sTmp+1), shiftHex=hex(16), src=sgpr("skGridAndTiles"), comment="Get skGrid"))
-        module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+1), src1=sgpr("ItersPerTile"), comment="DP iterations shift"))
+        module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr("skGrid"), src1=sgpr("ItersPerTile"), comment="DP iterations shift"))
         module.add(SAddU32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+1), src1=sgpr("StreamKIter"), comment="Add DP shift"))
         # Save DP iter in sTmp
         module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if in SK or DP section"))
@@ -1766,8 +1761,7 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr("StreamKIdx"), src1=sgpr("ItersPerTile"), comment="DP starting iteration (case: DP work to do)"))
         module.add(SMovB32(dst=sgpr("StreamKIterEnd"), src=sgpr("TotalIters"), comment="DP ending iteration (case: only DP work to do)"))
         sTmp = writer.sgprPool.checkOut(1, "TotalSKIters", preventOverflow=False)
-        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr("skGridAndTiles"), src1=hex(65535), comment="Get skTiles"))
-        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr("ItersPerTile"), comment="Total SK iters"))
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("skTiles"), src1=sgpr("ItersPerTile"), comment="Total SK iters"))
         module.add(SCmpLtU32(src0=sgpr(sTmp), src1=sgpr("TotalIters"), comment="Check if there are DP tiles to do"))
         module.add(SCBranchSCC1(labelName=skInitDone.getLabelName(), comment="Done init"))
         writer.sgprPool.checkIn(sTmp)
@@ -1791,8 +1785,7 @@ class StreamKTwoTileDPFirst(StreamK):
         # clamp to end of sk iterations
         # TODO maybe remove clamp, since extra iters code should guarantee total iterations match
         sTmp = writer.sgprPool.checkOut(1, "TotalSKIters", preventOverflow=False)
-        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr("skGridAndTiles"), src1=hex(65535), comment="Get skTiles"))
-        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr("ItersPerTile"), comment="Total SK iters"))
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("skTiles"), src1=sgpr("ItersPerTile"), comment="Total SK iters"))
         module.add(SMinU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIterEnd"), src1=sgpr(sTmp), comment="Cap ending iter at total SK iters"))
         writer.sgprPool.checkIn(sTmp)
 
@@ -1813,12 +1806,10 @@ class StreamKTwoTileDPFirst(StreamK):
 
         skUpdateDone = Label("SK_UpdateDone", "")
         # sTmp+3 = Offset to first SK tile
-        module.add(SAndB32(dst=sgpr(sTmp+3), src0=sgpr("skGridAndTiles"), src1=hex(65535), comment="Get skTiles"))
-        module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr("ItersPerTile"), comment="Total SK iters"))
+        module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr("skTiles"), src1=sgpr("ItersPerTile"), comment="Total SK iters"))
         module.add(SSubU32(dst=sgpr(sTmp+3), src0=sgpr("TotalIters"), src1=sgpr(sTmp+3), comment="Offset to first SK tile"))
         # If in DP, add dpShift
-        module.add(SLShiftRightB32(dst=sgpr(sTmp+1), shiftHex=hex(16), src=sgpr("skGridAndTiles"), comment="Get skGrid"))
-        module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+1), src1=sgpr("ItersPerTile"), comment="DP iterations shift"))
+        module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr("skGrid"), src1=sgpr("ItersPerTile"), comment="DP iterations shift"))
         module.add(SAddU32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+1), src1=sgpr("StreamKIter"), comment="Add DP shift"))
         # if sTmp+1 < sTmp+3, continue DP (add dpShift)
         module.add(SCmpLtU32(src0=sgpr(sTmp+1), src1=sgpr(sTmp+3), comment="Check if still in DP section"))

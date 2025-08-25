@@ -183,6 +183,50 @@ TYPED_TEST(RocprimTransformIteratorTests, Basic)
         ASSERT_TRUE(begin <= end);
         ASSERT_TRUE(end >= begin);
         ASSERT_TRUE(end >= end);
+
+        struct Wrapper
+        {
+            value_type value;
+        };
+
+        auto transform_wrap = [&](const value_type& value) -> Wrapper
+        { return Wrapper{static_cast<value_type>(transform(value))}; };
+        auto test_transform_wrap = rocprim::make_transform_iterator(input.data(), transform_wrap);
+
+        ASSERT_EQ(test_transform_wrap->value, transform(input[0]));
+        ASSERT_EQ((*test_transform_wrap).value, transform(input[0]));
+        ASSERT_EQ((++test_transform_wrap)->value, transform(input[1]));
+
+        struct WrapperPointer
+        {
+            value_type* a;
+        };
+
+        std::vector<WrapperPointer> input_test;
+        input_test.reserve(input.size());
+
+        for(const auto& val : input)
+        {
+            value_type* copy = new value_type(val);
+            input_test.push_back(WrapperPointer{copy});
+        }
+
+        auto func = [&](const WrapperPointer& wrapper) -> const WrapperPointer&
+        {
+            *(wrapper.a) = transform(static_cast<value_type>(*(wrapper.a)));
+            return wrapper;
+        };
+
+        auto test_transform_wrap_ref = rocprim::make_transform_iterator(input_test.data(), func);
+
+        ASSERT_EQ(*((*test_transform_wrap_ref).a), transform(input[0]));
+        ASSERT_EQ(*(test_transform_wrap_ref->a), transform(transform(input[0])));
+        ASSERT_EQ(*((++test_transform_wrap_ref)->a), transform(input[1]));
+
+        for(auto& wp : input_test)
+        {
+            delete wp.a;
+        }
     }
 }
 
