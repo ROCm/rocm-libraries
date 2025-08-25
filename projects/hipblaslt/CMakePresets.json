@@ -32,6 +32,25 @@
         }
       },
       {
+        "name": "rocisa",
+        "displayName": "rocisa",
+        "description": "Configures just rocisa",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_BUILD_TESTING": "OFF",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF",
+          "HIPBLASLT_ENABLE_DEVICE": "OFF",
+          "HIPBLASLT_ENABLE_HOST": "OFF",
+          "HIPBLASLT_ENABLE_MSGPACK": "OFF",
+          "HIPBLASLT_ENABLE_LLVM": "OFF",
+          "TENSILELITE_ENABLE_CLIENT": "OFF",
+          "TENSILELITE_ENABLE_HOST": "OFF",
+          "TENSILELITE_BUILD_TESTING": "OFF",
+          "TENSILELITE_ENABLE_AUTOBUILD": "OFF",
+          "HIPBLASLT_ENABLE_ROCROLLER": "OFF"
+        }
+      },
+      {
         "name": "hipblaslt",
         "displayName": "hipBLASLt",
         "description": "Build just the hipblaslt library and required deps",

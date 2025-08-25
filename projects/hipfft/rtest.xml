@@ -12,4 +12,7 @@
     <test sets="custom">
         <run name="custom_filter">{COMMAND}:output_custom.xml --gtest_filter=-*multi_gpu*</run>
     </test>
+    <test sets="smoke">
+        <run name="smoketest">{COMMAND}:output_psdb.xml {WISDOM_FLAGS} --precompile=rocfft-test-precompile.db --smoketest</run>
+    </test>
 </testset>
