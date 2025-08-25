@@ -1028,6 +1028,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       curPackIdx = 0
       packAIdx = 0
       packBIdx = 0
+      packMXSAIdx = 0
+      packMXSBIdx = 0
       packMIdx = 0
 
       schedulePackConsiderMetadata = kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]
@@ -1303,7 +1305,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self._interleavePackAB(kernel, packAItems, packBItems, packItems, prefetch=True, searchStrings=["__TF32_1", "__TF32_2"])
 
         else:
-          while packAItems:
+          while packAItems or packMXSAItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
               for n in range(instPerPackA):
                 if packAItems:
@@ -1317,20 +1319,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     packINtemsA[j].append(packAItems.pop(0))
                   else:
                     break
-          while packMXSAItems:
-            for j in range(self.states.numReadsIterCoalescedMXSA):
-              for n in range(instPerPackMXSA):
-                if packMXSAItems:
-                  packINtemsMXSA[j].append(packMXSAItems.pop(0))
-                else:
-                  break
-          while packMXSBItems:
-            for j in range(self.states.numReadsIterCoalescedMXSB):
-              for n in range(instPerPackMXSB):
-                if packMXSBItems:
-                  packINtemsMXSB[j].append(packMXSBItems.pop(0))
-                else:
-                  break
+            if packMXSAItems:
+              for j in range(self.states.numReadsIterCoalescedMXSA):
+                for n in range(instPerPackMXSA):
+                  if packMXSAItems:
+                    packINtemsMXSA[j].append(packMXSAItems.pop(0))
+                  else:
+                    break
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             while packMItems:
               # for j in range(self.states.numReadsIterCoalescedMetadata):
@@ -1339,7 +1334,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   packINtemsM[0].append(packMItems.pop(0))
                 else:
                   break
-          while packBItems:
+          while packMXSBItems or packBItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
               for n in range(instPerPackB):
                 if packBItems:
@@ -1351,6 +1346,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 for n in range(instPerPackB):
                   if packBItems:
                     packINtemsB[j].append(packBItems.pop(0))
+                  else:
+                    break
+            if packMXSBItems:
+              for j in range(self.states.numReadsIterCoalescedMXSB):
+                for n in range(instPerPackMXSB):
+                  if packMXSBItems:
+                    packINtemsMXSB[j].append(packMXSBItems.pop(0))
                   else:
                     break
 
@@ -1866,6 +1868,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # scheduled pack
         ####
         _instPerPackA = 0
+        _instPerPackMXSA = 0
+        _instPerPackMXSB = 0
         _instPerPackB = 0
         _instPerPackM = 0
         instPackLast = []
@@ -1882,6 +1886,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           packAIdx += _instPerPackA
           _instPerPackB = instPerPackB if i % kernel["MIWaveTileA"] == 0 else 0
           packBIdx += _instPerPackB
+          _instPerPackMXSA = instPerPackMXSA if i//(kernel["MIWaveTileA"]+kernel["MIWaveTileA"]*kernel["MIWaveTileB"]*(i//(kernel["MIWaveTileA"]*kernel["MIWaveTileB"]))) == 0 else 0
+          packMXSAIdx += _instPerPackMXSA
+          _instPerPackMXSB = instPerPackMXSB if i % kernel["MIWaveTileA"] == 0 else 0
+          packMXSBIdx += _instPerPackMXSB
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             if kernel["ProblemType"]["Sparse"] == 2:
               _instPerPackM = instPerPackM if i % kernel["MIWaveTileA"] == 0 else 0
@@ -1893,10 +1901,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
             packAIdx = packAIdx if tPA["bpe"] < 4 and (not kernel["UnrollMajorLDSA"] or kernel["ConvertAfterDS"]) else 0
             packBIdx = packBIdx if tPB["bpe"] < 4 and (not kernel["UnrollMajorLDSB"] or kernel["ConvertAfterDS"]) else 0
+            packMXSAIdx = packMXSAIdx if ("MX" in tPA) and (not kernel["UnrollMajorLDSMXSA"]) else 0
+            packMXSBIdx = packMXSBIdx if ("MX" in tPB) and (not kernel["UnrollMajorLDSMXSB"]) else 0
           else:
             packAIdx = packAIdx if tPA["localReadInstruction"].blockWidth == 0.25 else 0
             packBIdx = packBIdx if tPB["localReadInstruction"].blockWidth == 0.25 else 0
-          numPack = (packAIdx + packBIdx)
+            packMXSAIdx = 0
+            packMXSBIdx = 0
+          numPack = (packAIdx + packBIdx + packMXSAIdx + packMXSBIdx)
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             packMIdx = packMIdx if not kernel["UnrollMajorLDSMetadata"] else 0
             numPack += packMIdx
