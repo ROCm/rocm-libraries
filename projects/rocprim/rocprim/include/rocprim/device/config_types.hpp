@@ -342,6 +342,27 @@ struct merge_mergepath_config_selector
 };
 
 template<typename Config, target_arch Arch>
+struct radix_sort_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct radix_sort_onesweep_histogram_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.histogram.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct radix_sort_onesweep_sort_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.sort.block_size;
+};
+
+template<typename Config, target_arch Arch>
 struct segmented_radix_sort_warp_sort_small_config_selector
 {
     static constexpr unsigned int block_size
