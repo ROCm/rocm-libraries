@@ -66,10 +66,28 @@ template <typename T>
 class RotatingBuffer
 {
 public:
-    RotatingBuffer(size_t numElems, size_t rotationSize)
+    RotatingBuffer(size_t numElems, size_t rotationSize, const std::vector<T>& hostData = {})
         : numElems(numElems), rotationSize(rotationSize), currentOffset(0)
     {
+        // allocate a single large buffer, with extra space for rotations
         buffer = make_shared_device<T>(numElems + rotationSize, T{});
+
+        // *** CHANGED *** Copy host data into *every* rotated segment
+        if(!hostData.empty())
+        {
+            if(hostData.size() != numElems)
+            {
+                Throw<FatalError>("RotatingBuffer: host data size does not match device buffer size.");
+            }
+
+            // For each rotation offset, copy hostData into device
+            size_t numRotations = (numElems + rotationSize - 1) / rotationSize + 1;
+            for(size_t r = 0; r < numRotations; ++r)
+            {
+                T* dst = buffer.get() + r * rotationSize;
+                hipMemcpy(dst, hostData.data(), numElems * sizeof(T), hipMemcpyHostToDevice);
+            }
+        }
     }
 
     T* next()
@@ -84,7 +102,6 @@ private:
     size_t currentOffset;
     std::shared_ptr<T> buffer;
 };
-
 
 namespace rocRoller::Client::GEMMClient
 {
@@ -228,9 +245,9 @@ namespace rocRoller::Client::GEMMClient
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
-        RotatingBuffer<PackedTypeA> rotatingA(hostA.size(), rotatingSize);
-        RotatingBuffer<PackedTypeB> rotatingB(hostB.size(), rotatingSize);
-        RotatingBuffer<C>           rotatingC(hostC.size(), rotatingSize);
+        RotatingBuffer<PackedTypeA> rotatingA(hostA.size(), rotatingSize, hostA);
+        RotatingBuffer<PackedTypeB> rotatingB(hostB.size(), rotatingSize, hostB);
+        RotatingBuffer<C>           rotatingC(hostC.size(), rotatingSize, hostC);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
         
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
