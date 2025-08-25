@@ -230,46 +230,6 @@ namespace rocRoller
             return std::make_shared<Expression>(Exponential{a});
         }
 
-        inline ExpressionPtr multiplyHigh(ExpressionPtr a, ExpressionPtr b)
-        {
-            return std::make_shared<Expression>(MultiplyHigh{a, b});
-        }
-
-        inline ExpressionPtr multiplyAdd(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
-        {
-            return std::make_shared<Expression>(MultiplyAdd{a, b, c});
-        }
-
-        inline ExpressionPtr addShiftL(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
-        {
-            return std::make_shared<Expression>(AddShiftL{a, b, c});
-        }
-
-        inline ExpressionPtr shiftLAdd(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
-        {
-            return std::make_shared<Expression>(ShiftLAdd{a, b, c});
-        }
-
-        inline ExpressionPtr conditional(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
-        {
-            return std::make_shared<Expression>(Conditional{a, b, c});
-        }
-
-        inline ExpressionPtr magicMultiple(ExpressionPtr a)
-        {
-            return std::make_shared<Expression>(MagicMultiple{a});
-        }
-
-        inline ExpressionPtr magicShifts(ExpressionPtr a)
-        {
-            return std::make_shared<Expression>(MagicShifts{a});
-        }
-
-        inline ExpressionPtr magicShiftAndSign(ExpressionPtr a)
-        {
-            return std::make_shared<Expression>(MagicShiftAndSign{a});
-        }
-
         inline static bool convertibleTo(DataType dt)
         {
             return dt == DataType::Half || dt == DataType::Halfx2 || dt == DataType::BFloat16
@@ -308,17 +268,6 @@ namespace rocRoller
         inline ExpressionPtr convert(ExpressionPtr a)
         {
             return convert(DATATYPE, a);
-        }
-
-        inline ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width)
-        {
-            return std::make_shared<Expression>(
-                BitFieldExtract{{.arg{a}}, DataType::None, offset, width});
-        }
-
-        inline ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width)
-        {
-            return std::make_shared<Expression>(BitFieldExtract{{.arg{a}}, dt, offset, width});
         }
 
         template <CCommandArgumentValue T>

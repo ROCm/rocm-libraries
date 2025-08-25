@@ -212,70 +212,7 @@ rocsparse_status rocsparse_bsrgeam_nnzb(rocsparse_handle          handle,
 *
 *  \par Example
 *  This example adds two CSR matrices.
-*  \code{.c}
-*  // Initialize scalar multipliers
-*  float alpha = 1.0f;
-*  float beta  = 1.0f;
-*
-*  // Create matrix descriptors
-*  rocsparse_mat_descr descr_A;
-*  rocsparse_mat_descr descr_B;
-*  rocsparse_mat_descr descr_C;
-*
-*  rocsparse_create_mat_descr(&descr_A);
-*  rocsparse_create_mat_descr(&descr_B);
-*  rocsparse_create_mat_descr(&descr_C);
-*
-*  // Set pointer mode
-*  rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host);
-*
-*  // Obtain number of total non-zero block entries in C and block row pointers of C
-*  rocsparse_int nnzb_C;
-*  hipMalloc((void**)&bsr_row_ptr_C, sizeof(rocsparse_int) * (mb + 1));
-*
-*  rocsparse_bsrgeam_nnzb(handle,
-*                        dir,
-*                        mb,
-*                        nb,
-*                        block_dim,
-*                        descr_A,
-*                        nnzb_A,
-*                        bsr_row_ptr_A,
-*                        bsr_col_ind_A,
-*                        descr_B,
-*                        nnzb_B,
-*                        bsr_row_ptr_B,
-*                        bsr_col_ind_B,
-*                        descr_C,
-*                        bsr_row_ptr_C,
-*                        &nnzb_C);
-*
-*  // Compute block column indices and block values of C
-*  hipMalloc((void**)&bsr_col_ind_C, sizeof(rocsparse_int) * nnzb_C);
-*  hipMalloc((void**)&bsr_val_C, sizeof(float) * nnzb_C * block_dim * block_dim);
-*
-*  rocsparse_sbsrgeam(handle,
-*                     dir,
-*                     mb,
-*                     nb,
-*                     block_dim,
-*                     &alpha,
-*                     descr_A,
-*                     nnzb_A,
-*                     bsr_val_A,
-*                     bsr_row_ptr_A,
-*                     bsr_col_ind_A,
-*                     &beta,
-*                     descr_B,
-*                     nnzb_B,
-*                     bsr_val_B,
-*                     bsr_row_ptr_B,
-*                     bsr_col_ind_B,
-*                     descr_C,
-*                     bsr_val_C,
-*                     bsr_row_ptr_C,
-*                     bsr_col_ind_C);
-*  \endcode
+*  \snippet example_rocsparse_bsrgeam.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

@@ -131,54 +131,7 @@ rocsparse_status rocsparse_csr2ell_width(rocsparse_handle          handle,
 *
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
-*  \code{.c}
-*      //     1 2 0 3 0
-*      // A = 0 4 5 0 0
-*      //     6 0 0 7 8
-*
-*      rocsparse_int m   = 3;
-*      rocsparse_int n   = 5;
-*      rocsparse_int nnz = 8;
-*
-*      csr_row_ptr[m+1] = {0, 3, 5, 8};             // device memory
-*      csr_col_ind[nnz] = {0, 1, 3, 1, 2, 0, 3, 4}; // device memory
-*      csr_val[nnz]     = {1, 2, 3, 4, 5, 6, 7, 8}; // device memory
-*
-*      // Create ELL matrix descriptor
-*      rocsparse_mat_descr ell_descr;
-*      rocsparse_create_mat_descr(&ell_descr);
-*
-*      // Obtain the ELL width
-*      rocsparse_int ell_width;
-*      rocsparse_csr2ell_width(handle,
-*                              m,
-*                              csr_descr,
-*                              csr_row_ptr,
-*                              ell_descr,
-*                              &ell_width);
-*
-*      // Compute ELL non-zero entries
-*      rocsparse_int ell_nnz = m * ell_width;
-*
-*      // Allocate ELL column and value arrays
-*      rocsparse_int* ell_col_ind;
-*      hipMalloc((void**)&ell_col_ind, sizeof(rocsparse_int) * ell_nnz);
-*
-*      float* ell_val;
-*      hipMalloc((void**)&ell_val, sizeof(float) * ell_nnz);
-*
-*      // Format conversion
-*      rocsparse_scsr2ell(handle,
-*                         m,
-*                         csr_descr,
-*                         csr_val,
-*                         csr_row_ptr,
-*                         csr_col_ind,
-*                         ell_descr,
-*                         ell_width,
-*                         ell_val,
-*                         ell_col_ind);
-*  \endcode
+*  \snippet example_rocsparse_csr2ell.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

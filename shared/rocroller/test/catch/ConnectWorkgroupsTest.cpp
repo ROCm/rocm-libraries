@@ -43,6 +43,7 @@
 #include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
+#include "ExpressionMatchers.hpp"
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
 #include "common/Utilities.hpp"
@@ -91,13 +92,13 @@ namespace ConnectWorkgroupsTest
         SECTION("Basic info")
         {
             auto info = getTileSizeInfo(graph0);
-            CHECK(identical(info.sizes[0], literal(vX)));
-            CHECK(identical(info.sizes[1], literal(vY)));
+            CHECK_THAT(info.sizes[0], SimplifiesTo(literal(vX)));
+            CHECK_THAT(info.sizes[1], SimplifiesTo(literal(vY)));
             CHECK(info.sizes[2] == nullptr);
             CHECK(workgroupDimensions(info) == 2);
 
             auto total = totalNumberOfWorkgroups(info);
-            CHECK(identical(total, literal(vX) * literal(vY)));
+            CHECK_THAT(total, SimplifiesTo(literal(vX) * literal(vY)));
         }
 
         SECTION("No mapping")

@@ -373,6 +373,8 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreDiscardIterator)
 
         // Test with discard output iterator
         // using OffsetT = typename std::iterator_traits<Type>::difference_type;
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        // TODO: Here in block load an store, it's not possible to use rocprim::discard_iterator
         hipcub::DiscardOutputIterator<size_t> discard_itr;
 
         // Running kernel
@@ -386,7 +388,7 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreDiscardIterator)
                                                     discard_itr,
                                                     discard_itr,
                                                     guarded_elements);
-
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
         // Running kernel
         load_store_guarded_kernel<Type *,
                                   Type *,

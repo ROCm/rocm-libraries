@@ -406,7 +406,7 @@ int CompareResults(double* computed, double* reference, OffsetT len, bool verbos
 // template <typename S, typename OffsetT>
 // int CompareDeviceResults(
 //     S *h_reference,
-//     hipcub::DiscardOutputIterator<OffsetT> d_data,
+//     rocprim::discard_iterator d_data,
 //     std::size_t num_items,
 //     bool verbose = true,
 //     bool display_data = false)

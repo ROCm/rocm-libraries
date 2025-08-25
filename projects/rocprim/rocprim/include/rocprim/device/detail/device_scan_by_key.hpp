@@ -98,23 +98,30 @@ namespace detail
             auto not_equal
                 = [compare](const auto& a, const auto& b) mutable { return !compare(a, b); };
 
-            const auto flag_segment_boundaries = [&]() {
+            const auto flag_segment_boundaries = [&]()
+            {
                 if(Exclusive)
                 {
                     const key_type tile_successor
                         = starting_block + flat_block_id < number_of_blocks - 1
-                              ? block_keys[items_per_block]
-                              : *block_keys;
-                    block_discontinuity {}.flag_tails(
-                        flags, tile_successor, keys, not_equal, storage.keys.flag);
+                              ? static_cast<key_type>(block_keys[items_per_block])
+                              : static_cast<key_type>(*block_keys);
+                    block_discontinuity{}.flag_tails(flags,
+                                                     tile_successor,
+                                                     keys,
+                                                     not_equal,
+                                                     storage.keys.flag);
                 }
                 else
                 {
                     const key_type tile_predecessor = starting_block + flat_block_id > 0
-                                                          ? block_keys[-1]
-                                                          : *block_keys;
-                    block_discontinuity {}.flag_heads(
-                        flags, tile_predecessor, keys, not_equal, storage.keys.flag);
+                                                          ? static_cast<key_type>(block_keys[-1])
+                                                          : static_cast<key_type>(*block_keys);
+                    block_discontinuity{}.flag_heads(flags,
+                                                     tile_predecessor,
+                                                     keys,
+                                                     not_equal,
+                                                     storage.keys.flag);
                 }
             };
 

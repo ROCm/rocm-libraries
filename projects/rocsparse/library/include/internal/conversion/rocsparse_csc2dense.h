@@ -72,59 +72,7 @@ extern "C" {
 *              pointer is invalid.
 *
 *  \par Example
-*  \code{.c}
-*    // 1 2 3 0
-*    // 0 0 4 5
-*    // 0 6 0 0
-*    // 7 0 0 8
-*    rocsparse_int m = 4;
-*    rocsparse_int n = 4;
-*    rocsparse_int nnz = 8;
-*    rocsparse_int ld = m;
-*
-*    std::vector<rocsparse_int> hcsc_col_ptr = {0, 2, 4, 6, 8};
-*    std::vector<rocsparse_int> hcsc_row_ind = {0, 3, 0, 2, 0, 1, 1, 3};
-*    std::vector<float> hcsc_val = {1.0f, 7.0f, 2.0f, 6.0f, 3.0f, 4.0f, 5.0f, 8.0f};
-*
-*    rocsparse_int* dcsc_col_ptr = nullptr;
-*    rocsparse_int* dcsc_row_ind = nullptr;
-*    float* dcsc_val = nullptr;
-*    hipMalloc((void**)&dcsc_col_ptr, sizeof(rocsparse_int) * (n + 1));
-*    hipMalloc((void**)&dcsc_row_ind, sizeof(rocsparse_int) * nnz);
-*    hipMalloc((void**)&dcsc_val, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsc_col_ptr, hcsc_col_ptr.data(), sizeof(rocsparse_int) * (n + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsc_row_ind, hcsc_row_ind.data(), sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsc_val, hcsc_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    float* ddense = nullptr;
-*    hipMalloc((void**)&ddense, sizeof(float) * ld * n);
-*
-*    rocsparse_handle handle;
-*    rocsparse_create_handle(&handle);
-*
-*    rocsparse_mat_descr descr;
-*    rocsparse_create_mat_descr(&descr);
-*
-*    rocsparse_scsc2dense(handle,
-*                         m,
-*                         n,
-*                         descr,
-*                         dcsc_val,
-*                         dcsc_col_ptr,
-*                         dcsc_row_ind,
-*                         ddense,
-*                         ld);
-*
-*    rocsparse_destroy_handle(handle);
-*    rocsparse_destroy_mat_descr(descr);
-*
-*    hipFree(dcsc_col_ptr);
-*    hipFree(dcsc_row_ind);
-*    hipFree(dcsc_val);
-*
-*    hipFree(ddense);
-*  \endcode
+*  \snippet example_rocsparse_csc2dense.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

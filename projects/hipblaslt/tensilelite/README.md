@@ -1,6 +1,74 @@
-* TensileLite
+# Tensilelite
 
-** How to Rebuild Object Codes Directly from Assembly
+## Building and Running Tests
+
+While full test suites can be run with a single `tox` command, developers may wish to
+build the hipBLASLt tensilelite client executable (`tensilelite-client`) and run individual tests separately. 
+This is useful for debugging specific problems or isolating issues in a specific test.
+
+### Run Full Test Suite with Tox
+
+The standard workflow for running the entire test suite is to use `tox`. This command will build `tensilelite-client` and execute all 
+tests.
+
+```
+tox -e py3 -- Tensile/Tests -m common
+```
+
+### Build with invoke and Run a Test (Default Path)
+
+This workflow uses `invoke` to build the client into the default `build_tmp` directory. 
+The executable will automatically be found when using the default build directory.
+
+```
+# install invoke and rocisa if you haven't already
+pip3 install invoke
+
+# build the client to the default location with defaults
+invoke build-client
+
+# run an individual test
+Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
+```
+
+**3. Build with CMake (Custom Location) and Run Test with Path Flag**
+
+This workflow is for when you need to build the client in a location other
+than the default `build_tmp` directory by using CMake. The `--prebuilt-client` flag is then 
+used to specify this custom path when running a test. Make sure to do this in the `hipblaslt` directory.
+
+```
+# configure in a custom directory (e.g., my-custom-build)
+cmake --preset tensilelite -S . -B tensilelite/my-custom-build -DHIPBLASLT_ENABLE_LLVM=ON
+
+# build
+cmake --build tenstilelite/my-custom-build --parallel
+
+# run a test, specifying the custom client path with --prebuilt-client
+cd tensilelite
+./my-custom-build/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
+                          --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
+```
+
+**4. Build with tox (Custom Build Args)**
+
+This workflow uses `tox` with custom CMake arguments, which is useful for creating
+specialized builds (e.g., Debug builds) and setting the architecture.
+
+```
+# build the client using tox with custom CMake flags 
+TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
+```
+
+## Options
+
+* `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
+* `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `OFF`)
+* `TENSILELITE_ENABLE_AUTOBUILD`: Build the tensilelite host library tests (default: `OFF`)
+* `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
+* `GPU_TARGETS:` Semicolon separated list of gfx targets to build
+
+## How to Rebuild Object Codes Directly from Assembly
 
 During the tuning process, it is of interest to modify an assembly file/s and rebuild the corresponding object file/s and then relink the corresponding co file. Currently, we generate additional source files and a script to provide this workflow. 
 

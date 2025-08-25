@@ -18,13 +18,10 @@ on:
   push:
     branches:
       - 'develop'
-#      - 'docs/**'
-      - 'docs/test'
+      - 'docs/**'
     paths:
-#      - 'projects/**'
-#      - 'shared/**'
-      - 'projects/miopen/**'
-      - 'projects/hipblas/**'
+     - 'projects/**'
+     - 'shared/**'
 
 jobs:
   trigger-rtd:
@@ -77,7 +74,7 @@ jobs:
           )
 
           for project in $changed_projects; do
-            slug="advanced-micro-devices-monorepo-$project" # Remove monorepo keyword when using on live docs later
+            slug="advanced-micro-devices-$project"
             if echo "$project_list" | grep -Fxq "$slug"; then
               echo "Triggering RTD build for $project"
               response=$(curl -f -s -X POST \

@@ -747,5 +747,5 @@ TEST(hipfftTest, GetProperty)
     const auto valid_property_type = enum_helper<hipfftLibraryPropertyType>::get_any_valid_value();
     EXPECT_EQ(hipfftGetProperty(valid_property_type, nullptr), HIPFFT_INVALID_VALUE);
     const auto invalid_property_type = enum_helper<hipfftLibraryPropertyType>::get_invalid_value();
-    EXPECT_EQ(hipfftGetProperty(invalid_property_type, &tmp), HIPFFT_INVALID_TYPE);
+    EXPECT_EQ(hipfftGetProperty(invalid_property_type, &tmp), HIPFFT_INVALID_VALUE);
 }

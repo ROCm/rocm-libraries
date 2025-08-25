@@ -50,6 +50,7 @@ rocblaslt_status
                               const RocblasltContractionProblem& prob,
                               int                                requestedAlgoCount,
                               rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
+                              size_t                             maxWorkSpaceBytes,
                               int*                               returnAlgoCount);
 
 rocblaslt_status

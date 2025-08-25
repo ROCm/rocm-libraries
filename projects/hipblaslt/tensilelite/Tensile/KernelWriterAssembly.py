@@ -7636,16 +7636,12 @@ class KernelWriterAssembly(KernelWriter):
                   #   numElementsPerLoad = 2
                   # elif self.states.archCaps["HasEccHalf"]:
                   #   destVgprHi = self.vgprPool.checkOut(1, 'destVgprHi')
-                  if (not tP["isM"]) and isLds and (not tP["tlu"]) and tP["glvw"]>=4 and kernel["AssertSummationElementMultiple"] % 4 == 0:
-                    if tP["glvw"] == 4:
-                      # Pack four byte values into a single load dword (for DTL only for now)
-                      numElementsPerLoad = 4
-                    elif tP["glvw"] == 16:
-                      numElementsPerLoad = 16
+                  if (not tP["isM"]) and isLds:
+                    if not kernel["NonDTLTailLoop%c"%tc]:
+                      numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
                     dataIsByte = False
                   else:
                     dataIsByte = True
-
                   # Check out 3 regs once , for component 1,2,3 (r = 1,2,3)
                   if doTailOpt == 1:
                     if r == 1:
@@ -7672,7 +7668,7 @@ class KernelWriterAssembly(KernelWriter):
                   if tP["glvw"]>1 and kernel["AssertSummationElementMultiple"] % 2 == 0 and not isLds:
                   # Pack two FP16 values into a single load dword x2
                     numElementsPerLoad = 2
-                  elif isLds and kernel["AssertSummationElementMultiple"] % 2 == 0:
+                  elif isLds and not kernel["NonDTLTailLoop%c"%tc]:
                     numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
                   elif self.states.archCaps["HasEccHalf"]:
                     # In some cards, loading half types into register will zero out

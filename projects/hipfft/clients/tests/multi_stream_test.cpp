@@ -27,7 +27,6 @@
 #include "../../shared/params_gen.h" // hash_prob
 #include "../../shared/test_params.h" // externally-declared test parameters
 #include "../hipfft_params.h"
-#define _USE_MATH_DEFINES
 #include <algorithm> // copy_n, any_of
 #include <cmath> // M_PI, cos, sin
 #include <exception>
@@ -37,7 +36,15 @@
 #include <random> // ranlux24_base, uniform_int_distribution
 #include <sstream>
 #include <stdexcept>
+#ifdef WIN32
+#include <synchapi.h> // Sleep
+#else
 #include <unistd.h> // usleep
+#endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
@@ -681,18 +688,22 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
         }
         // Check if the callbacks get invoked within 10 s. If not, the stream set above was likely
         // ignored in the sub_dft operations (integer "times" in us below)
-        size_t           time_waited            = 0;
-        constexpr size_t sleep_time             = 1000; // 1 ms
-        constexpr size_t failure_time_threshold = 10000000; // 10^7 us := 10 s
+        size_t           time_waited_us            = 0;
+        constexpr size_t sleep_time_us             = 1000; // 1 ms
+        constexpr size_t failure_time_threshold_us = 10000000; // 10^7 us := 10 s
         while(std::any_of(stream_is_done.begin(),
                           stream_is_done.end(),
                           [](const decltype(stream_is_done)::value_type& val) { return val == 0; })
-              && time_waited <= failure_time_threshold)
+              && time_waited_us <= failure_time_threshold_us)
         {
-            usleep(sleep_time);
-            time_waited += sleep_time;
+#ifdef WIN32
+            Sleep(sleep_time_us / 1000); // argument in ms
+#else
+            usleep(sleep_time_us);
+#endif
+            time_waited_us += sleep_time_us;
         }
-        if(time_waited > failure_time_threshold)
+        if(time_waited_us > failure_time_threshold_us)
         {
             // The added callback probably was never invoked, i.e., the above set_stream
             // was not taken into consideration by some sub_dft plan.
@@ -811,3 +822,8 @@ INSTANTIATE_TEST_SUITE_P(
     multiStreamTest,
     ::testing::ValuesIn(generate_full_scope_for(create_random_set_of_sizes<max_byte_size>())),
     multiStreamTest::TestName);
+
+// The list of test parameters dynamically generated in the instantiation above may be empty
+// if low test probabilities are used. The following ensures such cases do not make gtest
+// report an error due to uninstantiated multiStreamTest, e.g., with option smoketest.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(multiStreamTest);

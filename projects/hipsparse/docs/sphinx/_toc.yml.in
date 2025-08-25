@@ -10,7 +10,9 @@ subtrees:
 - caption: Install
   entries:
   - file: install/install
-    title: Installation guide
+    title: Linux installation guide
+  - file: install/install-windows
+    title: Windows installation guide
 
 - caption: How to
   entries:

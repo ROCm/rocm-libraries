@@ -76,7 +76,7 @@ void run_even_benchmark(benchmark_utils::state&& state,
     std::vector<T> input = generate<T>(size, entropy_reduction, lower_level, upper_level);
 
     common::device_ptr<T>            d_input(input);
-    common::device_ptr<counter_type> d_histogram(size);
+    common::device_ptr<counter_type> d_histogram(bins);
 
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(rocprim::histogram_even(nullptr,
@@ -214,7 +214,7 @@ void run_range_benchmark(benchmark_utils::state&& state, size_t bins)
 
     common::device_ptr<T>            d_input(input);
     common::device_ptr<level_type>   d_levels(levels);
-    common::device_ptr<counter_type> d_histogram(size);
+    common::device_ptr<counter_type> d_histogram(bins);
 
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(rocprim::histogram_range(nullptr,
@@ -287,7 +287,7 @@ void run_multi_range_benchmark(benchmark_utils::state&& state, size_t bins)
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipMalloc(&d_levels[channel], num_levels_channel * sizeof(level_type)));
-        HIP_CHECK(hipMalloc(&d_histogram[channel], size * sizeof(counter_type)));
+        HIP_CHECK(hipMalloc(&d_histogram[channel], bins * sizeof(counter_type)));
     }
 
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)

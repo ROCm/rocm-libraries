@@ -279,45 +279,7 @@ rocsparse_status rocsparse_csrmv_clear(rocsparse_handle handle, rocsparse_mat_in
 *  \par Example
 *  This example performs a sparse matrix vector multiplication in CSR format
 *  using additional meta data to improve performance.
-*  \code{.c}
-*      // Create matrix info structure
-*      rocsparse_mat_info info;
-*      rocsparse_create_mat_info(&info);
-*
-*      // Perform analysis step to obtain meta data
-*      rocsparse_scsrmv_analysis(handle,
-*                                rocsparse_operation_none,
-*                                m,
-*                                n,
-*                                nnz,
-*                                descr,
-*                                csr_val,
-*                                csr_row_ptr,
-*                                csr_col_ind,
-*                                info);
-*
-*      // Compute y = Ax
-*      rocsparse_scsrmv(handle,
-*                       rocsparse_operation_none,
-*                       m,
-*                       n,
-*                       nnz,
-*                       &alpha,
-*                       descr,
-*                       csr_val,
-*                       csr_row_ptr,
-*                       csr_col_ind,
-*                       info,
-*                       x,
-*                       &beta,
-*                       y);
-*
-*      // Do more work
-*      // ...
-*
-*      // Clean up
-*      rocsparse_destroy_mat_info(info);
-*  \endcode
+*  \snippet example_rocsparse_csrmv.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

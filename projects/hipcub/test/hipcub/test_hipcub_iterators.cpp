@@ -29,9 +29,8 @@
 #include "hipcub/iterator/cache_modified_output_iterator.hpp"
 #include "hipcub/iterator/constant_input_iterator.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
-#include "hipcub/iterator/transform_input_iterator.hpp"
 #include "hipcub/iterator/tex_obj_input_iterator.hpp"
-#include "hipcub/iterator/tex_ref_input_iterator.hpp"
+#include "hipcub/iterator/transform_input_iterator.hpp"
 
 #include "hipcub/util_allocator.hpp"
 
@@ -231,8 +230,7 @@ TYPED_TEST(HipcubIteratorTests, TestConstant)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
-    using IteratorType = hipcub::ConstantInputIterator<T>;
-
+    using IteratorType            = rocprim::constant_iterator<T>;
     constexpr uint32_t array_size = 8;
 
     std::vector<T> h_reference(array_size);
@@ -259,8 +257,7 @@ TYPED_TEST(HipcubIteratorTests, TestCounting)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
-    using IteratorType = hipcub::CountingInputIterator<T>;
-
+    using IteratorType            = rocprim::counting_iterator<T>;
     constexpr uint32_t array_size = 8;
 
     std::vector<T> h_reference(array_size);
@@ -292,8 +289,7 @@ TYPED_TEST(HipcubIteratorTests, TestTransform)
 
     using T = typename TestFixture::input_type;
     using CastT = typename TestFixture::input_type;
-    using IteratorType = hipcub::TransformInputIterator<T, TransformOp<T>, CastT*>;
-
+    using IteratorType        = rocprim::transform_iterator<CastT*, TransformOp<T>, T>;
     constexpr int TEST_VALUES = 11000;
 
     std::vector<T> h_data(TEST_VALUES);
@@ -426,7 +422,7 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
 
     using T            = typename TestFixture::input_type;
     using CastT        = typename TestFixture::input_type;
-    using IteratorType = hipcub::TexRefInputIterator<T, __LINE__>;
+    using IteratorType = hipcub::TexObjInputIterator<T, std::ptrdiff_t>;
 
     //
     // Test iterator manipulation in kernel
@@ -499,7 +495,7 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T                   = typename TestFixture::input_type;
-    using TextureIteratorType = hipcub::TexRefInputIterator<T, __LINE__>;
+    using TextureIteratorType = hipcub::TexObjInputIterator<T, std::ptrdiff_t>;
 
     constexpr uint32_t TEST_VALUES = 11000;
 
@@ -535,13 +531,11 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
         HIP_CHECK(d_tex_itr.BindTexture(d_data, sizeof(T) * TEST_VALUES));
 
         // Create transform iterator
-        hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType> xform_itr(d_tex_itr,
-                                                                                         op);
+        rocprim::transform_iterator<TextureIteratorType, TransformOp<T>, T> xform_itr(d_tex_itr,
+                                                                                      op);
 
-        iterator_test_function<
-            hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType>,
-            T>(xform_itr, h_reference);
-
+        iterator_test_function<rocprim::transform_iterator<TextureIteratorType, TransformOp<T>, T>,
+                               T>(xform_itr, h_reference);
         HIP_CHECK(g_allocator.DeviceFree(d_data));
     }
 }

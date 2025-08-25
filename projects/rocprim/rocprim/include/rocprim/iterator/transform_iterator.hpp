@@ -27,6 +27,7 @@
 
 #include "../config.hpp"
 #include "../type_traits.hpp"
+#include "detail/common.hpp"
 
 /// \addtogroup iteratormodule
 /// @{
@@ -59,10 +60,10 @@ public:
     using value_type = ValueType;
     /// \brief A reference type of the type iterated over (\p value_type).
     /// It's `const` since transform_iterator is a read-only iterator.
-    using reference = const value_type&;
+    using reference = const std::remove_reference_t<value_type>&;
     /// \brief A pointer type of the type iterated over (\p value_type).
     /// It's `const` since transform_iterator is a read-only iterator.
-    using pointer = const value_type*;
+    using pointer = const detail::proxy_pointer<std::remove_reference_t<value_type>>;
     /// A type used for identify distance between iterators.
     using difference_type = typename std::iterator_traits<InputIterator>::difference_type;
     /// The category of the iterator.
@@ -70,6 +71,7 @@ public:
     /// The type of unary function used to transform input range.
     using unary_function = UnaryFunction;
 
+public:
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     using self_type = transform_iterator;
 #endif
@@ -125,14 +127,16 @@ public:
         return transform_(*iterator_);
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    pointer operator->() const
+    ROCPRIM_HOST_DEVICE
+    inline pointer
+        operator->() const
     {
-        return &(*(*this));
+        return pointer(transform_(*iterator_));
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    value_type operator[](difference_type distance) const
+    ROCPRIM_HOST_DEVICE
+    inline value_type
+        operator[](difference_type distance) const
     {
         transform_iterator i = (*this) + distance;
         return *i;
