@@ -920,6 +920,12 @@ namespace TensileLite
                     total_latency = total_latency * 0.8;
                 }
 
+                if(MT_M == 256 && MT_N == 256 && MT_K == 64 && (element_size_A == 16))
+                {
+                    //The kernel for this is more optimized
+                    total_latency = total_latency * 0.8;
+                }
+
                 if(MT_M == 256 && MT_N == 16 && MT_K == 128 && (element_size_A == 16))
                 {
                     //The kernel for this is less optimized, for some reason
