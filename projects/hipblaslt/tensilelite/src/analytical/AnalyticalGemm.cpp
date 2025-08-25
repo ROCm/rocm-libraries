@@ -986,10 +986,12 @@ namespace TensileLite
             //TODO TF32-based Heuristics
             if(enable_heuristics && tf32_emu)
             {
-                // Prefer Custom 256x256x32 kernel for TF32
-                if((MT_M == 256 && MT_N == 256 && MT_K == 32))
-                {
-                    total_latency = total_latency * 0.3;
+                // Prefer Custom 256x256x32 kernel for TF32 NT
+                if (!transA && transB) {
+                    if((MT_M == 256 && MT_N == 256 && MT_K == 32))
+                    {
+                        total_latency = total_latency * 0.3;
+                    }
                 }
             }
 

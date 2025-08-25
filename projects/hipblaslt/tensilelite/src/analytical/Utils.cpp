@@ -236,6 +236,9 @@ namespace TensileLite
             std::vector<ResultTuple> valid_results;
             valid_results.reserve(MT_list.size());
 
+            bool tf32_emu = ((miDataType == DataType::XFloat32 || miDataType == DataType::Float)
+                && (hardware.arch == Hardware::Architecture::gfx950));
+
             for(const auto& mt : MT_list)
             {
                 size_t MT_M = std::get<0>(mt);
@@ -301,10 +304,14 @@ namespace TensileLite
             // 2) Collect results that tie for the absolute best latency.
             double best_latency = std::get<0>(valid_results.front());
             size_t num_the_same = 0;
+            
+            // TODO: Experiment on what the threshold should be.
+            // Likely can be replaced with 5.
+            size_t tie_breaker_threshold = tf32_emu ? 5 : 10;
             for(const auto& res : valid_results)
             {
                 // If it's "essentially" (within 5 diff) the same as best_latency, include it
-                if(std::fabs(std::get<0>(res) - best_latency) < 5)
+                if(std::fabs(std::get<0>(res) - best_latency) < tie_breaker_threshold)
                     num_the_same++;
                 else
                     break; // Once we pass best_latency, we can stop.
