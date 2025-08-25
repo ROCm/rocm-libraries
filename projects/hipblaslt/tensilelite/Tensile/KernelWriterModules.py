@@ -252,11 +252,11 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False):
 ##############################################################################
 def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
   acc2arch, _ = accToArchMapper(kernel)
-
   itemList = [None] * len(acc2arch)
   for i in range(len(acc2arch)):
     destIdx = acc2arch[i]
     srcIdx  = i * kernel["MIRegPerOut"]
+    # TODO: Add conversion support for different compute data types
     if kernel["ProblemType"]["ComputeDataType"].isDouble():
       itemList[destIdx] = VMulF64(dst=vgpr(Holder(name="ValuC"),2),
                                                     src0=sgpr("Alpha",2), src1=vgpr("ValuC+%u"%srcIdx,2),
@@ -267,7 +267,7 @@ def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
                                                     src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%srcIdx),
                                                     comment="Multiply MI out reg with alpha")
     elif (kernel["ProblemType"]["ComputeDataType"].isHalf() and not kernel["ProblemType"]["HighPrecisionAccumulate"]):
-        itemList[destIdx] = VMulPKF16(dst=vgpr(Holder(name="ValuC")),
+      itemList[destIdx] = VMulPKF16(dst=vgpr(Holder(name="ValuC")),
                                                        src0=sgpr("Alpha"),
                                                        src1=vgpr("ValuC+%u"%srcIdx), comment="Multiply MI out reg with alpha")
     elif kernel["ProblemType"]["ComputeDataType"].isInt32():
@@ -315,7 +315,6 @@ def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
   ##############################################################################
 def moveMIoutToArch(kernel, startVgprAlphaTmp):
   acc2arch, _ = accToArchMapper(kernel)
-
   itemList = [None] * len(acc2arch)
   for i in range(len(acc2arch)):
     destIdx = acc2arch[i]

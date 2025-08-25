@@ -7166,7 +7166,7 @@ class KernelWriterAssembly(KernelWriter):
     miInInstType, miOutInstType = dataTypeToMfmaInstTypePair(miInputType, kernel["SourceSwap"])
     neg_flag         = True if ((not is_mfma) and (miInInstType == InstType.INST_I8)) else False
     miInInstType     = InstType.INST_U8 if ((not is_mfma) and miInInstType == InstType.INST_I8) else miInInstType
-    miOutInstType    = miOutInstType if is_mfma else dataTypeNameAbbrevToInstType(kernel["ProblemType"]["ComputeDataType"].toNameAbbrev())
+    miOutInstType    = miOutInstType if (is_mfma or kernel["ProblemType"]["Sparse"]) else dataTypeNameAbbrevToInstType(kernel["ProblemType"]["ComputeDataType"].toNameAbbrev())
     numReadsIterCoalescedA = self.states.numReadsIterCoalescedA
     numReadsIterCoalescedB = self.states.numReadsIterCoalescedB
     numReadsIterCoalesced = max(numReadsIterCoalescedA, numReadsIterCoalescedB)
@@ -7272,7 +7272,7 @@ class KernelWriterAssembly(KernelWriter):
           else:
             vgprPerSet0Group = 2
 
-          numSet0GroupA = vgprPerInputA//vgprPerSet0Group
+          numSet0GroupA = vgprPerInputA // vgprPerSet0Group
           for group in range(0, numSet0GroupA):
             if numSet0GroupA > 1 or (is_wmma_v2 and vgprPerInputA > 2):
               if group == 0:
@@ -7289,11 +7289,12 @@ class KernelWriterAssembly(KernelWriter):
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif blocksPerTGroupSMFMAA == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAA * numRegistersIn):
                 kIncA = blockOffsetSMFMAA + (numMIInput//numSet0GroupA)
-                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K"))
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K (block offset + group offset)"))
               else:
                 kIncA = numMIInput // numSet0GroupA
-
-                if is_wmma_v3:
+                if kernel["ProblemType"]["Sparse"]:
+                  kIncA = kIncA
+                elif is_wmma_v3:
                   bpe = tPA["bpe"]
                   vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPA["bpe"] * 8)
                   miVectorWidth = vgprLayout[-1]
@@ -7349,10 +7350,12 @@ class KernelWriterAssembly(KernelWriter):
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif blocksPerTGroupSMFMAB == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAB * numRegistersIn):
                 kIncB = blockOffsetSMFMAB + numMIInput//numSet0GroupB
-                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K (block offset + group offset)"))
               else:
                 kIncB = numMIInput//numSet0GroupB
-                if is_wmma_v3:
+                if kernel["ProblemType"]["Sparse"]:
+                  kIncB = kIncB
+                elif is_wmma_v3:
                   bpe = tPB["bpe"]
                   vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
                   miVectorWidth = vgprLayout[-1]

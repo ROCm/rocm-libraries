@@ -551,6 +551,7 @@ void init_containers(nb::module_ m)
                  &rocisa::RegisterContainer::replaceRegName))
         .def("getRegNameWithType", &rocisa::RegisterContainer::getRegNameWithType)
         .def("getCompleteRegNameWithType", &rocisa::RegisterContainer::getCompleteRegNameWithType)
+        .def("getCompleteRegName", &rocisa::RegisterContainer::getCompleteRegName)
         .def("splitRegContainer", &rocisa::RegisterContainer::splitRegContainer)
         .def("setMsb", &rocisa::RegisterContainer::setMsb)
         .def(

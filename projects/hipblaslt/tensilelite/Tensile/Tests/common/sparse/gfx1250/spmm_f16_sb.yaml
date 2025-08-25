@@ -28,7 +28,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # NN - standard
+  # NN - standard - SPB
   #######################################
   -
     - # ProblemType
@@ -40,11 +40,11 @@ BenchmarkProblems:
       TransposeA: False
       TransposeB: False
       UseBeta: True
-      # UseBias: 3
+      UseBias: 3
       Batched: True
-      Activation: False
-      # ActivationType: all
-      # UseScaleAlphaVec: 3
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
       Sparse: 2
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -102,14 +102,14 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           # - Exact: [1024, 1024, 1, 1024] # classic format
-        # - BiasTypeArgs: ['s', 'h']
-        # - FactorDimArgs: [0,1]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
           # - [Enum: relu]
 
   #######################################
-  # TN - standard
+  # TN - standard - SPB
   #######################################
   -
     - # ProblemType
@@ -121,11 +121,11 @@ BenchmarkProblems:
       TransposeA: True
       TransposeB: False
       UseBeta: True
-      # UseBias: 3
+      UseBias: 3
       Batched: True
-      Activation: False
-      # ActivationType: all
-      # UseScaleAlphaVec: 3
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
       Sparse: 2
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -160,6 +160,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
+        - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -182,14 +183,14 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           # - Exact: [1024, 1024, 1, 1024] # classic format
-        # - BiasTypeArgs: ['s', 'h']
-        # - FactorDimArgs: [0,1]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
           # - [Enum: relu]
 
   #######################################
-  # NT - standard
+  # NT - standard - SPB
   #######################################
   -
     - # ProblemType
@@ -201,11 +202,11 @@ BenchmarkProblems:
       TransposeA: False
       TransposeB: True
       UseBeta: True
-      # UseBias: 3
+      UseBias: 3
       Batched: True
-      Activation: False
-      # ActivationType: all
-      # UseScaleAlphaVec: 3
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
       Sparse: 2
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -263,14 +264,14 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           # - Exact: [1024, 1024, 1, 1024] # classic format
-        # - BiasTypeArgs: ['s', 'h']
-        # - FactorDimArgs: [0,1]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
           # - [Enum: relu]
 
   #######################################
-  # TT - standard
+  # TT - standard - SPB
   #######################################
   -
     - # ProblemType
@@ -282,11 +283,11 @@ BenchmarkProblems:
       TransposeA: True
       TransposeB: True
       UseBeta: True
-      # UseBias: 3
+      UseBias: 3
       Batched: True
-      Activation: False
-      # ActivationType: all
-      # UseScaleAlphaVec: 3
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
       Sparse: 2
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -345,8 +346,8 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           # - Exact: [1024, 1024, 1, 1024] # classic format
-        # - BiasTypeArgs: ['s', 'h']
-        # - FactorDimArgs: [0,1]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
           # - [Enum: relu]

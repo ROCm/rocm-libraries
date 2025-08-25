@@ -931,6 +931,11 @@ namespace rocisa
             return regType + "gpr" + regName->toString();
         }
 
+        std::string getCompleteRegName() const
+        {
+            return regName->toString();
+        }
+
         std::pair<std::shared_ptr<RegisterContainer>, std::shared_ptr<RegisterContainer>>
             splitRegContainer() const
         {
