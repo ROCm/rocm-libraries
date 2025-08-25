@@ -825,24 +825,20 @@ namespace GEMMDriverTest
                     {
                         std::filesystem::create_directories(base);
                     }
-                    std::filesystem::path asmFilePath
-                        = base / fmt::format("{}_{}.s", commandKernel.getKernelName(), iteration);
+
                     std::filesystem::path valuesFilePath
                         = base / fmt::format("{}_{}.txt", commandKernel.getKernelName(), iteration);
 
-                    std::ofstream asmFile(asmFilePath);
                     std::ofstream valuesFile(valuesFilePath);
 
-                    if(!asmFile.is_open() || !valuesFile.is_open())
+                    if(!valuesFile.is_open())
                     {
                         Log::error("Failed to open output files for writing");
                         break;
                     }
 
-                    Log::info("Assembly file written to: {}", asmFilePath.string());
                     Log::info("Values file written to: {}", valuesFilePath.string());
 
-                    asmFile << commandKernel.getInstructions() << std::endl;
                     valuesFile << fmt::format("RNorm is {} (acceptable {}, iteration {})",
                                               res.relativeNormL2,
                                               res.acceptableError.relativeL2Tolerance,
