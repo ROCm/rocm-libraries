@@ -145,7 +145,8 @@ namespace rocisa
             }
         }
         else if(std::dynamic_pointer_cast<MFMAInstruction>(item)
-                || std::dynamic_pointer_cast<SMFMAInstruction>(item))
+                || std::dynamic_pointer_cast<SMFMAInstruction>(item)
+                || std::dynamic_pointer_cast<MXMFMAInstruction>(item))
         {
             mfmaList.push_back(item);
         }
