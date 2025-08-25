@@ -2859,6 +2859,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # local write for next iter, used to have local writes here
             pointerLWCode.addComment1("local write swap offsets a")
             pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
+            if "MX" in tensorParametersA:
+              pointerLWCode.addComment1("local write swap offsets mxsa")
+              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+            if "MX" in tensorParametersB:
+              pointerLWCode.addComment1("local write swap offsets mxsb")
+              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
             pointerLWCode.addComment1("local write swap offsets b")
             pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
 
@@ -3699,6 +3705,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # swap local ptrs
       module.addComment1("local write swap a")
       module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA, prefetch=True))
+      if "MX" in tensorParametersA:
+        module.addComment1("local write swap mxsa")
+        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+      if "MX" in tensorParametersB:
+        module.addComment1("local write swap mxsb")
+        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
       module.addComment1("local write swap b")
       module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB, prefetch=True))
 
@@ -3765,6 +3777,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["DirectToLdsA"]:
             module.addComment1("local write swap a")
             module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA, prefetch=True))
+          if ("MX" in tensorParametersA) and kernel["DirectToLdsMXSA"]:
+            module.addComment1("local write swap mxsa")
+            module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+          if ("MX" in tensorParametersB) and kernel["DirectToLdsMXSB"]:
+            module.addComment1("local write swap mxsb")
+            module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
           if kernel["DirectToLdsB"]:
             module.addComment1("local write swap b")
             module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB, prefetch=True))
@@ -3952,6 +3970,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if(kernel["DirectToLdsA"]):
         module.addComment1("local write swap offsets a")
         module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
+      if ("MX" in tensorParametersA) and (kernel["DirectToLdsMXSA"]):
+        module.addComment1("local write swap offsets mxsa")
+        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+      if ("MX" in tensorParametersB) and (kernel["DirectToLdsMXSB"]):
+        module.addComment1("local write swap offsets mxsb")
+        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
       if(kernel["DirectToLdsB"]):
         module.addComment1("local write swap offsets b")
         module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
