@@ -28,6 +28,11 @@
 
 namespace rocsparse
 {
+    rocsparse_status csrsv_zero_pivot(rocsparse_handle     handle,
+                                      rocsparse_csrsv_info info,
+                                      rocsparse_indextype  indextype,
+                                      void*                position);
+
     template <typename I, typename J, typename T>
     rocsparse_status csrsv_buffer_size_template(rocsparse_handle          handle,
                                                 rocsparse_operation       trans,

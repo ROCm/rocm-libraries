@@ -145,8 +145,10 @@ namespace rocsparse
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
-                reinterpret_cast<J*>(info->zero_pivot), std::numeric_limits<J>::max(), stream));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::assign_async(reinterpret_cast<J*>(csrsm_info->get_zero_pivot()),
+                                        std::numeric_limits<J>::max(),
+                                        stream));
         }
 
         // Leading dimension
@@ -231,7 +233,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -256,7 +258,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -284,7 +286,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -309,7 +311,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -337,7 +339,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -362,7 +364,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -390,7 +392,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -415,7 +417,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -443,7 +445,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -468,7 +470,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)info->zero_pivot,
+                        (J*)csrsm_info->get_zero_pivot(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,

@@ -1298,7 +1298,6 @@ void testing_csritsv(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_zero_pivot(handle, descr, info, d_solve_pivot),
                                 (*h_solve_pivot != -1) ? rocsparse_status_zero_pivot
                                                        : rocsparse_status_success);
-
         h_analysis_pivot.unit_check(d_analysis_pivot);
         h_solve_pivot.unit_check(d_solve_pivot);
 

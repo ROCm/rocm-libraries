@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,40 +24,35 @@
 
 #pragma once
 
-#include "rocsparse_control.hpp"
-#include "rocsparse_datatype_utils.hpp"
-#include "rocsparse_enum_utils.hpp"
-#include "rocsparse_floating_data_t.hpp"
-#include "rocsparse_handle.hpp"
-#include "rocsparse_indextype_utils.hpp"
-#include "rocsparse_logging.hpp"
-#include "rocsparse_memstat.hpp"
-#include "rocsparse_scalar.hpp"
+#include "rocsparse-types.h"
+#include "rocsparse_position_t.hpp"
 
 namespace rocsparse
 {
 
-// Return the leftmost significant bit position
-#if defined(rocsparse_ILP64)
-    static inline rocsparse_int clz(rocsparse_int n)
+    struct singular_info_t : rocsparse::position_t
     {
-        // __builtin_clzll is undefined for n == 0
-        if(n == 0)
-        {
-            return 0;
-        }
-        return 64 - __builtin_clzll(n);
-    }
-#else
-    static inline rocsparse_int clz(rocsparse_int n)
-    {
-        // __builtin_clz is undefined for n == 0
-        if(n == 0)
-        {
-            return 0;
-        }
-        return 32 - __builtin_clz(n);
-    }
-#endif
+    protected:
+        double m_singular_tol{};
+        singular_info_t() = default;
 
+    public:
+        ~singular_info_t();
+
+        rocsparse_status copy_singular_pivot_async(rocsparse_pointer_mode pointer_mode,
+                                                   rocsparse_indextype    position_indextype,
+                                                   void*                  position,
+                                                   hipStream_t            stream) const;
+
+        void create_singular_pivot_async(rocsparse_indextype indextype, hipStream_t stream);
+
+        const void* get_singular_pivot() const;
+        void*       get_singular_pivot();
+
+        rocsparse_indextype get_singular_pivot_indextype() const;
+        double              get_singular_tol() const;
+        void                set_singular_tol(double);
+
+        void copy_singular_info_async(const singular_info_t* that, hipStream_t stream);
+    };
 }

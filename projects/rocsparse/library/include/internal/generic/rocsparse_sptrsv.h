@@ -59,8 +59,8 @@ extern "C" {
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_value the \p stage value is invalid.
-*  \retval rocsparse_status_invalid_pointer \p mat, \p x, \p y, \p descr or \p buffer_size_in_bytes pointer is invalid.
+*  \retval rocsparse_status_invalid_value the \p sptrsv_stage value is invalid.
+*  \retval rocsparse_status_invalid_pointer \p sptrsv_descr, \p spmat_descr, \p x, \p y, or \p buffer_size_in_bytes pointer is invalid.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle,
@@ -109,13 +109,14 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
 *
+*  \note The descriptor \p rocsparse_sptrsv_descr needs to be configured with \ref rocsparse_sptrsv_set_input.
 *  \note
 *  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
 *
 *  \note
 *  the \ref rocsparse_sptrsv_stage_compute stage is non blocking
 *  and executed asynchronously with respect to the host. It may return before the actual computation has finished.
-*  The \ref rocsparse_sptrsv_stage_preprocess stage is blocking with respect to the host.
+*  The \ref rocsparse_sptrsv_stage_analysis stage is blocking with respect to the host.
 *
 *  \note
 *  Currently, only \p trans == \ref rocsparse_operation_none and \p trans == \ref rocsparse_operation_transpose is supported.
@@ -128,8 +129,6 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *  handle       handle to the rocsparse library context queue.
 *  @param[in]
 *  sptrsv_descr descriptor of the routine.
-*  @param[in]
-*  alpha        scalar \f$\alpha\f$.
 *  @param[in]
 *  A            matrix descriptor.
 *  @param[in]
@@ -147,8 +146,10 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval      rocsparse_status_invalid_pointer \p sptrsv_descr, \p alpha, \p A, \p x, or \p y is invalid.
-*  \retval      rocsparse_status_invalid_value \p stage is invalid.
+*  \retval      rocsparse_status_invalid_pointer \p sptrsv_descr, \p A, \p x, or \p y is invalid.
+*  \retval      rocsparse_status_invalid_pointer if \p buffer is null and \p buffer_size_in_bytes is non zero.
+*  \retval      rocsparse_status_invalid_pointer if \p buffer is non null and \p buffer_size_in_bytes is zero.
+*  \retval      rocsparse_status_invalid_value \p sptrsv_stage is invalid.
 *
 *  \par Example
 *  \code{.c}
@@ -251,6 +252,14 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *                              rocsparse_sptrsv_input_compute_datatype,
 *                              &compute_datatype,
 *                              sizeof(compute_datatype),
+*                              nullptr);
+*
+*   const rocsparse_analysis_policy analysis_policy = rocsparse_analysis_policy_force;
+*   rocsparse_sptrsv_set_input(handle,
+*                              sptrsv_descr,
+*                              rocsparse_sptrsv_input_analysis_policy,
+*                              &analysis_policy,
+*                              sizeof(analysis_policy),
 *                              nullptr);
 *
 *   size_t buffer_size_in_bytes;

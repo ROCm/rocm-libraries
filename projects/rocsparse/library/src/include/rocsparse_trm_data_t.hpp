@@ -25,6 +25,8 @@
 #pragma once
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_indextype_utils.hpp"
+#include "rocsparse_pivot_info_t.hpp"
 #include "rocsparse_trm_info.hpp"
 #include <memory>
 namespace rocsparse
@@ -39,7 +41,7 @@ namespace rocsparse
                                   const I*                  csr_row_ptr,
                                   const J*                  csr_col_ind,
                                   rocsparse::trm_info_t*    info,
-                                  J**                       zero_pivot,
+                                  rocsparse::pivot_info_t*  pivot_info,
                                   void*                     temp_buffer);
 
 }
@@ -47,7 +49,7 @@ namespace rocsparse
 namespace rocsparse
 {
 
-    struct trm_data_t
+    struct trm_data_t : rocsparse::pivot_info_t
     {
     protected:
         rocsparse::trm_info_t* m_data[4]{};
@@ -59,9 +61,8 @@ namespace rocsparse
     public:
         trm_data_t() = default;
         ~trm_data_t();
-
         void uncouple(const trm_data_t* that);
-        void copy(const trm_data_t* that);
+        void copy(const trm_data_t* that, hipStream_t stream);
 
         rocsparse::trm_info_t* get(rocsparse_operation operation, rocsparse_fill_mode fill_mode);
 
@@ -80,7 +81,6 @@ namespace rocsparse
                                       const T*                  csr_val,
                                       const I*                  csr_row_ptr,
                                       const J*                  csr_col_ind,
-                                      J**                       zero_pivot,
                                       void*                     temp_buffer)
         {
             rocsparse::trm_info_t* trm_info = new rocsparse::trm_info_t();
@@ -93,7 +93,7 @@ namespace rocsparse
                                                              csr_row_ptr,
                                                              csr_col_ind,
                                                              trm_info,
-                                                             zero_pivot,
+                                                             this,
                                                              temp_buffer));
             return trm_info;
         }
@@ -121,7 +121,6 @@ namespace rocsparse
                                   const T*                  csr_val,
                                   const I*                  csr_row_ptr,
                                   const J*                  csr_col_ind,
-                                  J**                       zero_pivot,
                                   void*                     temp_buffer)
         {
             return this->recreate(trans,
@@ -134,7 +133,6 @@ namespace rocsparse
                                   csr_val,
                                   csr_row_ptr,
                                   csr_col_ind,
-                                  zero_pivot,
                                   temp_buffer);
         }
     };

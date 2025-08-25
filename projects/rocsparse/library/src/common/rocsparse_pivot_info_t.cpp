@@ -1,4 +1,3 @@
-/*! \file */
 /* ************************************************************************
  * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
@@ -22,39 +21,45 @@
  *
  * ************************************************************************ */
 
-#pragma once
-
-#include "rocsparse_csrmv_info.hpp"
 #include "rocsparse_pivot_info_t.hpp"
+#include "rocsparse_control.hpp"
 
-/********************************************************************************
- * \brief rocsparse_csritsv_info is a structure holding the rocsparse csritsv
- * info data gathered during csritsv_buffer_size. It must be initialized using
- * the create_csritsv_info() routine. It should be destroyed at the
- * end using destroy_csritsv_info().
- *******************************************************************************/
-typedef struct _rocsparse_csritsv_info : rocsparse::pivot_info_t
+rocsparse_status
+    rocsparse::pivot_info_t::copy_zero_pivot_async(rocsparse_pointer_mode pointer_mode,
+                                                   rocsparse_indextype    position_indextype,
+                                                   void*                  position,
+                                                   hipStream_t            stream) const
 {
-protected:
-    rocsparse_csrmv_info m_csrmv_info{};
-
-public:
-    bool                is_submatrix;
-    int64_t             ptr_end_size{};
-    rocsparse_indextype ptr_end_indextype{};
-    void*               ptr_end{};
-
-    rocsparse_csrmv_info get_csrmv_info()
+    auto status = this->copy_position_async(pointer_mode, position_indextype, position, stream);
+    if(status == rocsparse_status_zero_pivot)
     {
-        return this->m_csrmv_info;
+        return status;
     }
-    void set_csrmv_info(rocsparse_csrmv_info value)
-    {
-        this->m_csrmv_info = value;
-    }
+    RETURN_IF_ROCSPARSE_ERROR(status);
+    return rocsparse_status_success;
+}
 
-    void copy(const _rocsparse_csritsv_info*, hipStream_t);
-    _rocsparse_csritsv_info() = default;
-    ~_rocsparse_csritsv_info();
+void rocsparse::pivot_info_t::create_zero_pivot_async(rocsparse_indextype indextype,
+                                                      hipStream_t         stream)
+{
+    this->create_position_async(indextype, stream);
+}
 
-} * rocsparse_csritsv_info;
+const void* rocsparse::pivot_info_t::get_zero_pivot() const
+{
+    return this->get_position();
+}
+void* rocsparse::pivot_info_t::get_zero_pivot()
+{
+    return this->get_position();
+}
+
+rocsparse_indextype rocsparse::pivot_info_t::get_zero_pivot_indextype() const
+{
+    return this->get_position_indextype();
+}
+
+void rocsparse::pivot_info_t::copy_pivot_info_async(const pivot_info_t* that, hipStream_t stream)
+{
+    return this->copy_position_async(that, stream);
+}

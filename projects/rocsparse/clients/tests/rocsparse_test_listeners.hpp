@@ -44,7 +44,8 @@ namespace rocsparse_clients
 
         std::ostringstream& get_stream();
 
-        void clear();
+        void        clear();
+        static void signalHandler(int signum);
     };
 
     class configurable_event_listener : public testing::TestEventListener

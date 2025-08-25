@@ -26,5 +26,6 @@
 
 #include "rocsparse_trm_data_t.hpp"
 
-typedef rocsparse::trm_data_t  _rocsparse_csrsv_info;
+typedef rocsparse::trm_data_t _rocsparse_csrsv_info;
+
 typedef _rocsparse_csrsv_info* rocsparse_csrsv_info;

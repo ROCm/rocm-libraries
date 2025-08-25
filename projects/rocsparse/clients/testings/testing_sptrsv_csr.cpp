@@ -21,9 +21,87 @@
 *
 * ************************************************************************ */
 
+#include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_sptrsv.hpp"
-#include "testing.hpp"
-#include <variant>
+
+struct rocsparse_local_sptrsv
+{
+    struct config_t
+    {
+        rocsparse_operation       operation;
+        rocsparse_sptrsv_alg      alg;
+        rocsparse_datatype        scalar_datatype;
+        rocsparse_datatype        compute_datatype;
+        rocsparse_analysis_policy apol;
+    };
+
+    config_t               config;
+    rocsparse_sptrsv_descr sptrsv_descr{};
+    ~rocsparse_local_sptrsv()
+    {
+        rocsparse_destroy_sptrsv_descr(this->sptrsv_descr);
+    }
+
+    operator rocsparse_sptrsv_descr&()
+    {
+        return this->sptrsv_descr;
+    }
+    operator const rocsparse_sptrsv_descr&() const
+    {
+        return this->sptrsv_descr;
+    }
+
+    rocsparse_local_sptrsv(rocsparse_handle                handle,
+                           const rocsparse_operation       operation,
+                           const rocsparse_sptrsv_alg      alg,
+                           const rocsparse_datatype        scalar_datatype,
+                           const rocsparse_datatype        compute_datatype,
+                           const rocsparse_analysis_policy apol)
+        : config({operation, alg, scalar_datatype, compute_datatype, apol})
+    {
+        this->set(handle);
+    }
+
+    void set(rocsparse_handle handle)
+    {
+        rocsparse_create_sptrsv_descr(&this->sptrsv_descr);
+        rocsparse_error p_error[1] = {nullptr};
+        rocsparse_sptrsv_set_input(handle,
+                                   sptrsv_descr,
+                                   rocsparse_sptrsv_input_operation,
+                                   &config.operation,
+                                   sizeof(config.operation),
+                                   p_error);
+
+        rocsparse_sptrsv_set_input(handle,
+                                   sptrsv_descr,
+                                   rocsparse_sptrsv_input_alg,
+                                   &config.alg,
+                                   sizeof(config.alg),
+                                   p_error);
+
+        rocsparse_sptrsv_set_input(handle,
+                                   sptrsv_descr,
+                                   rocsparse_sptrsv_input_scalar_datatype,
+                                   &config.scalar_datatype,
+                                   sizeof(config.scalar_datatype),
+                                   p_error);
+
+        rocsparse_sptrsv_set_input(handle,
+                                   sptrsv_descr,
+                                   rocsparse_sptrsv_input_compute_datatype,
+                                   &config.compute_datatype,
+                                   sizeof(config.compute_datatype),
+                                   p_error);
+
+        rocsparse_sptrsv_set_input(handle,
+                                   sptrsv_descr,
+                                   rocsparse_sptrsv_input_analysis_policy,
+                                   &config.apol,
+                                   sizeof(config.apol),
+                                   p_error);
+    }
+};
 
 //
 // Implement missing instantiations regarding enums.
@@ -49,13 +127,15 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_sptrsv_input& p)
 //
 // Convenience.
 //
-static constexpr rocsparse_sptrsv_input_all[6] = {rocsparse_sptrsv_input_alg,
-                                                  rocsparse_sptrsv_input_scalar_datatype,
-                                                  rocsparse_sptrsv_input_scalar_alpha,
-                                                  rocsparse_sptrsv_input_compute_datatype,
-                                                  rocsparse_sptrsv_input_operation,
-                                                  rocsparse_sptrsv_input_analysis_policy};
+static constexpr rocsparse_sptrsv_input rocsparse_sptrsv_input_all[6]
+    = {rocsparse_sptrsv_input_alg,
+       rocsparse_sptrsv_input_scalar_datatype,
+       rocsparse_sptrsv_input_scalar_alpha,
+       rocsparse_sptrsv_input_compute_datatype,
+       rocsparse_sptrsv_input_operation,
+       rocsparse_sptrsv_input_analysis_policy};
 
+template <typename I, typename J, typename T>
 void testing_sptrsv_bad_arg(const Arguments& arg)
 {
     rocsparse_local_handle local_handle;
@@ -110,6 +190,7 @@ void testing_sptrsv_bad_arg(const Arguments& arg)
                                 data, //3
                                 data_size_in_bytes, //4
                                 p_error); // 5
+        CHECK_ROCSPARSE_ERROR(rocsparse_create_sptrsv_descr(&sptrsv_descr));
 
         for(auto e : rocsparse_sptrsv_input_all)
         {
@@ -129,19 +210,260 @@ void testing_sptrsv_bad_arg(const Arguments& arg)
             }
             }
         }
+        CHECK_ROCSPARSE_ERROR(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
+    }
+
+    //
+    // Now get a concrete example and continue.
+    //
+
+    {
+        rocsparse_clients::dense_vector_t<T>             x(4);
+        rocsparse_clients::dense_vector_t<T>             y(4);
+        rocsparse_clients::csr_tridiag_matrix_t<T, I, J> A(4);
+        auto                                             uplo = rocsparse_fill_mode_lower;
+        auto                                             diag = rocsparse_diag_type_unit;
+        auto matrix_type                                      = rocsparse_matrix_type_general;
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
+
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag, sizeof(diag)));
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
+            A, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)));
+
+        rocsparse_error p_error[1] = {nullptr};
+
+        rocsparse_datatype   alpha_datatype = rocsparse_datatype_f32_r;
+        host_scalar<float>   halpha(1);
+        device_scalar<float> dalpha(halpha);
+        for(auto analysis_policy :
+            {rocsparse_analysis_policy_force, rocsparse_analysis_policy_reuse})
+        {
+            rocsparse_local_sptrsv sptrsv_descr(handle,
+                                                arg.transA,
+                                                arg.sptrsv_alg,
+                                                alpha_datatype,
+                                                get_datatype<T>(),
+                                                analysis_policy);
+
+            size_t buffer_size;
+            CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(handle,
+                                                               sptrsv_descr,
+                                                               A,
+                                                               x,
+                                                               y,
+                                                               rocsparse_sptrsv_stage_analysis,
+                                                               &buffer_size,
+                                                               p_error));
+
+            {
+                device_dense_vector<char> buffer(buffer_size);
+                CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size));
+
+                //
+                // Call compute before analysis.
+                //
+                EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_value,
+                                        rocsparse_sptrsv(handle,
+                                                         sptrsv_descr,
+                                                         A,
+                                                         x,
+                                                         y,
+                                                         rocsparse_sptrsv_stage_compute,
+                                                         buffer_size,
+                                                         buffer,
+                                                         p_error));
+
+                //
+                // Call analysis.
+                //
+                CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
+                                                       sptrsv_descr,
+                                                       A,
+                                                       x,
+                                                       y,
+                                                       rocsparse_sptrsv_stage_analysis,
+                                                       buffer_size,
+                                                       buffer,
+                                                       p_error));
+
+                for(auto input : {rocsparse_sptrsv_input_alg,
+                                  rocsparse_sptrsv_input_operation,
+                                  rocsparse_sptrsv_input_compute_datatype,
+                                  rocsparse_sptrsv_input_scalar_datatype,
+                                  rocsparse_sptrsv_input_scalar_alpha,
+                                  rocsparse_sptrsv_input_analysis_policy})
+                {
+                    switch(input)
+                    {
+                    case rocsparse_sptrsv_input_alg:
+                    case rocsparse_sptrsv_input_operation:
+                    case rocsparse_sptrsv_input_compute_datatype:
+                    case rocsparse_sptrsv_input_analysis_policy:
+                    {
+
+                        EXPECT_ROCSPARSE_STATUS(
+                            rocsparse_status_invalid_value,
+                            rocsparse_sptrsv_set_input(
+                                handle, sptrsv_descr, input, (void*)0x4, sizeof(int64_t), p_error));
+                        break;
+                    }
+                    case rocsparse_sptrsv_input_scalar_datatype:
+                    case rocsparse_sptrsv_input_scalar_alpha:
+                    {
+                        CHECK_ROCSPARSE_ERROR(
+                            rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+                        CHECK_ROCSPARSE_ERROR(
+                            rocsparse_sptrsv_set_input(handle,
+                                                       sptrsv_descr,
+                                                       rocsparse_sptrsv_input_scalar_alpha,
+                                                       halpha,
+                                                       sizeof(halpha.data()),
+                                                       p_error));
+                        CHECK_ROCSPARSE_ERROR(
+                            rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
+                        CHECK_ROCSPARSE_ERROR(
+                            rocsparse_sptrsv_set_input(handle,
+                                                       sptrsv_descr,
+                                                       rocsparse_sptrsv_input_scalar_alpha,
+                                                       dalpha,
+                                                       sizeof(dalpha.data()),
+                                                       p_error));
+                        break;
+                    }
+                    }
+                }
+
+                //
+                // Call analysis twice.
+                //
+                EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_value,
+                                        rocsparse_sptrsv(handle,
+                                                         sptrsv_descr,
+                                                         A,
+                                                         x,
+                                                         y,
+                                                         rocsparse_sptrsv_stage_analysis,
+                                                         buffer_size,
+                                                         buffer,
+                                                         p_error));
+            }
+
+            {
+                CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(handle,
+                                                                   sptrsv_descr,
+                                                                   A,
+                                                                   x,
+                                                                   y,
+                                                                   rocsparse_sptrsv_stage_compute,
+                                                                   &buffer_size,
+                                                                   p_error));
+                device_dense_vector<char> buffer(buffer_size);
+                CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size));
+
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_sptrsv_set_input(handle,
+                                               sptrsv_descr,
+                                               rocsparse_sptrsv_input_scalar_alpha,
+                                               halpha,
+                                               sizeof(halpha.data()),
+                                               p_error));
+
+                //
+                // Call compute.
+                //
+
+                CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
+                                                       sptrsv_descr,
+                                                       A,
+                                                       x,
+                                                       y,
+                                                       rocsparse_sptrsv_stage_compute,
+                                                       buffer_size,
+                                                       buffer,
+                                                       p_error));
+
+                //
+                // Call analysis after compute.
+                //
+                EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_value,
+                                        rocsparse_sptrsv(handle,
+                                                         sptrsv_descr,
+                                                         A,
+                                                         x,
+                                                         y,
+                                                         rocsparse_sptrsv_stage_analysis,
+                                                         buffer_size,
+                                                         buffer,
+                                                         p_error));
+
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_sptrsv_set_input(handle,
+                                               sptrsv_descr,
+                                               rocsparse_sptrsv_input_scalar_alpha,
+                                               dalpha,
+                                               sizeof(dalpha.data()),
+                                               p_error));
+
+                //
+                // Call compute.
+                //
+
+                CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
+                                                       sptrsv_descr,
+                                                       A,
+                                                       x,
+                                                       y,
+                                                       rocsparse_sptrsv_stage_compute,
+                                                       buffer_size,
+                                                       buffer,
+                                                       p_error));
+
+                //
+                // Call analysis after compute.
+                //
+                EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_value,
+                                        rocsparse_sptrsv(handle,
+                                                         sptrsv_descr,
+                                                         A,
+                                                         x,
+                                                         y,
+                                                         rocsparse_sptrsv_stage_analysis,
+                                                         buffer_size,
+                                                         buffer,
+                                                         p_error));
+                //
+                // Call compute.
+                //
+                CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
+                                                       sptrsv_descr,
+                                                       A,
+                                                       x,
+                                                       y,
+                                                       rocsparse_sptrsv_stage_compute,
+                                                       buffer_size,
+                                                       buffer,
+                                                       p_error));
+            }
+        }
     }
 }
 
 template <typename I, typename J, typename T>
 void testing_sptrsv_csr_bad_arg(const Arguments& arg)
 {
-    testing_sptrsv_bad_arg(arg);
+    testing_sptrsv_bad_arg<I, J, T>(arg);
 }
 
 template <typename I, typename J, typename T>
 void testing_sptrsv_csr(const Arguments& arg)
 {
-
     if(arg.M != arg.N)
     {
         return;
@@ -224,6 +546,16 @@ void testing_sptrsv_csr(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
                                                          sptrsv_descr,
                                                          rocsparse_sptrsv_input_scalar_datatype,
+                                                         &ttype,
+                                                         sizeof(ttype),
+                                                         p_error));
+    }
+
+    {
+        const rocsparse_datatype ttype = get_datatype<T>();
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_compute_datatype,
                                                          &ttype,
                                                          sizeof(ttype),
                                                          p_error));

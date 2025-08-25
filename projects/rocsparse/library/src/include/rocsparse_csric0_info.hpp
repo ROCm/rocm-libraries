@@ -24,7 +24,13 @@
 
 #pragma once
 
+#include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_trm_data_t.hpp"
 
-typedef rocsparse::trm_data_t   _rocsparse_csric0_info;
+struct _rocsparse_csric0_info : rocsparse::trm_data_t, rocsparse::singular_info_t
+{
+public:
+    ~_rocsparse_csric0_info();
+    void copy(const _rocsparse_csric0_info* that, hipStream_t stream);
+};
 typedef _rocsparse_csric0_info* rocsparse_csric0_info;

@@ -40,4 +40,5 @@ namespace rocsparse_clients
                         rocsparse_pointer_mode pointer_mode,
                         const void*            alpha,
                         rocsparse_error*       p_error);
+
 }

@@ -26,33 +26,34 @@
 #include <memory>
 struct _rocsparse_sptrsv_descr
 {
+    const void* m_scalar_alpha;
+    const void* s_scalar_alpha;
+
 protected:
     rocsparse_sptrsv_stage                 m_stage;
     rocsparse_sptrsv_alg                   m_alg;
     rocsparse_operation                    m_operation;
     rocsparse_datatype                     m_scalar_datatype;
     rocsparse_datatype                     m_compute_datatype;
-    int64_t                                m_zero_pivot_position;
-    const void*                            m_scalar_alpha;
     rocsparse_analysis_policy              m_analysis_policy;
     std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
 
 public:
     ~_rocsparse_sptrsv_descr();
     _rocsparse_sptrsv_descr();
-    int64_t                   get_zero_pivot_position() const;
-    rocsparse_sptrsv_stage    get_stage() const;
-    rocsparse_sptrsv_alg      get_alg() const;
-    rocsparse_operation       get_operation() const;
-    rocsparse_datatype        get_scalar_datatype() const;
-    rocsparse_datatype        get_compute_datatype() const;
-    void                      set_stage(rocsparse_sptrsv_stage value);
-    void                      set_alg(rocsparse_sptrsv_alg value);
-    void                      set_operation(rocsparse_operation value);
-    void                      set_scalar_datatype(rocsparse_datatype value);
-    void                      set_scalar_alpha(const void* value);
-    void                      set_compute_datatype(rocsparse_datatype value);
-    void                      set_zero_pivot_position(int64_t value);
+
+    rocsparse_sptrsv_stage get_stage() const;
+    rocsparse_sptrsv_alg   get_alg() const;
+    rocsparse_operation    get_operation() const;
+    rocsparse_datatype     get_scalar_datatype() const;
+    rocsparse_datatype     get_compute_datatype() const;
+    void                   set_stage(rocsparse_sptrsv_stage value);
+    void                   set_alg(rocsparse_sptrsv_alg value);
+    void                   set_operation(rocsparse_operation value);
+    void                   set_scalar_datatype(rocsparse_datatype value);
+    void                   set_scalar_alpha(const void* value);
+    void                   set_compute_datatype(rocsparse_datatype value);
+
     const void*               get_scalar_alpha() const;
     rocsparse_analysis_policy get_analysis_policy() const;
     void                      set_analysis_policy(rocsparse_analysis_policy value);

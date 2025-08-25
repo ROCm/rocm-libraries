@@ -337,6 +337,15 @@ void testing_sptrsm_coo(const Arguments& arg)
                                                          sizeof(scalar_datatype),
                                                          p_error));
     }
+    {
+        const rocsparse_datatype compute_datatype = ttype;
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+                                                         sptrsm_descr,
+                                                         rocsparse_sptrsm_input_compute_datatype,
+                                                         &compute_datatype,
+                                                         sizeof(compute_datatype),
+                                                         p_error));
+    }
 
     {
         const rocsparse_analysis_policy apol = arg.apol;

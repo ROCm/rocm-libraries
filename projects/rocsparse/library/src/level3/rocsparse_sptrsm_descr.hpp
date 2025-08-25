@@ -37,13 +37,18 @@ protected:
     rocsparse_order                        m_X_order;
     rocsparse_order                        m_Y_order;
     rocsparse_datatype                     m_scalar_datatype;
-    int64_t                                m_zero_pivot_position;
+    rocsparse_datatype                     m_compute_datatype;
     int64_t                                m_nrhs;
     const void*                            m_scalar_alpha;
     rocsparse_analysis_policy              m_analysis_policy;
     std::shared_ptr<_rocsparse_csrsm_info> m_csrsm_info{};
+    float                                  m_local_host_alpha_value[4];
 
 public:
+    void* get_local_host_alpha()
+    {
+        return &this->m_local_host_alpha_value[0];
+    }
     rocsparse_csrsm_info get_csrsm_info();
     void                 set_csrsm_info(rocsparse_csrsm_info value);
     void                 set_shared_csrsm_info(std::shared_ptr<_rocsparse_csrsm_info> value);
@@ -51,7 +56,6 @@ public:
     ~_rocsparse_sptrsm_descr();
 
     _rocsparse_sptrsm_descr();
-    int64_t                   get_zero_pivot_position() const;
     rocsparse_analysis_policy get_analysis_policy() const;
     void                      set_analysis_policy(rocsparse_analysis_policy value);
 
@@ -65,6 +69,8 @@ public:
 
     rocsparse_datatype get_scalar_datatype() const;
     const void*        get_scalar_alpha() const;
+
+    rocsparse_datatype get_compute_datatype() const;
 
     rocsparse_datatype get_X_datatype() const;
 
@@ -84,12 +90,11 @@ public:
     void set_operation_X(rocsparse_operation value);
 
     void set_scalar_datatype(rocsparse_datatype value);
+    void set_compute_datatype(rocsparse_datatype value);
 
     void set_X_datatype(rocsparse_datatype value);
     void set_Y_datatype(rocsparse_datatype value);
 
     void set_X_order(rocsparse_order value);
     void set_Y_order(rocsparse_order value);
-
-    void set_zero_pivot_position(int64_t value);
 };

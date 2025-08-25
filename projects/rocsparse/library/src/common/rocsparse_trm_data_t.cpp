@@ -25,7 +25,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
-void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that)
+void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that, hipStream_t stream)
 {
     if(that != nullptr)
     {
@@ -36,12 +36,15 @@ void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that)
                 rocsparse::trm_info_t::copy(&this->m_data[i], that->m_data[i]);
             }
         }
+
+        this->copy_pivot_info_async(that, stream);
+        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
     }
 }
 
 void rocsparse::trm_data_t::uncouple(const rocsparse::trm_data_t* that)
 {
-    if(that != nullptr)
+    if(that != nullptr && that != this)
     {
         for(int i = 0; i < 4; ++i)
         {
@@ -64,6 +67,7 @@ void rocsparse::trm_data_t::uncouple(const rocsparse::trm_data_t* that)
 
 rocsparse::trm_data_t::~trm_data_t()
 {
+    // Clear zero pivot
     for(int i = 0; i < 4; ++i)
     {
         auto trm_info = this->m_data[i];

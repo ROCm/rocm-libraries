@@ -1374,7 +1374,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, src);
     ROCSPARSE_CHECKARG(1, src, (src == dest), rocsparse_status_invalid_pointer);
 
-    dest->duplicate_trdata(src);
+    dest->duplicate_trdata(src, 0);
 
     rocsparse_csrmv_info src_csrmv_info  = src->get_csrmv_info();
     rocsparse_csrmv_info dest_csrmv_info = dest->get_csrmv_info();
@@ -1416,34 +1416,10 @@ try
     {
         if(dest->csritsv_info == nullptr)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_csritsv_info(&dest->csritsv_info));
+            dest->csritsv_info = new _rocsparse_csritsv_info();
         }
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::copy_csritsv_info(dest->csritsv_info, src->csritsv_info));
-    }
-
-    if(src->zero_pivot != nullptr)
-    {
-        // zero pivot for csrsv, csrsm, csrilu0, csric0
-        const size_t J_size = rocsparse::indextype_sizeof(src->get_indextype_J());
-        if(dest->zero_pivot == nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->zero_pivot, J_size));
-        }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->zero_pivot, src->zero_pivot, J_size, hipMemcpyDeviceToDevice));
-    }
-
-    if(src->singular_pivot != nullptr)
-    {
-        // singular pivot for csric0
-        const size_t J_size = rocsparse::indextype_sizeof(src->get_indextype_J());
-        if(dest->singular_pivot == nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->singular_pivot, J_size));
-        }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->singular_pivot, src->singular_pivot, J_size, hipMemcpyDeviceToDevice));
+        hipStream_t default_stream{};
+        dest->csritsv_info->copy(src->csritsv_info, default_stream);
     }
 
     dest->boost_enable   = src->boost_enable;

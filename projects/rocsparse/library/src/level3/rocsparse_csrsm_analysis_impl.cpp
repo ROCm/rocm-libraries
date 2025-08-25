@@ -104,14 +104,6 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
             info->set_csrsm_info(trans_A, descr->fill_mode, p);
             return rocsparse_status_success;
         }
-
-        if(csrsm_info == nullptr)
-        {
-            std::cerr << "can't" << std::endl;
-            exit(1);
-            csrsm_info      = info->get_csrsm_info();
-            p_csrsm_info[0] = csrsm_info;
-        }
     }
 
     if(csrsm_info == nullptr)
@@ -121,16 +113,8 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
     }
 
     // Perform analysis
-    RETURN_IF_ROCSPARSE_ERROR(csrsm_info->recreate(handle,
-                                                   trans_A,
-                                                   m,
-                                                   nnz,
-                                                   descr,
-                                                   csr_val,
-                                                   csr_row_ptr,
-                                                   csr_col_ind,
-                                                   (J**)&info->zero_pivot,
-                                                   temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(csrsm_info->recreate(
+        handle, trans_A, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
 
     return rocsparse_status_success;
 }

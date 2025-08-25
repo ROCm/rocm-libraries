@@ -24,37 +24,41 @@
 
 #pragma once
 
-#include "rocsparse_csrmv_info.hpp"
-#include "rocsparse_pivot_info_t.hpp"
+#include "rocsparse-types.h"
 
-/********************************************************************************
- * \brief rocsparse_csritsv_info is a structure holding the rocsparse csritsv
- * info data gathered during csritsv_buffer_size. It must be initialized using
- * the create_csritsv_info() routine. It should be destroyed at the
- * end using destroy_csritsv_info().
- *******************************************************************************/
-typedef struct _rocsparse_csritsv_info : rocsparse::pivot_info_t
+namespace rocsparse
 {
-protected:
-    rocsparse_csrmv_info m_csrmv_info{};
-
-public:
-    bool                is_submatrix;
-    int64_t             ptr_end_size{};
-    rocsparse_indextype ptr_end_indextype{};
-    void*               ptr_end{};
-
-    rocsparse_csrmv_info get_csrmv_info()
+    struct position_t
     {
-        return this->m_csrmv_info;
-    }
-    void set_csrmv_info(rocsparse_csrmv_info value)
-    {
-        this->m_csrmv_info = value;
-    }
+    protected:
+        rocsparse_indextype m_position_indextype{};
+        void*               m_position{};
+        position_t();
 
-    void copy(const _rocsparse_csritsv_info*, hipStream_t);
-    _rocsparse_csritsv_info() = default;
-    ~_rocsparse_csritsv_info();
+        void copy_value(hipStream_t stream, rocsparse_pointer_mode mode, int64_t* value) const;
 
-} * rocsparse_csritsv_info;
+        void copy_async(hipStream_t            stream,
+                        rocsparse_pointer_mode mode,
+                        rocsparse_indextype    indextype,
+                        void*                  value) const;
+
+        ~position_t();
+
+        void create_position_async(rocsparse_indextype indextype, hipStream_t stream);
+        void free_position_async(hipStream_t stream);
+
+        rocsparse_indextype get_position_indextype() const;
+        const void*         get_position() const;
+        void*               get_position();
+
+        rocsparse_status copy_position_async(rocsparse_pointer_mode pointer_mode,
+                                             rocsparse_indextype    position_indextype,
+                                             void*                  position,
+                                             hipStream_t            stream) const;
+
+        void set_max_position_async(hipStream_t stream);
+
+        void copy_position_async(const position_t* that, hipStream_t stream);
+    };
+
+}

@@ -28,6 +28,11 @@
 #include "rocsparse_csrsm_info.hpp"
 namespace rocsparse
 {
+    rocsparse_status csrsm_zero_pivot(rocsparse_handle         handle,
+                                      rocsparse::pivot_info_t* info,
+                                      rocsparse_indextype      indextype,
+                                      void*                    position);
+
     rocsparse_status csrsm_buffer_size_quickreturn(rocsparse_handle          handle,
                                                    rocsparse_operation       trans_A,
                                                    rocsparse_operation       trans_B,

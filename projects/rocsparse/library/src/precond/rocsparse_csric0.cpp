@@ -92,19 +92,25 @@ rocsparse_status rocsparse::csric0_analysis_template(rocsparse_handle          h
 
     if(analysis == rocsparse_analysis_policy_reuse)
     {
-
         auto trm = info->get_csric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
         if(trm == nullptr)
         {
-            trm = info->get_csrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
-            if(trm == nullptr)
-                trm = info->get_csrsv_lower_info();
-            if(trm == nullptr)
-                trm = info->get_csrsm_lower_info();
-            if(trm == nullptr)
-                trm = info->get_csrsvt_upper_info();
-            if(trm == nullptr)
-                trm = info->get_csrsmt_upper_info();
+            trm = (trm != nullptr)
+                      ? trm
+                      : info->get_csrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+
+            trm = (trm != nullptr)
+                      ? trm
+                      : info->get_csrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+            trm = (trm != nullptr)
+                      ? trm
+                      : info->get_csrsm_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+            trm = (trm != nullptr) ? trm
+                                   : info->get_csrsv_info(rocsparse_operation_transpose,
+                                                          rocsparse_fill_mode_upper);
+            trm = (trm != nullptr) ? trm
+                                   : info->get_csrsm_info(rocsparse_operation_transpose,
+                                                          rocsparse_fill_mode_upper);
 
             if(trm != nullptr)
             {
@@ -130,23 +136,16 @@ rocsparse_status rocsparse::csric0_analysis_template(rocsparse_handle          h
                                                     csr_val,
                                                     csr_row_ptr,
                                                     csr_col_ind,
-                                                    (rocsparse_int**)&info->zero_pivot,
                                                     temp_buffer));
 
-    {
-        // setup info->singular_pivot
-        if(info->singular_pivot == nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                &info->singular_pivot, sizeof(rocsparse_int), handle->stream));
-        }
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->singular_pivot,
-                                           info->zero_pivot,
-                                           sizeof(rocsparse_int),
-                                           hipMemcpyDeviceToDevice,
-                                           handle->stream));
-    }
+    csric0_info->create_singular_pivot_async(rocsparse::get_indextype<rocsparse_int>(),
+                                             handle->stream);
 
+    RETURN_IF_HIP_ERROR(hipMemcpyAsync(csric0_info->get_singular_pivot(),
+                                       csric0_info->get_zero_pivot(),
+                                       sizeof(rocsparse_int),
+                                       hipMemcpyDeviceToDevice,
+                                       handle->stream));
     return rocsparse_status_success;
 }
 
@@ -197,6 +196,7 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
     ROCSPARSE_CHECKARG_ENUM(8, policy);
     ROCSPARSE_CHECKARG_ARRAY(9, m, temp_buffer);
 
+    auto                   csric0_info = info->get_csric0_info();
     rocsparse::trm_info_t* trm_info
         = info->get_csric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
@@ -246,9 +246,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
             (const rocsparse_int*)trm_info->get_diag_ind(),
             d_done_array,
             (const rocsparse_int*)trm_info->get_row_map(),
-            (rocsparse_int*)info->zero_pivot,
-            (rocsparse_int*)info->singular_pivot,
-            info->singular_tol,
+            (rocsparse_int*)csric0_info->get_zero_pivot(),
+            (rocsparse_int*)csric0_info->get_singular_pivot(),
+            csric0_info->get_singular_tol(),
             descr->base);
     }
     else
@@ -270,9 +270,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else if(max_nnz <= 64)
@@ -290,9 +290,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else if(max_nnz <= 128)
@@ -310,9 +310,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else if(max_nnz <= 256)
@@ -330,9 +330,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else if(max_nnz <= 512)
@@ -350,9 +350,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else
@@ -370,9 +370,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
         }
@@ -393,9 +393,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else if(max_nnz <= 128)
@@ -413,9 +413,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else if(max_nnz <= 256)
@@ -433,9 +433,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else if(max_nnz <= 512)
@@ -453,9 +453,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else if(max_nnz <= 1024)
@@ -473,9 +473,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
             else
@@ -493,9 +493,9 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                     (const rocsparse_int*)trm_info->get_diag_ind(),
                     d_done_array,
                     (const rocsparse_int*)trm_info->get_row_map(),
-                    (rocsparse_int*)info->zero_pivot,
-                    (rocsparse_int*)info->singular_pivot,
-                    info->singular_tol,
+                    (rocsparse_int*)csric0_info->get_zero_pivot(),
+                    (rocsparse_int*)csric0_info->get_singular_pivot(),
+                    csric0_info->get_singular_tol(),
                     descr->base);
             }
         }
@@ -768,7 +768,7 @@ try
 
     ROCSPARSE_CHECKARG_POINTER(1, info);
 
-    info->clear(rocsparse::trm_t::from_csric0);
+    info->clear_csric0_info();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -895,73 +895,17 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, info);
     ROCSPARSE_CHECKARG_POINTER(2, position);
 
-    // Stream
-    hipStream_t stream = handle->stream;
-
-    // If m == 0 || nnz == 0 it can happen, that info structure is not created.
-    // In this case, always return -1.
-    rocsparse::trm_info_t* trm_info
-        = info->get_csric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
-
-    if(trm_info == nullptr)
+    auto csric0_info = info->get_csric0_info();
     {
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
+        auto status = csric0_info->copy_zero_pivot_async(handle->pointer_mode,
+                                                         rocsparse::get_indextype<rocsparse_int>(),
+                                                         position,
+                                                         handle->stream);
+        if(status == rocsparse_status_zero_pivot)
         {
-            const rocsparse_int neg_one = -1;
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, neg_one, sizeof(rocsparse_int), stream));
+            return status;
         }
-        else
-        {
-            *position = -1;
-        }
-
-        return rocsparse_status_success;
-    }
-
-    // Differentiate between pointer modes
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        // rocsparse_pointer_mode_device
-        rocsparse_int pivot;
-
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            &pivot, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
-
-        // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-        if(pivot == std::numeric_limits<rocsparse_int>::max())
-        {
-            const rocsparse_int neg_one = -1;
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, neg_one, sizeof(rocsparse_int), stream));
-        }
-        else
-        {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(position,
-                                               info->zero_pivot,
-                                               sizeof(rocsparse_int),
-                                               hipMemcpyDeviceToDevice,
-                                               stream));
-
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
-        }
-    }
-    else
-    {
-        // rocsparse_pointer_mode_host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            position, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-        // If no zero pivot is found, set -1
-        if(*position == std::numeric_limits<rocsparse_int>::max())
-        {
-            *position = -1;
-        }
-        else
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
-        }
+        RETURN_IF_ROCSPARSE_ERROR(status);
     }
 
     return rocsparse_status_success;
@@ -992,54 +936,45 @@ try
     // Stream
     hipStream_t stream = handle->stream;
 
-    // If m == 0 || nnz == 0 it can happen, that info structure is not created.
-    // In this case, always return -1.
-    auto trm_info = info->get_csric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
-    if(trm_info == nullptr)
+    auto    csric0_info = info->get_csric0_info();
+    int64_t zero_pivot_value;
+    auto    status = csric0_info->copy_zero_pivot_async(rocsparse_pointer_mode_host,
+                                                     rocsparse::get_indextype<int64_t>(),
+                                                     &zero_pivot_value,
+                                                     handle->stream);
+    if(status != rocsparse_status_zero_pivot)
     {
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            const rocsparse_int neg_one = -1;
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, neg_one, sizeof(rocsparse_int), stream));
-        }
-        else
-        {
-            *position = -1;
-        }
-
-        return rocsparse_status_success;
+        RETURN_IF_ROCSPARSE_ERROR(status);
     }
+    int64_t singular_pivot_value;
+    status = csric0_info->copy_singular_pivot_async(rocsparse_pointer_mode_host,
+                                                    rocsparse::get_indextype<int64_t>(),
+                                                    &singular_pivot_value,
+                                                    handle->stream);
 
-    constexpr rocsparse_int max_int        = std::numeric_limits<rocsparse_int>::max();
-    rocsparse_int           zero_pivot     = max_int;
-    rocsparse_int           singular_pivot = max_int;
-
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-        &zero_pivot, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
-
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(&singular_pivot,
-                                       info->singular_pivot,
-                                       sizeof(rocsparse_int),
-                                       hipMemcpyDeviceToHost,
-                                       stream));
-
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-    singular_pivot = rocsparse::min(((zero_pivot == -1) ? max_int : zero_pivot),
-                                    ((singular_pivot == -1) ? max_int : singular_pivot));
-
-    if(singular_pivot == max_int)
+    if(status != rocsparse_status_zero_pivot)
     {
-        singular_pivot = -1;
+        RETURN_IF_ROCSPARSE_ERROR(status);
+    }
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+
+    int64_t singular_pivot;
+    if((singular_pivot_value == -1) || (zero_pivot_value == -1))
+    {
+        singular_pivot = ((singular_pivot_value == -1) ? zero_pivot_value : singular_pivot_value);
+    }
+    else
+    {
+        singular_pivot = std::min(zero_pivot_value, singular_pivot_value);
     }
 
     // Differentiate between pointer modes
     if(handle->pointer_mode == rocsparse_pointer_mode_device)
     {
-
         // rocsparse_pointer_mode_device
         RETURN_IF_HIP_ERROR(hipMemcpyAsync(
             position, &singular_pivot, sizeof(rocsparse_int), hipMemcpyHostToDevice, stream));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
     }
     else
     {
@@ -1082,8 +1017,8 @@ try
 
     // Logging
     rocsparse::log_trace(handle, "rocsparse_csric0_set_tolerance", (const void*&)info, tol);
-
-    info->singular_tol = tol;
+    auto csric0_info = info->get_csric0_info();
+    csric0_info->set_singular_tol(tol);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -1118,8 +1053,8 @@ try
 
     // Logging
     rocsparse::log_trace(handle, "rocsparse_csric0_get_tolerance", (const void*&)info, tol);
-
-    *tol = info->singular_tol;
+    auto csric0_info = info->get_csric0_info();
+    *tol             = csric0_info->get_singular_tol();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

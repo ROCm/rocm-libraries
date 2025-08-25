@@ -1007,7 +1007,7 @@ typedef enum rocsparse_sptrsv_input_
  */
 typedef enum rocsparse_sptrsv_output_
 {
-    rocsparse_sptrsv_output_zero_pivot_position /**< Get zero pivot position for output from SpTRSV descriptor. */
+    rocsparse_sptrsv_output_zero_pivot_position /**< Get zero pivot int64_t based position for output from SpTRSV descriptor. */
 } rocsparse_sptrsv_output;
 
 /*! \ingroup types_module
@@ -1045,7 +1045,8 @@ typedef enum rocsparse_sptrsm_input_
     rocsparse_sptrsm_input_alg, /**< Select algorithm \ref rocsparse_sptrsm_alg for input on SpTRSM descriptor. */
     rocsparse_sptrsm_input_operation_A, /**< Select matrix A operation \ref rocsparse_operation for input on SpTRSM descriptor. */
     rocsparse_sptrsm_input_operation_X, /**< Select matrix X operation \ref rocsparse_operation  for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on SpTRSM descriptor, this datatype is used as the compute type. */
+    rocsparse_sptrsm_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on SpTRSM descriptor, this datatype is used as the compute type. */
     rocsparse_sptrsm_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on SpTRSM descriptor */
 
@@ -1059,7 +1060,7 @@ typedef enum rocsparse_sptrsm_input_
  */
 typedef enum rocsparse_sptrsm_output_
 {
-    rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot position for output from SpTRSM descriptor. */
+    rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot int64_t based position for output from SpTRSM descriptor. */
 } rocsparse_sptrsm_output;
 
 /*! \ingroup types_module

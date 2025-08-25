@@ -197,7 +197,9 @@ rocsparse_status rocsparse::bsric0_analysis_template(rocsparse_handle          h
                   ? trm
                   : info->get_bsrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
-        trm = (trm != nullptr) ? trm : info->get_bsrsv_lower_info();
+        trm = (trm != nullptr)
+                  ? trm
+                  : info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
         if(trm != nullptr)
         {
@@ -218,7 +220,6 @@ rocsparse_status rocsparse::bsric0_analysis_template(rocsparse_handle          h
                                                     bsr_val,
                                                     bsr_row_ptr,
                                                     bsr_col_ind,
-                                                    (rocsparse_int**)&info->zero_pivot,
                                                     temp_buffer));
 
     return rocsparse_status_success;
@@ -405,8 +406,9 @@ rocsparse_status rocsparse::bsric0_template(rocsparse_handle          handle,
     ROCSPARSE_CHECKARG_ENUM(10, policy);
     ROCSPARSE_CHECKARG_ARRAY(11, mb, temp_buffer);
 
-    auto  trm_info   = info->get_bsric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
-    void* zero_pivot = info->zero_pivot;
+    auto  bsric0_info = info->get_bsric0_info();
+    auto  trm_info    = info->get_bsric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    void* zero_pivot  = bsric0_info->get_zero_pivot();
     ROCSPARSE_CHECKARG(
         9, info, ((mb > 0) && (trm_info == nullptr)), rocsparse_status_invalid_pointer);
 
@@ -679,7 +681,7 @@ try
 
     ROCSPARSE_CHECKARG_POINTER(1, info);
 
-    info->clear(rocsparse::trm_t::from_bsric0);
+    info->clear_bsric0_info();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -706,70 +708,17 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, info);
     ROCSPARSE_CHECKARG_POINTER(2, position);
 
-    // Stream
-    hipStream_t stream = handle->stream;
-
-    // If mb == 0 || nnzb == 0 it can happen, that info structure is not created.
-    // In this case, always return -1.
-    rocsparse::trm_info_t* trm_info
-        = info->get_bsric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
-    if(trm_info == nullptr)
+    auto bsric0_info = info->get_bsric0_info();
     {
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
+        auto status = bsric0_info->copy_zero_pivot_async(handle->pointer_mode,
+                                                         rocsparse::get_indextype<rocsparse_int>(),
+                                                         position,
+                                                         handle->stream);
+        if(status == rocsparse_status_zero_pivot)
         {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, 0xFF, sizeof(rocsparse_int), stream));
+            return status;
         }
-        else
-        {
-            *position = -1;
-        }
-
-        return rocsparse_status_success;
-    }
-
-    // Differentiate between pointer modes
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        // rocsparse_pointer_mode_device
-        rocsparse_int pivot;
-
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            &pivot, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
-
-        // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-        if(pivot == std::numeric_limits<rocsparse_int>::max())
-        {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(position, 0xFF, sizeof(rocsparse_int), stream));
-        }
-        else
-        {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(position,
-                                               info->zero_pivot,
-                                               sizeof(rocsparse_int),
-                                               hipMemcpyDeviceToDevice,
-                                               stream));
-
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
-        }
-    }
-    else
-    {
-        // rocsparse_pointer_mode_host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            position, info->zero_pivot, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-        // If no zero pivot is found, set -1
-        if(*position == std::numeric_limits<rocsparse_int>::max())
-        {
-            *position = -1;
-        }
-        else
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
-        }
+        RETURN_IF_ROCSPARSE_ERROR(status);
     }
 
     return rocsparse_status_success;

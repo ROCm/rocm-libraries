@@ -1,6 +1,5 @@
-/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,42 +21,12 @@
  *
  * ************************************************************************ */
 
-#pragma once
+#include "rocsparse_csric0_info.hpp"
 
-#include "rocsparse_control.hpp"
-#include "rocsparse_datatype_utils.hpp"
-#include "rocsparse_enum_utils.hpp"
-#include "rocsparse_floating_data_t.hpp"
-#include "rocsparse_handle.hpp"
-#include "rocsparse_indextype_utils.hpp"
-#include "rocsparse_logging.hpp"
-#include "rocsparse_memstat.hpp"
-#include "rocsparse_scalar.hpp"
-
-namespace rocsparse
+void _rocsparse_csric0_info::copy(const _rocsparse_csric0_info* that, hipStream_t stream)
 {
-
-// Return the leftmost significant bit position
-#if defined(rocsparse_ILP64)
-    static inline rocsparse_int clz(rocsparse_int n)
-    {
-        // __builtin_clzll is undefined for n == 0
-        if(n == 0)
-        {
-            return 0;
-        }
-        return 64 - __builtin_clzll(n);
-    }
-#else
-    static inline rocsparse_int clz(rocsparse_int n)
-    {
-        // __builtin_clz is undefined for n == 0
-        if(n == 0)
-        {
-            return 0;
-        }
-        return 32 - __builtin_clz(n);
-    }
-#endif
-
+    this->rocsparse::trm_data_t::copy(that, stream);
+    this->rocsparse::singular_info_t::copy_singular_info_async(that, stream);
+    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
 }
+_rocsparse_csric0_info::~_rocsparse_csric0_info() {}

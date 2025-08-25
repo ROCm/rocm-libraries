@@ -66,7 +66,6 @@ void run_example(rocsparse_handle handle, int ndim, int trials, int batch_size)
     utils_seedrand();
 
     T halpha = utils_random<T>();
-    T hbeta  = (T)0;
 
     std::vector<T> hx(n);
     utils_init<T>(hx, 1, n, 1);
@@ -139,6 +138,14 @@ void run_example(rocsparse_handle handle, int ndim, int trials, int batch_size)
                                                sizeof(sptrsv_compute_datatype),
                                                nullptr));
 
+    const rocsparse_analysis_policy sptrsv_analysis_policy = rocsparse_analysis_policy_reuse;
+    ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                               sptrsv_descr,
+                                               rocsparse_sptrsv_input_analysis_policy,
+                                               &sptrsv_analysis_policy,
+                                               sizeof(sptrsv_analysis_policy),
+                                               nullptr));
+
     // Call sptrsv to get buffer size
     size_t buffer_size;
     ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(
@@ -159,6 +166,13 @@ void run_example(rocsparse_handle handle, int ndim, int trials, int batch_size)
                                      nullptr));
 
     HIP_CHECK(hipFree(temp_buffer));
+
+    ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                               sptrsv_descr,
+                                               rocsparse_sptrsv_input_scalar_alpha,
+                                               &halpha,
+                                               sizeof(&halpha),
+                                               nullptr));
     ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(
         handle, sptrsv_descr, A, x, y, rocsparse_sptrsv_stage_compute, &buffer_size, nullptr));
 
@@ -213,11 +227,11 @@ void run_example(rocsparse_handle handle, int ndim, int trials, int batch_size)
     double gflops = static_cast<double>(2 * nnz) / time / 1e6;
 
     std::cout << std::setw(12) << "m" << std::setw(12) << "n" << std::setw(12) << "nnz"
-              << std::setw(12) << "alpha" << std::setw(12) << "beta" << std::setw(12) << "GFlop/s"
-              << std::setw(12) << "GB/s" << std::setw(12) << "msec" << std::endl;
+              << std::setw(12) << "alpha" << std::setw(12) << "GFlop/s" << std::setw(12) << "GB/s"
+              << std::setw(12) << "msec" << std::endl;
     std::cout << std::setw(12) << m << std::setw(12) << n << std::setw(12) << nnz << std::setw(12)
-              << halpha << std::setw(12) << hbeta << std::setw(12) << gflops << std::setw(12)
-              << bandwidth << std::setw(12) << time << std::endl;
+              << halpha << std::setw(12) << gflops << std::setw(12) << bandwidth << std::setw(12)
+              << time << std::endl;
 
     // Clear up on device
     HIP_CHECK(hipFree(dAptr));
@@ -227,10 +241,10 @@ void run_example(rocsparse_handle handle, int ndim, int trials, int batch_size)
     HIP_CHECK(hipFree(dy));
     HIP_CHECK(hipFree(temp_buffer));
 
-    ROCSPARSE_CHECK(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
-    ROCSPARSE_CHECK(rocsparse_destroy_spmat_descr(A));
-    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(x));
-    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(y));
+    //    ROCSPARSE_CHECK(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
+    //    ROCSPARSE_CHECK(rocsparse_destroy_spmat_descr(A));
+    //    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(x));
+    //    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(y));
 }
 
 int main(int argc, char* argv[])

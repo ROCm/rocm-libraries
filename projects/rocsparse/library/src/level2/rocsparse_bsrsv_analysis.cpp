@@ -139,16 +139,8 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
     }
 
     auto bsrsv_info = info->get_bsrsv_info();
-    RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->recreate(handle,
-                                                   trans,
-                                                   mb,
-                                                   nnzb,
-                                                   descr,
-                                                   bsr_val,
-                                                   bsr_row_ptr,
-                                                   bsr_col_ind,
-                                                   (rocsparse_int**)&info->zero_pivot,
-                                                   temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->recreate(
+        handle, trans, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, temp_buffer));
 
     return rocsparse_status_success;
 }

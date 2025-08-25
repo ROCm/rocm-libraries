@@ -47,18 +47,24 @@ namespace rocsparse
 
         if(analysis == rocsparse_analysis_policy_reuse)
         {
-            auto trm = info->get_csric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+            auto trm = info->get_csrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
             if(trm == nullptr)
             {
-                trm = info->get_csric0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
-                if(trm == nullptr)
-                    trm = info->get_csrsv_lower_info();
-                if(trm == nullptr)
-                    trm = info->get_csrsm_lower_info();
-                if(trm == nullptr)
-                    trm = info->get_csrsvt_upper_info();
-                if(trm == nullptr)
-                    trm = info->get_csrsmt_upper_info();
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csric0_info(rocsparse_operation_none,
+                                                               rocsparse_fill_mode_lower);
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csrsv_info(rocsparse_operation_none,
+                                                              rocsparse_fill_mode_lower);
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csrsm_info(rocsparse_operation_none,
+                                                              rocsparse_fill_mode_lower);
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csrsv_info(rocsparse_operation_transpose,
+                                                              rocsparse_fill_mode_upper);
+                trm = (trm != nullptr) ? trm
+                                       : info->get_csrsm_info(rocsparse_operation_transpose,
+                                                              rocsparse_fill_mode_upper);
 
                 if(trm != nullptr)
                 {
@@ -85,17 +91,14 @@ namespace rocsparse
                                                          csr_val,
                                                          csr_row_ptr,
                                                          csr_col_ind,
-                                                         (rocsparse_int**)&info->zero_pivot,
                                                          temp_buffer));
 
         // setup info->singular_pivot
-        if(info->singular_pivot == nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                &info->singular_pivot, sizeof(rocsparse_int), handle->stream));
-        }
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->singular_pivot,
-                                           info->zero_pivot,
+        csrilu0_info->create_singular_pivot_async(rocsparse::get_indextype<rocsparse_int>(),
+                                                  handle->stream);
+
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrilu0_info->get_singular_pivot(),
+                                           csrilu0_info->get_zero_pivot(),
                                            sizeof(rocsparse_int),
                                            hipMemcpyDeviceToDevice,
                                            handle->stream));

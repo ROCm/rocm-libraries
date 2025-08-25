@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "rocsparse_trm_data_t.hpp"
+#include "rocsparse_csrsv_info.hpp"
 
-typedef rocsparse::trm_data_t  _rocsparse_csrsm_info;
+typedef _rocsparse_csrsv_info  _rocsparse_csrsm_info;
 typedef _rocsparse_csrsm_info* rocsparse_csrsm_info;

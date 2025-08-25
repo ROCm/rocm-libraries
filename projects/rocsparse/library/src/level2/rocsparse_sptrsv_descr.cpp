@@ -48,8 +48,7 @@ _rocsparse_sptrsv_descr::~_rocsparse_sptrsv_descr()
     m_compute_datatype = ((rocsparse_datatype)-1);
     m_analysis_policy  = ((rocsparse_analysis_policy)-1);
     this->m_csrsv_info.reset();
-    this->m_zero_pivot_position = 0;
-    this->m_scalar_alpha        = nullptr;
+    this->m_scalar_alpha = nullptr;
 }
 
 _rocsparse_sptrsv_descr::_rocsparse_sptrsv_descr()
@@ -60,11 +59,6 @@ _rocsparse_sptrsv_descr::_rocsparse_sptrsv_descr()
     , m_compute_datatype((rocsparse_datatype)-1)
     , m_analysis_policy((rocsparse_analysis_policy)-1)
 {
-}
-
-int64_t _rocsparse_sptrsv_descr::get_zero_pivot_position() const
-{
-    return this->m_zero_pivot_position;
 }
 
 rocsparse_sptrsv_stage _rocsparse_sptrsv_descr::get_stage() const
@@ -134,11 +128,6 @@ void _rocsparse_sptrsv_descr::set_scalar_datatype(rocsparse_datatype value)
 void _rocsparse_sptrsv_descr::set_compute_datatype(rocsparse_datatype value)
 {
     this->m_compute_datatype = value;
-}
-
-void _rocsparse_sptrsv_descr::set_zero_pivot_position(int64_t value)
-{
-    this->m_zero_pivot_position = value;
 }
 
 extern "C" rocsparse_status rocsparse_create_sptrsv_descr(rocsparse_sptrsv_descr* descr)

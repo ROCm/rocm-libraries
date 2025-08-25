@@ -32,6 +32,11 @@ set(rocsparse_source
   src/common/rocsparse_common.cpp
   src/common/rocsparse_handle.cpp
   src/common/rocsparse_mat_info.cpp
+  src/common/rocsparse_position_t.cpp
+  src/common/rocsparse_singular_info_t.cpp
+  src/common/rocsparse_pivot_info_t.cpp
+  src/common/rocsparse_csric0_info.cpp
+  src/common/rocsparse_csrilu0_info.cpp
   src/common/rocsparse_trm_info.cpp
   src/common/rocsparse_sorted_coo2csr_info.cpp
   src/common/rocsparse_indextype_utils.cpp
