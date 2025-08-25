@@ -520,39 +520,10 @@ class LSUOn(LSU):
     def globalWrite(self, writer, kernel, tPA, tPB):
         if not writer.do["PostLoop"]: return ""
 
-        elements_0 = [[] for y in range(2)]
-        elements_1 = [[] for y in range(2)]
-        elements_f0    = [[] for y in range(2)]
-        elements_f1    = [[] for y in range(2)]
-        (fullVw, elements_0[False], fullVw_1, elements_1[False]) = writer.notLocalFullTileElements(kernel, False)
-        (edgeVw, elements_0[True], edgeVw_1, elements_1[True] )    = writer.notLocalFullTileElements(kernel, True)
-        edgeScaled_0 = len(elements_0[True]) // len(elements_1[False])
-        edgeScaled_1 = len(elements_1[True]) // len(elements_1[False])
-        noEgScaled_0 = len(elements_0[False]) // len(elements_1[False])
-
-        for i in range(0, len(elements_1[False])):
-            element = elements_1[False][i]
-            if element in self.LSUelementsPerLSUWave:
-                elements_f1[False].append(element)
-                for j in range(0, edgeScaled_0):
-                    # in general, edge will affect vc0 dimension.
-                    element = elements_0[True][i*edgeScaled_0+j]
-                    elements_f0[True].append(element)
-                for j in range(0, edgeScaled_1):
-                    # in general, edge will affect vc0 dimension.
-                    element = elements_1[True][i*edgeScaled_1+j]
-                    elements_f1[True].append(element)
-                for j in range(0, noEgScaled_0):
-                    # in general, edge will affect vc0 dimension.
-                    element = elements_0[False][i*noEgScaled_0+j]
-                    elements_f0[False].append(element)
-
-        vectorWidths     = [fullVw, edgeVw]
-        vectorWidths_1 = [fullVw_1, edgeVw_1]
-
+        (fullVws, elements_0, fullVws_1, elements_1) = writer.notLocalFullTileElements(kernel)
         noGSUBranch = (kernel["GlobalSplitU"] == 0)
         module = Module("localSplitUGlobalWrite")
-        module.add(writer.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch))
+        module.add(writer.globalWriteElements(kernel, tPA, tPB, fullVws, fullVws_1, elements_0, elements_1, noGSUBranch=noGSUBranch))
         writer.cleanupGlobalWrite(kernel)
         writer.vgprPool.checkIn(self.accVgprLdsReduction)
         return module

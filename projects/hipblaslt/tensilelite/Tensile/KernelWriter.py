@@ -402,7 +402,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.do["PostLoop"]    = True
     self.do["ApplyAlpha"]  = True
     self.do["GlobalWrite"] = True
-    self.do["EdgeWrite"]   = True
     self.do["KeepDirectToLdsAlloc"] = False  # If true, keep regs used for LDS alloc even if not used
     self.do["OptimizeNumItersPLR0"] = True
     self.do["AutoSplitDsWrite"] = True
