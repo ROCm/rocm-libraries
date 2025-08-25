@@ -303,8 +303,8 @@ namespace TensileLite
             size_t num_the_same = 0;
             for(const auto& res : valid_results)
             {
-                // If it's "essentially" the same as best_latency, include it
-                if(std::fabs(std::get<0>(res) - best_latency) < 10)
+                // If it's "essentially" (within 5 diff) the same as best_latency, include it
+                if(std::fabs(std::get<0>(res) - best_latency) < 5)
                     num_the_same++;
                 else
                     break; // Once we pass best_latency, we can stop.
