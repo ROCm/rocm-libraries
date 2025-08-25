@@ -6713,9 +6713,18 @@ class KernelWriterAssembly(KernelWriter):
             # Generate local write address code only for PrefetchGlobalRead>=2
             if not kernel["DirectToLdsA"]:
               evenIterCode.add(self.localWriteSwapOffsets(kernel, False, tPA))
+            if ("MX" in tPA) and (not kernel["DirectToLdsMXSA"]):
+              evenIterCode.add(self.localWriteSwapOffsets(kernel, False, tPA["MX"]))
+            if ("MX" in tPB) and (not kernel["DirectToLdsMXSB"]):
+              evenIterCode.add(self.localWriteSwapOffsets(kernel, False, tPB["MX"]))
             if not kernel["DirectToLdsB"]:
               evenIterCode.add(self.localWriteSwapOffsets(kernel, False, tPB))
+
             evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPA))
+            if "MX" in tPA:
+              evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPA["MX"]))
+            if "MX" in tPB:
+              evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPB["MX"]))
             evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPB))
 
         # generate even, odd exit code
@@ -9920,7 +9929,7 @@ class KernelWriterAssembly(KernelWriter):
                       ((kernel["ProblemType"]["Sparse"] ==2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]))
     needMetaSwap = needSwap and doMetadataCheck
     # swap not needed if DirectToVgpr is enabled (do not use DTVA/B for metaData. Change needSwap after setting needMetaSwap)
-    if (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]:
+    if kernel["DirectToVgpr%s"%tc]:
       needSwap = False
     if doMetadataCheck:
       if kernel["DirectToVgprSparseMetadata"]:
@@ -9980,6 +9989,19 @@ class KernelWriterAssembly(KernelWriter):
         else:
           # Using inlined constants
           src0Val = hex(kernel["LdsOffsetA_Blk"])
+
+        numLwa = 0
+        if tP["isA"]:
+          numLwa = self.states.a.numVgprLocalWriteAddr
+        elif tP["isB"]:
+          numLwa = self.states.b.numVgprLocalWriteAddr
+        elif tP["isMXSA"]:
+          numLwa = self.states.mxsa.numVgprLocalWriteAddr
+        elif tP["isMXSB"]:
+          numLwa = self.states.mxsb.numVgprLocalWriteAddr
+        else:
+          raise Exception(f"unsupport tc %s{tc}")
+
         numLwa = self.states.a.numVgprLocalWriteAddr if tP["isA"] else self.states.b.numVgprLocalWriteAddr
         localWriteSwapXOR(tc, src0Val, numLwa)
             
