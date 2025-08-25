@@ -6,7 +6,6 @@ Required environment variables:
 """
 
 import fnmatch
-from github_cli_client import GitHubCLIClient
 import json
 import logging
 import subprocess
@@ -17,6 +16,7 @@ import os
 
 logging.basicConfig(level=logging.INFO)
 
+
 def set_github_output(d: Mapping[str, str]):
     """Sets GITHUB_OUTPUT values.
     See https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/passing-information-between-jobs
@@ -24,13 +24,16 @@ def set_github_output(d: Mapping[str, str]):
     logging.info(f"Setting github output:\n{d}")
     step_output_file = os.environ.get("GITHUB_OUTPUT", "")
     if not step_output_file:
-        logging.warning("Warning: GITHUB_OUTPUT env var not set, can't set github outputs")
+        logging.warning(
+            "Warning: GITHUB_OUTPUT env var not set, can't set github outputs"
+        )
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
-        
+
+
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
-    # """Returns the paths of modified files relative to the base reference."""
+    """Returns the paths of modified files relative to the base reference."""
     try:
         return subprocess.run(
             ["git", "diff", "--name-only", base_ref],
@@ -45,8 +48,9 @@ def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
             " jobs to run.",
             file=sys.stderr,
         )
-        return None
-    
+        return []
+
+
 GITHUB_WORKFLOWS_CI_PATTERNS = [
     "therock*",
 ]
@@ -59,28 +63,29 @@ def is_path_workflow_file_related_to_ci(path: str) -> bool:
     ) or any(
         fnmatch.fnmatch(path, ".github/scripts/" + pattern)
         for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
-    ) 
-    
+    )
+
+
 def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
         return False
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
 
-        
-def retrieve_projects(args):    
+
+def retrieve_projects(args):
     if args.get("is_pull_request"):
         subtrees = args.get("input_subtrees").split("\n")
-    
+
     if args.get("is_workflow_dispatch"):
         if args.get("input_projects") == "all":
             subtrees = list(subtree_to_project_map.keys())
         else:
             subtrees = args.get("input_projects").split()
-    
+
     # If a push event to develop happens, we run tests on all subtrees
     if args.get("is_push"):
         subtrees = list(subtree_to_project_map.keys())
-        
+
     # If .github/*/therock* were changed, run all subtrees
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
@@ -88,20 +93,19 @@ def retrieve_projects(args):
     related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
     if related_to_therock_ci:
         subtrees = list(subtree_to_project_map.keys())
-    
+
     projects = set()
     # collect the associated subtree to project
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
             projects.add(subtree_to_project_map.get(subtree))
-            
-    
-    # retrieve the subtrees to checkout, cmake options to build, and projects to test 
+
+    # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
     for project in projects:
         if project in project_map:
             project_to_run.append(project_map.get(project))
-        
+
     return project_to_run
 
 
@@ -116,15 +120,15 @@ if __name__ == "__main__":
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
-    
+
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees
-    
+
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
-    
+
     args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
-    
+
     logging.info(f"Retrieved arguments {args}")
 
     run(args)
