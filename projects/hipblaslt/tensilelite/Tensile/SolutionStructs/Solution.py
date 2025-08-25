@@ -1949,16 +1949,14 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
           return
         
-        # Currently we do not support edge with enableLDSTrA / enableLDSTrB
-        # TODO: Enalbe edge with enableLDSTrA / enableLDSTrB
-        if state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
-          state["AssertFree0ElementMultiple"] = 16
+        # Currently we only support fp4 edge with AssertFree0(1)ElementMultiple = 2.
+        # TODO: Enalbe edge with arbitrary number
+        state["AssertFree0ElementMultiple"] = 2
+        state["AssertFree1ElementMultiple"] = 2
 
-        if state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
-          state["AssertFree1ElementMultiple"] = 16
-
-        # Currently we support fp4 tail-loop AssertSummationElementMultiple=16.
-        state["AssertSummationElementMultiple"] = 16
+        # Currently we only support fp4 tail-loop with AssertSummationElementMultiple = 8.
+        # TODO: Enalbe tail-loop with arbitrary number
+        state["AssertSummationElementMultiple"] = 8
 
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-

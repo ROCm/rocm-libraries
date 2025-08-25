@@ -7378,8 +7378,8 @@ class KernelWriterAssembly(KernelWriter):
                   bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=bk + group*vgprPerSet0Group), 1)
                   shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
 
-          # replace 0 for same thread
-          if numMIInput > 1 and kernel["AssertSummationElementMultiple"] < 8:
+          # replace elements with 0 for same thread, this conducting shift and mask between numElementsPerRead
+          if numMIInput > 1 and kernel["AssertSummationElementMultiple"] < 32:
             alignment = vgprPerInput if is_wmma_v2 else (2 if vgprPerInput > 1 else 1)
             abReg   = self.vgprPool.checkOutAligned(vgprPerInput, alignment, "abReg")
             if (vgprPerInput < 4 and is_mfma) or is_wmma_v2:

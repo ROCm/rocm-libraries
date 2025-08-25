@@ -4815,7 +4815,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           kernel["ProblemType"]["DataType"].isInt8x4() or kernel["ProblemType"]["DataType"].isInt8() or \
           kernel["ProblemType"]["DataType"].is8bitFloat() or kernel["ProblemType"]["DataType"].is6bitFloat() or \
           kernel["ProblemType"]["DataType"].isFloat4()):
-        print("HighPrecisionAccumulate only valid when DataType is half, bf16, Int8x4, Int8, fp8, bf8. Forcing HPA to False")
+        print("HighPrecisionAccumulate only valid when DataType is half, bf16, Int8x4, Int8, fp8, bf8, fp6, bf6, fp4. Forcing HPA to False")
         kernel["ProblemType"]["HighPrecisionAccumulate"] = False
 
     assert self.states.bpeAB == tensorParametersA["bpe"]
