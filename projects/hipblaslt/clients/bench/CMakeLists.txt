@@ -6,3 +6,5 @@ target_sources(hipblaslt-bench PRIVATE
 )
 
 add_subdirectory(src)
+
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/sequence.yaml" "${CMAKE_CURRENT_BINARY_DIR}/sequence.yaml" COPYONLY)
