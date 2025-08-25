@@ -154,9 +154,7 @@ namespace rocRoller
                             "Either s_barrier or s_barrier_signal must be supported.",
                             ShowValue(architecture.target()));
 
-                m_barrierOpcode = architecture.HasCapability(GPUCapability::s_barrier_signal)
-                                      ? "s_barrier_signal"
-                                      : "s_barrier";
+                m_barrierOpcode = hasBarrierSignal ? "s_barrier_signal" : "s_barrier";
             }
 
             for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
