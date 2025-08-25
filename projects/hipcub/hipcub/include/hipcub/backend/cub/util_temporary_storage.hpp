@@ -43,16 +43,17 @@ BEGIN_HIPCUB_NAMESPACE
 /// \param allocations [out] Pointers to device allocations needed.
 /// \param allocation_sizes [in] Sizes in bytes of device allocations needed.
 template<int ALLOCATIONS>
-HIPCUB_HOST_DEVICE
-HIPCUB_FORCEINLINE hipError_t AliasTemporaries(void*   d_temp_storage,
-                                               size_t& temp_storage_bytes,
-                                               void* (&allocations)[ALLOCATIONS],
-                                               const size_t (&allocation_sizes)[ALLOCATIONS])
+HIPCUB_DEPRECATED_BECAUSE("Internal-only implementation detail")
+HIPCUB_HOST_DEVICE HIPCUB_FORCEINLINE hipError_t
+    AliasTemporaries(void*   d_temp_storage,
+                     size_t& temp_storage_bytes,
+                     void* (&allocations)[ALLOCATIONS],
+                     const size_t (&allocation_sizes)[ALLOCATIONS])
 {
-    cudaError_t error = ::cub::AliasTemporaries(d_temp_storage,
-                                                temp_storage_bytes,
-                                                allocations,
-                                                allocation_sizes);
+    cudaError_t error = ::cub::detail::AliasTemporaries(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        allocations,
+                                                        allocation_sizes);
 
     if(cudaSuccess == error)
     {

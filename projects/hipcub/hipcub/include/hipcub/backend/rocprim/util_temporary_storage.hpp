@@ -31,6 +31,7 @@
 #define HIPCUB_ROCPRIM_UTIL_TEMPORARY_STORAGE_HPP_
 
 #include "../../config.hpp"
+#include "../../util_deprecated.hpp"
 
 #include <rocprim/detail/temp_storage.hpp> // IWYU pragma: export
 
@@ -62,14 +63,7 @@ typename std::enable_if<(N > 0), hipError_t>::type
 {
     return generate_partition<N - 1>(d_temp_storage, temp_storage_bytes, gen, gen(N - 1), args...);
 }
-} // namespace detail
 
-/// \brief Alias temporaries to externally-allocated device storage (or simply return the amount of storage needed).
-/// \tparam ALLOCATIONS The number of allocations that are needed.
-/// \param d_temp_storage [in] Device-accessible allocation of temporary storage.  When nullptr, the required allocation size is written to \p temp_storage_bytes and no work is done.
-/// \param temp_storage_bytes [in,out] Size in bytes of \t d_temp_storage allocation.
-/// \param allocations [out] Pointers to device allocations needed.
-/// \param allocation_sizes [in] Sizes in bytes of device allocations needed.
 template<int ALLOCATIONS>
 HIPCUB_HOST_DEVICE
 HIPCUB_FORCEINLINE hipError_t AliasTemporaries(void*   d_temp_storage,
@@ -81,6 +75,28 @@ HIPCUB_FORCEINLINE hipError_t AliasTemporaries(void*   d_temp_storage,
     { return rocprim::detail::temp_storage::make_partition(&allocations[i], allocation_sizes[i]); };
 
     return detail::generate_partition<ALLOCATIONS>(d_temp_storage, temp_storage_bytes, generator);
+}
+
+} // namespace detail
+
+/// \brief Alias temporaries to externally-allocated device storage (or simply return the amount of storage needed).
+/// \tparam ALLOCATIONS The number of allocations that are needed.
+/// \param d_temp_storage [in] Device-accessible allocation of temporary storage.  When nullptr, the required allocation size is written to \p temp_storage_bytes and no work is done.
+/// \param temp_storage_bytes [in,out] Size in bytes of \t d_temp_storage allocation.
+/// \param allocations [out] Pointers to device allocations needed.
+/// \param allocation_sizes [in] Sizes in bytes of device allocations needed.
+template<int ALLOCATIONS>
+HIPCUB_DEPRECATED_BECAUSE("Internal-only implementation detail")
+HIPCUB_HOST_DEVICE HIPCUB_FORCEINLINE hipError_t
+    AliasTemporaries(void*   d_temp_storage,
+                     size_t& temp_storage_bytes,
+                     void* (&allocations)[ALLOCATIONS],
+                     const size_t (&allocation_sizes)[ALLOCATIONS])
+{
+    return detail::AliasTemporaries(d_temp_storage,
+                                    temp_storage_bytes,
+                                    allocations,
+                                    allocation_sizes);
 }
 
 END_HIPCUB_NAMESPACE
