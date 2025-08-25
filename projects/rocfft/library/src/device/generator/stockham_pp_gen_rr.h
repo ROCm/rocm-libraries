@@ -50,9 +50,11 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         length_pp  = params.parent_length[params.off_dim];
         factors_pp = params.pp_factors_curr;
 
-        max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
+        transforms_per_block_pp = workgroup_size / params.pp_threads_per_transform;
 
-        length_off_dim = params.parent_length[params.off_dim];
+        max_factor_pp   = *std::max_element(factors_pp.begin(), factors_pp.end());
+        pp_factors_prod = product(factors_pp.begin(), factors_pp.end());
+        length_off_dim  = params.parent_length[params.off_dim];
 
         R.size = Expression{std::max(nregisters, max_factor_pp)};
 
@@ -72,6 +74,9 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
     unsigned int length_off_dim;
     unsigned int max_factor_pp;
+
+    unsigned int transforms_per_block_pp;
+    unsigned int pp_factors_prod;
 
     Variable offset_pp{"offset_pp", "size_t"};
     Variable stride_lds_pp{"stride_lds_pp", "size_t"};
@@ -393,7 +398,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         device_tmpl.set_value(stride_type.name, "SB_UNIT");
 
         StatementList device;
-
         device += Call{"forward_partial_pass_length" + std::to_string(length_pp) + "_"
                            + tiling_name() + "_device",
                        device_tmpl,
@@ -408,7 +412,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         twdMul += Call{"twiddle_multiply_pp_length" + std::to_string(length_pp) + "_device",
                        pre_twd_mul_tmpl,
                        pre_twd_mul_args};
-
         stmts += twdMul;
 
         StatementList postStore;

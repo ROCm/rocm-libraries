@@ -64,11 +64,13 @@ struct PartialPassParams
     PartialPassParams(const ComputeScheme&             scheme,
                       const unsigned int&              current_dim,
                       const unsigned int&              off_dim,
+                      const unsigned int&              pp_tpt,
                       const std::vector<unsigned int>& pp_factors_curr,
                       const std::vector<unsigned int>& pp_factors_other)
         : scheme(scheme)
         , current_dim(current_dim)
         , off_dim(off_dim)
+        , pp_tpt(pp_tpt)
         , pp_factors_curr(pp_factors_curr)
         , pp_factors_other(pp_factors_other)
     {
@@ -77,6 +79,7 @@ struct PartialPassParams
     ComputeScheme             scheme      = CS_NONE;
     unsigned int              current_dim = 0;
     unsigned int              off_dim     = 0;
+    unsigned int              pp_tpt      = 0;
     std::vector<unsigned int> pp_factors_curr;
     std::vector<unsigned int> pp_factors_other;
 };
@@ -119,6 +122,7 @@ struct FFTKernel
               ComputeScheme               scheme             = CS_NONE,
               unsigned int                current_dim        = 0,
               unsigned int                off_dim            = 0,
+              unsigned int                pp_tpt             = 0,
               std::vector<unsigned int>&& pp_factors_curr    = std::vector<unsigned int>(),
               std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>())
         : factors(factors)
@@ -129,7 +133,7 @@ struct FFTKernel
         , half_lds(half_lds)
         , direct_to_from_reg(direct_to_from_reg)
         , aot_rtc(aot_rtc)
-        , pp_params(scheme, current_dim, off_dim, pp_factors_curr, pp_factors_other)
+        , pp_params(scheme, current_dim, off_dim, pp_tpt, pp_factors_curr, pp_factors_other)
     {
     }
 

@@ -150,6 +150,7 @@ class FFTKernel(BaseNode):
         f += ', ' + str(self.function.meta.pp_child_scheme)
         f += ', ' + str(self.function.meta.pp_current_dim)
         f += ', ' + str(self.function.meta.pp_off_dim)
+        f += ', ' + str(self.function.meta.pp_threads_per_transform)
         pp_factors_curr = getattr(self.function.meta, 'pp_factors_curr', None)
         if pp_factors_curr is not None:
             f += ', {' + cjoin(pp_factors_curr) + '}'
@@ -444,6 +445,7 @@ def generate_kernel_functions(kernels, precisions, launchers_json):
             direct_to_from_reg = launcher.direct_to_from_reg
             scheme = launcher.scheme
             pp_child_scheme = launcher.pp_child_scheme
+            pp_threads_per_transform = launcher.pp_threads_per_transform
             pp_factors_curr = launcher.pp_factors_curr
             pp_factors_other = launcher.pp_factors_other
             pp_current_dim = launcher.pp_current_dim
@@ -467,24 +469,26 @@ def generate_kernel_functions(kernels, precisions, launchers_json):
             if precision == 'sp':
                 precisions.append('half')
             for p in precisions:
-                f = Function(arguments=ArgumentList(data, back),
-                             meta=NS(factors=factors,
-                                     length=length,
-                                     params=params,
-                                     precision=p,
-                                     runtime_compile=runtime_compile,
-                                     scheme=scheme,
-                                     workgroup_size=workgroup_size,
-                                     transforms_per_block=transforms_per_block,
-                                     threads_per_transform=tpt_list,
-                                     transpose=sbrc_transpose_type,
-                                     use_3steps_large_twd=use_3steps_large_twd,
-                                     lds_size_bytes=kernel.lds_size_bytes,
-                                     pp_child_scheme=pp_child_scheme,
-                                     pp_factors_curr=pp_factors_curr,
-                                     pp_factors_other=pp_factors_other,
-                                     pp_current_dim=pp_current_dim,
-                                     pp_off_dim=pp_off_dim))
+                f = Function(
+                    arguments=ArgumentList(data, back),
+                    meta=NS(factors=factors,
+                            length=length,
+                            params=params,
+                            precision=p,
+                            runtime_compile=runtime_compile,
+                            scheme=scheme,
+                            workgroup_size=workgroup_size,
+                            transforms_per_block=transforms_per_block,
+                            threads_per_transform=tpt_list,
+                            transpose=sbrc_transpose_type,
+                            use_3steps_large_twd=use_3steps_large_twd,
+                            lds_size_bytes=kernel.lds_size_bytes,
+                            pp_child_scheme=pp_child_scheme,
+                            pp_threads_per_transform=pp_threads_per_transform,
+                            pp_factors_curr=pp_factors_curr,
+                            pp_factors_other=pp_factors_other,
+                            pp_current_dim=pp_current_dim,
+                            pp_off_dim=pp_off_dim))
 
                 if (scheme == 'CS_3D_PP'):
                     pp_kernel_functions.append(f)
@@ -592,6 +596,9 @@ def generate_kernels(kernels, precisions, stockham_gen):
             # check for data specific to partial-pass 3D kernels
             if hasattr(k, 'dims'):
                 proc.stdin.write(" " + ','.join([str(f) for f in k.dims]))
+                proc.stdin.write(
+                    " " +
+                    ','.join([str(f) for f in k.threads_per_transform_pp]))
                 proc.stdin.write(" " +
                                  ','.join([str(f)
                                            for f in k.factors_pp[0]]) + " ")

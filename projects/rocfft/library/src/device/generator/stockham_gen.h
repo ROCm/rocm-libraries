@@ -90,11 +90,13 @@ struct StockhamPartialPassParams
     StockhamPartialPassParams() = default;
 
     StockhamPartialPassParams(const std::vector<unsigned int>& parent_length,
+                              const unsigned int               pp_threads_per_transform,
                               const unsigned int               current_dim,
                               const unsigned int               off_dim,
                               const std::vector<unsigned int>& pp_factors_curr,
                               const std::vector<unsigned int>& pp_factors_other)
         : parent_length(parent_length)
+        , pp_threads_per_transform(pp_threads_per_transform)
         , current_dim(current_dim)
         , off_dim(off_dim)
         , pp_factors_curr(pp_factors_curr)
@@ -103,6 +105,7 @@ struct StockhamPartialPassParams
     }
 
     std::vector<unsigned int> parent_length;
+    unsigned int              pp_threads_per_transform;
     unsigned int              current_dim = 0;
     unsigned int              off_dim     = 0;
     std::vector<unsigned int> pp_factors_curr;
