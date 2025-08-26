@@ -62,20 +62,28 @@ target_link_libraries(origami PUBLIC hip::host)
 
 if(ORIGAMI_ENABLE_PYTHON)
     find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-    find_package(pybind11 QUIET)
+    find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
 
-    pybind11_add_module(origami_python 
+    include(FetchContent)
+    FetchContent_Declare(
+        nanobind
+        GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+        GIT_TAG        v1.9.2  # or latest stable version
+    )
+    FetchContent_MakeAvailable(nanobind)
+    find_package(nanobind CONFIG REQUIRED)
+
+    nanobind_add_module(origami_python 
         "${CMAKE_CURRENT_SOURCE_DIR}/python/origami_module.cpp"
     )
     
     set_target_properties(origami_python PROPERTIES
         OUTPUT_NAME "origami"
-        SUFFIX "${PYTHON_MODULE_EXTENSION}"
     )
     
     target_link_libraries(origami_python PRIVATE origami::origami)
-
 endif()
+
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
@@ -144,6 +152,5 @@ if(ORIGAMI_STANDALONE)
         LDCONFIG
         LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
     )
-
 endif()
 

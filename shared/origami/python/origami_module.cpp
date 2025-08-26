@@ -2,19 +2,24 @@
 #include "origami/streamk.hpp"
 #include "origami/utils.hpp"
 
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
+#include <nanobind/stl/map.h>
+#include <nanobind/stl/unordered_map.h>
+#include <nanobind/stl/pair.h>
+#include <nanobind/stl/tuple.h>
 
 using Hardware = origami::hardware_t;
 
-PYBIND11_MODULE(origami, m)
+NB_MODULE(origami, m)
 {
-    pybind11::enum_<Hardware::architecture_t>(m, "architecture_t")
+    nanobind::enum_<Hardware::architecture_t>(m, "architecture_t")
         .value("gfx942", Hardware::architecture_t::gfx942)
         .value("gfx950", Hardware::architecture_t::gfx950)
         .export_values();
 
-    pybind11::enum_<origami::data_type_t>(m, "data_type_t")
+    nanobind::enum_<origami::data_type_t>(m, "data_type_t")
         .value("Float", origami::data_type_t::Float)
         .value("ComplexFloat", origami::data_type_t::ComplexFloat)
         .value("ComplexDouble", origami::data_type_t::ComplexDouble)
@@ -43,8 +48,8 @@ PYBIND11_MODULE(origami, m)
           &origami::int_to_data_type,
           "Convert int to data_type_t.");
 
-    pybind11::class_<Hardware>(m, "Hardware")
-        .def(pybind11::init<Hardware::architecture_t,
+    nanobind::class_<Hardware>(m, "Hardware")
+        .def(nanobind::init<Hardware::architecture_t,
                             size_t,
                             size_t,
                             size_t,
@@ -57,17 +62,17 @@ PYBIND11_MODULE(origami, m)
                             double>())
         .def("print", &Hardware::print)
         .def("print_debug_info", &Hardware::print_debug_info)
-        .def_readwrite("N_CU", &Hardware::N_CU)
-        .def_readwrite("LDS_capacity", &Hardware::LDS_capacity)
-        .def_readwrite("mem1_perf_ratio", &Hardware::mem1_perf_ratio)
-        .def_readwrite("mem2_perf_ratio", &Hardware::mem2_perf_ratio)
-        .def_readwrite("mem3_perf_ratio", &Hardware::mem3_perf_ratio)
-        .def_readwrite("L2_capacity", &Hardware::L2_capacity)
-        .def_readwrite("CU_per_L2", &Hardware::CU_per_L2)
-        .def_readwrite("compute_clock_ghz", &Hardware::compute_clock_ghz)
-        .def_readwrite("parallel_mi_cu", &Hardware::parallel_mi_cu)
-        .def_readwrite("percent_bw_per_wg", &Hardware::percent_bw_per_wg)
-        .def_readwrite("NUM_XCD", &Hardware::NUM_XCD);
+        .def_rw("N_CU", &Hardware::N_CU)
+        .def_rw("LDS_capacity", &Hardware::LDS_capacity)
+        .def_rw("mem1_perf_ratio", &Hardware::mem1_perf_ratio)
+        .def_rw("mem2_perf_ratio", &Hardware::mem2_perf_ratio)
+        .def_rw("mem3_perf_ratio", &Hardware::mem3_perf_ratio)
+        .def_rw("L2_capacity", &Hardware::L2_capacity)
+        .def_rw("CU_per_L2", &Hardware::CU_per_L2)
+        .def_rw("compute_clock_ghz", &Hardware::compute_clock_ghz)
+        .def_rw("parallel_mi_cu", &Hardware::parallel_mi_cu)
+        .def_rw("percent_bw_per_wg", &Hardware::percent_bw_per_wg)
+        .def_rw("NUM_XCD", &Hardware::NUM_XCD);
 
     m.def("get_hardware_for_device",
           &Hardware::get_hardware_for_device,

@@ -5,10 +5,10 @@ The bindings allow you to use Origami's functionality directly from Python.
 
 ## Installation
 
-First, install `pybind11` using pip:
+First, install `nanobind` using pip:
 
 ```bash
-pip install pybind11
+pip install nanobind
 ```
 
 Make sure `ROCM_PATH` is set (e.g. `export ROCM_PATH=/opt/rocm`). Then, build the bindings using the following command:
