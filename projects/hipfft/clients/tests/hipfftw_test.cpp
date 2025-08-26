@@ -1733,7 +1733,7 @@ namespace
                 }
                 const auto contiguous_idist = val;
                 set_input<hostbuf, hipfftw_real_t<prec>>(verification_input,
-                                                         fft_input_generator_host,
+                                                         fft_input_random_generator_host,
                                                          params.get_array_type(fft_io::fft_io_in),
                                                          params.get_lengths(),
                                                          ilength,
@@ -1978,7 +1978,7 @@ namespace
                                            {0} /* offset */,
                                            {0} /* offset */);
                 EXPECT_LE(diff.l_inf, linf_cutoff);
-                EXPECT_LT(diff.l_2 / ref_norm.l_2, sqrt(log2(total_length)) * test_epsilon);
+                EXPECT_LE(diff.l_2 / ref_norm.l_2, sqrt(log2(total_length)) * test_epsilon);
                 if constexpr(prec == fft_precision_single)
                 {
                     max_linf_eps_single = std::max(max_linf_eps_single,
