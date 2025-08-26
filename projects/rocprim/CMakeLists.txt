@@ -74,6 +74,7 @@ option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build rocPRIM with offload compression" ON)
+cmake_dependent_option(USE_SYSTEM_LIB "Use installed ROCm libs when building tests" OFF BUILD_TEST OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -205,6 +206,11 @@ endif()
 
 # Tests
 if(BUILD_TEST)
+  # If building tests from installed libs, we need to make sure the versions match
+  if(USE_SYSTEM_LIB)
+    find_package(rocprim ${PROJECT_VERSION} REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+  endif()
+
   if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
     rocm_package_setup_client_component(tests)
   endif()
