@@ -132,55 +132,7 @@ rocsparse_status rocsparse_coosort_buffer_size(rocsparse_handle     handle,
 *
 *  \par Example
 *  The following example sorts a \f$3 \times 3\f$ COO matrix by row indices.
-*  \code{.c}
-*      //     1 2 3
-*      // A = 4 5 6
-*      //     7 8 9
-*      rocsparse_int m   = 3;
-*      rocsparse_int n   = 3;
-*      rocsparse_int nnz = 9;
-*
-*      coo_row_ind[nnz] = {0, 1, 2, 0, 1, 2, 0, 1, 2}; // device memory
-*      coo_col_ind[nnz] = {0, 0, 0, 1, 1, 1, 2, 2, 2}; // device memory
-*      coo_val[nnz]     = {1, 4, 7, 2, 5, 8, 3, 6, 9}; // device memory
-*
-*      // Create permutation vector perm as the identity map
-*      rocsparse_int* perm;
-*      hipMalloc((void**)&perm, sizeof(rocsparse_int) * nnz);
-*      rocsparse_create_identity_permutation(handle, nnz, perm);
-*
-*      // Allocate temporary buffer
-*      size_t buffer_size;
-*      void* temp_buffer;
-*      rocsparse_coosort_buffer_size(handle,
-*                                    m,
-*                                    n,
-*                                    nnz,
-*                                    coo_row_ind,
-*                                    coo_col_ind,
-*                                    &buffer_size);
-*      hipMalloc(&temp_buffer, buffer_size);
-*
-*      // Sort the COO matrix
-*      rocsparse_coosort_by_row(handle,
-*                               m,
-*                               n,
-*                               nnz,
-*                               coo_row_ind,
-*                               coo_col_ind,
-*                               perm,
-*                               temp_buffer);
-*
-*      // Gather sorted coo_val array
-*      float* coo_val_sorted;
-*      hipMalloc((void**)&coo_val_sorted, sizeof(float) * nnz);
-*      rocsparse_sgthr(handle, nnz, coo_val, coo_val_sorted, perm, rocsparse_index_base_zero);
-*
-*      // Clean up
-*      hipFree(temp_buffer);
-*      hipFree(perm);
-*      hipFree(coo_val);
-*  \endcode
+*  \snippet example_rocsparse_coosort_by_row.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_coosort_by_row(rocsparse_handle handle,
@@ -245,55 +197,7 @@ rocsparse_status rocsparse_coosort_by_row(rocsparse_handle handle,
 *
 *  \par Example
 *  The following example sorts a \f$3 \times 3\f$ COO matrix by column indices.
-*  \code{.c}
-*      //     1 2 3
-*      // A = 4 5 6
-*      //     7 8 9
-*      rocsparse_int m   = 3;
-*      rocsparse_int n   = 3;
-*      rocsparse_int nnz = 9;
-*
-*      coo_row_ind[nnz] = {0, 0, 0, 1, 1, 1, 2, 2, 2}; // device memory
-*      coo_col_ind[nnz] = {0, 1, 2, 0, 1, 2, 0, 1, 2}; // device memory
-*      coo_val[nnz]     = {1, 2, 3, 4, 5, 6, 7, 8, 9}; // device memory
-*
-*      // Create permutation vector perm as the identity map
-*      rocsparse_int* perm;
-*      hipMalloc((void**)&perm, sizeof(rocsparse_int) * nnz);
-*      rocsparse_create_identity_permutation(handle, nnz, perm);
-*
-*      // Allocate temporary buffer
-*      size_t buffer_size;
-*      void* temp_buffer;
-*      rocsparse_coosort_buffer_size(handle,
-*                                    m,
-*                                    n,
-*                                    nnz,
-*                                    coo_row_ind,
-*                                    coo_col_ind,
-*                                    &buffer_size);
-*      hipMalloc(&temp_buffer, buffer_size);
-*
-*      // Sort the COO matrix
-*      rocsparse_coosort_by_column(handle,
-*                                  m,
-*                                  n,
-*                                  nnz,
-*                                  coo_row_ind,
-*                                  coo_col_ind,
-*                                  perm,
-*                                  temp_buffer);
-*
-*      // Gather sorted coo_val array
-*      float* coo_val_sorted;
-*      hipMalloc((void**)&coo_val_sorted, sizeof(float) * nnz);
-*      rocsparse_sgthr(handle, nnz, coo_val, coo_val_sorted, perm, rocsparse_index_base_zero);
-*
-*      // Clean up
-*      hipFree(temp_buffer);
-*      hipFree(perm);
-*      hipFree(coo_val);
-*  \endcode
+*  \snippet example_rocsparse_coosort_by_col.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_coosort_by_column(rocsparse_handle handle,
