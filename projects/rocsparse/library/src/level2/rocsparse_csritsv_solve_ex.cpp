@@ -447,10 +447,10 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                                 (rocsparse_int*)info->csritsv_info
                                                                     ->get_zero_pivot()));
 
-        rocsparse_int zero_pivot;
-        auto          csritsv_info = info->csritsv_info;
-        auto          status = csritsv_info->copy_zero_pivot_async(rocsparse_pointer_mode_host,
-                                                          rocsparse::get_indextype<rocsparse_int>(),
+        int64_t zero_pivot;
+        auto    csritsv_info = info->csritsv_info;
+        auto    status       = csritsv_info->copy_zero_pivot_async(rocsparse_pointer_mode_host,
+                                                          rocsparse::get_indextype<int64_t>(),
                                                           &zero_pivot,
                                                           handle->stream);
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));

@@ -26,6 +26,7 @@
 
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "../level1/rocsparse_gthr.hpp"
@@ -41,6 +42,13 @@ namespace rocsparse
 
     {
         ROCSPARSE_ROUTINE_TRACE;
+        if(info == nullptr)
+        {
+            rocsparse::set_minus_one_async(
+                handle->stream, handle->pointer_mode, indextype, position);
+            return rocsparse_status_success;
+        }
+
         auto status = info->copy_zero_pivot_async(
             handle->pointer_mode, indextype, position, handle->stream);
         if(status == rocsparse_status_zero_pivot)

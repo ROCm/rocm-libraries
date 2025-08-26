@@ -270,21 +270,21 @@ void testing_csrsv(const Arguments& arg)
             CHECK_ROCSPARSE_ERROR(rocsparse_csrsv_analysis<T>(PARAMS_ANALYSIS(dA)));
             {
                 auto st = rocsparse_csrsv_zero_pivot(handle, descr, info, analysis_pivot);
+                CHECK_HIP_ERROR(hipDeviceSynchronize());
                 EXPECT_ROCSPARSE_STATUS(st,
                                         (*analysis_pivot != -1) ? rocsparse_status_zero_pivot
                                                                 : rocsparse_status_success);
             }
 
-            CHECK_HIP_ERROR(hipDeviceSynchronize());
             CHECK_ROCSPARSE_ERROR(
                 testing::rocsparse_csrsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)));
             {
                 auto st = rocsparse_csrsv_zero_pivot(handle, descr, info, solve_pivot);
+                CHECK_HIP_ERROR(hipDeviceSynchronize());
                 EXPECT_ROCSPARSE_STATUS(st,
                                         (*solve_pivot != -1) ? rocsparse_status_zero_pivot
                                                              : rocsparse_status_success);
             }
-            CHECK_HIP_ERROR(hipDeviceSynchronize());
             h_analysis_pivot.unit_check(analysis_pivot);
             h_solve_pivot.unit_check(solve_pivot);
         }

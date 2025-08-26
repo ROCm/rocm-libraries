@@ -25,6 +25,7 @@
 #include "internal/level2/rocsparse_csrsv.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrsv.hpp"
+#include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
 namespace rocsparse
 {
@@ -35,6 +36,12 @@ namespace rocsparse
 
     {
         ROCSPARSE_ROUTINE_TRACE;
+        if(info == nullptr)
+        {
+            rocsparse::set_minus_one_async(
+                handle->stream, handle->pointer_mode, indextype, position);
+            return rocsparse_status_success;
+        }
         auto status = info->copy_zero_pivot_async(
             handle->pointer_mode, indextype, position, handle->stream);
         if(status == rocsparse_status_zero_pivot)
@@ -65,7 +72,8 @@ try
     // Check pointer arguments
     ROCSPARSE_CHECKARG_POINTER(2, position);
     auto csrsv_info = info->get_csrsv_info();
-    auto status     = rocsparse::csrsv_zero_pivot(
+
+    auto status = rocsparse::csrsv_zero_pivot(
         handle, csrsv_info, rocsparse::get_indextype<rocsparse_int>(), position);
     if(status == rocsparse_status_zero_pivot)
     {
