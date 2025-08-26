@@ -7508,6 +7508,8 @@ class KernelWriterAssembly(KernelWriter):
           return InstType.INST_F4
       elif abbrev == 'e8':
           return InstType.INST_E8
+      elif abbrev == 'e5m3':
+          return InstType.INST_E5M3
       else:
           assert("Unsupported data type.")
       return InstType.INST_NOTYPE

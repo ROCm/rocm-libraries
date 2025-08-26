@@ -87,6 +87,8 @@ namespace rocisa
 #endif // #ifdef TENSILE_USE_FP4
         case rocisa::DataType::E8:
             return "E8";
+        case rocisa::DataType::E5M3:
+            return "E5M3";
         case rocisa::DataType::Count:;
         }
         return "Invalid";
@@ -148,6 +150,8 @@ namespace rocisa
 #endif // #ifdef TENSILE_USE_FP4
         case rocisa::DataType::E8:
             return TensileLite::TypeInfo<TensileLite::E8>::ElementSize;
+        case rocisa::DataType::E5M3:
+            return TensileLite::TypeInfo<TensileLite::E5M3>::ElementSize;
         case rocisa::DataType::Count:;
         }
         return 1;
@@ -277,6 +281,7 @@ namespace TensileLite
         registerTypeInfo<Float4x2>();
 #endif // #ifdef TENSILE_USE_FP4
         registerTypeInfo<E8>();
+        registerTypeInfo<E5M3>();
     }
 
     void DataTypeInfo::registerAllTypeInfoOnce()

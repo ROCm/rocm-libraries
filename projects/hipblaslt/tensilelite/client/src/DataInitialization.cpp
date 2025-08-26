@@ -133,6 +133,7 @@ namespace TensileLite
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::E8:
+            case rocisa::DataType::E5M3:
                 return 8;
             default:
                 throw std::runtime_error("unsupported datatype");
@@ -373,6 +374,7 @@ namespace TensileLite
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::E8:
+            case rocisa::DataType::E5M3:
                 MiK  = 32;
                 MiKv = 8;
                 break;
@@ -1835,6 +1837,7 @@ namespace TensileLite
                     case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
                     case rocisa::DataType::E8:
+                    case rocisa::DataType::E5M3:
                     case rocisa::DataType::Int64:
                     case rocisa::DataType::XFloat32:
                     case rocisa::DataType::Count:

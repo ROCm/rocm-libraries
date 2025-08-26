@@ -369,6 +369,12 @@ namespace TensileLite
                 auto typedPtr = static_cast<E8 const*>(voidPtr);
                 return cast<Accumulator>(Transform<E8>::Input(typedPtr[pos], aConjugate));
             }
+            case rocisa::DataType::E5M3:
+            {
+                auto typedPtr = static_cast<E5M3 const*>(voidPtr);
+                return cast<Accumulator>(Transform<E5M3>::Input(typedPtr[pos], aConjugate));
+            }
+            break;
             break;
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::ComplexFloat:
@@ -509,6 +515,7 @@ namespace TensileLite
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
             case rocisa::DataType::E8:
+            case rocisa::DataType::E5M3:
                 ;
             }
         }
@@ -567,6 +574,7 @@ namespace TensileLite
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
             case rocisa::DataType::E8:
+            case rocisa::DataType::E5M3:
                 ;
             }
         }
