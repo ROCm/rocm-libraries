@@ -903,6 +903,9 @@ namespace GEMMDriverTest
                     valuesFile << "Scales:\n";
                     logBytes("ScaleA", hostScaleA);
                     logBytes("ScaleB", hostScaleB);
+
+                    logMatrixFloats("Host Result", h_result, M, N);
+                    logMatrixFloats("Device Result", d_result, M, N);
                 }
                 EXPECT_TRUE(res.ok) << res.message();
             }
