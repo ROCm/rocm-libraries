@@ -93,7 +93,14 @@ public:
 
     std::span<T> next()
     {
-        currentOffset = (currentOffset + rotationSize) % numElems;
+        // Return an empty span if numElems is 0
+        if (numElems == 0) {
+            return std::span<T>();
+        }
+        // Apply rotation only when rotationSize > 0
+        if (rotationSize > 0) {
+            currentOffset = (currentOffset + rotationSize) % numElems;
+        }
         return std::span<T>(buffer.get() + currentOffset, numElems);
     }
 
@@ -246,9 +253,9 @@ namespace rocRoller::Client::GEMMClient
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
-        RotatingBuffer<PackedTypeA> rotatingA(hostA.size(), rotatingSize);
-        RotatingBuffer<PackedTypeB> rotatingB(hostB.size(), rotatingSize);
-        RotatingBuffer<C>           rotatingC(hostC.size(), rotatingSize);
+        RotatingBuffer<PackedTypeA> rotatingA(hostA, rotatingSize);
+        RotatingBuffer<PackedTypeB> rotatingB(hostB, rotatingSize);
+        RotatingBuffer<C>           rotatingC(hostC, rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
         
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
