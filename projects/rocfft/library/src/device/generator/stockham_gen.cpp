@@ -642,12 +642,22 @@ void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
             throw std::runtime_error("invalid dimensions for CS_3D_PP");
         }
 
+        // Validate pp_threads_per_transform against threads_per_transform
         if(params_1.pp_threads_per_transform > specs_1.threads_per_transform
            || params_2.pp_threads_per_transform > specs_2.threads_per_transform)
         {
             throw std::runtime_error(
                 "CS_KERNEL_STOCKHAM_PP requires threads_per_transform_pp to be "
                 "equal or less than threads_per_transform");
+        }
+
+        // Validate pp_threads_per_transform against pp_factors_curr
+        if((params_1.pp_factors_curr.size() == 1 && params_1.pp_threads_per_transform > 1)
+           || (params_2.pp_factors_curr.size() == 1 && params_2.pp_threads_per_transform > 1))
+        {
+            throw std::runtime_error("CS_KERNEL_STOCKHAM_PP and CS_KERNEL_STOCKHAM_PP_BLOCK_CC "
+                                     "require threads_per_transform_pp to be 1 when "
+                                     "pp_factors has only one factor");
         }
     }
     else
