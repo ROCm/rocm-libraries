@@ -19,36 +19,36 @@ trigger:
   batch: true
   branches:
     include:
-    - develop
-    - release-staging/rocm-rel-7.*
+    - 'develop'
+    - 'release-staging/rocm-rel-7.*'  
   paths:
     include:
-    - CMakeLists.txt
-    - cmake
+    - 'CMakeLists.txt'
+    - 'cmake'
     exclude:
-    - .githooks
-    - .github
-    - docs
-    - CODEOWNERS
-    - .*.y*ml
-    - *.md
+    - '.githooks'
+    - '.github'
+    - 'docs'
+    - 'CODEOWNERS'
+    - '.*.y*ml'
+    - '*.md'
 
 pr:
   branches:
     include:
-    - develop
-    - release-staging/rocm-rel-7.*
+    - 'develop'
+    - 'release-staging/rocm-rel-7.*'
   paths:
     include:
-    - CMakeLists.txt
-    - cmake
+    - 'CMakeLists.txt'
+    - 'cmake'
     exclude:
-    - .githooks
-    - .github
-    - docs
-    - CODEOWNERS
-    - .*.y*ml
-    - *.md
+    - '.githooks'
+    - '.github'
+    - 'docs'
+    - 'CODEOWNERS'
+    - '.*.y*ml'
+    - '*.md'
 
 stages:
 - stage: rocm_libraries
