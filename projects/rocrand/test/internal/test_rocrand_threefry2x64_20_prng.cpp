@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "test_rocrand_prng.hpp"
+#include "test_rocrand_host_prng.hpp"
 #include "test_rocrand_threefryNx64_20_prng.hpp"
 #include <rocrand/rocrand.h>
 
@@ -57,6 +58,27 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_generator,
                                generator_prng_offset_tests,
                                threefry2x64_20_generator_prng_offset_tests_types);
 
+#ifdef CODE_COVERAGE_ENABLED
+    using rocrand_impl::host::threefry2x64_20_generator_host;
+    using threefry2x64_20_generator_prng_host_tests_types = ::testing::Types<
+        generator_prng_host_tests_params<threefry2x64_20_generator_host<true>, ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+    using threefry2x64_20_generator_prng_offset_host_tests_types = ::testing::Types<
+        generator_prng_offset_host_tests_params<unsigned int, threefry2x64_20_generator_host<true>, ROCRAND_ORDERING_PSEUDO_DEFAULT>,
+        generator_prng_offset_host_tests_params<float, threefry2x64_20_generator_host<true>, ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+    INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_host_generator,
+                                generator_prng_host_tests,
+                                threefry2x64_20_generator_prng_host_tests_types);
+
+    INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_host_generator,
+                                generator_prng_continuity_host_tests,
+                                threefry2x64_20_generator_prng_host_tests_types);
+
+    INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_host_generator,
+                                generator_prng_offset_host_tests,
+                                threefry2x64_20_generator_prng_offset_host_tests_types);
+#endif //CODE_COVERAGE_ENABLED
 // threefry2x64_20-specific generator API tests
 INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_generator,
                                threefryNx64_20_generator_prng_tests,
