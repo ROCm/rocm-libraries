@@ -4673,17 +4673,32 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["PrefetchGlobalRead"]:
         module.addComment1("Tail: local read reset offsets a")
         module.add(self.localReadResetOffsets(kernel, tensorParametersA))
+        if kernel["ProblemType"]["MXBlockA"]:
+          module.addComment1("Tail: local read reset offsets mxsa")
+          module.add(self.localReadResetOffsets(kernel, tensorParametersA["MX"]))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.addComment1("Tail: local read reset offsets mxsb")
+          module.add(self.localReadResetOffsets(kernel, tensorParametersB["MX"]))
         module.addComment1("Tail: local read reset offsets b")
         module.add(self.localReadResetOffsets(kernel, tensorParametersB))
+
         module.addComment1("Tail: local read init pointers a")
         module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))
+        if kernel["ProblemType"]["MXBlockA"]:
+          module.addComment1("Tail: local read init pointers mxsa")
+          module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA["MX"]))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.addComment1("Tail: local read init pointers mxsb")
+          module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"]))
         module.addComment1("Tail: local read init pointers b")
         module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
+
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
           module.addComment1("local read reset offsets metadata")
           module.add(self.localReadResetOffsets(kernel, tPM))
           module.addComment1("local read init pointers metadata")
           module.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
+
       # tail: macs
       module.addComment1("tail loop: macs")
       module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, -1, None))
