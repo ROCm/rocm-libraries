@@ -4398,6 +4398,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # reset local write offset in asm code as well
           module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB))
 
+        if kernel["ProblemType"]["MXBlockA"]:
+          module.addComment1("local write reset offsets mxsa")
+          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA["MX"]))
+          if kernel["ExpandPointerSwap"]:
+            # reset local write offset in asm code as well
+            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA["MX"]))
+
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.addComment1("local write reset offsets mxsb")
+          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB["MX"]))
+          if kernel["ExpandPointerSwap"]:
+            # reset local write offset in asm code as well
+            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB["MX"]))
+
       # tail: global read
       # Check out VGPR for DTVA
       vDtvResources = self.tailLoopAllocDTVVgpr(kernel, tensorParametersA, tensorParametersB)

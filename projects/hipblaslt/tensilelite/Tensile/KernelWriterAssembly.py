@@ -10208,10 +10208,16 @@ class KernelWriterAssembly(KernelWriter):
     numLwa = 0
     if tP["isA"]:
       numLwa = self.states.a.numVgprLocalWriteAddr
+    elif tP["isMXSA"]:
+      numLwa = self.states.mxsa.numVgprLocalWriteAddr
+    elif tP["isMXSB"]:
+      numLwa = self.states.mxsb.numVgprLocalWriteAddr
     elif tP["isB"]:
       numLwa = self.states.b.numVgprLocalWriteAddr
     elif tP["isM"]:
       numLwa = self.states.m.numVgprLocalWriteAddr
+    else:
+      raise Exception(f"unsupport tc %s{tc}")
 
     for i in range(1, numLwa):
       module.add(VAddU32(
