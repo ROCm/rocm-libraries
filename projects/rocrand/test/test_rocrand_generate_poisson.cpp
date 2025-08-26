@@ -58,7 +58,7 @@ void test_generate_host()
     const rocrand_rng_type rng_type = rocrand_generate_poisson_tests::GetParam();
 
     rocrand_generator generator;
-    ROCRAND_CHECK(rocrand_create_generator_host(&generator, rng_type));
+    ROCRAND_CHECK(rocrand_create_generator_host_blocking(&generator, rng_type));
 
     const size_t   size   = 12563;
     double         lambda = 100.0;
