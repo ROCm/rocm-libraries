@@ -7,6 +7,14 @@ Documentation for hipSPARSE is available at
 
 ### Added
 
+* Adds brain half float mixed precision to `rocsparse_axpby` where X and Y use bfloat16 and result and the compute type use float
+* Adds brain half float mixed precision to `rocsparse_spvv` where X and Y use bfloat16 and result and the compute type use float
+* Adds brain half float mixed precision to `rocsparse_spmv` where A and X use bfloat16 and Y and the compute type use float
+* Adds brain half float mixed precision to `rocsparse_spmm` where A and B use bfloat16 and C and the compute type use float
+* Adds brain half float mixed precision to `rocsparse_sddmm` where A and B use bfloat16 and C and the compute type use float
+* Adds brain half float mixed precision to `rocsparse_sddmm` where A and B and C use bfloat16 and the compute type use float
+* Adds half float mixed precision to `rocsparse_sddmm` where A and B and C use float16 and the compute type use float
+* Adds brain half float uniform precision to `rocsparse_scatter` and `rocsparse_gather` routines
 * Added documentation for installing and building hipSPARSE on Microsoft Windows.
 
 ## hipSPARSE 4.0.1 for ROCm 7.0.0
