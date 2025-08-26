@@ -2275,6 +2275,7 @@ class Solution(collections.abc.Mapping):
         bpe = state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
         bpe = 1 if ("MXS" in mxTc) else bpe
         ldsAlign = int(64 / state["ProblemType"]["DataType"].numRegisters())
+        ldsAlign = 64 if state["ProblemType"]["DataType"].is6bitFloat() else ldsAlign
 
         if state["UnrollMajorLDS%s"%mxTc]:
           ldsNumBytes = int((state["_DepthU%s"%mxTc] + ldsPad) * state["MacroTile%s"%mxTc] * bpe)
@@ -2296,6 +2297,7 @@ class Solution(collections.abc.Mapping):
       def calcLdsNumBytesM():
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
           ldsAlign = int(64 / state["ProblemType"]["DataType"].numRegisters())
+          ldsAlign = 64 if state["ProblemType"]["DataType"].is6bitFloat() else ldsAlign
           bpeAB = state["ProblemType"]["DataType"].numBytes()
           if state["UnrollMajorLDSMetadata"]:
             ldsNumBytesMetadata = (state["_DepthUMetadata"] + state["LdsPadMetadata"]) * state["MacroTileMetadata"]
