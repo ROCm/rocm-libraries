@@ -51,6 +51,7 @@
 #include <Tensile/DataTypes_BFloat6.hpp>
 #include <Tensile/DataTypes_Float4.hpp>
 #include <Tensile/DataTypes_E8.hpp>
+#include <Tensile/DataTypes_E5M3.hpp>
 
 namespace rocisa
 {
@@ -326,6 +327,12 @@ namespace TensileLite
     template <>
     struct TypeInfo<E8>
         : public BaseTypeInfo<E8, rocisa::DataType::E8, 1, false, false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E5M3>
+        : public BaseTypeInfo<E5M3, rocisa::DataType::E5M3, 1, false, false>
     {
     };
 

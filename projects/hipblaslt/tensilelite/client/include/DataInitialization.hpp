@@ -442,6 +442,9 @@ namespace TensileLite
                 case rocisa::DataType::E8:
                     initArray<E8>(initMode, static_cast<E8*>(array), descriptor);
                     break;
+                case rocisa::DataType::E5M3:
+                    initArray<E5M3>(initMode, static_cast<E5M3*>(array), descriptor);
+                    break;
                 case rocisa::DataType::Int64:
                 case rocisa::DataType::XFloat32:
                 case rocisa::DataType::ComplexFloat:
@@ -2479,6 +2482,73 @@ namespace TensileLite
         }
 
         template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Zero>()
+        {
+            return 0;
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::One>()
+        {
+            return E5M3(1.0f);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Two>()
+        {
+            return E5M3(2.0f);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::NegOne>()
+        {
+            throw std::runtime_error("-1 not available for E5M3.");
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Max>()
+        {
+            uint8_t x = 0xfe;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::DenormMin>()
+        {
+            uint8_t x = 0x01;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::DenormMax>()
+        {
+            uint8_t x = 0x07;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::NaN>()
+        {
+            uint8_t x = 0xff;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for E5M3.");
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Random>()
+        {
+            return E5M3((rand() % 7) - 3);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::BadInput>()
+        {
+            uint8_t x = 0xff;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::BadOutput>()
+        {
+            uint8_t x = 0xff;
+            return reinterpret_cast<E5M3&>(x);
+        }
+
+        template <>
         inline bool DataInitialization::isBadInput<float>(float value)
         {
             return std::isnan(value);
@@ -2582,6 +2652,12 @@ namespace TensileLite
 
         template <>
         inline bool DataInitialization::isBadInput<E8>(E8 value)
+        {
+            return value.data == 0xff;
+        }
+
+        template <>
+        inline bool DataInitialization::isBadInput<E5M3>(E5M3 value)
         {
             return value.data == 0xff;
         }
@@ -2691,6 +2767,12 @@ namespace TensileLite
 
         template <>
         inline bool DataInitialization::isBadOutput<E8>(E8 value)
+        {
+            return value.data == 0xff;
+        }
+
+        template <>
+        inline bool DataInitialization::isBadOutput<E5M3>(E5M3 value)
         {
             return value.data == 0xff;
         }
@@ -2855,6 +2937,12 @@ namespace TensileLite
                                         getTrigValue<double>(idx, useCos, useAbs));
         }
 
+        template <>
+        inline E5M3 DataInitialization::getTrigValue<E5M3>(int idx, bool useCos, bool useAbs)
+        {
+            return E5M3(getTrigValue<float>(idx, useCos, useAbs));
+        }
+
         template <typename>
         struct FP_PARAM;
 
@@ -2928,6 +3016,14 @@ namespace TensileLite
             using UINT_T                = uint8_t;
             static constexpr int NUMSIG = 0;
             static constexpr int NUMEXP = 8;
+        };
+
+        template <>
+        struct FP_PARAM<E5M3>
+        {
+            using UINT_T                = uint8_t;
+            static constexpr int NUMSIG = 3;
+            static constexpr int NUMEXP = 5;
         };
 
         template <typename T>
@@ -3022,6 +3118,11 @@ namespace TensileLite
 
         template <>
         struct rocm_random_narrow_range<E8> : rocm_random<E8, -100, 0>
+        {
+        };
+
+        template <>
+        struct rocm_random_narrow_range<E5M3> : rocm_random<E5M3, -100, 0>
         {
         };
 
@@ -3182,6 +3283,12 @@ namespace TensileLite
         inline E8 DataInitialization::getValue<E8, InitMode::RandomNarrow>()
         {
             return getValue<E8, InitMode::Random>();
+        }
+
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::RandomNarrow>()
+        {
+            return getValue<E5M3, InitMode::Random>();
         }
 
         template <typename T>
@@ -3355,6 +3462,12 @@ namespace TensileLite
         }
 
         template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::RandomNegPosLimited>()
+        {
+            return getValueWithUpperLowerBoundInteger<E5M3>();
+        }
+
+        template <>
         inline float DataInitialization::ConvertTo<float>(size_t i)
         {
             return static_cast<float>(i);
@@ -3500,6 +3613,12 @@ namespace TensileLite
         }
 
         template <>
+        inline E5M3 DataInitialization::ConvertTo<E5M3>(size_t i)
+        {
+            return static_cast<E5M3>(static_cast<float>(i));
+        }
+
+        template <>
         inline float DataInitialization::convertDoubleTo<float>(double value)
         {
             return static_cast<float>(value);
@@ -3642,5 +3761,10 @@ namespace TensileLite
             return static_cast<E8>(static_cast<float>(value));
         }
 
+        template <>
+        inline E5M3 DataInitialization::convertDoubleTo<E5M3>(double value)
+        {
+            return static_cast<E5M3>(static_cast<float>(value));
+        }
     } // namespace Client
 } // namespace TensileLite

@@ -65,6 +65,7 @@ void init_enum(nb::module_ m)
         .value("BFloat6", rocisa::DataType::BFloat6)
         .value("Float4", rocisa::DataType::Float4)
         .value("E8", rocisa::DataType::E8)
+        .value("E5M3", rocisa::DataType::E5M3)
         .export_values();
 
     nb::enum_<rocisa::SignatureValueKind>(m_enum, "SignatureValueKind")
@@ -73,6 +74,7 @@ void init_enum(nb::module_ m)
         .export_values();
 
     nb::enum_<rocisa::InstType>(m_enum, "InstType")
+        .value("INST_E5M3", rocisa::InstType::INST_E5M3)
         .value("INST_E8", rocisa::InstType::INST_E8)
         .value("INST_F4", rocisa::InstType::INST_F4)
         .value("INST_F6", rocisa::InstType::INST_F6)
