@@ -122,6 +122,12 @@ namespace TensileLite
     namespace Client
     {
         template <typename T>
+        T abs(T val)
+        {
+            return (val > T(0))? val : -val;
+        }
+
+        template <typename T>
         struct Transform
         {
             inline static T Input(T const& val, bool conj)
@@ -688,7 +694,7 @@ namespace TensileLite
             auto new_type = isForAll ? activationType2 : activationType;
             if(new_type == ActivationType::Abs)
             {
-                return static_cast<T>(std::abs(val));
+                return static_cast<T>(abs(val));
             }
             else if(new_type == ActivationType::Clippedrelu)
             {
@@ -1579,7 +1585,7 @@ namespace TensileLite
                             {
                                 size_t mxsaI = (boundIndices[0].aMirror ? (boundSize[0] - i - 1) : i) / problem.mxBlockA();
                                 size_t mxsaIdx = mxsaIndex + (mxsaI * mxsaStride);
-                                Accumulator sa = GetValue<Accumulator>(mxsa.dataType(), inputs.mxsa, mxsaIdx, 0);
+                                Accumulator sa = abs(GetValue<Accumulator>(mxsa.dataType(), inputs.mxsa, mxsaIdx, 0));
                                 mxScale = multiply<Accumulator>(mxScale, sa);
                             }
 
@@ -1587,7 +1593,7 @@ namespace TensileLite
                             {
                                 size_t mxsbI = (boundIndices[0].bMirror ? (boundSize[0] - i - 1) : i) / problem.mxBlockB();
                                 size_t mxsbIdx = mxsbIndex + (mxsbI * mxsbStride);
-                                Accumulator sb = GetValue<Accumulator>(mxsb.dataType(), inputs.mxsb, mxsbIdx, 0);
+                                Accumulator sb = abs(GetValue<Accumulator>(mxsb.dataType(), inputs.mxsb, mxsbIdx, 0));
                                 mxScale = multiply<Accumulator>(mxScale, sb);
                             }
                             value += multiply<Accumulator>(val, mxScale);
