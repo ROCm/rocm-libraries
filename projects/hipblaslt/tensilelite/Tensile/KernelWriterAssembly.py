@@ -4287,10 +4287,12 @@ class KernelWriterAssembly(KernelWriter):
         with self.allocTmpSgpr(3) as tmpSgprInfo:
           tmpSgpr = tmpSgprInfo.idx
           gsuSgpr = tmpSgpr + 2
+          du = kernel["_DepthU%s"%tc]
+          duBpe = int(du * tP["bpeGR"])
           module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
-          module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1=int(kernel["DepthU"]*tP["bpeGR"]), comment="GSU*DepthU*Bpe"))
+          module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1=duBpe, comment="GSU*_DepthUTc*Bpe"))
           module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
-          module.add(SCMovB32(dst=sgpr(gsuSgpr), src=int(kernel["DepthU"]*tP["bpeGR"]), comment="DepthU*Bpe if GSUC = 1"))
+          module.add(SCMovB32(dst=sgpr(gsuSgpr), src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
           module.add(SMulI32(dst=sgpr(tmpSgpr+0), src0=sgpr(gsuSgpr), src1=stride, \
               comment="incr%s%s = %s*DepthU*bpeGR (unrollIdx)"%(tc, loopChar, stride) ))
           # TODO - this should be mul-H??
