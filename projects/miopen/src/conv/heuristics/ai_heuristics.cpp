@@ -642,7 +642,11 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 {
     if(problem.Is3d())
     {
-        // Check cache FIRST - avoids expensive model creation if we have cached results
+        MIOPEN_LOG_I2("TunaNet for 3D convolutions is not implemented yet, using fallback");
+        return {};
+#if 0 // Temporarily disabled to avoid unreachable code warnings. Restore when 3D TunaNet is ready.
+      // TODO: Train improved 3D TunaNet model and metadata
+      // Check cache FIRST - avoids expensive model creation if we have cached results
         auto cached_result = GetCachedPrediction(problem, device, true); // true = 3D
         if(!cached_result.empty())
         {
@@ -672,6 +676,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         }
 
         return result.solver_ids;
+#endif
     }
     else
     {
