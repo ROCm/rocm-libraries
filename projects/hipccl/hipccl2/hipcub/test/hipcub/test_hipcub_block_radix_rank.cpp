@@ -722,7 +722,7 @@ void test_radix_rank_with_prefix_sum_output()
 
                     ++histogram[bit_rep];
                 }
-                #if defined(_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE >= 9)
+                #if defined(_WIN32) || (defined(_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE >= 9))
                     std::exclusive_scan(histogram.begin(),
                                         histogram.end(),
                                         pfs_expected.begin() + pfs_offset,
