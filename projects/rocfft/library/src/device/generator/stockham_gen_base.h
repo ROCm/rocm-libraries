@@ -78,6 +78,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     unsigned int nregisters;
     unsigned int transforms_per_block;
+    unsigned int transforms_per_block_pp;
 
     // data that may be overridden by subclasses (different tiling types)
     unsigned int n_device_calls = 1;
@@ -167,6 +168,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // So we'd like to do that expensive mod or div once and for all
     // Variable thread_in_device{"thread_in_device", "size_t"};
     Variable thread_in_device{"thread_in_device", "unsigned int"};
+    Variable thread_in_device_pp{"thread_in_device_pp", "unsigned int"};
 
     // global input/output buffer offset to current transform
     Variable offset{"offset", "size_t"};
@@ -501,6 +503,87 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     // Call generator as many times as needed.
     // generator accepts h, hr, width, dt, guard_pred parameters
+    StatementList add_pp_work(
+        std::function<StatementList(
+            unsigned int, unsigned int, unsigned int, unsigned int, Expression)> generator,
+        unsigned int                                                             width,
+        double                                                                   height,
+        ThreadGuardMode                                                          guard,
+        bool                                                                     trans_dir = false,
+        const std::optional<unsigned int>& guard_factor = std::nullopt,
+        const std::optional<unsigned int>& work_length  = std::nullopt) const
+    {
+        StatementList stmts;
+        unsigned int  iheight = std::floor(height);
+        if(height > iheight && threads_per_transform_pp > length / width)
+            iheight += 1;
+
+        Expression guard_expr = Expression{Literal{"true"}};
+
+        const auto effective_length = work_length ? *work_length : length;
+        const auto thread_guard_cond
+            = (effective_length / width) * (guard_factor ? *guard_factor : 1);
+
+        // do thread gurad when guard_by_if or guard_by_arg
+        if(guard != ThreadGuardMode::NO_GUARD)
+        {
+            // using ">" : no need to test "if(thread < XXX)"" if it is always true
+            if((!trans_dir && threads_per_transform_pp > (effective_length / width))
+               || (trans_dir
+                   && workgroup_size / transforms_per_block_pp > (effective_length / width)))
+            {
+                if(writeGuard)
+                    guard_expr = Expression{write && (thread < thread_guard_cond)};
+                else
+                    guard_expr = Expression{thread < thread_guard_cond};
+            }
+            else
+            {
+                if(writeGuard)
+                    guard_expr = Expression{write};
+            }
+        }
+
+        StatementList work;
+        for(unsigned int h = 0; h < iheight; ++h)
+            work += generator(h, 0, width, 0, guard_expr);
+
+        // guard_expr is not a trivial value "true"
+        if(guard == ThreadGuardMode::GUARD_BY_IF && !std::holds_alternative<Literal>(guard_expr))
+        {
+            stmts += CommentLines{"more than enough threads, some do nothing"};
+            stmts += If{guard_expr, work};
+        }
+        else
+        {
+            stmts += work;
+        }
+
+        if(height > iheight && threads_per_transform_pp < effective_length / width)
+        {
+            stmts += CommentLines{"not enough threads, some threads do extra work"};
+            unsigned int dt = iheight * threads_per_transform_pp;
+
+            // always do thread gurad
+            if(writeGuard)
+                guard_expr = Expression{write && (thread + dt < thread_guard_cond)};
+            else
+                guard_expr = Expression{thread + dt < thread_guard_cond};
+
+            work = generator(0, iheight, width, dt, guard_expr);
+
+            // put in if only if guard_by_if
+            if(guard == ThreadGuardMode::GUARD_BY_IF)
+                stmts += If{guard_expr, work};
+            else
+                stmts += work;
+        }
+
+        return stmts;
+    }
+
+    // Call generator as many times as needed.
+    // generator accepts h, hr, width, dt, guard_pred parameters
     StatementList
         add_work(std::function<StatementList(
                      unsigned int, unsigned int, unsigned int, unsigned int, Expression)> generator,
@@ -662,7 +745,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             // width is the butterfly width, Radix-n.
             unsigned int width = factors_pp[npass];
             // height is how many butterflies per thread will do on average
-            float height = static_cast<float>(length) / width / threads_per_transform;
+            float height = static_cast<float>(length) / width / threads_per_transform_pp;
 
             unsigned int cumheight = product(
                 factors_pp.begin(),
@@ -672,7 +755,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             body += LineBreak{};
             body += CommentLines{
                 "pass " + std::to_string(npass) + ", width " + std::to_string(width),
-                "using " + std::to_string(threads_per_transform) + " threads we need to do "
+                "using " + std::to_string(threads_per_transform_pp) + " threads we need to do "
                     + std::to_string(length / width) + " radix-" + std::to_string(width)
                     + " butterflies",
                 "therefore each thread will do " + std::to_string(height) + " butterflies"};
@@ -722,7 +805,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                     bool isFirstStore = (npass == 0) && (component == Component::REAL);
                     auto half_width   = factors_pp[npass];
                     auto half_height
-                        = static_cast<float>(length) / half_width / threads_per_transform;
+                        = static_cast<float>(length) / half_width / threads_per_transform_pp;
                     // minimize sync as possible
                     if(!isFirstStore)
                         reg2lds_half += SyncThreads();
@@ -732,8 +815,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                         half_height,
                         ThreadGuardMode::GUARD_BY_IF);
 
-                    half_width  = factors_pp[npass + 1];
-                    half_height = static_cast<float>(length) / half_width / threads_per_transform;
+                    half_width = factors_pp[npass + 1];
+                    half_height
+                        = static_cast<float>(length) / half_width / threads_per_transform_pp;
                     reg2lds_half += SyncThreads();
                     reg2lds_half
                         += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, component),

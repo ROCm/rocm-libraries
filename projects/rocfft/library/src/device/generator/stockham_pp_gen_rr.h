@@ -50,7 +50,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         length_pp  = params.parent_length[params.off_dim];
         factors_pp = params.pp_factors_curr;
 
-        transforms_per_block_pp = workgroup_size / params.pp_threads_per_transform;
+        threads_per_transform_pp = params.pp_threads_per_transform;
+        transforms_per_block_pp  = workgroup_size / threads_per_transform_pp;
 
         max_factor_pp   = *std::max_element(factors_pp.begin(), factors_pp.end());
         pp_factors_prod = product(factors_pp.begin(), factors_pp.end());
@@ -75,7 +76,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
     unsigned int length_off_dim;
     unsigned int max_factor_pp;
 
-    unsigned int transforms_per_block_pp;
     unsigned int pp_factors_prod;
 
     Variable offset_pp{"offset_pp", "size_t"};
@@ -236,8 +236,12 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(R[hr * width + w],
-                           lds_complex[offset_lds + (hr * width + w) * stride_lds]);
+        {
+            const auto tid = Parens{thread + dt + h * threads_per_transform_pp};
+            work += Assign(
+                R[hr * width + w],
+                lds_complex[offset_lds + (tid + w * pp_factors_prod / width) * stride_lds]);
+        }
 
         return work;
     }
@@ -250,7 +254,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
     std::vector<Expression> device_lds_reg_inout_pp_device_call_arguments()
     {
-        return {R, lds_complex, stride_lds_pp, offset_lds_pp, thread_id / max_factor_pp};
+        return {R, lds_complex, stride_lds_pp, offset_lds_pp, thread_in_device_pp};
     }
 
     TemplateList device_lds_reg_inout_pp_templates()
@@ -270,36 +274,45 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         f.arguments = device_lds_reg_inout_pp_arguments();
         f.qualifier = "__device__";
 
-        auto effective_length = std::max(length, length_pp);
-
         StatementList& body = f.body;
 
         auto load_lds = std::mem_fn(&StockhamPartialPassKernelRR::load_lds_step_1_2_generator);
         // first pass of load (full)
-        unsigned int width  = factors_pp[0];
-        float        height = static_cast<float>(effective_length) / width / threads_per_transform;
+        unsigned int width = factors_pp[0];
+        float height       = static_cast<float>(pp_factors_prod) / width / threads_per_transform_pp;
         body += SyncThreads();
-        body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
-                         width,
-                         height,
-                         ThreadGuardMode::GUARD_BY_IF,
-                         false,
-                         std::nullopt,
-                         effective_length);
+        body += add_pp_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
+                            width,
+                            height,
+                            ThreadGuardMode::GUARD_BY_IF,
+                            false,
+                            std::nullopt,
+                            pp_factors_prod);
 
         return f;
     }
 
-    StatementList store_pp_step_1_2_lds_generator(
-        unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
+    StatementList store_pp_step_1_2_lds_generator(unsigned int h,
+                                                  unsigned int hr,
+                                                  unsigned int width,
+                                                  unsigned int dt,
+                                                  Expression   guard,
+                                                  unsigned int cumheight)
     {
         if(hr == 0)
             hr = h;
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(lds_complex[offset_lds + (hr * width + w) * stride_lds],
-                           R[hr * width + w]);
+        {
+            const auto tid = thread + dt + h * threads_per_transform_pp;
+            const auto idx = offset_lds
+                             + (Parens{tid / cumheight} * (width * cumheight) + tid % cumheight
+                                + w * cumheight)
+                                   * stride_lds;
+
+            work += Assign(lds_complex[idx], R[hr * width + w]);
+        }
 
         return work;
     }
@@ -314,22 +327,21 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         f.arguments = device_lds_reg_inout_pp_arguments();
         f.qualifier = "__device__";
 
-        auto effective_length = std::max(length_pp, length);
-
         StatementList& body = f.body;
 
         auto store_lds = std::mem_fn(&StockhamPartialPassKernelRR::store_pp_step_1_2_lds_generator);
         // last pass of store (full)
-        unsigned int width  = factors_pp.back();
-        float        height = static_cast<float>(effective_length) / width / threads_per_transform;
+        unsigned int width = factors_pp.back();
+        float height       = static_cast<float>(pp_factors_prod) / width / threads_per_transform_pp;
+        unsigned int cumheight = product(factors_pp.begin(), factors_pp.end() - 1);
         body += SyncThreads();
-        body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5),
-                         width,
-                         height,
-                         ThreadGuardMode::GUARD_BY_IF,
-                         false,
-                         std::nullopt,
-                         effective_length);
+        body += add_pp_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, cumheight),
+                            width,
+                            height,
+                            ThreadGuardMode::GUARD_BY_IF,
+                            false,
+                            std::nullopt,
+                            pp_factors_prod);
         return f;
     }
 
@@ -519,6 +531,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         body += LineBreak{};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
         body += Declaration{thread_in_device, thread_id % threads_per_transform};
+        body += Declaration{thread_in_device_pp, thread_id % threads_per_transform_pp};
 
         // before starting the transform job (core device function)
         // we call a re-load lds-to-reg function here, but it's not always doing things.

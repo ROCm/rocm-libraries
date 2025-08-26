@@ -54,9 +54,10 @@ struct StockhamGeneratorSpecs
     unsigned int              length2d = 0;
 
     unsigned int workgroup_size;
-    unsigned int threads_per_transform = 0;
-    bool         half_lds              = false;
-    bool         direct_to_from_reg    = false;
+    unsigned int threads_per_transform    = 0;
+    unsigned int threads_per_transform_pp = 0;
+    bool         half_lds                 = false;
+    bool         direct_to_from_reg       = false;
     // dimension of the kernel - 0 if the generated kernel accepts a
     // 'dim' argument at runtime; otherwise the dimension is
     // statically defined for the kernel
