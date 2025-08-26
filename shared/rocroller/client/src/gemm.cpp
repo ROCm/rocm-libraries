@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <filesystem>
+#include <span>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -66,13 +67,13 @@ template <typename T>
 class RotatingBuffer
 {
 public:
-    RotatingBuffer(size_t numElems, size_t rotationSize, const std::vector<T>& hostData = {})
-        : numElems(numElems), rotationSize(rotationSize), currentOffset(0)
+    RotatingBuffer(const std::vector<T>& hostData, size_t rotationSize)
+        : numElems(hostData.size()), rotationSize(rotationSize), currentOffset(0)
     {
         // allocate a single large buffer, with extra space for rotations
         buffer = make_shared_device<T>(numElems + rotationSize, T{});
 
-        // *** CHANGED *** Copy host data into *every* rotated segment
+        //Copy host data into every rotated segment
         if(!hostData.empty())
         {
             if(hostData.size() != numElems)
@@ -90,10 +91,10 @@ public:
         }
     }
 
-    T* next()
+    std::span<T> next()
     {
         currentOffset = (currentOffset + rotationSize) % numElems;
-        return buffer.get() + currentOffset;
+        return std::span<T>(buffer.get() + currentOffset, numElems);
     }
 
 private:
@@ -245,9 +246,9 @@ namespace rocRoller::Client::GEMMClient
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
-        RotatingBuffer<PackedTypeA> rotatingA(hostA.size(), rotatingSize, hostA);
-        RotatingBuffer<PackedTypeB> rotatingB(hostB.size(), rotatingSize, hostB);
-        RotatingBuffer<C>           rotatingC(hostC.size(), rotatingSize, hostC);
+        RotatingBuffer<PackedTypeA> rotatingA(hostA.size(), rotatingSize);
+        RotatingBuffer<PackedTypeB> rotatingB(hostB.size(), rotatingSize);
+        RotatingBuffer<C>           rotatingC(hostC.size(), rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
         
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
@@ -396,9 +397,9 @@ namespace rocRoller::Client::GEMMClient
             // Warmup runs
             for(int i = 0; i < benchmarkParams.numWarmUp; ++i)
             {
-                commandArgs.setArgument(aTag, ArgumentType::Value, rotatingA.next());
-                commandArgs.setArgument(bTag, ArgumentType::Value, rotatingB.next());
-                commandArgs.setArgument(cTag, ArgumentType::Value, rotatingC.next());
+                commandArgs.setArgument(aTag, ArgumentType::Value, rotatingA.next().data());
+                commandArgs.setArgument(bTag, ArgumentType::Value, rotatingB.next().data());
+                commandArgs.setArgument(cTag, ArgumentType::Value, rotatingC.next().data());
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs);
             }
@@ -406,9 +407,9 @@ namespace rocRoller::Client::GEMMClient
             HIP_TIMER(t_kernel, "GEMM", benchmarkParams.numInner);
             for(int inner = 0; inner < benchmarkParams.numInner; ++inner)
             {
-                commandArgs.setArgument(aTag, ArgumentType::Value, rotatingA.next());
-                commandArgs.setArgument(bTag, ArgumentType::Value, rotatingB.next());
-                commandArgs.setArgument(cTag, ArgumentType::Value, rotatingC.next());
+                commandArgs.setArgument(aTag, ArgumentType::Value, rotatingA.next().data());
+                commandArgs.setArgument(bTag, ArgumentType::Value, rotatingB.next().data());
+                commandArgs.setArgument(cTag, ArgumentType::Value, rotatingC.next().data());
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
