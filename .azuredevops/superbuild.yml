@@ -23,11 +23,8 @@ trigger:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - shared/rocroller
-    - shared/mxdatagenerator
-    - shared/hipblas-common
-    - projects/rocprim
-    - projects/rocrand
+    - CMakeLists.txt
+    - cmake
     exclude:
     - .githooks
     - .github
@@ -43,11 +40,8 @@ pr:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - shared/rocroller
-    - shared/mxdatagenerator
-    - shared/hipblas-common
-    - projects/rocprim
-    - projects/rocrand
+    - CMakeLists.txt
+    - cmake
     exclude:
     - .githooks
     - .github
