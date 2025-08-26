@@ -550,6 +550,22 @@ _validGEMMTypes = [
     ("B6", "S", "S"),
 ]
 
+_validMXGEMMTypes = [
+    ("F8", "S", "S"),
+    ("F8B8", "S", "S"),
+    ("B8", "S", "S"),
+    ("B8F8", "S", "S"),
+    ("F6", "S", "S"),
+    ("F6B6", "S", "S"),
+    ("B6", "S", "S"),
+    ("B6F6", "S", "S"),
+    ("F4", "S", "S"),
+]
+
+_validMXGEMMBlock = [
+    16, 32
+]
+
 
 # All HPA types are listed here (HPA=T). The name of the library logic files for these types is:
 # *_TiToTc_BH*.yaml where Ti, To, and Tc are the data types of A/B, C/D, and computation, respectively.
@@ -863,6 +879,12 @@ class ProblemType(Mapping):
     gemmType = ( inType.toChar(), outType.toChar(), computeType.toChar() )
     if gemmType not in _validGEMMTypes:
       raise Exception("This typed-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet."%(gemmType[0], gemmType[1], gemmType[2]))
+
+    if self["MXBlockA"] or self["MXBlockB"]:
+      if gemmType not in _validMXGEMMTypes:
+        raise Exception("This typed-MX-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet." % (gemmType[0], gemmType[1], gemmType[2]))
+      if (self["MXBlockA"] != self["MXBlockB"]) and (self["MXBlockA"] not in _validMXGEMMBlock):
+        raise Exception("MXShape is not supported")
 
   ########################################
   def initGEMM(self):
