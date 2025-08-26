@@ -2119,6 +2119,17 @@ Tests:
   unit_check: 0
   gpu_arch: '950'
 
+- name: matmul_one_double
+  category: quick
+  function:
+    matmul: *double_precision
+  matrix_size: *one_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  unit_check: 1
+  gpu_arch: '1250'
+
 - name: matmul_gemm_double
   category: pre_checkin
   function:

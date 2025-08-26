@@ -28,7 +28,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
 
-- name: matmul_bias_relu_smoke
+- name: matmul_bias_relu_SAV_smoke
   category: smoke
   function:
     matmul: *real_precisions
@@ -36,6 +36,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: 1
   beta: [ 0.0, 2.0 ]
+  scaleAlpha_vector: [0, 1]
   activation_type: relu
   bias_vector: [0, 1]
   unit_check: 1
@@ -136,7 +137,7 @@ Tests:
   bias_type: bf16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '120[0-1]'
+  gpu_arch: '12(0[0-1]|50)'
 
 - name: matmul_f8_bf8_dst_fp16_gfx12_smoke
   category: smoke
@@ -214,7 +215,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 2.0 ]
-  gpu_arch: '120[0-1]'
+  gpu_arch: '12(0[0-1]|50)'
 
 - name: matmul_real_1b_fnuz_dst_f8_fnuz_SCDInt1_smoke
   category: smoke

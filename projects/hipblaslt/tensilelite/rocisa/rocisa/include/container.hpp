@@ -606,6 +606,7 @@ namespace rocisa
     {
         std::string      name;
         std::vector<int> offsets;
+        mutable int nameIdx;
 
         RegName(const std::string& name = "", const std::vector<int>& offsets = {})
             : name(name)
@@ -643,6 +644,17 @@ namespace rocisa
                 offsets = std::move(other.offsets);
             }
             return *this;
+        }
+
+        void setNameIdx() const
+        {
+            nameIdx = rocIsa::getInstance().getVgprIdx()[name];
+        }
+
+        int getTotalIdx() const
+        {
+            setNameIdx();
+            return getTotalOffsets() + nameIdx;
         }
 
         int getTotalOffsets() const
@@ -696,6 +708,7 @@ namespace rocisa
         std::optional<RegName> regName;
         int                    regIdx;
         int                    regNum;
+        mutable  int           msb;
         bool                   isInlineAsm;
         bool                   isMinus;
         bool                   isAbs;
@@ -926,37 +939,49 @@ namespace rocisa
             std::string minusStr = isMinus ? "-" : "";
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
             auto absStr          = isAbs ? ")" : "";
+            msb = 0;
+            std::string msbStr = "";
             if(isInlineAsm)
             {
                 return minusStr + "%" + std::to_string(regIdx) + absStr;
             }
-
             if(regName)
             {
                 std::string macroSlash = isMacro ? "\\" : "";
+                if(rocIsa::getInstance().getAsmCaps()["HasVgprMSB"] && regType == "v"){
+                    msb = regName->getTotalIdx() / 256;
+                    if(msb > 0)
+                        msbStr = std::to_string(-256 * msb);
+                }
                 if(regNum == 1)
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + "]" + absStr;
+                           + regName->toString() + msbStr + "]" + absStr;
                 }
                 else
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + ":" + macroSlash + regType + "gpr"
-                           + regName->toString() + "+"
+                           + regName->toString() + msbStr + ":" + regType + "gpr" + regName->toString() + msbStr + "+"
                            + std::to_string(regNum - 1) + "]" + absStr;
                 }
             }
             else
             {
+                if(rocIsa::getInstance().getAsmCaps()["HasVgprMSB"] && regType == "v"){
+                    msb = regIdx / 256;
+                    if(msb > 0)
+                        msbStr = std::to_string(-256 * msb);
+                }
                 if(regNum == 1)
                 {
+                    if(msb > 0)
+                        return minusStr + regType + "["  + std::to_string(regIdx) + msbStr + "]" + absStr;
                     return minusStr + regType + std::to_string(regIdx) + absStr;
                 }
                 else
                 {
-                    return minusStr + regType + "[" + std::to_string(regIdx) + ":"
-                           + std::to_string(regIdx + regNum - 1) + "]" + absStr;
+                    return minusStr + regType + "[" + std::to_string(regIdx) + msbStr + ":"
+                           + std::to_string(regIdx + regNum - 1) + msbStr + "]" + absStr;
                 }
             }
         }

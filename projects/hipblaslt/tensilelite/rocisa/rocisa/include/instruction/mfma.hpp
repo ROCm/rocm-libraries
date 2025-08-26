@@ -118,6 +118,7 @@ namespace rocisa
 
         std::string typeConvert(InstType iType) const
         {
+            bool is_wmma_v3 = getAsmCaps()["HasWMMA_V3"];
             switch(iType)
             {
             case InstType::INST_F16:
@@ -137,13 +138,17 @@ namespace rocisa
             case InstType::INST_XF32:
                 return "xf32";
             case InstType::INST_F8:
+                if(is_wmma_v3)
+                {
+                    return variant[2] > 64 ? "f8f6f4" : "fp8_fp8";
+                }
                 return variant[2] > 32 ? "f8f6f4" : "fp8_fp8";
             case InstType::INST_BF8:
-                return variant[2] > 32 ? "f8f6f4" : "bf8_bf8";
+                return is_wmma_v3 ? "bf8_bf8" : (variant[2] > 32 ? "f8f6f4" : "bf8_bf8");
             case InstType::INST_F8_BF8:
-                return variant[2] > 32 ? "f8f6f4" : "fp8_bf8";
+                return is_wmma_v3 ? "fp8_bf8" : (variant[2] > 32 ? "f8f6f4" : "fp8_bf8");
             case InstType::INST_BF8_F8:
-                return variant[2] > 32 ? "f8f6f4" : "bf8_fp8";
+                return is_wmma_v3 ? "bf8_fp8" : (variant[2] > 32 ? "f8f6f4" : "bf8_fp8");
             default:
                 throw std::runtime_error("Type not found");
             }
@@ -202,6 +207,17 @@ namespace rocisa
                     break;
                 }
             }
+            else if(getAsmCaps()["HasWMMA_f8f6f4"])
+            {
+                switch(instType)
+                {
+                case InstType::INST_F8:
+                    inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                    break;
+                default:
+                    break;
+                }
+            }
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                    + acc2->toString() + negStr + inputPermuteStr;
         }
@@ -210,7 +226,9 @@ namespace rocisa
         {
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
-            return formatWithComment(kStr);
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {a, b, acc2}, acc);
+            return kStr;
         }
 
         int getIssueLatency() const override
@@ -328,7 +346,9 @@ namespace rocisa
         {
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
-            return formatWithComment(kStr);
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {a, b, metadata}, acc);
+            return kStr;
         }
 
         int getIssueLatency() const override
