@@ -163,10 +163,6 @@ TEST_P(rocrand_generate_poisson_tests, generate_test)
         { return rocrand_generate_poisson(gen, data, size, lambda); });
 
     test_generate_host<unsigned int>();
-
-    // test_generate_host<unsigned int>(
-    //     [](rocrand_generator gen, unsigned int* data, size_t size, double lambda)
-    //     { return rocrand_generate_poisson(gen, data, size, lambda); });
 }
 
 TEST(rocrand_generate_poisson_tests, neg_test)
