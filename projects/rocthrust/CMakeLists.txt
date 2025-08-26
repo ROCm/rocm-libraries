@@ -60,6 +60,7 @@ option(BUILD_EXAMPLE "Build example" OFF)
 option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
+cmake_dependent_option(USE_SYSTEM_LIB "Use installed ROCm libs when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 
 check_language(HIP)
@@ -207,6 +208,13 @@ if(CODE_COVERAGE)
 endif()
   
 # Tests
+
+# If building tests from installed libs, we need to make sure the versions match
+if(BUILD_TEST AND USE_SYSTEM_LIB)
+  find_package(rocprim ${PROJECT_VERSION} REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+  find_package(rocthrust ${PROJECT_VERSION} REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
+endif()
+
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_client_component(tests)
   if (ENABLE_UPSTREAM_TESTS)
