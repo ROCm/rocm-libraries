@@ -167,54 +167,7 @@ rocsparse_status rocsparse_csr2bsr_nnz(rocsparse_handle          handle,
 *
 *  \par Example
 *  This example converts a CSR matrix into an BSR matrix.
-*  \code{.c}
-*      //     1 4 0 0 0 0
-*      // A = 0 2 3 0 0 0
-*      //     5 0 0 7 8 0
-*      //     0 0 9 0 6 0
-*
-*      rocsparse_int m   = 4;
-*      rocsparse_int n   = 6;
-*      rocsparse_int block_dim = 2;
-*      rocsparse_int nnz = 9;
-*      rocsparse_int mb = (m + block_dim - 1) / block_dim;
-*      rocsparse_int nb = (n + block_dim - 1) / block_dim;
-*
-*      csr_row_ptr[m+1]  = {0, 2, 4, 7, 9};             // device memory
-*      csr_col_ind[nnz]  = {0, 1, 1, 2, 0, 3, 4, 2, 4}; // device memory
-*      csr_val[nnz]      = {1, 4, 2, 3, 5, 7, 8, 9, 6}; // device memory
-*
-*      hipMalloc(&bsr_row_ptr, sizeof(rocsparse_int) *(mb + 1));
-*      rocsparse_int nnzb;
-*      rocsparse_int* nnzTotalHostPtr = &nnzb;
-*      csr2bsr_nnz(handle,
-*                  rocsparse_direction_row,
-*                  m,
-*                  n,
-*                  csr_descr,
-*                  csr_row_ptr,
-*                  csr_col_ind,
-*                  block_dim,
-*                  bsr_descr,
-*                  bsr_row_ptr,
-*                  nnzTotalHostPtr);
-*      nnzb = *nnzTotalDevHostPtr;
-*      hipMalloc(&bsr_col_ind, sizeof(int)*nnzb);
-*      hipMalloc(&bsr_val, sizeof(float)*(block_dim * block_dim) * nnzb);
-*      scsr2bsr(handle,
-*               rocsparse_direction_row,
-*               m,
-*               n,
-*               csr_descr,
-*               csr_val,
-*               csr_row_ptr,
-*               csr_col_ind,
-*               block_dim,
-*               bsr_descr,
-*               bsr_val,
-*               bsr_row_ptr,
-*               bsr_col_ind);
-*  \endcode
+*  \snippet example_rocsparse_csr2bsr.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT
