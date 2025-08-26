@@ -5372,6 +5372,7 @@ class KernelWriterAssembly(KernelWriter):
   def removeStagger(self, kernel, tP):
     imod = Module("removeStagger")
     tc = tP["tensorChar"]
+    imod.addComment(f" removeStagger {tc}")
     with self.allocTmpSgpr(3) as tmpSgprInfo:
       tmp = tmpSgprInfo.idx
       tmpIncSparse = tmpSgprInfo.idx + 2
@@ -5565,11 +5566,14 @@ class KernelWriterAssembly(KernelWriter):
     return ([vgprBaseA, imodA],[vgprBaseB, imodB],[vgprBaseM, imodM],[vgprBaseMisc, imodMisc])
 
   def tailLoopAllocG2LVgpr(self, kernel):
-    imod     = Module("tailLoopAllocG2LVgpr")
-    vgprBase = -1
-    numG2LA  = 0
-    numG2LB  = 0
-    numG2LMetadata  = 0
+    imod           = Module("tailLoopAllocG2LVgpr")
+    vgprBase       = -1
+    numG2LA        = 0
+    numG2LB        = 0
+    numG2LMXSA     = 0
+    numG2LMXSB     = 0
+    numG2LMetadata = 0
+
     if not kernel["DirectToVgprA"]:
       if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
         numG2LA = self.states.a.numVgprG2LTailloopAllocated*2
@@ -5580,34 +5584,54 @@ class KernelWriterAssembly(KernelWriter):
         numG2LB = self.states.b.numVgprG2LTailloopAllocated*2
       else:
         numG2LB = self.states.b.numVgprG2LTailloopAllocated
+    if kernel["ProblemType"]["MXBlockA"] and (not kernel["DirectToVgprMXSA"]):
+      if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
+        numG2LMXSA = self.states.mxsa.numVgprG2LAllocated*2
+      else:
+        numG2LMXSA = self.states.mxsa.numVgprG2LAllocated
+    if kernel["ProblemType"]["MXBlockB"] and (not kernel["DirectToVgprMXSB"]):
+      if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
+        numG2LMXSB = self.states.mxsb.numVgprG2LAllocated*2
+      else:
+        numG2LMXSB = self.states.mxsb.numVgprG2LAllocated
+
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       numG2LMetadata = self.states.m.numVgprG2LAllocated
 
-    if numG2LB > 0:
-      # TODO: B alignment hack
-      numG2LA = ((numG2LA+1)//2)*2
-    if numG2LMetadata > 0:
-      # TODO: M alignment hack
-      numTemp1 = numG2LA + numG2LB
-      numTemp2 = ((numTemp1+1)//2)*2
-      numG2LB += (numTemp2 - numTemp1)
-    if numG2LA + numG2LB + numG2LMetadata > 0:
-      vgprBase = self.vgprPool.checkOutAligned(numG2LA + numG2LB + numG2LMetadata, 2)
+    numG2LA = ((numG2LA+1)//2)*2
+    numG2LB = ((numG2LB+1)//2)*2
+    numG2LMXSA = ((numG2LMXSA+1)//2)*2
+    numG2LMXSB = ((numG2LMXSB+1)//2)*2
+    numG2LMetadata = ((numG2LMetadata+1)//2)*2
+
+    if numG2LA + numG2LB + numG2LMXSA + numG2LMXSB + numG2LMetadata > 0:
+      vgprBase = self.vgprPool.checkOutAligned(numG2LA + numG2LB + numG2LMXSA + numG2LMXSB + numG2LMetadata, 2)
       imod.addComment0("Check out VGPR (numG2LA,numG2LB,numG2LMetadata) = (%d,%d,%d)"%(numG2LA,numG2LB,numG2LMetadata))
+
     if numG2LA > 0:
       imod.add(RegSet("v", "vgprG2LA_BASE", vgprBase))
       if kernel["DirectToLdsA"] and kernel["NonDTLTailLoopA"]:
         imod.add(RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0))
       else:
         imod.add(self.moduleVgprMacroG2LA)
+
     if numG2LB > 0:
       imod.add(RegSet("v", "vgprG2LB_BASE", vgprBase + numG2LA))
       if kernel["DirectToLdsB"] and kernel["NonDTLTailLoopB"]:
         imod.add(RegSet("v", "vgprG2LB", "vgprG2LB_BASE", 0))
       else:
         imod.add(self.moduleVgprMacroG2LB)
+
+    if numG2LMXSA > 0:
+      imod.add(RegSet("v", "vgprG2LMXSA_BASE", vgprBase + numG2LA + numG2LB))
+      imod.add(self.moduleVgprMacroG2LMXSA)
+
+    if numG2LMXSB > 0:
+      imod.add(RegSet("v", "vgprG2LMXSB_BASE", vgprBase + numG2LA + numG2LB + numG2LMXSA))
+      imod.add(self.moduleVgprMacroG2LMXSB)
+
     if numG2LMetadata > 0:
-      imod.add(RegSet("v", "vgprG2LMetadata", vgprBase + numG2LA + numG2LB))
+      imod.add(RegSet("v", "vgprG2LMetadata", vgprBase + numG2LA + numG2LB + numG2LMXSA + numG2LMXSB))
 
     return imod, vgprBase
 
@@ -8965,7 +8989,7 @@ class KernelWriterAssembly(KernelWriter):
                 # adjustment for {d,s}gemm + BufferLoad
                 # use same buffer_load instruction for tail loop as out of tail loop
                 # this is mandatory for DirectToLds case. Also, it improves tail loop performance.
-                numLoadVectorComp = numLoadVectorComp // kernel["GlobalReadVectorWidth%c"%tc]
+                numLoadVectorComp = numLoadVectorComp // kernel["GlobalReadVectorWidth%s"%tc]
 
               if isLds or isTr:
                 numLoadVectorComp = 1
@@ -8992,10 +9016,10 @@ class KernelWriterAssembly(KernelWriter):
                   # elif self.states.archCaps["HasEccHalf"]:
                   #   destVgprHi = self.vgprPool.checkOut(1, 'destVgprHi')
                   if isTr:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
+                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
                   if (not tP["isM"]) and isLds:
-                    if not kernel["NonDTLTailLoop%c"%tc]:
-                      numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
+                    if not kernel["NonDTLTailLoop%s"%tc]:
+                      numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
                     dataIsByte = False
                   else:
                     dataIsByte = True
@@ -9023,12 +9047,12 @@ class KernelWriterAssembly(KernelWriter):
                         glvw=tP["glvw"], idx=loopCnt, numVgprG2L=numVgprG2L)
                 elif dataType.isHalf() or dataType.isBFloat16():
                   if isTr:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
+                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
                   elif tP["glvw"]>1 and kernel["AssertSummationElementMultiple"] % 2 == 0 and not isLds:
                   # Pack two FP16 values into a single load dword x2
                     numElementsPerLoad = 2
-                  elif isLds and not kernel["NonDTLTailLoop%c"%tc]:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
+                  elif isLds and not kernel["NonDTLTailLoop%s"%tc]:
+                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
                   elif self.states.archCaps["HasEccHalf"]:
                     # In some cards, loading half types into register will zero out
                     # the other half. Therefore we need to load into a separate register
@@ -9060,12 +9084,12 @@ class KernelWriterAssembly(KernelWriter):
                 elif dataType.isInt8x4() or dataType.isSingle():
                   # Only supported for buffer loads since it has OOB checks
                   if kernel["BufferLoad"]:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
+                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc]
                   regIdx = r
                 elif dataType.isDouble():
                   # Only supported for buffer loads since it has OOB checks
                   if kernel["BufferLoad"]:
-                    numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc] # adjust numElementsPerLoad for DGEMM
+                    numElementsPerLoad = kernel["GlobalReadVectorWidth%s"%tc] # adjust numElementsPerLoad for DGEMM
                   regIdx = r*2
                 elif dataType.isSingleComplex():
                   regIdx = r*2
@@ -9114,13 +9138,13 @@ class KernelWriterAssembly(KernelWriter):
                     # need to increment ldsInc only once per each loopCnt
                     # this is pre count up, so increment it at r == 0
                     if r == 0:
-                      ldsInc = int((self.states.kernel["WavefrontSize"] if kernel["WaveSeparateGlobalRead%c"%tc] else kernel["NumThreads"]) * kernel["GlobalReadVectorWidth%c"%tc] * tP["bpeGR"])
+                      ldsInc = int((self.states.kernel["WavefrontSize"] if kernel["WaveSeparateGlobalRead%s"%tc] else kernel["NumThreads"]) * kernel["GlobalReadVectorWidth%s"%tc] * tP["bpeGR"])
                     else:
                       ldsInc = 0
                     if kernel["LdsBlockSizePerPad%s"%tc] != 0:
                       ldsInc += int((ldsInc // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeGR"])
                     else:
-                      padInterval = (self.states.kernel["WavefrontSize"] if kernel["WaveSeparateGlobalRead%c"%tc] else kernel["NumThreads"]) * self.states.bpr
+                      padInterval = (self.states.kernel["WavefrontSize"] if kernel["WaveSeparateGlobalRead%s"%tc] else kernel["NumThreads"]) * self.states.bpr
                       ldsInc += int((ldsInc // padInterval) * kernel["LdsPad%s"%tc] * tP["bpeGR"])
                     if kernel["UseInstOffsetForGRO"]:
                       # buffer_load only support 12 bit instruction offset
@@ -9839,11 +9863,11 @@ class KernelWriterAssembly(KernelWriter):
 
                 if kernel["DirectToLds%s"%tc]:
                   # use bpe with GlobalReadVectorWidth
-                  ldsInc = int((self.states.kernel["WavefrontSize"] * kernel["GlobalReadVectorWidth%c"%tc] if kernel["WaveSeparateGlobalRead%c"%tc] else kernel["NumThreads"] * kernel["GlobalReadVectorWidth%c"%tc]) * tP["bpeGR"])
+                  ldsInc = int((self.states.kernel["WavefrontSize"] * kernel["GlobalReadVectorWidth%s"%tc] if kernel["WaveSeparateGlobalRead%s"%tc] else kernel["NumThreads"] * kernel["GlobalReadVectorWidth%s"%tc]) * tP["bpeGR"])
                   if kernel["LdsBlockSizePerPad%s"%tc] != 0:
                     ldsInc += int((ldsInc // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeGR"])
                   else:
-                    padInterval = (self.states.kernel["WavefrontSize"] if kernel["WaveSeparateGlobalRead%c"%tc] else kernel["NumThreads"]) * self.states.bpr
+                    padInterval = (self.states.kernel["WavefrontSize"] if kernel["WaveSeparateGlobalRead%s"%tc] else kernel["NumThreads"]) * self.states.bpr
                     ldsInc += int((ldsInc // padInterval) * kernel["LdsPad%s"%tc] * tP["bpeGR"])
 
                   if kernel["UseInstOffsetForGRO"]:
