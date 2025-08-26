@@ -4559,15 +4559,16 @@ class KernelWriterAssembly(KernelWriter):
         tmp = self.vgprPool.checkOut(2)
         with self.allocTmpSgpr(1) as tmpSgprInfo:
           if self.states.asmCaps["HasWMMA_V4"]:
-            module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(rReg), src1=int(tP["bpeGR"]+1), src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
-            module.add(vectorStaticMultiply(vgpr(tmp), vgpr(tmp), int(tP["bpeGR"]*8), tmpSgprInfo, comment="%s: %s = %s * %s"%(swizzledOrTrName, vgpr(tmp), vgpr(tmp), tP["bpeGR"]*8)))
-            module.add(vectorStaticDivide(tmp+1, rReg, 16, tmpVgprRes, comment="%s: %s = %s / %s"%(swizzledOrTrName, vgpr(tmp+1), vgpr(rReg), 16)))
-            module.add(vectorStaticMultiply(vgpr(tmp+1), vgpr(tmp+1), int(tP["bpeGR"]*4), tmpSgprInfo, comment="%s: %s = %s * %s"%(swizzledOrTrName, vgpr(tmp+1), vgpr(tmp+1), tP["bpeGR"]*4)))
+            module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(rReg), src1=int(2//tP["bpeGR"]), src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
+            module.add(vectorStaticMultiply(vgpr(tmp), vgpr(tmp), 8, tmpSgprInfo, comment="%s: %s = %s * %s"%(swizzledOrTrName, vgpr(tmp), vgpr(tmp), tP["bpeGR"]*8)))
+            module.add(vectorStaticDivide(tmp+1, rReg, int(2//tP["bpeGR"]*8), tmpVgprRes, comment="%s: %s = %s / %s"%(swizzledOrTrName, vgpr(tmp+1), vgpr(rReg), 16)))
+            module.add(vectorStaticMultiply(vgpr(tmp+1), vgpr(tmp+1), int(2//tP["bpeGR"]*2), tmpSgprInfo, comment="%s: %s = %s * %s"%(swizzledOrTrName, vgpr(tmp+1), vgpr(tmp+1), tP["bpeGR"]*4)))
             module.add(VAddU32(dst=vgpr(tmp), src0=vgpr(tmp), src1=vgpr(tmp+1), comment="%s: %s = %s + %s"%(swizzledOrTrName, vgpr(tmp), vgpr(tmp), vgpr(tmp+1))))
+            module.add(vectorStaticRemainder(tmp+1, rReg, rReg, int(2//tP["bpeGR"]*2), tmpVgprRes, tmpSgprInfo, comment="%s: %s = %s %% %s"%(swizzledOrTrName, vgpr(rReg), vgpr(rReg), tP["bpeGR"]*4)))
           else:
             module.add(vectorStaticDivide(tmp, rReg, int(tP["bpeGR"]*8), tmpVgprRes, comment="%s: %s = %s / %s"%(swizzledOrTrName, vgpr(tmp), vgpr(rReg), tP["bpeGR"]*8)))
             module.add(vectorStaticMultiply(vgpr(tmp), vgpr(tmp), int(tP["bpeGR"]*4), tmpSgprInfo, comment="%s: %s = %s * %s"%(swizzledOrTrName, vgpr(tmp), vgpr(tmp), tP["bpeGR"]*4)))
-        module.add(vectorStaticRemainder(tmp+1, rReg, rReg, int(tP["bpeGR"]*4), tmpVgprRes, tmpSgprInfo, comment="%s: %s = %s %% %s"%(swizzledOrTrName, vgpr(tmp+1), vgpr(rReg), tP["bpeGR"]*4)))
+            module.add(vectorStaticRemainder(tmp+1, rReg, rReg, int(tP["bpeGR"]*4), tmpVgprRes, tmpSgprInfo, comment="%s: %s = %s %% %s"%(swizzledOrTrName, vgpr(tmp+1), vgpr(rReg), tP["bpeGR"]*4)))
         module.add(VAddU32(dst=vgpr(rReg), src0=vgpr(tmp), src1=vgpr(rReg), comment="%s: %s = %s + %s"%(swizzledOrTrName, vgpr(rReg), vgpr(rReg), vgpr(tmp))))
 
       WvG_M = kernel["MIWaveGroup"][0]
@@ -4588,7 +4589,7 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprPool.checkIn(tmp)
       elif isTr:
         if self.states.asmCaps["HasWMMA_V4"]:
-          module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(dividendReg), src1=int(tP["bpeGR"]+2), src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
+          module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(dividendReg), src1=int(2//tP["bpeGR"]+1), src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
         else:
           module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(dividendReg), src1=int(tP["bpeGR"]+1), src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
         module.add(VAddU32(dst=vgpr(qReg), src0=vgpr(tmp), src1=vgpr(qReg), comment="%s: wave_id += offset for the right half of the tile"%(swizzledOrTrName)))
@@ -7799,6 +7800,7 @@ class KernelWriterAssembly(KernelWriter):
 
         with self.allocTmpSgpr(1) as tmpSgprInfo:
           if self.states.asmCaps["HasWMMA_V4"]:
+            shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", self.states.kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
             shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", 2, tmpVgpr, tmpSgprInfo))
           else:
             shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", self.states.kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
@@ -9267,7 +9269,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) *= numKr"%tc))
 
       if self.states.asmCaps["HasWMMA_V4"]:
-        module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=int(tP["bpeGR"]+2), src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
+        module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=int(2//tP["bpeGR"]+1), src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
       else:
         module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=int(tP["bpeGR"]+1), src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
       module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(tmp2), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id += offset for the right half of the tile"%(tc)))
@@ -9292,7 +9294,10 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VSubU32(dst=vgpr(tmp2), src0=vgpr(tmp2), src1=1, comment="GLTr%s: unroll idx - 1"%(tc)))
       bfArgs = (maxGroVgpr, maxGroVgpr, tmp2, tmp)
       module.add(MacroInstruction(name="GLOBAL_OFFSET_%s"%tc, args=bfArgs))
-      module.add(vectorMultiplyBpe(maxGroVgpr, maxGroVgpr, tP["bpeGR"]))
+      if kernel["BufferLoad"]:
+          module.add(vectorMultiplyBpe(maxGroVgpr, maxGroVgpr, tP["bpeGR"]))
+      else:
+          module.add(vectorMultiply64Bpe(maxGroVgpr, maxGroVgpr, tP["bpeGR"]))
 
       module.addSpaceLine()
 

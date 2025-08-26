@@ -414,7 +414,10 @@ class Solution(collections.abc.Mapping):
     elif isaInfoMap[isa].asmCaps['HasWMMA_V2'] or isaInfoMap[isa].asmCaps['HasWMMA_V3']:
         outputVectorWidth, RegsPerOut = 8, 1
     elif isaInfoMap[isa].asmCaps['HasWMMA_V4']:
+      if state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataType"].isInt8():
         outputVectorWidth, RegsPerOut = 4, 1
+      else:
+        outputVectorWidth, RegsPerOut = 2, 1
     else:
       print("WARNING: unexpect code flow")
 
@@ -2763,7 +2766,7 @@ class Solution(collections.abc.Mapping):
               glvwAlimit = max(glvwAlimit, 4)
 
             # reduce GLVA if GLVA larger than MIOVW
-            if state["GlobalReadVectorWidthA"] > glvwAlimit:
+            if state["GlobalReadVectorWidthA"] > glvwAlimit and not state["enableGLTrA"]:
               tva = totalElementsA // glvwAlimit
               if not Solution.setGlobalReadVectorWidth(state, "A", tva, glvwAlimit, printRejectionReason):
                 validDepthU = False
@@ -2837,7 +2840,7 @@ class Solution(collections.abc.Mapping):
               glvwBlimit = max(glvwBlimit, 4)
 
             # reduce GLVB if GLVB larger than MIOVW
-            if state["GlobalReadVectorWidthB"] > glvwBlimit:
+            if state["GlobalReadVectorWidthB"] > glvwBlimit and not state["enableGLTrB"]:
               tvb = totalElementsB // glvwBlimit
               if not Solution.setGlobalReadVectorWidth(state, "B", tvb, glvwBlimit, printRejectionReason):
                 validDepthU = False

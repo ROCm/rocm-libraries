@@ -728,6 +728,7 @@ class LraTileAssignmentTransposedMFMAB6(LraTileAssignmentTransposedMFMAF6):
 
 class LraTileAssignmentMFMA(LraTileAssignment):
     kernel = {"EnableMatrixInstruction": True, }
+    # TODO: fix this condition
     asmCaps = {
         "HasLDSTrB128B16": False
     }
@@ -908,7 +909,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             else:
                 if writer.states.asmCaps["HasWMMA_V4"]:
                     module.add(vectorStaticDivide(tReg, kReg, 2, tmpVgprRes, \
-                        "1. group even and odd: nIdx = wtid / 2"))
+                                                  "1. group even and odd: nIdx = wtid / 2"))
                 else:
                     module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstTO, tmpVgprRes, tmpSgprInfo, \
                                              "1. N offset: nIdx = wtid %% MI_N(%u)" % matrixInstTO))
@@ -921,7 +922,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                perpPerm(tReg)
 
             module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
-                "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
+                    "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
             if enableLDSTr:
                 module.add(VAddU32(dst=vgpr(tReg), src0=vgpr(sReg), src1=vgpr(tReg), \
                            comment="1. offset in wave: lrOffset = bnOffset + lrKOffset"))
@@ -951,13 +952,13 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 if (dividendForKId != waveWidth) and (not isDTVAB):
                     if enableLDSTr:
                         module.add(vectorStaticRemainder(dummy, mReg, kReg, 16, tmpVgprRes, tmpSgprInfo, \
-                                                        "5.1 thread id in wave: mtid = wtid %% 16"))
+                                                        "5.1 thread id in wave: mtid = wtid % 16"))
                         module.add(vectorStaticDivide(mReg, mReg, 4, tmpVgprRes, \
                                                      "5.2 thread id in wave: k1Idx = mtid // 4"))
                 if (dividendForKId != waveWidth) or isDTVAB:
                     if writer.states.asmCaps["HasWMMA_V4"]:
                         module.add(vectorStaticRemainder(dummy, kReg, kReg, 2, tmpVgprRes, tmpSgprInfo, \
-                                                "5. K offset: kIdx = wtid % 2"))
+                                                         "5. K offset: kIdx = wtid % 2"))
                     else:
                         # DTVAB case, add this regardless of dividendForKId != waveWidth
                         module.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
@@ -991,7 +992,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                           comment="6. offset in wave: lrOffset = bnOffset + lrKOffset"))
                     else:
                         module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(kReg), strideK, vgpr(tReg), tmpSgprInfo, \
-                                                    "5. K offset: lrKOffset = kIdx * mStride(%u); 6. offset in wave: lrOffset = bnOffset + lrKOffset" % (strideK)))
+                                                               "5. K offset: lrKOffset = kIdx * mStride(%u); 6. offset in wave: lrOffset = bnOffset + lrKOffset" % (strideK)))
 
             # wave offset
             if num1DWaves > 1:
