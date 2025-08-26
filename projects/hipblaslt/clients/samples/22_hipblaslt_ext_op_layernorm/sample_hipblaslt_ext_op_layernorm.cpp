@@ -46,11 +46,6 @@ void simpleLayerNorm(hipDataType type,
 
 int main()
 {
-    int             deviceId;
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDevice(&deviceId));
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-
     LayerNormRunner<float> runnerF32(135, 345);
 
     runnerF32.run([&runnerF32] {
