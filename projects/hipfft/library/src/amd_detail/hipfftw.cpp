@@ -23,6 +23,7 @@
 #include "rocfft/rocfft.h"
 #include <algorithm>
 #include <array>
+#include <cstdint> // std::int64_t
 #include <cstdlib>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -804,7 +805,7 @@ namespace
         hipfftw_general_layout_data<rank, 1, int> ret;
         ret.lengths = user_lengths_rm;
         int ival = 1, oval = 1;
-        for(int dim_idx = static_cast<int>(rank) - 1; dim_idx >= 0; dim_idx--)
+        for(auto dim_idx = rank; dim_idx-- > 0;)
         {
             ret.istrides[dim_idx] = ival;
             ret.ostrides[dim_idx] = oval;
