@@ -692,41 +692,91 @@ namespace rocRoller::KernelGraph
                 {
                     auto [target, direction] = getOperationTarget(candidate, kgraph, isDirect2LDS);
                     auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
-                    auto unrollCoordinates   = filterCoordinates<Unroll>(required, kgraph);  
-                    auto sdim = 0;
-                    
-                    for (auto const& unroll : unrollCoordinates)
+
+                    for(auto const& c : kgraph.mapper.getConnections(candidate))
                     {
-                        // Find the neighbour of the Unroll that:
-                        // 1. is in the load/store coordinate transform path
-                        // 2. has a Stride edge connected to it
-                        std::optional<int> maybeStrideTag;
-                        std::vector<int>   neighbourNodes;
-                        if(direction == Graph::Direction::Downstream)
-                            neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
-                        else
-                            neighbourNodes = kgraph.coordinates.childNodes(unroll).to<std::vector>();
-                        
-                        for(auto neighbourNode : neighbourNodes)
+                        if(std::holds_alternative<Connections::TypeAndSubDimension>(c.connection))
                         {
-                            if(path.contains(neighbourNode))
+                            auto curConnection = std::get<Connections::TypeAndSubDimension>(c.connection);
+                            auto maybeUnroll  = kgraph.coordinates.get<Unroll>(c.coordinate);
+
+                            if (maybeUnroll)
                             {
-                                auto neighbourEdges = kgraph.coordinates.getNeighbours(
-                            neighbourNode, Graph::opposite(direction));
-                                for(auto neighbourEdge : neighbourEdges)
+                                auto const subDimension = curConnection.subdimension;
+                                // Find the neighbour of the Unroll that:
+                                // 1. is in the load/store coordinate transform path
+                                // 2. has a Stride edge connected to it
+                                std::optional<int> maybeStrideTag;
+                                std::vector<int>   neighbourNodes;
+                                if(direction == Graph::Direction::Downstream)
+                                    neighbourNodes = kgraph.coordinates.parentNodes(c.coordinate).to<std::vector>();
+                                else
+                                    neighbourNodes = kgraph.coordinates.childNodes(c.coordinate).to<std::vector>();
+                        
+                                for(auto neighbourNode : neighbourNodes)
                                 {
-                                    auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
-                                    if(maybeStride)
+                                    if(path.contains(neighbourNode))
                                     {
-                                        maybeStrideTag = neighbourEdge;
-                                        auto unrollStrideConnection = Connections::TypeAndSubDimension{"UnrollStride", sdim};
-                                        kgraph.mapper.connect(candidate, *maybeStrideTag, unrollStrideConnection);
-                                        sdim++;
+                                        auto neighbourEdges = kgraph.coordinates.getNeighbours(
+                            neighbourNode, Graph::opposite(direction));
+                                        for(auto neighbourEdge : neighbourEdges)
+                                        {
+                                            auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
+                                            if(maybeStride)
+                                            {
+                                                maybeStrideTag = neighbourEdge;
+                                                // auto newConnection = UnrollConnection<Stride>(*maybeStrideTag, subDimension);
+                                                auto newConnection = makeConnection<Stride, Connections::UnrollStride>(*maybeStrideTag, subDimension);
+                                                kgraph.mapper.connect(candidate, newConnection.coordinate, newConnection.connectionSpec);
+                                                // auto unrollStrideConnection = Connections::TypeAndSubDimension{"UnrollStride", subDimension};
+                                                // kgraph.mapper.connect(candidate, *maybeStrideTag, unrollStrideConnection);
+                                            }
+                                        }
                                     }
-                                }
+                                }                            
                             }
                         }
+
+
                     }
+
+                    // auto [target, direction] = getOperationTarget(candidate, kgraph, isDirect2LDS);
+                    // auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
+                    // auto unrollCoordinates   = filterCoordinates<Unroll>(required, kgraph);  
+                    // auto sdim = 0;
+                    
+                    // for (auto const& unroll : unrollCoordinates)
+                    // {
+                    //     // Find the neighbour of the Unroll that:
+                    //     // 1. is in the load/store coordinate transform path
+                    //     // 2. has a Stride edge connected to it
+                    //     std::optional<int> maybeStrideTag;
+                    //     std::vector<int>   neighbourNodes;
+                    //     if(direction == Graph::Direction::Downstream)
+                    //         neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
+                    //     else
+                    //         neighbourNodes = kgraph.coordinates.childNodes(unroll).to<std::vector>();
+                        
+                    //     for(auto neighbourNode : neighbourNodes)
+                    //     {
+                    //         if(path.contains(neighbourNode))
+                    //         {
+                    //             auto neighbourEdges = kgraph.coordinates.getNeighbours(
+                    //         neighbourNode, Graph::opposite(direction));
+                    //             for(auto neighbourEdge : neighbourEdges)
+                    //             {
+                    //                 auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
+                    //                 if(maybeStride)
+                    //                 {
+                    //                     maybeStrideTag = neighbourEdge;
+                    //                     auto unrollStrideConnection = Connections::TypeAndSubDimension{"UnrollStride", sdim};
+                    //                     kgraph.mapper.connect(candidate, *maybeStrideTag, unrollStrideConnection);
+                    //                     sdim++;
+                    //                 }
+                    //             }
+                    //         }
+                    //     }
+                    // }
                 }
 
                 // Add deferred connections

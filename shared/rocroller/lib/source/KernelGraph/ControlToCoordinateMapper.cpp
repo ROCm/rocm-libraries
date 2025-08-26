@@ -219,6 +219,7 @@ namespace rocRoller::KernelGraph
                                   [](ComputeIndex const&) { return "ComputeIndex"; },
                                   [](TypeAndSubDimension const&) { return "TypeAndSubDimension"; },
                                   [](TypeAndNaryArgument const&) { return "TypeAndNaryArgument"; },
+                                  [](UnrollStride const&) { return "UnrollStride"; },
                               },
                               cs);
         }
@@ -269,6 +270,11 @@ namespace rocRoller::KernelGraph
             std::string operator()(TypeAndSubDimension const& ci) const
             {
                 return concatenate(ci.id, ": (", ci.subdimension, ")");
+            }
+
+            std::string operator()(UnrollStride const& ci) const
+            {
+                return concatenate(ci.unrollStride, ": (", ci.unrollDimension, ")");
             }
 
             std::string operator()(TypeAndNaryArgument const& ci) const

@@ -68,23 +68,23 @@ namespace rocRoller::KernelGraph
             }
         };
 
-        // struct UnrollStide
-        // {
-        //     std::string id;
-        //     int subdimension;
-
-        //     bool operator==(UnrollStride const& other) const
-        //     {
-        //         return this->id == other.id && this->unrollCoord == other.unrollCoord;
-        //     }
-        // }
-
         bool inline operator<(TypeAndSubDimension const& a, TypeAndSubDimension const& b)
         {
             if(a.id == b.id)
                 return a.subdimension < b.subdimension;
             return a.id < b.id;
         }
+
+        struct UnrollStride
+        {
+            std::string unrollStride;
+            int         unrollDimension;
+
+            bool operator==(UnrollStride const& other) const
+            {
+                return this->unrollStride == other.unrollStride && this->unrollDimension == other.unrollDimension;
+            }
+        };
 
         struct TypeAndNaryArgument
         {
@@ -144,7 +144,8 @@ namespace rocRoller::KernelGraph
                                             JustNaryArgument,
                                             ComputeIndex,
                                             TypeAndSubDimension,
-                                            TypeAndNaryArgument>;
+                                            TypeAndNaryArgument,
+                                            UnrollStride>;
 
         std::string   name(ConnectionSpec const& cs);
         std::string   toString(ConnectionSpec const& cs);
@@ -158,13 +159,19 @@ namespace rocRoller::KernelGraph
         int                         coordinate;
     };
 
+    template <typename T, typename SpecType>
+    inline DeferredConnection makeConnection(int coordinate, int sdim = 0)
+    {
+        DeferredConnection rv;
+        rv.connectionSpec = SpecType{name<T>(), sdim};
+        rv.coordinate     = coordinate;
+        return rv;
+    }
+
     template <typename T>
     inline DeferredConnection DC(int coordinate, int sdim = 0)
     {
-        DeferredConnection rv;
-        rv.connectionSpec = Connections::TypeAndSubDimension{name<T>(), sdim};
-        rv.coordinate     = coordinate;
-        return rv;
+        return makeConnection<T, Connections::TypeAndSubDimension>(coordinate, sdim);
     }
 
     /**
