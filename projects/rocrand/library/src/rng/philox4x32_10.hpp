@@ -310,7 +310,6 @@ public:
     template<typename T, typename Distribution = uniform_distribution<T>>
     rocrand_status generate(T* data, size_t data_size, Distribution distribution = Distribution())
     {
-        printf("Aslkjdlsajdlkasjdlkasjdlkasjdlkasjdlkas!!!\n");
         rocrand_status status = init();
         if(status != ROCRAND_STATUS_SUCCESS)
         {
@@ -400,11 +399,9 @@ public:
 
     rocrand_status generate_poisson(unsigned int* data, size_t data_size, double lambda)
     {
-        printf("Why are we segging?\n");
         auto result = m_poisson.get_distribution(lambda);
         if(auto* dis = std::get_if<poisson_distribution_t>(&result))
         {
-            printf("ahkjdhasjkdhasd\n");
             return generate(data, data_size, *dis);
         }
         if(auto* dis = std::get_if<poisson_approx_distribution_t>(&result))
