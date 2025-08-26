@@ -593,7 +593,7 @@ namespace TensileLite
             }
 
             double L_cvt    = 0.0f;
-            bool   tf32_emu = ((miDataType == DataType::XFloat32 || miDataType == DataType::Float)
+            bool   tf32_emu = ((miDataType == DataType::XFloat32)
                              && (hardware.arch == Hardware::Architecture::gfx950));
 
             if(tf32_emu && !(MT_M == 256 && MT_N == 256))
@@ -921,7 +921,7 @@ namespace TensileLite
                                                  mx_block_size,
                                                  debug);
 
-            bool tf32_emu = ((miDataType == DataType::XFloat32 || miDataType == DataType::Float)
+            bool tf32_emu = ((miDataType == DataType::XFloat32)
                              && (hardware.arch == Hardware::Architecture::gfx950));
 
             //Short circuit conditions for tiles.
@@ -987,7 +987,8 @@ namespace TensileLite
             if(enable_heuristics && tf32_emu)
             {
                 // Prefer Custom 256x256x32 kernel for TF32 NT
-                if (!transA && transB) {
+                if(!transA && transB)
+                {
                     if((MT_M == 256 && MT_N == 256 && MT_K == 32))
                     {
                         total_latency = total_latency * 0.3;
@@ -1126,7 +1127,7 @@ namespace TensileLite
                     total_latency = total_latency * 0.25;
                 }
             }
-          
+
             //If we can still fit one whole dimension in a singletile though, that's great! promote that
             // if(MT_M >= M || MT_N >= N)
             // {
