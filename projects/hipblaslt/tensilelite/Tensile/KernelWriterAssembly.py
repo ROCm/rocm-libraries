@@ -7506,6 +7506,8 @@ class KernelWriterAssembly(KernelWriter):
         return InstType.INST_BF6
       elif abbrev == 'fp4_fp4':
           return InstType.INST_F4
+      elif abbrev == 'e8':
+          return InstType.INST_E8
       else:
           assert("Unsupported data type.")
       return InstType.INST_NOTYPE
@@ -7531,9 +7533,11 @@ class KernelWriterAssembly(KernelWriter):
     numMIInputM      = kernel["MIInputPerThreadMetadata"]
     numMIInput       = max(numMIInputA,numMIInputB)
     miInInstType, miOutInstType = dataTypeToMfmaInstTypePair(miInputType, kernel["SourceSwap"])
-    neg_flag         = True if ((not is_mfma) and (miInInstType == InstType.INST_I8)) else False
-    miInInstType     = InstType.INST_U8 if ((not is_mfma) and miInInstType == InstType.INST_I8) else miInInstType
-    miOutInstType    = miOutInstType if (is_mfma or kernel["ProblemType"]["Sparse"]) else dataTypeNameAbbrevToInstType(kernel["ProblemType"]["ComputeDataType"].toNameAbbrev())
+    neg_flag           = True if ((not is_mfma) and (miInInstType == InstType.INST_I8)) else False
+    miInInstType       = InstType.INST_U8 if ((not is_mfma) and miInInstType == InstType.INST_I8) else miInInstType
+    miOutInstType      = miOutInstType if (is_mfma or kernel["ProblemType"]["Sparse"]) else dataTypeNameAbbrevToInstType(kernel["ProblemType"]["ComputeDataType"].toNameAbbrev())
+    miInScaleAInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSA"].toNameAbbrev())
+    miInScaleBInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSB"].toNameAbbrev())
     numReadsIterCoalescedA = self.states.numReadsIterCoalescedA
     numReadsIterCoalescedB = self.states.numReadsIterCoalescedB
     numReadsIterCoalesced = max(numReadsIterCoalescedA, numReadsIterCoalescedB)
@@ -8195,11 +8199,15 @@ class KernelWriterAssembly(KernelWriter):
               src1 = Str0
               srcMX0 = StrMX1
               srcMX1 = StrMX0
+              miInScale0InstType = miInScaleBInstType
+              miInScale1InstType = miInScaleAInstType
             else:
               src0 = Str0
               src1 = Str1
               srcMX0 = StrMX0
               srcMX1 = StrMX1
+              miInScale0InstType = miInScaleAInstType
+              miInScale1InstType = miInScaleBInstType
 
             variant = [kernel["MatrixInstM"], kernel["MatrixInstN"], kernel["MatrixInstK"], kernel["MatrixInstB"]]
 
@@ -8258,7 +8266,8 @@ class KernelWriterAssembly(KernelWriter):
                                         comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
                 block = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
-                imod.add(MXMFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, \
+                imod.add(MXMFMAInstruction(instType=miInInstType, accType=miOutInstType, \
+                                       mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
                                        a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
                                        mxsa=srcMX0, mxsb=srcMX1, block=block,

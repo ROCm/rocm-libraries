@@ -287,6 +287,8 @@ namespace rocisa
     struct MXMFMAInstruction : public Instruction
     {
         InstType                           accType;
+        InstType                           mxScaleAType;
+        InstType                           mxScaleBType;
         std::vector<int>                   variant;
         std::shared_ptr<RegisterContainer> acc;
         std::shared_ptr<RegisterContainer> a;
@@ -298,6 +300,8 @@ namespace rocisa
 
         MXMFMAInstruction(InstType                                  instType,
                           InstType                                  accType,
+                          InstType                                  mxScaleAType,
+                          InstType                                  mxScaleBType,
                           const std::vector<int>&                   variant,
                           const std::shared_ptr<RegisterContainer>& acc,
                           const std::shared_ptr<RegisterContainer>& a,
@@ -309,6 +313,8 @@ namespace rocisa
                           const std::string&                        comment = "")
             : Instruction(instType, comment)
             , accType(accType)
+            , mxScaleAType(mxScaleAType)
+            , mxScaleBType(mxScaleBType)
             , variant(variant)
             , acc(acc)
             , a(a)
@@ -323,6 +329,8 @@ namespace rocisa
         MXMFMAInstruction(const MXMFMAInstruction& other)
             : Instruction(other.instType, other.comment)
             , accType(other.accType)
+            , mxScaleAType(other.mxScaleAType)
+            , mxScaleBType(other.mxScaleBType)
             , variant(other.variant)
             , acc(other.acc ? other.acc->clone2() : nullptr)
             , a(other.a ? other.a->clone2() : nullptr)
@@ -384,6 +392,25 @@ namespace rocisa
             default:
                 break;
             }
+
+            switch(mxScaleAType)
+            {
+            case InstType::INST_F8:
+                inputPermuteStr += " matrix_a_scale_fmt:2";
+                break;
+            default:
+                break;
+            }
+
+            switch(mxScaleBType)
+            {
+            case InstType::INST_F8:
+                inputPermuteStr += " matrix_b_scale_fmt:2";
+                break;
+            default:
+                break;
+            }
+
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                    + acc2->toString() + ", " + mxsa->toString() + ", " + mxsb->toString() + inputPermuteStr;
         }

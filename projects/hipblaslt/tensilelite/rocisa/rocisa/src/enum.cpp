@@ -73,6 +73,7 @@ void init_enum(nb::module_ m)
         .export_values();
 
     nb::enum_<rocisa::InstType>(m_enum, "InstType")
+        .value("INST_E8", rocisa::InstType::INST_E8)
         .value("INST_F4", rocisa::InstType::INST_F4)
         .value("INST_F6", rocisa::InstType::INST_F6)
         .value("INST_BF6", rocisa::InstType::INST_BF6)

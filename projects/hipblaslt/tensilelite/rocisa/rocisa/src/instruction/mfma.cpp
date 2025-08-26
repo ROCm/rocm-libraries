@@ -140,6 +140,8 @@ void mfma_inst(nb::module_ m_mfma)
     nb::class_<rocisa::MXMFMAInstruction, rocisa::Instruction>(m_mfma, "MXMFMAInstruction")
         .def(nb::init<rocisa::InstType,
                       rocisa::InstType,
+                      rocisa::InstType,
+                      rocisa::InstType,
                       const std::vector<int>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -151,6 +153,8 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::string&>(),
              nb::arg("instType"),
              nb::arg("accType"),
+             nb::arg("mxScaleAType"),
+             nb::arg("mxScaleBType"),
              nb::arg("variant"),
              nb::arg("acc"),
              nb::arg("a"),
