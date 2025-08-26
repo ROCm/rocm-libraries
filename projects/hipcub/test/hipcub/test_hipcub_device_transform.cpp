@@ -98,7 +98,6 @@ struct HipcubDeviceTransformParams
     using input_type                 = InputType;
     using output_type                = std::invoke_result_t<UnaryOp, input_type>;
     using unary_op                   = UnaryOp;
-    static constexpr bool use_graphs = UseGraphs;
 };
 
 template<class Params>
@@ -107,8 +106,6 @@ struct HipcubDeviceTransformTests : public ::testing::Test
     using input_type                        = typename Params::input_type;
     using output_type                       = typename Params::output_type;
     using unary_op                          = typename Params::unary_op;
-    static constexpr bool use_graphs        = Params::use_graphs;
-    static constexpr bool debug_synchronous = false;
 };
 
 using HipcubDeviceTransformTestsParams
