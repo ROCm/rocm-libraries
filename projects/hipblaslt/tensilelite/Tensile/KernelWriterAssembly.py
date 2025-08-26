@@ -13621,8 +13621,12 @@ class KernelWriterAssembly(KernelWriter):
   def getWaitcntCodeForDirectToVgpr(self, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, u, isNLL=False, beforeBarrier=False, NLLlast=False, oddLast=False):
     module = Module("DTV wait")
     # generate wait for DTV
-    # TODO: add logic for DTVA + DTVB
-    if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]):
+    # TODO: add precise wait count logic for DTVA + DTVB
+    if kernel["DirectToVgprA"] and kernel["DirectToVgprB"]:
+      needToWait = 0
+      waitComment = "global read wait for DirectToVgpr"
+      module.add(self.getWaitcntCodeForDTVSub(kernel, tensorParametersA, tensorParametersB, needToWait, waitComment))
+    elif kernel["DirectToVgprA"] ^ kernel["DirectToVgprB"]:
       numGlobalReadA = kernel["NumLoadsPerpendicularA"] * kernel["NumLoadsCoalescedA"]
       numGlobalReadB = kernel["NumLoadsPerpendicularB"] * kernel["NumLoadsCoalescedB"]
       numReadsIterCoalesced = self.states.numReadsIterCoalescedA if kernel["DirectToVgprA"] else self.states.numReadsIterCoalescedB

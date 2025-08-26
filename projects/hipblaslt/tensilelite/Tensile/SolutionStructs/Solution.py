@@ -613,8 +613,10 @@ class Solution(collections.abc.Mapping):
       state["PrefetchLocalRead"] = 0
       # So far, DTVA + DTVB does not perform well (waitcnt is not ideal).
       # Disable it for now (TODO: improve waitcnt and re-enable)
-      reject(state, printRejectionReason, "DirectToVgprA + DirectToVgprB disabled")
-      return False
+      # Exception: allow if enableGLTrA or enableGLTrB are set; this still provides better performance than enabling only one side
+      if not (state["enableGLTrA"] or state["enableGLTrB"]):
+        reject(state, printRejectionReason, "DirectToVgprA + DirectToVgprB disabled")
+        return False
 
     # DTV + input type conversion
     if state["ProblemType"]["DataType%s"%tc] != state["ProblemType"]["DataType"]:
@@ -628,7 +630,7 @@ class Solution(collections.abc.Mapping):
       return False
 
     # Does not work with TLU = False and PrefetchLocalRead = 0
-    if (not state["ProblemType"]["TLU%c"%tc]) and state["PrefetchLocalRead"] == 0:
+    if (not state["ProblemType"]["TLU%c"%tc]) and state["PrefetchLocalRead"] == 0 and not (state["DirectToVgprA"] and state["DirectToVgprB"]):
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports TLU%c = False and PrefetchLocalRead = 0"%(tc, tc))
       return False
 
