@@ -170,12 +170,12 @@ install_packages( )
   local library_dependencies_sles=( "gcc-fortran" "make" "gcc-c++" "libcxxtools9" "rpm-build" )
   local library_dependencies_mariner=( "gfortran" "make" "rpm-build" )
 
-  local client_dependencies_ubuntu=( "python3" "python3-yaml")
-  local client_dependencies_centos=( "python36" "python3-pip" )
-  local client_dependencies_centos8=( "python39" "python3-virtualenv" )
-  local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" )
-  local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" )
-  local client_dependencies_mariner=( "python3" "python3-yaml" )
+  local client_dependencies_ubuntu=( "python3" "python3-yaml" libopenblas-dev)
+  local client_dependencies_centos=( "python36" "python3-pip" openblas-devel)
+  local client_dependencies_centos8=( "python39" "python3-virtualenv" openblas-devel)
+  local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" openblas-devel)
+  local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" openblas-devel)
+  local client_dependencies_mariner=( "python3" "python3-yaml" openblas-devel)
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
     library_dependencies_ubuntu+=("libmsgpack-dev")
@@ -681,11 +681,11 @@ if [[ "${install_dependencies}" == true ]]; then
       ;;
   esac
 
-  # The following builds googletest & lapack from source, installs into cmake default /usr/local
+  # The following builds googletest from source, installs into cmake default /usr/local
   pushd .
     printf "\033[32mBuilding \033[33mgoogletest\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} ${root_path}/deps
+    ${cmake_executable} -DBUILD_LAPACK=OFF ${root_path}/deps
     make -j$(nproc)
     elevate_if_not_root make install
   popd
