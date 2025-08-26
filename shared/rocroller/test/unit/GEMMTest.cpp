@@ -817,12 +817,6 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                if(gemm.direct2LDSA || gemm.direct2LDSB)
-                {
-                    Log::info("Faking failure");
-                    res.ok = false;
-                }
-
                 if(!res.ok)
                 {
                     std::filesystem::path base
