@@ -63,6 +63,33 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[1,67,517], [1,93,709], [1], [1,76,865]]
+    - # Check DTL+nonDTL tuning
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - DepthU: [ 32 ]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [1]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [1, 4]
+        - GlobalReadVectorWidthB: [1, 4]
+        - LocalReadVectorWidth: [1, 4]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - DirectToLds: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+
 
   ########################################
   # F32 NT

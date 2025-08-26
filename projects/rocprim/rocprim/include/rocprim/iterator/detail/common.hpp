@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,15 +18,41 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#pragma once
-#ifndef TESTCONSTANTS_H
-#define TESTCONSTANTS_H
+#ifndef ROCPRIM_ITERATOR_DETAIL_COMMON_HPP_
+#define ROCPRIM_ITERATOR_DETAIL_COMMON_HPP_
 
-#include "hipfft/hipfft.h"
+#include "../../config.hpp"
 
-#include <stdexcept>
+BEGIN_ROCPRIM_NAMESPACE
 
-extern int    verbose;
-extern size_t ramgb;
+namespace detail
+{
 
-#endif
+template<typename T>
+class proxy_pointer
+{
+    T value_;
+
+public:
+    ROCPRIM_HOST_DEVICE explicit inline proxy_pointer(const T& value) : value_(value) {}
+
+    ROCPRIM_HOST_DEVICE
+    const T*
+        operator->() const
+    {
+        return &value_;
+    }
+
+    ROCPRIM_HOST_DEVICE
+    const T&
+        operator*() const
+    {
+        return value_;
+    }
+};
+
+} // namespace detail
+
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_DEVICE_DETAIL_COMMON_HPP_

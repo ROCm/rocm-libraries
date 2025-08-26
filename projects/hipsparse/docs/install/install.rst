@@ -1,14 +1,15 @@
 .. meta::
-  :description: hipSPARSE installation guide
+  :description: hipSPARSE installation guide for Linux
   :keywords: hipSPARSE, rocSPARSE, ROCm, API, documentation, install
 
 .. _hipsparse_building:
 
-*********************************
-Installing and building hipSPARSE
-*********************************
+*******************************************
+Installing and building hipSPARSE for Linux
+*******************************************
 
-This topic explains how to install and build the hipSPARSE library.
+This topic explains how to install and build the hipSPARSE library on Linux by using prebuilt packages or building from source.
+For information on installing and building hipSPARSE on Microsoft Windows, see :doc:`hipSPARSE for Windows <./install-windows>`.
 
 Prerequisites
 =============
@@ -83,7 +84,7 @@ longer but is recommended for those working with a large number of libraries.
 
 .. note::
 
-   To build ROCm 6.4.2 and earlier, use the hipSPARSE repository at `<https://github.com/ROCm/hipSPARSE>`_.
+   To build ROCm 6.4.3 and earlier, use the hipSPARSE repository at `<https://github.com/ROCm/hipSPARSE>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Building hipSPARSE using the install script
