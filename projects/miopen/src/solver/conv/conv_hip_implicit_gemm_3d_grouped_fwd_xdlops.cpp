@@ -453,46 +453,57 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
 
     // 2. AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(&ctx != &GetDummyCtx() &&
-       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
+    // Only use AI heuristics for float32 (not for fp16 or bf16, since tests did not show
+    // significant improvement for those compared to fallback)
+    if(problem.GetInDataType() == miopenFloat)
     {
-        bool ai_success         = false;
-        std::string solver_name = "ConvHipImplicitGemm3DGroupFwdXdlops";
+        if(&ctx != &GetDummyCtx() &&
+           !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
+        {
+            bool ai_success         = false;
+            std::string solver_name = "ConvHipImplicitGemm3DGroupFwdXdlops";
 
-        auto run_ai_heuristics = [&](auto CKDataType) {
-            using T = decltype(CKDataType);
-            auto fill_valid_kernels =
-                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<T>, CKArgs<T>>(
-                    problem);
+            auto run_ai_heuristics = [&](auto CKDataType) {
+                using T                 = decltype(CKDataType);
+                auto fill_valid_kernels = [=](const miopen::conv::ProblemDescription& problem)
+                    -> std::vector<std::string> {
+                    return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<T>,
+                                                               CKArgs<T>>(problem);
+                };
+                return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
+                                                                            problem,
+                                                                            valid_kernels,
+                                                                            index,
+                                                                            split_k,
+                                                                            kernel_id,
+                                                                            fill_valid_kernels,
+                                                                            solver_name);
             };
-            return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
-                                                                        problem,
-                                                                        valid_kernels,
-                                                                        index,
-                                                                        split_k,
-                                                                        kernel_id,
-                                                                        fill_valid_kernels,
-                                                                        solver_name);
-        };
-        switch(problem.GetInDataType())
-        {
-        case miopenHalf: ai_success = run_ai_heuristics(ck::half_t{}); break;
-        case miopenFloat: ai_success = run_ai_heuristics(float{}); break;
-        case miopenBFloat16: ai_success = run_ai_heuristics(ck::bhalf_t{}); break;
-        default: break;
+            switch(problem.GetInDataType())
+            {
+            case miopenHalf: ai_success = run_ai_heuristics(ck::half_t{}); break;
+            case miopenFloat: ai_success = run_ai_heuristics(float{}); break;
+            case miopenBFloat16: ai_success = run_ai_heuristics(ck::bhalf_t{}); break;
+            default: break;
+            }
+            if(ai_success)
+            {
+                MIOPEN_LOG_I("AI heuristics successfully selected kernel: " << kernel_id);
+                return;
+            }
+            else
+            {
+                MIOPEN_LOG_I("AI heuristics failed, falling back to fallback heuristics or default "
+                             "initialization");
+                // Continue to fallback heuristics
+            }
         }
-        if(ai_success)
-        {
-            MIOPEN_LOG_I("AI heuristics successfully selected kernel: " << kernel_id);
-            return;
-        }
-        else
-        {
-            MIOPEN_LOG_I("AI heuristics failed, falling back to fallback heuristics or default "
-                         "initialization");
-            // Continue to fallback heuristics
-        }
+    }
+    else
+    {
+
+        MIOPEN_LOG_I2("AI heuristics only supported for FP32 data type, falling back to fallback "
+                      "heuristics or default initialization");
     }
 #endif
 
