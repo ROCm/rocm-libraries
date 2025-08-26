@@ -1015,7 +1015,17 @@ namespace TensileLite
                     total_latency = total_latency * 4;
                 }
 
-
+                // Bias toward 512 tiles for sizes "very skinny" sizes
+                // "very skinny" definition: either N or M less than 16 (1 tile) and the other one requires
+                // more than 100 waves (100*numCUs tiles)
+                if(M < 16 && N > 100 * hardware.N_CU * 512 && MT_N == 512)
+                {
+                    total_latency = total_latency * 0.25;
+                }
+                if(N < 16 && M > 100 * hardware.N_CU * 512 && MT_M == 512)
+                {
+                    total_latency = total_latency * 0.25;
+                }
 
             }
             //If we can still fit one whole dimension in a singletile though, that's great! promote that

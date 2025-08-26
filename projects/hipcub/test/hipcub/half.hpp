@@ -33,12 +33,13 @@
  * Utilities for interacting with the opaque CUDA __half type
  */
 
- #include <stdint.h>
- #include <hipcub/util_type.hpp>
+#include <hipcub/config.hpp>
+#include <hipcub/util_type.hpp>
+#include <stdint.h>
 
- #if defined(__HIP_PLATFORM_NVIDIA__)
-     #include <cuda_fp16.h>
- #endif
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cuda_fp16.h>
+#endif
 
 #include <cstring>
 #include <ostream>
@@ -338,8 +339,17 @@ struct hipcub::FpLimits<half_t>
     static __host__ __device__ __forceinline__ half_t Lowest() { return half_t::lowest(); }
 };
 
+#if defined(__HIP_PLATFORM_NVIDIA__)
+_CCCL_SUPPRESS_DEPRECATED_PUSH
+#else
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+#endif
 template <> struct hipcub::NumericTraits<half_t> : hipcub::BaseTraits<FLOATING_POINT, true, false, unsigned short, half_t> {};
-
+#if defined(__HIP_PLATFORM_NVIDIA__)
+_CCCL_SUPPRESS_DEPRECATED_POP
+#else
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+#endif
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
