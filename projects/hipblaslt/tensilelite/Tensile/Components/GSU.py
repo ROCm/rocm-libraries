@@ -59,7 +59,7 @@ class GSU(Component):
     def graIncrementsRestore(self, writer, kernel, loopCounterName):
         pass
 
-    def graIncrementsCommon(self, writer, loopIdx, tc, stride, m):
+    def graIncrementsCommon(self, writer, loopIdx, tc, stride, M):
         module = Module("GSU Common graIncrements")
 
         # multiply by stride, optimizing if unit stride
@@ -406,10 +406,12 @@ class GSUOn(GSU):
             with writer.allocTmpSgpr(3) as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 2
+                du = kernel["_DepthU%s"%tc]
+                duBpe = int(du * tP["bpeGR"])
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
-                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1="DepthU*%d"%(tP["bpeGR"]), comment="GSU*DepthU*Bpe"))
+                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1=duBpe, comment="GSU*DepthU*Bpe"))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
-                module.add(SCMovB32(dst=sgpr(gsuSgpr), src="DepthU*%d"%(tP["bpeGR"]), comment="DepthU*Bpe if GSUC = 1"))
+                module.add(SCMovB32(dst=sgpr(gsuSgpr), src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
                 module.add(SMulI32(dst=sgpr(tmpSgpr+0), src0=sgpr(gsuSgpr), src1=stride, \
                     comment="incr%s%s = %s*DepthU*bpeGR (unrollIdx)"%(tc, loopChar, stride) ))
                 # TODO - this should be mul-H??
@@ -437,7 +439,7 @@ class GSUOn(GSU):
                 elif tc == "B" and kernel["ProblemType"]["SwizzleTensorB"]:
                     mult_MI_Dim = "*MI_N"
 
-                du = kernel["DepthU"]
+                du = kernel["_DepthU%s"%tc]
                 duBpe = f'{int(du * tP["bpeGR"])}*{mult_MI_Dim}' if mult_MI_Dim else int(du * tP["bpeGR"])
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
                 module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=duBpe, comment="GSU*DepthU*Bpe%s"%(mult_MI_Dim)))
@@ -449,19 +451,13 @@ class GSUOn(GSU):
                     m.setMinus(True)
 
                 incr = sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
-                duBpe = f'{int(kernel["DepthU"]*tP["bpeGR"])}{mult_MI_Dim}'
+                duBpe = f'{int(du*tP["bpeGR"])}{mult_MI_Dim}'
                 # multiply by stride, optimizing if unit stride
                 if writer.isConstUnitStride(stride):
                     module.add(SCSelectB32(dst=incr, src0=duBpe, src1=m, comment="incr%s (unrollIdx)"%(tc)))
                 else:
                     module.add(SCMovB32(dst=m, src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
                     module.add(SMulI32(dst=incr, src0=m, src1=stride, comment="incr%s unrollIdx)"%(tc) ))
-
-                if kernel["ProblemType"]["Sparse"]:
-                    if tP["is_sparse"]:
-                        module.add(SLShiftRightB32(dst=incr, shiftHex=hex(log2(2)), src=incr))
-                    elif tP["isM"]:
-                        module.add(SLShiftRightB32(dst=incr, shiftHex=hex(log2(8)), src=incr))
 
         return module
 
