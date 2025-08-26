@@ -819,7 +819,7 @@ namespace GEMMDriverTest
 
                 if(gemm.direct2LDSA || gemm.direct2LDSB)
                 {
-                    Log::Info("Faking failure");
+                    Log::info("Faking failure");
                     res.ok = false;
                 }
 
