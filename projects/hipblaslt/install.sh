@@ -320,7 +320,7 @@ install_msgpack_from_source( )
       pushd .
       mkdir -p ${build_dir}/deps
       cd ${build_dir}/deps
-      git clone -b cpp-3.0.1 https://github.com/msgpack/msgpack-c.git --depth 1
+      git clone -b cpp-3.1.0 https://github.com/msgpack/msgpack-c.git --depth 1
       cd msgpack-c
       git fetch --unshallow
       CXX=${cxx} CC=${cc} ${cmake_executable} -DMSGPACK_BUILD_TESTS=OFF -DMSGPACK_BUILD_EXAMPLES=OFF .
