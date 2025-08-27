@@ -349,12 +349,16 @@ def restore_prob_sol_map(logfile):
     print(f"#  Restore Previous Tuning From Log File: {str(logfile)}")
 
     startHint = "run,problem-progress,"
-    finHint = "clientExit"
+    finTuningHint = "clientExit"
+    finProblemHint = "####"
     keyword = "Contraction"
     runningTuning = False
 
     prob_best_us_record = {}
     prob_sol_map = {}
+    cur_prob_idx = -1
+    cur_sol_idx = -1
+    last_fin_prob = -1
     allProblems = 0
     allSolutions = 0
 
@@ -363,50 +367,72 @@ def restore_prob_sol_map(logfile):
             # Iterate over each line in the file
             for line in sh_file:
                 line = line.strip()
-                # run untile we see "run,problem-progress,"
+                # run until we see a line: "run,problem-progress,...."
                 if not runningTuning:
                     runningTuning = line.startswith(startHint)
                     continue
 
-                # following lines should be bench result
+                # following lines should be the bench results
                 if runningTuning:
-                    # not a tuning result line (contains "Contraction")
-                    if keyword not in line:
-                        continue
-                    # we see a line with clientExit, then break
-                    if line.startswith(finHint):
+                    # we see a line with clientExit, then finish parsing log.
+                    if line.startswith(finTuningHint):
+                        print1(f'#  Parsed log finished the tuning with line: {line}')
                         break
+
+                    # a line starts and ends with "####" is printed in postProblem() which means the cur_prob completed tuning.
+                    elif line.startswith(finProblemHint) and line.endswith(finProblemHint):
+                        # print1(f'#  Parsed Prob-Idx: {cur_prob_idx} completed tuning.')
+                        last_fin_prob = cur_prob_idx
+
+                    # not a valid tuning result line (a valid tuning result line contains "Contraction")
+                    elif keyword not in line:
+                        continue
+
+                    # a valid tuning result line
                     else:
                         tokens = line.split('"')
-                        ## split with "(problem-size)" : there should be be 3 tokens: { "starting-numbers," , "problem-size-desc" , ",rest-of-numbers"}
-                        assert len(tokens) == 3, f'bench result line: {line} is not fitting expected format'
-                        tokens[1] = "problem-sizes"
-                        newline = tokens[0] + tokens[1] + tokens[2] # a new line " starting-number, 'problem-sizes' , rest-of-numbers "
+                        # split by '"' to extract "(problem-size-desc)"
+                        # there should be 3 tokens: { "some-info," , "(problem-size-desc)" , ",rest-of-other-info"}
+                        assert len(tokens) == 3, f'bench result line: {line} is not fitting the expected format'
+                        # original tokens[1] looks like "(M,N,B,K)", replace it with a string without comma
+                        tokens[1] = 'problem-sizes'
+                        newline = tokens[0] + tokens[1] + tokens[2]
+                        # now the new line = "some-info, 'problem-sizes' , rest-of-other-info"
+                        # 0,29/31,8/247,Contraction....,'problem-sizes',None,,None,[SOLUTION-NAME],[VALIDATION],[53.6248(us)],[63354.7(gflops)],.........
                         tokens = newline.split(',')
-                        probInfo = tokens[1].split('/') # tokens[1] should be "probId/AllProb"
-                        solInfo = tokens[2].split('/') # tokens[2] should be "solId/AllSol"
+                        probInfo = tokens[1].split('/')
+                        solInfo = tokens[2].split('/')
                         assert len(probInfo) == 2, f'tokens[1]: {tokens[1]} should be a token as probId/AllProb'
                         assert len(solInfo) == 2, f'tokens[2]: {tokens[2]} should be a token as solId/AllSol'
-                        # solName = tokens[7]
-                        usTimeInfo = float(tokens[10]) # tokens[10] should be tuning mju-second
+                        # solName = tokens[8] # Might be another choice to put in map...
+                        usTimeInfo = float(tokens[10]) # tokens[10] should be the mju-sec
+                        cur_prob_idx = int(probInfo[0])
+                        cur_sol_idx = int(solInfo[0])
 
-                        # This can handle both the log w/ or /wo PrintWinnerOnly
-                        current_best_us_for_prob = prob_best_us_record.get(int(probInfo[0]))
+                        # This can handle logs with or without PrintWinnerOnly
+                        current_best_us_for_prob = prob_best_us_record.get(cur_prob_idx)
                         if current_best_us_for_prob is None:
                             # print(f"None, added for probID: {probInfo[0]}, time: {usTimeInfo}")
-                            prob_best_us_record.update( {int(probInfo[0]) : float(usTimeInfo)} )
-                            prob_sol_map.update( {int(probInfo[0]) : int(solInfo[0])} )
+                            prob_best_us_record.update( {cur_prob_idx : usTimeInfo} )
+                            prob_sol_map.update( {cur_prob_idx : cur_sol_idx} )
                         else:
-                            # update the winner
+                            # update the winner if better
                             if usTimeInfo < current_best_us_for_prob:
                                 # print(f"Better, updated for probID: {probInfo[0]}, new time: {usTimeInfo}, old time: {current_best_us_for_prob}")
-                                prob_best_us_record.update( {int(probInfo[0]) : float(usTimeInfo)} )
-                                prob_sol_map.update( {int(probInfo[0]) : int(solInfo[0])} )
+                                prob_best_us_record.update( {cur_prob_idx : usTimeInfo} )
+                                prob_sol_map.update( {cur_prob_idx : cur_sol_idx} )
 
+                        # for printing information
                         if allProblems == 0:
                             allProblems = int(probInfo[1]) + 1
                         if allSolutions == 0:
                             allSolutions = int(solInfo[1]) + 1
+
+        # The final updated "cur_prob_idx" is not finished since we don't see its postProblem() "####" line
+        # -> The problem did not complete tuning, so we need to remove it from map
+        if cur_prob_idx != last_fin_prob:
+            prob_sol_map.pop(cur_prob_idx)
+            print1(f'#  Parsed Prob-Idx {cur_prob_idx} did not complete tuning. Remove it from map.')
 
     except FileNotFoundError:
         print(f'Error: The file {logfile} was not found.')
@@ -414,7 +440,7 @@ def restore_prob_sol_map(logfile):
     except Exception as e:
         print(f'An error occurred: {e}')
 
-    print(f"#  Parsed Log File is for a {allProblems} problems vs {allSolutions} solutions tuning.")
+    print(f"#  Parsed log is for a '{allProblems}-problems-vs-{allSolutions}-solutions' tuning.")
 
     return prob_sol_map
 

@@ -748,7 +748,6 @@ int main(int argc, const char* argv[])
             {
                 auto problem = problems[problemIdx].get();
 
-
                 reporters->report(ResultKey::ProblemIndex, problemIdx);
                 reporters->report(ResultKey::ProblemProgress,
                                   concatenate(problemIdx, "/", lastProblemIdx));
@@ -765,8 +764,6 @@ int main(int argc, const char* argv[])
                     maxRotatingBufferNum, problem, inputs, stream);
                 static_cast<void>(hipDeviceSynchronize());
                 bool resetInput = false;
-
-                int cur_sol_idx = 0;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
                     auto solution = solutionIterator->getSolution();
@@ -774,7 +771,6 @@ int main(int argc, const char* argv[])
                         throw std::runtime_error("Could not find a solution");
 
                     listeners.preSolution(*solution);
-
                     if(solutionIterator->runCurrentSolution() && runKernels)
                     {
                         try
@@ -876,8 +872,6 @@ int main(int argc, const char* argv[])
                     }
 
                     listeners.postSolution();
-
-                    cur_sol_idx++;
 
                     if(exitOnError && listeners.error() > 0)
                     {
