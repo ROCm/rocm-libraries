@@ -22,10 +22,10 @@
 
 #include "common_test_header.hpp"
 
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/thread/thread_sort.hpp"
-#include "hipcub/util_type.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/thread/thread_sort.hpp>
+#include <hipcub/util_type.hpp>
 
 #include <hip/hip_runtime.h>
 

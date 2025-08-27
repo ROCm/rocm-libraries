@@ -39,6 +39,9 @@
 #include <rocprim/device/device_reduce.hpp> // IWYU pragma: export
 #include <rocprim/device/device_reduce_by_key.hpp> // IWYU pragma: export
 #include <rocprim/iterator/transform_iterator.hpp> // IWYU pragma: export
+#include <rocprim/iterator/transform_output_iterator.hpp> // IWYU pragma: export
+#include <rocprim/iterator/zip_iterator.hpp>
+#include <rocprim/types/tuple.hpp>
 
 #include <hip/hip_bfloat16.h> // hip_bfloat16
 #include <hip/hip_fp16.h> // __half
@@ -287,6 +290,10 @@ public:
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
+    HIPCUB_DEPRECATED_BECAUSE(
+        "CUB has superseded this interface in favor of the ArgMin interface that takes two "
+        "separate iterators: one iterator to which the extremum is written and another iterator to "
+        "which the index of the found extremum is written. ")
     HIPCUB_RUNTIME_FUNCTION static hipError_t ArgMin(void*           d_temp_storage,
                                                      size_t&         temp_storage_bytes,
                                                      InputIteratorT  d_in,
@@ -330,7 +337,40 @@ public:
                bool            debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         return ArgMin(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+    }
+
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMin(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             ExtremumOutIteratorT d_min_out,
+                             IndexOutIteratorT    d_index_out,
+                             NumItemsT            num_items,
+                             hipStream_t          stream = 0)
+    {
+        // We need to combine two iterators, so zip them. However writing to a zipped iterator,
+        // requires a tuple. ArgMin by default is a key-value pair iterator, so we need to
+        // add small transform step to make sure everything typechecks.
+        auto d_combined_iterator = rocprim::make_transform_output_iterator(
+            rocprim::make_zip_iterator(rocprim::make_tuple(d_index_out, d_min_out)),
+            [](auto kvp) { return rocprim::make_tuple(kvp.key, kvp.value); });
+
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        return ArgMin(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_combined_iterator,
+                      num_items,
+                      stream);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
@@ -367,6 +407,10 @@ public:
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
+    HIPCUB_DEPRECATED_BECAUSE(
+        "CUB has superseded this interface in favor of the ArgMax interface that takes two "
+        "separate iterators: one iterator to which the extremum is written and another iterator to "
+        "which the index of the found extremum is written. ")
     HIPCUB_RUNTIME_FUNCTION static hipError_t ArgMax(void*           d_temp_storage,
                                                      size_t&         temp_storage_bytes,
                                                      InputIteratorT  d_in,
@@ -410,6 +454,8 @@ public:
                bool            debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         return ArgMax(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
@@ -417,6 +463,37 @@ public:
                       num_items,
                       stream,
                       debug_synchronous);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+    }
+
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMax(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             ExtremumOutIteratorT d_max_out,
+                             IndexOutIteratorT    d_index_out,
+                             NumItemsT            num_items,
+                             hipStream_t          stream = 0)
+    {
+        // We need to combine two iterators, so zip them. However writing to a zipped iterator,
+        // requires a tuple. ArgMin by default is a key-value pair iterator, so we need to
+        // add small transform step to make sure everything typechecks.
+        auto d_combined_iterator = rocprim::make_transform_output_iterator(
+            rocprim::make_zip_iterator(rocprim::make_tuple(d_index_out, d_max_out)),
+            [](auto kvp) { return rocprim::make_tuple(kvp.key, kvp.value); });
+
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        return ArgMax(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_combined_iterator,
+                      num_items,
+                      stream);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<typename InputIteratorT,

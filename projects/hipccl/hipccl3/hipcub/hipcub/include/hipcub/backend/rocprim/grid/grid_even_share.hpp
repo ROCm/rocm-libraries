@@ -120,7 +120,9 @@ public:
         this->block_offset          = num_items_;    // Initialize past-the-end
         this->block_end             = num_items_;    // Initialize past-the-end
         this->num_items             = num_items_;
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         this->total_tiles           = static_cast<int>(hipcub::DivideAndRoundUp(num_items_, tile_items));
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
         this->grid_size             = min(total_tiles, max_grid_size);
         int avg_tiles_per_block     = total_tiles / grid_size;
         // leftover grains go to big blocks:

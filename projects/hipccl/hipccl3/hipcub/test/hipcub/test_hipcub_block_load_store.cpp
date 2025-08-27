@@ -34,7 +34,7 @@
 
 // kernel definitions
 #include "test_hipcub_block_load_store.kernels.hpp"
-#include "hipcub/iterator/discard_output_iterator.hpp"
+#include <hipcub/iterator/discard_output_iterator.hpp>
 
 // Start stamping out tests
 struct HipcubBlockLoadStoreTests;
