@@ -75,30 +75,52 @@ public:
             if(row_lane_id >= 8)
                 output = scan_op(t, output);
         }
-#ifdef ROCPRIM_DETAIL_HAS_DPP_BROADCAST
-        if(VirtualWaveSize > 16)
+
+        if SPIRV_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
         {
-            T t = warp_move_dpp<T, 0x142>(output); // row_bcast:15
-            if(lane_id % 32 >= 16)
-                output = scan_op(t, output);
-        }
-        if(VirtualWaveSize > 32)
-        {
-            T t = warp_move_dpp<T, 0x143>(output); // row_bcast:31
-            if(lane_id >= 32)
-                output = scan_op(t, output);
-        }
-        static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
+            if(VirtualWaveSize > 16)
+            {
+                T t = warp_swizzle<T, 0x1e0>(output); // row_bcast:15
+                if(lane_id % 32 >= 16)
+                    output = scan_op(t, output);
+            }
+
+#if !ROCPRIM_TARGET_SPIRV
+            static_assert(VirtualWaveSize <= 32,
+                          "VirtualWaveSize > 32 is not supported without DPP broadcasts");
 #else
-        if(VirtualWaveSize > 16)
-        {
-            T t = warp_swizzle<T, 0x1e0>(output); // row_bcast:15
-            if(lane_id % 32 >= 16)
-                output = scan_op(t, output);
-        }
-        static_assert(VirtualWaveSize <= 32,
-                      "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+            if constexpr(VirtualWaveSize > 32)
+            {
+                ROCPRIM_PRINT_ERROR_ONCE(
+                    "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+                return;
+            }
 #endif
+        }
+        else
+        {
+            if(VirtualWaveSize > 16)
+            {
+                T t = warp_move_dpp<T, 0x142>(output); // row_bcast:15
+                if(lane_id % 32 >= 16)
+                    output = scan_op(t, output);
+            }
+            if(VirtualWaveSize > 32)
+            {
+                T t = warp_move_dpp<T, 0x143>(output); // row_bcast:31
+                if(lane_id >= 32)
+                    output = scan_op(t, output);
+            }
+#if !ROCPRIM_TARGET_SPIRV
+            static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
+#else
+            if constexpr(VirtualWaveSize > 64)
+            {
+                ROCPRIM_PRINT_ERROR_ONCE("VirtualWaveSize > 64 is not supported");
+                return;
+            }
+#endif
+        }
     }
 
     template<class BinaryFunction>
