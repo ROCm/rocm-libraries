@@ -768,8 +768,11 @@ class Solution(collections.abc.Mapping):
 
     if (MT & (MT-1)) != 0: # Check of MT not power of 2
       # so far, numBytesAB<4 case, TLU=False only (continue with False)
-      if numBytesAB < 4 and state["ProblemType"]["TLU%c"%tc]:
+      if (numBytesAB < 4 or state["UseF32XEmulation"]) and state["ProblemType"]["TLU%c"%tc]:
         return False
+
+    if state["UseF32XEmulation"]:
+      state["ClusterLocalRead"] = 1
 
     # x2 DTL is not supported
     if numBytesPerLoad == 8:
