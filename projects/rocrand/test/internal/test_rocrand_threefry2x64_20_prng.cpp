@@ -59,6 +59,8 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_generator,
                                threefry2x64_20_generator_prng_offset_tests_types);
 
 #ifdef CODE_COVERAGE_ENABLED
+#include "test_rocrand_host_prng.hpp"
+
 using rocrand_impl::host::threefry2x64_20_generator_host;
 using threefry2x64_20_generator_prng_host_tests_types
     = ::testing::Types<generator_prng_host_tests_params<threefry2x64_20_generator_host<true>,

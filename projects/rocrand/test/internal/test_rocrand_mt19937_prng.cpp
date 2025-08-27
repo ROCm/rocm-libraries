@@ -20,7 +20,6 @@
 
 #include "test_common.hpp"
 #include "test_rocrand_common.hpp"
-#include "test_rocrand_host_prng.hpp"
 #include "test_rocrand_prng.hpp"
 #include <rocrand/rocrand.h>
 
@@ -55,6 +54,8 @@ INSTANTIATE_TYPED_TEST_SUITE_P(mt19937_generator,
                                mt19937_generator_prng_tests_types);
 
 #ifdef CODE_COVERAGE_ENABLED
+#include "test_rocrand_host_prng.hpp"
+
 using rocrand_impl::host::mt19937_generator_host;
 using mt19937_generator_prng_host_tests_types
     = ::testing::Types<generator_prng_host_tests_params<mt19937_generator_host<true>,

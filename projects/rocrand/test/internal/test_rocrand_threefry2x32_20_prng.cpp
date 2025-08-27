@@ -17,7 +17,6 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 
-#include "test_rocrand_host_prng.hpp"
 #include "test_rocrand_prng.hpp"
 #include "test_rocrand_threefryNx32_20_prng.hpp"
 #include <rocrand/rocrand.h>
@@ -58,6 +57,8 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_generator,
                                threefry2x32_20_generator_prng_offset_tests_types);
 
 #ifdef CODE_COVERAGE_ENABLED
+#include "test_rocrand_host_prng.hpp"
+
 using rocrand_impl::host::threefry2x32_20_generator_host;
 using threefry2x32_20_generator_prng_host_tests_types
     = ::testing::Types<generator_prng_host_tests_params<threefry2x32_20_generator_host<true>,
