@@ -284,18 +284,20 @@ namespace rocRoller
          * part of the offset above.
          */
         ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int                opTag,
-                                                            bool isDirect2LDS,
+                                                            bool               isDirect2LDS,
                                                             Transformer const& coords)
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::getOffsetExpr(operationTag: {}, isDirect2LDS: {})", opTag, isDirect2LDS);
+            rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::getOffsetExpr("
+                                               "operationTag: {}, isDirect2LDS: {})",
+                                               opTag,
+                                               isDirect2LDS);
 
             auto [target, direction] = getOperationTarget(opTag, *m_graph, isDirect2LDS);
             auto [required, path]    = findRequiredCoordinates(target, direction, *m_graph);
 
             ExpressionPtr result = Expression::literal(0u);
 
-            auto const maxSubDim = 3;
+            auto const                       maxSubDim = 3;
             std::vector<std::pair<int, int>> unrollCoords(maxSubDim, {-1, -1});
 
             auto isTypeAndSubDimension = [](auto ctype) {
@@ -308,39 +310,43 @@ namespace rocRoller
 
             for(auto const& c : m_graph->mapper.getConnections(opTag))
             {
-                if (isTypeAndSubDimension(c.connection))
+                if(isTypeAndSubDimension(c.connection))
                 {
-                    auto maybeUnroll  = m_graph->coordinates.get<Unroll>(c.coordinate);
-
-                    if (!maybeUnroll)
+                    auto maybeUnroll = m_graph->coordinates.get<Unroll>(c.coordinate);
+                    if(!maybeUnroll)
                         continue;
+                        
                     auto curConnection = std::get<Connections::TypeAndSubDimension>(c.connection);
-                    auto subdim = curConnection.subdimension;
+                    auto subdim        = curConnection.subdimension;
                     AssertFatal(subdim < maxSubDim, ShowValue(subdim));
                     unrollCoords[subdim].first = c.coordinate;
-                        
-                } else if (isUnrollStride(c.connection))
+                }
+                else if(isUnrollStride(c.connection))
                 {
                     auto curConnection = std::get<Connections::UnrollStride>(c.connection);
-                    auto subdim = curConnection.unrollDimension;
+                    auto subdim        = curConnection.unrollDimension;
                     AssertFatal(subdim < maxSubDim, ShowValue(subdim));
                     unrollCoords[subdim].second = c.coordinate;
                 }
+                else
+                    continue;
             }
 
-            for (auto const& unrollStride : unrollCoords)
+            for(auto const& unrollStride : unrollCoords)
             {
                 auto [unrollTag, strideTag] = unrollStride;
-                if (unrollTag != -1 && strideTag != -1)
-                {
-                    auto [strideExpr, strideAttrs]
+                if(unrollTag == -1 || strideTag == -1)
+                    continue;
+
+                auto [strideExpr, strideAttrs]
                     = m_context->registerTagManager()->getExpression(strideTag);
 
-                    Log::debug(
-                    "  unroll coord {} value: {}", unrollTag, toString(coords.getCoordinate(unrollTag)));
+                Log::debug("  unroll coord {} value: {}",
+                           unrollTag,
+                           toString(coords.getCoordinate(unrollTag)));
+                Log::debug("  stride coord {} expr: {}", strideTag, toString(strideExpr));
 
-                    result = result + coords.getCoordinate(unrollTag) * strideExpr; 
-                }
+                result = result + coords.getCoordinate(unrollTag) * strideExpr;
             }
             return result;
         }
@@ -391,11 +397,30 @@ namespace rocRoller
                     info.rowOffsetReg = m_context->registerTagManager()->getRegister(offsetTag);
                 }
 
-                rowOffsetExpr = getOffsetExpr(tag, direct2LDS,  coords);
+                rowOffsetExpr = getOffsetExpr(tag, direct2LDS, coords);
             }
-            else if(m_baseOffsets.count(offsetTag) > 0)
+            //else if(m_baseOffsets.count(offsetTag) > 0)
+            else
             {
-                auto baseTag = m_baseOffsets[offsetTag];
+                // auto baseTag = m_baseOffsets[offsetTag];
+                auto baseTag = -1;
+                for(auto const& c : m_graph->mapper.getConnections(tag))
+                {
+                    if(!std::holds_alternative<Connections::BaseOffset>(c.connection))
+                        continue;
+                    auto curConnection = std::get<Connections::BaseOffset>(c.connection);
+                    auto subdim        = curConnection.subdimension;
+
+                    if(subdim != 0)
+                        continue;
+                    baseTag = c.coordinate;
+                }
+
+                if(baseTag == -1)
+                {
+                    Throw<FatalError>("Base offset not found");
+                }
+                // AssertFatal(tmpBaseTag == baseTag);
                 if(direct2LDS)
                 {
                     auto tmp = m_context->registerTagManager()->getRegister(baseTag);
@@ -418,12 +443,12 @@ namespace rocRoller
                     co_yield m_context->copier()->copy(info.rowOffsetReg, baseReg);
                 }
 
-                rowOffsetExpr = getOffsetExpr(tag, direct2LDS,  coords);
+                rowOffsetExpr = getOffsetExpr(tag, direct2LDS, coords);
             }
-            else
-            {
-                Throw<FatalError>("Base offset not found");
-            }
+            // else
+            // {
+            //     Throw<FatalError>("Base offset not found");
+            // }
 
             if(direct2LDS)
             {
@@ -586,11 +611,6 @@ namespace rocRoller
                 auto offsetReg = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
                 offsetReg->setName(concatenate("Offset", tag));
                 scope->addRegister(offset);
-            }
-            else
-            {
-                // TODO: use mapper connection to replace m_baseOffsets
-                m_baseOffsets.insert_or_assign(offset, base);
             }
 
             // Create a buffer descriptor

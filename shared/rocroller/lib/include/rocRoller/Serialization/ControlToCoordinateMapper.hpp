@@ -90,14 +90,33 @@ namespace rocRoller
         {
             using iot = IOTraits<IO>;
 
-            static void
-                mapping(IO& io, KernelGraph::Connections::UnrollStride& x, Context& ctx)
+            static void mapping(IO& io, KernelGraph::Connections::UnrollStride& x, Context& ctx)
             {
                 iot::mapRequired(io, "unrollStride", x.unrollStride);
                 iot::mapRequired(io, "unrollDmension", x.unrollDimension);
             }
 
             static void mapping(IO& io, KernelGraph::Connections::UnrollStride& x)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, x, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::Connections::BaseOffset, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, KernelGraph::Connections::BaseOffset& x, Context& ctx)
+            {
+                iot::mapRequired(io, "base", x.base);
+                iot::mapRequired(io, "subdimension", x.subdimension);
+            }
+
+            static void mapping(IO& io, KernelGraph::Connections::BaseOffset& x)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 

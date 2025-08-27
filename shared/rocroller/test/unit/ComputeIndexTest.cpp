@@ -203,13 +203,17 @@ namespace ComputeIndexTest
         kgraph               = kgraph.transform(addComputeIndex);
 
         auto removeSetCoordinate = std::make_shared<RemoveSetCoordinate>();
-        kgraph = kgraph.transform(removeSetCoordinate);
+        kgraph                   = kgraph.transform(removeSetCoordinate);
 
         auto assignComputeIndex = std::make_shared<AssignComputeIndex>(m_context);
-        kgraph = kgraph.transform(assignComputeIndex);
+        kgraph                  = kgraph.transform(assignComputeIndex);
 
         auto deallocateDF = std::make_shared<AddDeallocateDataFlow>();
         kgraph            = kgraph.transform(deallocateDF);
+
+        std::ofstream outFile("output.dot");
+        outFile << kgraph.toDOT(true);
+        // std::cout << kgraph.toDOT(true) << std::endl;
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
