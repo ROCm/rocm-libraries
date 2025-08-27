@@ -74,7 +74,7 @@ static std::string BNModeToString(int bn_mode)
     }
 }
 
-miopenTuningPolicy_t GetTuningPolicy(void)
+inline miopenTuningPolicy_t GetTuningPolicy(void)
 {
     auto str = env::value(MIOPEN_FIND_ENFORCE);
     if(str.empty())
