@@ -23,9 +23,9 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_select.hpp"
-#include "hipcub/iterator/counting_input_iterator.hpp"
-#include "hipcub/iterator/discard_output_iterator.hpp"
+#include <hipcub/device/device_select.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
+#include <hipcub/iterator/discard_output_iterator.hpp>
 
 #include "single_index_iterator.hpp"
 #include "test_utils_bfloat16.hpp"

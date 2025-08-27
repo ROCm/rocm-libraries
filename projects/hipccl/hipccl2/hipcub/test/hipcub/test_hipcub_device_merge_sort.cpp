@@ -23,7 +23,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_merge_sort.hpp"
+#include <hipcub/device/device_merge_sort.hpp>
 
 #include "test_utils_data_generation.hpp"
 

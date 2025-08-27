@@ -23,11 +23,11 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_scan.hpp"
-#include "hipcub/iterator/constant_input_iterator.hpp"
-#include "hipcub/iterator/counting_input_iterator.hpp"
-#include "hipcub/iterator/transform_input_iterator.hpp"
-#include "hipcub/thread/thread_operators.hpp"
+#include <hipcub/device/device_scan.hpp>
+#include <hipcub/iterator/constant_input_iterator.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
+#include <hipcub/iterator/transform_input_iterator.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
 #include "single_index_iterator.hpp"
 #include "test_utils_bfloat16.hpp"

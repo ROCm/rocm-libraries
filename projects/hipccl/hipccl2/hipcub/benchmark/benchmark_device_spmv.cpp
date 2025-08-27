@@ -23,7 +23,7 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/device/device_spmv.hpp"
+#include <hipcub/device/device_spmv.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 32;
