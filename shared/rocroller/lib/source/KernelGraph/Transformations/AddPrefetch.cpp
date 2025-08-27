@@ -228,6 +228,36 @@ namespace rocRoller
                 return rv;
             }
 
+            std::optional<int> getLoadForExchange(int exchangeTag, KernelGraph const& graph)
+            {
+                auto isLoadPredicate = [&](int operation) -> bool {
+                    auto maybeLoad = graph.control.get<LoadTiled>(operation);
+                    return maybeLoad.has_value();
+                };
+
+                auto findConnections = [&](int coordinate) -> std::optional<int> {
+                    for(auto c : graph.mapper.getCoordinateConnections(coordinate))
+                        if(isLoadPredicate(c.control))
+                            return c.control;
+                    return {};
+                };
+
+                auto exchangeTileTag = graph.mapper.get<MacroTile>(exchangeTag);
+                for(auto const edge :
+                    graph.coordinates.getNeighbours<GD::Downstream>(exchangeTileTag))
+                {
+                    auto maybeIndex = graph.coordinates.get<Index>(edge);
+                    if(!maybeIndex)
+                        continue;
+                    auto indexTileTag
+                        = only(graph.coordinates.getNeighbours<GD::Downstream>(edge)).value();
+                    auto tag = findConnections(indexTileTag);
+                    if(tag.has_value())
+                        return tag;
+                }
+                return {};
+            }
+
             bool isLoadForExchange(int loadTag, KernelGraph const& graph)
             {
                 auto isExchangePredicate = [&](int operation) -> bool {
@@ -958,7 +988,7 @@ namespace rocRoller
             }
 
             //
-            // Make exchanges happen first!
+            // Make exchange scale loads happen first!
             //
             {
                 auto isExchangePredicate = graph.control.isElemType<Exchange>();
@@ -967,17 +997,31 @@ namespace rocRoller
                 auto exchanges
                     = graph.control.findNodes(bodies, isExchangePredicate).to<std::vector>();
 
-                for(auto exchangeTag : exchanges)
+                std::map<int, int> scaleLoadU;
+
+                for(auto const exchangeTag : exchanges)
                 {
                     auto prefetchGlobalU
                         = (m_exchangeSegment[exchangeTag] + numInFlight) % numUnroll;
 
+                    auto loadTag = getLoadForExchange(exchangeTag, graph);
+                    AssertFatal(loadTag.has_value(),
+                                "couldn't find the load associated with the exchange");
+
+                    auto const search = scaleLoadU.find(loadTag.value());
+                    if(search == scaleLoadU.end() || search->second > prefetchGlobalU)
+                        scaleLoadU[loadTag.value()] = prefetchGlobalU;
+                }
+
+                for(auto const [loadTag, u] : scaleLoadU)
+                {
                     std::unordered_set<int> orderBeforeTags;
-                    for(auto info : loadsByUnroll[prefetchGlobalU])
+                    for(auto const info : loadsByUnroll[u])
                         orderBeforeTags.insert(info.globalChain);
 
-                    for(auto orderBeforeTag : orderBeforeTags)
-                        graph.control.addElement(Sequence(), {exchangeTag}, {orderBeforeTag});
+                    auto topOp = getTopSetCoordinate(graph, loadTag);
+                    for(auto const orderBeforeTag : orderBeforeTags)
+                        graph.control.addElement(Sequence(), {topOp}, {orderBeforeTag});
                 }
             }
         }
