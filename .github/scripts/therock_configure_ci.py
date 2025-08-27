@@ -11,6 +11,7 @@ import logging
 import subprocess
 import sys
 from therock_matrix import subtree_to_project_map, project_map
+import time
 from typing import Mapping, Optional, Iterable
 import os
 
@@ -30,25 +31,34 @@ def set_github_output(d: Mapping[str, str]):
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
+        
+def retry(max_attempts, delay_seconds, exceptions):
+    def decorator(func):
+        def newfn(*args, **kwargs):
+            attempt = 0
+            while attempt < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    print(f'Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}')
+                    attempt += 1
+                    if attempt < max_attempts:
+                        backoff = delay_seconds * (2 ** (attempt - 1))
+                        time.sleep(backoff)
+            return func(*args, **kwargs)
+        return newfn
+    return decorator
 
-
+@retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
     """Returns the paths of modified files relative to the base reference."""
-    try:
-        return subprocess.run(
-            ["git", "diff", "--name-only", base_ref],
-            stdout=subprocess.PIPE,
-            check=True,
-            text=True,
-            timeout=60,
-        ).stdout.splitlines()
-    except TimeoutError:
-        print(
-            "Computing modified files timed out. Not using PR diff to determine"
-            " jobs to run.",
-            file=sys.stderr,
-        )
-        return []
+    return subprocess.run(
+        ["git", "diff", "--name-only", base_ref],
+        stdout=subprocess.PIPE,
+        check=True,
+        text=True,
+        timeout=60,
+    ).stdout.splitlines()
 
 
 GITHUB_WORKFLOWS_CI_PATTERNS = [
