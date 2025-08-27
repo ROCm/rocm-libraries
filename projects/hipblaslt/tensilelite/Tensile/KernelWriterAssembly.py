@@ -5478,59 +5478,6 @@ class KernelWriterAssembly(KernelWriter):
   # User must call tailLoopFreeVgpr(vgprBase, imod) to release the resources.
   ##############################################################################
   def tailLoopAllocValuVgpr(self, kernel, tensorParametersA, tensorParametersB, tensorParametersM):
-    imodMXSDummy        = Module("tailLoopAllocValuMXSDummyVgpr")
-    vgprBaseMXSDummy    = -1
-    if bool(kernel["ProblemType"]["MXBlockA"]) ^ bool(kernel["ProblemType"]["MXBlockB"]):
-      vgprBaseMXSDummy = self.vgprPool.checkOutAligned(2,2)
-      imodMXSDummy.add(RegSet("v", "vgprValuMXSDummy", vgprBaseMXSDummy))
-
-    imodMXSA            = Module("tailLoopAllocValuMXSAVgpr")
-    vgprBaseMXSA        = -1
-    numValuMXSA         = 0
-    numVgprValuPackMXSA = 0
-    if kernel["ProblemType"]["MXBlockA"]:
-      # 1024 vgpr: avoid cross pool usage
-      valuVgprAlignment = 32 // kernel["ProblemType"]["MXBlockA"]
-      if self.states.mxsa.numVgprValu > 0 and not kernel["DirectToVgprMXSA"]:
-        numValuMXSA = self.states.mxsa.numVgprValu
-        if not kernel["UnrollMajorLDSA"]:
-          if self.states.lrvwTileMXSA > 1:
-            numVgprValuPackMXSA = ceil(kernel["VectorWidthMXSA"] / self.states.bpr) * kernel["MIWaveTileMXSA"] // kernel["VectorWidthMXSA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadMXSA"]
-            if self.states.packDTVA:
-              # pack DTV case, double the number
-              numVgprValuPackMXSA *= 2
-          else:
-            numVgprValuPackMXSA = self.states.mxsa.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackMXSA * (4 - 1)
-        vgprBaseMXSA = self.vgprPool.checkOutAligned(numValuMXSA + numVgprValuPackMXSA, valuVgprAlignment)
-        imodMXSA.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", vgprBaseMXSA))
-        imodMXSA.add(self.moduleVgprMacroValuMXSA)
-        if numVgprValuPackMXSA > 0:
-          imodMXSA.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", vgprBaseMXSA + numValuMXSA))
-          imodMXSA.add(self.moduleVgprMacroValuMXSAPack)
-
-    imodMXSB            = Module("tailLoopAllocValuMXSBVgpr")
-    vgprBaseMXSB        = -1
-    numValuMXSB         = 0
-    numVgprValuPackMXSB = 0
-    if kernel["ProblemType"]["MXBlockB"]:
-      valuVgprAlignment = 32 // kernel["ProblemType"]["MXBlockB"]
-      if self.states.mxsb.numVgprValu > 0 and not kernel["DirectToVgprMXSB"]:
-        numValuMXSB = self.states.mxsb.numVgprValu
-        if not kernel["UnrollMajorLDSMXSB"]:
-          if self.states.lrvwTileMXSB > 1:
-            numVgprValuPackMXSB = ceil(kernel["VectorWidthMXSB"] / self.states.bpr) * kernel["MIWaveTileMXSB"] // kernel["VectorWidthMXSB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadMXSB"]
-            if self.states.packDTVB:
-              # pack DTV case, double the number
-              numVgprValuPackMXSB *= 2
-          else:
-            numVgprValuPackMXSB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackMXSB * (4 - 1)
-        vgprBaseMXSB = self.vgprPool.checkOutAligned(numValuMXSB + numVgprValuPackMXSB, valuVgprAlignment)
-        imodMXSB.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", vgprBaseMXSB))
-        imodMXSB.add(self.moduleVgprMacroValuMXSB)
-        if numVgprValuPackMXSB > 0:
-          imodMXSB.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", vgprBaseMXSB + numValuMXSB))
-          imodMXSB.add(self.moduleVgprMacroValuMXSBPack)
-
     imodA            = Module("tailLoopAllocValuAVgpr")
     vgprBaseA        = -1
     numValuA         = 0
@@ -5622,7 +5569,7 @@ class KernelWriterAssembly(KernelWriter):
       if numVgprCvtTemp > 0:
         imodMisc.add(RegSet("v", "vgprCvtTemp", vgprBaseMisc + numVgprPackTemp))
 
-    return ([vgprBaseMXSDummy, imodMXSDummy], [vgprBaseMXSA, imodMXSA], [vgprBaseMXSB, imodMXSB], [vgprBaseA, imodA],[vgprBaseB, imodB], [vgprBaseM, imodM],[vgprBaseMisc, imodMisc])
+    return ([vgprBaseA, imodA],[vgprBaseB, imodB], [vgprBaseM, imodM],[vgprBaseMisc, imodMisc])
 
   def tailLoopAllocG2LVgpr(self, kernel):
     imod           = Module("tailLoopAllocG2LVgpr")

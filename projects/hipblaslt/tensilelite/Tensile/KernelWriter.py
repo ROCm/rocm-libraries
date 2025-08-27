@@ -4335,11 +4335,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment1("remove stagger offsets")
       module.add(self.removeStaggerAB(kernel, tensorParametersA, tensorParametersB))
 
-    if self.states.lastValuMXSAB:
-      self.vgprPool.add(0 , self.states.lastValuMXSAB, "ValuMXSAB")
-      module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
-          (0, self.states.lastValuMXSAB))
-
     module.add(VNop(self.states.miVALUInstrDataHazard, "Add v_nop before releasing ValuA/B"))
     self.vgprPool.add(self.states.a.startVgprValu , \
         self.states.lastValuAB - self.states.a.startVgprValu, "ValuAB")
@@ -4873,6 +4868,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, " tailloopInNll: wait for global read"))
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, " tailloopInNll: wait for local read"))
       module.add(self._syncThreads(kernel))
+
+    if self.states.lastValuMXSAB:
+      self.vgprPool.add(0 , self.states.lastValuMXSAB, "ValuMXSAB")
+      module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
+          (0, self.states.lastValuMXSAB))
 
     if self.do["executeToLoopEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
