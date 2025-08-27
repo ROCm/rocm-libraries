@@ -110,7 +110,7 @@ inline hipError_t launch_block_sort(detail::target_arch  arch,
                          storage);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class Config,
@@ -147,12 +147,12 @@ inline hipError_t launch_device_block_merge_oddeven(detail::target_arch  arch,
                                                                                  compare_function);
     };
 
-    return launch_kernel<Config, decltype(kernel), merge_oddeven_config_selector>(arch,
-                                                                                  kernel,
-                                                                                  grid,
-                                                                                  block,
-                                                                                  shmem,
-                                                                                  stream);
+    return execute_launch_plan<Config, decltype(kernel), merge_oddeven_config_selector>(arch,
+                                                                                        kernel,
+                                                                                        grid,
+                                                                                        block,
+                                                                                        shmem,
+                                                                                        stream);
 }
 
 template<class Config,
@@ -211,12 +211,12 @@ inline hipError_t launch_device_block_merge_mergepath(detail::target_arch  arch,
                                   storage);
     };
 
-    return launch_kernel<Config, decltype(kernel), merge_mergepath_config_selector>(arch,
-                                                                                    kernel,
-                                                                                    grid,
-                                                                                    block,
-                                                                                    shmem,
-                                                                                    stream);
+    return execute_launch_plan<Config, decltype(kernel), merge_mergepath_config_selector>(arch,
+                                                                                          kernel,
+                                                                                          grid,
+                                                                                          block,
+                                                                                          shmem,
+                                                                                          stream);
 }
 
 template<typename Config, typename KeysInputIterator, typename OffsetT, typename CompareOpT>
@@ -279,7 +279,7 @@ inline hipError_t launch_device_block_merge_mergepath_partition(detail::target_a
         merge_partitions[partition_id] = keys1_beg + partition_diag;
     };
 
-    return launch_kernel<Config, decltype(kernel), merge_mergepath_partition_config_selector>(
+    return execute_launch_plan<Config, decltype(kernel), merge_mergepath_partition_config_selector>(
         arch,
         kernel,
         grid,

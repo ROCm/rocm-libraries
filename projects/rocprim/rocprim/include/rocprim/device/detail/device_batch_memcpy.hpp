@@ -1199,15 +1199,14 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
             batch_memcpy_grid_size - 1);
     };
 
-    auto blev_memcpy_tuned_kernel
-        = configure_kernel<config,
-                           decltype(blev_memcpy_kernel),
-                           blev_batch_memcpy_kernel_config_selector>(target_arch,
-                                                                     blev_memcpy_kernel);
+    auto blev_memcpy_launch_plan
+        = make_launch_plan<config, decltype(blev_memcpy_kernel), blev_batch_memcpy_config_selector>(
+            target_arch,
+            blev_memcpy_kernel);
 
     int        blev_occupancy{};
     hipError_t error = hipOccupancyMaxActiveBlocksPerMultiprocessor(&blev_occupancy,
-                                                                    blev_memcpy_tuned_kernel.kernel,
+                                                                    blev_memcpy_launch_plan.kernel,
                                                                     blev_block_size,
                                                                     0 /* dynSharedMemPerBlk */);
     if(error != hipSuccess)
@@ -1274,19 +1273,19 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
     start_timer();
 
     ROCPRIM_RETURN_ON_ERROR(
-        launch_kernel<config,
-                      decltype(non_blev_memcpy_kernel),
-                      non_blev_batch_memcpy_kernel_config_selector>(target_arch,
-                                                                    non_blev_memcpy_kernel,
-                                                                    batch_memcpy_grid_size,
-                                                                    non_blev_block_size,
-                                                                    0,
-                                                                    stream));
+        execute_launch_plan<config,
+                            decltype(non_blev_memcpy_kernel),
+                            non_blev_batch_memcpy_config_selector>(target_arch,
+                                                                   non_blev_memcpy_kernel,
+                                                                   batch_memcpy_grid_size,
+                                                                   non_blev_block_size,
+                                                                   0,
+                                                                   stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("non_blev_memcpy_kernel", num_copies, start);
 
     // Launch batch_memcpy_blev_kernel.
     start_timer();
-    blev_memcpy_tuned_kernel.launch(batch_memcpy_blev_grid_size, blev_block_size, 0, stream);
+    blev_memcpy_launch_plan.launch(batch_memcpy_blev_grid_size, blev_block_size, 0, stream);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("blev_memcpy_kernel",
                                                 batch_memcpy_grid_size - 1,
                                                 start);

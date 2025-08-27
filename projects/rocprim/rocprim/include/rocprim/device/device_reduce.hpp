@@ -74,7 +74,7 @@ inline hipError_t launch_block_reduce(detail::target_arch arch,
                                  ResultType>(input, size, output, initial_value, reduce_op);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 #define ROCPRIM_DETAIL_HIP_SYNC(name, size, start)                                           \

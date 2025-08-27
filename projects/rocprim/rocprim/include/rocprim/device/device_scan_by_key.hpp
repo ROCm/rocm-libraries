@@ -92,7 +92,7 @@ inline hipError_t
             previous_last_value);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<lookback_scan_determinism Determinism,

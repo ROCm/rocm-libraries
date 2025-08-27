@@ -414,11 +414,11 @@ if(NOT WIN32)
   string(REPLACE ";" " " NM_ARGS_STR "${NM_ARGS}")
   add_test(
     NAME "rocprim.linking_lib1_symbols"
-    COMMAND sh -c "${CMAKE_NM} ${NM_ARGS_STR} $<TARGET_FILE:test_linking_lib1> | grep -c -P \"(rocprim::(?!ROCPRIM_${rocprim_VERSION_NUMBER}_NS))|trampoline|init_lookback_scan_state_kernel\""
+    COMMAND sh -c "${CMAKE_NM} ${NM_ARGS_STR} $<TARGET_FILE:test_linking_lib1> | grep -c -P \"(rocprim::(?!ROCPRIM_${rocprim_VERSION_NUMBER}_NS))|kernel\""
   )
   add_test(
     NAME "rocprim.linking_lib2_symbols"
-    COMMAND sh -c "${CMAKE_NM} ${NM_ARGS_STR} $<TARGET_FILE:test_linking_lib2> | grep -c -P \"(rocprim::(?!ROCPRIM_300201_NS))|trampoline|init_lookback_scan_state_kernel\""
+    COMMAND sh -c "${CMAKE_NM} ${NM_ARGS_STR} $<TARGET_FILE:test_linking_lib2> | grep -c -P \"(rocprim::(?!ROCPRIM_300201_NS))|kernel\""
   )
   add_test(
     NAME "rocprim.linking_symbols"

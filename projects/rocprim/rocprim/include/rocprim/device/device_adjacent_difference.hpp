@@ -86,7 +86,7 @@ inline hipError_t launch_adjacent_difference(
                                                                                starting_block);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<typename Config,

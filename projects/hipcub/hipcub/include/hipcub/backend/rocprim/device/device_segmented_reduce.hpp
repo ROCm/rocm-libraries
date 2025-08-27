@@ -103,7 +103,7 @@ inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target_arch arc
         }
     };
 
-    return ::rocprim::detail::launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return ::rocprim::detail::execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 /// Dispatch function similar to \p rocprim::segmented_reduce but writes \p empty_value for empty

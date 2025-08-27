@@ -300,21 +300,21 @@ constexpr target_arch device_target_arch()
 }
 
 template<typename Config, target_arch Arch>
-struct default_kernel_config_selector
+struct default_config_selector
 {
     static constexpr unsigned int block_size
         = Config::template architecture_config<Arch>::params.kernel_config.block_size;
 };
 
 template<typename Config, target_arch Arch>
-struct non_blev_batch_memcpy_kernel_config_selector
+struct non_blev_batch_memcpy_config_selector
 {
     static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
                                                    .non_blev_batch_memcpy_kernel_config.block_size;
 };
 
 template<typename Config, target_arch Arch>
-struct blev_batch_memcpy_kernel_config_selector
+struct blev_batch_memcpy_config_selector
 {
     static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
                                                    .blev_batch_memcpy_kernel_config.block_size;
@@ -341,14 +341,6 @@ struct merge_mergepath_config_selector
         = Config::template architecture_config<Arch>::params.merge_mergepath_config.block_size;
 };
 
-template<class Config, target_arch Arch>
-struct target_config
-{
-    constexpr static auto params    = Config::template architecture_config<Arch>::params;
-    constexpr static auto wavefront = arch_wavefront_size(Arch);
-    constexpr static auto arch      = Arch;
-};
-
 template<typename Config, target_arch Arch>
 struct segmented_radix_sort_warp_sort_small_config_selector
 {
@@ -363,7 +355,15 @@ struct segmented_radix_sort_warp_sort_meduim_config_selector
         = Config::template architecture_config<Arch>::params.warp_sort_config.block_size_medium;
 };
 
-// Trampoline that is fully specialized at compile-time for a single GPU architecture.
+template<class Config, target_arch Arch>
+struct target_config
+{
+    constexpr static auto params    = Config::template architecture_config<Arch>::params;
+    constexpr static auto wavefront = arch_wavefront_size(Arch);
+    constexpr static auto arch      = Arch;
+};
+
+// trampoline_kernel that is fully specialized at compile-time for a single GPU architecture.
 // By instantiating this template once per supported `target_arch`,the correct tuned config
 // will be derived from the template
 template<typename Config,
@@ -372,7 +372,7 @@ template<typename Config,
          template<typename, target_arch>
          class LaunchSelector>
 ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Arch>::block_size))
-void trampoline(Kernel kernel)
+void trampoline_kernel(Kernel kernel)
 {
     using ArchConfig = target_config<Config, Arch>;
 
@@ -385,7 +385,7 @@ void trampoline(Kernel kernel)
 }
 
 template<typename Kernel>
-struct tuned_kernel
+struct launch_plan
 {
     using kernel_type = void (*)(Kernel);
     kernel_type kernel;
@@ -404,8 +404,8 @@ struct tuned_kernel
 
 template<class Config,
          class Kernel,
-         template<typename, target_arch> class LaunchSelector = default_kernel_config_selector>
-auto configure_kernel(target_arch arch, Kernel kernel) -> tuned_kernel<Kernel>
+         template<typename, target_arch> class LaunchSelector = default_config_selector>
+auto make_launch_plan(target_arch arch, Kernel kernel) -> launch_plan<Kernel>
 {
     std::optional<void (*)(Kernel)> tuned_kernel = std::nullopt;
 
@@ -416,31 +416,31 @@ auto configure_kernel(target_arch arch, Kernel kernel) -> tuned_kernel<Kernel>
             if(Arch != arch || tuned_kernel)
                 return;
 
-            tuned_kernel = trampoline<Config, Arch, Kernel, LaunchSelector>;
+            tuned_kernel = trampoline_kernel<Config, Arch, Kernel, LaunchSelector>;
         });
 
     if(!tuned_kernel)
     {
-        tuned_kernel = trampoline<Config, target_arch::unknown, Kernel, LaunchSelector>;
+        tuned_kernel = trampoline_kernel<Config, target_arch::unknown, Kernel, LaunchSelector>;
     }
 
     return {tuned_kernel.value(), kernel};
 }
 
-// Host-side helper running at run-time, picking the trampoline whose template
+// Host-side helper running at run-time, picking the trampoline_kernel whose template
 // argument `Arch` matches the actual GPU we are executing on.
 template<class Config,
          class Kernel,
-         template<typename, target_arch> class LaunchSelector = default_kernel_config_selector>
-hipError_t launch_kernel(target_arch arch,
-                         Kernel      kernel,
-                         dim3        grid_size,
-                         dim3        block_size,
-                         size_t      shmem,
-                         hipStream_t stream)
+         template<typename, target_arch> class LaunchSelector = default_config_selector>
+hipError_t execute_launch_plan(target_arch arch,
+                               Kernel      kernel,
+                               dim3        grid_size,
+                               dim3        block_size,
+                               size_t      shmem,
+                               hipStream_t stream)
 {
-    const auto tuned_kernel = configure_kernel<Config, Kernel, LaunchSelector>(arch, kernel);
-    tuned_kernel.launch(grid_size, block_size, shmem, stream);
+    const auto launch_plan = make_launch_plan<Config, Kernel, LaunchSelector>(arch, kernel);
+    launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
 }
 

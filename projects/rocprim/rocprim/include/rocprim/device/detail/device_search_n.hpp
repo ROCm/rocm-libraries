@@ -91,7 +91,7 @@ struct search_n_impl_kernels
                 }
             }
         };
-        return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
     template<class SizeType>
@@ -145,7 +145,7 @@ struct search_n_impl_kernels
                 }
             }
         };
-        return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
     inline hipError_t launch_search_n_heads_filter(detail::target_arch arch,
@@ -194,7 +194,7 @@ struct search_n_impl_kernels
                 filtered_heads[atomic_add(filtered_heads_size, 1)] = this_head;
             }
         };
-        return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
     inline hipError_t launch_search_n_discard_heads(
@@ -262,7 +262,7 @@ struct search_n_impl_kernels
                 }
             }
         };
-        return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
     }
 };
 

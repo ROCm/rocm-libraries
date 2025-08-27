@@ -155,7 +155,7 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
                 ordered_tile_id);
         };
 
-        auto adjacent_find_block_reduce_kernel = configure_kernel<config>(target_arch, kernel);
+        auto adjacent_find_block_reduce_kernel = make_launch_plan<config>(target_arch, kernel);
 
         // Get grid size for maximum occupancy, as we may not be able to schedule all the blocks
         // at the same time

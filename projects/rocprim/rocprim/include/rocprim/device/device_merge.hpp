@@ -74,7 +74,7 @@ inline hipError_t launch_partition(detail::target_arch arch,
                                               compare_function);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class Config,
@@ -129,7 +129,7 @@ inline hipError_t launch_merge(detail::target_arch  arch,
                                     storage);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<typename Config, typename Key, typename Value>

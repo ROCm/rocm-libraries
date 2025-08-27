@@ -123,7 +123,7 @@ inline hipError_t launch_single_scan(detail::target_arch arch,
             scan_op);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 // Single pass (look-back kernels)
@@ -170,7 +170,7 @@ inline hipError_t launch_lookback_scan(detail::target_arch arch,
             save_last_value);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<lookback_scan_determinism Determinism,

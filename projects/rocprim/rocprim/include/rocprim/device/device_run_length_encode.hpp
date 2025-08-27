@@ -125,7 +125,7 @@ inline hipError_t launch_non_trivial(detail::target_arch           arch,
             size);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<typename Config,

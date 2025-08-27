@@ -167,7 +167,7 @@ inline hipError_t launch_block_sort(detail::target_arch arch,
     auto kernel = [=](auto arch_config)
     { block_sort_kernel_impl<decltype(arch_config)>(keys, size, compare_function); };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class ArchConfig, class KeysIterator, class BinaryFunction>
@@ -234,7 +234,7 @@ inline hipError_t
                                                           compare_function);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class ArchConfig, class KeysIterator, class BinaryFunction>
@@ -365,7 +365,7 @@ inline hipError_t
                                                               compare_function);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class ArchConfig>
@@ -434,7 +434,7 @@ inline hipError_t launch_find_nth_element_bucket(detail::target_arch          ar
                                                                    rank);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class ArchConfig, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
@@ -655,7 +655,7 @@ inline hipError_t
                                                                        compare_function);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class Config, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>

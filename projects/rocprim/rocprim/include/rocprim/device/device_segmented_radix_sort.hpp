@@ -93,7 +93,7 @@ inline hipError_t launch_segmented_sort(
                                                           end_bit);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class Config,
@@ -141,7 +141,7 @@ inline hipError_t launch_segmented_sort_large(
                                                                 end_bit);
     };
 
-    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<class Config,
@@ -189,14 +189,14 @@ inline hipError_t launch_segmented_sort_small(
                                                                 end_bit);
     };
 
-    return launch_kernel<Config,
-                         decltype(kernel),
-                         segmented_radix_sort_warp_sort_small_config_selector>(arch,
-                                                                               kernel,
-                                                                               grid,
-                                                                               block,
-                                                                               shmem,
-                                                                               stream);
+    return execute_launch_plan<Config,
+                               decltype(kernel),
+                               segmented_radix_sort_warp_sort_small_config_selector>(arch,
+                                                                                     kernel,
+                                                                                     grid,
+                                                                                     block,
+                                                                                     shmem,
+                                                                                     stream);
 }
 
 template<class Config,
@@ -244,14 +244,14 @@ inline hipError_t launch_segmented_sort_medium(
                                                                  end_bit);
     };
 
-    return launch_kernel<Config,
-                         decltype(kernel),
-                         segmented_radix_sort_warp_sort_meduim_config_selector>(arch,
-                                                                                kernel,
-                                                                                grid,
-                                                                                block,
-                                                                                shmem,
-                                                                                stream);
+    return execute_launch_plan<Config,
+                               decltype(kernel),
+                               segmented_radix_sort_warp_sort_meduim_config_selector>(arch,
+                                                                                      kernel,
+                                                                                      grid,
+                                                                                      block,
+                                                                                      shmem,
+                                                                                      stream);
 }
 
 struct Partitioner

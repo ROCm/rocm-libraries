@@ -275,7 +275,7 @@ struct search_impl_kernels
                                                              compare_function);
         };
 
-        return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
     inline static hipError_t launch_search(detail::target_arch arch,
@@ -300,7 +300,7 @@ struct search_impl_kernels
                                                       compare_function);
         };
 
-        return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
     inline static hipError_t launch_search_shared(detail::target_arch              arch,
@@ -325,7 +325,7 @@ struct search_impl_kernels
                                                              compare_function);
         };
 
-        return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
     inline static hipError_t launch_search(detail::target_arch              arch,
@@ -350,7 +350,7 @@ struct search_impl_kernels
                                                       compare_function);
         };
 
-        return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
+        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
     template<class T>

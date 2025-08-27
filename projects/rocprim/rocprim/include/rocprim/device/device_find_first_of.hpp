@@ -245,7 +245,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
                 compare_function);
         };
 
-        auto find_first_of_configured_kernel = configure_kernel<config>(target_arch, kernel);
+        auto find_first_of_configured_kernel = make_launch_plan<config>(target_arch, kernel);
 
         const size_t shared_memory_size = 0;
 
