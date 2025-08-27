@@ -764,7 +764,7 @@ pushd .
     tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_DEVICE=OFF"
   else
     if [[ -n "${tensile_logic}" ]]; then
-      tensile_opt="${tensile_opt} -D{HIPBLASLT_LIBLOGIC_PATH}=${tensile_logic}"
+      tensile_opt="${tensile_opt} -D{TENSILELITE_LIBLOGIC_PATH}=${tensile_logic}"
     fi
     # tensile_opt="${tensile_opt} -DTensile_CODE_OBJECT_VERSION=${tensile_cov}"
     if [[ ${tensile_threads} != $(nproc) ]]; then
