@@ -62,6 +62,19 @@ def main():
 
     args = parser.parse_args()
 
+    wget_cmd = [
+        "wget",
+        "https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-ubuntu-22.04-0.1.2-Linux.deb",
+    ]
+    subprocess.run(wget_cmd, check=True)
+    dpkg_cmd = [
+        "sudo",
+        "dpkg",
+        "-i",
+        "rocprof-trace-decoder-ubuntu-22.04-0.1.2-Linux.deb",
+    ]
+    subprocess.run(dpkg_cmd, check=True)
+
     # Determine which modes to test
     modes_to_test = []
     if args.write and args.read:
@@ -78,7 +91,7 @@ def main():
     os.environ["ROCROLLER_BUILD_DIR"] = "./"
     os.environ["ROCROLLER_SAVE_ASSEMBLY"] = "1"
 
-    # Due how rocprofv3 works, sometimes data is not recorded and thus needs to be re-ran
+    # Due to how rocprofv3 works, sometimes data is not recorded and thus needs to be re-ran
     # If the output is too short (i.e. only csv headers), repeat the run
     CHAR_LIMIT = args.char_limit
 
