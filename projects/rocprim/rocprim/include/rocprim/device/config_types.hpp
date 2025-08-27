@@ -371,7 +371,7 @@ template<typename Config,
          class Kernel,
          template<typename, target_arch>
          class LaunchSelector>
-__global__ __launch_bounds__((LaunchSelector<Config, Arch>::block_size))
+ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Arch>::block_size))
 void trampoline(Kernel kernel)
 {
     using ArchConfig = target_config<Config, Arch>;
