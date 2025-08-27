@@ -17,8 +17,8 @@ def main():
     parser.add_argument(
         "instr_widths",
         type=int,
-        nargs="*",  # Accept 0 or more arguments
-        default=[1, 2, 3, 4],
+        nargs="*",
+        default=[1, 2, 4],
         help="Instruction width values in dwords (default: 1 2 3 4)",
     )
 
@@ -27,7 +27,7 @@ def main():
         "--strides",
         type=int,
         nargs="+",
-        default=[2**i for i in range(0, 6)],  # [1, 2, 4, 8, 16, 32]
+        default=[2**i for i in range(0, 6)],
         help="List of byte stride values to test (default: 1 2 4 8 16 32)",
     )
 
