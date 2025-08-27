@@ -18,7 +18,7 @@ Documentation for rocSPARSE is available at
 
 ### Optimized
 
-* Improved the user documentation
+* Improved the user documentation.
 
 ### Upcoming changes
 
