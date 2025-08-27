@@ -283,77 +283,65 @@ namespace rocRoller
          *
          * part of the offset above.
          */
-        ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int                offsetTag,
+        ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int                opTag,
+                                                            bool isDirect2LDS,
                                                             Transformer const& coords)
         {
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::getOffsetExpr(offsetTag: {})", offsetTag);
+                "KernelGraph::LoadStoreTileGenerator::getOffsetExpr(operationTag: {}, isDirect2LDS: {})", opTag, isDirect2LDS);
 
-            // Find storage node connected to Offset edge.
-            auto maybeTargetTag = findStorageNeighbour(offsetTag, *m_graph);
-            if(!maybeTargetTag)
-            {
-                return nullptr;
-            }
-
-            auto [targetTag, direction] = *maybeTargetTag;
-            auto theOne = 527;
-
-            // Find all required coordinates for the storage node,
-            // and filter out Unroll coordinates.
-            auto [required, path] = findRequiredCoordinates(targetTag, direction, *m_graph);
-            auto unrolls          = filterCoordinates<Unroll>(required, *m_graph);
-
-
-            if(unrolls.size() == 0)
-                return nullptr;
+            auto [target, direction] = getOperationTarget(opTag, *m_graph, isDirect2LDS);
+            auto [required, path]    = findRequiredCoordinates(target, direction, *m_graph);
 
             ExpressionPtr result = Expression::literal(0u);
 
-            for(auto const& unroll : unrolls)
+            auto const maxSubDim = 3;
+            std::vector<std::pair<int, int>> unrollCoords(maxSubDim, {-1, -1});
+
+            auto isTypeAndSubDimension = [](auto ctype) {
+                return (std::holds_alternative<Connections::TypeAndSubDimension>(ctype));
+            };
+
+            auto isUnrollStride = [](auto ctype) {
+                return (std::holds_alternative<Connections::UnrollStride>(ctype));
+            };
+
+            for(auto const& c : m_graph->mapper.getConnections(opTag))
             {
-                // Find the neighbour of the Unroll that:
-                // 1. is in the load/store coordinate transform path
-                // 2. has a Stride edge connected to it
-                std::optional<int> maybeStrideTag;
-                std::vector<int>   neighbourNodes;
-                if(direction == Graph::Direction::Downstream)
-                    neighbourNodes = m_graph->coordinates.parentNodes(unroll).to<std::vector>();
-                else
-                    neighbourNodes = m_graph->coordinates.childNodes(unroll).to<std::vector>();
-                for(auto neighbourNode : neighbourNodes)
+                if (isTypeAndSubDimension(c.connection))
                 {
-                    if(path.contains(neighbourNode))
-                    {
-                        auto neighbourEdges = m_graph->coordinates.getNeighbours(
-                            neighbourNode, Graph::opposite(direction));
-                        for(auto neighbourEdge : neighbourEdges)
-                        {
-                            auto maybeStride = m_graph->coordinates.get<Stride>(neighbourEdge);
-                            if(maybeStride
-                               && m_context->registerTagManager()->hasExpression(neighbourEdge))
-                            {
-                                maybeStrideTag = neighbourEdge;
-                            }
-                        }
-                    }
-                }
+                    auto maybeUnroll  = m_graph->coordinates.get<Unroll>(c.coordinate);
 
-                if(!maybeStrideTag)
+                    if (!maybeUnroll)
+                        continue;
+                    auto curConnection = std::get<Connections::TypeAndSubDimension>(c.connection);
+                    auto subdim = curConnection.subdimension;
+                    AssertFatal(subdim < maxSubDim, ShowValue(subdim));
+                    unrollCoords[subdim].first = c.coordinate;
+                        
+                } else if (isUnrollStride(c.connection))
                 {
-                    continue;
+                    auto curConnection = std::get<Connections::UnrollStride>(c.connection);
+                    auto subdim = curConnection.unrollDimension;
+                    AssertFatal(subdim < maxSubDim, ShowValue(subdim));
+                    unrollCoords[subdim].second = c.coordinate;
                 }
-                    
-
-                auto [strideExpr, strideAttrs]
-                    = m_context->registerTagManager()->getExpression(*maybeStrideTag);
-
-                Log::debug(
-                    "  unroll coord {} value: {}", unroll, toString(coords.getCoordinate(unroll)));
-
-                result = result + coords.getCoordinate(unroll) * strideExpr;
             }
 
+            for (auto const& unrollStride : unrollCoords)
+            {
+                auto [unrollTag, strideTag] = unrollStride;
+                if (unrollTag != -1 && strideTag != -1)
+                {
+                    auto [strideExpr, strideAttrs]
+                    = m_context->registerTagManager()->getExpression(strideTag);
+
+                    Log::debug(
+                    "  unroll coord {} value: {}", unrollTag, toString(coords.getCoordinate(unrollTag)));
+
+                    result = result + coords.getCoordinate(unrollTag) * strideExpr; 
+                }
+            }
             return result;
         }
 
@@ -403,7 +391,7 @@ namespace rocRoller
                     info.rowOffsetReg = m_context->registerTagManager()->getRegister(offsetTag);
                 }
 
-                rowOffsetExpr = getOffsetExpr(offsetTag, coords);
+                rowOffsetExpr = getOffsetExpr(tag, direct2LDS,  coords);
             }
             else if(m_baseOffsets.count(offsetTag) > 0)
             {
@@ -430,7 +418,7 @@ namespace rocRoller
                     co_yield m_context->copier()->copy(info.rowOffsetReg, baseReg);
                 }
 
-                rowOffsetExpr = getOffsetExpr(offsetTag, coords);
+                rowOffsetExpr = getOffsetExpr(tag, direct2LDS,  coords);
             }
             else
             {

@@ -156,7 +156,8 @@ namespace rocRoller
 
             // Index calculation Helpers
             std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
-            Expression::ExpressionPtr         getOffsetExpr(int                                 offsetTag,
+            Expression::ExpressionPtr         getOffsetExpr(int                                 opTag,
+                                                            bool isDirect2LDS,
                                                             CoordinateGraph::Transformer const& coords);
             Generator<Instruction>            getOffset(LoadStoreTileInfo&           info,
                                                         CoordinateGraph::Transformer coords,

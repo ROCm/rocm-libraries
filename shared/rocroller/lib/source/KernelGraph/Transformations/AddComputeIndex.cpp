@@ -725,11 +725,8 @@ namespace rocRoller::KernelGraph
                                             if(maybeStride)
                                             {
                                                 maybeStrideTag = neighbourEdge;
-                                                // auto newConnection = UnrollConnection<Stride>(*maybeStrideTag, subDimension);
                                                 auto newConnection = makeConnection<Stride, Connections::UnrollStride>(*maybeStrideTag, subDimension);
                                                 kgraph.mapper.connect(candidate, newConnection.coordinate, newConnection.connectionSpec);
-                                                // auto unrollStrideConnection = Connections::TypeAndSubDimension{"UnrollStride", subDimension};
-                                                // kgraph.mapper.connect(candidate, *maybeStrideTag, unrollStrideConnection);
                                             }
                                         }
                                     }
