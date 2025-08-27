@@ -313,7 +313,8 @@ namespace TensileLite
         {
             throw std::runtime_error("No valid macro-tile sizes found.");
         }
-        
+    
+        //Remove empty indices
         valid_results.erase(std::remove(valid_results.begin(), valid_results.end(), ResultTuple{}),
             valid_results.end());
 
