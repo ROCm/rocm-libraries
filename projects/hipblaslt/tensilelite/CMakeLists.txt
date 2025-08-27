@@ -12,6 +12,10 @@ if(TENSILELITE_ENABLE_HOST)
     add_library(tensilelite-host OBJECT)
     add_library(tensilelite::tensilelite-host ALIAS tensilelite-host)
 
+    if(HIPBLASLT_ENABLE_OPENMP)
+        target_link_libraries(tensilelite-host PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+
     set_target_properties(tensilelite-host PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
     target_compile_features(tensilelite-host PUBLIC cxx_std_17)

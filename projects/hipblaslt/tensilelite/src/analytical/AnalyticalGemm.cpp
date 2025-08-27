@@ -889,7 +889,10 @@ namespace TensileLite
                 size_t max_split = 8;
                 split            = std::min(split, max_split);
             }
-            hardware.log_debug("split", split);
+            
+            if(debug)
+                hardware.log_debug("split", split);
+
             //std::cout << "Split " << split << "\n";
             H_mem1
                 = estimate_l2_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, WGM, element_size_A);
@@ -934,14 +937,15 @@ namespace TensileLite
                     || (MT_N > N && MT_N != MI_N && edge_waste_n > 0.5)
                     || (MT_K > K && !(MT_K <= MI_K))))
                 {
-                    hardware.log_debug("Edge Waste Invalidated", "True");
+                    if(debug)
+                        hardware.log_debug("Edge Waste Invalidated", "True");
                     if(Hardware::is_debug_enabled())
                     {
                         hardware.print_debug_info();
                     }
                     //return std::numeric_limits<double>::max();
                 }
-                else
+                else if(debug)
                 {
                     hardware.log_debug("Edge Waste Invalidated", "False");
                 }
@@ -957,8 +961,9 @@ namespace TensileLite
                 //TODO 256 and 256 here should be largest M and N tile dimensions in library
                 if(M <= 256 && N <= 256 && K < 1024 && (MT_M < M || MT_N < N))
                 {
+                    if(debug)
+                        hardware.log_debug("Complete Tile Possible Invalidated", "True");
 
-                    hardware.log_debug("Complete Tile Possible Invalidated", "True");
                     if(Hardware::is_debug_enabled())
                     {
                         hardware.print_debug_info();
@@ -966,7 +971,7 @@ namespace TensileLite
 
                     return std::numeric_limits<double>::max();
                 }
-                else
+                else if(debug)
                 {
                     hardware.log_debug("Complete Tile Possible Invalidated", "False");
                 }

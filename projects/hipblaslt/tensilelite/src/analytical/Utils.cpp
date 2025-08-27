@@ -33,10 +33,19 @@
 #include <iomanip> // For output formatting
 #include <iostream>
 
+#ifdef _OPENMP
+    #include <omp.h>
+#endif
+
 namespace TensileLite
 {
     namespace analytical
     {
+        size_t round_down_threads_multiplesof16_or_one(size_t x) 
+        {
+            size_t y = x & ~15;     // round down to multiple of 16
+            return (y < 16) ? 1 : y; // if less than 16, set to 1
+        }
 
         //
         // Tiebreaker function.
@@ -215,140 +224,147 @@ namespace TensileLite
             return best_grid;
         }
 
-        std::vector<ResultTuple> select_best_macro_tile_size(size_t                        M,
-                                                             size_t                        N,
-                                                             size_t                        K,
-                                                             size_t                        batch,
-                                                             bool                          transA,
-                                                             bool                          transB,
-                                                             const Hardware&               hardware,
-                                                             const std::vector<TileTuple>& MT_list,
-                                                             size_t   element_size_A, //In bits
-                                                             size_t   element_size_B, //In bits
-                                                             size_t   element_size_out, //In bits
-                                                             DataType miDataType,
-                                                             size_t   mx_block_size,
-                                                             double   H_L2,
-                                                             bool     debug,
-                                                             bool     print,
-                                                             size_t   WGM)
-        {
-            std::vector<ResultTuple> valid_results;
-            valid_results.reserve(MT_list.size());
-
-            bool tf32_emu = ((miDataType == DataType::XFloat32)
-                             && (hardware.arch == Hardware::Architecture::gfx950));
-
-            for(const auto& mt : MT_list)
+    std::vector<ResultTuple> select_best_macro_tile_size(size_t                        M,
+                                                            size_t                        N,
+                                                            size_t                        K,
+                                                            size_t                        batch,
+                                                            bool                          transA,
+                                                            bool                          transB,
+                                                            const Hardware&             hardware,
+                                                            const std::vector<TileTuple>& MT_list,
+                                                            size_t element_size_A, //In bits
+                                                            size_t element_size_B, //In bits
+                                                            size_t element_size_out, //In bits
+                                                            DataType mi_datatype,
+                                                            size_t mx_block_size,
+                                                            double H_L2,
+                                                            bool   debug,
+                                                            bool   print,
+                                                            size_t WGM)
+    {
+            std::vector<ResultTuple> valid_results;  
+            valid_results.resize(MT_list.size());// preallocate
+#ifdef _OPENMP
+                size_t num_threads = std::max(1UL, MT_list.size() / 6);
+                num_threads = std::min(num_threads, static_cast<size_t>((omp_get_max_threads() / 3)));
+                size_t threads_multiple_16 = round_down_threads_multiplesof16_or_one(num_threads);
+#pragma omp parallel for num_threads(threads_multiple_16)
+#endif
+            for (size_t i = 0; i < MT_list.size(); ++i)
             {
-                size_t MT_M      = std::get<0>(mt);
-                size_t MT_N      = std::get<1>(mt);
-                size_t MT_K      = std::get<2>(mt);
-                size_t MI_M      = std::get<3>(mt);
-                size_t MI_N      = std::get<4>(mt);
-                size_t MI_K      = std::get<5>(mt);
-                size_t occupancy = std::get<6>(mt);
+            const auto& mt = MT_list[i];
+            size_t MT_M = std::get<0>(mt);
+            size_t MT_N = std::get<1>(mt);
+            size_t MT_K = std::get<2>(mt);
+            size_t MI_M = std::get<3>(mt);
+            size_t MI_N = std::get<4>(mt);
+            size_t MI_K = std::get<5>(mt);
+            size_t occupancy = std::get<6>(mt);
+
+            if(debug)
+            {
+#pragma omp critical
+                std::cout << "Evaluating MT_M=" << MT_M << ", MT_N=" << MT_N
+                            << ", MT_K=" << MT_K << ", MI_M=" << MI_M << ", MI_N=" << MI_N
+                            << ", MI_K=" << MI_K << "\n";
+            }
+
+            size_t split = 1;
+            if(check_LDS_capacity(hardware, MT_M, MT_N, MT_K, element_size_A, debug))
+            {
+                double Total_latency = compute_total_latency(hardware,
+                                                                M,
+                                                                N,
+                                                                K,
+                                                                batch,
+                                                                transA,
+                                                                transB,
+                                                                MT_M,
+                                                                MT_N,
+                                                                MT_K,
+                                                                MI_M,
+                                                                MI_N,
+                                                                MI_K,
+                                                                split,
+                                                                H_L2,
+                                                                element_size_A,
+                                                                element_size_B,
+                                                                element_size_out,
+                                                                mi_datatype,
+                                                                WGM,
+                                                                mx_block_size,
+                                                                debug);
+
+                valid_results[i] = ResultTuple(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy);        
+            }
+            else
+            {
+                //leave un-initialized
+                valid_results[i] = ResultTuple{};
 
                 if(debug)
-                {
-                    std::cout << "Evaluating MT_M=" << MT_M << ", MT_N=" << MT_N
-                              << ", MT_K=" << MT_K << ", MI_M=" << MI_M << ", MI_N=" << MI_N
-                              << ", MI_K=" << MI_K << "\n";
-                }
-
-                size_t split = 1;
-                if(check_LDS_capacity(hardware, MT_M, MT_N, MT_K, element_size_A, debug))
-                {
-                    double Total_latency = compute_total_latency(hardware,
-                                                                 M,
-                                                                 N,
-                                                                 K,
-                                                                 batch,
-                                                                 transA,
-                                                                 transB,
-                                                                 MT_M,
-                                                                 MT_N,
-                                                                 MT_K,
-                                                                 MI_M,
-                                                                 MI_N,
-                                                                 MI_K,
-                                                                 split,
-                                                                 H_L2,
-                                                                 element_size_A,
-                                                                 element_size_B,
-                                                                 element_size_out,
-                                                                 miDataType,
-                                                                 WGM,
-                                                                 mx_block_size,
-                                                                 debug);
-
-                    valid_results.emplace_back(
-                        Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy);
-                }
-                else if(debug)
-                {
-                    std::cout << "Skipping MT_M=" << MT_M << ", MT_N=" << MT_N << ", MT_K=" << MT_K
-                              << " due to LDS capacity\n";
-                }
+#pragma omp critical
+                std::cout << "Skipping MT_M=" << MT_M << ", MT_N=" << MT_N << ", MT_K=" << MT_K
+                            << " due to LDS capacity\n";
             }
-
-            if(valid_results.empty())
-            {
-                throw std::runtime_error("No valid macro-tile sizes found.");
-            }
-
-            // 1) Sort results by ascending latency.
-            std::sort(valid_results.begin(), valid_results.end(), [](auto const& a, auto const& b) {
-                return std::get<0>(a) < std::get<0>(b);
-            });
-
-            // 2) Collect results that tie for the absolute best latency.
-            double best_latency = std::get<0>(valid_results.front());
-            size_t num_the_same = 0;
-
-            // TODO: Experiment on what the threshold should be.
-            // Likely can be replaced with 5.
-            size_t tie_breaker_threshold = tf32_emu ? 5 : 10;
-            for(const auto& res : valid_results)
-            {
-                // If it's "essentially" (within 5 diff) the same as best_latency, include it
-                if(std::fabs(std::get<0>(res) - best_latency) < tie_breaker_threshold)
-                    num_the_same++;
-                else
-                    break; // Once we pass best_latency, we can stop.
-            }
-            // 3) If that tie group has at least 10 entries, we only use those.
-            // 4) Otherwise, keep adding the next best latencies until we have 10 total or run out.
-            // std::vector<ResultTuple> top_candidates = tie_results;
-            // if(tie_results.size() < 10)
-            // {
-            //     size_t i = tie_results.size();
-            //     while(top_candidates.size() < 10 && i < valid_results.size())
-            //     {
-            //         top_candidates.push_back(valid_results[i]);
-            //         i++;
-            //     }
-            // }
-            // Now ‘top_candidates’ is either all the tied best-latency results (if >=10),
-            // or the top 10 latencies overall (including however many best-latency entries there were).
-
-            // Finally, use your existing tie-breaker on top_candidates
-            pick_best_tile_by_arithmetic_intensity(valid_results, num_the_same);
-            if(print)
-            {
-                for(const auto& tile : valid_results)
-                {
-                    std::cout << M << "x" << N << "x" << K
-                              << "Selected Macro-Tile: Latency=" << std::get<0>(tile)
-                              << ", MT_M=" << std::get<1>(tile) << ", MT_N=" << std::get<2>(tile)
-                              << ", MT_K=" << std::get<3>(tile) << ", MI_M=" << std::get<4>(tile)
-                              << ", MI_N=" << std::get<5>(tile) << ", MI_K=" << std::get<6>(tile)
-                              << "\n";
-                }
-            }
-
-            return valid_results;
         }
+
+        if(valid_results.empty())
+        {
+            throw std::runtime_error("No valid macro-tile sizes found.");
+        }
+        
+        valid_results.erase(std::remove(valid_results.begin(), valid_results.end(), ResultTuple{}),
+            valid_results.end());
+
+        // 1) Sort results by ascending latency.
+        std::sort(valid_results.begin(), valid_results.end(), [](auto const& a, auto const& b) {
+            return std::get<0>(a) < std::get<0>(b);
+        });
+
+
+        // 2) Collect results that tie for the absolute best latency.
+        double best_latency = std::get<0>(valid_results.front());
+        size_t num_the_same = 0;
+        for(const auto& res : valid_results)
+        {
+            // If it's "essentially" the same as best_latency, include it
+            if(std::fabs(std::get<0>(res) - best_latency) < 10)
+                num_the_same++;
+            else
+                break; // Once we pass best_latency, we can stop.
+        }
+        // 3) If that tie group has at least 10 entries, we only use those.
+        // 4) Otherwise, keep adding the next best latencies until we have 10 total or run out.
+        // std::vector<result_tuple> top_candidates = tie_results;
+        // if(tie_results.size() < 10)
+        // {
+        //     size_t i = tie_results.size();
+        //     while(top_candidates.size() < 10 && i < valid_results.size())
+        //     {
+        //         top_candidates.push_back(valid_results[i]);
+        //         i++;
+        //     }
+        // }
+        // Now ‘top_candidates’ is either all the tied best-latency results (if >=10),
+        // or the top 10 latencies overall (including however many best-latency entries there were).
+
+        // Finally, use your existing tie-breaker on top_candidates
+        pick_best_tile_by_arithmetic_intensity(valid_results, num_the_same);
+        if(print)
+        {
+            for(const auto& tile : valid_results)
+            {
+                std::cout << M << "x" << N << "x" << K
+                            << "Selected Macro-Tile: Latency=" << std::get<0>(tile)
+                            << ", MT_M=" << std::get<1>(tile) << ", MT_N=" << std::get<2>(tile)
+                            << ", MT_K=" << std::get<3>(tile) << ", MI_M=" << std::get<4>(tile)
+                            << ", MI_N=" << std::get<5>(tile) << ", MI_K=" << std::get<6>(tile)
+                            << "\n";
+            }
+        }
+        return valid_results;
+    }
 
         /*!
          * \brief Selects the best WGM (maximizing L2 hit rate) given fixed macro tile sizes.
