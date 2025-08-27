@@ -32,7 +32,7 @@
 
 #include "../../config.hpp"
 
-#include "cub/util_macro.cuh" // IWYU pragma: export
+#include <cub/util_macro.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
