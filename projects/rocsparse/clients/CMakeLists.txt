@@ -101,7 +101,11 @@ else()
   # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
   find_package(OpenMP)
   if (TARGET OpenMP::OpenMP_CXX)
-    set(ROCSPARSE_CLIENT_LIBS "OpenMP::OpenMP_CXX")
+    if(NOT WIN32)
+      set(ROCSPARSE_CLIENT_LIBS "OpenMP::OpenMP_CXX")
+    else()
+      set(ROCSPARSE_CLIENT_LIBS libomp)
+    endif()
   endif()
 endif()
 
