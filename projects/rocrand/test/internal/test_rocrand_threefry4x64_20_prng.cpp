@@ -65,7 +65,7 @@ using threefry4x64_20_generator_prng_host_tests_types
                                                         ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
 
 using threefry4x64_20_generator_prng_offset_host_tests_types
-    = ::testing::Types<generator_prng_offset_host_tests_params<unsigned int,
+    = ::testing::Types<generator_prng_offset_host_tests_params<unsigned long long,
                                                                threefry4x64_20_generator_host<true>,
                                                                ROCRAND_ORDERING_PSEUDO_DEFAULT>,
                        generator_prng_offset_host_tests_params<float,
