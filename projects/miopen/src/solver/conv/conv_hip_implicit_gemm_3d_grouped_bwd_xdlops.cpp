@@ -661,6 +661,14 @@ ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
 #endif
 }
 
+#if !(MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL)
+void miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
+    const miopen::conv::ProblemDescription&)
+{
+    // No-op stub for non-CK builds
+}
+#endif
+
 } // namespace conv
 } // namespace solver
 } // namespace miopen
