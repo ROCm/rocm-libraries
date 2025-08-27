@@ -3388,6 +3388,43 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
+  def graShiftMX(self, kernel, tP, tPref):
+    # graShift requires a vgpr for each address component (so each component
+    # can be examined and shifted if necessary) - therefore does not work
+    # with UseSgprForGRO.
+    assert(not kernel["_UseSgprForGRO"]), "%s"%self.states.kernelName
+    if not self.states.groOffsetInMacroTile:
+      raise Exception(f"unsupport non groOffsetInMacroTile")
+    module = Module("graShift")
+    margin = tPref["glvw"] if tPref["rtv"] else 1
+    offsetGrpVgpr = self.vgprPool.checkOut(1, "offset", self.states.preventVgprOverflowDuringNewTile)
+    with self.allocTmpSgpr(self.states.laneSGPRCount+1,2) as tmpSgprInfo:
+      edgeGrpSgpr = tmpSgprInfo.idx
+      edgeSgpr = tmpSgprInfo.idx + self.states.laneSGPRCount
+      shiftSgpr = tmpSgprInfo.idx + self.states.laneSGPRCount
+      module.add(SMulI32(dst=sgpr(edgeSgpr), src0=sgpr(tP["wg"]), src1=kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
+      module.add(SSubU32(dst=sgpr(edgeSgpr), src0=self.sizeRef(tP["idx"]), src1=sgpr(edgeSgpr), \
+                comment="edge = Size%s - WG*MT"%(tP["tileChar"])))
+      module.add(SLShiftRightB32(dst=sgpr(edgeGrpSgpr), shiftHex=hex(log2(margin)), src=sgpr(edgeSgpr), comment="edge group"))
+
+      module.add(SAndB32(dst=sgpr(shiftSgpr), src0=sgpr(edgeSgpr), src1=(margin-1), comment="shift value = (GRVW - edge) % (GRVW-1)"))
+      module.add(SSubU32(dst=sgpr(shiftSgpr), src0=margin, src1=sgpr(shiftSgpr), comment="shift value = (GRVW - edge) % (GRVW-1)"))
+      module.add(SAndB32(dst=sgpr(shiftSgpr), src0=sgpr(shiftSgpr), src1=(margin-1), comment="shift value = (GRVW - edge) % (GRVW-1)"))
+
+      vSrc = tP["vgprTileOffsets"]
+      vDst = tP["vgprTileOffsets"]
+      for l in range(0, tP["nrt"]):
+        module.add(VLShiftRightB32(dst=vgpr(offsetGrpVgpr), shiftHex=hex(log2(margin)), src=vgpr(vSrc+l), comment="offsetGrp == edgeGrp ? shift : normal"))
+        module.add(VCmpEQU32(dst=sgpr(edgeGrpSgpr, self.states.laneSGPRCount), src0=sgpr(edgeGrpSgpr), src1=vgpr(offsetGrpVgpr)))
+        module.add(VSubU32(dst=vgpr(offsetGrpVgpr), src0=vgpr(vSrc+l), src1=sgpr(shiftSgpr), comment="offsetGrp == edgeGrp ? shift : normal"))
+        module.add(VCndMaskB32(dst=vgpr(vDst+l), src0=vgpr(vSrc+l), src1=vgpr(offsetGrpVgpr), src2=sgpr(edgeGrpSgpr, self.states.laneSGPRCount)))
+
+    self.vgprPool.checkIn(offsetGrpVgpr)
+
+    return module
+
+
+  ##############################################################################
   # Global Read Addresses: Final Offsets metadata
   ##############################################################################
   def graMetadataFinalOffsets(self, kernel, tP):
