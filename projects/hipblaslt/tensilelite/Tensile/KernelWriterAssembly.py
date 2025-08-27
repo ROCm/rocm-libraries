@@ -844,12 +844,16 @@ class KernelWriterAssembly(KernelWriter):
     module.add(RegSet("v", "vgprMXSBase", 0))
 
     moduleVgprMacroMXS = Module("VALU/G2L Vgpr Macro")
+    moduleVgprMacroValuMXSDummy = Module("VALU Dummy Vgpr Macro")
     moduleVgprMacroValuMXSA = Module("VALUA Vgpr Macro")
     moduleVgprMacroValuMXSB = Module("VALUB Vgpr Macro")
     moduleVgprMacroValuMXSAPack = Module("VALUA Pack Vgpr Macro")
     moduleVgprMacroValuMXSBPack = Module("VALUB Pack Vgpr Macro")
     moduleVgprMacroG2LMXSA = Module("G2LA Vgpr Macro")
     moduleVgprMacroG2LMXSB = Module("G2LB Vgpr Macro")
+
+    if bool(kernel["ProblemType"]["MXBlockA"]) ^ bool(kernel["ProblemType"]["MXBlockB"]):
+      moduleVgprMacroValuMXSDummy.add(RegSet("v", "vgprValuMXSDummy", "vgprMXSBase", 0))
 
     if kernel["ProblemType"]["MXBlockA"]:
       ri = 0
@@ -951,6 +955,7 @@ class KernelWriterAssembly(KernelWriter):
           moduleVgprMacroG2LMXSB.add(RegSet("v", "vgprG2LMXSB2", "vgprG2LMXSB_BASE", self.states.mxsb.numVgprG2LAllocated//2))
 
     self.moduleVgprMacroMXS = moduleVgprMacroMXS
+    self.moduleVgprMacroValuMXSDummy = moduleVgprMacroValuMXSDummy
     self.moduleVgprMacroValuMXSA = moduleVgprMacroValuMXSA
     self.moduleVgprMacroValuMXSB = moduleVgprMacroValuMXSB
     self.moduleVgprMacroValuMXSAPack = moduleVgprMacroValuMXSAPack
@@ -959,6 +964,7 @@ class KernelWriterAssembly(KernelWriter):
     self.moduleVgprMacroG2LMXSB = moduleVgprMacroG2LMXSB
     module.addComment2("VGPR Macro Assignments for MX")
     module.add(self.moduleVgprMacroMXS)
+    module.add(moduleVgprMacroValuMXSDummy)
     module.add(self.moduleVgprMacroValuMXSA)
     module.add(self.moduleVgprMacroValuMXSB)
     module.add(self.moduleVgprMacroValuMXSAPack)
@@ -2197,7 +2203,7 @@ class KernelWriterAssembly(KernelWriter):
       # we will claim then just before the start of the unroll loop:
       if self.states.lastValuMXSAB:
         self.vgprPool.add(0 , \
-            self.states.lastValuMXSAB - self.states.mxsa.startVgprValu, "ValuMXSAB") # Add as available
+            self.states.lastValuMXSAB, "ValuMXSAB") # Add as available
         moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
                             (self.states.mxsa.startVgprValu, self.states.lastValuMXSAB+self.states.mxsa.startVgprValu))
 
@@ -5088,7 +5094,7 @@ class KernelWriterAssembly(KernelWriter):
   def initC(self, kernel):
     module = Module("initC")
     if self.states.lastValuMXSAB:
-      self.vgprPool.remove(self.states.mxsa.startVgprValu , self.states.lastValuMXSAB - self.states.mxsa.startVgprValu , "ValuMXSAB")
+      self.vgprPool.remove(0 , self.states.lastValuMXSAB, "ValuMXSAB")
       module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(self.states.mxsa.startVgprValu, self.states.lastValuMXSAB))
     self.vgprPool.remove(self.states.c.startVgprValu, self.states.c.numVgprValu, "ValuC")
     module.addComment1("initC: remove ValuC vgpr buffer [%u...%u) from pool"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu))
@@ -5472,6 +5478,12 @@ class KernelWriterAssembly(KernelWriter):
   # User must call tailLoopFreeVgpr(vgprBase, imod) to release the resources.
   ##############################################################################
   def tailLoopAllocValuVgpr(self, kernel, tensorParametersA, tensorParametersB, tensorParametersM):
+    imodMXSDummy        = Module("tailLoopAllocValuMXSDummyVgpr")
+    vgprBaseMXSDummy    = -1
+    if bool(kernel["ProblemType"]["MXBlockA"]) ^ bool(kernel["ProblemType"]["MXBlockB"]):
+      vgprBaseMXSDummy = self.vgprPool.checkOutAligned(2,2)
+      imodMXSDummy.add(RegSet("v", "vgprValuMXSDummy", vgprBaseMXSDummy))
+
     imodMXSA            = Module("tailLoopAllocValuMXSAVgpr")
     vgprBaseMXSA        = -1
     numValuMXSA         = 0
@@ -5610,7 +5622,7 @@ class KernelWriterAssembly(KernelWriter):
       if numVgprCvtTemp > 0:
         imodMisc.add(RegSet("v", "vgprCvtTemp", vgprBaseMisc + numVgprPackTemp))
 
-    return ([vgprBaseMXSA, imodMXSA],[vgprBaseMXSB, imodMXSB], [vgprBaseA, imodA],[vgprBaseB, imodB], [vgprBaseM, imodM],[vgprBaseMisc, imodMisc])
+    return ([vgprBaseMXSDummy, imodMXSDummy], [vgprBaseMXSA, imodMXSA], [vgprBaseMXSB, imodMXSB], [vgprBaseA, imodA],[vgprBaseB, imodB], [vgprBaseM, imodM],[vgprBaseMisc, imodMisc])
 
   def tailLoopAllocG2LVgpr(self, kernel):
     imod           = Module("tailLoopAllocG2LVgpr")
@@ -6460,11 +6472,47 @@ class KernelWriterAssembly(KernelWriter):
     module.add(gsuComponent.calculateIncrementMetadata(self, kernel, sgprOut))
     return module
 
+  def getOneStr(self, mxType, bits):
+    value = ""
+    if bits == 32:
+      if mxType.toName() == "E8":
+        value = "0x7f7f7f7f"
+      elif mxType.toName() == "Float8":
+        value = "0x38383838"
+      elif mxType.toName() == "E5M3":
+        value = "0x78787878"
+      else:
+        raise Exception(f"unsupport tc {mxType.toName()}")
+    elif bits == 64:
+      if mxType.toName() == "E8":
+        value = "0x7f7f7f7f7f7f7f7f"
+      elif mxType.toName() == "Float8":
+        value = "0x3838383838383838"
+      elif mxType.toName() == "E5M3":
+        value = "0x7878787878787878"
+      else:
+        raise Exception(f"unsupport tc {mxType.toName()}")
+    else:
+      raise Exception(f"unsupport bits {bits}")
+
+    return value
+
   ##############################################################################
   # Open Loop
   ##############################################################################
   def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False):
     module = Module("openLoop")
+
+    if bool(kernel["ProblemType"]["MXBlockA"]) ^ bool(kernel["ProblemType"]["MXBlockB"]):
+      block = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
+      mxType = kernel["ProblemType"]["DataTypeMXSA"] if kernel["ProblemType"]["MXBlockA"] else kernel["ProblemType"]["DataTypeMXSB"]
+      if block == 32:
+        module.add(VMovB32(dst=vgpr("ValuMXSDummy"), src=self.getOneStr(mxType, 32)))
+      elif block == 16:
+        module.add(VMovB64(dst=vgpr("ValuMXSDummy",2), src=self.getOneStr(mxType, 64)))
+      else:
+        raise Exception(f"unsupport mx block {block}")
+
     # TODO - rewrite this function to simplify control-flow between tail-loop / unroll loop
     tailLoop = loopIdx < 0
     if tailLoop:
@@ -8104,12 +8152,12 @@ class KernelWriterAssembly(KernelWriter):
             mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, idxA)
             mxsaStr = vgpr(mxsaStr_base, vgprPerInputMXSA)
           else:
-            mxsaStr = "127"
+            mxsaStr = vgpr("ValuMXSDummy") if kernel["ProblemType"]["MXBlockB"] == 32 else vgpr("ValuMXSDummy",2)
           if kernel["ProblemType"]["MXBlockB"]:
             mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, idxB)
             mxsbStr = vgpr(mxsbStr_base, vgprPerInputMXSB)
           else:
-            mxsbStr = "127"
+            mxsbStr = vgpr("ValuMXSDummy") if kernel["ProblemType"]["MXBlockA"] == 32 else vgpr("ValuMXSDummy",2)
 
           StrMX0 = mxsaStr if tPB["tile01Idx"] else mxsbStr
           StrMX1 = mxsbStr if tPB["tile01Idx"] else mxsaStr

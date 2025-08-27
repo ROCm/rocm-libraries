@@ -883,7 +883,15 @@ class ProblemType(Mapping):
     if self["MXBlockA"] or self["MXBlockB"]:
       if gemmType not in _validMXGEMMTypes:
         raise Exception("This typed-MX-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet." % (gemmType[0], gemmType[1], gemmType[2]))
-      if (self["MXBlockA"] != self["MXBlockB"]) and (self["MXBlockA"] not in _validMXGEMMBlock):
+      if self["MXBlockA"] == 0:
+        if self["MXBlockB"] not in _validMXGEMMBlock:
+          raise Exception("MXShape is not supported")
+      elif self["MXBlockB"] == 0:
+        if self["MXBlockA"] not in _validMXGEMMBlock:
+          raise Exception("MXShape is not supported")
+      elif (self["MXBlockA"] != self["MXBlockB"]):
+        raise Exception("MXShape is not supported")
+      elif (self["MXBlockA"] not in _validMXGEMMBlock):
         raise Exception("MXShape is not supported")
 
   ########################################
