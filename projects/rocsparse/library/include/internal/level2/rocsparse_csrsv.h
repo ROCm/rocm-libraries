@@ -439,76 +439,7 @@ rocsparse_status rocsparse_csrsv_clear(rocsparse_handle          handle,
 *  \par Example
 *  Consider the lower triangular \f$m \times m\f$ matrix \f$L\f$, stored in CSR
 *  storage format with unit diagonal. The following example solves \f$L \cdot y = x\f$.
-*  \code{.c}
-*      // Create rocSPARSE handle
-*      rocsparse_handle handle;
-*      rocsparse_create_handle(&handle);
-*
-*      // Create matrix descriptor
-*      rocsparse_mat_descr descr;
-*      rocsparse_create_mat_descr(&descr);
-*      rocsparse_set_mat_fill_mode(descr, rocsparse_fill_mode_lower);
-*      rocsparse_set_mat_diag_type(descr, rocsparse_diag_type_unit);
-*
-*      // Create matrix info structure
-*      rocsparse_mat_info info;
-*      rocsparse_create_mat_info(&info);
-*
-*      // Obtain required buffer size
-*      size_t buffer_size;
-*      rocsparse_dcsrsv_buffer_size(handle,
-*                                   rocsparse_operation_none,
-*                                   m,
-*                                   nnz,
-*                                   descr,
-*                                   csr_val,
-*                                   csr_row_ptr,
-*                                   csr_col_ind,
-*                                   info,
-*                                   &buffer_size);
-*
-*      // Allocate temporary buffer
-*      void* temp_buffer;
-*      hipMalloc(&temp_buffer, buffer_size);
-*
-*      // Perform analysis step
-*      rocsparse_dcsrsv_analysis(handle,
-*                                rocsparse_operation_none,
-*                                m,
-*                                nnz,
-*                                descr,
-*                                csr_val,
-*                                csr_row_ptr,
-*                                csr_col_ind,
-*                                info,
-*                                rocsparse_analysis_policy_reuse,
-*                                rocsparse_solve_policy_auto,
-*                                temp_buffer);
-*
-*      // Solve Ly = x
-*      rocsparse_dcsrsv_solve(handle,
-*                             rocsparse_operation_none,
-*                             m,
-*                             nnz,
-*                             &alpha,
-*                             descr,
-*                             csr_val,
-*                             csr_row_ptr,
-*                             csr_col_ind,
-*                             info,
-*                             x,
-*                             y,
-*                             rocsparse_solve_policy_auto,
-*                             temp_buffer);
-*
-*      // No zero pivot should be found, with L having unit diagonal
-*
-*      // Clean up
-*      hipFree(temp_buffer);
-*      rocsparse_destroy_mat_info(info);
-*      rocsparse_destroy_mat_descr(descr);
-*      rocsparse_destroy_handle(handle);
-*  \endcode
+*  \snippet example_rocsparse_csrsv.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT
