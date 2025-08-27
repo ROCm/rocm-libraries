@@ -2600,7 +2600,8 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"] and state["GlobalReadVectorWidthA"]:
           partialA = state["ProblemType"]["TLUA"] and (state["AssertFree0ElementMultiple"] % state["GlobalReadVectorWidthA"] != 0)
           if partialA and not state["UseGeneralizedNLCOneA"]:
-            glvwAlimit = int(16 // state["ProblemType"]["DataType"].numBytes())
+            limitBytes = 24 if state["ProblemType"]["DataType"].is6bitFloat else 16
+            glvwAlimit = int(limitBytes / state["ProblemType"]["DataType"].numBytes())
             if state["SourceSwap"]:
               matrixInstM = (state["MatrixInstM"] * state["MatrixInstBM"]) if (state["MatrixInstM"] == 4) else state["MatrixInstM"]
               glvwAlimit = matrixInstM * state["VectorWidthA"]
@@ -2673,12 +2674,14 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"] and state["GlobalReadVectorWidthB"]:
           partialB = state["ProblemType"]["TLUB"] and (state["AssertFree1ElementMultiple"] % state["GlobalReadVectorWidthB"] != 0)
           if partialB and not state["UseGeneralizedNLCOneB"]:
-            glvwBlimit = int(16 // state["ProblemType"]["DataType"].numBytes())
+            limitBytes = 24 if state["ProblemType"]["DataType"].is6bitFloat else 16
+            glvwBlimit = int(limitBytes / state["ProblemType"]["DataType"].numBytes())
             if state["SourceSwap"]:
               matrixInstM = (state["MatrixInstM"] * state["MatrixInstBM"]) if (state["MatrixInstM"] == 4) else state["MatrixInstM"]
               glvwBlimit  = state["MIOutputVectorWidth"] * (state["WavefrontSize"] // matrixInstM)
-            # else:  # use origin shiftptr for B
-            #   matrixInstN = (state["MatrixInstN"] * state["MatrixInstBN"]) if (state["MatrixInstN"] == 4) else state["MatrixInstN"]
+            else:  # use origin shiftptr for B
+              matrixInstN = (state["MatrixInstN"] * state["MatrixInstBN"]) if (state["MatrixInstN"] == 4) else state["MatrixInstN"]
+              glvwBlimit = matrixInstN * state["VectorWidthB"]
             if state["ProblemType"]["DataType"].numRegisters() == 0.25:
               glvwBlimit = max(glvwBlimit, 4)
 
