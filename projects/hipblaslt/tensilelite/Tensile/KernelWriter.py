@@ -4900,7 +4900,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("shift vector components d0")
         module.add(self.shiftVectorComponents(kernel, tensorParametersA))
 
-      # shift vector components d1, for MFMA version, B never entered this
+      # shift vector components d1
       if not kernel["GuaranteeNoPartialB"] and tensorParametersB["rtv"]:
         module.addComment1("shift vector components d1")
         module.add(self.shiftVectorComponents(kernel, tensorParametersB))
