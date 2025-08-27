@@ -8,7 +8,7 @@
 Absolute maximum value of a 2D Tensor
 *********************************************
 
-This code sample from ``clients/samples/23_amax_ext/sample_hipblaslt_ext_op_amax.cpp`` finds the absolute maximum value of a 2D tensor.
+This code sample from ``clients/samples/23_hipblaslt_ext_op_amax/sample_hipblaslt_ext_op_amax.cpp`` finds the absolute maximum value of a 2D tensor.
 
-.. literalinclude:: ../../clients/samples/23_amax_ext/sample_hipblaslt_ext_op_amax.cpp
+.. literalinclude:: ../../clients/samples/23_hipblaslt_ext_op_amax/sample_hipblaslt_ext_op_amax.cpp
    :language: c++    
