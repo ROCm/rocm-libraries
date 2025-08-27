@@ -5002,6 +5002,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.m.numVgprValu = self.states.m.numVgprValuPerBlock * valuBlocks
       else:
         self.states.m.numVgprValuPerBlock = kernel["MIWaveTileMetadata"] * roundUp(kernel["MIInputPerThreadMetadata"] / self.states.bpr)
+        if kernel["enableLDSTrMetadata"]:
+          multiplyBy = 1 if kernel["MIInputPerThreadMetadata"] // self.states.bpr == 2 else 2
+          self.states.m.numVgprValuPerBlock *= multiplyBy
         self.states.m.numVgprValu = self.states.m.numVgprValuPerBlock * valuBlocks
         if self.states.lrvwTileMetadata > 1 and tensorParametersM["bpe"] < 4:
           self.states.m.numVgprValu = self.states.m.numVgprValuPerBlock * kernel["InnerUnroll"]
@@ -5509,7 +5512,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.m.startVgprValu = vgprIdx
         vgprIdx += self.states.m.numVgprValu
         numVgprValuPackMetadata = 0
-        if not kernel["UnrollMajorLDSMetadata"]:
+        if not kernel["UnrollMajorLDSMetadata"] and not kernel["enableLDSTrMetadata"]:
           self.states.m.startVgprValuPack = vgprIdx
           if self.states.lrvwTileMetadata > 1:
             numVgprValuPackMetadata = roundUp(kernel["VectorWidthMetadata"] * tensorParametersM["bpe"] / self.states.bpr) * kernel["MIWaveTileMetadata"] // kernel["VectorWidthMetadata"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadMetadata"]

@@ -361,6 +361,10 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
                 "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
 
             if tP["isM"]:
+                # multiplyBy:
+                # 2 : t8-t15 will read the same block as the t0-t7. t0-t7 reads 0-63
+                # 1 : t8-t15 will read the next block. t0-t7 reads 0-63 and t8-t15 read 64-127
+                # TODO Should have wider local read to let t8-t15 read the next iter's data and remove the muliplyBy=1 case.
                 multiplyBy = 1 if kernel["MIInputPerThread%s"%tc] * tP["bpeDS"] // writer.states.bpr == 2 else 2
                 strideK = self.NUM_UNROLLED_STRIDE_ELEMENTS // self.NUM_READ_ELEMENT_PER_THREAD * self.NUM_CONT_READ_ELEMENTS * multiplyBy
                 module.add(vectorStaticRemainder(dummy, sReg, kReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, f"5.1 kOffset = wtId % {self.NUM_CONT_READ_ELEMENTS}"))

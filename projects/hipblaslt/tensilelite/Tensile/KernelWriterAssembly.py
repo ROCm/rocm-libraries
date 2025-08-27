@@ -994,7 +994,7 @@ class KernelWriterAssembly(KernelWriter):
               if not kernel["UnrollMajorLDSMetadata"]:
                 ri = 0
             ri = 0
-            if not kernel["UnrollMajorLDSMetadata"]:
+            if not kernel["UnrollMajorLDSMetadata"] and not kernel["enableLDSTrMetadata"]:
               miWaveTile = kernel["MIWaveTileB"] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTileA"]
               moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_D0_PACK", "vgprBase", self.states.m.startVgprValuPack - self.states.startVgpr))
               for data in range(0,kernel["MIInputPerThreadMetadata"]):
@@ -1008,7 +1008,7 @@ class KernelWriterAssembly(KernelWriter):
               for iui in range(0, kernel["InnerUnroll"]):
                 moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), "vgprValuMetadata_X0_I0_BASE", ri))
                 ri += self.states.m.numVgprValuPerBlock
-            if not kernel["UnrollMajorLDSMetadata"]:
+            if not kernel["UnrollMajorLDSMetadata"] and not kernel["enableLDSTrMetadata"]:
               moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_D0_PACK", "vgprBase", self.states.m.startVgprValuPack - self.states.startVgpr))
               for data in range(1,kernel["MIInputPerThreadMetadata"]):
                 for bi in range(0,PLR): # buffer indices
