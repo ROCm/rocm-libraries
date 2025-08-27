@@ -674,7 +674,7 @@ hipError_t
     }
     unsigned int single_sort_items_per_block
         = block_sort_config::block_size * block_sort_config::items_per_thread;
-    if(size <= single_sort_items_per_block)
+    if(size <= static_cast<decltype(size)>(single_sort_items_per_block))
     {
         if(temporary_storage == nullptr)
         {

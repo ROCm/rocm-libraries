@@ -23,7 +23,6 @@
 ################################################################################
 
 from . import BenchmarkProblems
-from . import ClientExecutable
 from . import ClientWriter
 from . import LibraryIO
 from . import LibraryLogic
@@ -122,7 +121,7 @@ def parseCurrentLibrary(libPath, sizePath):
 def runBenchmarking(solutions, problemSizes, outPath, update, cxxCompiler: str, cCompiler: str, assembler: str, offloadBundler: str):
     # TODO some copy-pasting from BenchmarkProblems.benchmarkProblemType
     # could use a refactor to elimate duplicated code
-    ClientExecutable.getClientExecutable(cxxCompiler, cCompiler)
+    ClientWriter.getClientExecutablePath()
 
 
 

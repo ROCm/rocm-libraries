@@ -20,8 +20,8 @@
 
 #include "test_common.hpp"
 #include "test_rocrand_common.hpp"
-#include "test_rocrand_prng.hpp"
 #include "test_rocrand_host_prng.hpp"
+#include "test_rocrand_prng.hpp"
 #include <rocrand/rocrand.h>
 
 #include <rng/config_types.hpp>
@@ -55,18 +55,19 @@ INSTANTIATE_TYPED_TEST_SUITE_P(mt19937_generator,
                                mt19937_generator_prng_tests_types);
 
 #ifdef CODE_COVERAGE_ENABLED
-    using rocrand_impl::host::mt19937_generator_host;
-    using mt19937_generator_prng_host_tests_types = ::testing::Types<
-        generator_prng_host_tests_params<mt19937_generator_host<true>, ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+using rocrand_impl::host::mt19937_generator_host;
+using mt19937_generator_prng_host_tests_types
+    = ::testing::Types<generator_prng_host_tests_params<mt19937_generator_host<true>,
+                                                        ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
 
-    INSTANTIATE_TYPED_TEST_SUITE_P(mt19937_host_generator,
-                                generator_prng_host_tests,
-                                mt19937_generator_prng_host_tests_types);
-    
-    //TODO: Figure out why this is causing compilation errors
-    // INSTANTIATE_TYPED_TEST_SUITE_P(mt19937_host_generator,
-    //                             generator_prng_continuity_host_tests,
-    //                             mt19937_generator_prng_host_tests_types);
+INSTANTIATE_TYPED_TEST_SUITE_P(mt19937_host_generator,
+                               generator_prng_host_tests,
+                               mt19937_generator_prng_host_tests_types);
+
+//TODO: Figure out why this is causing compilation errors
+// INSTANTIATE_TYPED_TEST_SUITE_P(mt19937_host_generator,
+//                             generator_prng_continuity_host_tests,
+//                             mt19937_generator_prng_host_tests_types);
 #endif //CODE_COVERAGE_ENABLED
 
 // mt19937-specific generator API tests

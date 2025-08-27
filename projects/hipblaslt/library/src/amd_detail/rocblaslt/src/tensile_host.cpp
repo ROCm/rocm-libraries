@@ -3286,7 +3286,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(
-            handle, prob, requestedAlgoCount, heuristicResultsArray, returnAlgoCount);
+            handle, prob, requestedAlgoCount, heuristicResultsArray, maxWorkSpaceBytes, returnAlgoCount);
 #endif
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;

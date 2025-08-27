@@ -39,11 +39,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iterator>
 #include <numeric>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
-#include <iterator>
 
 //
 // General generator host API tests
@@ -108,32 +108,32 @@ TYPED_TEST_P(generator_prng_host_tests, init_test)
 TYPED_TEST_P(generator_prng_host_tests, uniform_uint_test)
 {
     const size_t  size = 1313;
-    unsigned int* data = new unsigned int [size];
+    unsigned int* data = new unsigned int[size];
 
     auto g = TestFixture::get_generator();
     ROCRAND_CHECK(g.generate_uniform(data, size));
     HIP_CHECK(hipDeviceSynchronize());
 
-    double mean = std::accumulate(data, data + size, 0.0) / (double) size;
+    double mean = std::accumulate(data, data + size, 0.0) / (double)size;
     double maxi = std::numeric_limits<unsigned int>::max();
     ASSERT_NEAR(mean, maxi / 2, maxi / 20);
-    delete [] data;
+    delete[] data;
 }
 
 template<class Generator, class T>
 void uniform_floating_point_host_test(rocrand_ordering ordering)
 {
     const size_t size = 1313;
-    T* data = new T[size];
+    T*           data = new T[size];
 
     Generator g;
     g.set_order(ordering);
     ROCRAND_CHECK(g.generate_uniform(data, size));
     HIP_CHECK(hipDeviceSynchronize());
 
-    double mean = std::accumulate(data, data + size, 0.0) / (double) size;
+    double mean = std::accumulate(data, data + size, 0.0) / (double)size;
     ASSERT_NEAR(mean, 0.5, 0.05);
-    delete [] data;
+    delete[] data;
 }
 
 TYPED_TEST_P(generator_prng_host_tests, uniform_float_test)
@@ -163,18 +163,18 @@ void normal_floating_point_host_test(rocrand_ordering ordering)
     ROCRAND_CHECK(g.generate_normal(data, size, static_cast<T>(2.0), static_cast<T>(5.0)));
     HIP_CHECK(hipDeviceSynchronize());
 
-    double mean = std::accumulate(data, data + size, 0.0) / (double) size;
-    double stddev = std::sqrt(
-        std::accumulate(data, data + size, 0.0,
-            [mean](double acc, double x) {
-                return acc + std::powf((x - mean), 2);
-            }) / size
-    );
+    double mean   = std::accumulate(data, data + size, 0.0) / (double)size;
+    double stddev = std::sqrt(std::accumulate(data,
+                                              data + size,
+                                              0.0,
+                                              [mean](double acc, double x)
+                                              { return acc + std::powf((x - mean), 2); })
+                              / size);
 
     EXPECT_NEAR(2.0, mean, 0.4); // 20%
     EXPECT_NEAR(5.0, stddev, 1.0); // 20%
 
-    delete [] data;
+    delete[] data;
 }
 
 TYPED_TEST_P(generator_prng_host_tests, normal_float_test)
@@ -197,7 +197,7 @@ template<class Generator, class T>
 void log_normal_floating_point_host_test(rocrand_ordering ordering)
 {
     const size_t size = 131313;
-    T* data = new T[size];
+    T*           data = new T[size];
 
     T normal_mean   = static_cast<T>(3.0);
     T normal_stddev = static_cast<T>(1.5);
@@ -211,18 +211,18 @@ void log_normal_floating_point_host_test(rocrand_ordering ordering)
     ROCRAND_CHECK(g.generate_log_normal(data, size, normal_mean, normal_stddev));
     HIP_CHECK(hipDeviceSynchronize());
 
-    double mean = std::accumulate(data, data + size, 0.0) / (double) size;
-    double stddev = std::sqrt(
-        std::accumulate(data, data + size, 0.0,
-            [mean](double acc, double x) {
-                return acc + std::powf((x - mean), 2);
-            }) / size
-    );
+    double mean   = std::accumulate(data, data + size, 0.0) / (double)size;
+    double stddev = std::sqrt(std::accumulate(data,
+                                              data + size,
+                                              0.0,
+                                              [mean](double acc, double x)
+                                              { return acc + std::powf((x - mean), 2); })
+                              / size);
 
     EXPECT_NEAR(log_normal_mean, mean, log_normal_mean * 0.2); // 20%
     EXPECT_NEAR(log_normal_stddev, stddev, log_normal_stddev * 0.2); // 20%
 
-    delete [] data;
+    delete[] data;
 }
 
 TYPED_TEST_P(generator_prng_host_tests, log_normal_float_test)
@@ -250,18 +250,19 @@ TYPED_TEST_P(generator_prng_host_tests, poisson_test)
     ROCRAND_CHECK(g.generate_poisson(data, size, 5.5));
     HIP_CHECK(hipDeviceSynchronize());
 
+    double mean = std::accumulate(data, data + size, 0.0) / (double)size;
 
-    double mean = std::accumulate(data, data + size, 0.0) / (double) size;
-
-    double var = std::accumulate(data, data + size, 0.0,
-        [mean](double acc, double x) {
-            return acc + std::powf(x - mean, 2);
-        }) / size;
+    double var
+        = std::accumulate(data,
+                          data + size,
+                          0.0,
+                          [mean](double acc, double x) { return acc + std::powf(x - mean, 2); })
+          / size;
 
     EXPECT_NEAR(mean, 5.5, std::max(1.0, 5.5 * 1e-2));
     EXPECT_NEAR(var, 5.5, std::max(1.0, 5.5 * 1e-2));
 
-    delete [] data;
+    delete[] data;
 }
 
 // Check if the numbers generated by first generate() call are different from
@@ -269,7 +270,7 @@ TYPED_TEST_P(generator_prng_host_tests, poisson_test)
 TYPED_TEST_P(generator_prng_host_tests, state_progress_test)
 {
     // Device data
-    const size_t  size = 1025;
+    const size_t  size  = 1025;
     unsigned int* data1 = new unsigned int[size];
     // Generator
     auto g0 = TestFixture::get_generator();
@@ -290,8 +291,8 @@ TYPED_TEST_P(generator_prng_host_tests, state_progress_test)
     // just make sure that most of them are different.
     EXPECT_LT(same, static_cast<size_t>(0.01f * size));
 
-    delete [] data1;
-    delete [] data2;
+    delete[] data1;
+    delete[] data2;
 }
 
 // Checks if generators with the same seed and in the same state
@@ -301,9 +302,9 @@ TYPED_TEST_P(generator_prng_host_tests, same_seed_test)
     const unsigned long long seed = 0xdeadbeefdeadbeefULL;
 
     // Device side data
-    const size_t  size = 1024;
-    unsigned int* data1 = new unsigned int [size];
-    unsigned int* data2 = new unsigned int [size];
+    const size_t  size  = 1024;
+    unsigned int* data1 = new unsigned int[size];
+    unsigned int* data2 = new unsigned int[size];
 
     // Generators
     auto g0 = TestFixture::get_generator(), g1 = TestFixture::get_generator();
@@ -321,17 +322,17 @@ TYPED_TEST_P(generator_prng_host_tests, same_seed_test)
         ASSERT_EQ(data1[i], data2[i]);
     }
 
-    delete [] data1;
-    delete [] data2;
+    delete[] data1;
+    delete[] data2;
 }
 
 template<class Generator>
 void different_seed_host_impl(rocrand_ordering         ordering,
-                         const unsigned long long seed0,
-                         const unsigned long long seed1)
+                              const unsigned long long seed0,
+                              const unsigned long long seed1)
 {
     // Device side data
-    const size_t  size = 1024;
+    const size_t  size  = 1024;
     unsigned int* data1 = new unsigned int[size];
     unsigned int* data2 = new unsigned int[size];
 
@@ -349,7 +350,6 @@ void different_seed_host_impl(rocrand_ordering         ordering,
     ROCRAND_CHECK(g0.generate(data1, size));
     HIP_CHECK(hipDeviceSynchronize());
 
-
     // Generate using g1 and copy to host
     ROCRAND_CHECK(g1.generate(data2, size));
     HIP_CHECK(hipDeviceSynchronize());
@@ -364,8 +364,8 @@ void different_seed_host_impl(rocrand_ordering         ordering,
     // just make sure that most of them are different.
     EXPECT_LT(same, static_cast<size_t>(0.01f * size));
 
-    delete [] data1;
-    delete [] data2;
+    delete[] data1;
+    delete[] data2;
 }
 
 template<class Generator,
@@ -380,19 +380,25 @@ void different_seed_host(rocrand_ordering ordering)
 template<>
 void different_seed_host<rocrand_impl::host::mtgp32_generator_host<true>>(rocrand_ordering ordering)
 {
-    different_seed_host_impl<rocrand_impl::host::mtgp32_generator_host<true>>(ordering, 5ULL, 10ULL);
+    different_seed_host_impl<rocrand_impl::host::mtgp32_generator_host<true>>(ordering,
+                                                                              5ULL,
+                                                                              10ULL);
 }
 
 // mt19937 uses a different seed
 template<>
-void different_seed_host<rocrand_impl::host::mt19937_generator_host<true>>(rocrand_ordering ordering)
+void different_seed_host<rocrand_impl::host::mt19937_generator_host<true>>(
+    rocrand_ordering ordering)
 {
-    different_seed_host_impl<rocrand_impl::host::mt19937_generator_host<true>>(ordering, 5ULL, 10ULL);
+    different_seed_host_impl<rocrand_impl::host::mt19937_generator_host<true>>(ordering,
+                                                                               5ULL,
+                                                                               10ULL);
 }
 
 // lsfr113 uses it's particular implementation
 template<>
-void different_seed_host<rocrand_impl::host::lfsr113_generator_host<true>>(rocrand_ordering /*ordering*/)
+void different_seed_host<rocrand_impl::host::lfsr113_generator_host<true>>(
+    rocrand_ordering /*ordering*/)
 {
     GTEST_SKIP() << "LFSR113 runs a custom implementation of different_seed_host test!";
 }
@@ -419,14 +425,16 @@ struct generator_prng_continuity_host_tests : public testing::Test
 
 TYPED_TEST_SUITE_P(generator_prng_continuity_host_tests);
 
-template<typename T,
-         typename Generator,
-         typename GenerateFunc,
-         std::enable_if_t<!std::is_same_v<Generator, rocrand_impl::host::mt19937_generator_host<true>>, bool>
-         = false>
-void continuity_host_test(GenerateFunc generate_func,
-                     rocrand_ordering ordering,
-                     unsigned int     divisor = 1)
+template<
+    typename T,
+    typename Generator,
+    typename GenerateFunc,
+    std::enable_if_t<!std::is_same_v<Generator, rocrand_impl::host::mt19937_generator_host<true>>,
+                     bool>
+    = false>
+void continuity_host_test(GenerateFunc     generate_func,
+                          rocrand_ordering ordering,
+                          unsigned int     divisor = 1)
 {
     std::vector<size_t> sizes0({100, 1, 24783, 3, 2, 776543, 1048576});
     std::vector<size_t> sizes1({1024, 55, 65536, 623456, 30, 1048576, 111331});
@@ -470,8 +478,8 @@ void continuity_host_test(GenerateFunc generate_func,
         ASSERT_EQ(out_data0[i], out_data1[i]);
     }
 
-    delete [] data0;
-    delete [] data1;
+    delete[] data0;
+    delete[] data1;
 }
 
 TYPED_TEST_P(generator_prng_continuity_host_tests, continuity_uniform_uint_test)
@@ -644,8 +652,8 @@ TYPED_TEST_P(generator_prng_offset_host_tests, offsets_test)
             ASSERT_EQ(data0[i], data1[i + offset]);
         }
 
-        delete [] data0;
-        delete [] data1;
+        delete[] data0;
+        delete[] data1;
     }
 }
 
@@ -661,8 +669,7 @@ REGISTER_TYPED_TEST_SUITE_P(generator_prng_host_tests,
                             poisson_test,
                             state_progress_test,
                             same_seed_test,
-                            different_seed_test
-                            );
+                            different_seed_test);
 
 REGISTER_TYPED_TEST_SUITE_P(generator_prng_continuity_host_tests,
                             continuity_uniform_uint_test,

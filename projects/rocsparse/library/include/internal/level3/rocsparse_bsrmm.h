@@ -132,68 +132,7 @@ extern "C" {
  *
  *  \par Example
  *  This example multiplies a BSR matrix with a column-oriented dense matrix.
- *  \code{.c}
- *      //     1 2 0 3 0 0
- *      // A = 0 4 5 0 0 0
- *      //     0 0 0 7 8 0
- *      //     0 0 1 2 4 1
- *
- *      rocsparse_int block_dim = 2;
- *      rocsparse_int mb   = 2;
- *      rocsparse_int kb   = 3;
- *      rocsparse_int nnzb = 4;
- *      rocsparse_direction dir = rocsparse_direction_row;
- *
- *      bsr_row_ptr[mb+1]                 = {0, 2, 4};                                        // device memory
- *      bsr_col_ind[nnzb]                 = {0, 1, 1, 2};                                     // device memory
- *      bsr_val[nnzb*block_dim*block_dim] = {1, 2, 0, 4, 0, 3, 5, 0, 0, 7, 1, 2, 8, 0, 4, 1}; // device memory
- *
- *      // Set dimension n of B
- *      rocsparse_int n = 64;
- *      rocsparse_int m = mb * block_dim;
- *      rocsparse_int k = kb * block_dim;
- *
- *      // Allocate and generate column-oriented dense matrix B
- *      std::vector<float> hB(k * n);
- *      for(rocsparse_int i = 0; i < k * n; ++i)
- *      {
- *          hB[i] = static_cast<float>(rand()) / RAND_MAX;
- *      }
- *
- *      // Copy B to the device
- *      float* B;
- *      hipMalloc((void**)&B, sizeof(float) * k * n);
- *      hipMemcpy(B, hB.data(), sizeof(float) * k * n, hipMemcpyHostToDevice);
- *
- *      // alpha and beta
- *      float alpha = 1.0f;
- *      float beta  = 0.0f;
- *
- *      // Allocate memory for the resulting matrix C
- *      float* C;
- *      hipMalloc((void**)&C, sizeof(float) * m * n);
- *
- *      // Perform the matrix multiplication
- *      rocsparse_sbsrmm(handle,
- *                       dir,
- *                       rocsparse_operation_none,
- *                       rocsparse_operation_none,
- *                       mb,
- *                       n,
- *                       kb,
- *                       nnzb,
- *                       &alpha,
- *                       descr,
- *                       bsr_val,
- *                       bsr_row_ptr,
- *                       bsr_col_ind,
- *                       block_dim,
- *                       B,
- *                       k,
- *                       &beta,
- *                       C,
- *                       m);
- *  \endcode
+ *  \snippet example_rocsparse_bsrmm.cpp doc example
  */
 /**@{*/
 ROCSPARSE_EXPORT
