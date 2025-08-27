@@ -2021,6 +2021,9 @@ class Solution(collections.abc.Mapping):
         # TODO: Enalbe tail-loop with arbitrary number
         state["AssertSummationElementMultiple"] = 8
 
+    state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
+    state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
+
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
     #  On gfx1250, i8, f8, it seem working for 1LDSBuffer=0 "BUT EPS=0", haven't checked for other archs/types, so we still reject by 1LDSBuffer only
