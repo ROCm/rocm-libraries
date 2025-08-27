@@ -57,7 +57,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         pp_factors_prod = product(factors_pp.begin(), factors_pp.end());
         length_off_dim  = params.parent_length[params.off_dim];
 
-        R.size = Expression{std::max(nregisters, max_factor_pp)};
+        R.size = Expression{std::max(
+            nregisters, compute_nregisters(pp_factors_prod, factors_pp, threads_per_transform_pp))};
 
         // nregister must not be larger than max_factor_pp.
         // If that were to be true,  work in the off-dimension
@@ -228,7 +229,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return {If{inbound, stmts}};
     }
 
-    StatementList load_lds_step_1_2_generator(
+    StatementList load_pp_step_1_2_lds_generator(
         unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
     {
         if(hr == 0)
@@ -276,7 +277,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         StatementList& body = f.body;
 
-        auto load_lds = std::mem_fn(&StockhamPartialPassKernelRR::load_lds_step_1_2_generator);
+        auto load_lds = std::mem_fn(&StockhamPartialPassKernelRR::load_pp_step_1_2_lds_generator);
         // first pass of load (full)
         unsigned int width = factors_pp[0];
         float height       = static_cast<float>(pp_factors_prod) / width / threads_per_transform_pp;
@@ -345,6 +346,106 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return f;
     }
 
+    Function generate_pp_device_function()
+    {
+        std::string function_name = "forward_partial_pass_length" + std::to_string(pp_factors_prod)
+                                    + "_" + tiling_name() + "_device";
+
+        Function f{function_name};
+        f.arguments = device_arguments();
+        f.templates = device_templates();
+        f.qualifier = "__device__";
+        if(pp_factors_prod == 1)
+        {
+            return f;
+        }
+
+        StatementList& body = f.body;
+        body += Declaration{W};
+        body += Declaration{t};
+        body += Declaration{l_offset};
+
+        for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
+        {
+            // width is the butterfly width, Radix-n.
+            unsigned int width = factors_pp[npass];
+            // height is how many butterflies per thread will do on average
+            float height = static_cast<float>(pp_factors_prod) / width / threads_per_transform_pp;
+
+            unsigned int cumheight = product(
+                factors_pp.begin(),
+                factors_pp.begin() + npass); // cumheight is irrelevant to the above height,
+            // is used for twiddle multiplication and lds writing.
+
+            body += LineBreak{};
+            body += CommentLines{
+                "pass " + std::to_string(npass) + ", width " + std::to_string(width),
+                "using " + std::to_string(threads_per_transform_pp) + " threads we need to do "
+                    + std::to_string(pp_factors_prod / width) + " radix-" + std::to_string(width)
+                    + " butterflies",
+                "therefore each thread will do " + std::to_string(height) + " butterflies"};
+
+            auto load_lds
+                = std::mem_fn(&StockhamPartialPassKernelRR::load_pp_step_1_2_lds_generator);
+            auto store_lds
+                = std::mem_fn(&StockhamPartialPassKernelRR::store_pp_step_1_2_lds_generator);
+
+            if(npass > 0)
+            {
+                // internal full lds2reg (both linear/nonlinear variants)
+                StatementList lds2reg_full;
+                lds2reg_full += SyncThreads();
+                lds2reg_full += add_pp_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
+                                            width,
+                                            height,
+                                            ThreadGuardMode::GUARD_BY_IF,
+                                            true,
+                                            std::nullopt,
+                                            pp_factors_prod);
+                body += If{Not{lds_is_real}, lds2reg_full};
+
+                auto apply_twiddle = std::mem_fn(&StockhamKernel::apply_twiddle_generator);
+                body += add_work(
+                    std::bind(
+                        apply_twiddle, this, _1, _2, _3, _4, _5, cumheight, factors_pp.front()),
+                    width,
+                    height,
+                    ThreadGuardMode::NO_GUARD);
+            }
+
+            auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
+            body += add_work(std::bind(butterfly, this, _1, _2, _3, _4, _5),
+                             width,
+                             height,
+                             ThreadGuardMode::NO_GUARD);
+
+            if(npass == factors_pp.size() - 1)
+                body += large_twiddles_multiply(width, height, cumheight);
+
+            // internal lds store
+            StatementList reg2lds_full;
+            if(npass < factors_pp.size() - 1)
+            {
+                // internal full lds store (both linear/nonlinear variants)
+                if(npass == 0)
+                    reg2lds_full += If{!direct_load_to_reg, {SyncThreads()}};
+                else
+                    reg2lds_full += SyncThreads();
+                reg2lds_full
+                    += add_pp_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, cumheight),
+                                   width,
+                                   height,
+                                   ThreadGuardMode::GUARD_BY_IF,
+                                   false,
+                                   std::nullopt,
+                                   pp_factors_prod);
+
+                body += reg2lds_full;
+            }
+        }
+        return f;
+    }
+
     Function generate_twiddle_multiply_pp_function(int direction)
     {
         std::string function_name
@@ -410,7 +511,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         device_tmpl.set_value(stride_type.name, "SB_UNIT");
 
         StatementList device;
-        device += Call{"forward_partial_pass_length" + std::to_string(length_pp) + "_"
+        device += Call{"forward_partial_pass_length" + std::to_string(pp_factors_prod) + "_"
                            + tiling_name() + "_device",
                        device_tmpl,
                        device_args};
