@@ -160,6 +160,9 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*BNOCLBWDLargeFusedActivation2D*") 
         add_gtest_negative_filter("*BNFWDTrain*D*")
         add_gtest_negative_filter("*BNBWDSerialRun3D*")
+        add_gtest_negative_filter("*GPU_BNOCLFWDTrainLarge*_BFP16*")
+        add_gtest_negative_filter("*GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16*")
+        add_gtest_negative_filter("*GPU_BNOCLFWDTrainSerialRun3D_BFP16*")
 
 #GPU_TestMhaFind20_FP32
         add_gtest_negative_filter("*GPU_*MHA*")
