@@ -401,7 +401,8 @@ if(HIPBLASLT_ENABLE_CLIENT)
         string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
         rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
     endif()
-
+    
+    rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
     rocm_package_setup_client_component(benchmarks
         DEPENDS
