@@ -119,3 +119,99 @@ def run_bench(benchExecutable,
     loop.close()
 
     return csvKeys, benchResultsList, success
+
+
+#####################################
+# For ./hipblaslt-perf --run_sh
+#####################################
+def run_sh_cmd(cmdLine,
+               verbose=False,
+               timeout=300):
+    """Run single bench from sh"""
+
+    cmd = cmdLine.split(' ')
+    cmd = [str(x) for x in cmd]
+    logging.info('running: ' + ' '.join(cmd))
+    if verbose:
+        print('running: ' + ' '.join(cmd))
+
+    startingToken = "["
+    solNameToken = "--Solution name:"
+    csvKeys = []
+    benchResultsList = {}
+    capturingValues = False
+
+    async def run_command(*args, timeout=None):
+
+        process = await asyncio.create_subprocess_exec(
+            *args, stdout=asyncio.subprocess.PIPE)
+
+        nonlocal startingToken
+        nonlocal csvKeys
+        nonlocal benchResultsList
+        nonlocal capturingValues
+
+        singleValuesList = []
+        solutionName = "N/A"
+
+        while True:
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(),
+                                              timeout)
+            except asyncio.TimeoutError:
+                logging.info(
+                    "timeout expired. killed. Please check the process.")
+                print("timeout expired. killed. Please check the process.")
+                process.kill()  # Timeout or some criterion is not satisfied
+                break
+
+            if not line:
+                break
+            else:
+                line = line.decode('utf-8').rstrip('\n')
+                line = line.strip()
+
+                # capturing values right after capturing keys
+                if capturingValues:
+                    singleValuesList = line.split(',')
+                    # default is empty if --print_kernel_info is not in the bench cmd
+                    solutionName = "N/A"
+                    capturingValues = False
+                    continue
+
+                if line.startswith(startingToken):
+                    line = line.replace('hipblaslt-Gflops', 'gflops')
+                    line = line.replace('hipblaslt-GB/s', 'GB/s')
+                    splitLine = line.split(':')
+                    # SSN = splitLine[0] # should be [0]
+                    keys = splitLine[1] + str(",solution-name")
+                    csvKeys = keys.split(',')
+                    # print(f'\n{keys}')
+                    # print(f'\n{csvKeys}')
+                    capturingValues = True # Next line must be values
+                else:
+                    # if is "--Solution name:" (--print_kernel_info), then we capture this
+                    if line.startswith(solNameToken):
+                        splitLine = line.split(':')
+                        solutionName = splitLine[1].strip()
+                    # simply ignore irrelative msg
+                    else:
+                        continue
+
+        singleValuesList.append(solutionName)
+        benchResultsList = defaultdict(str, zip(csvKeys, singleValuesList))
+
+        return await process.wait()  # Wait for the child process to exit
+
+    if sys.platform == "win32":
+        loop = asyncio.ProactorEventLoop()  # For subprocess' pipes on Windows
+        asyncio.set_event_loop(loop)
+    else:
+        loop = asyncio.new_event_loop()
+
+    returncode = loop.run_until_complete(run_command(*cmd, timeout=timeout))
+    success = returncode == 0
+
+    loop.close()
+
+    return csvKeys, benchResultsList, success

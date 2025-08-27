@@ -1502,11 +1502,6 @@ namespace rocisa
         std::string toString() const override
         {
             std::string waitStr;
-            if(lgkmcnt == -2)
-            {
-                waitStr = "_lgkmcnt null, 0";
-                return formatWithComment("s_waitcnt" + waitStr);
-            }
             if(lgkmcnt == 0 && vmcnt == 0)
             {
                 waitStr = "0";
@@ -1520,8 +1515,9 @@ namespace rocisa
                 }
                 if(vmcnt != -1)
                 {
+                    int maxVmcnt = getAsmCaps()["MaxVmcnt"];
                     waitStr += (waitStr != "" ? ", " : "");
-                    waitStr += "vmcnt(" + std::to_string(vmcnt) + ")";
+                    waitStr += "vmcnt(" + std::to_string(std::min(vmcnt, maxVmcnt)) + ")";
                 }
             }
             return formatWithComment("s_waitcnt " + waitStr);
@@ -1558,7 +1554,8 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return formatWithComment("s_waitcnt_vscnt null " + std::to_string(vscnt));
+            int maxVscnt = getAsmCaps()["MaxVscnt"];
+            return formatWithComment("s_waitcnt_vscnt null " + std::to_string(std::min(vscnt, maxVscnt)));
         }
 
     private:
@@ -1591,7 +1588,8 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return formatWithComment("s_wait_storecnt " + std::to_string(storecnt));
+            int maxStorecnt = getAsmCaps()["MaxStorecnt"];
+            return formatWithComment("s_wait_storecnt " + std::to_string(std::min(storecnt, maxStorecnt)));
         }
 
     private:
@@ -1624,7 +1622,8 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return formatWithComment("s_wait_loadcnt " + std::to_string(loadcnt));
+            int maxLoadcnt = getAsmCaps()["MaxLoadcnt"];
+            return formatWithComment("s_wait_loadcnt " + std::to_string(std::min(loadcnt, maxLoadcnt)));
         }
 
     private:
@@ -1657,7 +1656,8 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return formatWithComment("s_wait_kmcnt " + std::to_string(kmcnt));
+            int maxKmcnt = getAsmCaps()["MaxKmcnt"];
+            return formatWithComment("s_wait_kmcnt " + std::to_string(std::min(kmcnt, maxKmcnt)));
         }
 
     private:
@@ -1690,7 +1690,8 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return formatWithComment("s_wait_dscnt " + std::to_string(dscnt));
+            int maxDscnt = getAsmCaps()["MaxDscnt"];
+            return formatWithComment("s_wait_dscnt " + std::to_string(std::min(dscnt, maxDscnt)));
         }
 
     private:
@@ -1699,40 +1700,51 @@ namespace rocisa
 
     struct SWaitCnt : public CompositeInstruction
     {
-        int lgkmcnt;
-        int vmcnt;
-        int vscnt;
+        /*
+        vlcnt: Number of VMEM load (and atomic with return value) instructions issued but not yet completed.
+        vscnt: Number of VMEM store (and atomic w/o return value) instructions issued but not yet completed.
+        dscnt: Number of LDS instructions issued but not yet completed.
+        kmcnt: Number of constant-fetch (scalar memory read), and message instructions issued but not yet completed.
 
-        SWaitCnt(int                lgkmcnt  = -1,
-                 int                vmcnt    = -1,
-                 int                vscnt    = -1,
-                 int                dscnt    = -1,
-                 int                kmcnt    = -1,
-                 int                loadcnt  = -1,
-                 int                storecnt = -1,
-                 const std::string& comment  = "",
-                 bool               waitAll  = false)
+        In some ISA, VMEM load/store share the same counter(vmcnt). LDS, scalar memory read and message share 
+        the same counter(lgkmcnt). These counters are combined from the 4 counters above as:
+            vmcnt   = vlcnt + vscnt
+            lgkmcnt = dscnt + kmcnt
+
+        Example: 4 VMEM instructions vl_0, vl_1, vs_0, vl_2 are issued and we want to wait for vl_1 to complete.
+
+            If the target ISA has separate counters for load and store, use SWaitCnt(vlcnt=1),
+            which means vl_2 is not completed yet.
+            
+            If the target ISA has a single counter for load and store, use SWaitCnt(vlcnt=1, vscnt=1),
+            which means vs_0, vl_2 are not completed yet.
+        */
+        int vlcnt;
+        int vscnt;
+        int dscnt;
+        int kmcnt;
+
+        SWaitCnt(int                vlcnt   = -1,
+                 int                vscnt   = -1,
+                 int                dscnt   = -1,
+                 int                kmcnt   = -1,
+                 const std::string& comment = "",
+                 bool               waitAll = false)
             : CompositeInstruction(InstType::INST_NOTYPE, nullptr, {}, comment)
-            , lgkmcnt(lgkmcnt)
-            , vmcnt(vmcnt)
+            , vlcnt(vlcnt)
             , vscnt(vscnt)
             , dscnt(dscnt)
             , kmcnt(kmcnt)
-            , loadcnt(loadcnt)
-            , storecnt(storecnt)
             , waitAll(waitAll)
         {
         }
 
         SWaitCnt(const SWaitCnt& other)
             : CompositeInstruction(other)
-            , lgkmcnt(other.lgkmcnt)
-            , vmcnt(other.vmcnt)
+            , vlcnt(other.vlcnt)
             , vscnt(other.vscnt)
             , dscnt(other.dscnt)
             , kmcnt(other.kmcnt)
-            , loadcnt(other.loadcnt)
-            , storecnt(other.storecnt)
             , waitAll(other.waitAll)
         {
         }
@@ -1749,81 +1761,71 @@ namespace rocisa
 
         std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
         {
-            // TODO: dscnt, loadcnt, storecnt in gfx12
-            int         lgkmcnt  = this->lgkmcnt;
-            int         vmcnt    = this->vmcnt;
-            int         vscnt    = this->vscnt;
-            int         dscnt    = kmcnt != -1 ? -1 : this->lgkmcnt;
-            int         kmcnt    = this->kmcnt;
-            int         loadcnt  = this->vmcnt;
-            int         storecnt = this->vscnt;
-            std::string comment  = this->comment;
+            int         vlcnt   = this->vlcnt;
+            int         vscnt   = this->vscnt;
+            int         dscnt   = this->dscnt;
+            int         kmcnt   = this->kmcnt;
+            std::string comment = this->comment;
+
+            // Currently these two capabilities should be both enabled or disabled together
+            assert(getAsmCaps()["SeparateVMcnt"] == getAsmCaps()["SeparateLGKMcnt"]);
 
             if(waitAll)
             {
-                lgkmcnt  = 0;
-                vmcnt    = 0;
-                vscnt    = 0;
-                dscnt    = 0;
-                kmcnt    = 0;
-                loadcnt  = 0;
-                storecnt = 0;
-                comment  = "(Wait all)";
+                vlcnt   = 0;
+                vscnt   = 0;
+                dscnt   = 0;
+                kmcnt   = 0;
+                comment = "(Wait all)";
             }
 
             std::vector<std::shared_ptr<Instruction>> instructions;
 
-            int maxVmcnt = getAsmCaps()["MaxVmcnt"];
-            if(getArchCaps()["SeparateVscnt"])
-            {
-                vmcnt        = std::min(vmcnt, maxVmcnt);
-                instructions = {std::make_shared<_SWaitCnt>(lgkmcnt, vmcnt, comment)};
-                if((lgkmcnt != -1 && vmcnt != -1) || vscnt != -1)
+            if(getAsmCaps()["SeparateVscnt"])
+            {  
+                int lgkmcnt = (dscnt != -1 || kmcnt != -1)? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0) : -1;
+                int vmcnt   = vlcnt; // With SeparateVscnt, vmcnt only counts load instructions
+                if(vlcnt != -1 || lgkmcnt != -1)
                 {
-                    instructions.push_back(std::make_shared<_SWaitCntVscnt>(vmcnt, comment));
+                    instructions.push_back(std::make_shared<_SWaitCnt>(lgkmcnt, vmcnt, comment));
+                }
+                if(vscnt != -1)
+                {
+                    instructions.push_back(std::make_shared<_SWaitCntVscnt>(vscnt, comment));
                 }
             }
-            else if(getArchCaps()["SeparateVMcnt"] || getArchCaps()["SeparateLGKMcnt"])
+            else if(getAsmCaps()["SeparateVMcnt"] && getAsmCaps()["SeparateLGKMcnt"])
             {
                 if(dscnt != -1)
                 {
-                    instructions = {std::make_shared<_SWaitDscnt>(dscnt, comment)};
+                    instructions.push_back(std::make_shared<_SWaitDscnt>(dscnt, comment));
                 }
                 if(kmcnt != -1)
                 {
                     instructions.push_back(std::make_shared<_SWaitKMcnt>(kmcnt, comment));
                 }
-                if(loadcnt != -1)
+                if(vlcnt != -1)
                 {
-                    instructions.push_back(std::make_shared<_SWaitLoadcnt>(loadcnt, comment));
+                    instructions.push_back(std::make_shared<_SWaitLoadcnt>(vlcnt, comment));
                 }
-                if(storecnt != -1)
+                if(vscnt != -1)
                 {
-                    instructions.push_back(std::make_shared<_SWaitStorecnt>(storecnt, comment));
+                    instructions.push_back(std::make_shared<_SWaitStorecnt>(vscnt, comment));
                 }
             }
             else
             {
-                int vmvscnt = -1;
-                if(vscnt != -1)
+                int lgkmcnt = (dscnt != -1 || kmcnt != -1)? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0) : -1;
+                int vmcnt   = (vscnt != -1 || vlcnt != -1)? (vscnt != -1 ? vscnt : 0) + (vlcnt != -1 ? vlcnt : 0) : -1;
+                if(vmcnt != -1 || lgkmcnt != -1)
                 {
-                    vmvscnt = vscnt;
+                    instructions.push_back(std::make_shared<_SWaitCnt>(lgkmcnt, vmcnt, comment));
                 }
-                if(vmcnt != -1)
-                {
-                    vmvscnt = vmcnt + (vmvscnt != -1 ? vmvscnt : 0);
-                }
-                vmvscnt      = std::min(vmvscnt, maxVmcnt);
-                instructions = {std::make_shared<_SWaitCnt>(lgkmcnt, vmvscnt, comment)};
             }
             return std::move(instructions);
         }
 
     private:
-        int  dscnt;
-        int  kmcnt;
-        int  loadcnt;
-        int  storecnt;
         bool waitAll;
     };
 
@@ -4572,6 +4574,29 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VMovB64>(*this);
+        }
+    };
+
+    struct VSwapB32 : public CommonInstruction
+    {
+        VSwapB32(const std::shared_ptr<Container>&   dst,
+                const InstructionInput&             src,
+                const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
+                const std::string&                  comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
+        {
+            setInst("v_swap_b32");
+        }
+
+        VSwapB32(const VSwapB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VSwapB32>(*this);
         }
     };
 

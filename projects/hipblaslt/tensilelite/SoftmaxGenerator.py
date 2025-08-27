@@ -230,12 +230,12 @@ class SoftmaxKernelGenerator:
         module.add(ri.SLoadB64(sgpr(input_srd_idx, 2), sgpr(kernel_args_addr, kernel_args_addr_size), 0))
         module.add(ri.SLoadB32(sgpr(m_reg_idx), sgpr(kernel_args_addr, kernel_args_addr_size), 16))
         module.add(ri.SLoadB32(sgpr(n_reg_idx), sgpr(kernel_args_addr, kernel_args_addr_size), 20))
-        module.add(ri.SWaitCnt(lgkmcnt=0))
+        module.add(ri.SWaitCnt(kmcnt=0))
         module.add(ri.SLoadB64(sgpr(output_srd_idx, 2), sgpr(kernel_args_addr, kernel_args_addr_size), 8))
         module.add(ri.SMulI32(sgpr(num_elem_reg_idx), sgpr(m_reg_idx), sgpr(n_reg_idx)))
         module.add(ri.SMulI32(sgpr(num_elem_reg_idx), sgpr(num_elem_reg_idx), hex(self.bpe)))
         module.add(ri.SMovB32(sgpr(input_srd_idx + 2), sgpr(num_elem_reg_idx)))
-        module.add(ri.SWaitCnt(lgkmcnt=0))
+        module.add(ri.SWaitCnt(kmcnt=0))
         module.add(ri.SMovB32(sgpr(output_srd_idx + 2), sgpr(num_elem_reg_idx)))
         module.add(ri.SMovB32(sgpr(input_srd_idx + 3), self.srd_const))
         module.add(ri.SMovB32(sgpr(output_srd_idx + 3), self.srd_const))
@@ -287,7 +287,7 @@ class SoftmaxKernelGenerator:
         self.vgpr_pool.checkIn(byte_offset_reg_idx)
 
         if sync:
-            module.add(ri.SWaitCnt(vmcnt=0))
+            module.add(ri.SWaitCnt(vlcnt=0))
 
         return module, data_reg_idx
 
@@ -304,7 +304,7 @@ class SoftmaxKernelGenerator:
         module.add(ri.DSLoadB32(vgpr(data_reg_idx), vgpr(local_byte_offset_reg_idx)))
 
         if sync:
-            module.add(ri.SWaitCnt(lgkmcnt=0))
+            module.add(ri.SWaitCnt(dscnt=0))
 
         if not ext_local_byte_offset_reg_idx:
             self.vgpr_pool.checkIn(local_byte_offset_reg_idx)
@@ -350,7 +350,7 @@ class SoftmaxKernelGenerator:
             self.vgpr_pool.checkIn(byte_offset_reg_idx)
 
         if sync:
-            module.add(ri.SWaitCnt(lgkmcnt=0))
+            module.add(ri.SWaitCnt(dscnt=0))
             module.add(ri.SBarrier())
 
         return module
@@ -365,12 +365,12 @@ class SoftmaxKernelGenerator:
         max_reg_idx = data_reg_idx_0
         module.add(ri.DSLoadB32(vgpr(data_reg_idx_0), vgpr(lds_addr0)))
         module.add(ri.DSLoadB32(vgpr(data_reg_idx_1), vgpr(lds_addr1)))
-        module.add(ri.SWaitCnt(lgkmcnt=0))
+        module.add(ri.SWaitCnt(dscnt=0))
         module.add(ri.VMaxF32(vgpr(max_reg_idx), vgpr(data_reg_idx_0), vgpr(data_reg_idx_1)))
         module.add(ri.DSStoreB32(vgpr(lds_addr0), vgpr(max_reg_idx)))
 
         if sync:
-            module.add(ri.SWaitCnt(lgkmcnt=0))
+            module.add(ri.SWaitCnt(dscnt=0))
             module.add(ri.SBarrier())
 
         self.vgpr_pool.checkIn(data_reg_idx_0)
@@ -388,7 +388,7 @@ class SoftmaxKernelGenerator:
         mod.add(vectorStaticDivide(addr_reg_idx, t_id_reg_idx, self.num_cols, None))
         mod.add(vectorStaticMultiply(vgpr(addr_reg_idx), vgpr(addr_reg_idx), self.bpe * self.num_cols, None))
         mod.add(ri.DSLoadB32(vgpr(addr_reg_idx), vgpr(addr_reg_idx)))
-        mod.add(ri.SWaitCnt(lgkmcnt=0))
+        mod.add(ri.SWaitCnt(dscnt=0))
         return mod, addr_reg_idx
 
     def sum_elem(self) -> Tuple[Module, int]:
@@ -404,12 +404,12 @@ class SoftmaxKernelGenerator:
         sum_reg_idx = data_reg_idx_0
         module.add(ri.DSLoadB32(vgpr(data_reg_idx_0), vgpr(lds_addr0)))
         module.add(ri.DSLoadB32(vgpr(data_reg_idx_1), vgpr(lds_addr1)))
-        module.add(ri.SWaitCnt(lgkmcnt=0))
+        module.add(ri.SWaitCnt(dscnt=0))
         module.add(ri.VAddF32(vgpr(sum_reg_idx), vgpr(data_reg_idx_0), vgpr(data_reg_idx_1)))
         module.add(ri.DSStoreB32(vgpr(lds_addr0), vgpr(sum_reg_idx)))
 
         if sync:
-            module.add(ri.SWaitCnt(lgkmcnt=0))
+            module.add(ri.SWaitCnt(dscnt=0))
             module.add(ri.SBarrier())
 
         self.vgpr_pool.checkIn(data_reg_idx_0)
@@ -555,7 +555,7 @@ class SoftmaxKernelGenerator:
             module.add(GlobalWriteInstType(vgpr(data_reg_idx), vgpr(local_byte_offset_reg_idx), sgpr(srd_reg_idx, self.srd_num_reg), sgpr(wg_byte_offset_reg_idx), MUBUFModifiers(offen=True)))
 
             if sync:
-                module.add(ri.SWaitCnt(vmcnt=0))
+                module.add(ri.SWaitCnt(vscnt=0))
 
             self.vgpr_pool.checkIn(local_byte_offset_reg_idx)
         return module

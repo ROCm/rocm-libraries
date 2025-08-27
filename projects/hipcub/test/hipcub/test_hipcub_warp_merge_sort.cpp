@@ -24,9 +24,9 @@
 #include "test_utils.hpp"
 
 // hipcub API
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/warp/warp_merge_sort.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/warp/warp_merge_sort.hpp>
 
 #include <limits>
 #include <type_traits>

@@ -436,8 +436,6 @@ namespace rocRoller
 
         KernelGraph FuseLoops::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::fuseLoops");
-
             auto newGraph = k;
 
             std::unordered_map<int, LoopBodyInfo> loopInfo;

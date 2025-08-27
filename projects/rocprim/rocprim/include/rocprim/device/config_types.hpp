@@ -181,7 +181,7 @@ enum class target_arch : unsigned int
 
 /**
  * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`
- * 
+ *
  * \param lhs the string to compare against
  * \param rhs the string to compare with
  * \param n length of the substring of `rhs` to chceck
@@ -247,10 +247,10 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
 
 /**
  * \brief Get the current architecture in device compilation.
- * 
+ *
  * This function will always return `unknown` when called from the host, host could should instead
  * call host_target_arch to query the current device from the HIP API.
- * 
+ *
  * \return target_arch the architecture currently being compiled for on the device.
  */
 constexpr target_arch device_target_arch()
@@ -300,6 +300,46 @@ auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
     }
 #endif
     return Config::template architecture_config<target_arch::unknown>::params;
+}
+
+// Wrapper that forces a Conf to use the params for ForcedArch.
+template<target_arch ForcedArch, class Conf, class PartitionConfigParams>
+struct force_arch_config
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr PartitionConfigParams params
+            = Conf::template architecture_config<ForcedArch>::params;
+    };
+};
+
+template<typename F>
+inline hipError_t generic_dispatch_target_arch(detail::target_arch target_arch, F&& f)
+{
+    using ta = detail::target_arch;
+
+    switch(target_arch)
+    {
+        case ta::unknown: return f.template operator()<ta::unknown>();
+        case ta::gfx803: return f.template operator()<ta::gfx803>();
+        case ta::gfx900: return f.template operator()<ta::gfx900>();
+        case ta::gfx906: return f.template operator()<ta::gfx906>();
+        case ta::gfx908: return f.template operator()<ta::gfx908>();
+        case ta::gfx90a: return f.template operator()<ta::gfx90a>();
+        case ta::gfx942: return f.template operator()<ta::gfx942>();
+        case ta::gfx1030: return f.template operator()<ta::gfx1030>();
+        case ta::gfx1100: return f.template operator()<ta::gfx1100>();
+        case ta::gfx1102: return f.template operator()<ta::gfx1102>();
+        case ta::gfx1200: return f.template operator()<ta::gfx1200>();
+        case ta::gfx1201: return f.template operator()<ta::gfx1201>();
+        case ta::invalid:
+            assert(false && "Invalid target architecture");
+            return hipErrorInvalidValue;
+    }
+
+    assert(false && "Unhandled target_arch.");
+    return hipErrorInvalidValue;
 }
 
 template<typename Config>
@@ -354,8 +394,8 @@ inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_i
 {
     static constexpr hipStream_t default_stream = 0;
 
-    // hipStreamLegacy is supported in HIP >= 6.1.0
-#if (HIP_VERSION_MAJOR >= 6 && HIP_VERSION_MINOR >= 1)
+    // hipStreamLegacy is supported in HIP >= 6.2.0
+#if (HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
     const bool is_legacy_stream = (stream == hipStreamLegacy);
 #else
     const bool is_legacy_stream = false;

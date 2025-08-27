@@ -202,10 +202,11 @@ find_package(Git REQUIRED)
 
 # Get the git hash of the rocBLAS branch
 execute_process(
-          COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
-          WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+          COMMAND "${GIT_EXECUTABLE}" log -1 --format=%H . # was rev-parse HEAD
+          WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} # top rocBLAS directory
           OUTPUT_VARIABLE GIT_HASH_ROCBLAS
-          OUTPUT_STRIP_TRAILING_WHITESPACE)
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+          )
 
 #set the rocBLAS commit hash
 set(rocblas_VERSION_COMMIT_ID "${GIT_HASH_ROCBLAS}")

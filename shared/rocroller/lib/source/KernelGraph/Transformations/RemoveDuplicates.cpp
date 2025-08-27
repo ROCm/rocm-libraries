@@ -442,8 +442,6 @@ namespace rocRoller
 
         KernelGraph RemoveDuplicates::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::RemoveDuplicates");
-
             auto colouring = colourByUnrollValue(original);
             auto graph     = original;
             removeRedundantSequenceEdges(graph);

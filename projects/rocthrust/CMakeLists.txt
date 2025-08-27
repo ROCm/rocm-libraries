@@ -43,15 +43,13 @@ option(BUILD_TEST "Build tests" OFF)
 option(CODE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
-option(BUILD_EXAMPLES "Build examples" OFF)
-option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(BUILD_EXAMPLE "Build example" OFF)
+option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
-cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARKS OFF)
+cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARK OFF)
 option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
-#Set the header wrapper OFF by default.
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -169,7 +167,7 @@ math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${roct
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
   
-if(BUILD_TEST OR BUILD_BENCHMARKS OR BUILD_HIPSTDPAR_TEST)
+if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
@@ -194,27 +192,15 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 # Examples
-if(BUILD_EXAMPLES)
+if(BUILD_EXAMPLE)
   add_subdirectory(examples)
 endif()
 
-# Benchmarks
-if(BUILD_BENCHMARKS)
-  add_subdirectory(benchmarks)
+# Benchmark
+if(BUILD_BENCHMARK)
+  add_subdirectory(benchmark)
 endif()
 
-#Create header wrapper for backward compatibility
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/thrust
-    PATTERNS "*.h" "*.inl" "*.cuh" "*.hpp"
-    HEADER_LOCATION include/thrust
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS rocthrust/${CMAKE_INSTALL_INCLUDEDIR}/thrust
-    OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
-  )
-endif( )
-  
 set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
 set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 
