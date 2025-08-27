@@ -82,7 +82,19 @@ namespace rocRoller::KernelGraph
 
             bool operator==(UnrollStride const& other) const
             {
-                return this->unrollStride == other.unrollStride && this->unrollDimension == other.unrollDimension;
+                return this->unrollStride == other.unrollStride
+                       && this->unrollDimension == other.unrollDimension;
+            }
+        };
+
+        struct BaseOffset
+        {
+            std::string base;
+            int         subdimension;
+
+            bool operator==(BaseOffset const& other) const
+            {
+                return this->base == other.base && this->subdimension == other.subdimension;
             }
         };
 
@@ -145,7 +157,8 @@ namespace rocRoller::KernelGraph
                                             ComputeIndex,
                                             TypeAndSubDimension,
                                             TypeAndNaryArgument,
-                                            UnrollStride>;
+                                            UnrollStride,
+                                            BaseOffset>;
 
         std::string   name(ConnectionSpec const& cs);
         std::string   toString(ConnectionSpec const& cs);
