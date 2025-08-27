@@ -241,6 +241,7 @@ class StateValues:
   e: MatrixInfo                          = field(default_factory=MatrixInfo)
   bias: MatrixInfo                       = field(default_factory=MatrixInfo)
   m: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)       # For Sparse Metadata
+  startMXDummyValuVgpr: int              = 0
   totalAgprs: int                        = 0
   maxLimitAgprs: int                     = 0
   totalMixedAgprs: int                   = 0
@@ -4335,10 +4336,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.removeStaggerAB(kernel, tensorParametersA, tensorParametersB))
 
     if self.states.lastValuMXSAB:
-      self.vgprPool.add(self.states.mxsa.startVgprValu , \
-          self.states.lastValuMXSAB - self.states.mxsa.startVgprValu, "ValuMXSAB")
+      self.vgprPool.add(0 , self.states.lastValuMXSAB, "ValuMXSAB")
       module.addComment1("Tail: add ValuA/B vgpr buffer [%u...%u) to pool" % \
-          (self.states.mxsa.startVgprValu, self.states.lastValuMXSAB))
+          (0, self.states.lastValuMXSAB))
 
     module.add(VNop(self.states.miVALUInstrDataHazard, "Add v_nop before releasing ValuA/B"))
     self.vgprPool.add(self.states.a.startVgprValu , \
@@ -4732,7 +4732,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           bufIdxA = (bufIdxDTV if kernel["DirectToVgprA"] else bufIdx) // self.states.numReadsIterCoalescedA
           if kernel["ProblemType"]["MXBlockA"]:
             bufIdxMXSA = (bufIdxDTV if kernel["DirectToVgprMXSA"] else bufIdx) // self.states.numReadsIterCoalescedMXSA
-          if kernel["ProblemType"]["MXBlockA"]:
+          if kernel["ProblemType"]["MXBlockB"]:
             bufIdxMXSB = (bufIdxDTV if kernel["DirectToVgprMXSB"] else bufIdx) // self.states.numReadsIterCoalescedMXSB
           bufIdxB = (bufIdxDTV if kernel["DirectToVgprB"] else bufIdx) // self.states.numReadsIterCoalescedB
           if mValue < mEnd and mValue % self.states.numReadsIterCoalescedA == 0:
@@ -6225,6 +6225,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # VGPR Assignment
     ####################################
     vgprIdx = 0
+
+    if bool(kernel["ProblemType"]["MXBlockA"]) ^ bool(kernel["ProblemType"]["MXBlockB"]):
+      self.states.startMXDummyValuVgpr = vgprIdx
+      vgprIdx += 2
 
     # TODO: alignment hack, figure out a better solution
     if kernel["ProblemType"]["MXBlockA"]:

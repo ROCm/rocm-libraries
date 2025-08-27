@@ -1804,7 +1804,10 @@ class Solution(collections.abc.Mapping):
         state["UnrollMajorLDSMXSB"] = state["UnrollMajorLDSB"]
 
     if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
-      state["LocalReadVectorWidthMXS"] = state["MIInputPerThreadMXSA"]
+      if state["ProblemType"]["MXBlockA"]:
+        state["LocalReadVectorWidthMXS"] = state["MIInputPerThreadMXSA"]
+      elif state["ProblemType"]["MXBlockB"]:
+        state["LocalReadVectorWidthMXS"] = state["MIInputPerThreadMXSB"]
 
     # Some restrictions for half:
     if state["KernelLanguage"] == "Assembly" \
