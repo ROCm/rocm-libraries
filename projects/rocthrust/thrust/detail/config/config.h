@@ -20,7 +20,7 @@
 
 #pragma once
 
-#if !defined(__HIP__)
+#if defined(__CUDACC__)
 // For _CCCL_IMPLICIT_SYSTEM_HEADER
 #  include <cuda/__cccl_config>
 #endif

@@ -100,6 +100,10 @@ add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 # of a mismatch
 target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
 
+# callback functions need to be built as relocatable device code
+target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
+target_link_options( rocfft-test PRIVATE -fgpu-rdc )
+
 find_package( Boost REQUIRED )
 set( Boost_DEBUG ON )
 set( Boost_DETAILED_FAILURE_MSG ON )
@@ -196,9 +200,23 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
   if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
      # Fall-back to module mode.
      find_package( OpenMP REQUIRED )
+     set( BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
+     set( INSTALL_RPATH "$ORIGIN/../llvm/lib" )
+  else()
+     set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
+     set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
   endif()
-    list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )	
+  list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )	
+
+  set_target_properties( rocfft-test PROPERTIES
+     BUILD_RPATH "{$BUILD_RPATH}"
+  )
+  set_target_properties( rocfft-test PROPERTIES
+    INSTALL_RPATH "${INSTALL_RPATH}"
+  )
 endif()
+
+
 
 include( ../cmake/build-gtest.cmake )
 
@@ -334,6 +352,15 @@ if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
     add_executable( ${worker} rocfft_mpi_worker.cpp )
+
+    if( BUILD_CLIENTS_TESTS_OPENMP )
+      set_target_properties( ${worker} PROPERTIES
+         BUILD_RPATH "${BUILD_RPATH}"
+      )
+      set_target_properties( ${worker} PROPERTIES
+        INSTALL_RPATH "${INSTALL_RPATH}"
+      )
+    endif()
     if( BUILD_FFTW  OR NOT FFTW_FOUND )
       add_dependencies( ${worker} fftw_double fftw_single )
     endif()

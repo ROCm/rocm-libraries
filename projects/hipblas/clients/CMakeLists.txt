@@ -109,19 +109,34 @@ if( NOT WIN32 )
     set(hipblas_f90_source_clients_solver
       include/hipblas_fortran_module.f90
     )
+
+    set (hipblas_f90_source
+      ../library/src/hipblas_module.f90
+    )
 endif()
 
 if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_SAMPLES )
+  # Create hipBLAS Fortran module
+  if(NOT WIN32)
+      # Set Fortran module output directory
+      set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/hipblas)
+      add_library(hipblas_fortran OBJECT ${hipblas_f90_source})
+  endif()
+
   if( NOT WIN32 )
     if( BUILD_WITH_SOLVER )
-      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver})
+      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver} $<TARGET_OBJECTS:hipblas_fortran>)
     else()
-      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_no_solver})
+      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_no_solver} $<TARGET_OBJECTS:hipblas_fortran>)
     endif()
-    add_dependencies(hipblas_fortran_client hipblas_fortran)
   endif()
-  include_directories(${CMAKE_BINARY_DIR}/include/hipblas)
-  include_directories(${CMAKE_BINARY_DIR}/include)
+
+  if(SKIP_LIBRARY)
+    include_directories(${HIPBLAS_LIBRARY_DIR}/include/hipblas)
+  else()
+    include_directories(${CMAKE_BINARY_DIR}/include/hipblas)
+    include_directories(${CMAKE_BINARY_DIR}/include)
+  endif()
 endif( )
 
 if( BUILD_CLIENTS_SAMPLES )
@@ -222,6 +237,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
 
   message(STATUS "Build Dir: ${BUILD_DIR}")
   message(STATUS "Linking Ref. Libs: ${BLAS_LIBRARY}")
+
+  if( NOT TARGET hipblas )
+    find_package( hipblas REQUIRED CONFIG PATHS ${HIPBLAS_LIBRARY_DIR} )
+  endif( )
 
   if( BUILD_CLIENTS_TESTS )
     add_subdirectory( gtest )

@@ -2999,7 +2999,7 @@
     NonTemporalC: 0
     NonTemporalD: 0
     NonTemporalE: 0
-    NumElementsPerBatchStore: 1
+    NumElementsPerBatchStore: 0
     NumElementsPerThread: 4
     NumGlobalWriteVectorsPerThread: 4
     NumLoadsA: 1
@@ -3020,7 +3020,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 18
-    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_Bias_HAH_SAV_MT16x32x64_MI16x16x16x1_SN_GRVW8_LPB8_MIWT1_1_NTB3_NEPBS1_PGR2_PLR5_SPO1
+    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_Bias_HAH_SAV_MT16x32x64_MI16x16x16x1_SN_GRVW8_LPB8_MIWT1_1_NTB3_NEPBS0_PGR2_PLR5_SPO1
     SourceSwap: 0
     StaggerU: 0
     StaggerUMapping: 0

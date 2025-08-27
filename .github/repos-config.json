@@ -69,8 +69,8 @@
       "url": "ROCm/hipFFT",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "hiprand",
@@ -117,8 +117,8 @@
       "url": "ROCm/rocFFT",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocprim",

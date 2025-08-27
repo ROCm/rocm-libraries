@@ -1507,6 +1507,15 @@ For the above command, instead of using the ``-r`` parameter to specify the prec
 This mixed-precision support is only available for ``gemv_batched``, ``gemv_strided_batched``, and rocBLAS extension
 functions (for example, ``axpy_ex``, ``scal_ex``, and ``gemm_ex``). For more information, see the :ref:`api-reference-guide`.
 
+
+.. _rocblas_bench_stream_sync:
+
+rocblas-bench timing
+^^^^^^^^^^^^^^^^^^^^^
+
+rocblas-bench uses ``hipEvent_t`` recording to time API calls and ignore the overhead of any ``hipStreamSynchronize`` call. 
+To switch back to the earlier timing approach that uses ``hipStreamSynchronize`` to ensure work completion, set the environment variable ``ROCBLAS_BENCH_STREAM_SYNC=1``.
+
 rocblas-gemm-tune
 -----------------
 
@@ -1542,6 +1551,7 @@ sample code showing how to use kernels directly via their indices.
 
 If the output is stored in a file, you can use the results to override the default kernel selection
 by setting the environment variable ``ROCBLAS_TENSILE_GEMM_OVERRIDE_PATH=<path>``, where ``<path>`` points to the file.
+
 
 rocblas-test
 -------------

@@ -10,7 +10,7 @@ What is rocFFT?
 
 The rocFFT library implements the discrete Fast Fourier Transform (FFT) in HIP for GPU devices.
 It provides a fast and accurate platform for calculating discrete FFTs. 
-The source code can be found at `<https://github.com/ROCm/rocFFT>`_.
+The source code can be found at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft>`_.
 
 rocFFT supports the following features: 
 

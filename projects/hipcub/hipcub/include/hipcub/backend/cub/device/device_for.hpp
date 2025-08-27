@@ -33,6 +33,14 @@
 
 #include <cub/device/device_for.cuh> // IWYU pragma: export
 
+#if __cccl_lib_mdspan
+    #include <cuda/std/__mdspan/extents.h>
+BEGIN_HIPCUB_NAMESPACE
+template<class IndexType, size_t... Extents>
+using extents = ::cuda::std::extents<IndexType, Extents...>;
+END_HIPCUB_NAMESPACE
+#endif // __cccl_lib_mdspan
+
 BEGIN_HIPCUB_NAMESPACE
 
 struct DeviceFor
@@ -155,6 +163,33 @@ HIPCUB_RUNTIME_FUNCTION
         return hipCUDAErrorTohipError(
             cub::DeviceFor::Bulk(d_temp_storage, temp_storage_bytes, shape, op, stream));
     }
+
+// ForEachInExtents only enables when the cccl mdspan extension is enabled
+#ifdef __cccl_lib_mdspan
+    template<class IndexType, size_t... Extents, typename OpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ForEachInExtents(void*   d_temp_storage,
+                                       size_t& temp_storage_bytes,
+                                       const ::cuda::std::extents<IndexType, Extents...>& extents,
+                                       OpT                                                op,
+                                       hipStream_t stream = {})
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachInExtents(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       extents,
+                                                                       op,
+                                                                       stream));
+    }
+
+    template<class IndexType, size_t... Extents, typename OpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ForEachInExtents(const ::cuda::std::extents<IndexType, Extents...>& extents,
+                                       OpT                                                op,
+                                       hipStream_t stream = {})
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachInExtents(extents, op, stream));
+    }
+#endif // __cccl_lib_mdspan
 };
 
 END_HIPCUB_NAMESPACE

@@ -28,6 +28,14 @@ tables.
         | **0**: Tensile is always used as the GEMM backend.
         | **1**: hipBLASLt is preferred as the GEMM backend, but will fallback to Tensile on problems for which hipBLASLt does not provide a solution or when errors are encountered using the hipBLASLt backend.
 
+    * - | ``ROCBLAS_USE_HIPBLASLT_BATCHED``
+        | Manual control to selectively disable the use of hipBlasLt only for the batched GEMMs. ``ROCBLAS_USE_HIPBLASLT=0`` disables the ``ROCBLAS_USE_HIPBLASLT_BATCHED`` variable, because hipBlasLt would not be enabled.
+      - 1
+      - :ref:`Control the GEMM backend <rocblas-tensile-hipblaslt>`
+      - | **Unset**: GEMM batched default backend.
+        | **0**: Tensile is always used as the GEMM batched backend.
+        | **1**: hipBLASLt will be used as the GEMM batched backend when applicable, but will fallback to Tensile on problems for which hipBLASLt does not provide a solution or when errors are encountered using the hipBLASLt backend.
+
     * - | ``ROCBLAS_DEVICE_MEMORY_SIZE``
         | Sets how much memory to preallocate.
       - Unset by default.
@@ -46,6 +54,13 @@ tables.
         | Allows memory allocation and deallocation to be stream ordered.
       - 0
       - :ref:`stream order alloc`
+      - | **0**: Disable
+        | **1**: Enable
+
+    * - | ``ROCBLAS_BENCH_STREAM_SYNC``
+        | Benchmark timing based on ``hipStreamSynchronize``, otherwise uses default ``hipEvent_t`` based timing.
+      - 0
+      - :ref:`rocblas_bench_stream_sync`
       - | **0**: Disable
         | **1**: Enable
 
