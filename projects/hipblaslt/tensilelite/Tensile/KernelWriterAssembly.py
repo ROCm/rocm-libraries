@@ -60,7 +60,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
-  VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpLeI32, VCmpLtI32, \
+  VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
   VCmpLtU32, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, \
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
@@ -7610,6 +7610,7 @@ class KernelWriterAssembly(KernelWriter):
     tmpVgpr2 = None
     kReg    = None
     abReg   = None
+    mxReg   = None
     tmpVgpr = None
     dummy   = -1
 
@@ -8031,6 +8032,52 @@ class KernelWriterAssembly(KernelWriter):
             shiftK.add(TailLoop_SkipZeroOutMask)
             if vgprPerInput == 4 and is_wmma_v2:
               if tmpVgpr2 is not None: self.vgprPool.checkIn(tmpVgpr2)
+
+          if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+            mxK = kernel["MatrixInstK"]
+            mxBlock = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
+            vgprPerInput = max(vgprPerInputMXSA, vgprPerInputMXSB)
+            mxReg = self.vgprPool.checkOutAligned(vgprPerInput, vgprPerInput, "mxReg")
+            shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=int(mxK-1), comment="get inputs for edge thread"))
+            shiftK.add(SLShiftRightB32(dst=sgpr(tmpSgprX1), src=sgpr(tmpSgprX1), shiftHex=log2(mxBlock), comment="calculate 64bit groups index"))
+            shiftK.add(SSubU32(dst=sgpr(tmpSgprX1), src0=(mxK//mxBlock), src1=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
+            shiftK.add(SLShiftLeftB32(dst=sgpr(tmpSgprX1), shiftHex=log2(8), src=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
+
+            if vgprPerInput == 1:
+              VShiftLeft = VLShiftLeftB32
+              VShiftRight = VLShiftRightB32
+            elif vgprPerInput == 2:
+              VShiftLeft = VLShiftLeftB64
+              VShiftRight = VLShiftRightB64
+            else:
+              raise Exception(f"unsupport vgprPerInput {vgprPerInput}")
+
+          if kernel["ProblemType"]["MXBlockA"]:
+            for mxsa in range(0, kernel["MIWaveTileMXSA"]):
+              for iui in range(0, innerUnroll):
+                mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, mxsa)
+                mxsaStr = vgpr(mxsaStr_base, vgprPerInputMXSA)
+                shiftK.add(VShiftLeft(dst=vgpr(mxReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=mxsaStr, comment=""))
+                shiftK.add(VShiftRight(dst=vgpr(mxReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=vgpr(mxReg, vgprPerInput), comment=""))
+                shiftK.add(VCmpGTI32(dst=sgpr(tmpSgprX2), src0=mxK, src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                for bk in range(0, vgprPerInput):
+                  mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, mxsa, bk=bk)
+                  mxsaStr = vgpr(mxsaStr_base, 1)
+                  shiftK.add(VCndMaskB32(dst=mxsaStr, src0=mxsaStr, src1=vgpr(mxReg+bk), src2=sgpr(tmpSgprX2), comment=""))
+
+          if kernel["ProblemType"]["MXBlockB"]:
+            for mxsb in range(0, kernel["MIWaveTileMXSB"]):
+              for iui in range(0, innerUnroll):
+                mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, mxsb)
+                mxsbStr = vgpr(mxsbStr_base, vgprPerInputMXSB)
+                shiftK.add(VShiftLeft(dst=vgpr(mxReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=mxsbStr, comment=""))
+                shiftK.add(VShiftRight(dst=vgpr(mxReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=vgpr(mxReg, vgprPerInput), comment=""))
+                shiftK.add(VCmpGTI32(dst=sgpr(tmpSgprX2), src0=mxK, src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                for bk in range(0, vgprPerInput):
+                  mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, mxsb, bk=bk)
+                  mxsbStr = vgpr(mxsbStr_base, 1)
+                  shiftK.add(VCndMaskB32(dst=mxsbStr, src0=mxsbStr, src1=vgpr(mxReg+bk), src2=sgpr(tmpSgprX2), comment=""))
+
         if kernel["LocalSplitU"] > 1:
           self.sgprPool.checkIn(loopCntSgpr)
       else: #wmma
@@ -8336,6 +8383,7 @@ class KernelWriterAssembly(KernelWriter):
     if kReg_first is not None: self.vgprPool.checkIn(kReg_first)
     if kReg is not None: self.vgprPool.checkIn(kReg)
     if abReg is not None: self.vgprPool.checkIn(abReg)
+    if mxReg is not None: self.vgprPool.checkIn(mxReg)
     if tmpVgpr is not None: self.vgprPool.checkIn(tmpVgpr)
 
     mfmaMod = Module("mfmaCode")
