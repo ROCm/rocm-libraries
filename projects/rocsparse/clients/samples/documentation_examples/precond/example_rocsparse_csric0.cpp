@@ -229,9 +229,9 @@ int main()
         {
             std::cout << temp[j] << " ";
         }
-        std::cout << "" << std::endl;
+        std::cout << std::endl;
     }
-    std::cout << "" << std::endl;
+    std::cout << std::endl;
 
     // Solve Lz = x
     ROCSPARSE_CHECK(rocsparse_dcsrsv_solve(handle,
