@@ -2511,7 +2511,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.graMetadataShift(kernel, tensorParametersA))
         if kernel["ProblemType"]["MXBlockA"]:
           module.addComment1("global read addresses: shift mxsa")
-          module.add(self.graShift(kernel, tensorParametersA["MX"]))
+          module.add(self.graShiftMX(kernel, tensorParametersA["MX"], tensorParametersA))
 
       if not (kernel["BufferLoad"] and kernel["GuaranteeNoPartialMetadata"]) and not forceNoTileCode \
         and kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
@@ -2527,7 +2527,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.graMetadataShift(kernel, tensorParametersB))
         if kernel["ProblemType"]["MXBlockB"]:
           module.addComment1("global read addresses: shift mxsb")
-          module.add(self.graShift(kernel, tensorParametersB["MX"]))
+          module.add(self.graShiftMX(kernel, tensorParametersB["MX"], tensorParametersB))
 
     # addresses
     if not forceNoTileCode:
@@ -5405,9 +5405,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.srdShiftLeft["A"] = kernel["GlobalReadVectorWidthA"]
     self.states.srdShiftLeft["B"] = kernel["GlobalReadVectorWidthB"]
     if kernel["ProblemType"]["MXBlockA"]:
-      self.states.srdShiftLeft["MXSA"] = kernel["GlobalReadVectorWidthMXSA"]
+      self.states.srdShiftLeft["MXSA"] = kernel["GlobalReadVectorWidthA"]
     if kernel["ProblemType"]["MXBlockB"]:
-      self.states.srdShiftLeft["MXSB"] = kernel["GlobalReadVectorWidthMXSB"]
+      self.states.srdShiftLeft["MXSB"] = kernel["GlobalReadVectorWidthB"]
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       self.states.srdShiftLeft["Metadata"] = kernel["GlobalReadVectorWidthMetadata"]
 
