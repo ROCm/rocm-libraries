@@ -367,7 +367,7 @@ namespace TensileLite
                         std::cout << curRow[ResultKey::BenchmarkRunNumber] << ","
                                   << curRow[ResultKey::ProblemProgress] << ","
                                   << curRow[ResultKey::SolutionProgress]
-                                  << ", Skip Slow Solution: " << curRow[ResultKey::SolutionName]
+                                  << ",Solution Skipped (slow or doing restoration): " << curRow[ResultKey::SolutionName]
                                   << std::endl;
                     else
                         m_csvOutput.writeCurrentRow();

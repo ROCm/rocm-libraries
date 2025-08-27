@@ -659,7 +659,6 @@ int main(int argc, const char* argv[])
     bool        exitOnError      = args["exit-on-error"].as<bool>();
     bool        groupedGemm      = args["grouped-gemm"].as<bool>();
     const auto& icacheFlushArgs  = args["icache-flush-args"].as<std::vector<bool>>();
-    const auto& probSolMap       = args["prob-sol-map"].as<std::map<int,int>>();
 
     float skip_slow_solution_ratio = args["skip-slow-solution-ratio"].as<float>();
     if(skip_slow_solution_ratio > 1.0 || skip_slow_solution_ratio < 0.0)
@@ -749,9 +748,6 @@ int main(int argc, const char* argv[])
             {
                 auto problem = problems[problemIdx].get();
 
-                int runOnlySolIdx = -1;
-                if(probSolMap.count(problemIdx) != 0)
-                    runOnlySolIdx = probSolMap.at(problemIdx);
 
                 reporters->report(ResultKey::ProblemIndex, problemIdx);
                 reporters->report(ResultKey::ProblemProgress,
@@ -779,10 +775,7 @@ int main(int argc, const char* argv[])
 
                     listeners.preSolution(*solution);
 
-                    // skip if this problem has a specified solution to run
-                    bool skipRun = (runOnlySolIdx != -1 && cur_sol_idx != runOnlySolIdx);
-
-                    if(solutionIterator->runCurrentSolution() && runKernels && !skipRun)
+                    if(solutionIterator->runCurrentSolution() && runKernels)
                     {
                         try
                         {

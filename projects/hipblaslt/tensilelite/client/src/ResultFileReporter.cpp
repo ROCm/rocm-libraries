@@ -81,8 +81,9 @@ namespace TensileLite
                 ++m_currSolutionIdx;
                 if(!m_invalidSolution)
                 {
-                    double timeUS = std::stod(valueStr);
-                    if(m_fasterTimeUS < 0 || m_fasterTimeUS > timeUS)
+                    double timeUS    = std::stod(valueStr);
+                    bool   timeIsNan = std::isnan(timeUS);
+                    if((!timeIsNan) && (m_fasterTimeUS < 0 || m_fasterTimeUS > timeUS))
                     {
                         m_fasterTimeUS = timeUS;
                         if(m_extraCol)

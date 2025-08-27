@@ -353,6 +353,7 @@ def restore_prob_sol_map(logfile):
     keyword = "Contraction"
     runningTuning = False
 
+    prob_best_us_record = {}
     prob_sol_map = {}
     allProblems = 0
     allSolutions = 0
@@ -376,12 +377,32 @@ def restore_prob_sol_map(logfile):
                     if line.startswith(finHint):
                         break
                     else:
-                        tokens = line.split(',')
+                        tokens = line.split('"')
+                        ## split with "(problem-size)" : there should be be 3 tokens: { "starting-numbers," , "problem-size-desc" , ",rest-of-numbers"}
+                        assert len(tokens) == 3, f'bench result line: {line} is not fitting expected format'
+                        tokens[1] = "problem-sizes"
+                        newline = tokens[0] + tokens[1] + tokens[2] # a new line " starting-number, 'problem-sizes' , rest-of-numbers "
+                        tokens = newline.split(',')
                         probInfo = tokens[1].split('/') # tokens[1] should be "probId/AllProb"
                         solInfo = tokens[2].split('/') # tokens[2] should be "solId/AllSol"
                         assert len(probInfo) == 2, f'tokens[1]: {tokens[1]} should be a token as probId/AllProb'
                         assert len(solInfo) == 2, f'tokens[2]: {tokens[2]} should be a token as solId/AllSol'
-                        prob_sol_map.update({ int(probInfo[0]) : int(solInfo[0])})
+                        # solName = tokens[7]
+                        usTimeInfo = float(tokens[10]) # tokens[10] should be tuning mju-second
+
+                        # This can handle both the log w/ or /wo PrintWinnerOnly
+                        current_best_us_for_prob = prob_best_us_record.get(int(probInfo[0]))
+                        if current_best_us_for_prob is None:
+                            # print(f"None, added for probID: {probInfo[0]}, time: {usTimeInfo}")
+                            prob_best_us_record.update( {int(probInfo[0]) : float(usTimeInfo)} )
+                            prob_sol_map.update( {int(probInfo[0]) : int(solInfo[0])} )
+                        else:
+                            # update the winner
+                            if usTimeInfo < current_best_us_for_prob:
+                                # print(f"Better, updated for probID: {probInfo[0]}, new time: {usTimeInfo}, old time: {current_best_us_for_prob}")
+                                prob_best_us_record.update( {int(probInfo[0]) : float(usTimeInfo)} )
+                                prob_sol_map.update( {int(probInfo[0]) : int(solInfo[0])} )
+
                         if allProblems == 0:
                             allProblems = int(probInfo[1]) + 1
                         if allSolutions == 0:
