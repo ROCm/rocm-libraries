@@ -571,10 +571,6 @@ private:
     std::shared_ptr<hipblasLtHandle_t> hipblasLtHandle;
     int                                hipblasltEnvVar = -1;
 
-    // used in constructor initialization list
-    int       getActiveDevice();
-    Processor getActiveArch();
-
     // Opaque smart allocator class to perform device memory allocations
     // clang-format off
     class [[nodiscard]] _device_malloc : public rocblas_device_malloc_base
