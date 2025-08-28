@@ -17,6 +17,8 @@
 
 #include <thrust/detail/config.h>
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <thrust/device_free.h>
@@ -79,18 +81,18 @@ struct assert_sequence_iterator
     unexpected_value = nullptr;
   }
 
-  THRUST_HOST_DEVICE assert_sequence_iterator operator+(difference_type i) const
+  __host__ __device__ assert_sequence_iterator operator+(difference_type i) const
   {
     return clone(expected + i);
   }
 
-  THRUST_HOST_DEVICE reference operator[](difference_type i) const
+  __host__ __device__ reference operator[](difference_type i) const
   {
     return clone(expected + i);
   }
 
   // Some weirdness, this iterator acts like its own reference
-  THRUST_DEVICE assert_sequence_iterator operator=(value_type val)
+  __device__ assert_sequence_iterator operator=(value_type val)
   {
     if (val != expected)
     {
@@ -107,7 +109,7 @@ struct assert_sequence_iterator
   }
 
 private:
-  THRUST_HOST_DEVICE assert_sequence_iterator clone(value_type new_expected) const
+  __host__ __device__ assert_sequence_iterator clone(value_type new_expected) const
   {
     return {new_expected, max, found_max, unexpected_value};
   }
@@ -249,4 +251,9 @@ void test_large_indices_custom_scan_op()
 }
 DECLARE_UNITTEST(test_large_indices_custom_scan_op);
 
-#endif // C++14
+#endif // C++17
+
+// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC

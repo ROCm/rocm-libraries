@@ -23,6 +23,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/config/memory_resource.h>
 #ifdef THRUST_MR_STD_MR_HEADER
 #  include THRUST_MR_STD_MR_HEADER
@@ -168,7 +176,7 @@ public:
 
   virtual bool do_is_equal(const THRUST_STD_MR_NS::memory_resource& other) const noexcept override
   {
-#  ifdef THRUST_HAS_DYNAMIC_CAST
+#  ifndef THRUST_NO_RTTI
     auto mr_resource = dynamic_cast<memory_resource<>*>(&other);
     return mr_resource && do_is_equal(*mr_resource);
 #  else

@@ -22,11 +22,22 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/allocate_unique.h>
 #include <thrust/detail/type_deduction.h>
 #include <thrust/device_allocator.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <utility>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -36,16 +47,15 @@ THRUST_NAMESPACE_BEGIN
  *         memory.
  */
 template <typename T, typename... Args>
-THRUST_HOST auto device_make_unique(Args&&... args) -> decltype(uninitialized_allocate_unique<T>(device_allocator<T>{}))
+THRUST_HOST auto device_make_unique(Args&&... args)
+  -> decltype(uninitialized_allocate_unique<T>(_THRUST_STD::declval<device_allocator<T>>()))
 {
-#if !defined(THRUST_DOXYGEN) // This causes Doxygen to choke for some reason.
   // FIXME: This is crude - we construct an unnecessary T on the host for
   // `device_new`. We need a proper dispatched `construct` algorithm to
   // do this properly.
-  auto p = uninitialized_allocate_unique<T>(device_allocator<T>{});
+  auto p = uninitialized_allocate_unique<T>(device_allocator<T>());
   device_new<T>(p.get(), T(THRUST_FWD(args)...));
   return p;
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////

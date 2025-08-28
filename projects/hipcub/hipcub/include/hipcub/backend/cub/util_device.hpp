@@ -34,6 +34,6 @@
 
 #include "util_temporary_storage.hpp"
 
-#include "cub/util_device.cuh" // IWYU pragma: export
+#include <cub/util_device.cuh> // IWYU pragma: export
 
 #endif // HIPCUB_CUB_UTIL_DEVICE_HPP_
