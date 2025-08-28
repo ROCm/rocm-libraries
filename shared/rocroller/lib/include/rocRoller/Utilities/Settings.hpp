@@ -245,6 +245,12 @@ namespace rocRoller
             getDefaultValueForKernelGraphDOTSerialization,
             -1};
 
+        static inline const SettingsOption<bool> WriteOnFail{
+            "ROCROLLER_WRITE_ON_FAIL",
+            "Write input/output matrices to file when GEMM tests fail",
+            false,
+            -1};
+
         /**
          * @brief Creates a help dialog for the environment variables with
          * their names, default values and bit-offset (if it has one).

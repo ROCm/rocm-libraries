@@ -817,7 +817,7 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                if(!res.ok)
+                if(!res.ok && Settings::getInstance()->get(Settings::WriteOnFail))
                 {
                     std::filesystem::path base
                         = std::filesystem::absolute(std::filesystem::path("failures/"));
