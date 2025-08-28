@@ -63,98 +63,97 @@ Prefetching is controlled by:
 4. `int prefetchLDSFactor` - Ratio of how many sub-tiles are
    prefetched from LDS before the next unroll segment.
 
-## Single prefetch
+## Two buffers, one request in-flight
 
-Focusing on how the two sets of buffers are operated on, we can view
-the control flow of loads vertically as follows
+Focusing on how two sets of buffers are operated on, we can view the
+control flow of loads and math operations vertically as follows
 
-    Buf0      Buf1
-    ============== for loop preamble
-     PG        PG
-     CL
-    -------------- barrier
-     PL
-    ============== unrolled for loop begin (counter += 2)
-    -=-=-=-=-=-=-= unroll u=0 segment
-     CV
-     OPR
-     PG        CL
-    -------------- barrier
-               PL
-    -=-=-=-=-=-=-= unroll u=1 segment
-               CV
-               OPR
-     CL        PG
-    -------------- barrier
-     PL
-    ============== for loop end
 
-where
-
-- `PG` denotes _prefetch global_: issuing global to vgpr loads
-- `CL` denotes _commit to lds_: vgpr to lds stores
-- `PL` denotes _prefetch lds_: issuing lds to vgpr loads
-- `CV` denotes _commit to vgpr_: waiting on lds to vgpr loads
-- `OPR` denotes _operating on vgpr_: doing math (hopefully many cycles)
-
-The order of these must be: `PG CL PL CV OPR`.
+    Buffer 0                         Buffer 1
+    ========================================================================= for loop preamble
+     LoadTile                         LoadTile
+     StoreLDSTile
+    ------------------------------------------------------------------------- barrier
+     LoadLDSTile (pre)
+    ========================================================================= unrolled for loop begin (counter += 2)
+    -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- unroll u=0 segment
+     MFMA & LoadLDSTile
+     LoadTile                         StoreLDSTile
+    ------------------------------------------------------------------------- barrier
+                                      LoadLDSTile (pre)
+    -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- unroll u=1 segment
+                                      MFMA & LoadLDSTile
+     StoreLDSTile                     LoadTile
+    ------------------------------------------------------------------------- barrier
+     LoadLDSTile (pre)
+    ========================================================================= for loop end
 
 Note that:
 
-1. Within the for-loop, there is always a barrier between a `CL` and a
-   `PL`.
+1. There is always a barrier between a `StoreLDSTile` and `LoadLDSTile`.
 
 2. Global prefetches are not stalled by barriers.
 
-3. Within a unrolled segment; `CV` and `OPR` can be mixed.  The
-   rocRoller scheduler will make sure, eg, appropriate wait-counts are
-   inserted to enforce dependencies.
+3. The `LoadLDSTile (pre)` is a partial prefetch from LDS so that
+   MFMAs can appear immediately at the beginning of the for-loop.
 
-4. The `PL` may be a "partial" prefetch.  In this case, the remaining
-   loads from LDS into VGPRs happends in the immediately following
-   `CV`.
+   This is controlled by the `prefetchLDSFactor` parameter.  A value
+   of `prefetchLDSFactor=1` means all LDS reads are prefetched.  A
+   value of `prefetchLDSFactor=0` means no LDS reads are prefetched.
+   A value of `prefetchLDSFactor=2` (etc) means half of them are
+   prefetched.
 
-## Two prefetches, unrolled
+4. Within a unrolled segment `LoadLDSTile` and `MFMA` can be mixed.
+   The rocRoller scheduler will make sure, eg, appropriate wait-counts
+   are inserted to enforce dependencies.
 
-With two-prefetches, we obtain
+5. Across every barrier and loop boundary, there is one LoadTile
+   operation in-flight.
 
-    Buf0      Buf1      Buf2
-    ======================== for loop preamble
-     PG        PG        PG
-     CL
-    ------------------------ barrier
-     PL
-    ======================== unrolled for loop begin (counter += 3)
-    -=-=-=-=-=-=-=-=-=-=-=-= unroll u=0 segment
-     CV
-     OPR
-     PG        CL
-    ------------------------ barrier
-               PL
-    -=-=-=-=-=-=-=-=-=-=-=-= unroll u=1 segment
-               CV
-               OPR
-               PG        CL
-    ------------------------ barrier
-                         PL
-    -=-=-=-=-=-=-=-=-=-=-=-= unroll u=2 segment
-                         CV
-                         OPR
-     CL                  PG
-    ------------------------ barrier
-     PL
-    ======================== for loop end
+## Three buffers, two requests in-flight
 
-In the single pre-fetch mode, we have $U=2$ unrolled segments.  In the
-two-prefetch mode, we have $U=3$ unrolled segments.  In both cases,
+With two requests in-flight, we obtain
+
+
+    Buffer 0                         Buffer 1                         Buffer 2
+    ============================================================================================= for loop preamble
+     LoadTile                         LoadTile                         LoadTile
+     StoreLDSTile
+    --------------------------------------------------------------------------------------------- barrier
+     LoadLDSTile (pre)
+    ============================================================================================= unrolled for loop begin (counter += 2)
+    -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- unroll u=0 segment
+     MFMA & LoadLDSTile
+     LoadTile                         StoreLDSTile
+    --------------------------------------------------------------------------------------------- barrier
+                                      LoadLDSTile (pre)
+    -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- unroll u=1 segment
+                                      MFMA & LoadLDSTile
+                                      LoadTile                         StoreLDSTile
+    --------------------------------------------------------------------------------------------- barrier
+                                                                       LoadLDSTile (pre)
+    -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- unroll u=2 segment
+                                                                       MFMA & LoadLDSTile
+     StoreLDSTile                                                      LoadTile
+    --------------------------------------------------------------------------------------------- barrier
+     LoadLDSTile (pre)
+    ============================================================================================= for loop end
+
+Across every barrier and loop boundary, there are two LoadTile
+operations in-flight.
+
+## General
+
+In the one in-flight mode, we have $U=2$ unrolled segments.  In the
+two in-flight mode, we have $U=3$ unrolled segments.  In both cases,
 the scheduling of operations in unrolled segment $u$ are:
 
-    -=-=-=-=-=-=-=-=-=-=-=-=-=- unroll u segment
-    CV  [u]
-    OPR [u]
-    PG  [u]     CL [(u+1) % U]
-    --------------------------- barrier
-                PL [(u+1) % U]
+    -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=- unroll u segment
+    LoadLDSTile  [u]
+    MFMA [u]
+    LoatTile  [u]     StoreLDSTile [(u+1) % U]
+    ------------------------------------------- barrier
+                      LoadLDSTile [(u+1) % U]
 
 */
 
