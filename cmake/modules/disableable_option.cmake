@@ -10,10 +10,6 @@
 #   <doc>         - Documentation string for the option.
 #   <default>     - Default value for the option.
 function(disableable_option _option_name _doc _default)
-    if(DEFINED ${_option_name})
-        return()
-    endif()
-
     if(ROCM_LIBRARIES_DISABLE_ALL)
         option(${_option_name} "${_doc}" OFF)
     else()
