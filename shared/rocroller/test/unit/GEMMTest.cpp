@@ -827,7 +827,8 @@ namespace GEMMDriverTest
                     }
 
                     std::filesystem::path valuesFilePath
-                        = base / fmt::format("{}_{}.txt", commandKernel.getKernelName(), iteration);
+                        = base
+                          / fmt::format("{}_iter_{}.txt", commandKernel.getKernelName(), iteration);
 
                     std::ofstream valuesFile(valuesFilePath);
 
