@@ -27,6 +27,14 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/system/cuda/config.h>
 
 #include <cub/block/block_load.cuh>
@@ -39,7 +47,7 @@
 #include <thrust/system/system_error.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
-#include <type_traits>
+#include <cuda/std/__type_traits/void_t.h>
 
 #include <nv/target>
 
@@ -52,24 +60,33 @@ namespace core
 
 #ifdef _NVHPC_CUDA
 #  if (__NVCOMPILER_CUDA_ARCH__ >= 600)
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm60
 #  elif (__NVCOMPILER_CUDA_ARCH__ >= 520)
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm52
 #  elif (__NVCOMPILER_CUDA_ARCH__ >= 350)
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm35
 #  else
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm30
 #  endif
 #else
 #  if (__CUDA_ARCH__ >= 600)
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm60
 #  elif (__CUDA_ARCH__ >= 520)
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm52
 #  elif (__CUDA_ARCH__ >= 350)
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm35
 #  elif (__CUDA_ARCH__ >= 300)
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm30
 #  elif !defined(__CUDA_ARCH__)
+// deprecated [since 2.8]
 #    define THRUST_TUNING_ARCH sm30
 #  endif
 #endif
@@ -246,7 +263,7 @@ struct has_enough_shmem_impl<V, A, S, typelist<>>
   {
     value = V
   };
-  using type = ::cuda::std::__conditional_t<value, thrust::detail::true_type, thrust::detail::false_type>;
+  using type = ::cuda::std::conditional_t<value, thrust::detail::true_type, thrust::detail::false_type>;
 };
 
 template <class Agent, size_t MAX_SHMEM>
@@ -259,6 +276,7 @@ struct has_enough_shmem : has_enough_shmem_impl<true, Agent, MAX_SHMEM, sm_list>
 
 // AgentPlan structure and helpers
 // --------------------------------
+
 struct AgentPlan
 {
   int block_threads;
@@ -355,7 +373,7 @@ THRUST_RUNTIME_FUNCTION typename get_plan<Agent>::type get_agent_plan(int ptx_ve
 }
 
 // XXX keep this dead-code for now as a gentle reminder
-//     that kernel luunch which reats plan values is the most robust
+//     that kernel launch which reats plan values is the most robust
 //     mechanism to extract sm-specific tuning parameters
 // TODO: since we are unable to afford kernel launch + cudaMemcpy ON EVERY
 //       algorithm invocation, we need to design a good caching strategy
@@ -372,10 +390,10 @@ THRUST_RUNTIME_FUNCTION typename get_plan<Agent>::type get_agent_plan(int ptx_ve
   template<class Agent>
   void __global__ get_agent_plan_kernel(AgentPlan *plan);
 
-  static THRUST_DEVICE AgentPlan agent_plan_device;
+  static _CCCL_DEVICE AgentPlan agent_plan_device;
 
   template<class Agent>
-  AgentPlan THRUST_DEVICE get_agent_plan_dev()
+  AgentPlan _CCCL_DEVICE get_agent_plan_dev()
   {
     AgentPlan plan;
     plan.block_threads      = Agent::ptx_plan::BLOCK_THREADS;
@@ -386,7 +404,7 @@ THRUST_RUNTIME_FUNCTION typename get_plan<Agent>::type get_agent_plan(int ptx_ve
   }
 
   template <class Agent, class F>
-  AgentPlan THRUST_HOST_DEVICE THRUST_FORCEINLINE
+  AgentPlan _CCCL_HOST_DEVICE _CCCL_FORCEINLINE
   xget_agent_plan_impl(F f, cudaStream_t s, void* d_ptr)
   {
     AgentPlan plan;
@@ -505,27 +523,27 @@ struct LoadIterator
   using size_type  = typename iterator_traits<It>::difference_type;
 
   using type =
-    ::cuda::std::__conditional_t<is_contiguous_iterator<It>::value,
-                                 cub::CacheModifiedInputIterator<PtxPlan::LOAD_MODIFIER, value_type, size_type>,
-                                 It>;
+    ::cuda::std::conditional_t<is_contiguous_iterator<It>::value,
+                               cub::CacheModifiedInputIterator<PtxPlan::LOAD_MODIFIER, value_type, size_type>,
+                               It>;
 }; // struct Iterator
 
 template <class PtxPlan, class It>
-typename LoadIterator<PtxPlan, It>::type THRUST_DEVICE THRUST_FORCEINLINE
+typename LoadIterator<PtxPlan, It>::type _CCCL_DEVICE _CCCL_FORCEINLINE
 make_load_iterator_impl(It it, thrust::detail::true_type /* is_trivial */)
 {
   return raw_pointer_cast(&*it);
 }
 
 template <class PtxPlan, class It>
-typename LoadIterator<PtxPlan, It>::type THRUST_DEVICE THRUST_FORCEINLINE
+typename LoadIterator<PtxPlan, It>::type _CCCL_DEVICE _CCCL_FORCEINLINE
 make_load_iterator_impl(It it, thrust::detail::false_type /* is_trivial */)
 {
   return it;
 }
 
 template <class PtxPlan, class It>
-typename LoadIterator<PtxPlan, It>::type THRUST_DEVICE THRUST_FORCEINLINE make_load_iterator(PtxPlan const&, It it)
+typename LoadIterator<PtxPlan, It>::type _CCCL_DEVICE _CCCL_FORCEINLINE make_load_iterator(PtxPlan const&, It it)
 {
   return make_load_iterator_impl<PtxPlan>(it, typename is_contiguous_iterator<It>::type());
 }
@@ -575,6 +593,7 @@ struct BlockStore
 // --------------
 // used for function that return cudaError_t along with the result
 //
+// TODO(bgruber): this looks rather like an expected than an optional. Use ::cuda::std::expected in C++14.
 template <class T>
 class cuda_optional
 {
@@ -584,27 +603,27 @@ class cuda_optional
 public:
   cuda_optional() = default;
 
-  THRUST_HOST_DEVICE cuda_optional(T v, cudaError_t status = cudaSuccess)
+  _CCCL_HOST_DEVICE cuda_optional(T v, cudaError_t status = cudaSuccess)
       : status_(status)
       , value_(v)
   {}
 
-  bool THRUST_HOST_DEVICE isValid() const
+  bool _CCCL_HOST_DEVICE isValid() const
   {
     return cudaSuccess == status_;
   }
 
-  cudaError_t THRUST_HOST_DEVICE status() const
+  cudaError_t _CCCL_HOST_DEVICE status() const
   {
     return status_;
   }
 
-  THRUST_HOST_DEVICE T const& value() const
+  _CCCL_HOST_DEVICE T const& value() const
   {
     return value_;
   }
 
-  THRUST_HOST_DEVICE operator T const&() const
+  _CCCL_HOST_DEVICE operator T const&() const
   {
     return value_;
   }
@@ -669,11 +688,12 @@ THRUST_RUNTIME_FUNCTION inline cudaError_t sync_stream(cudaStream_t stream)
   return cub::SyncStream(stream);
 }
 
-inline void THRUST_DEVICE sync_threadblock()
+inline void _CCCL_DEVICE sync_threadblock()
 {
-  cub::CTA_SYNC();
+  __syncthreads();
 }
 
+// Deprecated [Since 2.8]
 #define CUDA_CUB_RET_IF_FAIL(e)                \
   {                                            \
     auto const error = (e);                    \
@@ -697,12 +717,12 @@ struct uninitialized
 
   DeviceWord storage[WORDS];
 
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE T& get()
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE T& get()
   {
     return reinterpret_cast<T&>(*this);
   }
 
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE operator T&()
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE operator T&()
   {
     return get();
   }
@@ -725,45 +745,45 @@ private:
   char data_[N * sizeof(T)];
 
 public:
-  THRUST_HOST_DEVICE T* data()
+  _CCCL_HOST_DEVICE T* data()
   {
     return data_;
   }
-  THRUST_HOST_DEVICE const T* data() const
+  _CCCL_HOST_DEVICE const T* data() const
   {
     return data_;
   }
-  THRUST_HOST_DEVICE T& operator[](unsigned int idx)
+  _CCCL_HOST_DEVICE T& operator[](unsigned int idx)
   {
     return ((T*) data_)[idx];
   }
-  THRUST_HOST_DEVICE T const& operator[](unsigned int idx) const
+  _CCCL_HOST_DEVICE T const& operator[](unsigned int idx) const
   {
     return ((T*) data_)[idx];
   }
-  THRUST_HOST_DEVICE T& operator[](int idx)
+  _CCCL_HOST_DEVICE T& operator[](int idx)
   {
     return ((T*) data_)[idx];
   }
-  THRUST_HOST_DEVICE T const& operator[](int idx) const
+  _CCCL_HOST_DEVICE T const& operator[](int idx) const
   {
     return ((T*) data_)[idx];
   }
-  THRUST_HOST_DEVICE unsigned int size() const
+  _CCCL_HOST_DEVICE unsigned int size() const
   {
     return N;
   }
-  THRUST_HOST_DEVICE operator ref&()
+  _CCCL_HOST_DEVICE operator ref&()
   {
     return *reinterpret_cast<ref*>(data_);
   }
-  THRUST_HOST_DEVICE ref& get_ref()
+  _CCCL_HOST_DEVICE ref& get_ref()
   {
     return (ref&) *this;
   }
 };
 
-THRUST_HOST_DEVICE THRUST_FORCEINLINE size_t align_to(size_t n, size_t align)
+_CCCL_HOST_DEVICE _CCCL_FORCEINLINE size_t align_to(size_t n, size_t align)
 {
   return ((n + align - 1) / align) * align;
 }
@@ -794,7 +814,7 @@ template <int ALLOCATIONS>
 THRUST_RUNTIME_FUNCTION cudaError_t alias_storage(
   void* storage_ptr, size_t& storage_size, void* (&allocations)[ALLOCATIONS], size_t (&allocation_sizes)[ALLOCATIONS])
 {
-  return cub::AliasTemporaries(storage_ptr, storage_size, allocations, allocation_sizes);
+  return cub::detail::AliasTemporaries(storage_ptr, storage_size, allocations, allocation_sizes);
 }
 
 } // namespace core

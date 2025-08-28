@@ -93,6 +93,7 @@ July 14, 2025 | jhawk-commits | N/A
 Aug 05, 2025 | amd-aakash | N/A
 Aug 12, 2025 | eidenyoshida | N/A
 Aug 19, 2025 | stanleytsang-amd | N/A
+Aug 26, 2025 | rahulc-gh | N/A
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 

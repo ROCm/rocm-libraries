@@ -68,6 +68,14 @@ class ConfigureCITest(unittest.TestCase):
         
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
+        
+    def test_is_path_workflow_file_related_to_ci(self):
+        workflow_path = ".github/workflows/therocktest.yml"
+        self.assertTrue(therock_configure_ci.is_path_workflow_file_related_to_ci(workflow_path))
+        script_path = ".github/scripts/therocktest.py"
+        self.assertTrue(therock_configure_ci.is_path_workflow_file_related_to_ci(script_path))
+        bad_path = ".github/workflows/test.yml"
+        self.assertFalse(therock_configure_ci.is_path_workflow_file_related_to_ci(bad_path))
 
 if __name__ == "__main__":
     unittest.main()
