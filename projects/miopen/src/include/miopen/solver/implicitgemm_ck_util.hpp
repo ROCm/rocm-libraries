@@ -51,6 +51,28 @@ struct ProblemDescription;
 
 namespace solver {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+
+static constexpr int CkSplitkAutoDeduce = -1;
+
+template <int L, int H>
+inline static bool NextCKSplitkValue(int& v)
+{
+    assert((IsTwoPower<L, H>(v) || v == CkSplitkAutoDeduce));
+    if(v == H)
+    {
+        v = CkSplitkAutoDeduce;
+        return true;
+    }
+    if(v == CkSplitkAutoDeduce)
+    {
+        v = L;
+        return false;
+    }
+
+    v *= 2;
+    return false;
+}
+
 namespace conv {
 template <typename DataType>
 using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<

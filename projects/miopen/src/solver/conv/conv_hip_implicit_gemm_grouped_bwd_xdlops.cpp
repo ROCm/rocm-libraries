@@ -216,7 +216,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::Init(const ProblemDescripti
 {
     valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
     index         = 0;
-    split_k       = 1;
+    split_k       = CkSplitkAutoDeduce;
     kernel_id     = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
@@ -398,7 +398,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem)
 {
-    split_k   = 1;
+    split_k   = CkSplitkAutoDeduce;
     index     = 0;
     kernel_id = "";
 
@@ -460,7 +460,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
     }
     do
     {
-        bool flag = NextTwoPower<1, 128>(split_k);
+        bool flag = NextCKSplitkValue<1, 128>(split_k);
         if(!flag)
         {
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);

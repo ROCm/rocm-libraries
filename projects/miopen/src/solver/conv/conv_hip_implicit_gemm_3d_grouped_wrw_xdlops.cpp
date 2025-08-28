@@ -323,7 +323,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(const ProblemDescrip
         break;
     }
     index     = 0;
-    split_k   = 1;
+    split_k   = CkSplitkAutoDeduce;
     kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
@@ -365,7 +365,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     [[maybe_unused]] const ProblemDescription& problem)
 {
     index     = 0;
-    split_k   = 1;
+    split_k   = CkSplitkAutoDeduce;
     kernel_id = "";
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -398,7 +398,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
     }
     do
     {
-        bool flag = NextTwoPower<1, 128>(split_k);
+        bool flag = NextCKSplitkValue<1, 128>(split_k);
         if(!flag)
         {
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
