@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 4.0.1 for ROCm 7.0.1
+
+### Resolved issues
+
+* Fixed compilation issue when using `rocprim::texture_cache_iterator`.
+
 ## rocPRIM 4.0.0 for ROCm 7.0
 
 ### Added
