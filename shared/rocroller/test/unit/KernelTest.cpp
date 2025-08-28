@@ -456,7 +456,7 @@ amdhsa.kernels:
                     co_yield m_context->mem()->storeLocal(
                         ldsWithOffset,
                         dst->subset(Generated(iota(i, i + instrDwords))),
-                        0,
+                        i * instrDwords * 4,
                         4 * instrDwords);
                 }
                 else
@@ -464,7 +464,7 @@ amdhsa.kernels:
                     co_yield m_context->mem()->loadLocal(
                         dst->subset(Generated(iota(i, i + instrDwords))),
                         ldsWithOffset,
-                        0,
+                        i * strideMultiplier * 4,
                         4 * instrDwords);
                 }
             }
