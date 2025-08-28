@@ -121,13 +121,11 @@ namespace ArgumentTracerTest
 
         auto kgraph = KG::translate(command);
 
-        auto lowerLinearTransform = std::make_shared<KG::LowerLinear>(context.get());
         kgraph = rocRollerTest::transform<KG::LowerLinear>(kgraph, context.get());
         kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
         kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
         kgraph = rocRollerTest::transform<KG::SetWorkitemCount>(kgraph, context.get());
         kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
         kgraph = rocRollerTest::transform<KG::SetWorkitemCount>(kgraph, context.get());
         kgraph = rocRollerTest::transform<KG::RemoveSetCoordinate>(kgraph);
 
@@ -214,16 +212,11 @@ namespace ArgumentTracerTest
         {
             KG::ControlFlowArgumentTracer argTracer(kgraph, context->kernel());
 
-            auto intArg = [&]() -> AssemblyKernelArgumentPtr {
-                for(auto const& arg : context->kernel()->arguments())
-                {
-                    if(arg.variableType == DataType::Int64)
-                        return std::make_shared<AssemblyKernelArgument>(arg);
-                }
-
-                return nullptr;
-            }();
-            REQUIRE(intArg != nullptr);
+            // Create an additional kernel argument after we've made the arg tracer.
+            std::string const& newArgName = "newArg";
+            context->kernel()->addArgument({newArgName, DataType::Int64, DataDirection::ReadOnly});
+            auto newArg = std::make_shared<AssemblyKernelArgument>(
+                context->kernel()->findArgument(newArgName));
 
             // Modify a random Assign node to access an additional kernel
             // argument after we've made the arg tracer.
@@ -231,10 +224,10 @@ namespace ArgumentTracerTest
                 auto assignId = kgraph.control.getNodes<CG::Assign>().take(1).only().value();
                 auto assign   = kgraph.control.getNode<CG::Assign>(assignId);
 
-                REQUIRE_FALSE(argTracer.referencedArguments(assignId).contains(intArg->name));
+                REQUIRE_FALSE(argTracer.referencedArguments(assignId).contains(newArgName));
                 assign.expression
                     = assign.expression
-                      + convert(DataType::Int32, std::make_shared<Expression::Expression>(intArg));
+                      + convert(DataType::Int32, std::make_shared<Expression::Expression>(newArg));
 
                 CAPTURE(assignId, assign.expression, (argTracer.referencedArguments(assignId)));
 
@@ -255,7 +248,39 @@ namespace ArgumentTracerTest
 
             CHECK_THROWS_MATCHES(context->schedule(generate()),
                                  FatalError,
-                                 m::MessageMatches(m::ContainsSubstring(intArg->name)));
+                                 m::MessageMatches(m::ContainsSubstring(newArgName)));
         }
+    }
+
+    TEST_CASE("AddDeallocateArguments removes unused kernel arguments", "[kernel-graph]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        auto example           = rocRollerTest::Graphs::VectorAddNegSquare<int>();
+        auto command           = example.getCommand();
+        auto commandParameters = example.getCommandParameters();
+
+        auto one = Expression::literal(1);
+        context->kernel()->setWorkgroupSize({64, 1, 1});
+        context->kernel()->setWorkitemCount({one, one, one});
+
+        auto kgraph = KG::translate(command);
+
+        kgraph = rocRollerTest::transform<KG::LowerLinear>(kgraph, context.get());
+        kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
+        kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
+
+        // Add a new unused argument
+        context->kernel()->addArgument(
+            {"unusedArg", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+
+        // Ensure the unused arg has been added to the kernel successfully
+        CHECK_NOTHROW(context->kernel()->findArgument("unusedArg"));
+
+        kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
+
+        // Verify unused argument is removed after AddDeallocateArguments by
+        // checking an error is thrown when finding it in the kernel.
+        CHECK_THROWS_AS(context->kernel()->findArgument("unusedArg"), FatalError);
     }
 }

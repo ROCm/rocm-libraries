@@ -32,6 +32,7 @@
 
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/DataTypes/DistinctType.hpp>
 #include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduler_fwd.hpp>
 #include <rocRoller/Utilities/Component.hpp>
@@ -41,34 +42,44 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+        struct StreamId final : public DistinctType<uint32_t, StreamId>
+        {
+            StreamId(uint32_t value)
+                : DistinctType<uint32_t, StreamId>(value)
+            {
+            }
+        };
+
+        std::ostream& operator<<(std::ostream& stream, StreamId val);
+
         constexpr bool isNonPreemptibleDependency(Dependency dep);
 
         /**
          * Locking Rules
          *
          * A scheduler has a number of streams which each will yield a sequence of instructions.
-         * The job of the scheduler is to pick (i.e. schedule) the instruction from the beginning 
-	 * of one of the streams, and then repeat until there are no more streams with any 
-	 * instructions left.
+         * The job of the scheduler is to pick (i.e. schedule) the instruction from the beginning
+         * of one of the streams, and then repeat until there are no more streams with any
+         * instructions left.
          *
-         * - If a scheduler schedules a lock for a non-preemptible dependency, 
-	 *   it must continue to select instructions from that same stream 
-	 *   until that lock has been unlocked.
+         * - If a scheduler schedules a lock for a non-preemptible dependency,
+         *   it must continue to select instructions from that same stream
+         *   until that lock has been unlocked.
          * - That stream might include further lock/unlock instructions which
          *   must occur in a last-in, first-out order, those should be treated
          *   as a stack to track when the original lock has been unlocked.
-	 *
-	 * - Dependency rank (low-to-high):
-	 *   Branch (Non-preemptible)
-	 *   M0 (Preemptible)
-	 *   VCC (Preemptible)
-	 *   SCC (Non-preemptible)
+         *
+         * - Dependency rank (low-to-high):
+         *   Branch (Non-preemptible)
+         *   M0 (Preemptible)
+         *   VCC (Preemptible)
+         *   SCC (Non-preemptible)
          *
          * - If a stream yields any kind of lock, it cannot yield a lower-ranked
          *   dependency lock until it releases the higher-ranked dependency lock.
          * - If a scheduler schedules a lock for a preemptible dependency,
-	 *   it cannot schedule the same kind of lock from any other stream 
-	 *   until that lock is released.
+         *   it cannot schedule the same kind of lock from any other stream
+         *   until that lock is released.
          *      Example:
          *          1. Stream 0 locks M0.
          *          2. Stream 1 locks VCC.
@@ -80,9 +91,9 @@ namespace rocRoller
          *          8. Stream 0 unlocks VCC.
          *          9. Stream 0 unlocks M0.
          *
-         * - If a scheduler schedules a lock for a preemptible dependency, 
-	 *   it cannot schedule a lower-ranked non-preemptible dependency lock 
-	 *   from any stream until that lock is released.
+         * - If a scheduler schedules a lock for a preemptible dependency,
+         *   it cannot schedule a lower-ranked non-preemptible dependency lock
+         *   from any stream until that lock is released.
          *      Examples:
          *          - If stream 0 locks M0, and then we see stream 3 try to lock
          *            Branch, we can't pull from stream 3 until stream 0
@@ -97,10 +108,10 @@ namespace rocRoller
             explicit LockState(ContextPtr ctx);
             LockState(ContextPtr ctx, Dependency dependency);
 
-            void add(Instruction const& instr, int streamId);
-            bool isNonPreemptibleStream(int streamId) const;
-            bool isSchedulable(Instruction const& instr, int streamId) const;
-            bool isLocked(Dependency dependency, int streamId) const;
+            void add(Instruction const& instr, StreamId streamId);
+            bool isNonPreemptibleStream(StreamId streamId) const;
+            bool isSchedulable(Instruction const& instr, StreamId streamId) const;
+            bool isLocked(Dependency dependency, StreamId streamId) const;
 
             /**
              * @brief Extra checks to verify lock state integrity.
@@ -108,21 +119,21 @@ namespace rocRoller
              * Note: disabled in Release mode.
              *
              * @param instr The instruction to verify
-         * @param streamId The instruction's stream ID
+             * @param streamId The instruction's stream ID
              */
-            void lockCheck(Instruction const& instr, int streamId) const;
+            void lockCheck(Instruction const& instr, StreamId streamId) const;
 
-            Dependency getTopDependency(int streamId) const;
-            int        getLockDepth(int streamId) const;
+            Dependency getTopDependency(StreamId streamId) const;
+            int        getLockDepth(StreamId streamId) const;
 
         private:
-            void lock(Dependency dep, int streamId);
-            void unlock(Dependency dep, int streamId);
+            void lock(Dependency dep, StreamId streamId);
+            void unlock(Dependency dep, StreamId streamId);
 
-            std::map<int, std::stack<Dependency>> m_streamToStack;
-            std::map<Dependency, int>             m_depToStream;
-            std::unordered_multiset<Dependency>   m_locks;
-            std::optional<int>                    m_nonPreemptibleStream;
+            std::map<StreamId, std::stack<Dependency>> m_streamToStack;
+            std::map<Dependency, StreamId>             m_depToStream;
+            std::unordered_multiset<Dependency>        m_locks;
+            std::optional<StreamId>                    m_nonPreemptibleStream;
 
             std::weak_ptr<rocRoller::Context> m_ctx;
         };
@@ -178,7 +189,7 @@ namespace rocRoller
              * - If that first instruction locks the stream, yields until the stream is unlocked.
              */
             Generator<Instruction> yieldFromStream(Generator<Instruction>::iterator& iter,
-                                                   int                               streamId);
+                                                   StreamId                          streamId);
 
             /**
              * @brief Handles new nodes being added to the instruction streams being scheduled.

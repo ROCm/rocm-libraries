@@ -30,6 +30,10 @@
 
 #  include <unittest/unittest.h>
 
+#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#    include <iterator>
+#  endif
+
 using namespace unittest;
 
 struct SumThree
@@ -79,17 +83,17 @@ struct TestZipFunctionTransform
     device_vector<T> d_result_zip(n);
 
     // Tuple base case
-    transform(make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin(), h_data2.begin())),
-              make_zip_iterator(make_tuple(h_data0.end(), h_data1.end(), h_data2.end())),
+    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
               h_result_tuple.begin(),
               SumThreeTuple{});
     // Zip Function
-    transform(make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin(), h_data2.begin())),
-              make_zip_iterator(make_tuple(h_data0.end(), h_data1.end(), h_data2.end())),
+    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
               h_result_zip.begin(),
               make_zip_function(SumThree{}));
-    transform(make_zip_iterator(make_tuple(d_data0.begin(), d_data1.begin(), d_data2.begin())),
-              make_zip_iterator(make_tuple(d_data0.end(), d_data1.end(), d_data2.end())),
+    transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
+              make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
               d_result_zip.begin(),
               make_zip_function(SumThree{}));
 
@@ -171,13 +175,12 @@ SimpleUnitTest<TestNestedZipFunction, type_list<int, float>> TestNestedZipFuncti
 
 struct SortPred
 {
-  THRUST_DEVICE __forceinline__ bool
+  THRUST_DEVICE THRUST_FORCEINLINE bool
   operator()(const thrust::tuple<thrust::tuple<int, int>, int>& a, const thrust::tuple<thrust::tuple<int, int>, int>& b)
   {
     return thrust::get<1>(a) < thrust::get<1>(b);
   }
 };
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 template <typename T>
 struct TestNestedZipFunction2
 {
@@ -188,11 +191,10 @@ struct TestNestedZipFunction2
     thrust::device_vector<int> C(5);
     auto n = A.size();
 
-    auto tupleIt       = thrust::make_zip_iterator(cuda::std::begin(A), cuda::std::begin(B));
-    auto nestedTupleIt = thrust::make_zip_iterator(tupleIt, cuda::std::begin(C));
+    auto tupleIt       = thrust::make_zip_iterator(_THRUST_STD::begin(A), _THRUST_STD::begin(B));
+    auto nestedTupleIt = thrust::make_zip_iterator(tupleIt, _THRUST_STD::begin(C));
     thrust::sort(nestedTupleIt, nestedTupleIt + n, SortPred{});
   }
 };
 SimpleUnitTest<TestNestedZipFunction2, type_list<int, float>> TestNestedZipFunctionInstance2;
-#  endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #endif // !THRUST_LEGACY_GCC

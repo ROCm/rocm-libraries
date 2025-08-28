@@ -22,6 +22,38 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
+  # TF32 NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      F32XdlMathOp: X
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+      Activation: true
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: true
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      CustomKernels:
+        ["Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950"]
+      ForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[17, 235, 1024], [2, 127, 600], [1], [1, 13, 400]]
+        - BiasTypeArgs: ['s']
+
+  ########################################
   # TF32 TN - standard
   ########################################
   -
@@ -35,7 +67,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       UseBias: 1
-      BiasDataTypeList: [s]  
+      BiasDataTypeList: [s]
       UseScaleAlphaVec: 1
       Activation: true
       ActivationType: hipblaslt_all
@@ -50,5 +82,38 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[17, 235, 1024], [2, 127, 600], [1], [1, 13, 400]]        
+          - Range: [[17, 235, 1024], [2, 127, 600], [1], [1, 13, 400]]
         - BiasTypeArgs: ['s']
+
+  ########################################
+  # TF32 NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      F32XdlMathOp: X
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+      Activation: true
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: true
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      CustomKernels:
+        ["Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950"]
+      ForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[17, 235, 1024], [2, 127, 600], [1], [1, 13, 400]]
+        - BiasTypeArgs: ['s']
+
