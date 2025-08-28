@@ -31,6 +31,7 @@
 
 #include "hipcub/util_allocator.hpp"
 #include <cstdlib>
+#include <hipcub/util_allocator.hpp>
 
 #if __has_include(<valgrind/valgrind.h>)
     #include <valgrind/valgrind.h>
@@ -39,7 +40,9 @@
     #define HAS_VALGRIND_H 0
 #endif
 
-__global__ void EmptyKernel() { }
+__global__
+void EmptyKernel()
+{}
 
 // Hipified test/test_allocator.cu
 

@@ -22,7 +22,7 @@
 
 #include "common_test_header.hpp"
 
-#include "hipcub/warp/warp_scan.hpp"
+#include <hipcub/warp/warp_scan.hpp>
 #include <type_traits>
 
 // Params for tests
