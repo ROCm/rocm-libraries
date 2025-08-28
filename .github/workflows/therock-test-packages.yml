@@ -18,7 +18,7 @@ permissions:
 jobs:
   configure_test_matrix:
     name: "Configure test matrix"
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.test_runs_on }}
     if: ${{ inputs.test_runs_on != '' }}
     outputs:
       components: ${{ steps.configure.outputs.components }}
