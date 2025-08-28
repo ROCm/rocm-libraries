@@ -32,6 +32,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/zip_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -124,7 +131,13 @@ THRUST_NAMESPACE_BEGIN
  *  \see get
  */
 template <typename IteratorTuple>
+#if !defined(THRUST_DOXYGEN_INVOKED)                    \
+  && (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC \
+      || (defined(__has_declspec_attribute) && __has_declspec_attribute(empty_bases)))
+class __declspec(empty_bases) zip_iterator : public detail::zip_iterator_base<IteratorTuple>::type
+#else
 class zip_iterator : public detail::zip_iterator_base<IteratorTuple>::type
+#endif
 {
 public:
   /*! The underlying iterator tuple type. Alias to zip_iterator's first template argument.
@@ -170,7 +183,7 @@ public:
 private:
   using super_t = typename detail::zip_iterator_base<IteratorTuple>::type;
 
-  friend class thrust::iterator_core_access;
+  friend class iterator_core_access;
 
   // Dereferencing returns a tuple built from the dereferenced
   // iterators in the iterator tuple.

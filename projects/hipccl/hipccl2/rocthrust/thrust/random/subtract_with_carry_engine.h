@@ -23,6 +23,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/random/detail/random_core_access.h>
 
 #include <cstddef> // for size_t
@@ -112,7 +120,7 @@ public:
   /*! This constructor, which optionally accepts a seed, initializes a new
    *  \p subtract_with_carry_engine.
    *
-   *  \param value The seed used to intialize this \p subtract_with_carry_engine's state.
+   *  \param value The seed used to initialize this \p subtract_with_carry_engine's state.
    */
   THRUST_HOST_DEVICE explicit subtract_with_carry_engine(result_type value = default_seed);
 
