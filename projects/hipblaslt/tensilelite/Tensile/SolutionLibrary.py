@@ -312,8 +312,7 @@ class PredicateLibrary:
             self.rows.sort(key=lambda x: len(x["library"].filenamePrefix))
         else:
             # Sort to ensure consistent fallback logic.
-            pred_order = {"EqualityMatching": 0, "RangeMatching": 1, "FreeSizeMatching": 2}
-            self.rows.sort(key=lambda x: pred_order.get(x["predicate"].tag, x["predicate"]))
+            self.rows.sort(key=lambda x: x["predicate"])
 
     def remapSolutionIndices(self, indexMap):
         for row in self.rows:

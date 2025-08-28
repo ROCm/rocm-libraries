@@ -935,14 +935,14 @@ namespace TensileLite
             {
                 for(const auto& row : table)
                 {
-                    if((row.key[0] == -1 || key[0] >= row.key[0]) &&  // N >= N_min
-                       (row.key[1] == -1 || key[1] <= row.key[1]) &&  // N <= N_max
-                       (row.key[2] == -1 || key[2] >= row.key[2]) &&  // M >= M_min
-                       (row.key[3] == -1 || key[3] <= row.key[3]) &&  // M <= M_max
+                    if((row.key[0] == -1 || key[0] >= row.key[0]) &&  // M >= M_min
+                       (row.key[1] == -1 || key[1] <= row.key[1]) &&  // M <= M_max
+                       (row.key[2] == -1 || key[2] >= row.key[2]) &&  // N >= N_min
+                       (row.key[3] == -1 || key[3] <= row.key[3]) &&  // N <= N_max
                        (row.key[4] == -1 || key[4] >= row.key[4]) &&  // batch >= batch_min
-                       (row.key[5] == -1 || key[5] <= row.key[5]) &&  // batch <= batch_min
+                       (row.key[5] == -1 || key[5] <= row.key[5]) &&  // batch <= batch_max
                        (row.key[6] == -1 || key[6] >= row.key[6]) &&  // K >= K_min
-                       (row.key[7] == -1 || key[7] <= row.key[7]))    // K <= Kmax
+                       (row.key[7] == -1 || key[7] <= row.key[7]))    // K <= K_max
                     {
                         return std::make_tuple(transform(row.value), 0.0);
                     }
