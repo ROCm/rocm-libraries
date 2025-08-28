@@ -105,8 +105,6 @@ namespace mxDataGeneratorTest
                        BFloat16,
                        float)
     {
-        mxDataGeneratorTest t;
-
         SUPPORTED_ARCH_SECTION(arch)
         {
             const int dim1 = 1024;
@@ -178,8 +176,6 @@ namespace mxDataGeneratorTest
         BFloat16,
         float)
     {
-        mxDataGeneratorTest t;
-
         SUPPORTED_ARCH_SECTION(arch)
         {
             const int   dim1         = 32;
