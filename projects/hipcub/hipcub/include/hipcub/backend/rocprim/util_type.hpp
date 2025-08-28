@@ -196,9 +196,12 @@ using is_integral_or_enum =
 
 }
 
-template <typename NumeratorT, typename DenominatorT>
+// CUB deprecated this API, and suggests to use `::cuda::ceil_div` instead,
+// which is implemented in file `libcudacxx/include/cuda/__cmath/ceil_div.h`.
+template<typename NumeratorT, typename DenominatorT>
+HIPCUB_DEPRECATED_BECAUSE("Use hip::ceil_div instead from 'libhipcxx'")
 HIPCUB_HOST_DEVICE __forceinline__ constexpr NumeratorT
-DivideAndRoundUp(NumeratorT n, DenominatorT d)
+    DivideAndRoundUp(NumeratorT n, DenominatorT d)
 {
   static_assert(hipcub::detail::is_integral_or_enum<NumeratorT>::value &&
                 hipcub::detail::is_integral_or_enum<DenominatorT>::value,

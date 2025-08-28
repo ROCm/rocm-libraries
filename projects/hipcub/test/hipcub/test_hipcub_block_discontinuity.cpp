@@ -23,10 +23,10 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_discontinuity.hpp"
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/thread/thread_operators.hpp"
+#include <hipcub/block/block_discontinuity.hpp>
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
 template<class T, class Flag, unsigned int BlockSize, unsigned int ItemsPerThread, class FlagOp>
 struct params
