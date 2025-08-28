@@ -13,8 +13,7 @@
 function(add_subdirectory_with_message _subdir)
     cmake_parse_arguments(ARG "" "EXPECT_TARGET" "" ${ARGN})
 
-    message(STATUS "[rocm-libraries] Configuring ${_subdir}")
-
+    list(APPEND CMAKE_MESSAGE_CONTEXT "${_subdir}")
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/${_subdir}")
 
     if(${ARG_EXPECT_TARGET} AND NOT TARGET ${ARG_EXPECT_TARGET})
@@ -23,4 +22,5 @@ function(add_subdirectory_with_message _subdir)
                 "[rocm-libraries] Expected target ${ARG_EXPECT_TARGET} not found in ${_subdir}"
         )
     endif()
+    list(POP_BACK CMAKE_MESSAGE_CONTEXT)
 endfunction()

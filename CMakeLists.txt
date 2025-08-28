@@ -45,6 +45,8 @@ disableable_option(ENABLE_HIPSPARSELT "Enable hipsparselt" OFF)
 # are reasonable and should be addressed.
 option(ROCM_WARN_TOOLCHAIN_VAR "Warn if the toolchain version is not supported" OFF)
 
+option(CMAKE_MESSAGE_CONTEXT_SHOW "Show the context of the message" ON)
+
 # --- Add subdirectories ---
 
 if(ENABLE_MXDATAGENERATOR)
