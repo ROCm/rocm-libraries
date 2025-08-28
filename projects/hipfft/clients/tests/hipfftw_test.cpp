@@ -122,15 +122,6 @@ namespace
         }
         return ret;
     }
-    int get_random_integer(const int min_val, const int max_val)
-    {
-        if(min_val > max_val)
-            throw std::invalid_argument("invalid bounds for get_random_integer");
-        std::uniform_int_distribution<int> int_rng(min_val, max_val);
-
-        return int_rng(get_pseudo_rng());
-    }
-
     template <bool validity_flag, typename type_to_consider_for_validity>
     std::vector<ptrdiff_t>
         get_random_lengths(int       desired_rank,
@@ -1471,12 +1462,6 @@ namespace
         }
     };
 
-    hipfftw_data_memory_type get_random_data_mem_type()
-    {
-        const auto& options = get_possible_data_mem_types();
-        return options[get_random_idx(options.size())];
-    };
-
     template <fft_precision prec>
     struct hipfftw_functional_validation_params
     {
@@ -2125,13 +2110,21 @@ TEST(hipfftw_test, utility_functions)
 }
 
 INSTANTIATE_TEST_SUITE_P(
+#ifdef __HIP_PLATFORM_AMD__
     hipfftw_test,
+#else
+    DISABLED_hipfftw_test,
+#endif
     allocation_sp,
     ::testing::ValuesIn(params_for_testing_hipfftw_malloc<fft_precision_single>()),
     allocation_sp::TestName);
 
 INSTANTIATE_TEST_SUITE_P(
+#ifdef __HIP_PLATFORM_AMD__
     hipfftw_test,
+#else
+    DISABLED_hipfftw_test,
+#endif
     allocation_dp,
     ::testing::ValuesIn(params_for_testing_hipfftw_malloc<fft_precision_double>()),
     allocation_dp::TestName);
@@ -2148,12 +2141,21 @@ TEST_P(argument_validation_dp, creation_and_execution)
 }
 
 INSTANTIATE_TEST_SUITE_P(
+#ifdef __HIP_PLATFORM_AMD__
     hipfftw_test,
+#else
+    DISABLED_hipfftw_test,
+#endif
     argument_validation_sp,
     ::testing::ValuesIn(params_for_testing_input_validation_params<fft_precision_single>()),
     argument_validation_sp::TestName);
+
 INSTANTIATE_TEST_SUITE_P(
+#ifdef __HIP_PLATFORM_AMD__
     hipfftw_test,
+#else
+    DISABLED_hipfftw_test,
+#endif
     argument_validation_dp,
     ::testing::ValuesIn(params_for_testing_input_validation_params<fft_precision_double>()),
     argument_validation_dp::TestName);

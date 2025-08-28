@@ -75,13 +75,17 @@ private:
 
     dynamically_loaded_hipfftw()
     {
+#ifdef __HIP_PLATFORM_AMD__
         const std::string lib_basename = "hipfftw";
+#else
+        const std::string lib_basename = "cufftw";
+#endif
 #ifdef WIN32
         const std::string lib_fullame = lib_basename + ".dll";
         lib_handle                    = LoadLibraryA(lib_fullame.c_str());
 #else
-        const std::string lib_fullame = "lib" + lib_basename + ".so";
-        lib_handle                    = dlopen(lib_fullame.c_str(), RTLD_LAZY);
+        const std::string lib_fullame  = "lib" + lib_basename + ".so";
+        lib_handle                     = dlopen(lib_fullame.c_str(), RTLD_LAZY);
 #endif
         load_error_info.clear();
         if(!lib_handle)
@@ -322,6 +326,7 @@ public:
         : active(false)
         , original_cerr_rdbuf(std::cerr.rdbuf())
     {
+#ifdef __HIP_PLATFORM_AMD__
         const auto env_val = rocfft_getenv("HIPFFTW_LOG_EXCEPTIONS");
         // activate temporary redirection only if not already used otherwise
         // (e.g., in test user's environment )
@@ -332,6 +337,7 @@ public:
             const auto temp_env_val = rocfft_getenv("HIPFFTW_LOG_EXCEPTIONS");
             active                  = !temp_env_val.empty() && std::stoull(temp_env_val) != 0;
         }
+#endif
         if(active)
             std::cerr.rdbuf(buffer.rdbuf());
     }
