@@ -266,8 +266,8 @@ namespace rocRoller
         {
             BitFieldCombine() = default;
 
-            BitFieldCombine(ExpressionPtr       src,
-                            ExpressionPtr       dst,
+            BitFieldCombine(ExpressionPtr       src /* lhs */,
+                            ExpressionPtr       dst /* rhs */,
                             int                 srcOffset,
                             int                 dstOffset,
                             int                 width,
@@ -299,10 +299,13 @@ namespace rocRoller
                 return *this;
             }
 
-            int                 srcOffset;
-            int                 dstOffset;
-            int                 width;
+            int srcOffset;
+            int dstOffset;
+            int width;
+
+            // if srcIsZero sets to true, that means bits outside [srcOffset:srcOffset+width-1] are 0
             std::optional<bool> srcIsZero;
+            // if dstIsZero sets to true, that means bits [dstOffset:dstOffset+width-1] are 0
             std::optional<bool> dstIsZero;
 
             constexpr static inline auto                Type = Category::Arithmetic;
