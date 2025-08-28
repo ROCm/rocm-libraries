@@ -79,11 +79,11 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ../ --projects \
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ${{ github.workspace }} --projects \
             hipBLAS-common \
             hipBLAS \
             hipBLASLt \
-            rocBLAS 
+            rocBLAS
 
       - name: Configure Projects
         env:
