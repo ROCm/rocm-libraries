@@ -110,7 +110,7 @@ if(HIPSPARSELT_ENABLE_MARKER)
     if(HIPSPARSELT_ENABLE_CUDA)
         message(FATAL_ERROR "rocTracer marker is not supported with CUDA backend.")
     else()
-        find_library(ROCTX64_LIBRARY REQUIRED NAMES roctx64 libroctx64)
+        find_library(ROCTX64_LIBRARY REQUIRED HINTS lib NAMES roctx64 libroctx64)
     endif()
 endif()
 
