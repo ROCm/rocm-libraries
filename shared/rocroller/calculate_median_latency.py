@@ -37,7 +37,7 @@ def find_csv_files(directory):
 
 
 def calculate_median_latency(csv_file):
-    """Calculate median latency divided by median hitcount from a CSV file."""
+    """Calculate mode latency divided by mode hitcount from a CSV file."""
     latencies = []
     hitcounts = []
 
@@ -54,11 +54,11 @@ def calculate_median_latency(csv_file):
                     hitcounts.append(hitcount)
 
         if latencies and hitcounts:
-            median_latency = statistics.mode(latencies)
-            median_hitcount = statistics.mode(hitcounts)
+            mode_latency = statistics.mode(latencies)
+            mode_hitcount = statistics.mode(hitcounts)
             # Avoid division by zero
-            if median_hitcount > 0:
-                return median_latency / median_hitcount
+            if mode_hitcount > 0:
+                return mode_latency / mode_hitcount
             else:
                 return None
         else:
@@ -72,7 +72,7 @@ def calculate_median_latency(csv_file):
 def main():
     """Main function to process all CSV files."""
     parser = argparse.ArgumentParser(
-        description="Calculate median latency from CSV files in a directory"
+        description="Calculate mode latency from CSV files in a directory"
     )
     parser.add_argument(
         "directory",
@@ -95,21 +95,23 @@ def main():
         return
 
     print(f"Found {len(csv_files)} CSV files to process\n")
-    print("-" * 80)
-    print(f"{'File Path':<60} {'Med Latency/Med Hitcount':>25}")
-    print("-" * 80)
+    print("-" * 100)
+    print(f"{'Latency':>10} | {'Directory':<35} | {'Full Path':<50}")
+    print("-" * 100)
 
     for csv_file in csv_files:
-        # Get relative path for cleaner output
-        relative_path = os.path.relpath(csv_file, output_dir)
+        # Get absolute path
+        absolute_path = os.path.abspath(csv_file)
+        # Extract directory name (e.g., ds_read_b32_stride_1)
+        dir_name = os.path.basename(os.path.dirname(csv_file))
         median_latency = calculate_median_latency(csv_file)
 
         if median_latency is not None:
-            print(f"{relative_path:<60} {median_latency:>25.1f}")
+            print(f"{median_latency:>10.1f} | {dir_name:<35} | {absolute_path}")
         else:
-            print(f"{relative_path:<60} {'N/A':>25}")
+            print(f"{'N/A':>10} | {dir_name:<35} | {absolute_path}")
 
-    print("-" * 80)
+    print("-" * 100)
 
 
 if __name__ == "__main__":
