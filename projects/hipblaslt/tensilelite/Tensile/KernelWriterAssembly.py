@@ -6595,6 +6595,8 @@ class KernelWriterAssembly(KernelWriter):
         vsize = self.states.a.startVgprLocalReadAddr + self.states.a.numVgprLocalReadAddr - vbegin
       if self.states.b.startVgprLocalReadAddr > self.states.lastVgprForReads:
         vsize = self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr - vbegin
+      if self.states.m.startVgprLocalReadAddr > self.states.lastVgprForReads:
+        vsize = self.states.m.startVgprLocalReadAddr + self.states.m.numVgprLocalReadAddr - vbegin        
       self.vgprPool.add(vbegin, vsize, "endSummation")
       module.addComment0("endSummation: add vgpr [%u...%u) to pool" % \
                         (vbegin, vbegin+vsize))
