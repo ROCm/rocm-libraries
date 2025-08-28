@@ -1363,7 +1363,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
 
     // Need to split into two for loop to calculate the rotating buffer
-    int64_t totalRotatingSizeNeeded = 0, totalRotatingSizeRead = 0;
+    int64_t totalRotatingSizeNeeded = 0;
     for(int i = 0; i < gemm_count; i++)
     {
         M[i] = arg.M[i];
@@ -1489,12 +1489,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         auto    biasSize = size_bias[i] * realDataTypeSize(Tbias);
         int64_t sizeC    = get_computeInterface(h_beta[i], Tc) == 0 ? 0 : size_C[i] * sizeof(To);
         totalRotatingSizeNeeded
-            += size_dA[i] * realDataTypeSize(TiA) + size_dB[i] * realDataTypeSize(TiB) + sizeC
-               + size_D[i] * realDataTypeSize(To) + size_E[i] * realDataTypeSize(To) + biasSize
-               + size_scaleAlphaVec[i] * realDataTypeSize(Talpha)
-               + size_scaleAVec[i] * realDataTypeSize(Talpha)
-               + size_scaleBVec[i] * realDataTypeSize(Talpha);
-        totalRotatingSizeRead
             += (size_dA[i] * realDataTypeSizeBits(TiA) + 8 - 1) / 8
                + (size_B[i] * realDataTypeSizeBits(TiB) + 8 - 1) / 8 + sizeC
                + size_D[i] * realDataTypeSize(To) + size_E[i] * realDataTypeSize(To) + biasSize
@@ -1503,7 +1497,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                + size_scaleBVec[i] * ((arg.scaleB == hipblaslt_scaling_format::Block) ? 1 : realDataTypeSize(Talpha));
     }
 
-    gpu_mem_gbytes = static_cast<double>(totalRotatingSizeRead) / (1024 * 1024 * 1024);
+    gpu_mem_gbytes = static_cast<double>(totalRotatingSizeNeeded) / (1024 * 1024 * 1024);
 
     // Calculating block count
     int32_t max_iters   = max(arg.cold_iters, arg.iters);
