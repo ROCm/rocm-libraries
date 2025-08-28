@@ -17,8 +17,11 @@
 
 #include <thrust/detail/config.h>
 
+// need to suppress deprecation warnings inside a lot of thrust headers
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 // Disabled on MSVC && NVCC < 11.1 for GH issue #1098.
-#if defined(_CCCL_COMPILER_MSVC) && defined(__CUDACC__)
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && defined(__CUDACC__)
 #  if (__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 1)
 #    define THRUST_BUG_1098_ACTIVE
 #  endif // NVCC version check
@@ -102,7 +105,7 @@ struct test_async_sort
   template <typename T>
   struct tester
   {
-    THRUST_HOST_DEVICE void operator()(std::size_t n)
+    THRUST_HOST void operator()(std::size_t n)
     {
       thrust::host_vector<T> h0_data(unittest::random_integers<T>(n));
       thrust::device_vector<T> d0_data(h0_data);
@@ -192,3 +195,8 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
 // TODO: Test future return type.
 
 #endif
+
+// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC

@@ -182,9 +182,9 @@ rocblas_status rocsolver_larfg_getMemorySize(const I n,
         // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
         int device;
         HIP_CHECK(hipGetDevice(&device));
-        hipDeviceProp_t deviceProperties;
-        HIP_CHECK(hipGetDeviceProperties(&deviceProperties, device));
-        if(deviceProperties.warpSize >= 64)
+        hipDeviceProp_t props;
+        HIP_CHECK(hipGetDeviceProperties(&props, device));
+        if(props.warpSize >= 64)
             return rocblas_status_success;
     }
 
@@ -273,11 +273,8 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     if(true)
     {
         // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
-        int device;
-        HIP_CHECK(hipGetDevice(&device));
-        hipDeviceProp_t deviceProperties;
-        HIP_CHECK(hipGetDeviceProperties(&deviceProperties, device));
-        if(deviceProperties.warpSize >= 64)
+        const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+        if(props->warpSize >= 64)
         {
             return larfg_run_small(handle, n, alpha, shifta, stridex, beta, shiftb, strideb, x,
                                    shiftx, incx, stridex, tau, strideP, batch_count);

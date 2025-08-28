@@ -739,27 +739,29 @@ namespace TensileLite
                     skTiles = min(skTiles, tiles);
                 }
 
-                // If we have reached the maxGridLimit
-                if(skGrid == 65535)
-                {
-                    skTiles = 65535;
-                }
-
                 uint32_t skItersPerWG = skTiles * itersPerTile / skGrid;
                 uint32_t skExtraIters = skTiles * itersPerTile % (skGrid);
 
-                // Pack skGrid and skTiles into a single uint32_t such that the upper 16 bits
-                // represent skGrid and the lower 16 bits represent skTiles
-                uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);                
-                if(skGrid > 65535 || skTiles > 65535)
+                if(sizeMapping.customKernelName.empty())
                 {
-                    // We should never reach here
-                    throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid",       skGrid);
+                    args.template append<uint32_t>("skTiles",      skTiles);
+                    args.template append<uint32_t>("skExtraIters", skExtraIters);
                 }
+                else
+                {
+                    uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);
+                    // safe guard
+                    if(skGrid > 65535 || skTiles > 65535)
+                    {
+                        throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
+                    }
 
-                args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
-                args.template append<uint32_t>("skExtraIters", skExtraIters);
+                    args.template append<uint32_t>("SKItersPerWG",   skItersPerWG);
+                    args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
+                    args.template append<uint32_t>("skExtraIters",   skExtraIters);
+                }
             }
         }
 
@@ -3078,12 +3080,6 @@ namespace TensileLite
             skGrid = cuCount;
         }
 
-        size_t maxSkGrid = 65535; // We should be able to store it in 16 bits
-        if(skGrid > maxSkGrid)
-        {
-            skGrid = maxSkGrid;
-        }
-        
         return skGrid;
     }
 
