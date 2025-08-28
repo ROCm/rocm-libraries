@@ -43,7 +43,9 @@
 #include "norm.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
+#include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <functional>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -169,7 +171,7 @@ void swizzle_tensor(T*               dst,
         auto orgTensor = Tensor::create<T>({b, k, m});
         for(size_t i = 0; i < b * k; i++)
         {
-            memcpy(orgTensor.template as<T>() + (i * m), src + (i * ld), m * sizeof(T));
+            std::copy(src + (i * ld), src + (i * ld) + m, orgTensor.template as<T>() + (i * m));
         }
         tmpTensor = permute(orgTensor, {0, 2, 1});
     }
@@ -177,7 +179,7 @@ void swizzle_tensor(T*               dst,
     {
         for(size_t i = 0; i < b * m; i++)
         {
-            memcpy(tmpTensor.template as<T>() + (i * k), src + (i * ld), k * sizeof(T));
+            std::copy(src + (i * ld), src + (i * ld) + k, tmpTensor.template as<T>() + (i * k));
         }
     }
 
@@ -190,7 +192,7 @@ void swizzle_tensor(T*               dst,
     paddedTensor.reshape(
         {b, paddedM / MiM, MiM, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK});
     Tensor permuted = permute(paddedTensor, {0, 1, 3, 4, 2, 5});
-    memcpy(dst, permuted.template as<void>(), b * paddedM * paddedK * sizeof(T));
+    std::copy(permuted.template as<T>(), permuted.template as<T>() + (b * paddedM * paddedK), dst);
 }
 
 void swizzle_tensor_type(HipHostBuffer&       dst,
@@ -430,9 +432,9 @@ void epilogue_func(int64_t     m,
             for(int j = 0; j < n; j++)
             {
                 CALCULATE_EPILOGUE_ACT;
-                *amaxD = *amaxD > fabs(static_cast<Tc>(in_Tact_act))
+                *amaxD = *amaxD > std::abs(static_cast<Tc>(in_Tact_act))
                              ? *amaxD
-                             : fabs(static_cast<Tc>(in_Tact_act));
+                             : std::abs(static_cast<Tc>(in_Tact_act));
                 saturate_cast_to_type(out, in_Tact_act * scaleD, To, pos);
                 *(out_raw + pos) = static_cast<Tc>(in_Tact_act * scaleD);
             }
@@ -580,7 +582,7 @@ void epilogue_func(int64_t     m,
             {
                 CALCULATE_EPILOGUE_BASIC;
                 *amaxD
-                    = *amaxD > fabs(static_cast<Tc>(temp)) ? *amaxD : fabs(static_cast<Tc>(temp));
+                    = *amaxD > std::abs(static_cast<Tc>(temp)) ? *amaxD : std::abs(static_cast<Tc>(temp));
                 temp *= scaleD;
                 saturate_cast_to_type(out, temp, To, pos);
                 *(out_raw + pos) = static_cast<Tc>(temp);
