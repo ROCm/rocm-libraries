@@ -947,3 +947,38 @@ TEST_CASE("LowerUnsignedArithmeticShiftR ExpressionTransformation works",
         CHECK_THAT(lowerUnsignedArithmeticShiftR(expr), IdenticalTo(expr));
     }
 }
+
+TEST_CASE("BitFieldCombine epxression and lowering",
+          "[expression][expression-transformation][a123]")
+{
+    using namespace rocRoller;
+
+    auto context = TestContext::ForDefaultTarget();
+
+    Register::AllocationOptions allocOptions{.contiguousChunkWidth = Register::FULLY_CONTIGUOUS};
+
+    auto src = std::make_shared<Register::Value>(
+        context.get(), Register::Type::Vector, DataType::UInt32, 1, allocOptions);
+    src->allocateNow();
+    auto srcExpr = src->expression();
+
+    auto dst = std::make_shared<Register::Value>(
+        context.get(), Register::Type::Vector, DataType::UInt32, 1, allocOptions);
+    dst->allocateNow();
+    auto dstExpr = dst->expression();
+
+    SECTION("Lowering")
+    {
+        auto srcOffset = 10u;
+        auto dstOffset = 4u;
+        auto width     = 7u;
+
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width));
+
+        auto expected = (Expression::literal(((1u << width) - 1u) << srcOffset) & srcExpr)
+                        | (~Expression::literal(((1u << width) - 1u) << dstOffset) & dstExpr);
+
+        CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
+    }
+}
