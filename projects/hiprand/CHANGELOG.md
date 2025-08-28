@@ -3,6 +3,13 @@
 Documentation for hipRAND is available at
 [https://rocm.docs.amd.com/projects/hipRAND/en/latest/](https://rocm.docs.amd.com/projects/hipRAND/en/latest/).
 
+## hipRAND 3.1.0 for ROCm 7.1
+
+### Resolved issues
+
+* Updated error handling for several hipRAND unit tests to accomodate the new hipGetLastError behaviour that was introduced in ROCm 7.0.
+As of ROCm 7.0, the internal error state is cleared on each call to `hipGetLastError` rather than on every HIP API call.
+
 ## hipRAND 3.0.0 for ROCm 7.0
 
 ### Added
