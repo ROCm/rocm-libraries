@@ -192,14 +192,13 @@ namespace TensileLite
                                                        MI_M,
                                                        MI_N,
                                                        MI_K,
-                                                       split,
-                                                       H_L2,
                                                        element_size_A, //ElementSizeA
                                                        element_size_B, //ElementSizeB
                                                        element_size_out, //ElementSizeout
                                                        miDataType,
-                                                       WGM,
                                                        mx_block_size,
+                                                       WGM,
+                                                       split,
                                                        debug);
 
                 if(latency < best_latency)
@@ -256,7 +255,6 @@ namespace TensileLite
                               << ", MI_K=" << MI_K << "\n";
                 }
 
-                size_t split = 1;
                 if(check_LDS_capacity(hardware, MT_M, MT_N, MT_K, element_size_A, debug))
                 {
                     double Total_latency = compute_total_latency(hardware,
@@ -272,14 +270,13 @@ namespace TensileLite
                                                                  MI_M,
                                                                  MI_N,
                                                                  MI_K,
-                                                                 split,
-                                                                 H_L2,
                                                                  element_size_A,
                                                                  element_size_B,
                                                                  element_size_out,
                                                                  miDataType,
-                                                                 WGM,
                                                                  mx_block_size,
+                                                                 WGM,
+                                                                 0, // split will be picked automatically
                                                                  debug);
 
                     valid_results.emplace_back(
@@ -532,15 +529,14 @@ namespace TensileLite
                                                 MI_M,
                                                 MI_N,
                                                 MI_K,
-                                                split, //Split
-                                                H_L2, //H_mem1
                                                 element_size * 8, //Element Size A
                                                 element_size * 8, //Element Size B
                                                 element_size * 8, //Element Size out
                                                 miDataType,
-                                                WGM, //WGM
-                                                mx_block_size, //mx_block_size
-                                                debug); //debug
+                                                mx_block_size,
+                                                WGM,
+                                                split,
+                                                debug);
 
                     results.push_back(
                         std::make_tuple(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K));

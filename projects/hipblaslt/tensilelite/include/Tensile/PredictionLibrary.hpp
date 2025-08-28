@@ -165,6 +165,10 @@ namespace TensileLite
             size_t elementSizeC_bits
                 = problem.c().elementBytes() * 8;
             const analytical::Hardware& analaytical_hardware = *(pAMDGPU->analyticalHardware);
+            if(analytical::Hardware::is_debug_enabled())
+            {
+                analaytical_hardware.print();
+            }
             int WGM
                 = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
             analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
@@ -183,8 +187,8 @@ namespace TensileLite
                 elementSizeB_bits,
                 elementSizeC_bits,
                 miDataType,
-                0, //mx_block_size -> MX Data types come from rocroller.
-                0.8,
+                0,   // mx_block_size -> MX Data types come from rocroller.
+                0.8, // L2 hit-rate (not used anymore -- should be removed)
                 debug,
                 false,
                 WGM);
