@@ -177,7 +177,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
             FetchContent_Declare(
                 rocRoller
                 GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-                GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
+                GIT_TAG 8b6adc048bd845430cb017fbcd85e450e0f68b04
             )
             FetchContent_MakeAvailable(rocRoller)
         endblock()
