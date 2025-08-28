@@ -112,6 +112,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
             hipblaslt::hipblaslt-clients-common
             GTest::gtest
             OpenMP::OpenMP_CXX
+            origami::origami
     )
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
