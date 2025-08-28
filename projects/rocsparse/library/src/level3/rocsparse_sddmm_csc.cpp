@@ -24,6 +24,12 @@
 #include "../conversion/rocsparse_csx2dense_impl.hpp"
 #include "rocsparse_sddmm_csx_kernel.hpp"
 
+inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
+{
+    os_ << (float)that_;
+    return os_;
+}
+
 template <typename T, typename I, typename J, typename A, typename B, typename C>
 struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
 {

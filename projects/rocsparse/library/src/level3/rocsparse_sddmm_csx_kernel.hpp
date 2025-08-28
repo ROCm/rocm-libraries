@@ -30,8 +30,8 @@
 
 namespace rocsparse
 {
-    template <rocsparse_int       BLOCKSIZE,
-              rocsparse_int       NTHREADS_PER_DOTPRODUCT,
+    template <uint32_t       BLOCKSIZE,
+              uint32_t       NTHREADS_PER_DOTPRODUCT,
               rocsparse_direction DIRECTION,
               typename T,
               typename I,
@@ -64,19 +64,16 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
         {
-            return;
+           return;
         }
 
-        //
         // Each group treats one row/column.
-        //
-        static constexpr rocsparse_int NUM_SEQS        = (BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
+        static constexpr uint32_t NUM_SEQS        = (BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
         const I                        local_seq_index = hipThreadIdx_x / NTHREADS_PER_DOTPRODUCT;
         const I               local_thread_index       = hipThreadIdx_x % NTHREADS_PER_DOTPRODUCT;
         const I               tid                      = hipBlockIdx_x * NUM_SEQS + local_seq_index;
         static constexpr bool row_oriented             = (DIRECTION == rocsparse_direction_row);
-#define BOUND ((row_oriented) ? M : N)
-        if(tid >= BOUND)
+        if(tid >= ((row_oriented) ? M : N))
         {
             return;
         }
@@ -92,7 +89,8 @@ namespace rocsparse
         const int64_t xinc = (row_oriented) ? incx : incy;
         const int64_t yinc = (row_oriented) ? incy : incx;
 
-        __shared__ T s[NUM_SEQS][NTHREADS_PER_DOTPRODUCT];
+        const I start = csx_ptr[tid] - csx_base;
+        const I end = csx_ptr[tid + 1] - csx_base;
 
         if(row_oriented)
         {
@@ -101,10 +99,10 @@ namespace rocsparse
                                                                       : (dense_A + lda * tid))
                               : ((transA == rocsparse_operation_none) ? (dense_A + lda * tid)
                                                                       : (dense_A + tid)));
-
-            for(I at = csx_ptr[tid] - csx_base; at < csx_ptr[tid + 1] - csx_base; ++at)
+                                                                      
+            for(I at = start; at < end; ++at)
             {
-                I        ind = csx_ind[at] - csx_base;
+                const I        ind = csx_ind[at] - csx_base;
                 const B* y   = ((orderB == rocsparse_order_column)
                                     ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * ind)
                                                                             : (dense_B + ind))
@@ -114,26 +112,14 @@ namespace rocsparse
                 T sum = static_cast<T>(0);
                 for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
                 {
-                    sum += x[k * xinc] * y[k * yinc];
-                }
-                s[local_seq_index][local_thread_index] = sum;
-                __syncthreads();
-
-#pragma unroll
-                for(int ipow2_ = 2; ipow2_ <= NTHREADS_PER_DOTPRODUCT; ipow2_ *= 2)
-                {
-                    if(local_thread_index < NTHREADS_PER_DOTPRODUCT / ipow2_)
-                    {
-                        s[local_seq_index][local_thread_index]
-                            += s[local_seq_index]
-                                [local_thread_index + NTHREADS_PER_DOTPRODUCT / ipow2_];
-                    }
-                    __syncthreads();
+                    sum = rocsparse::fma<T>(x[k * xinc],  y[k * yinc], sum);
                 }
 
-                if(local_thread_index == 0)
+                sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+
+                if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)
                 {
-                    csx_val[at] = beta * csx_val[at] + alpha * s[local_seq_index][0];
+                    csx_val[at] = beta * csx_val[at] + alpha * sum;
                 }
             }
         }
@@ -145,9 +131,9 @@ namespace rocsparse
                               : ((transB == rocsparse_operation_none) ? (dense_B + tid)
                                                                       : (dense_B + ldb * tid)));
 
-            for(I at = csx_ptr[tid] - csx_base; at < csx_ptr[tid + 1] - csx_base; ++at)
+            for(I at = start; at < end; ++at)
             {
-                I        ind = csx_ind[at] - csx_base;
+                const I        ind = csx_ind[at] - csx_base;
                 const A* y   = ((orderA == rocsparse_order_column)
                                     ? ((transA == rocsparse_operation_none) ? (dense_A + ind)
                                                                             : (dense_A + lda * ind))
@@ -157,26 +143,166 @@ namespace rocsparse
                 T sum = static_cast<T>(0);
                 for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
                 {
-                    sum += x[k * xinc] * y[k * yinc];
-                }
-                s[local_seq_index][local_thread_index] = sum;
-                __syncthreads();
-
-#pragma unroll
-                for(int ipow2_ = 2; ipow2_ <= NTHREADS_PER_DOTPRODUCT; ipow2_ *= 2)
-                {
-                    if(local_thread_index < NTHREADS_PER_DOTPRODUCT / ipow2_)
-                    {
-                        s[local_seq_index][local_thread_index]
-                            += s[local_seq_index]
-                                [local_thread_index + NTHREADS_PER_DOTPRODUCT / ipow2_];
-                    }
-                    __syncthreads();
+                    sum = rocsparse::fma<T>(x[k * xinc], y[k * yinc], sum);
                 }
 
-                if(local_thread_index == 0)
+                sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+
+                if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)
                 {
-                    csx_val[at] = beta * csx_val[at] + alpha * s[local_seq_index][0];
+                    csx_val[at] = beta * csx_val[at] + alpha * sum;
+                }
+            }
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    template <uint32_t       BLOCKSIZE,
+              uint32_t       WFSIZE,
+              uint32_t       NTHREADS_PER_DOTPRODUCT,
+              rocsparse_direction DIRECTION,
+              typename T,
+              typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void sddmm_csx_kernel_wavefront_per_row(rocsparse_operation transA,
+                          rocsparse_operation transB,
+                          rocsparse_order     orderA,
+                          rocsparse_order     orderB,
+                          J                   M,
+                          J                   N,
+                          J                   K,
+                          I                   nnz,
+                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                          const A* __restrict__ dense_A,
+                          int64_t lda,
+                          const B* __restrict__ dense_B,
+                          int64_t ldb,
+                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                          C* __restrict__ csx_val,
+                          const I* __restrict__ csx_ptr,
+                          const J* __restrict__ csx_ind,
+                          rocsparse_index_base csx_base,
+                          bool                 is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
+        {
+           return;
+        }
+
+        // Each wavefront treats one row/column.
+        static constexpr uint32_t NUM_SEQS  = (WFSIZE / NTHREADS_PER_DOTPRODUCT);
+        const uint32_t        bid           = hipBlockIdx_x;
+        const uint32_t        tid           = hipThreadIdx_x;
+        const uint32_t        wid           = tid / WFSIZE;
+        const uint32_t        lid           = tid % WFSIZE;
+        const uint32_t        swid          = lid / NTHREADS_PER_DOTPRODUCT;
+        const uint32_t        slid          = lid % NTHREADS_PER_DOTPRODUCT;
+
+        const uint32_t        rowcol = (BLOCKSIZE / WFSIZE) * bid + wid;
+
+        static constexpr bool ROW_ORIENTED  = (DIRECTION == rocsparse_direction_row);
+        
+        if(rowcol >= ((ROW_ORIENTED) ? M : N))
+        {
+            return;
+        }
+
+        const int64_t incx = (orderA == rocsparse_order_column)
+                                 ? ((transA == rocsparse_operation_none) ? lda : 1)
+                                 : ((transA == rocsparse_operation_none) ? 1 : lda);
+
+        const int64_t incy = (orderB == rocsparse_order_column)
+                                 ? ((transB == rocsparse_operation_none) ? 1 : ldb)
+                                 : ((transB == rocsparse_operation_none) ? ldb : 1);
+
+        const int64_t xinc = (ROW_ORIENTED) ? incx : incy;
+        const int64_t yinc = (ROW_ORIENTED) ? incy : incx;
+
+        const I start = csx_ptr[rowcol] - csx_base;
+        const I end = csx_ptr[rowcol + 1] - csx_base;
+        
+        if(ROW_ORIENTED)
+        {
+            const A* x = ((orderA == rocsparse_order_column)
+                              ? ((transA == rocsparse_operation_none) ? (dense_A + rowcol)
+                                                                      : (dense_A + lda * rowcol))
+                              : ((transA == rocsparse_operation_none) ? (dense_A + lda * rowcol)
+                                                                      : (dense_A + rowcol)));
+                                                                      
+            for(I at = start + swid; at < end; at += NUM_SEQS)
+            {
+                const I        ind = csx_ind[at] - csx_base;
+                const B* y   = ((orderB == rocsparse_order_column)
+                                    ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * ind)
+                                                                            : (dense_B + ind))
+                                    : ((transB == rocsparse_operation_none) ? (dense_B + ind)
+                                                                            : (dense_B + ldb * ind)));
+
+                T sum = static_cast<T>(0);
+                for(J k = slid; k < K; k += NTHREADS_PER_DOTPRODUCT)
+                {
+                    sum = rocsparse::fma<T>(x[k * xinc], y[k * yinc], sum);
+                }
+
+                sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+
+                if(slid == NTHREADS_PER_DOTPRODUCT - 1)
+                {
+                    csx_val[at] = beta * csx_val[at] + alpha * sum;
+                }
+            }
+        }
+        else
+        {
+            const B* x = ((orderB == rocsparse_order_column)
+                              ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * rowcol)
+                                                                      : (dense_B + rowcol))
+                              : ((transB == rocsparse_operation_none) ? (dense_B + rowcol)
+                                                                      : (dense_B + ldb * rowcol)));
+
+            for(I at = start + swid; at < end; at += NUM_SEQS)
+            {
+                const I        ind = csx_ind[at] - csx_base;
+                const A* y   = ((orderA == rocsparse_order_column)
+                                    ? ((transA == rocsparse_operation_none) ? (dense_A + ind)
+                                                                            : (dense_A + lda * ind))
+                                    : ((transA == rocsparse_operation_none) ? (dense_A + lda * ind)
+                                                                            : (dense_A + ind)));
+
+                T sum = static_cast<T>(0);
+                for(J k = slid; k < K; k += NTHREADS_PER_DOTPRODUCT)
+                {
+                    sum = rocsparse::fma<T>(x[k * xinc], y[k * yinc], sum);
+                }
+
+                sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+
+                if(slid == NTHREADS_PER_DOTPRODUCT - 1)
+                {
+                    csx_val[at] = beta * csx_val[at] + alpha * sum;
                 }
             }
         }
@@ -214,8 +340,10 @@ namespace rocsparse
             return;
         }
 
-        for(I at = csx_ptr[gwid] - csx_base + lid; at < csx_ptr[gwid + 1] - csx_base;
-            at += NTHREADS_PER_GROUP)
+        const I start = csx_ptr[gwid] - csx_base;
+        const I end = csx_ptr[gwid + 1] - csx_base;
+
+        for(I at = start + lid; at < end; at += NTHREADS_PER_GROUP)
         {
             const I ind = csx_ind[at] - csx_base;
 
