@@ -341,6 +341,7 @@ namespace rocRoller
         EXPRESSION_INFO(LogicalShiftR);
         EXPRESSION_INFO(ArithmeticShiftR);
 
+        EXPRESSION_INFO(BitFieldCombine);
         EXPRESSION_INFO(BitwiseNegate);
         EXPRESSION_INFO(BitwiseAnd);
         EXPRESSION_INFO(BitwiseOr);

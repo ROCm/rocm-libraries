@@ -262,6 +262,55 @@ namespace rocRoller
             constexpr static inline int                 Complexity = 1;
         };
 
+        struct BitFieldCombine : Binary
+        {
+            BitFieldCombine() = default;
+
+            BitFieldCombine(ExpressionPtr       src,
+                            ExpressionPtr       dst,
+                            int                 srcOffset,
+                            int                 dstOffset,
+                            int                 width,
+                            std::optional<bool> srcIsZero = std::nullopt,
+                            std::optional<bool> dstIsZero = std::nullopt,
+                            std::string         comment   = "")
+                : Binary{src, dst, comment}
+                , srcOffset(srcOffset)
+                , dstOffset(dstOffset)
+                , width(width)
+                , srcIsZero(srcIsZero)
+                , dstIsZero(dstIsZero)
+            {
+            }
+
+            BitFieldCombine(BitFieldCombine const& other)
+                : Binary{other.lhs, other.rhs, other.comment}
+            {
+                copyParams(other);
+            }
+
+            BitFieldCombine& copyParams(const BitFieldCombine& other)
+            {
+                srcOffset = other.srcOffset;
+                dstOffset = other.dstOffset;
+                width     = other.width;
+                srcIsZero = other.srcIsZero;
+                dstIsZero = other.dstIsZero;
+                return *this;
+            }
+
+            int                 srcOffset;
+            int                 dstOffset;
+            int                 width;
+            std::optional<bool> srcIsZero;
+            std::optional<bool> dstIsZero;
+
+            constexpr static inline auto                Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes     EvalTimes{EvaluationTime::Count};
+            constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 4;
+        };
+
         /*
          * SRConversion performs a stochastic rounding conversion.
          * The lhs is the value to be converted, the rhs is the seed
