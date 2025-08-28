@@ -24,7 +24,7 @@ GlobalParameters:
   # PrintTensorD: 1
   # PrintTensorRef: 1
   # GenerateSourcesAndExit: True
-  AMDGPUArchPath: rocm_agent_enumerator
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
