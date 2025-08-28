@@ -27,8 +27,8 @@
 #include "test_utils_thread_operators.hpp"
 
 // hipcub API
-#include "hipcub/device/device_segmented_reduce.hpp"
-#include "hipcub/iterator/counting_input_iterator.hpp"
+#include <hipcub/device/device_segmented_reduce.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
 
 template<class Input,
          class Output,
@@ -1144,7 +1144,7 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
     using T              = size_t;
     using input_type     = T;
     using output_type    = T;
-    using IteratorType   = hipcub::CountingInputIterator<input_type>;
+    using IteratorType   = rocprim::counting_iterator<input_type>;
     using reduce_op_type = typename hipcub::Sum;
     using offset_type    = T;
 

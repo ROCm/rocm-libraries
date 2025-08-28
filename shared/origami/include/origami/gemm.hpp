@@ -206,7 +206,7 @@ namespace origami
                                 bool            debug);
 
     // Check if MT fits in LDS
-    bool check_LDS_capacity(const hardware_t& hardware,
+    bool check_lds_capacity(const hardware_t& hardware,
                             size_t          MT_M,
                             size_t          MT_N,
                             size_t          MT_K,

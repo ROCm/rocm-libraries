@@ -45,20 +45,20 @@ template <class Tc, class Ti, class To>
 static constexpr double sum_error_tolerance_for_gfx11 = std::numeric_limits<Tc>::epsilon();
 
 template <>
-static constexpr double sum_error_tolerance_for_gfx11<float, hip_bfloat16, float> = 1 / 10.0;
+constexpr double sum_error_tolerance_for_gfx11<float, hip_bfloat16, float> = 1 / 10.0;
 
 template <>
-static constexpr double sum_error_tolerance_for_gfx11<float, hip_bfloat16, hip_bfloat16> = 1 / 10.0;
+constexpr double sum_error_tolerance_for_gfx11<float, hip_bfloat16, hip_bfloat16> = 1 / 10.0;
 
 template <>
-static constexpr double sum_error_tolerance_for_gfx11<float, hipblasLtHalf, float> = 1 / 100.0;
+constexpr double sum_error_tolerance_for_gfx11<float, hipblasLtHalf, float> = 1 / 100.0;
 
 template <>
-static constexpr double
+constexpr double
     sum_error_tolerance_for_gfx11<float, hipblasLtHalf, hipblasLtHalf> = 1 / 100.0;
 
 template <>
-static constexpr double
+constexpr double
     sum_error_tolerance_for_gfx11<hipblasLtHalf, hipblasLtHalf, hipblasLtHalf> = 1 / 100.0;
 
 double sum_error_tolerance_for_gfx11_type(hipDataType Tc, hipDataType Ti, hipDataType To)

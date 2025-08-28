@@ -711,8 +711,29 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_row, rocsparse_order_column]
   orderC: [rocsparse_order_row, rocsparse_order_column]
-  filename: [sme3Dc,
-             bmwcra_1]
+  filename: [sme3Dc]
+
+- name: spmm_csc_file
+  category: stress
+  hardware: [gfx90a]
+  function: spmm_csc
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: [2]
+  K: 1
+  ld_multiplier_B: [9354]
+  ld_multiplier_C: [7523]
+  alpha_beta: *alpha_beta_range_stress
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmm_alg: [rocsparse_spmm_alg_csr]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_row, rocsparse_order_column]
+  filename: [bmwcra_1]
+  convert_to_int: true
 
 - name: spmm_csc_file
   category: stress

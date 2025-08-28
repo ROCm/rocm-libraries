@@ -486,7 +486,7 @@ namespace origami
             std::cout << "===========================\n";
         }
 
-        size_t get_MI_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const
+        size_t get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const
         {
             const auto& instruction_map = INSTRUCTION_MAP.at(arch);
             auto        key             = matrix_instruction(MI_M, MI_N, MI_K, mi_input_type);

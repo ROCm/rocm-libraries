@@ -20,7 +20,7 @@ target_sources(hipblaslt
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
-    add_library(hipblaslt-rocroller OBJECT)
+    add_library(hipblaslt-rocroller STATIC)
     target_sources(hipblaslt-rocroller
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_host.cpp"

@@ -4,6 +4,15 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 4.1.0 for ROCm 7.1
 
+### Added
+
+* Added `get_sreg_lanemask_lt`, `get_sreg_lanemask_le`, `get_sreg_lanemask_gt` and `get_sreg_lanemask_ge`.
+* Added `rocprim::transform_output_iterator` and `rocprim::make_transform_output_iterator`.
+
+### Changed
+
+* Changed tests to support `ptr-to-const` output in `/test/rocprim/test_device_batch_memcpy.cpp`.
+
 ### Upcoming changes
 
 * Deprecated the `->` operator for the `zip_iterator`.
