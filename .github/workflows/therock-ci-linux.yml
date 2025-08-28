@@ -77,6 +77,14 @@ jobs:
           pip install -r TheRock/requirements.txt
           pip freeze
 
+      - name: Patch rocm-libraries
+        run: |
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ../ --projects \
+            hipBLAS-common \
+            hipBLAS \
+            hipBLASLt \
+            rocBLAS 
+
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}

@@ -6,7 +6,13 @@ subtree_to_project_map = {
     "projects/rocthrust": "prim",
     "projects/hipcub": "prim",
     "projects/rocrand": "rand",
-    "projects/hiprand": "rand"
+    "projects/hiprand": "rand",
+    "projects/hiprand": "rand",
+    "projects/hiprand": "rand",
+    "projects/rocblas": "blas",
+    "projects/hipblaslt": "blas",
+    "projects/hipblas": "blas",
+    "projects/hipblas-common": "blas"
 }
 
 project_map = {
@@ -20,4 +26,9 @@ project_map = {
         "project_to_test": "rocrand, hiprand",
         "subtree_checkout": "projects/rocrand\nprojects/hiprand",
     },
+    "blas": {
+        "cmake_options": "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "hipblaslt, rocblas",
+        "subtree_checkout": "projects/hipblaslt\nprojects/hipblas-common\nprojects/rocblas\nprojects/hipblas\nshared/mxdatagenerator\nshared/rocroller\nshared/tensile",
+    }
 }
