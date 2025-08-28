@@ -262,18 +262,18 @@ namespace rocRoller
             constexpr static inline int                 Complexity = 1;
         };
 
-        struct BitFieldCombine : Binary
+        struct BitFieldCombine final : Binary
         {
             BitFieldCombine() = default;
 
-            BitFieldCombine(ExpressionPtr       src /* lhs */,
-                            ExpressionPtr       dst /* rhs */,
-                            int                 srcOffset,
-                            int                 dstOffset,
-                            int                 width,
-                            std::optional<bool> srcIsZero = std::nullopt,
-                            std::optional<bool> dstIsZero = std::nullopt,
-                            std::string         comment   = "")
+            explicit BitFieldCombine(ExpressionPtr       src /* lhs */,
+                                     ExpressionPtr       dst /* rhs */,
+                                     int                 srcOffset,
+                                     int                 dstOffset,
+                                     int                 width,
+                                     std::optional<bool> srcIsZero = std::nullopt,
+                                     std::optional<bool> dstIsZero = std::nullopt,
+                                     std::string         comment   = "")
                 : Binary{src, dst, comment}
                 , srcOffset(srcOffset)
                 , dstOffset(dstOffset)
