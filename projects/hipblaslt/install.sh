@@ -831,7 +831,7 @@ pushd .
   fi
 
   if [[ "${build_clients}" == false ]]; then
-    cmake_client_options="HIPBLASLT_ENABLE_CLIENTS=OFF"
+    cmake_client_options="-DHIPBLASLT_ENABLE_CLIENTS=OFF"
   fi
 
   echo $cmake_common_options ${cmake_client_options}
