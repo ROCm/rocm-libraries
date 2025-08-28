@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/memory.h>
 #include <thrust/mr/allocator.h>
@@ -76,12 +83,14 @@ inline void free(pointer<void> ptr);
 template <typename T>
 using allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::tbb::memory_resource>;
 
-/*! \p tbb::universal_allocator allocates memory that can be used by the \p tbb
- *  system and host systems.
- */
+//! \p tbb::universal_allocator allocates memory that can be used by the \p tbb system and host systems.
 template <typename T>
 using universal_allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::tbb::universal_memory_resource>;
 
+//! \p tbb::universal_host_pinned_allocator allocates memory that can be used by the \p tbb system and host systems.
+template <typename T>
+using universal_host_pinned_allocator =
+  thrust::mr::stateless_resource_allocator<T, thrust::system::tbb::universal_host_pinned_memory_resource>;
 } // namespace tbb
 } // namespace system
 
@@ -94,6 +103,7 @@ using thrust::system::tbb::allocator;
 using thrust::system::tbb::free;
 using thrust::system::tbb::malloc;
 using thrust::system::tbb::universal_allocator;
+using thrust::system::tbb::universal_host_pinned_allocator;
 } // namespace tbb
 
 THRUST_NAMESPACE_END

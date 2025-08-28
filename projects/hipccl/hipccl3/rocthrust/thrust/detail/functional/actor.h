@@ -28,28 +28,29 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_deduction.h>
-#include <thrust/detail/type_traits/result_of_adaptable_function.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/tuple.h>
 
-#include <type_traits>
-#include <utility>
+#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(utility)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <tuple>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 namespace functional
 {
-
-// If we're not on Windows and we have libstdc++ >= 10, we can use the __decay_t
-// builtin to reduce compilation time.
-template<typename T>
-#if defined(_WIN32) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE < 10)
-using decay_t = std::decay_t<T>;
-#else
-using decay_t = std::__decay_t<T>;
-#endif
-
 // An actor is a node in an expression template
 template <typename Eval>
 struct actor : Eval
@@ -74,34 +75,23 @@ struct actor : Eval
 };
 
 template <typename T>
-struct is_actor : std::false_type
+struct is_actor : ::thrust::detail::false_type
 {};
 
 template <typename T>
-struct is_actor<actor<T>> : std::true_type
+struct is_actor<actor<T>> : ::thrust::detail::true_type
 {};
 
 // a node selecting and returning one of the arguments to the entire expression template
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <unsigned int Pos>
 struct argument
 {
   template <typename... Ts>
   THRUST_HOST_DEVICE auto eval(Ts&&... args) const
-    -> decltype(thrust::get<Pos>(thrust::tuple<Ts&&...>(THRUST_FWD(args)...)))
+    -> decltype(thrust::get<Pos>(thrust::tuple<Ts&&...>{THRUST_FWD(args)...}))
   {
-    return thrust::get<Pos>(thrust::tuple<Ts&&...>(THRUST_FWD(args)...));
-  }
-};
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-template <unsigned int Pos>
-struct argument
-{
-  template <typename... Ts>
-  THRUST_HOST_DEVICE auto eval(Ts&&... args) const
-    -> decltype(thrust::get<Pos>(thrust::tuple<Ts...>{THRUST_FWD(args)...}))
-  {
-    return thrust::get<Pos>(thrust::tuple<Ts...>{THRUST_FWD(args)...});
+    return thrust::get<Pos>(thrust::tuple<Ts&&...>{THRUST_FWD(args)...});
   }
 };
 #else
@@ -109,9 +99,9 @@ template <unsigned int Pos>
 struct argument
 {
   template <typename... Ts>
-  THRUST_HOST_DEVICE auto eval(Ts&&... args) const -> decltype(std::get<Pos>(std::forward_as_tuple(args...)))
+  THRUST_HOST_DEVICE auto eval(Ts&&... args) const -> decltype(::std::get<Pos>(::std::forward_as_tuple(args...)))
   {
-    return std::get<Pos>(std::forward_as_tuple(args...));
+    return ::std::get<Pos>(::std::forward_as_tuple(args...));
   }
 };
 #endif
@@ -125,6 +115,7 @@ struct placeholder
 // composition of actors/nodes
 template <typename...>
 struct composite;
+
 template <typename Eval, typename SubExpr>
 struct composite<Eval, SubExpr>
 {
@@ -138,7 +129,7 @@ struct composite<Eval, SubExpr>
 
   template <typename... Ts>
   THRUST_HOST_DEVICE auto eval(Ts&&... args) const
-    -> decltype(std::declval<Eval>().eval(std::declval<SubExpr>().eval(THRUST_FWD(args)...)))
+    -> decltype(_THRUST_STD::declval<Eval>().eval(_THRUST_STD::declval<SubExpr>().eval(THRUST_FWD(args)...)))
   {
     return m_eval.eval(m_subexpr.eval(THRUST_FWD(args)...));
   }
@@ -161,8 +152,9 @@ struct composite<Eval, SubExpr1, SubExpr2>
   {}
 
   template <typename... Ts>
-  THRUST_HOST_DEVICE auto eval(Ts&&... args) const -> decltype(std::declval<Eval>().eval(
-    std::declval<SubExpr1>().eval(THRUST_FWD(args)...), std::declval<SubExpr2>().eval(THRUST_FWD(args)...)))
+  THRUST_HOST_DEVICE auto eval(Ts&&... args) const
+    -> decltype(_THRUST_STD::declval<Eval>().eval(_THRUST_STD::declval<SubExpr1>().eval(THRUST_FWD(args)...),
+                                                  _THRUST_STD::declval<SubExpr2>().eval(THRUST_FWD(args)...)))
   {
     return m_eval.eval(m_subexpr1.eval(THRUST_FWD(args)...), m_subexpr2.eval(THRUST_FWD(args)...));
   }
@@ -183,7 +175,7 @@ struct operator_adaptor : F
   constexpr operator_adaptor() = default;
 
   THRUST_HOST_DEVICE operator_adaptor(F f)
-      : F(std::move(f))
+      : F(_THRUST_STD::move(f))
   {}
 
   template <typename... Ts>
@@ -207,7 +199,7 @@ struct value
 };
 
 template <typename T>
-THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<thrust::detail::functional::decay_t<T>>>
+THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<::internal::decay_t<T>>>
 {
   return {{THRUST_FWD(x)}};
 }
@@ -221,26 +213,20 @@ THRUST_HOST_DEVICE auto make_actor(actor<Eval> x) -> actor<Eval>
 template <typename Eval, typename SubExpr>
 THRUST_HOST_DEVICE auto compose(Eval e, const SubExpr& subexpr)
   -> decltype(actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr))>>{
-    {{std::move(e)}, make_actor(subexpr)}})
+    {{_THRUST_STD::move(e)}, make_actor(subexpr)}})
 {
-  return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr))>>{{{std::move(e)}, make_actor(subexpr)}};
+  return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr))>>{
+    {{_THRUST_STD::move(e)}, make_actor(subexpr)}};
 }
 
 template <typename Eval, typename SubExpr1, typename SubExpr2>
 THRUST_HOST_DEVICE auto compose(Eval e, const SubExpr1& subexpr1, const SubExpr2& subexpr2)
   -> decltype(actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr1)), decltype(make_actor(subexpr2))>>{
-    {{std::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}})
+    {{_THRUST_STD::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}})
 {
   return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr1)), decltype(make_actor(subexpr2))>>{
-    {{std::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}};
+    {{_THRUST_STD::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}};
 }
 } // namespace functional
-
-template <typename Eval, typename... Args>
-struct result_of_adaptable_function<functional::actor<Eval>(Args...)>
-{
-  using type = decltype(std::declval<functional::actor<Eval>>()(std::declval<Args>()...));
-};
-
 } // namespace detail
 THRUST_NAMESPACE_END
