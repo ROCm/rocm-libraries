@@ -127,7 +127,7 @@ namespace PermLanesTest
         kgraph                     = kgraph.transform(updateWavefrontParams);
         kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
         kgraph                     = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
-        kgraph                     = kgraph.transform(std::make_shared<AssignComputeIndex>(context));
+        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context));
 
         context->schedule(k->preamble());
         context->schedule(k->prolog());
@@ -180,7 +180,7 @@ namespace PermLanesTest
                         + lane * waveK
                         + vgprBlock * miK
                         + vgprIndex;
-            
+
             auto resultIdx = wave * waveK * nLanes * waveK
                              + vgprIndex * factor * nLanes * waveK
                              + simdIndex * nLanes * waveK

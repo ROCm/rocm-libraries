@@ -145,7 +145,6 @@ namespace rocRoller
             };
 
         private:
-            std::map<int, int>               m_baseOffsets;
             ContextPtr                       m_context;
             KernelGraphPtr                   m_graph;
             Expression::ExpressionTransducer m_fastArith;
