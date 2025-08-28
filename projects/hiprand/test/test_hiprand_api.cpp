@@ -26,8 +26,6 @@
 
 #include <gtest/gtest.h>
 
-#define HIPRAND_CHECK(state) ASSERT_EQ(state, HIPRAND_STATUS_SUCCESS)
-
 constexpr hiprandRngType_t hiprand_rng_types[] = {HIPRAND_RNG_PSEUDO_XORWOW,
                                                   HIPRAND_RNG_PSEUDO_MRG32K3A,
                                                   HIPRAND_RNG_PSEUDO_MTGP32,
@@ -570,7 +568,7 @@ INSTANTIATE_TEST_SUITE_P(hiprand, hiprand_ordering, ::testing::ValuesIn(hiprand_
 void hiprand_generate_uniform_host_test_func(hiprandRngType_t rng_type)
 {
     hiprandGenerator_t generator = 0;
-    HIP_CHECK(hiprandCreateGeneratorHost(&generator, rng_type));
+    HIPRAND_CHECK(hiprandCreateGeneratorHost(&generator, rng_type));
 
     constexpr size_t   output_size = 8192;
     std::vector<float> output_host(output_size);

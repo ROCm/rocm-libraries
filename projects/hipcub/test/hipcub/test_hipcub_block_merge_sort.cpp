@@ -23,9 +23,9 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_merge_sort.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_merge_sort.hpp>
+#include <hipcub/block/block_store.hpp>
 
 #include <algorithm>
 #include <string>
@@ -892,9 +892,6 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
     custom_type* host_side_sort    = new custom_type[size];
     T*           host_keys_input   = new T[size];
     T*           host_values_input = new T[size];
-
-    [[maybe_unused]] T* host_keys_expected   = new T[size];
-    [[maybe_unused]] T* host_values_expected = new T[size];
 
     T* device_keys_input;
     T* device_values_input;
