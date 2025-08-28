@@ -29,8 +29,15 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
@@ -63,7 +70,7 @@ struct generate_f
 
 // for_each_n
 template <class Derived, class OutputIt, class Size, class Generator>
-OutputIt THRUST_HIP_FUNCTION
+OutputIt THRUST_HOST_DEVICE
 generate_n(execution_policy<Derived>& policy, OutputIt result, Size count, Generator generator)
 {
   return hip_rocprim::for_each_n(policy, result, count, generate_f<Generator>(generator));
@@ -71,11 +78,11 @@ generate_n(execution_policy<Derived>& policy, OutputIt result, Size count, Gener
 
 // for_each
 template <class Derived, class OutputIt, class Generator>
-void THRUST_HIP_FUNCTION generate(execution_policy<Derived>& policy, OutputIt first, OutputIt last, Generator generator)
+void THRUST_HOST_DEVICE generate(execution_policy<Derived>& policy, OutputIt first, OutputIt last, Generator generator)
 {
   hip_rocprim::generate_n(policy, first, thrust::distance(first, last), generator);
 }
 
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#endif

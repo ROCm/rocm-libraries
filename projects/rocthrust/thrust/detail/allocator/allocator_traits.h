@@ -22,11 +22,23 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_member_function.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -244,7 +256,7 @@ public:
 
   using size_type = typename eval_if<allocator_traits_detail::has_size_type<allocator_type>::value,
                                      allocator_traits_detail::nested_size_type<allocator_type>,
-                                     make_unsigned<difference_type>>::type;
+                                     ::internal::make_unsigned<difference_type>>::type;
 
   using propagate_on_container_copy_assignment =
     typename eval_if<allocator_traits_detail::has_propagate_on_container_copy_assignment<allocator_type>::value,
@@ -264,7 +276,7 @@ public:
   using is_always_equal =
     typename eval_if<allocator_traits_detail::has_is_always_equal<allocator_type>::value,
                      allocator_traits_detail::nested_is_always_equal<allocator_type>,
-                     is_empty<allocator_type>>::type;
+                     _THRUST_STD::is_empty<allocator_type>>::type;
 
   using system_type =
     typename eval_if<allocator_traits_detail::has_system_type<allocator_type>::value,
@@ -329,10 +341,9 @@ struct allocator_system
 
   // the type that get returns
   using get_result_type =
-    typename eval_if<allocator_traits_detail::has_member_system<Alloc>::value, // if Alloc.system() exists
-                     add_reference<type>, // then get() needs to return a reference
-                     identity_<type> // else get() needs to return a value
-                     >::type;
+    typename eval_if<allocator_traits_detail::has_member_system<Alloc>::value,
+                     _THRUST_STD::add_lvalue_reference<type>,
+                     identity_<type>>::type;
 
   THRUST_HOST_DEVICE inline static get_result_type get(Alloc& a);
 };

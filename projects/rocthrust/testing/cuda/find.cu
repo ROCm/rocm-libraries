@@ -29,7 +29,7 @@ struct equal_to_value_pred
       : value(value)
   {}
 
-  THRUST_HOST_DEVICE bool operator()(T v) const
+  _CCCL_HOST_DEVICE bool operator()(T v) const
   {
     return v == value;
   }
@@ -44,7 +44,7 @@ struct not_equal_to_value_pred
       : value(value)
   {}
 
-  THRUST_HOST_DEVICE bool operator()(T v) const
+  _CCCL_HOST_DEVICE bool operator()(T v) const
   {
     return v != value;
   }
@@ -59,7 +59,7 @@ struct less_than_value_pred
       : value(value)
   {}
 
-  THRUST_HOST_DEVICE bool operator()(T v) const
+  _CCCL_HOST_DEVICE bool operator()(T v) const
   {
     return v < value;
   }
@@ -240,12 +240,7 @@ DECLARE_UNITTEST(TestFindIfNotDeviceDevice);
 
 void TestFindCudaStreams()
 {
-  thrust::device_vector<int> vec(5);
-  vec[0] = 1;
-  vec[1] = 2;
-  vec[2] = 3;
-  vec[3] = 3;
-  vec[4] = 5;
+  thrust::device_vector<int> vec{1, 2, 3, 3, 5};
 
   cudaStream_t s;
   cudaStreamCreate(&s);
