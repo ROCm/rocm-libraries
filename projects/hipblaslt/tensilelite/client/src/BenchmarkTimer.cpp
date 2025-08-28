@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -110,9 +110,8 @@ namespace TensileLite
             }
             else
             {
-                // startwith "###" as an indication of end-of-problem
-                std::cout << "########################## "
-                          << std::endl;
+                // print this as an indication of end-of-problem
+                std::cout << "########################## " << std::endl;
             }
         }
 
@@ -160,12 +159,11 @@ namespace TensileLite
 
         void BenchmarkTimer::postSolution()
         {
-            bool sol_is_skipped = (m_skiprun_from_map || m_skip_slow_solution);
-            double timePerEnqueue_us
-                = !sol_is_skipped
-                      ? double_micros(m_timeInSolution).count() / m_numEnqueuesInSolution
-                            - m_flushTimeUs
-                      : std::numeric_limits<double>::quiet_NaN();
+            bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
+            double timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
+                                                                 / m_numEnqueuesInSolution
+                                                             - m_flushTimeUs
+                                                       : std::numeric_limits<double>::quiet_NaN();
 
             ContractionSolution::ProjectedPerformance pp;
             double                                    flopCount = 0;
@@ -185,9 +183,9 @@ namespace TensileLite
                     "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
             }
 
-            double gflops  = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
-            int    tiles   = pp.granularities.tilesPerCu * perf.CUs;
-            int    usedCus = std::min(tiles, perf.CUs);
+            double gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
+            int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
+            int    usedCus     = std::min(tiles, perf.CUs);
             double gflopsPerCu = gflops / usedCus;
 
             m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
