@@ -177,7 +177,7 @@ void CheckGetFeatures3D_MapValues(const std::map<std::string, float>& features,
 // Helper: check if model files exist for architecture
 bool CheckModelFilesExist(const std::string& arch, const std::string& solver_name)
 {
-    std::string db_path = miopen::GetSystemDbPath();
+    std::string db_path = miopen::GetSystemDbPath().string();
     auto metadata       = db_path + "/" + arch + "_" + solver_name + "_metadata.tn.model";
     auto input_encoder  = db_path + "/" + arch + "_" + solver_name + "_input_encoder.tn.model";
     auto kernel_config_encoder =
