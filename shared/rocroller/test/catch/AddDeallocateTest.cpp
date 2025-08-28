@@ -59,7 +59,7 @@ namespace AddDeallocateTest
 
         params->unrollK           = 4;
         params->prefetch          = true;
-        params->prefetchInFlight  = 2;
+        params->prefetchInFlight  = 1;
         params->prefetchLDSFactor = 2;
         params->prefetchMixMemOps = true;
 

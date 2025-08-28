@@ -1047,8 +1047,8 @@ namespace GEMMDriverTest
         gemm.prefetchInFlight = 1;
         auto maxLDS = m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
         auto bytesPerElement = sizeof(float);
-        auto ldsA            = gemm.macM * gemm.macK * bytesPerElement * gemm.prefetchInFlight;
-        auto ldsB            = gemm.macK * gemm.macN * bytesPerElement * gemm.prefetchInFlight;
+        auto ldsA            = gemm.macM * gemm.macK * bytesPerElement * 2;
+        auto ldsB            = gemm.macK * gemm.macN * bytesPerElement * 2;
         auto ldsD            = gemm.waveM * gemm.waveN * bytesPerElement;
 
         if(ldsA + ldsB + ldsD <= maxLDS)
@@ -1101,7 +1101,7 @@ namespace GEMMDriverTest
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
         //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
+        //gemm.prefetchInFlight = 1;
 
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
@@ -1140,7 +1140,7 @@ namespace GEMMDriverTest
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
         //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
+        //gemm.prefetchInFlight = 1;
 
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
@@ -1185,7 +1185,7 @@ namespace GEMMDriverTest
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
         //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
+        //gemm.prefetchInFlight = 1;
 
         for(auto twoTile : {true, false})
         {
@@ -1393,7 +1393,7 @@ namespace GEMMDriverTest
         gemm.macM      = gemm.waveM * 4;
         gemm.macN      = gemm.waveN * 2;
 
-        for(auto inflight : {1, 2})
+        for(auto inflight : {0, 1})
         {
             gemm.prefetchInFlight = inflight;
             for(auto ldsFactor : {0, 1, 2})
@@ -1427,7 +1427,7 @@ namespace GEMMDriverTest
         gemm.transA = "N";
         gemm.transB = "N";
 
-        for(auto inflight : {1, 2})
+        for(auto inflight : {0, 1})
         {
             gemm.prefetchInFlight = inflight;
             for(auto ldsFactor : {0, 2})
@@ -1455,7 +1455,7 @@ namespace GEMMDriverTest
         gemm.macK      = 4;
         gemm.prefetch  = true;
 
-        for(auto inflight : {1, 2, 3})
+        for(auto inflight : {0, 1, 2})
         {
             gemm.prefetchInFlight = inflight;
             for(auto ldsFactor : {0, 2})
@@ -1470,7 +1470,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16Prefetch3)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16Prefetch2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1491,7 +1491,7 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX    = 256;
         gemm.workgroupSizeY    = 1;
         gemm.prefetch          = true;
-        gemm.prefetchInFlight  = 3;
+        gemm.prefetchInFlight  = 2;
         gemm.prefetchLDSFactor = 2;
         gemm.prefetchMixMemOps = true;
         basicGEMM<Half>(gemm);
@@ -1925,7 +1925,7 @@ namespace GEMMDriverTest
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
-        gemm.prefetchInFlight  = 2;
+        gemm.prefetchInFlight  = 1;
         gemm.prefetchLDSFactor = 2;
 
         gemm.scaleAMode = Operations::ScaleMode::Separate;
@@ -2334,7 +2334,7 @@ namespace GEMMDriverTest
 
             gemm.unrollK           = 2;
             gemm.prefetch          = true;
-            gemm.prefetchInFlight  = 2;
+            gemm.prefetchInFlight  = 1;
             gemm.prefetchLDSFactor = 2;
 
             gemm.scaleAMode = Operations::ScaleMode::Separate;
@@ -2385,7 +2385,7 @@ namespace GEMMDriverTest
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
-        gemm.prefetchInFlight  = 2;
+        gemm.prefetchInFlight  = 1;
         gemm.prefetchLDSFactor = 2;
 
         gemm.scaleAMode = Operations::ScaleMode::Separate;
@@ -2434,7 +2434,7 @@ namespace GEMMDriverTest
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
-        gemm.prefetchInFlight  = 2;
+        gemm.prefetchInFlight  = 1;
         gemm.prefetchLDSFactor = 1;
         gemm.prefetchMixMemOps = true;
 
@@ -2491,7 +2491,7 @@ namespace GEMMDriverTest
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
-        gemm.prefetchInFlight  = 2;
+        gemm.prefetchInFlight  = 1;
         gemm.prefetchLDSFactor = 1;
         gemm.prefetchMixMemOps = true;
 
@@ -2562,7 +2562,7 @@ namespace GEMMDriverTest
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
-        gemm.prefetchInFlight  = 2;
+        gemm.prefetchInFlight  = 1;
         gemm.prefetchLDSFactor = 2;
 
         gemm.scaleAMode = Operations::ScaleMode::Separate;
@@ -2863,13 +2863,12 @@ namespace GEMMDriverTest
     TEST_P(GEMMTestGPU, GPU_LargerLDSGEMMFP8_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm             = setup_GEMMF8F6F4(32, 32, 64);
-        gemm.macM             = 128;
-        gemm.macN             = 128;
-        gemm.macK             = 256;
-        gemm.loadLDSA         = true;
-        gemm.loadLDSB         = true;
-        gemm.prefetchInFlight = 2;
+        auto gemm     = setup_GEMMF8F6F4(32, 32, 64);
+        gemm.macM     = 128;
+        gemm.macN     = 128;
+        gemm.macK     = 256;
+        gemm.loadLDSA = true;
+        gemm.loadLDSB = true;
 
         basicGEMM<FP8, FP8, float>(gemm);
     }
@@ -3131,7 +3130,7 @@ namespace GEMMDriverTest
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
         problem.prefetch         = true;
-        problem.prefetchInFlight = 2;
+        problem.prefetchInFlight = 1;
         problem.unrollK          = 2;
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
@@ -3186,7 +3185,7 @@ namespace GEMMDriverTest
         problem.storeLDSD   = false;
 
         problem.prefetch         = true;
-        problem.prefetchInFlight = 2;
+        problem.prefetchInFlight = 1;
         problem.unrollK          = 2;
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
@@ -3460,7 +3459,8 @@ namespace GEMMDriverTest
 
         gemm.unrollK = 2;
 
-        gemm.prefetchInFlight  = 2;
+        //gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 1;
         gemm.prefetchLDSFactor = 2;
         gemm.prefetchMixMemOps = true;
 

@@ -74,7 +74,7 @@ namespace AliasDataFlowTagsTest
         example.setUseLDS(true, true, false);
         example.setUnroll(2, 2);
 
-        example.setPrefetch(true, 2, 2, false);
+        example.setPrefetch(true, 1, 2, false);
 
         auto graph  = example.getKernelGraph();
         auto params = example.getCommandParameters();

@@ -440,7 +440,7 @@ def prefetch_configurations():
     """Return list of prefetching modes to test."""
     rv = [Prefetch(0, 0)]
     for lds_factor in [0, 2]:
-        rv.append(Prefetch(2, lds_factor))
+        rv.append(Prefetch(1, lds_factor))
     return rv
 
 

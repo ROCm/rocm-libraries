@@ -47,7 +47,7 @@ namespace AddPrefetchTest
         auto typeA   = rocRoller::DataType::Float;
         auto example = rocRollerTest::Graphs::GEMM(typeA);
 
-        int  prefetchInFlight  = GENERATE(1, 2, 4);
+        int  prefetchInFlight  = GENERATE(0, 1, 3);
         int  prefetchLDSFactor = GENERATE(0, 1, 2);
         bool prefetchMixMemOps = GENERATE(false, true);
 
@@ -86,7 +86,7 @@ namespace AddPrefetchTest
             CHECK(prefetchLoops.size() == 1);
 
             auto numUnroll = (*prefetchLoops.cbegin()).second;
-            CHECK(numUnroll == std::max(2, prefetchInFlight));
+            CHECK(numUnroll == prefetchInFlight + 1);
         }
     }
 }

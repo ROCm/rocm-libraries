@@ -336,7 +336,7 @@ namespace rocRollerTest::Graphs
         m_problem.prefetchLDSFactor = prefetchLDSFactor;
         m_problem.prefetchMixMemOps = prefetchMixMemOps;
 
-        m_problem.unrollK = std::max(2, prefetchInFlight);
+        m_problem.unrollK = prefetchInFlight + 1;
     }
 
     void GEMM::setUnroll(unsigned int unrollX, unsigned int unrollY)

@@ -204,7 +204,7 @@ def hgemm():
         mac_k=16,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        prefetchInFlight=2,
+        prefetchInFlight=1,
         prefetchLDSFactor=2,
         types=TypeParameters(
             HGEMM_7680x8448x8192["types"],
@@ -266,7 +266,7 @@ def hgemm():
         mac_k=16,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        prefetchInFlight=2,
+        prefetchInFlight=1,
         prefetchLDSFactor=2,
     )
 
@@ -465,7 +465,7 @@ def guidepost_1():
         mac_k=16,
         scheduler="Priority",
         prefetch=True,
-        prefetchInFlight=2,
+        prefetchInFlight=1,
         prefetchLDSFactor=2,
     )
 
@@ -479,7 +479,7 @@ def guidepost_2():
         mac_k=16,
         scheduler="Priority",
         prefetch=True,
-        prefetchInFlight=2,
+        prefetchInFlight=1,
         prefetchLDSFactor=2,
     )
 
@@ -495,7 +495,7 @@ def hgemm_no_store_LDS():
             storeLDS_D=False,
             scheduler="Priority",
             prefetch=True,
-            prefetchInFlight=2,
+            prefetchInFlight=1,
             prefetchLDSFactor=0,
         )
 
@@ -545,7 +545,7 @@ def streamk_sweep():
                                 workgroup_size_y=2,
                                 visualize=False,
                                 prefetch=False,  # TODO: Fix k loop unrolling with stream k
-                                # prefetchInFlight=2,
+                                # prefetchInFlight=1,
                                 # prefetchLDSFactor=2,
                                 streamK=True,
                                 streamKTwoTile=twoTile,
@@ -566,7 +566,7 @@ def streamk():
             workgroup_size_y=2,
             visualize=False,
             prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
+            # prefetchInFlight=1,
             # prefetchLDSFactor=2,
             streamK=True,
             streamKTwoTile=twoTile,
@@ -585,7 +585,7 @@ def streamk():
             workgroup_size_x=128,
             workgroup_size_y=2,
             prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
+            # prefetchInFlight=1,
             # prefetchLDSFactor=2,
             streamK=True,
             streamKTwoTile=twoTile,
@@ -642,7 +642,7 @@ def scalar_is_zero():
         mac_k=16,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        prefetchInFlight=2,
+        prefetchInFlight=1,
         prefetchLDSFactor=2,
         types=TypeParameters(
             hgemm["types"],
@@ -881,7 +881,7 @@ def gemm_f8f6f4_different_macrotiles():
                     )
 
 
-def _f8f6f4_gemm_prefetch(wave_m, wave_n, wave_k, gemmTypes, prefetchFactor):
+def _f8f6f4_gemm_prefetch(wave_m, wave_n, wave_k, gemmTypes, prefetchInFlight):
     params = dict(
         M=256,
         N=256,
@@ -894,8 +894,8 @@ def _f8f6f4_gemm_prefetch(wave_m, wave_n, wave_k, gemmTypes, prefetchFactor):
         wave_k=wave_k,
         workgroup_size_x=256,
         workgroup_size_y=1,
-        prefetchInFlight=prefetchFactor,
-        prefetchLDSFactor=prefetchFactor,
+        prefetchInFlight=prefetchInFlight,
+        prefetchLDSFactor=2,
     )
     yield GEMMRun(
         **params,
@@ -904,12 +904,12 @@ def _f8f6f4_gemm_prefetch(wave_m, wave_n, wave_k, gemmTypes, prefetchFactor):
 
 
 def gemm_f8f6f4_test_prefetch():
-    # Any factor > 2 fails to generate due to lack of registers/too large imm offset.
+    # Any prefetchInFlight > 1 fails to generate due to lack of registers/too large imm offset.
     # TODO: test with more aggressive prefetching once we can.
-    for factor in [2]:
+    for prefetchInFlight in [1]:
         for type in [fp8fp8_fp32, fp6fp6_fp32, fp4fp4_fp32, bf8bf8_fp32, bf6bf6_fp32]:
-            yield from _f8f6f4_gemm_prefetch(16, 16, 128, type, factor)
-            yield from _f8f6f4_gemm_prefetch(32, 32, 64, type, factor)
+            yield from _f8f6f4_gemm_prefetch(16, 16, 128, type, prefetchInFlight)
+            yield from _f8f6f4_gemm_prefetch(32, 32, 64, type, prefetchInFlight)
 
 
 def bf16gemm_16x16x8():
@@ -1002,7 +1002,7 @@ def fp4_target():
         loadLDSScale_B=True,
         storeLDS_D=True,
         prefetch=True,
-        prefetchInFlight=2,
+        prefetchInFlight=1,
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
@@ -1049,7 +1049,7 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
         loadLDSScale_B=True,
         storeLDS_D=True,
         prefetch=True,
-        prefetchInFlight=2,
+        prefetchInFlight=1,
         prefetchLDSFactor=1,
         betaInFma=True,
         scheduler="Priority",
@@ -1122,7 +1122,7 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         loadLDSScale_B=False,
         storeLDS_D=False,
         prefetch=True,
-        prefetchInFlight=4,
+        prefetchInFlight=3,
         prefetchLDSFactor=1,
         prefetchScale=True,
         swizzleScale=True,
@@ -1182,7 +1182,7 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         loadLDSScale_B=False,
         storeLDS_D=False,
         prefetch=True,
-        prefetchInFlight=4,
+        prefetchInFlight=3,
         prefetchLDSFactor=1,
         prefetchScale=True,
         swizzleScale=True,
@@ -1242,7 +1242,7 @@ def does_this_fail():
         loadLDSScale_B=False,
         storeLDS_D=False,
         prefetch=True,
-        prefetchInFlight=4,
+        prefetchInFlight=3,
         prefetchLDSFactor=1,
         prefetchScale=False,
         swizzleScale=False,
@@ -1288,7 +1288,7 @@ def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():
         loadLDSScale_B=False,
         storeLDS_D=False,
         prefetch=True,
-        prefetchInFlight=4,
+        prefetchInFlight=3,
         prefetchLDSFactor=1,
         prefetchScale=False,
         swizzleScale=False,

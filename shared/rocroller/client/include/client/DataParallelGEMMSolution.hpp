@@ -453,7 +453,7 @@ namespace rocRoller
                     if(solutionParams.prefetch)
                     {
                         params->prefetch          = true;
-                        params->unrollK           = std::max(2, solutionParams.prefetchInFlight);
+                        params->unrollK           = solutionParams.prefetchInFlight + 1;
                         params->prefetchInFlight  = solutionParams.prefetchInFlight;
                         params->prefetchLDSFactor = solutionParams.prefetchLDSFactor;
                         params->prefetchMixMemOps = solutionParams.prefetchMixMemOps;

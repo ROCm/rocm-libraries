@@ -151,7 +151,7 @@ namespace rocRoller
                 bool direct2LDSB = false;
 
                 bool prefetch          = false;
-                int  prefetchInFlight  = 2;
+                int  prefetchInFlight  = 1;
                 int  prefetchLDSFactor = 0;
                 bool prefetchMixMemOps = false;
                 bool betaInFma         = true;
