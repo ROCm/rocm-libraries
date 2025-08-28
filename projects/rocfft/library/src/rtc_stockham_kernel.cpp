@@ -239,7 +239,10 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 
     // twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)
+    {
         kargs.append_ptr(data.node->twiddles_pp);
+        kargs.append_ptr(data.node->twiddles_off_dim);
+    }
     kargs.append_ptr(data.node->twiddles);
     // large 1D twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC

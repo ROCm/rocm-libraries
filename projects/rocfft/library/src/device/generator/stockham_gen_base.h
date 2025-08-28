@@ -169,6 +169,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // Variable thread_in_device{"thread_in_device", "size_t"};
     Variable thread_in_device{"thread_in_device", "unsigned int"};
     Variable thread_in_device_pp{"thread_in_device_pp", "unsigned int"};
+    Variable thread_in_device_pp_twiddles{"thread_in_device_pp_twiddles", "unsigned int"};
 
     // global input/output buffer offset to current transform
     Variable offset{"offset", "size_t"};
