@@ -246,9 +246,6 @@ namespace rocRoller
 
             if(ci.isDirect2LDS)
             {
-                // std::cout << "ci isDirect2LDS, make scalar" << std::endl;
-                // expr = Expression::ToScalar(expr);
-
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
             }
 
@@ -263,7 +260,6 @@ namespace rocRoller
                 toString(assignNode.expression),
                 offset);
 
-            // std::cout << "YL: makeAssignBase (target, offset, expression) " << target << ", " << offset << ", " << toString(expr) << std::endl;
             return assignTag;
         }
 
@@ -382,8 +378,6 @@ namespace rocRoller
                 assignTag,
                 toString(assignNode.expression),
                 stride);
-            // std::cout << "YL makeAssignStride (tag, expression, stride) " << assignTag << ", "
-            //           << toString(assignNode.expression) << ", " << stride << std::endl;
             return assignTag;
         }
 
@@ -399,7 +393,6 @@ namespace rocRoller
             auto candidates
                 = kgraph.control.findNodes(*kgraph.control.roots().begin(), isComputeIndexPredicate)
                       .to<std::vector>();
-            // std::cout << "Number of ComputeIndex nodes " << candidates.size() << std::endl;
 
             std::vector<std::tuple<int, int, int>> ciAndAssign;
 
@@ -419,9 +412,6 @@ namespace rocRoller
                 auto buffer = kgraph.mapper.get(
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
 
-                // TODO: check if ComputeIndex nodes are within the ForLoop. If it is in the ForLoop, set register for ForLoop, else, set to 0
-
-                // check maybeLDS
                 auto maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
                 if(maybeLDS)
                 {
@@ -437,7 +427,6 @@ namespace rocRoller
                 }
                 maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
 
-                // check isTransposed
                 auto isTransposed
                     = kgraph.coordinates
                           .findNodes(target,
@@ -451,13 +440,11 @@ namespace rocRoller
                           .size()
                       == 1;
 
-                // Set required coordinates
                 auto ci = kgraph.control.get<ComputeIndex>(tag).value();
                 auto direction
                     = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
 
                 // 1. Set register coordinates
-                // Transformer xform(&kgraph.coordinates);
                 auto xform = kgraph.buildTransformer(tag);
 
                 auto const maybeForLoop = findContainingOperation<ForLoopOp>(tag, kgraph);
@@ -477,22 +464,9 @@ namespace rocRoller
                 {
                     if(std::visit(isRegisterDim, kgraph.coordinates.getNode(coord)))
                     {
-                        auto parentCoord = coord;
-                        // if the coordinate if ForLoop, it might be a duplicate,
-                        // use the parent coordinate instead
-                        // if (kgraph.coordinates.get<ForLoop>(coord))
-                        // {
-                        //         auto maybeParentForLoop = only(kgraph.coordinates.getInputNodeIndices(coord, rocRoller::KernelGraph::CoordinateGraph::isEdge<DataFlow>));
-                        //         if(maybeParentForLoop)
-                        //         {
-                        //             parentCoord = *maybeParentForLoop;
-                        //         }
-
-                        // }
-
                         auto registerType = Register::Type::Vector;
                         auto coordDF      = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{parentCoord, registerType, DataType::UInt32});
+                            Expression::DataFlowTag{coord, registerType, DataType::UInt32});
                         regCoords[coord] = coordDF;
                     }
                 }
@@ -539,7 +513,6 @@ namespace rocRoller
 
                 if(assignStrideTag != -1 || assignBaseTag != -1)
                 {
-                    // std::cout << "YL: add (ciTag, assignBaseTag, assignStrideTag) " << tag << ", " << assignBaseTag << ", " << assignStrideTag << std::endl;
                     ciAndAssign.push_back({tag, assignBaseTag, assignStrideTag});
                 }
             }

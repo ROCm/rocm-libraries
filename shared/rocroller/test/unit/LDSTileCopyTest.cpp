@@ -273,6 +273,11 @@ namespace LDSCopyTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
+        auto addComputeIndex = std::make_shared<AddComputeIndex>();
+        kgraph               = kgraph.transform(addComputeIndex);
+
+        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(m_context));
+
         kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         m_context->schedule(k->preamble());
@@ -321,5 +326,5 @@ namespace LDSCopyTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(LDSCopyTest, LDSCopyTest, currentGPUISA());
+    INSTANTIATE_TEST_SUITE_P(LDSCopyTest, LDSCopyTest, supportedISATuples());
 }

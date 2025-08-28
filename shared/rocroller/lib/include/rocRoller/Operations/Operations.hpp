@@ -36,7 +36,6 @@
 
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
-#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/T_LoadStore.hpp>
 #include <rocRoller/Operations/T_Mul.hpp>
 #include <rocRoller/Operations/TensorScalar.hpp>

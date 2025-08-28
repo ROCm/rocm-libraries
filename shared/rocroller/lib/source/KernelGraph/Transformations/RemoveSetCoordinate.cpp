@@ -87,48 +87,6 @@ namespace rocRoller
                 return leaves;
             }
 
-            static void connect(bool const              isSequenceEdge,
-                                std::vector<int> const& A,
-                                std::vector<int> const& B,
-                                KernelGraph&            kg)
-            {
-                if(A.empty() or B.empty())
-                    return;
-
-                auto addEdges = [&]<typename EdgeType>() {
-                    for(auto const a : A)
-                        for(auto const b : B)
-                            kg.control.addElement(EdgeType(), {a}, {b});
-                };
-
-                if(isSequenceEdge)
-                    addEdges.template operator()<ControlGraph::Sequence>();
-                else
-                    addEdges.template operator()<ControlGraph::Body>();
-            }
-
-            static bool const getAndVerifyInputEdgesAreOfTheSameType(KernelGraph const& kg,
-                                                                     int const          node)
-            {
-                using GD = rocRoller::Graph::Direction;
-
-                auto const allSequence
-                    = std::ranges::all_of(kg.control.getNeighbours<GD::Upstream>(node), [&](int x) {
-                          return std::holds_alternative<CG::Sequence>(kg.control.getEdge(x));
-                      });
-
-                if(not allSequence)
-                {
-                    auto const allBody = std::ranges::all_of(
-                        kg.control.getNeighbours<GD::Upstream>(node), [&](int x) {
-                            return std::holds_alternative<CG::Body>(kg.control.getEdge(x));
-                        });
-                    AssertFatal(allBody, "A SetCoordinate's input edges are of different types");
-                }
-
-                return allSequence;
-            }
-
             void removeSetCoordinates(KernelGraph& kg)
             {
                 using GD = rocRoller::Graph::Direction;

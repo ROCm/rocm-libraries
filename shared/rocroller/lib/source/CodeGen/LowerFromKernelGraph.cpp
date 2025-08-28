@@ -628,9 +628,6 @@ namespace rocRoller
 
                 auto scope = m_context->getScopeManager();
 
-                auto maybeOffset = m_graph->coordinates.get<Offset>(dimTag).has_value();
-                // auto maybeStride = assign.strideExpressionAttributes.has_value();
-
                 if(assign.strideExpressionAttributes)
                 {
                     co_yield Instruction::Comment("Assign stride expression");
@@ -640,72 +637,60 @@ namespace rocRoller
                         *(assign.strideExpressionAttributes));
                     scope->addRegister(dimTag);
                 }
-                // else if (maybeOffset)
-                // {
-                //     // auto tagger = m_context->registerTagManager();
-                //     AssertFatal(assign.variableType);
-                //     auto varType = (assign.variableType) ? ssign.variableType.value() : resultVariableType(assign.expression);
-                //     auto offsetReg = m_context->registerTagManager()->getRegister(dimTag, assign.regType, assign.variableType.value(), 1);
-                //     offsetReg->setName(concatenate("Offset", tag));
-                //     scope->addRegister(dimTag);
-                //     co_yield Expression::generate(offsetReg, assign.expression, m_context);
-                // }
                 else
                 {
-                scope->addRegister(dimTag);
+                    scope->addRegister(dimTag);
 
-                auto deferred = expressionHasNoneDT(assign.expression)
-                                && !m_context->registerTagManager()->hasRegister(dimTag);
+                    auto deferred = expressionHasNoneDT(assign.expression)
+                                    && !m_context->registerTagManager()->hasRegister(dimTag);
 
-                Register::ValuePtr dest;
-                if(!deferred)
-                {
-                    auto valueCount = assign.valueCount;
-                    if(valueCount == 0)
+                    Register::ValuePtr dest;
+                    if(!deferred)
                     {
-                        auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
-                        valueCount = tmp->valueCount();
+                        auto valueCount = assign.valueCount;
+                        if(valueCount == 0)
+                        {
+                            auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
+                            valueCount = tmp->valueCount();
+                        }
+
+                        auto varType = resultVariableType(assign.expression);
+                        if(assign.variableType)
+                        {
+                            varType = assign.variableType.value();
+                            // For non-packed types, the denominator is 1.
+                            valueCount /= DataTypeInfo::Get(varType).packing;
+                        }
+
+                        Log::debug("  immediate: count {}", assign.valueCount);
+                        if(assign.regType == Register::Type::Accumulator
+                           || assign.regType == Register::Type::Vector)
+                        {
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag,
+                                assign.regType,
+                                varType,
+                                valueCount,
+                                Register::AllocationOptions{.contiguousChunkWidth
+                                                            = static_cast<int>(valueCount)});
+                        }
+                        else
+                        {
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag, assign.regType, varType, valueCount);
+                        }
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
                     }
 
-                    auto varType = resultVariableType(assign.expression);
-                    if(assign.variableType)
+                    co_yield Expression::generate(dest, assign.expression, m_context);
+
+                    if(deferred)
                     {
-                        varType = assign.variableType.value();
-                        // For non-packed types, the denominator is 1.
-                        valueCount /= DataTypeInfo::Get(varType).packing;
+                        m_context->registerTagManager()->addRegister(dimTag, dest);
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
                     }
-
-                    Log::debug("  immediate: count {}", assign.valueCount);
-                    if(assign.regType == Register::Type::Accumulator
-                       || assign.regType == Register::Type::Vector)
-                    {
-                        dest = m_context->registerTagManager()->getRegister(
-                            dimTag,
-                            assign.regType,
-                            varType,
-                            valueCount,
-                            Register::AllocationOptions{.contiguousChunkWidth
-                                                        = static_cast<int>(valueCount)});
-                    }
-                    else
-                    {
-                        dest = m_context->registerTagManager()->getRegister(
-                            dimTag, assign.regType, varType, valueCount);
-                    }
-                    if(dest->name().empty())
-                        dest->setName(concatenate("DataFlowTag", dimTag));
-                }
-
-                co_yield Expression::generate(dest, assign.expression, m_context);
-
-                
-
-                if(deferred)
-                {
-                    m_context->registerTagManager()->addRegister(dimTag, dest);
-                    if(dest->name().empty())
-                        dest->setName(concatenate("DataFlowTag", dimTag));
-                }
                 }
             }
 
@@ -1093,7 +1078,7 @@ namespace rocRoller
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::Int64, 1);
 
-                auto indexes = m_graph->buildTransformer(tag).forward({userTag});   
+                auto indexes = m_graph->buildTransformer(tag).forward({userTag});
 
                 co_yield Instruction::Comment("GEN: StoreSGPR; user index");
                 co_yield generateOffset(

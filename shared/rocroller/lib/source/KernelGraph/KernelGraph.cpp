@@ -139,7 +139,6 @@ namespace rocRoller
 
             for(int index : stk | std::views::reverse)
             {
-
                 std::visit(
                     [&](auto&& node) {
                         using OpType = std::decay_t<decltype(node)>;
@@ -154,7 +153,6 @@ namespace rocRoller
                     },
                     control.getNode(index));
             }
-
             return iter->second;
         }
 

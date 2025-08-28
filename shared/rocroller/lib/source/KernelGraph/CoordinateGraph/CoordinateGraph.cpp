@@ -32,8 +32,6 @@
 
 #include <rocRoller/Utilities/Settings.hpp>
 
-#include <rocRoller/Utilities/Settings.hpp>
-
 namespace rocRoller
 {
 

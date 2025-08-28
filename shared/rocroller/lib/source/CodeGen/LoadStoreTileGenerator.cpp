@@ -118,153 +118,6 @@ namespace rocRoller
             return std::make_shared<BufferDescriptor>(bufferSrd, m_context);
         }
 
-        static std::pair<uint, uint>
-            getElementBlockValues(KernelGraph const& graph, int target, const bool isTransposed)
-        {
-            uint elementBlockNumber = 0;
-            uint elementBlockIndex  = 0;
-
-            std::unordered_set<int> tileTags;
-            using OpsAndTilesType
-                = std::tuple<std::pair<int, Operation>, std::pair<int, MacroTile>, DataType>;
-            std::vector<OpsAndTilesType> targetOpsAndTiles;
-
-            for(auto conn : graph.mapper.getCoordinateConnections(target))
-            {
-                auto     opTag = conn.control;
-                auto     op    = std::get<Operation>(graph.control.getElement(opTag));
-                DataType dataType;
-                if(std::visit(rocRoller::overloaded{[&](LoadTiled& load) {
-                                                        dataType = load.varType.dataType;
-                                                        return true;
-                                                    },
-                                                    [&](LoadLDSTile& load) {
-                                                        dataType = load.varType.dataType;
-                                                        return true;
-                                                    },
-                                                    [&](StoreTiled& store) {
-                                                        dataType = store.varType.dataType;
-                                                        return true;
-                                                    },
-                                                    [&](StoreLDSTile& store) {
-                                                        dataType = store.varType.dataType;
-                                                        return true;
-                                                    },
-                                                    [&](auto& other) { return false; }},
-                              op))
-                {
-                    auto [macTileTag, macTile] = graph.getDimension<MacroTile>(opTag);
-
-                    auto maybeParentTile = only(
-                        graph.coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<Duplicate>));
-                    if(maybeParentTile)
-                    {
-                        macTileTag = *maybeParentTile;
-                        macTile    = *graph.coordinates.get<MacroTile>(macTileTag);
-                    }
-
-                    if(!tileTags.count(macTileTag))
-                    {
-                        targetOpsAndTiles.push_back({{opTag, op}, {macTileTag, macTile}, dataType});
-                    }
-                }
-            }
-
-            auto [tagAndOp, tagAndTile, dataType] = [](auto opsAndTiles) -> OpsAndTilesType {
-                for(OpsAndTilesType& elem : opsAndTiles)
-                {
-                    auto memType = std::get<1>(elem).second.memoryType;
-                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE)
-                    {
-                        return elem;
-                    }
-                }
-                return opsAndTiles[0];
-            }(targetOpsAndTiles);
-            auto [opTag, op]           = tagAndOp;
-            auto [macTileTag, macTile] = tagAndTile;
-
-            if(macTile.memoryType == MemoryType::VGPR
-               || (macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   && macTile.memoryType == MemoryType::WAVE_SPLIT))
-            {
-                auto [elementNumberXTag, elementNumberX]
-                    = graph.getDimension<ElementNumber>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(elementNumberX.size)[EvaluationTime::Translate],
-                    "Could not determine ElementNumberX size at translate-time.\n",
-                    ShowValue(elementNumberX));
-
-                auto [elementNumberYTag, elementNumberY]
-                    = graph.getDimension<ElementNumber>(opTag, 1);
-                AssertFatal(
-                    Expression::evaluationTimes(elementNumberY.size)[EvaluationTime::Translate],
-                    "Could not determine ElementNumber size at translate-time.\n",
-                    ShowValue(elementNumberY));
-
-                elementBlockNumber = getUnsignedInt(evaluate(elementNumberX.size));
-                elementBlockIndex  = getUnsignedInt(evaluate(elementNumberY.size));
-            }
-            else if(macTile.memoryType == MemoryType::WAVE
-                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE)
-            {
-                auto [vgprBlockNumberTag, vgprBlockNumber]
-                    = graph.getDimension<VGPRBlockNumber>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(vgprBlockNumber.size)[EvaluationTime::Translate],
-                    "Could not determine VGPRBlockNumber size at translate-time.\n",
-                    ShowValue(vgprBlockNumber));
-
-                auto [vgprBlockIndexTag, vgprBlockIndex]
-                    = graph.getDimension<VGPRBlockIndex>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(vgprBlockIndex.size)[EvaluationTime::Translate],
-                    "Could not determine VGPRBlockIndex size at translate-time.\n",
-                    ShowValue(vgprBlockIndex));
-
-                elementBlockNumber = getUnsignedInt(evaluate(vgprBlockNumber.size));
-                elementBlockIndex  = getUnsignedInt(evaluate(vgprBlockIndex.size));
-                if(isScaleType(dataType))
-                {
-                    // Scales are another special case here. For Scales we need
-                    // to get VGPR coordinate instead of VGPRBlockNumber/Index
-                    // (see addLoadSwizzleTileCT).
-                    auto [vgprTag, vgpr] = graph.getDimension<VGPR>(opTag, 0);
-                    AssertFatal(Expression::evaluationTimes(vgpr.size)[EvaluationTime::Translate],
-                                "Could not determine VGPR size at translate-time.\n",
-                                ShowValue(vgpr));
-                    // Multiplying by elementBlockNumber here forces the use
-                    // of the widest load/store possible
-                    elementBlockIndex = elementBlockNumber * getUnsignedInt(evaluate(vgpr.size));
-                }
-
-                if((!isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(dataType,
-                                                                     {.m = macTile.subTileSizes[0],
-                                                                      .n = macTile.subTileSizes[1],
-                                                                      .k = macTile.subTileSizes[2]})
-                    || isScaleType(dataType))
-                   && !isTransposed)
-                {
-                    // For Scales and other kinds of tiles, VGPRBlockIndex holds
-                    // number of VGPR per block and not elements per VGPRBlock.
-                    elementBlockIndex *= packingFactorForDataType(dataType);
-                }
-            }
-            else
-            {
-                Throw<FatalError>(
-                    "Could not find ElementNumber or VGPRBlockNumber/Index coordinates.\n",
-                    ShowValue(op),
-                    ShowValue(macTile));
-            }
-
-            AssertFatal(elementBlockNumber > 0 && elementBlockIndex > 0,
-                        "elemementBlockNumber & elementBlockIndex must be greater than zero. ",
-                        ShowValue(elementBlockNumber),
-                        ShowValue(elementBlockIndex));
-            return {elementBlockNumber, elementBlockIndex};
-        }
-
         /**
          * @brief Build unrolled offset expression.
          *
@@ -315,7 +168,7 @@ namespace rocRoller
                     auto maybeUnroll = m_graph->coordinates.get<Unroll>(c.coordinate);
                     if(!maybeUnroll)
                         continue;
-                        
+
                     auto curConnection = std::get<Connections::TypeAndSubDimension>(c.connection);
                     auto subdim        = curConnection.subdimension;
                     AssertFatal(subdim < maxSubDim, ShowValue(subdim));
@@ -399,10 +252,8 @@ namespace rocRoller
 
                 rowOffsetExpr = getOffsetExpr(tag, direct2LDS, coords);
             }
-            //else if(m_baseOffsets.count(offsetTag) > 0)
             else
             {
-                // auto baseTag = m_baseOffsets[offsetTag];
                 auto baseTag = -1;
                 for(auto const& c : m_graph->mapper.getConnections(tag))
                 {
@@ -415,12 +266,11 @@ namespace rocRoller
                         continue;
                     baseTag = c.coordinate;
                 }
-
                 if(baseTag == -1)
                 {
                     Throw<FatalError>("Base offset not found");
                 }
-                // AssertFatal(tmpBaseTag == baseTag);
+
                 if(direct2LDS)
                 {
                     auto tmp = m_context->registerTagManager()->getRegister(baseTag);
@@ -445,10 +295,6 @@ namespace rocRoller
 
                 rowOffsetExpr = getOffsetExpr(tag, direct2LDS, coords);
             }
-            // else
-            // {
-            //     Throw<FatalError>("Base offset not found");
-            // }
 
             if(direct2LDS)
             {

@@ -1351,7 +1351,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 16);
+            EXPECT_EQ(deallocatedDims.size(), 48);
         }
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
@@ -1379,7 +1379,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 86);
+            EXPECT_EQ(deallocatedDims.size(), 290);
         }
     }
 
@@ -2768,8 +2768,6 @@ namespace KernelGraphTest
         kgraph.mapper.connect(beforeConditionalAssign, destReg, NaryArgument::DEST);
         kgraph.mapper.connect(trueOp, destReg, NaryArgument::DEST);
         kgraph.mapper.connect(falseOp, destReg, NaryArgument::DEST);
-
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 

@@ -32,11 +32,11 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Generate the Assign operations to compute the index
+         * @brief Generate Assign operations that have index expression from associated ComputeIndex
      *
      *   (1) Generate expressions for each ComputeIndex operation and write the expression to new Assign operation
      *
-     *   (2) The new Assign operations are connected to a chain and placed in the downstream neighbor for the associate ComputeIndex
+     *   (2) The new Assign operations are connected to a chain and placed in the downstream neighbor of the associate ComputeIndex
          *
      * @ingroup Transformations
     */
