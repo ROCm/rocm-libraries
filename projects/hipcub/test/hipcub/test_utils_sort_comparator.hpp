@@ -33,7 +33,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_half.hpp"
 
-#include "hipcub/tuple.hpp"
+#include <hipcub/tuple.hpp>
 
 #include <cstring>
 
