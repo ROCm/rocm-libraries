@@ -23,6 +23,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/config/memory_resource.h>
 #include <thrust/detail/integer_math.h>
 
@@ -92,7 +100,7 @@ struct pool_options
 
   /*! Checks if the options are self-consistent.
    *
-   *  /returns true if the options are self-consitent, false otherwise.
+   *  /returns true if the options are self-consistent, false otherwise.
    */
   bool validate() const
   {
