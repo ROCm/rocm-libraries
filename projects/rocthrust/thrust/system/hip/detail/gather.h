@@ -29,16 +29,7 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <thrust/functional.h>
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/hip/detail/transform.h>
 
@@ -47,7 +38,7 @@ namespace hip_rocprim
 {
 
 template <class Derived, class MapIt, class ItemsIt, class ResultIt>
-ResultIt THRUST_HOST_DEVICE
+ResultIt THRUST_HIP_FUNCTION
 gather(execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, ItemsIt items, ResultIt result)
 {
   return hip_rocprim::transform(
@@ -55,11 +46,11 @@ gather(execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, Items
     thrust::make_permutation_iterator(items, map_first),
     thrust::make_permutation_iterator(items, map_last),
     result,
-    ::internal::identity{});
+    identity());
 }
 
 template <class Derived, class MapIt, class StencilIt, class ItemsIt, class ResultIt, class Predicate>
-ResultIt THRUST_HOST_DEVICE gather_if(
+ResultIt THRUST_HIP_FUNCTION gather_if(
   execution_policy<Derived>& policy,
   MapIt map_first,
   MapIt map_last,
@@ -74,15 +65,15 @@ ResultIt THRUST_HOST_DEVICE gather_if(
     thrust::make_permutation_iterator(items, map_last),
     stencil,
     result,
-    ::internal::identity{},
+    identity(),
     predicate);
 }
 
 template <class Derived, class MapIt, class StencilIt, class ItemsIt, class ResultIt>
-ResultIt THRUST_HOST_DEVICE gather_if(
+ResultIt THRUST_HIP_FUNCTION gather_if(
   execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, StencilIt stencil, ItemsIt items, ResultIt result)
 {
-  return hip_rocprim::gather_if(policy, map_first, map_last, stencil, items, result, ::internal::identity{});
+  return hip_rocprim::gather_if(policy, map_first, map_last, stencil, items, result, identity());
 }
 
 } // namespace hip_rocprim

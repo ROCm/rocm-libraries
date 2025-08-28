@@ -36,7 +36,7 @@
 // determines whether the character is alphabetical
 __host__ __device__ bool is_alpha(const char c)
 {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+  return (c >= 'A' && c <= 'z');
 }
 
 // determines whether the right character begins a new word
@@ -74,7 +74,7 @@ int word_count(const thrust::device_vector<char>& input)
   return wc;
 }
 
-int main()
+int main(void)
 {
   // Paragraph from 'The Raven' by Edgar Allan Poe
   // http://en.wikipedia.org/wiki/The_Raven

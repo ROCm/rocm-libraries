@@ -19,8 +19,8 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(SetDifferenceByKeyDescendingTests, FullTestsParams);
@@ -29,19 +29,45 @@ TESTS_DEFINE(SetDifferenceByKeyDescendingPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(SetDifferenceByKeyDescendingTests, TestSetDifferenceByKeyDescendingSimple)
 {
   using Vector   = typename TestFixture::input_type;
+  using Policy   = typename TestFixture::execution_policy;
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a_key{5, 4, 2, 0}, a_val(4, 0);
-  Vector b_key{6, 4, 3, 3, 0}, b_val(5, 1);
+  Vector a_key(4), a_val(4);
+  Vector b_key(5), b_val(5);
 
-  Vector ref_key{5, 2}, ref_val{0, 0};
+  a_key[0] = 5;
+  a_key[1] = 4;
+  a_key[2] = 2;
+  a_key[3] = 0;
+  a_val[0] = 0;
+  a_val[1] = 0;
+  a_val[2] = 0;
+  a_val[3] = 0;
+
+  b_key[0] = 6;
+  b_key[1] = 4;
+  b_key[2] = 3;
+  b_key[3] = 3;
+  b_key[4] = 0;
+  b_val[0] = 1;
+  b_val[1] = 1;
+  b_val[2] = 1;
+  b_val[3] = 1;
+  b_val[4] = 1;
+
+  Vector ref_key(2), ref_val(2);
+  ref_key[0] = 5;
+  ref_key[1] = 2;
+  ref_val[0] = 0;
+  ref_val[1] = 0;
 
   Vector result_key(2), result_val(2);
 
   thrust::pair<Iterator, Iterator> end = thrust::set_difference_by_key(
+    Policy{},
     a_key.begin(),
     a_key.end(),
     b_key.begin(),
@@ -52,8 +78,8 @@ TYPED_TEST(SetDifferenceByKeyDescendingTests, TestSetDifferenceByKeyDescendingSi
     result_val.begin(),
     thrust::greater<T>());
 
-  ASSERT_EQ_QUIET(result_key.end(), end.first);
-  ASSERT_EQ_QUIET(result_val.end(), end.second);
+  EXPECT_EQ(result_key.end(), end.first);
+  EXPECT_EQ(result_val.end(), end.second);
   ASSERT_EQ(ref_key, result_key);
   ASSERT_EQ(ref_val, result_val);
 }
@@ -63,6 +89,8 @@ TYPED_TEST(SetDifferenceByKeyDescendingPrimitiveTests, TestSetDifferenceByKeyDes
   using T = typename TestFixture::input_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  const std::vector<size_t> sizes = get_sizes();
 
   for (auto size : get_sizes())
   {
@@ -74,6 +102,7 @@ TYPED_TEST(SetDifferenceByKeyDescendingPrimitiveTests, TestSetDifferenceByKeyDes
 
       thrust::host_vector<T> temp =
         get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+
       thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + size);
       thrust::host_vector<T> h_b_key(temp.begin() + size, temp.end());
 

@@ -67,7 +67,7 @@ __global__ void count_if_kernel(ExecutionPolicy exec, Iterator first, Iterator l
 template <typename T>
 struct greater_than_five
 {
-  _CCCL_HOST_DEVICE bool operator()(const T& x) const
+  THRUST_HOST_DEVICE bool operator()(const T& x) const
   {
     return x > 5;
   }
@@ -106,7 +106,12 @@ DECLARE_VARIABLE_UNITTEST(TestCountIfDeviceDevice);
 
 void TestCountCudaStreams()
 {
-  thrust::device_vector<int> data{1, 1, 0, 0, 1};
+  thrust::device_vector<int> data(5);
+  data[0] = 1;
+  data[1] = 1;
+  data[2] = 0;
+  data[3] = 0;
+  data[4] = 1;
 
   cudaStream_t s;
   cudaStreamCreate(&s);

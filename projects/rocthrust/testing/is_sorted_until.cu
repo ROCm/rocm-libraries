@@ -21,12 +21,16 @@
 #include <unittest/unittest.h>
 
 template <typename Vector>
-void TestIsSortedUntilSimple()
+void TestIsSortedUntilSimple(void)
 {
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
-  Vector v{0, 5, 8, 0};
+  Vector v(4);
+  v[0] = 0;
+  v[1] = 5;
+  v[2] = 8;
+  v[3] = 0;
 
   Iterator first = v.begin();
 
@@ -74,16 +78,27 @@ void TestIsSortedUntilSimple()
 DECLARE_VECTOR_UNITTEST(TestIsSortedUntilSimple);
 
 template <typename Vector>
-void TestIsSortedUntilRepeatedElements()
+void TestIsSortedUntilRepeatedElements(void)
 {
-  Vector v{0, 1, 1, 2, 3, 4, 5, 5, 5, 6};
+  Vector v(10);
+
+  v[0] = 0;
+  v[1] = 1;
+  v[2] = 1;
+  v[3] = 2;
+  v[4] = 3;
+  v[5] = 4;
+  v[6] = 5;
+  v[7] = 5;
+  v[8] = 5;
+  v[9] = 6;
 
   ASSERT_EQUAL_QUIET(v.end(), thrust::is_sorted_until(v.begin(), v.end()));
 }
 DECLARE_VECTOR_UNITTEST(TestIsSortedUntilRepeatedElements);
 
 template <class Vector>
-void TestIsSortedUntil()
+void TestIsSortedUntil(void)
 {
   using T = typename Vector::value_type;
 
@@ -103,7 +118,7 @@ void TestIsSortedUntil()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestIsSortedUntil);
 
 template <typename ForwardIterator>
-ForwardIterator is_sorted_until(my_system& system, ForwardIterator first, ForwardIterator)
+THRUST_HOST_DEVICE ForwardIterator is_sorted_until(my_system& system, ForwardIterator first, ForwardIterator)
 {
   system.validate_dispatch();
   return first;
@@ -121,7 +136,7 @@ void TestIsSortedUntilExplicit()
 DECLARE_UNITTEST(TestIsSortedUntilExplicit);
 
 template <typename ForwardIterator>
-ForwardIterator is_sorted_until(my_tag, ForwardIterator first, ForwardIterator)
+THRUST_HOST_DEVICE ForwardIterator is_sorted_until(my_tag, ForwardIterator first, ForwardIterator)
 {
   *first = 13;
   return first;

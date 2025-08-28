@@ -19,25 +19,24 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/reference_forward_declaration.h>
 #include <thrust/pair.h>
 #include <thrust/tuple.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(tuple)
-#  include _THRUST_STD_INCLUDE(type_traits)
-#else
-#  include <utility>
-#endif
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/tuple>
+#  include <cuda/std/type_traits>
+#elif defined(__has_include)
+#  if __has_include(<cuda/std/tuple>)
+#    include <cuda/std/tuple>
+#  endif // __has_include(<cuda/std/tuple>)
+#  if __has_include(<cuda/std/type_traits>)
+#    include <cuda/std/type_traits>
+#  endif // __has_include(<cuda/std/type_traits>)
+#endif // THRUST_DEVICE_SYSTEM
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 THRUST_NAMESPACE_BEGIN
 
@@ -56,16 +55,14 @@ struct maybe_unwrap_nested
   }
 };
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <class... Us, class... Ts>
 struct maybe_unwrap_nested<thrust::tuple<Us...>, tuple_of_iterator_references<Ts...>>
 {
   THRUST_HOST_DEVICE thrust::tuple<Us...> operator()(const tuple_of_iterator_references<Ts...>& t) const
   {
-    return t.template __to_tuple<Us...>(typename _THRUST_STD::__make_tuple_indices<sizeof...(Ts)>::type{});
+    return t.template __to_tuple<Us...>(typename ::cuda::std::__make_tuple_indices<sizeof...(Ts)>::type{});
   }
 };
-#endif
 
 template <typename... Ts>
 class tuple_of_iterator_references : public thrust::tuple<Ts...>
@@ -74,9 +71,7 @@ public:
   using super_t = thrust::tuple<Ts...>;
   using super_t::super_t;
 
-  inline THRUST_HOST_DEVICE tuple_of_iterator_references()
-      : super_t()
-  {}
+  tuple_of_iterator_references() = default;
 
   // allow implicit construction from tuple<refs>
   inline THRUST_HOST_DEVICE tuple_of_iterator_references(const super_t& other)
@@ -84,7 +79,7 @@ public:
   {}
 
   inline THRUST_HOST_DEVICE tuple_of_iterator_references(super_t&& other)
-      : super_t(_THRUST_STD::move(other))
+      : super_t(::cuda::std::move(other))
   {}
 
   // allow assignment from tuples
@@ -122,13 +117,11 @@ public:
     return *this;
   }
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-  template <class... Us, _THRUST_STD::enable_if_t<sizeof...(Us) == sizeof...(Ts), int> = 0>
+  template <class... Us, ::cuda::std::__enable_if_t<sizeof...(Us) == sizeof...(Ts), int> = 0>
   inline THRUST_HOST_DEVICE constexpr operator thrust::tuple<Us...>() const
   {
-    return __to_tuple<Us...>(typename _THRUST_STD::__make_tuple_indices<sizeof...(Ts)>::type{});
+    return __to_tuple<Us...>(typename ::cuda::std::__make_tuple_indices<sizeof...(Ts)>::type{});
   }
-#endif
 
   // this overload of swap() permits swapping tuple_of_iterator_references returned as temporaries from
   // iterator dereferences
@@ -138,31 +131,23 @@ public:
     x.swap(y);
   }
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   template <class... Us, size_t... Id>
-  inline THRUST_HOST_DEVICE constexpr thrust::tuple<Us...> __to_tuple(_THRUST_STD::__tuple_indices<Id...>) const
+  inline THRUST_HOST_DEVICE constexpr thrust::tuple<Us...> __to_tuple(::cuda::std::__tuple_indices<Id...>) const
   {
     return {maybe_unwrap_nested<Us, Ts>{}(get<Id>(*this))...};
   }
-#endif
 };
 
 } // namespace detail
 
+template <class... Ts>
+struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
+    : integral_constant<bool, true>
+{};
+
 THRUST_NAMESPACE_END
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-_THRUST_STD_NAMESPACE_BEGIN
-#else
-THRUST_NAMESPACE_BEGIN
-#endif
-
-// 'libhipcxx' implementation is incomplete so we ignore this for now
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <class... Ts>
-struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> : true_type
-{};
-#endif
+_LIBCUDACXX_BEGIN_NAMESPACE_STD
 
 // define tuple_size, tuple_element, etc.
 template <class... Ts>
@@ -172,21 +157,12 @@ struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts..
 
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-    : _THRUST_STD::tuple_element<Id, _THRUST_STD::tuple<Ts...>>
-#else
-    : ::thrust::tuple_element<Id, ::thrust::tuple<Ts...>>
-#endif
+    : _CUDA_VSTD::tuple_element<Id, _CUDA_VSTD::tuple<Ts...>>
 {};
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-_THRUST_STD_NAMESPACE_END
-#else
-THRUST_NAMESPACE_END
-#endif
+_LIBCUDACXX_END_NAMESPACE_STD
 
-// structured bindings support
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
+// structured bindings suppport
 namespace std
 {
 
@@ -197,12 +173,105 @@ struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts..
 
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-    : _THRUST_STD::tuple_element<Id, _THRUST_STD::tuple<Ts...>>
-#  else
-    : ::thrust::tuple_element<Id, ::thrust::tuple<Ts...>>
-#  endif
+    : _CUDA_VSTD::tuple_element<Id, _CUDA_VSTD::tuple<Ts...>>
 {};
 
 } // namespace std
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
+
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+
+THRUST_NAMESPACE_BEGIN
+
+namespace detail
+{
+
+template <typename... Ts>
+class tuple_of_iterator_references : public thrust::tuple<Ts...>
+{
+private:
+  using super_t = thrust::tuple<Ts...>;
+
+public:
+  // allow implicit construction from tuple<refs>
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references(const super_t& other)
+      : super_t(other)
+  {}
+
+  // allow assignment from tuples
+  // XXX might be worthwhile to guard this with an enable_if is_assignable
+  THRUST_EXEC_CHECK_DISABLE
+  template <typename... Us>
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const thrust::tuple<Us...>& other)
+  {
+    super_t::operator=(other);
+    return *this;
+  }
+
+  // allow assignment from pairs
+  // XXX might be worthwhile to guard this with an enable_if is_assignable
+  THRUST_EXEC_CHECK_DISABLE
+  template <typename U1, typename U2>
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const thrust::pair<U1, U2>& other)
+  {
+    super_t::operator=(other);
+    return *this;
+  }
+
+  // allow assignment from reference<tuple>
+  // XXX perhaps we should generalize to reference<T>
+  //     we could captures reference<pair> this way
+  THRUST_EXEC_CHECK_DISABLE
+  template <typename Pointer, typename Derived, typename... Us>
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references&
+  operator=(const thrust::reference<thrust::tuple<Us...>, Pointer, Derived>& other)
+  {
+    using tuple_type = thrust::tuple<Us...>;
+
+    // XXX perhaps this could be accelerated
+    tuple_type other_tuple = other;
+    super_t::operator=(other_tuple);
+    return *this;
+  }
+
+  // duplicate thrust::tuple's constructors
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references() {}
+
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references(typename access_traits<Ts>::parameter_type... ts)
+      : super_t(ts...)
+  {}
+};
+
+// this overload of swap() permits swapping tuple_of_iterator_references returned as temporaries from
+// iterator dereferences
+template <typename... Ts, typename... Us>
+inline THRUST_HOST_DEVICE void swap(tuple_of_iterator_references<Ts...> x, tuple_of_iterator_references<Us...> y)
+{
+  x.swap(y);
+}
+
+} // namespace detail
+
+// define tuple_size, tuple_element, etc.
+template <class... Ts>
+struct tuple_size<detail::tuple_of_iterator_references<Ts...>> : std::integral_constant<size_t, sizeof...(Ts)>
+{};
+
+template <size_t i>
+struct tuple_element<i, detail::tuple_of_iterator_references<>>
+{};
+
+template <class T, class... Ts>
+struct tuple_element<0, detail::tuple_of_iterator_references<T, Ts...>>
+{
+  using type = T;
+};
+
+template <size_t i, class T, class... Ts>
+struct tuple_element<i, detail::tuple_of_iterator_references<T, Ts...>>
+{
+  using type = typename tuple_element<i - 1, detail::tuple_of_iterator_references<Ts...>>::type;
+};
+
+THRUST_NAMESPACE_END
+
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA

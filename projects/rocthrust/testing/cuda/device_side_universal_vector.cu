@@ -19,8 +19,8 @@
 
 #include <unittest/unittest.h>
 
-template <class VecInT, class VecOutT>
-THRUST_HOST_DEVICE void universal_vector_access(VecInT& in, VecOutT& out)
+template <class VecT>
+THRUST_HOST_DEVICE void universal_vector_access(VecT& in, thrust::universal_vector<bool>& out)
 {
   const int expected_front = 4;
   const int expected_back  = 2;
@@ -34,14 +34,14 @@ THRUST_HOST_DEVICE void universal_vector_access(VecInT& in, VecOutT& out)
 }
 
 #if defined(THRUST_TEST_DEVICE_SIDE)
-template <class VecInT, class VecOutT>
-__global__ void universal_vector_device_access_kernel(VecInT& vec, VecOutT& out)
+template <class VecT>
+__global__ void universal_vector_device_access_kernel(VecT& vec, thrust::universal_vector<bool>& out)
 {
   universal_vector_access(vec, out);
 }
 
-template <class VecInT, class VecOutT>
-void test_universal_vector_access(VecInT& vec, VecOutT& out)
+template <class VecT>
+void test_universal_vector_access(VecT& vec, thrust::universal_vector<bool>& out)
 {
   universal_vector_device_access_kernel<<<1, 1>>>(vec, out);
   cudaError_t const err = cudaDeviceSynchronize();
@@ -49,19 +49,18 @@ void test_universal_vector_access(VecInT& vec, VecOutT& out)
   ASSERT_EQUAL(out[0], true);
 }
 #else
-template <class VecInT, class VecOutT>
-void test_universal_vector_access(VecInT& vec, VecOutT& out)
+template <class VecT>
+void test_universal_vector_access(VecT& vec, thrust::universal_vector<bool>& out)
 {
   universal_vector_access(vec, out);
   ASSERT_EQUAL(out[0], true);
 }
 #endif
 
-template <typename UniversalIntVector, typename UniversalBoolVector>
-void TestDeviceAccess()
+void TestUniversalVectorDeviceAccess()
 {
-  using in_vector_t  = UniversalIntVector;
-  using out_vector_t = UniversalBoolVector;
+  using in_vector_t  = thrust::universal_vector<int>;
+  using out_vector_t = thrust::universal_vector<bool>;
 
   in_vector_t* in_ptr{};
   cudaMallocManaged(&in_ptr, sizeof(*in_ptr));
@@ -69,7 +68,8 @@ void TestDeviceAccess()
 
   auto& in = *in_ptr;
   in.resize(2);
-  in = {4, 2};
+  in[0] = 4;
+  in[1] = 2;
 
   out_vector_t* out_ptr{};
   cudaMallocManaged(&out_ptr, sizeof(*out_ptr));
@@ -80,14 +80,35 @@ void TestDeviceAccess()
   out[0] = false;
 
   test_universal_vector_access(in, out);
-  const auto& const_in = *in_ptr;
-  test_universal_vector_access(const_in, out);
-
-  cudaFree(in_ptr);
-  cudaFree(out_ptr);
 }
-DECLARE_UNITTEST_WITH_NAME((TestDeviceAccess<thrust::universal_vector<int>, thrust::universal_vector<bool>>),
-                           TestUniversalVectorDeviceAccess);
-DECLARE_UNITTEST_WITH_NAME(
-  (TestDeviceAccess<thrust::universal_host_pinned_vector<int>, thrust::universal_host_pinned_vector<bool>>),
-  TestUniversalHPVectorDeviceAccess);
+DECLARE_UNITTEST(TestUniversalVectorDeviceAccess);
+
+void TestConstUniversalVectorDeviceAccess()
+{
+  using in_vector_t  = thrust::universal_vector<int>;
+  using out_vector_t = thrust::universal_vector<bool>;
+
+  in_vector_t* in_ptr{};
+  cudaMallocManaged(&in_ptr, sizeof(*in_ptr));
+  new (in_ptr) in_vector_t(1);
+
+  {
+    auto& in = *in_ptr;
+    in.resize(2);
+    in[0] = 4;
+    in[1] = 2;
+  }
+
+  const auto& const_in = *in_ptr;
+
+  out_vector_t* out_ptr{};
+  cudaMallocManaged(&out_ptr, sizeof(*out_ptr));
+  new (out_ptr) out_vector_t(1);
+  auto& out = *out_ptr;
+
+  out.resize(1);
+  out[0] = false;
+
+  test_universal_vector_access(const_in, out);
+}
+DECLARE_UNITTEST(TestConstUniversalVectorDeviceAccess);

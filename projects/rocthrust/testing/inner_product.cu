@@ -25,12 +25,18 @@
 #include <unittest/unittest.h>
 
 template <class Vector>
-void TestInnerProductSimple()
+void TestInnerProductSimple(void)
 {
   using T = typename Vector::value_type;
 
-  Vector v1{1, -2, 3};
-  Vector v2{-4, 5, 6};
+  Vector v1(3);
+  Vector v2(3);
+  v1[0] = 1;
+  v1[1] = -2;
+  v1[2] = 3;
+  v2[0] = -4;
+  v2[1] = 5;
+  v2[2] = 6;
 
   T init   = 3;
   T result = thrust::inner_product(v1.begin(), v1.end(), v2.begin(), init);
@@ -74,12 +80,18 @@ void TestInnerProductDispatchImplicit()
 DECLARE_UNITTEST(TestInnerProductDispatchImplicit);
 
 template <class Vector>
-void TestInnerProductWithOperator()
+void TestInnerProductWithOperator(void)
 {
   using T = typename Vector::value_type;
 
-  Vector v1{1, -2, 3};
-  Vector v2{-1, 3, 6};
+  Vector v1(3);
+  Vector v2(3);
+  v1[0] = 1;
+  v1[1] = -2;
+  v1[2] = 3;
+  v2[0] = -1;
+  v2[1] = 3;
+  v2[2] = 6;
 
   // compute (v1 - v2) and perform a multiplies reduction
   T init   = 3;
@@ -148,11 +160,9 @@ void TestInnerProductWithBigIndexesHelper(int magnitude)
 void TestInnerProductWithBigIndexes()
 {
   TestInnerProductWithBigIndexesHelper(30);
-#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestInnerProductWithBigIndexesHelper(31);
   TestInnerProductWithBigIndexesHelper(32);
   TestInnerProductWithBigIndexesHelper(33);
-#endif
 }
 DECLARE_UNITTEST(TestInnerProductWithBigIndexes);
 

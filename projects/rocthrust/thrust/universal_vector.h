@@ -23,13 +23,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/universal_allocator.h>
 
 /*! \cond
@@ -61,14 +54,8 @@ THRUST_NAMESPACE_BEGIN
  *  \see host_vector For the documentation of the complete interface which is
  *                   shared by \p universal_vector.
  *  \see device_vector
- *  \see universal_host_pinned_vector
  */
 using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::universal_vector;
-
-//! Like \ref universal_vector but uses pinned memory when the system supports it.
-//! \see device_vector
-//! \see universal_vector
-using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::universal_host_pinned_vector;
 
 /*! \} // containers
  */

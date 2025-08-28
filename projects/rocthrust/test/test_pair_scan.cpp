@@ -27,7 +27,7 @@ TESTS_DEFINE(PairScanVariablesTests, NumericalTestsParams);
 struct make_pair_functor
 {
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  __host__ __device__ thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
   {
     return thrust::make_pair(x, y);
   } // end operator()()
@@ -36,11 +36,24 @@ struct make_pair_functor
 struct add_pairs
 {
   template <typename Pair1, typename Pair2>
-  THRUST_HOST_DEVICE Pair1 operator()(const Pair1& x, const Pair2& y)
+  __host__ __device__ Pair1 operator()(const Pair1& x, const Pair2& y)
   {
     return thrust::make_pair(x.first + y.first, x.second + y.second);
   } // end operator()
 }; // end add_pairs
+
+// TODO: Workaround, for issue:
+// issue 127
+struct maximum_pairs
+{
+  template <typename Pair1, typename Pair2>
+  __host__ __device__ Pair1 operator()(const Pair1& x, const Pair2& y)
+  {
+    // bool b = x.first < y.first || (!(y.first < x.first) && x.second < y.second);
+    // return b ? y : x;
+    return x.first < y.first || (!(y.first < x.first) && x.second < y.second) ? y : x;
+  } // end operator()
+}; // end maximum_pairs
 
 TYPED_TEST(PairScanVariablesTests, TestPairScan)
 {
@@ -79,9 +92,10 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
       thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), add_pairs());
       test_equality_pair_scan(h_output, d_output);
 
-      // scan with maximum (thrust issue #69)
-      thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), thrust::maximum<P>());
-      thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), thrust::maximum<P>());
+      // scan with maximum
+      // TODO: Workaround
+      thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), maximum_pairs() /*thrust::maximum<P>()*/);
+      thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), maximum_pairs() /*thrust::maximum<P>()*/);
       test_equality_pair_scan(h_output, d_output);
 
       // scan with plus
@@ -89,9 +103,12 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
       thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, add_pairs());
       test_equality_pair_scan(h_output, d_output);
 
-      // scan with maximum (thrust issue #69)
-      thrust::exclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), init, thrust::maximum<P>());
-      thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, thrust::maximum<P>());
+      // scan with maximum
+      // TODO: Workaround
+      thrust::exclusive_scan(
+        h_pairs.begin(), h_pairs.end(), h_output.begin(), init, maximum_pairs() /*thrust::maximum<P>()*/);
+      thrust::exclusive_scan(
+        d_pairs.begin(), d_pairs.end(), d_output.begin(), init, maximum_pairs() /*thrust::maximum<P>()*/);
       test_equality_pair_scan(h_output, d_output);
     }
   }

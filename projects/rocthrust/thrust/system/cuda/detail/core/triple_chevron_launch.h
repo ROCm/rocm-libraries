@@ -27,25 +27,15 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/system/cuda/config.h>
 
 #include <cuda/cmath>
-#include <cuda/std/__cccl/cuda_capabilities.h>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub
 {
-namespace detail
+namespace launcher
 {
 
 struct _CCCL_VISIBILITY_HIDDEN triple_chevron
@@ -54,43 +44,19 @@ struct _CCCL_VISIBILITY_HIDDEN triple_chevron
   dim3 const grid;
   dim3 const block;
   Size const shared_mem;
-  bool const dependent_launch;
   cudaStream_t const stream;
 
-  /// @param dependent_launch Launches the kernel using programmatic dependent launch if available.
-  THRUST_RUNTIME_FUNCTION triple_chevron(
-    dim3 grid_, dim3 block_, Size shared_mem_ = 0, cudaStream_t stream_ = nullptr, bool dependent_launch = false)
+  THRUST_RUNTIME_FUNCTION triple_chevron(dim3 grid_, dim3 block_, Size shared_mem_ = 0, cudaStream_t stream_ = 0)
       : grid(grid_)
       , block(block_)
       , shared_mem(shared_mem_)
-      , dependent_launch(dependent_launch)
       , stream(stream_)
   {}
 
   template <class K, class... Args>
   cudaError_t _CCCL_HOST doit_host(K k, Args const&... args) const
   {
-#if _THRUST_HAS_PDL
-    if (dependent_launch)
-    {
-      cudaLaunchAttribute attribute[1];
-      attribute[0].id                                         = cudaLaunchAttributeProgrammaticStreamSerialization;
-      attribute[0].val.programmaticStreamSerializationAllowed = 1;
-
-      cudaLaunchConfig_t config{};
-      config.gridDim          = grid;
-      config.blockDim         = block;
-      config.dynamicSmemBytes = shared_mem;
-      config.stream           = stream;
-      config.attrs            = attribute;
-      config.numAttrs         = 1;
-      cudaLaunchKernelEx(&config, k, args...);
-    }
-    else
-#endif // _THRUST_HAS_PDL
-    {
-      k<<<grid, block, shared_mem, stream>>>(args...);
-    }
+    k<<<grid, block, shared_mem, stream>>>(args...);
     return cudaPeekAtLastError();
   }
 
@@ -108,19 +74,19 @@ struct _CCCL_VISIBILITY_HIDDEN triple_chevron
   template <class... Args>
   size_t _CCCL_DEVICE argument_pack_size(size_t size, Args const&...) const
   {
-    // TODO(bgruber): replace by fold over comma in C++17 (make sure order of evaluation is left to right!)
-    int dummy[] = {(size = align_up<Args>(size) + sizeof(Args), 0)...};
-    static_cast<void>(dummy);
+    int dummy[] = {(size += align_up<Args>(size) + sizeof(Args), 0)...};
+    (void) dummy;
     return size;
   }
 
   template <class Arg>
-  void _CCCL_DEVICE copy_arg(char* buffer, size_t& offset, const Arg& arg) const
+  void _CCCL_DEVICE copy_arg(char* buffer, size_t& offset, Arg arg) const
   {
-    // TODO(bgruber): we should make sure that we can actually byte-wise copy Arg, but this fails with some tests
-    // static_assert(::cuda::std::is_trivially_copyable<Arg>::value, "");
     offset = align_up<Arg>(offset);
-    ::memcpy(buffer + offset, static_cast<const void*>(&arg), sizeof(arg));
+    for (int i = 0; i != sizeof(Arg); ++i)
+    {
+      buffer[offset + i] = reinterpret_cast<const char*>(&arg)[i];
+    }
     offset += sizeof(Arg);
   }
 
@@ -129,9 +95,8 @@ struct _CCCL_VISIBILITY_HIDDEN triple_chevron
   template <class... Args>
   _CCCL_DEVICE void fill_arguments(char* buffer, size_t offset, Args const&... args) const
   {
-    // TODO(bgruber): replace by fold over comma in C++17 (make sure order of evaluation is left to right!)
     int dummy[] = {(copy_arg(buffer, offset, args), 0)...};
-    static_cast<void>(dummy);
+    (void) dummy;
   }
 
 #ifdef THRUST_RDC_ENABLED
@@ -165,11 +130,7 @@ struct _CCCL_VISIBILITY_HIDDEN triple_chevron
   }
 
 }; // struct triple_chevron
-} // namespace detail
 
-namespace launcher
-{
-using triple_chevron CCCL_DEPRECATED = detail::triple_chevron;
 } // namespace launcher
 } // namespace cuda_cub
 

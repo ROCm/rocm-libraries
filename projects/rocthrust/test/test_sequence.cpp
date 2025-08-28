@@ -15,7 +15,8 @@
  *  limitations under the License.
  */
 
-#include <thrust/complex.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
@@ -39,7 +40,7 @@ void sequence(my_system& system, ForwardIterator, ForwardIterator)
   system.validate_dispatch();
 }
 
-TEST(SequenceTests, TestSequenceDispatchExplicit)
+TEST(SequenceTests, SequenceDispatchExplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -57,7 +58,7 @@ void sequence(my_tag, ForwardIterator first, ForwardIterator)
   *first = 13;
 }
 
-TEST(SequenceTests, TestSequenceDispatchImplicit)
+TEST(SequenceTests, SequenceDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -68,40 +69,51 @@ TEST(SequenceTests, TestSequenceDispatchImplicit)
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(SequenceTests, TestSequenceSimple)
+TYPED_TEST(SequenceTests, SequenceSimple)
 {
-  using Vector     = typename TestFixture::input_type;
-  using value_type = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
+  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector v(5);
 
-  thrust::sequence(v.begin(), v.end());
+  thrust::sequence(Policy{}, v.begin(), v.end());
 
-  Vector ref{0, 1, 2, 3, 4};
-  ASSERT_EQ(v, ref);
+  ASSERT_EQ(v[0], 0);
+  ASSERT_EQ(v[1], 1);
+  ASSERT_EQ(v[2], 2);
+  ASSERT_EQ(v[3], 3);
+  ASSERT_EQ(v[4], 4);
 
-  thrust::sequence(v.begin(), v.end(), value_type{10});
+  thrust::sequence(Policy{}, v.begin(), v.end(), (T) 10);
 
-  ref = {10, 11, 12, 13, 14};
-  ASSERT_EQ(v, ref);
+  ASSERT_EQ(v[0], 10);
+  ASSERT_EQ(v[1], 11);
+  ASSERT_EQ(v[2], 12);
+  ASSERT_EQ(v[3], 13);
+  ASSERT_EQ(v[4], 14);
 
-  thrust::sequence(v.begin(), v.end(), value_type{10}, value_type{2});
+  thrust::sequence(Policy{}, v.begin(), v.end(), (T) 10, (T) 2);
 
-  ref = {10, 12, 14, 16, 18};
-  ASSERT_EQ(v, ref);
+  ASSERT_EQ(v[0], 10);
+  ASSERT_EQ(v[1], 12);
+  ASSERT_EQ(v[2], 14);
+  ASSERT_EQ(v[3], 16);
+  ASSERT_EQ(v[4], 18);
 }
 
-TYPED_TEST(PrimitiveSequenceTests, TestSequence)
+TYPED_TEST(PrimitiveSequenceTests, SequencesWithVariableLength)
 {
   using T = typename TestFixture::input_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
+  T error_margin = (T) 0.01;
   for (auto size : get_sizes())
   {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
+    size_t step_size = (size * 0.01) + 1;
 
     thrust::host_vector<T> h_data(size);
     thrust::device_vector<T> d_data(size);
@@ -109,26 +121,42 @@ TYPED_TEST(PrimitiveSequenceTests, TestSequence)
     thrust::sequence(h_data.begin(), h_data.end());
     thrust::sequence(d_data.begin(), d_data.end());
 
-    ASSERT_EQ(h_data, d_data);
+    thrust::host_vector<T> h_data_d = d_data;
+    for (size_t i = 0; i < size; i += step_size)
+    {
+      ASSERT_NEAR(h_data[i], h_data_d[i], error_margin);
+    }
 
     thrust::sequence(h_data.begin(), h_data.end(), T(10));
     thrust::sequence(d_data.begin(), d_data.end(), T(10));
 
-    ASSERT_EQ(h_data, d_data);
+    h_data_d = d_data;
+    for (size_t i = 0; i < size; i += step_size)
+    {
+      ASSERT_NEAR(h_data[i], h_data_d[i], error_margin);
+    }
 
     thrust::sequence(h_data.begin(), h_data.end(), T(10), T(2));
     thrust::sequence(d_data.begin(), d_data.end(), T(10), T(2));
 
-    ASSERT_EQ(h_data, d_data);
+    h_data_d = d_data;
+    for (size_t i = 0; i < size; i += step_size)
+    {
+      ASSERT_NEAR(h_data[i], h_data_d[i], error_margin);
+    }
 
-    thrust::sequence(h_data.begin(), h_data.end(), T(10), T(2));
-    thrust::sequence(d_data.begin(), d_data.end(), T(10), T(2));
+    thrust::sequence(h_data.begin(), h_data.end(), size_t(10), size_t(2));
+    thrust::sequence(d_data.begin(), d_data.end(), size_t(10), size_t(2));
 
-    ASSERT_EQ(h_data, d_data);
+    h_data_d = d_data;
+    for (size_t i = 0; i < size; i += step_size)
+    {
+      ASSERT_NEAR(h_data[i], h_data_d[i], error_margin);
+    }
   }
 }
 
-TYPED_TEST(PrimitiveSequenceTests, TestSequenceToDiscardIterator)
+TYPED_TEST(PrimitiveSequenceTests, SequenceToDiscardIterator)
 {
   using T = typename TestFixture::input_type;
 
@@ -136,8 +164,6 @@ TYPED_TEST(PrimitiveSequenceTests, TestSequenceToDiscardIterator)
 
   for (auto size : get_sizes())
   {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
-
     thrust::host_vector<T> h_data(size);
     thrust::device_vector<T> d_data(size);
 
@@ -149,21 +175,13 @@ TYPED_TEST(PrimitiveSequenceTests, TestSequenceToDiscardIterator)
   // nothing to check -- just make sure it compiles
 }
 
-TEST(SequenceTests, TestSequenceComplex)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  thrust::device_vector<thrust::complex<double>> m(64);
-  thrust::sequence(m.begin(), m.end());
-}
-
-// A class that does not accept conversion from size_t but can be multiplied by a scalar
+// A class that doesnt accept conversion from size_t but can be multiplied by a scalar
 struct Vector
 {
   Vector() = default;
   // Explicitly disable construction from size_t
   Vector(std::size_t) = delete;
-  THRUST_HOST_DEVICE Vector(int x_, int y_)
+  __host__ __device__ Vector(int x_, int y_)
       : x{x_}
       , y{y_}
   {}
@@ -174,26 +192,22 @@ struct Vector
 };
 
 // Vector-Vector addition
-THRUST_HOST_DEVICE Vector operator+(const Vector a, const Vector b)
+__host__ __device__ Vector operator+(const Vector a, const Vector b)
 {
   return Vector{a.x + b.x, a.y + b.y};
 }
-
 // Vector-Scalar Multiplication
-// Multiplication by std::size_t is required by thrust::sequence.
-THRUST_HOST_DEVICE Vector operator*(const std::size_t a, const Vector b)
+__host__ __device__ Vector operator*(const int a, const Vector b)
 {
-  return Vector{static_cast<int>(a) * b.x, static_cast<int>(a) * b.y};
+  return Vector{a * b.x, a * b.y};
 }
-THRUST_HOST_DEVICE Vector operator*(const Vector b, const std::size_t a)
+__host__ __device__ Vector operator*(const Vector b, const int a)
 {
-  return Vector{static_cast<int>(a) * b.x, static_cast<int>(a) * b.y};
+  return Vector{a * b.x, a * b.y};
 }
 
 TEST(SequenceTests, TestSequenceNoSizeTConversion)
 {
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
   thrust::device_vector<Vector> m(64);
   thrust::sequence(m.begin(), m.end(), ::Vector{0, 0}, ::Vector{1, 2});
 
