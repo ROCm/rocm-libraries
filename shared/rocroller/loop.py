@@ -62,18 +62,19 @@ def main():
 
     args = parser.parse_args()
 
-    wget_cmd = [
-        "wget",
-        "https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-ubuntu-22.04-0.1.2-Linux.deb",
-    ]
-    subprocess.run(wget_cmd, check=True)
-    dpkg_cmd = [
-        "sudo",
-        "dpkg",
-        "-i",
-        "rocprof-trace-decoder-ubuntu-22.04-0.1.2-Linux.deb",
-    ]
-    subprocess.run(dpkg_cmd, check=True)
+    if not os.path.isfile("/opt/rocm-7.1.0/lib/librocprof-trace-decoder.so"):
+        wget_cmd = [
+            "wget",
+            "https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.2/rocprof-trace-decoder-ubuntu-22.04-0.1.2-Linux.deb",
+        ]
+        subprocess.run(wget_cmd, check=True)
+        dpkg_cmd = [
+            "sudo",
+            "dpkg",
+            "-i",
+            "rocprof-trace-decoder-ubuntu-22.04-0.1.2-Linux.deb",
+        ]
+        subprocess.run(dpkg_cmd, check=True)
 
     # Determine which modes to test
     modes_to_test = []
@@ -130,7 +131,7 @@ def main():
                 # Set stride environment variable
                 os.environ["BYTE_STRIDE"] = str(stride)
 
-                rocprof_dir = f"rocprof_{instr_width}_{mode_name}_{stride}"
+                rocprof_dir = f"{output_dir}/rocprof_{instr_width}_{mode_name}_{stride}"
 
                 # Loop in case of rocprofiler issues
                 while True:
