@@ -35,16 +35,33 @@
 
 #ifdef _OPENMP
     #include <omp.h>
+#endif  // _OPENMP check
+
+#ifdef USE_NUMA
+#ifndef _WIN32
+    #include <numa.h>
+#else
+    #include <windows.h>
 #endif
+#endif  // Windows/Linux check
 
 namespace TensileLite
 {
     namespace analytical
-    {
-        size_t round_down_threads_multiplesof16_or_one(size_t x) 
-        {
-            size_t y = x & ~15;     // round down to multiple of 16
-            return (y < 16) ? 1 : y; // if less than 16, set to 1
+    {   
+        int get_numa_node_count() {
+#ifndef _WIN32
+        if (numa_available() >= 0) {
+            return numa_num_configured_nodes();
+        }
+        return 1; // NUMA not supported
+#else
+        ULONG highestNode;
+        if (GetNumaHighestNodeNumber(&highestNode)) {
+            return static_cast<int>(highestNode) + 1; // total NUMA nodes
+        }
+        return 1; // NUMA not supported        
+#endif    
         }
 
         //
@@ -244,11 +261,17 @@ namespace TensileLite
     {
             std::vector<ResultTuple> valid_results;  
             valid_results.resize(MT_list.size());// preallocate
+
 #ifdef _OPENMP
-                size_t num_threads = std::max(1UL, MT_list.size() / 6);
-                num_threads = std::min(num_threads, static_cast<size_t>((omp_get_max_threads() / 3)));
-                size_t threads_multiple_16 = round_down_threads_multiplesof16_or_one(num_threads);
-#pragma omp parallel for num_threads(threads_multiple_16)
+            int numa_node = 1;
+
+#ifdef USE_NUMA
+            numa_node = get_numa_node_count();
+#endif            
+            const size_t max_threads = static_cast<size_t>(omp_get_max_threads() / numa_node); // get_numa_node_count() returns number of NUMA node, returns 1 even if there is no NUMA nodes
+            size_t num_threads = std::min(MT_list.size(), (max_threads / 2)); //Reducing the max_threads by dividing by 2, using fewer threads than the maximum
+            num_threads = std::max(static_cast<size_t>(1), num_threads); //Make sure num_threads is always positive integer.
+#pragma omp parallel for num_threads(num_threads) proc_bind(close)
 #endif
             for (size_t i = 0; i < MT_list.size(); ++i)
             {

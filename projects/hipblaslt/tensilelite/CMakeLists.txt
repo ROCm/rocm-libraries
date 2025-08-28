@@ -14,6 +14,16 @@ if(TENSILELITE_ENABLE_HOST)
 
     if(HIPBLASLT_ENABLE_OPENMP)
         target_link_libraries(tensilelite-host PRIVATE OpenMP::OpenMP_CXX)
+        if(NOT WIN32)
+            find_library(NUMA_LIB NAMES numa)
+            if(NUMA_LIB)
+                target_link_libraries(tensilelite-host PUBLIC ${NUMA_LIB})
+                target_compile_definitions(tensilelite-host PRIVATE USE_NUMA)
+            endif()
+        else()
+            # Windows NUMA support
+            target_compile_definitions(tensilelite-host PRIVATE USE_NUMA)    
+        endif()
     endif()
 
     set_target_properties(tensilelite-host PROPERTIES POSITION_INDEPENDENT_CODE ON)
