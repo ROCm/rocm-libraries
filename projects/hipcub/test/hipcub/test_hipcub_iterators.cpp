@@ -24,15 +24,15 @@
 #include <stdio.h>
 #include <typeinfo>
 
-#include "hipcub/iterator/arg_index_input_iterator.hpp"
-#include "hipcub/iterator/cache_modified_input_iterator.hpp"
-#include "hipcub/iterator/cache_modified_output_iterator.hpp"
-#include "hipcub/iterator/constant_input_iterator.hpp"
-#include "hipcub/iterator/counting_input_iterator.hpp"
-#include "hipcub/iterator/tex_obj_input_iterator.hpp"
-#include "hipcub/iterator/transform_input_iterator.hpp"
+#include <hipcub/iterator/arg_index_input_iterator.hpp>
+#include <hipcub/iterator/cache_modified_input_iterator.hpp>
+#include <hipcub/iterator/cache_modified_output_iterator.hpp>
+#include <hipcub/iterator/constant_input_iterator.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
+#include <hipcub/iterator/tex_obj_input_iterator.hpp>
+#include <hipcub/iterator/transform_input_iterator.hpp>
 
-#include "hipcub/util_allocator.hpp"
+#include <hipcub/util_allocator.hpp>
 
 #include "common_test_header.hpp"
 

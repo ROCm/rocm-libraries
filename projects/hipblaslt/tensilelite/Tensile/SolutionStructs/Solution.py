@@ -768,7 +768,7 @@ class Solution(collections.abc.Mapping):
 
     if (MT & (MT-1)) != 0: # Check of MT not power of 2
       # so far, numBytesAB<4 case, TLU=False only (continue with False)
-      if numBytesAB < 4 and state["ProblemType"]["TLU%c"%tc]:
+      if (numBytesAB < 4 or state["UseF32XEmulation"]) and state["ProblemType"]["TLU%c"%tc]:
         return False
 
     # x2 DTL is not supported
@@ -2363,6 +2363,11 @@ class Solution(collections.abc.Mapping):
       if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
         #1LDS buffer must be 0 for DirectToLdsA
         state["1LDSBuffer"] = 0
+
+      # Temp: Force enable CLR when DTL is used for TF32.
+      # TODO: Determine why DTL+CLR=0 causes issues
+      if state["UseF32XEmulation"] and state["DirectToLds"]:
+        state["ClusterLocalRead"] = 1
 
       # Re-check DTV + WaveGroup after DTL is confirmed
       if state["DirectToLds"]:

@@ -19,7 +19,6 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/pair.h>
-#include <thrust/detail/swap.h>
 #include <thrust/tuple.h>
 
 THRUST_NAMESPACE_BEGIN

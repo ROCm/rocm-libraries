@@ -20,9 +20,12 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Deprecated hipCUB macros: `HIPCUB_MAX`, `HIPCUB_MIN`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST`.
 
 ### Changed
+* Changed include headers to avoid relative includes that have slipped in.
 * Changed `CUDA_STANDARD` for tests in `test/hipcub`, due to C++17 APIs such as `std::exclusive_scan` is used in some tests. Still use `CUDA_STANDARD 14` for `test/extra`.
 * Changed `CCCL_MINIMUM_VERSION` to `2.8.2` to align with CUB.
 * Changed `cmake_minimum_required` from `3.16` to `3.18`, in order to support `CUDA_STANDARD 17` as a valid value.
+* Add support for large num_items `DeviceScan`, `DevicePartition` and `Reduce::{ArgMin, ArgMax}`.
+* Added tests for large num_items.
 
 ## hipCUB-4.0.0 for ROCm 7.0
 

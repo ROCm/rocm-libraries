@@ -22,10 +22,20 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/detail/discard_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+#ifndef THRUST_DOXYGEN_INVOKED
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -94,7 +104,7 @@ class discard_iterator : public detail::discard_iterator_base<System>::type
 {
   /*! \cond
    */
-  friend class thrust::iterator_core_access;
+  friend class iterator_core_access;
   using super_t       = typename detail::discard_iterator_base<System>::type;
   using incrementable = typename detail::discard_iterator_base<System>::incrementable;
   using base_iterator = typename detail::discard_iterator_base<System>::base_iterator;
@@ -155,4 +165,4 @@ make_discard_iterator(discard_iterator<>::difference_type i = discard_iterator<>
 
 THRUST_NAMESPACE_END
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP
