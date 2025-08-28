@@ -419,6 +419,9 @@ namespace rocRoller
                 auto buffer = kgraph.mapper.get(
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
 
+                // TODO: check if ComputeIndex nodes are within the ForLoop. If it is in the ForLoop, set register for ForLoop, else, set to 0
+
+                // check maybeLDS
                 auto maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
                 if(maybeLDS)
                 {
@@ -434,6 +437,7 @@ namespace rocRoller
                 }
                 maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
 
+                // check isTransposed
                 auto isTransposed
                     = kgraph.coordinates
                           .findNodes(target,
@@ -447,11 +451,13 @@ namespace rocRoller
                           .size()
                       == 1;
 
+                // Set required coordinates
                 auto ci = kgraph.control.get<ComputeIndex>(tag).value();
                 auto direction
                     = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
 
                 // 1. Set register coordinates
+                // Transformer xform(&kgraph.coordinates);
                 auto xform = kgraph.buildTransformer(tag);
 
                 auto const maybeForLoop = findContainingOperation<ForLoopOp>(tag, kgraph);
@@ -471,7 +477,19 @@ namespace rocRoller
                 {
                     if(std::visit(isRegisterDim, kgraph.coordinates.getNode(coord)))
                     {
-                        auto parentCoord  = coord;
+                        auto parentCoord = coord;
+                        // if the coordinate if ForLoop, it might be a duplicate,
+                        // use the parent coordinate instead
+                        // if (kgraph.coordinates.get<ForLoop>(coord))
+                        // {
+                        //         auto maybeParentForLoop = only(kgraph.coordinates.getInputNodeIndices(coord, rocRoller::KernelGraph::CoordinateGraph::isEdge<DataFlow>));
+                        //         if(maybeParentForLoop)
+                        //         {
+                        //             parentCoord = *maybeParentForLoop;
+                        //         }
+
+                        // }
+
                         auto registerType = Register::Type::Vector;
                         auto coordDF      = std::make_shared<Expression::Expression>(
                             Expression::DataFlowTag{parentCoord, registerType, DataType::UInt32});

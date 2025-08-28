@@ -273,18 +273,6 @@ namespace LDSCopyTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
-        auto addComputeIndex = std::make_shared<AddComputeIndex>();
-        kgraph               = kgraph.transform(addComputeIndex);
-
-        auto removeSetCoordinate = std::make_shared<RemoveSetCoordinate>();
-        kgraph = kgraph.transform(removeSetCoordinate);
-
-        auto assignComputeIndex = std::make_shared<AssignComputeIndex>(m_context);
-        kgraph = kgraph.transform(assignComputeIndex);
-
-        auto deallocateDF = std::make_shared<AddDeallocateDataFlow>();
-        kgraph            = kgraph.transform(deallocateDF);
-
         kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         m_context->schedule(k->preamble());
