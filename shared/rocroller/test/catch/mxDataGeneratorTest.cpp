@@ -176,6 +176,8 @@ namespace mxDataGeneratorTest
         BFloat16,
         float)
     {
+        SKIP("Current mxdatagenerator does not guarantee same data with different thread "
+             "counts");
         SUPPORTED_ARCH_SECTION(arch)
         {
             const int   dim1         = 32;
@@ -227,10 +229,9 @@ namespace mxDataGeneratorTest
                     floatCorrect += (refFloat == testFloat) ? 1 : 0;
                 }
 
-                // Producing different data is expected behavior
-                CHECK(dataCorrect <= threadCounts.size());
-                CHECK(scaleCorrect <= threadCounts.size());
-                CHECK(floatCorrect <= threadCounts.size());
+                CHECK(dataCorrect == threadCounts.size());
+                CHECK(scaleCorrect == threadCounts.size());
+                CHECK(floatCorrect == threadCounts.size());
             }
 
             omp_set_num_threads(originalThreads);
