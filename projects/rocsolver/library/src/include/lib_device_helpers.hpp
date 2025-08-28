@@ -27,6 +27,8 @@
 
 #pragma once
 
+#include <cassert>
+
 #include <hip/hip_runtime.h>
 
 #include "ideal_sizes.hpp"

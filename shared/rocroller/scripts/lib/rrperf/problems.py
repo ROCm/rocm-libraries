@@ -160,7 +160,8 @@ class GEMMProblem:
     scaleValue_A: float = 1.0
     scaleValue_B: float = 1.0
 
-    workgroupMapping: tuple[int, int] = (-1, -1)
+    workgroupMappingDim: int = -1
+    workgroupMappingValue: int = -1
 
     def __post_init__(self):
         convert_class_params(GEMMProblem, self)
@@ -536,6 +537,28 @@ _base_to_run_class = {
 }
 
 
+def cast_missing_parameters(result):
+    """
+    Cast parameters in previous GEMMResult version into existing parameters
+
+    Args:
+        result: a dictionary with parameters (keys) and their values
+
+    """
+    if 'workgroupMapping' in result:
+
+        assert len(result['workgroupMapping']) == 2, \
+               "workgroupMapping should contain a dimension and a value"
+
+        wgmDim = result['workgroupMapping'][0]
+        wgmValue = result['workgroupMapping'][1]
+
+        del result['workgroupMapping']
+
+        result['workgroupMappingDim'] = wgmDim
+        result['workgroupMappingValue'] = wgmValue
+
+
 def load_results(path: pathlib.Path):
     """
     Load results from a YAML file `path` and return an array of RESULT objects.
@@ -544,6 +567,7 @@ def load_results(path: pathlib.Path):
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
         ResultClass = _client_to_result_class[r["resultType"]]
         r.pop("path", None)
+        cast_missing_parameters(r)
         rv.append(ResultClass(path=path, **r))
     return rv
 

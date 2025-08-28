@@ -31,11 +31,20 @@
 
 #include <thrust/detail/config.h>
 
+#include "cuda/std/__cccl/diagnostic.h"
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if _CCCL_STD_VER >= 2017
 
-#  ifdef _CCCL_CUDA_COMPILER
+#  if _CCCL_HAS_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -79,10 +88,10 @@ auto get_async_device_allocator(thrust::detail::execution_policy_base<DerivedPol
     auto get_async_device_allocator(thrust::detail::execute_with_allocator<Allocator, BaseSystem>& exec)
       THRUST_RETURNS(exec.get_allocator())
 
-        template <typename Allocator, template <typename> class BaseSystem>
-        auto get_async_device_allocator(
-          thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem>& exec)
-          THRUST_RETURNS(exec.get_allocator())
+        _CCCL_SUPPRESS_DEPRECATED_PUSH template <typename Allocator, template <typename> class BaseSystem>
+        CCCL_DEPRECATED
+  auto get_async_device_allocator(thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem>& exec)
+    THRUST_RETURNS(exec.get_allocator()) _CCCL_SUPPRESS_DEPRECATED_POP
 
   ///////////////////////////////////////////////////////////////////////////////
 

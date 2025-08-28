@@ -31,7 +31,7 @@ namespace test_utils
 template<typename T>
 class single_index_iterator
 {
-private:
+public:
     class conditional_discard_value
     {
     public:

@@ -93,7 +93,8 @@ void Arguments::init()
 
     batch_count = 1;
 
-    scan = c_scan_value; // default value disables scanning
+    scan   = c_scan_value; // member used to set multiple args set with scan_value
+    scan_2 = c_scan_value_2; // 2d scanning support
 
     // 32bit
 
@@ -160,9 +161,11 @@ void Arguments::init()
 bool Arguments::validate()
 {
 // c_scan_value must matching value in rocblas_common.yaml definition
-#define SCAN_VALUE_CHECK(arg_) \
-    if(arg_ == c_scan_value)   \
-    arg_ = scan
+#define SCAN_VALUE_CHECK(arg_)      \
+    if(arg_ == c_scan_value)        \
+        arg_ = scan;                \
+    else if(arg_ == c_scan_value_2) \
+    arg_ = scan_2
 
     if(scan != c_scan_value)
     {

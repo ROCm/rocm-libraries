@@ -644,53 +644,81 @@ ROCPRIM_KERNEL void device_merge_sort_compile_time_verifier()
                   "merge_mergepath_items_per_block");
 }
 
+// Templated helper that instantiates block_sort_impl and block_merge_impl for an Arch,
+// and puts its vsmem_per_block in the vsmem_size_out member variable.
 template<class BlockSortConfig, class BlockMergeConfig, typename key_type, typename value_type>
-inline size_t get_merge_sort_vsmem_size(const size_t size)
+struct merge_sort_vsmem_size_visitor
 {
+    const size_t size;
+    size_t&      vsmem_size_out;
 
-    size_t                                               virtual_shared_memory_size = 0;
-    static constexpr merge_sort_block_sort_config_params bs_params
-        = device_params<BlockSortConfig>();
-    static constexpr merge_sort_block_merge_config_params bm_params
-        = device_params<BlockMergeConfig>();
-    using bs_sort_impl          = block_sort_impl<key_type,
-                                         value_type,
-                                         bs_params.block_sort_config.block_size,
-                                         bs_params.block_sort_config.items_per_thread>;
-    using bm_sort_impl          = block_merge_impl<key_type,
-                                          value_type,
-                                          bm_params.merge_mergepath_config.block_size,
-                                          bm_params.merge_mergepath_config.items_per_thread>;
-    using BlockSortVSmemHelperT = detail::vsmem_helper_impl<bs_sort_impl>;
-    using MergeSortVSmemHelperT = detail::vsmem_helper_impl<bm_sort_impl>;
-
-    // mergepath total number of blocks
-    const unsigned int merge_mergepath_items_per_block
-        = bm_params.merge_mergepath_config.block_size
-          * bm_params.merge_mergepath_config.items_per_thread;
-    const unsigned int merge_mergepath_number_of_blocks
-        = ceiling_div(size, merge_mergepath_items_per_block);
-
-    const bool use_mergepath = size > bm_params.merge_oddeven_config.size_limit;
-
-    // Check if vsmem is needed
-    if(BlockSortVSmemHelperT::vsmem_per_block + MergeSortVSmemHelperT::vsmem_per_block > 0)
+    template<target_arch Arch>
+    inline hipError_t operator()() const
     {
+        vsmem_size_out = 0;
 
-        // block sort total number of blocks
-        const unsigned int bs_items_per_block
-            = bs_params.block_sort_config.block_size * bs_params.block_sort_config.items_per_thread;
-        const unsigned int sort_number_of_blocks = ceiling_div(size, bs_items_per_block);
+        using forced_block_sort_conf_t
+            = force_arch_config<Arch, BlockSortConfig, merge_sort_block_sort_config_params>;
+        using forced_block_merge_conf_t
+            = force_arch_config<Arch, BlockMergeConfig, merge_sort_block_merge_config_params>;
 
-        // Compute amount of virtual shared memory needed
-        size_t block_sort_smem_size
-            = BlockSortVSmemHelperT::vsmem_per_block * sort_number_of_blocks;
-        size_t merge_smem_size     = use_mergepath ? MergeSortVSmemHelperT::vsmem_per_block
-                                                     * merge_mergepath_number_of_blocks
+        static constexpr merge_sort_block_sort_config_params bs_params
+            = device_params<forced_block_sort_conf_t>();
+        static constexpr merge_sort_block_merge_config_params bm_params
+            = device_params<forced_block_merge_conf_t>();
+
+        using bs_sort_impl = block_sort_impl<key_type,
+                                             value_type,
+                                             bs_params.block_sort_config.block_size,
+                                             bs_params.block_sort_config.items_per_thread>;
+        using bm_sort_impl = block_merge_impl<key_type,
+                                              value_type,
+                                              bm_params.merge_mergepath_config.block_size,
+                                              bm_params.merge_mergepath_config.items_per_thread>;
+
+        using BlockSortVSmemHelperT = detail::vsmem_helper_impl<bs_sort_impl>;
+        using MergeSortVSmemHelperT = detail::vsmem_helper_impl<bm_sort_impl>;
+
+        // mergepath total number of blocks
+        const unsigned int merge_mergepath_items_per_block
+            = bm_params.merge_mergepath_config.block_size
+              * bm_params.merge_mergepath_config.items_per_thread;
+        const unsigned int merge_mergepath_number_of_blocks
+            = ceiling_div(size, merge_mergepath_items_per_block);
+
+        const bool use_mergepath = size > bm_params.merge_oddeven_config.size_limit;
+
+        // Check if vsmem is needed
+        if(BlockSortVSmemHelperT::vsmem_per_block + MergeSortVSmemHelperT::vsmem_per_block > 0)
+        {
+
+            // block sort total number of blocks
+            const unsigned int bs_items_per_block = bs_params.block_sort_config.block_size
+                                                    * bs_params.block_sort_config.items_per_thread;
+            const unsigned int sort_number_of_blocks = ceiling_div(size, bs_items_per_block);
+
+            // Compute amount of virtual shared memory needed
+            size_t block_sort_smem_size
+                = BlockSortVSmemHelperT::vsmem_per_block * sort_number_of_blocks;
+            size_t merge_smem_size = use_mergepath ? MergeSortVSmemHelperT::vsmem_per_block
+                                                         * merge_mergepath_number_of_blocks
                                                    : 0;
-        virtual_shared_memory_size = (std::max)(block_sort_smem_size, merge_smem_size);
+            vsmem_size_out         = (std::max)(block_sort_smem_size, merge_smem_size);
+        }
+
+        return hipSuccess;
     }
-    return virtual_shared_memory_size;
+};
+
+template<class BlockSortConfig, class BlockMergeConfig, typename key_type, typename value_type>
+inline hipError_t
+    get_merge_sort_vsmem_size(const size_t size, target_arch target_arch, size_t& vsmem_size)
+{
+    return generic_dispatch_target_arch(
+        target_arch,
+        merge_sort_vsmem_size_visitor<BlockSortConfig, BlockMergeConfig, key_type, value_type>{
+            size,
+            vsmem_size});
 }
 
 template<class Config,
@@ -750,10 +778,16 @@ inline hipError_t merge_sort_impl(
         = ceiling_div(size, merge_mergepath_items_per_block);
 
     // Virtual shared memory part
-    void*  vsmem = nullptr;
-    size_t virtual_shared_memory_size
-        = get_merge_sort_vsmem_size<wrapped_bs_config, wrapped_bm_config, key_type, value_type>(
-            size);
+    void*  vsmem;
+    size_t vsmem_size;
+    result = get_merge_sort_vsmem_size<wrapped_bs_config, wrapped_bm_config, key_type, value_type>(
+        size,
+        target_arch,
+        vsmem_size);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
 
     // temporary storage needed for both block merge and block sort
     size_t*     d_merge_partitions = nullptr;
@@ -772,9 +806,7 @@ inline hipError_t merge_sort_impl(
                 detail::temp_storage::ptr_aligned_array(
                     &d_merge_partitions,
                     use_mergepath ? merge_mergepath_number_of_blocks + 1 : 0),
-                detail::temp_storage::make_partition(&vsmem,
-                                                     virtual_shared_memory_size,
-                                                     cache_line_size)));
+                detail::temp_storage::make_partition(&vsmem, vsmem_size, cache_line_size)));
     }
     else
     {
@@ -785,9 +817,7 @@ inline hipError_t merge_sort_impl(
                 detail::temp_storage::ptr_aligned_array(
                     &d_merge_partitions,
                     use_mergepath ? merge_mergepath_number_of_blocks + 1 : 0),
-                detail::temp_storage::make_partition(&vsmem,
-                                                     virtual_shared_memory_size,
-                                                     cache_line_size)));
+                detail::temp_storage::make_partition(&vsmem, vsmem_size, cache_line_size)));
         keys_buffer   = keys_double_buffer;
         values_buffer = values_double_buffer;
     }

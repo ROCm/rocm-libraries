@@ -18087,7 +18087,7 @@
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
-    AssertSummationElementMultiple: 1
+    AssertSummationElementMultiple: 16
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
     BaseName: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
