@@ -1,183 +1,130 @@
-# ########################################################################
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-cmake_minimum_required( VERSION 3.22...3.25.2 )
+add_executable(hipblaslt-bench)
+add_library(hipblaslt-clients-common STATIC)
 
-#add_definitions(-D_HIPBLASLT_INTERNAL_BFLOAT16_)
+target_include_directories(hipblaslt-clients-common
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
+)
 
-# This has to be initialized before the project() command appears
-# Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
-if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
-  set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
-endif()
+add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
-
-project( hipblaslt-clients LANGUAGES CXX C Fortran )
-
-if( SKIP_LIBRARY )
-  include_directories(${HIPBLASLT_LIBRARY_DIR}/include
-                      ${CMAKE_SOURCE_DIR}/tensilelite)  # For benchmark allocation function
+if(HIPBLASLT_ENABLE_BLIS)
+    target_link_libraries(hipblaslt-clients-common PRIVATE BLIS::BLIS)
 else()
-  include_directories(${CMAKE_BINARY_DIR}/include
-                      ${CMAKE_SOURCE_DIR}/tensilelite)
+    target_link_libraries(hipblaslt-clients-common PUBLIC ${BLAS_LIBRARIES})
+endif()
+target_link_libraries(hipblaslt-clients-common
+    PUBLIC
+        roc::hipblaslt
+        OpenMP::OpenMP_CXX
+        ${LAPACK_LIBRARIES}
+    PRIVATE
+        hip::device
+)
+
+if(HIPBLASLT_ENABLE_ROCROLLER)
+    if(NOT ROCM_LIBRARIES_SUPERBUILD)
+        if(HIPBLASLT_ENABLE_FETCH)
+            FetchContent_Declare(
+                mxDataGenerator
+                GIT_REPOSITORY https://github.com/ROCm/mxDataGenerator.git
+                GIT_TAG 3ac153eec4c1a1e0da7546abc9c0c4f54e180f43
+            )
+            FetchContent_MakeAvailable(mxDataGenerator)
+        else()
+            find_package(mxDataGenerator REQUIRED)
+        endif()
+    endif()
+    target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
+    target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator)
+    target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
 endif()
 
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
-
-# if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
-# if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
-find_package(OpenMP)
-
-if (TARGET OpenMP::OpenMP_CXX)
-  set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
-  list( APPEND COMMON_LINK_LIBS "-L${HIP_CLANG_ROOT}/lib")
+if(HIPBLASLT_ENABLE_ASAN)
+    hipblaslt_target_configure_sanitizers(hipblaslt-clients-common PUBLIC)
 endif()
 
-if (TARGET Threads::Threads)
-  list( APPEND COMMON_LINK_LIBS "Threads::Threads")
+target_link_libraries(hipblaslt-bench
+    PRIVATE
+        hip::device
+        hipblaslt::hipblaslt-clients-common
+        OpenMP::OpenMP_CXX
+)
+
+target_include_directories(hipblaslt-bench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/bench/include")
+
+if(HIPBLASLT_ENABLE_OPENMP)
+    target_link_libraries(hipblaslt-bench PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-message(STATUS "CLIENT COMMON CXX_OPTIONS: ${COMMON_CXX_OPTIONS}")
-message(STATUS "CLIENT COMMON LINK: ${COMMON_LINK_LIBS}")
+add_subdirectory(common)
+add_subdirectory(bench)
 
-list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
+add_executable(hipblaslt-api-overhead "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_api_overhead.cpp")
+target_link_libraries(hipblaslt-api-overhead PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-api-overhead PRIVATE ROCBLASLT_INTERNAL_API)
+target_include_directories(hipblaslt-api-overhead PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/samples/common")
 
-#include( build-options )
+add_executable(hipblaslt-bench-groupedgemm-fixed-mk "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_groupedgemm_fixed_mk.cpp")
+target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE ROCBLASLT_INTERNAL_API)
 
-# This option only works for make/nmake and the ninja generators, but no reason it shouldn't be on all the time
-# This tells cmake to create a compile_commands.json file that can be used with clang tooling or vim
-set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
+add_executable(hipblaslt-bench-extop-layernorm "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_layernorm.cpp")
+target_link_libraries(hipblaslt-bench-extop-layernorm PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-extop-layernorm PRIVATE ROCBLASLT_INTERNAL_API)
 
-if( NOT TARGET hipblaslt )
-  find_package( hipblaslt REQUIRED CONFIG PATHS ${ROCM_PATH}/hipblaslt /opt/rocm/hipblaslt ${HIPBLASLT_LIBRARY_DIR})
-endif( )
+add_executable(hipblaslt-bench-extop-matrixtransform "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_matrixtransform.cpp")
+target_link_libraries(hipblaslt-bench-extop-matrixtransform PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-extop-matrixtransform PRIVATE ROCBLASLT_INTERNAL_API)
 
-# Hip headers required of all clients; clients use hip to allocate device memory
-list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} /opt/rocm )
-if ( NOT hip_FOUND )
-  find_package( hip REQUIRED CONFIG PATHS ${ROCM_PATH} )
-endif( )
+add_executable(hipblaslt-bench-extop-softmax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_softmax.cpp")
+target_link_libraries(hipblaslt-bench-extop-softmax PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-extop-softmax PRIVATE ROCBLASLT_INTERNAL_API)
 
+add_executable(hipblaslt-bench-extop-amax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_amax.cpp")
+target_link_libraries(hipblaslt-bench-extop-amax PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API)
 
-if( BUILD_CLIENTS_SAMPLES )
-  add_subdirectory( samples )
-endif( )
+find_package(LLVM REQUIRED)
+add_executable(hipblaslt-sequence "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_sequence.cpp")
+target_link_libraries(hipblaslt-sequence PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-sequence PRIVATE ROCBLASLT_INTERNAL_API)
+target_link_libraries(hipblaslt-sequence PRIVATE LLVMObjectYAML)
+target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
 
-if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
-
-  # Linking lapack library requires fortran flags
-  find_package( cblas REQUIRED CONFIG )
-  if(${BLIS_FOUND})
-    set( BLAS_LIBRARY ${BLIS_LIB} )
-    set( BLIS_CPP ../common/blis_interface.cpp )
-  else()
-    set( BLAS_LIBRARY "blas" )
-  endif()
-
-  # Find the package ROCmSMI
-  if(NOT WIN32)
-      find_package(ROCmSMI REQUIRED)
-      list( APPEND COMMON_LINK_LIBS rocm_smi )
-  endif()
-
-  # common source files used in subdirectories benchmarks and gtest thus ../common
-  set( hipblaslt_test_bench_common
-      ../common/singletons.cpp
-      ../common/utility.cpp
-      ../common/efficiency_monitor.cpp
-      ../common/cblas_interface.cpp
-      ../common/argument_model.cpp
-      ../common/hipblaslt_parse_data.cpp
-      ../common/hipblaslt_arguments.cpp
-      ../common/hipblaslt_random.cpp
-      ../common/hipblaslt_init_device.cpp
-      ${BLIS_CPP}
+if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
+    find_package(GTest REQUIRED)
+    add_executable(hipblaslt-test)
+    if(rocm_smi_FOUND)
+        target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
+    endif()
+    target_link_libraries(hipblaslt-test 
+        PRIVATE
+            hip::device
+            hipblaslt::hipblaslt-clients-common
+            GTest::gtest
+            OpenMP::OpenMP_CXX
     )
-
-  # RocRoller integration
-  include(FetchContent)
-  include(../cmake/Utilities.cmake)
-  if(HIPBLASLT_USE_ROCROLLER)
-      _save_var(BUILD_TESTING)
-      set(BUILD_TESTING OFF)
-      add_definitions(-DHIPBLASLT_USE_ROCROLLER)
-
-      FetchContent_Declare(
-        mxDataGenerator
-        GIT_REPOSITORY https://github.com/ROCm/mxDataGenerator.git
-        GIT_TAG 12c016dc694139317feb2e23c59028fde70beaf4
-      )
-      FetchContent_MakeAvailable(mxDataGenerator)
-
-      list( APPEND COMMON_LINK_LIBS mxDataGenerator )
-      set( mxDataGen_SRC
-       ../common/mxDataGen.cpp
-      )
-      list(APPEND hipblaslt_test_bench_common
-       ../common/mxDataGen.cpp
-       )
-      _restore_var(BUILD_TESTING)
-  endif()
-
-  if( BUILD_CLIENTS_BENCHMARKS )
-    add_subdirectory( benchmarks )
-  endif( )
-
-  if( BUILD_CLIENTS_TESTS )
-    add_subdirectory( gtest )
-  endif( )
-
+    target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
+    if(HIPBLASLT_ENABLE_ROCROLLER)
+        target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
+    endif()
+    add_subdirectory(tests)
 endif()
 
+if(HIPBLASLT_ENABLE_SAMPLES)
+    add_subdirectory(samples)
+endif()
 
-set( HIPBLASLT_COMMON "${PROJECT_BINARY_DIR}/staging/hipblaslt_common.yaml")
-add_custom_command( OUTPUT "${HIPBLASLT_COMMON}"
-                    COMMAND ${CMAKE_COMMAND} -E copy include/hipblaslt_common.yaml "${HIPBLASLT_COMMON}"
-                    DEPENDS include/hipblaslt_common.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
-
-set( HIPBLASLT_TEMPLATE "${PROJECT_BINARY_DIR}/staging/hipblaslt_template.yaml")
-add_custom_command( OUTPUT "${HIPBLASLT_TEMPLATE}"
-                    COMMAND ${CMAKE_COMMAND} -E copy include/hipblaslt_template.yaml "${HIPBLASLT_TEMPLATE}"
-                    DEPENDS include/hipblaslt_template.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
-
-set( HIPBLASLT_GENTEST "${PROJECT_BINARY_DIR}/staging/hipblaslt_gentest.py")
-add_custom_command( OUTPUT "${HIPBLASLT_GENTEST}"
-                    COMMAND ${CMAKE_COMMAND} -E copy common/hipblaslt_gentest.py "${HIPBLASLT_GENTEST}"
-                    DEPENDS common/hipblaslt_gentest.py
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
-
-add_custom_target( hipblaslt-common DEPENDS "${HIPBLASLT_COMMON}" "${HIPBLASLT_TEMPLATE}" "${HIPBLASLT_GENTEST}" )
-
-rocm_install(
-  FILES ${HIPBLASLT_COMMON} ${HIPBLASLT_TEMPLATE}
-  DESTINATION "${CMAKE_INSTALL_BINDIR}"
-  COMPONENT clients-common
-)
-rocm_install(
-  PROGRAMS ${HIPBLASLT_GENTEST}
-  DESTINATION "${CMAKE_INSTALL_BINDIR}"
-  COMPONENT clients-common
-)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/hipblaslt_gentest.py" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_gentest.py" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/hipblaslt_common.yaml" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_common.yaml" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/hipblaslt_template.yaml" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_template.yaml" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/bench/sequence.yaml" "${CMAKE_CURRENT_BINARY_DIR}/sequence.yaml" COPYONLY)

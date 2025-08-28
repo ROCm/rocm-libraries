@@ -20,14 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_benchmark_header.hpp"
-
 // HIP API
-#include "hipcub/block/block_discontinuity.hpp"
+#include <hipcub/block/block_discontinuity.hpp>
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/thread/thread_operators.hpp> //to use hipcub::Equality
 
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/thread/thread_operators.hpp" //to use hipcub::Equality
+#include "common_benchmark_header.hpp"
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;

@@ -41,13 +41,12 @@ endif()
 # hipRAND project
 #
 project(hipRAND CXX)
-set(hipRAND_VERSION "3.0.0")
+set(hipRAND_VERSION "3.1.0")
 
 # Build options
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
 option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(DEPENDENCIES_FORCE_DOWNLOAD "Do not use system installed dependencies, always download and build them" OFF)

@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_run_length_decode.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_run_length_decode.hpp>
+#include <hipcub/block/block_store.hpp>
 
 template<class ItemT,
          class LengthT,

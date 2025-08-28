@@ -74,6 +74,7 @@ set( hipfft-test_source
   accuracy_test_3D.cpp
   accuracy_test_callback.cpp
   multi_device_test.cpp
+  multi_stream_test.cpp
   ../../shared/array_validator.cpp
   )
 
@@ -229,6 +230,14 @@ else()
   add_dependencies( hipfft-test gtest )
   target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
   target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+endif()
+
+# tests have callback functions, which need to be built as relocatable device code
+if( BUILD_WITH_LIB STREQUAL "CUDA" )
+  target_compile_options( hipfft-test PRIVATE -dc )
+else()
+  target_compile_options( hipfft-test PRIVATE -fgpu-rdc )
+  target_link_options( hipfft-test PRIVATE -fgpu-rdc )
 endif()
 
 if(FFTW_MULTITHREAD)

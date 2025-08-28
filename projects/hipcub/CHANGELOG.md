@@ -2,6 +2,31 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-4.1.0 for ROCm 7.1
+
+### Added
+* Added `::hipcub::extents`, with limited parity to C++23's `std::extents`. Only `static extents` is supported; `dynamic extents` is not. Helper structs have been created to perform computations on `::hipcub::extents` only when the backend is rocPRIM. For the CUDA backend, similar functionality exists.
+* Added `projects/hipcub/hipcub/include/hipcub/backend/rocprim/util_mdspan.hpp` to support `::hipcub::extents`.
+* Added `::hipcub::ForEachInExtents` API.
+
+### Removed
+* Removed `TexRefInputIterator`, which was removed from CUB after CCCL's 2.6.0 release. This API should have already been removed, but somehow it remained and was not tested.
+* Deprecated `hipcub::ConstantInputIterator`, use `rocprim::constant_iterator` or `rocthrust::constant_iterator` instead.
+* Deprecated `hipcub::CountingInputIterator`, use `rocprim::counting_iterator` or `rocthrust::counting_iterator` instead.
+* Deprecated `hipcub::DiscardOutputIterator`, use `rocprim::discard_iterator` or `rocthrust::discard_iterator` instead.
+* Deprecated `hipcub::TransformInputIterator`, use `rocprim::transform_iterator` or `rocthrust::transform_iterator` instead.
+* Deprecated `hipcub::AliasTemporaries`, which is considered to be internal API. Moved it to detail namespace.
+* Deprecated almost all functions in `projects/hipcub/hipcub/include/hipcub/backend/rocprim/util_ptx.hpp`.
+* Deprecated hipCUB macros: `HIPCUB_MAX`, `HIPCUB_MIN`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST`.
+
+### Changed
+* Changed include headers to avoid relative includes that have slipped in.
+* Changed `CUDA_STANDARD` for tests in `test/hipcub`, due to C++17 APIs such as `std::exclusive_scan` is used in some tests. Still use `CUDA_STANDARD 14` for `test/extra`.
+* Changed `CCCL_MINIMUM_VERSION` to `2.8.2` to align with CUB.
+* Changed `cmake_minimum_required` from `3.16` to `3.18`, in order to support `CUDA_STANDARD 17` as a valid value.
+* Add support for large num_items `DeviceScan`, `DevicePartition` and `Reduce::{ArgMin, ArgMax}`.
+* Added tests for large num_items.
+
 ## hipCUB-4.0.0 for ROCm 7.0
 
 ### Added

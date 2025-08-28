@@ -44,7 +44,7 @@ if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     # to ensure that the command supplied to execute_process is interpreted as a list
     # of strings rather than one white space delimited string.
     if(ROCROLLER_ENABLE_ASAN)
-        rocroller_target_configure_sanitizers(rocroller-test-catch PRIVATE)
+        rocroller_target_configure_sanitizers(rocroller-tests-catch PRIVATE)
         set_target_properties(rocroller-tests-catch
             PROPERTIES 
                 CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
