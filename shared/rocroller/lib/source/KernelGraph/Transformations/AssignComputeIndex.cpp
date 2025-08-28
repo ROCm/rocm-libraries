@@ -24,15 +24,14 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AssignComputeIndex.hpp>
-#include <rocRoller/KernelGraph/Utils.hpp>
-#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
-#include <rocRoller/CodeGen/Utils.hpp>
-#include <rocRoller/ExpressionTransformations.hpp>
-#include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile_details.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
 {
@@ -51,7 +50,7 @@ namespace rocRoller
         static std::pair<uint, uint>
             getElementBlockValues(KernelGraph const& graph, int target, const bool isTransposed)
         {
-            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+            namespace CT            = rocRoller::KernelGraph::CoordinateGraph;
             uint elementBlockNumber = 0;
             uint elementBlockIndex  = 0;
 
@@ -86,7 +85,8 @@ namespace rocRoller
                 {
                     auto [macTileTag, macTile] = graph.getDimension<MacroTile>(opTag);
 
-                    auto maybeParentTile = only(graph.coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<Duplicate>));
+                    auto maybeParentTile = only(
+                        graph.coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<Duplicate>));
 
                     if(maybeParentTile)
                     {
@@ -121,17 +121,17 @@ namespace rocRoller
             {
                 auto [elementNumberXTag, elementNumberX]
                     = graph.getDimension<ElementNumber>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(elementNumberX.size)[Expression::EvaluationTime::Translate],
-                    "Could not determine ElementNumberX size at translate-time.\n",
-                    ShowValue(elementNumberX));
+                AssertFatal(Expression::evaluationTimes(
+                                elementNumberX.size)[Expression::EvaluationTime::Translate],
+                            "Could not determine ElementNumberX size at translate-time.\n",
+                            ShowValue(elementNumberX));
 
                 auto [elementNumberYTag, elementNumberY]
                     = graph.getDimension<ElementNumber>(opTag, 1);
-                AssertFatal(
-                    Expression::evaluationTimes(elementNumberY.size)[Expression::EvaluationTime::Translate],
-                    "Could not determine ElementNumber size at translate-time.\n",
-                    ShowValue(elementNumberY));
+                AssertFatal(Expression::evaluationTimes(
+                                elementNumberY.size)[Expression::EvaluationTime::Translate],
+                            "Could not determine ElementNumber size at translate-time.\n",
+                            ShowValue(elementNumberY));
 
                 elementBlockNumber = getUnsignedInt(evaluate(elementNumberX.size));
                 elementBlockIndex  = getUnsignedInt(evaluate(elementNumberY.size));
@@ -141,17 +141,17 @@ namespace rocRoller
             {
                 auto [vgprBlockNumberTag, vgprBlockNumber]
                     = graph.getDimension<VGPRBlockNumber>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(vgprBlockNumber.size)[Expression::EvaluationTime::Translate],
-                    "Could not determine VGPRBlockNumber size at translate-time.\n",
-                    ShowValue(vgprBlockNumber));
+                AssertFatal(Expression::evaluationTimes(
+                                vgprBlockNumber.size)[Expression::EvaluationTime::Translate],
+                            "Could not determine VGPRBlockNumber size at translate-time.\n",
+                            ShowValue(vgprBlockNumber));
 
                 auto [vgprBlockIndexTag, vgprBlockIndex]
                     = graph.getDimension<VGPRBlockIndex>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(vgprBlockIndex.size)[Expression::EvaluationTime::Translate],
-                    "Could not determine VGPRBlockIndex size at translate-time.\n",
-                    ShowValue(vgprBlockIndex));
+                AssertFatal(Expression::evaluationTimes(
+                                vgprBlockIndex.size)[Expression::EvaluationTime::Translate],
+                            "Could not determine VGPRBlockIndex size at translate-time.\n",
+                            ShowValue(vgprBlockIndex));
 
                 elementBlockNumber = getUnsignedInt(evaluate(vgprBlockNumber.size));
                 elementBlockIndex  = getUnsignedInt(evaluate(vgprBlockIndex.size));
@@ -161,7 +161,8 @@ namespace rocRoller
                     // to get VGPR coordinate instead of VGPRBlockNumber/Index
                     // (see addLoadSwizzleTileCT).
                     auto [vgprTag, vgpr] = graph.getDimension<VGPR>(opTag, 0);
-                    AssertFatal(Expression::evaluationTimes(vgpr.size)[Expression::EvaluationTime::Translate],
+                    AssertFatal(Expression::evaluationTimes(
+                                    vgpr.size)[Expression::EvaluationTime::Translate],
                                 "Could not determine VGPR size at translate-time.\n",
                                 ShowValue(vgpr));
                     // Multiplying by elementBlockNumber here forces the use
@@ -169,10 +170,11 @@ namespace rocRoller
                     elementBlockIndex = elementBlockNumber * getUnsignedInt(evaluate(vgpr.size));
                 }
 
-                if((!LowerTileDetails::isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(dataType,
-                                                                     {.m = macTile.subTileSizes[0],
-                                                                      .n = macTile.subTileSizes[1],
-                                                                      .k = macTile.subTileSizes[2]})
+                if((!LowerTileDetails::isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(
+                        dataType,
+                        {.m = macTile.subTileSizes[0],
+                         .n = macTile.subTileSizes[1],
+                         .k = macTile.subTileSizes[2]})
                     || isScaleType(dataType))
                    && !isTransposed)
                 {
@@ -196,49 +198,48 @@ namespace rocRoller
             return {elementBlockNumber, elementBlockIndex};
         }
 
-        int makeAssignBase(KernelGraph& graph,
-                        ComputeIndex const& ci,
-                       const int          target,
-                       const int          offset,
-                       const bool         maybeLDS,
-                       const bool         isTransposed,
-                       const ContextPtr   context,
-                       Transformer& coords)
+        int makeAssignBase(KernelGraph&        graph,
+                           ComputeIndex const& ci,
+                           const int           target,
+                           const int           offset,
+                           const bool          maybeLDS,
+                           const bool          isTransposed,
+                           const ContextPtr    context,
+                           Transformer&        coords)
         {
-                auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
-                    uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
+            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
+                uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
 
-                    // TODO: This would be a good place to add a GPU
-                    // assert.  If numBits is not a multiple of 8, assert
-                    // that (expr * numBits) is a multiple of 8.
-                    Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
+                // TODO: This would be a good place to add a GPU
+                // assert.  If numBits is not a multiple of 8, assert
+                // that (expr * numBits) is a multiple of 8.
+                Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
 
-                    if(numBits % 8u == 0)
-                        return expr * L(numBits / 8u);
-                    return (expr * L(numBits)) / L(8u);
-                };
+                if(numBits % 8u == 0)
+                    return expr * L(numBits / 8u);
+                return (expr * L(numBits)) / L(8u);
+            };
 
             auto offsetRegisterType = Register::Type::Vector;
             if(ci.isDirect2LDS)
                 offsetRegisterType = Register::Type::Scalar;
 
-            auto indexExpr
-                    = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
+            auto indexExpr = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
 
             auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
             auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
 
             auto const& arch = context->targetArchitecture();
             const auto  needsPadding
-                    = numBits == 6 && isTransposed
-                      && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
+                = numBits == 6 && isTransposed
+                  && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
 
             Expression::ExpressionPtr paddingBytes{L(0u)};
             if(needsPadding && maybeLDS)
             {
-                    uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
-                    auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
-                    paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
+                uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
+                paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
             }
 
             auto expr = toBytes(indexExpr) + paddingBytes;
@@ -250,7 +251,6 @@ namespace rocRoller
 
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
             }
-                    
 
             auto assignNode         = Assign{offsetRegisterType, convert(ci.offsetType, expr)};
             assignNode.variableType = ci.offsetType;
@@ -263,133 +263,128 @@ namespace rocRoller
                 toString(assignNode.expression),
                 offset);
 
-            
-
             // std::cout << "YL: makeAssignBase (target, offset, expression) " << target << ", " << offset << ", " << toString(expr) << std::endl;
             return assignTag;
-
         }
 
-        int makeAssignStride(KernelGraph& graph,
-                        ComputeIndex const& ci,
-                        const int target,
-                        const int stride,
-                        const int increment,
-                        bool maybeLDS,
-                        const bool isTransposed,
-                       const ContextPtr   context,
-                       Transformer& coords)
+        int makeAssignStride(KernelGraph&        graph,
+                             ComputeIndex const& ci,
+                             const int           target,
+                             const int           stride,
+                             const int           increment,
+                             bool                maybeLDS,
+                             const bool          isTransposed,
+                             const ContextPtr    context,
+                             Transformer&        coords)
         {
-                auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
-                    uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
+            auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
+                uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
 
-                    // TODO: This would be a good place to add a GPU
-                    // assert.  If numBits is not a multiple of 8, assert
-                    // that (expr * numBits) is a multiple of 8.
-                    Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
+                // TODO: This would be a good place to add a GPU
+                // assert.  If numBits is not a multiple of 8, assert
+                // that (expr * numBits) is a multiple of 8.
+                Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
 
-                    if(numBits % 8u == 0)
-                        return expr * L(numBits / 8u);
-                    return (expr * L(numBits)) / L(8u);
-                };
+                if(numBits % 8u == 0)
+                    return expr * L(numBits / 8u);
+                return (expr * L(numBits)) / L(8u);
+            };
 
-                auto indexExpr = ci.forward ? coords.forwardStride(increment, L(1), {target})[0]
-                                            : coords.reverseStride(increment, L(1), {target})[0];
+            auto indexExpr = ci.forward ? coords.forwardStride(increment, L(1), {target})[0]
+                                        : coords.reverseStride(increment, L(1), {target})[0];
 
-                // We have to manually invoke m_fastArith here since it can't traverse into the
-                // RegisterTagManager.
-                // TODO: Revisit storing expressions in the RegisterTagManager.
-                bool unitStride = false;
-                if(Expression::evaluationTimes(indexExpr)[Expression::EvaluationTime::Translate])
+            // We have to manually invoke m_fastArith here since it can't traverse into the
+            // RegisterTagManager.
+            // TODO: Revisit storing expressions in the RegisterTagManager.
+            bool unitStride = false;
+            if(Expression::evaluationTimes(indexExpr)[Expression::EvaluationTime::Translate])
+            {
+                if(getUnsignedInt(evaluate(indexExpr)) == 1u)
+                    unitStride = true;
+            }
+
+            uint          elementBlockSize = 0;
+            ExpressionPtr elementBlockStride;
+            ExpressionPtr trLoadPairStride;
+            ExpressionPtr elementBlockStridePaddingBytes{L(0u)};
+            ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
+            ExpressionPtr indexExprPaddingBytes{L(0u)};
+
+            auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
+            auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
+
+            if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
+            {
+                auto [elementBlockNumber, elementBlockIndex]
+                    = getElementBlockValues(graph, target, isTransposed);
+
+                elementBlockSize = elementBlockIndex;
+
+                auto const& arch = context->targetArchitecture();
+                if(isTransposed)
                 {
-                    if(getUnsignedInt(evaluate(indexExpr)) == 1u)
-                        unitStride = true;
+                    // See addLoadWaveTileCTF8F6F4 in LowerTile.cpp
+                    const auto wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+                    uint const numVBlocks
+                        = wfs == 64 ? (numBits == 8 ? 2 : 1) : (numBits == 8 ? 4 : 2);
+                    elementBlockSize = (elementBlockNumber / numVBlocks) * elementBlockSize;
+                }
+                AssertFatal(elementBlockSize > 0, "Invalid elementBlockSize: ", elementBlockSize);
+
+                const auto needsPadding
+                    = numBits == 6 && isTransposed
+                      && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
+
+                // Padding is added after every 16 elements, thus for F6 datatypes that will
+                // be transpose loaded from LDS elementBlockSize is set to 16 instead of 32.
+                if(needsPadding)
+                {
+                    elementBlockSize = 16;
                 }
 
-                uint          elementBlockSize = 0;
-                ExpressionPtr elementBlockStride;
-                ExpressionPtr trLoadPairStride;
-                ExpressionPtr elementBlockStridePaddingBytes{L(0u)};
-                ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
-                ExpressionPtr indexExprPaddingBytes{L(0u)};
+                elementBlockStride
+                    = ci.forward
+                          ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
+                          : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
 
-                auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
-                auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
+                uint elementsPerTrLoad = elementBlockIndex;
+                trLoadPairStride
+                    = ci.forward
+                          ? coords.forwardStride(increment, L(elementsPerTrLoad), {target})[0]
+                          : coords.reverseStride(increment, L(elementsPerTrLoad), {target})[0];
 
-                if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
+                if(needsPadding && maybeLDS)
                 {
-                    auto [elementBlockNumber, elementBlockIndex]
-                        = getElementBlockValues(graph, target, isTransposed);
-
-                    elementBlockSize = elementBlockIndex;
-
-                    auto const& arch = context->targetArchitecture();
-                    if(isTransposed)
-                    {
-                        // See addLoadWaveTileCTF8F6F4 in LowerTile.cpp
-                        const auto wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
-                        uint const numVBlocks
-                            = wfs == 64 ? (numBits == 8 ? 2 : 1) : (numBits == 8 ? 4 : 2);
-                        elementBlockSize = (elementBlockNumber / numVBlocks) * elementBlockSize;
-                    }
-                    AssertFatal(
-                        elementBlockSize > 0, "Invalid elementBlockSize: ", elementBlockSize);
-
-                    const auto needsPadding
-                        = numBits == 6 && isTransposed
-                          && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
-
-                    // Padding is added after every 16 elements, thus for F6 datatypes that will
-                    // be transpose loaded from LDS elementBlockSize is set to 16 instead of 32.
-                    if(needsPadding)
-                    {
-                        elementBlockSize = 16;
-                    }
-
-                    elementBlockStride
-                        = ci.forward
-                              ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
-                              : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
-
-                    uint elementsPerTrLoad = elementBlockIndex;
-                    trLoadPairStride
-                        = ci.forward
-                              ? coords.forwardStride(increment, L(elementsPerTrLoad), {target})[0]
-                              : coords.reverseStride(increment, L(elementsPerTrLoad), {target})[0];
-
-                    if(needsPadding && maybeLDS)
-                    {
-                        uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
-                        auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
-                        elementBlockStridePaddingBytes
-                            = elementBlockStride / L(elementsPerTrLoad) * L(extraLdsBytes);
-                        trLoadPairStridePaddingBytes
-                            = trLoadPairStride / L(elementsPerTrLoad) * L(extraLdsBytes);
-                        indexExprPaddingBytes = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
-                    }
+                    uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                    auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
+                    elementBlockStridePaddingBytes
+                        = elementBlockStride / L(elementsPerTrLoad) * L(extraLdsBytes);
+                    trLoadPairStridePaddingBytes
+                        = trLoadPairStride / L(elementsPerTrLoad) * L(extraLdsBytes);
+                    indexExprPaddingBytes = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
                 }
+            }
 
-        auto assignNode
-            = Assign{Register::Type::Vector, toBytes(indexExpr) + indexExprPaddingBytes};
-        assignNode.variableType = ci.strideType;
-        assignNode.strideExpressionAttributes
-            = {ci.strideType,
-               unitStride,
-               elementBlockSize,
-               toBytes(elementBlockStride) + elementBlockStridePaddingBytes,
-               toBytes(trLoadPairStride) + trLoadPairStridePaddingBytes};
-        auto assignTag = graph.control.addElement(assignNode);
-        graph.mapper.connect(assignTag, stride, NaryArgument::DEST);
+            auto assignNode
+                = Assign{Register::Type::Vector, toBytes(indexExpr) + indexExprPaddingBytes};
+            assignNode.variableType = ci.strideType;
+            assignNode.strideExpressionAttributes
+                = {ci.strideType,
+                   unitStride,
+                   elementBlockSize,
+                   toBytes(elementBlockStride) + elementBlockStridePaddingBytes,
+                   toBytes(trLoadPairStride) + trLoadPairStridePaddingBytes};
+            auto assignTag = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, stride, NaryArgument::DEST);
 
-        rocRoller::Log::getLogger()->debug(
-            "KernelGraph::makeAssignStride: assign {} expression {} to stride {}",
-            assignTag,
-            toString(assignNode.expression),
-            stride);
-        // std::cout << "YL makeAssignStride (tag, expression, stride) " << assignTag << ", "
-        //           << toString(assignNode.expression) << ", " << stride << std::endl;
-        return assignTag;
-
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::makeAssignStride: assign {} expression {} to stride {}",
+                assignTag,
+                toString(assignNode.expression),
+                stride);
+            // std::cout << "YL makeAssignStride (tag, expression, stride) " << assignTag << ", "
+            //           << toString(assignNode.expression) << ", " << stride << std::endl;
+            return assignTag;
         }
 
         KernelGraph AssignComputeIndex::apply(KernelGraph const& original)
@@ -397,35 +392,33 @@ namespace rocRoller
             TIMER(t, "KernelGraph::AddComputeIndex");
             auto kgraph = original;
 
-            auto isComputeIndexPredicate = [&kgraph](int x) {
-                return kgraph.control.get<ComputeIndex>(x).has_value();
-            };
+            auto isComputeIndexPredicate
+                = [&kgraph](int x) { return kgraph.control.get<ComputeIndex>(x).has_value(); };
 
             // search candidates
-            auto candidates = kgraph.control.findNodes( *kgraph.control.roots().begin(), isComputeIndexPredicate).to<std::vector>();
+            auto candidates
+                = kgraph.control.findNodes(*kgraph.control.roots().begin(), isComputeIndexPredicate)
+                      .to<std::vector>();
             // std::cout << "Number of ComputeIndex nodes " << candidates.size() << std::endl;
 
             std::vector<std::tuple<int, int, int>> ciAndAssign;
 
             // commit changes
-            for (const auto& tag : candidates)
+            for(const auto& tag : candidates)
             {
                 auto base = kgraph.mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASE});
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASE});
                 auto offset = kgraph.mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::OFFSET});
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::OFFSET});
                 auto stride = kgraph.mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::STRIDE});
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::STRIDE});
                 auto target = kgraph.mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::TARGET});
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::TARGET});
                 auto increment = kgraph.mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
                 auto buffer = kgraph.mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
 
-                // TODO: check if ComputeIndex nodes are within the ForLoop. If it is in the ForLoop, set register for ForLoop, else, set to 0
-
-                // check maybeLDS
                 auto maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
                 if(maybeLDS)
                 {
@@ -441,37 +434,35 @@ namespace rocRoller
                 }
                 maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
 
-                // check isTransposed
                 auto isTransposed
-                = kgraph.coordinates
-                      .findNodes(target,
-                                 [&](int tag) -> bool {
-                                     auto maybeAdhoc = kgraph.coordinates.get<Adhoc>(tag);
-                                     return maybeAdhoc
-                                            && maybeAdhoc->name() == "Adhoc.transpose.simdsPerWave";
-                                 })
-                      .to<std::vector>()
-                      .size()
-                  == 1;
+                    = kgraph.coordinates
+                          .findNodes(target,
+                                     [&](int tag) -> bool {
+                                         auto maybeAdhoc = kgraph.coordinates.get<Adhoc>(tag);
+                                         return maybeAdhoc
+                                                && maybeAdhoc->name()
+                                                       == "Adhoc.transpose.simdsPerWave";
+                                     })
+                          .to<std::vector>()
+                          .size()
+                      == 1;
 
-
-                // Set required coordinates
                 auto ci = kgraph.control.get<ComputeIndex>(tag).value();
-                auto direction = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
+                auto direction
+                    = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
 
                 // 1. Set register coordinates
-                // Transformer xform(&kgraph.coordinates);
                 auto xform = kgraph.buildTransformer(tag);
 
                 auto const maybeForLoop = findContainingOperation<ForLoopOp>(tag, kgraph);
-                auto fullStop  = [&](int tag) { return tag == increment; };
-                auto [required, path] = findRequiredCoordinates(target, direction, fullStop, kgraph);
-
+                auto       fullStop     = [&](int tag) { return tag == increment; };
+                auto [required, path]
+                    = findRequiredCoordinates(target, direction, fullStop, kgraph);
 
                 std::map<int, Expression::ExpressionPtr> regCoords;
                 auto isRegisterDim = [&maybeForLoop](auto dim) -> bool {
                     using T = std::decay_t<decltype(dim)>;
-                    if (maybeForLoop)
+                    if(maybeForLoop)
                         return CIsAnyOf<T, Wavefront, Workitem, Workgroup, ForLoop>;
                     else
                         return CIsAnyOf<T, Wavefront, Workitem, Workgroup>;
@@ -480,40 +471,28 @@ namespace rocRoller
                 {
                     if(std::visit(isRegisterDim, kgraph.coordinates.getNode(coord)))
                     {
-                        auto parentCoord = coord;
-                        // if the coordinate if ForLoop, it might be a duplicate,
-                        // use the parent coordinate instead
-                        // if (kgraph.coordinates.get<ForLoop>(coord))
-                        // {
-                        //         auto maybeParentForLoop = only(kgraph.coordinates.getInputNodeIndices(coord, rocRoller::KernelGraph::CoordinateGraph::isEdge<DataFlow>));
-                        //         if(maybeParentForLoop)
-                        //         {
-                        //             parentCoord = *maybeParentForLoop;
-                        //         }
-     
-                        // }
-
+                        auto parentCoord  = coord;
                         auto registerType = Register::Type::Vector;
-                        auto coordDF
-                            = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
-                                parentCoord, registerType, DataType::UInt32});
+                        auto coordDF      = std::make_shared<Expression::Expression>(
+                            Expression::DataFlowTag{parentCoord, registerType, DataType::UInt32});
                         regCoords[coord] = coordDF;
                     }
                 }
                 for(auto const& [coord, expr] : regCoords)
                 {
-                    if (!xform.hasCoordinate(coord))
+                    if(!xform.hasCoordinate(coord))
                         xform.setCoordinate(coord, expr);
                 }
 
-                // 2. Set remaining coordinates 
+                // 2. Set remaining coordinates
                 for(auto coord : required)
-                    if((coord  != increment) && (!xform.hasCoordinate(coord)))
-                        xform.setCoordinate(coord , L(0u));
+                    if((coord != increment) && (!xform.hasCoordinate(coord)))
+                        xform.setCoordinate(coord, L(0u));
 
                 // 3. Set the increment coordinate to zero if it doesn't
                 // already have a value
-                bool initializeIncrement = !xform.hasPath({target}, direction == Graph::Direction::Upstream);
+                bool initializeIncrement
+                    = !xform.hasPath({target}, direction == Graph::Direction::Upstream);
                 if(initializeIncrement)
                 {
                     xform.setCoordinate(increment, L(0u));
@@ -523,27 +502,36 @@ namespace rocRoller
 
                 if(base < 0 && offset > 0)
                 {
-                    assignBaseTag = makeAssignBase(kgraph, ci, target, offset, maybeLDS, isTransposed, m_context, xform);
+                    assignBaseTag = makeAssignBase(
+                        kgraph, ci, target, offset, maybeLDS, isTransposed, m_context, xform);
                 }
 
-                if (stride > 0)
+                if(stride > 0)
                 {
-                    assignStrideTag = makeAssignStride(kgraph, ci, target, stride, increment, maybeLDS, isTransposed, m_context, xform);                       
+                    assignStrideTag = makeAssignStride(kgraph,
+                                                       ci,
+                                                       target,
+                                                       stride,
+                                                       increment,
+                                                       maybeLDS,
+                                                       isTransposed,
+                                                       m_context,
+                                                       xform);
                 }
 
-                if (assignStrideTag != -1 || assignBaseTag != -1)
+                if(assignStrideTag != -1 || assignBaseTag != -1)
                 {
                     // std::cout << "YL: add (ciTag, assignBaseTag, assignStrideTag) " << tag << ", " << assignBaseTag << ", " << assignStrideTag << std::endl;
                     ciAndAssign.push_back({tag, assignBaseTag, assignStrideTag});
                 }
             }
 
-            for (auto const& tags : ciAndAssign)
+            for(auto const& tags : ciAndAssign)
             {
                 auto [ciTag, assignBaseTag, assignStrideTag] = tags;
-                if (assignStrideTag != -1)
+                if(assignStrideTag != -1)
                     insertAfter(kgraph, ciTag, assignStrideTag, assignStrideTag);
-                if (assignBaseTag != -1)
+                if(assignBaseTag != -1)
                     insertAfter(kgraph, ciTag, assignBaseTag, assignBaseTag);
             }
 
