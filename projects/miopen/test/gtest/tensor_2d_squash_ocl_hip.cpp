@@ -39,7 +39,8 @@
 namespace {
 constexpr bool PERF_ENABLE = false;
 
-constexpr size_t H = PERF_ENABLE ? (8 * 1024 * 1024) : 4;
+constexpr size_t H_FOR_PERF = 32 * 1024 * 1024;
+constexpr size_t H          = PERF_ENABLE ? (H_FOR_PERF) : 4;
 
 struct TestCase
 {
@@ -70,32 +71,25 @@ std::vector<TestCase::tensorlen_t> tensorBLensArr{{1, 16, H}, {1, 32, H * 2}, {1
 std::vector<TestCase::tensorstride_t> tensorBStridesArr{
     {16 * H, H * 1, 1}, {32 * H * 2, H * 2 * 1, 1}, {8 * H * 8, H * 8 * 1, 1}};
 
-constexpr std::array<TestCase::offsets_t, 1> offsetsArr{
-    {{0, 0, 0}}}; //, {64, 32, 16}, {32, 16, 32}, {32, 16, 32}}};
+constexpr std::array<TestCase::offsets_t, 4> offsetsArr{
+    {{0, 0, 0}, {64, 32, 16}, {32, 16, 32}, {32, 16, 32}}};
 
-constexpr std::array<TestCase::alphabeta_t, 3> alphabetaArr{
-    {{1.0, 1.0, 10.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}}};
-/*
- {{
-    {1.0, 1.0, 10.0},
-    {-1.0, 1.0, 1.0},
-    {1.0, 0.5, 0.3},
-    {0.0, 1.0, 1.0},
-    {1.0, 0.0, 1.0},
-    {1.0, 0.5, 0.0},
-    {0.0, 0.0, 0.0},
-    {0.0, 0.0, 1.0},
-    {0.0, 0.0, -1.0}
- }};
-*/
+constexpr std::array<TestCase::alphabeta_t, 6> alphabetaArr{{{-1.0, 1.0, 1.0},
+                                                             {0.0, 1.0, 1.0},
+                                                             {1.0, 0.0, 1.0},
+                                                             {1.0, 0.5, 0.0},
+                                                             {0.0, 0.0, 1.0},
+                                                             {0.0, 0.0, 0.0}}};
+
 constexpr std::array packedArr = {true, false};
 
 constexpr std::array operationArr = {
     miopenTensorOpAdd, miopenTensorOpMul, miopenTensorOpMin, miopenTensorOpMax};
+
 } // namespace
 
 template <typename T>
-struct GPU_Op2dTensorSquashTest : public testing::TestWithParam<TestCase>
+struct Op2dTensorSquashTest : public testing::TestWithParam<TestCase>
 {
     void SetUp() override { prng::reset_seed(); }
 
@@ -103,12 +97,10 @@ struct GPU_Op2dTensorSquashTest : public testing::TestWithParam<TestCase>
     {
         CreateTensors();
 
-        const auto tensorHIP = runHIP();
         const auto tensorOCL = runOCL();
-        const auto tensorCPU = runCPU();
+        const auto tensorHIP = runHIP();
 
-        CompareResults(tensorOCL, tensorCPU);
-        CompareResults(tensorHIP, tensorCPU);
+        CompareResults(tensorHIP, tensorOCL);
     }
 
 private:
@@ -172,7 +164,7 @@ private:
     void writeProfileResults(std::vector<float>& meas, const std::string& engine)
     {
         std::ofstream file;
-        const std::string filename{"tensor_2d_squash.csv"};
+        const std::string filename{engine + "_tensor_2d_squash.csv"};
         file.open(filename, std::ios::app);
 
         if(!file.is_open())
@@ -182,22 +174,21 @@ private:
 
         if(miopen::fs::file_size(filename) == 0)
         {
-            file << "Engine,ASize,BSize,alphabeta,OP,packed,exectime0,exectime1,exectime2,"
-                    "exectime3,exectime4,exectime5,"
-                    "exectime6,exectime7,exectime8,exectime9\n";
+            file << "type,ASize,BSize,a0,a1,b,OP,e0,e1,e2,e3,e4,e5,e6,e7,e8,e9\n";
         }
 
-        const TestCase& testCase = GetParam();
-        const auto alpha0        = testCase.alphabeta[0];
-        const auto alpha1        = testCase.alphabeta[1];
-        const auto beta          = testCase.alphabeta[2];
+        miopenDataType_t data_type = tensorB.desc.GetType();
+        const TestCase& testCase   = GetParam();
+        const auto alpha0          = testCase.alphabeta[0];
+        const auto alpha1          = testCase.alphabeta[1];
+        const auto beta            = testCase.alphabeta[2];
 
-        file << engine << "," << std::to_string(testCase.tensorlens_ac[2]) << ","
-             << std::to_string(testCase.tensorlens_b[2]) << ","
-             << " a0:" << std::to_string(alpha0) << " a1:" << std::to_string(alpha1)
-             << " b:" << std::to_string(beta) << "," << op2string(testCase.operation) << ","
-             << (testCase.packed ? "T" : "F");
-        ;
+        file << miopen::GetDataType(data_type) << ","
+             << std::to_string(testCase.tensorlens_ac[2] / (1024 * 1024)) << ","
+             << std::to_string(testCase.tensorlens_b[2] / (1024 * 1024)) << ","
+             << std::to_string(alpha0) << "," << std::to_string(alpha1) << ","
+             << std::to_string(beta) << "," << op2string(testCase.operation);
+
         for(auto m : meas)
         {
             file << "," << m;
@@ -213,6 +204,56 @@ private:
         return ops[op];
     };
 
+    std::tuple<int, int, int> GetBitmapAndWgInfo(const std::vector<size_t>& blens,
+                                                 const std::vector<size_t>& clens)
+    {
+        // first_not_one is incorrect if btensor size equal to 1
+        auto first_not_one =
+            std::find_if(blens.rbegin(), blens.rend(), [](int i) { return i != 1; });
+        auto d = std::distance(blens.begin(), first_not_one.base());
+
+        // quick fix
+        int num_wg = first_not_one != blens.rend()
+                         ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
+                         : 1;
+
+        int work_per_wg =
+            std::accumulate(clens.begin() + d, clens.end(), 1, std::multiplies<int>());
+
+        unsigned int bitmap = 0;
+        // update bitmap for first_not_one
+        bitmap |= (1 << (blens.size() - d));
+
+        for(int i = (d - 2); i >= 0; i--)
+        {
+            if(blens[i] != 1)
+            {
+                bitmap |= (1 << (blens.size() - (i + 1)));
+                num_wg *= blens[i];
+            }
+            else
+            {
+                work_per_wg *= clens[i];
+            }
+        }
+
+        return std::make_tuple(num_wg, work_per_wg, bitmap);
+    };
+
+    std::tuple<size_t, std::string> GetRDBLCKandREADTYPE(size_t len, miopenDataType_t type)
+    {
+        const std::string data_type = miopen::GetDataType(type);
+        size_t RD_BLCK              = (len % 4 == 0) ? 4 : (len % 2 == 0) ? 2 : 1;
+
+        if(data_type == "half" && RD_BLCK == 4)
+        {
+            RD_BLCK = 2;
+        }
+
+        return std::make_tuple(RD_BLCK,
+                               (RD_BLCK == 1) ? data_type : data_type + std::to_string(RD_BLCK));
+    };
+
     std::vector<T> runOCL()
     {
         const TestCase& testCase = GetParam();
@@ -223,70 +264,30 @@ private:
         auto b_dev = handle.Write(tensorB.data);
         auto c_dev = handle.Write(tensorC.data);
 
-        const auto GetBitmapAndWgInfo = [](const std::vector<size_t>& blens,
-                                           const std::vector<size_t>& clens) {
-            // first_not_one is incorrect if btensor size equal to 1
-            auto first_not_one =
-                std::find_if(blens.rbegin(), blens.rend(), [](int i) { return i != 1; });
-            auto d = std::distance(blens.begin(), first_not_one.base());
+        miopenDataType_t data_type = tensorB.desc.GetType();
 
-            // quick fix
-            int num_wg = first_not_one != blens.rend()
-                             ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
-                             : 1;
-
-            int work_per_wg =
-                std::accumulate(clens.begin() + d, clens.end(), 1, std::multiplies<int>());
-
-            unsigned int bitmap = 0;
-            // update bitmap for first_not_one
-            bitmap |= (1 << (blens.size() - d));
-
-            for(int i = (d - 2); i >= 0; i--)
-            {
-                if(blens[i] != 1)
-                {
-                    bitmap |= (1 << (blens.size() - (i + 1)));
-                    num_wg *= blens[i];
-                }
-                else
-                {
-                    work_per_wg *= clens[i];
-                }
-            }
-
-            return std::make_tuple(num_wg, work_per_wg, bitmap);
-        };
-
-        const auto GetRDBLCKandREADTYPE = [](size_t len, miopenDataType_t type) {
-            const std::string data_type = miopen::GetDataType(type);
-            size_t RD_BLCK              = (len % 4 == 0) ? 4 : (len % 2 == 0) ? 2 : 1;
-            return std::make_tuple(
-                RD_BLCK, (RD_BLCK == 1) ? data_type : data_type + std::to_string(RD_BLCK));
-        };
-
-        const int max_num_wg       = 4096;
-        const size_t local_threads = 256;
-        miopenDataType_t data_type = miopen_type<T>{};
-
-        auto&& [RD_BLCK, READ_TYPE] = GetRDBLCKandREADTYPE(tensorC.desc.GetLengths()[2], data_type);
         auto&& [num_wg, work_per_wg, bitmap] =
             GetBitmapAndWgInfo(tensorB.desc.GetLengths(), tensorC.desc.GetLengths());
 
-        num_wg = num_wg > max_num_wg ? max_num_wg : num_wg;
+        const int max_num_wg = 4096;
+        num_wg               = num_wg > max_num_wg ? max_num_wg : num_wg;
+
+        const size_t local_threads = 256;
+
+        auto&& [RD_BLCK, READ_TYPE] = GetRDBLCKandREADTYPE(tensorC.desc.GetLengths()[2], data_type);
 
         const size_t total_work = std::max(tensorC.desc.GetLengths()[2] / RD_BLCK, size_t(1));
         size_t grp_sz           = (total_work + local_threads - 1) / local_threads;
-        grp_sz                  = std::min(size_t(max_num_wg), grp_sz);
 
+        grp_sz                = std::min(size_t(max_num_wg), grp_sz);
         size_t global_threads = local_threads * grp_sz;
 
         const std::vector<size_t> vld{local_threads, 1, 1};
         const std::vector<size_t> vgd{global_threads, 1, 1};
 
-        std::string network_config = std::to_string(data_type) + "-miopenTensorOpAdd-" +
-                                     std::to_string(global_threads) + "-" +
-                                     std::to_string(local_threads);
+        std::string network_config =
+            std::to_string(data_type) + "-" + op2string(testCase.operation) + "-" +
+            std::to_string(global_threads) + "-" + std::to_string(local_threads) + "-ocl";
 
         std::string params = " -DMIOPEN_TYPE=" + miopen::GetDataType(data_type) + " " +
                              miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{}) +
@@ -294,20 +295,15 @@ private:
                              " -DUSE_2D_TENSOR_SQUASH" + " -DRD_BLCK=" + std::to_string(RD_BLCK) +
                              " -DREAD_TYPE=" + READ_TYPE;
 
-        std::string program_name       = "MIOpenTensorKernels.cl";
-        std::string network_config_ocl = network_config + "-ocl";
+        std::string program_name = "MIOpenTensorKernels.cl";
 
-        const auto alpha0 = testCase.alphabeta[0];
-        const auto alpha1 = testCase.alphabeta[1];
-        const auto beta   = testCase.alphabeta[2];
+        miopen::as_float<const T> asT;
+        const auto alpha0 = asT(testCase.alphabeta[0]);
+        const auto alpha1 = asT(testCase.alphabeta[1]);
+        const auto beta   = asT(testCase.alphabeta[2]);
 
-        auto kernel = handle.AddKernel("Op2dTensorSquash",
-                                       network_config_ocl,
-                                       program_name,
-                                       "Op2dTensorSquash",
-                                       vld,
-                                       vgd,
-                                       params);
+        auto kernel = handle.AddKernel(
+            "Op2dTensorSquash", network_config, program_name, "Op2dTensorSquash", vld, vgd, params);
 
         kernelRunner_t kernelRunner = [&]() {
             kernel(a_dev.get(),
@@ -345,51 +341,9 @@ private:
         auto b_dev = handle.Write(tensorB.data);
         auto c_dev = handle.Write(tensorC.data);
 
-        const auto GetBitmapAndWgInfo = [](const std::vector<size_t>& blens,
-                                           const std::vector<size_t>& clens) {
-            // first_not_one is incorrect if btensor size equal to 1
-            auto first_not_one =
-                std::find_if(blens.rbegin(), blens.rend(), [](int i) { return i != 1; });
-            auto d = std::distance(blens.begin(), first_not_one.base());
-
-            // quick fix
-            int num_wg = first_not_one != blens.rend()
-                             ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
-                             : 1;
-
-            int work_per_wg =
-                std::accumulate(clens.begin() + d, clens.end(), 1, std::multiplies<int>());
-
-            unsigned int bitmap = 0;
-            // update bitmap for first_not_one
-            bitmap |= (1 << (blens.size() - d));
-
-            for(int i = (d - 2); i >= 0; i--)
-            {
-                if(blens[i] != 1)
-                {
-                    bitmap |= (1 << (blens.size() - (i + 1)));
-                    num_wg *= blens[i];
-                }
-                else
-                {
-                    work_per_wg *= clens[i];
-                }
-            }
-
-            return std::make_tuple(num_wg, work_per_wg, bitmap);
-        };
-
-        const auto GetRDBLCKandREADTYPE = [](size_t len, miopenDataType_t type) {
-            const std::string data_type = miopen::GetDataType(type);
-            size_t RD_BLCK              = (len % 4 == 0) ? 4 : (len % 2 == 0) ? 2 : 1;
-            return std::make_tuple(
-                RD_BLCK, (RD_BLCK == 1) ? data_type : data_type + std::to_string(RD_BLCK));
-        };
-
         const int max_num_wg       = 4096;
         const size_t local_threads = 256;
-        miopenDataType_t data_type = miopen_type<T>{};
+        miopenDataType_t data_type = tensorB.desc.GetType();
 
         auto&& [RD_BLCK, READ_TYPE] = GetRDBLCKandREADTYPE(tensorC.desc.GetLengths()[2], data_type);
         auto&& [num_wg, work_per_wg, bitmap] =
@@ -408,7 +362,7 @@ private:
 
         std::string network_config = std::to_string(data_type) + "-miopenTensorOpAdd-" +
                                      std::to_string(global_threads) + "-" +
-                                     std::to_string(local_threads);
+                                     std::to_string(local_threads) + "-hip";
 
         std::string params = " -DMIOPEN_TYPE=" + miopen::GetDataType(data_type) + " " +
                              miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{}) +
@@ -416,20 +370,15 @@ private:
                              " -DUSE_2D_TENSOR_SQUASH" + " -DRD_BLCK=" + std::to_string(RD_BLCK) +
                              " -DREAD_TYPE=" + READ_TYPE;
 
-        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
-        std::string network_config_hip = network_config + "-hip";
+        std::string program_name = "MIOpenTensorKernelsHip.cpp";
 
-        const auto alpha0 = testCase.alphabeta[0];
-        const auto alpha1 = testCase.alphabeta[1];
-        const auto beta   = testCase.alphabeta[2];
+        miopen::as_float<const T> asT;
+        const auto alpha0 = asT(testCase.alphabeta[0]);
+        const auto alpha1 = asT(testCase.alphabeta[1]);
+        const auto beta   = asT(testCase.alphabeta[2]);
 
-        auto kernel = handle.AddKernel("Op2dTensorSquash",
-                                       network_config_hip,
-                                       program_name,
-                                       "Op2dTensorSquash",
-                                       vld,
-                                       vgd,
-                                       params);
+        auto kernel = handle.AddKernel(
+            "Op2dTensorSquash", network_config, program_name, "Op2dTensorSquash", vld, vgd, params);
 
         kernelRunner_t kernelRunner = [&]() {
             kernel(a_dev.get(),
@@ -457,65 +406,7 @@ private:
         return res;
     }
 
-    std::vector<T> runCPU()
-    {
-        const TestCase& testCase = GetParam();
-        const float alpha0       = testCase.alphabeta[0];
-        const float alpha1       = testCase.alphabeta[1];
-
-        switch(testCase.operation)
-        {
-        case miopenTensorOpAdd:
-            return runCPUDataOp(
-                [alpha0, alpha1](const auto A, const auto B) { return A * alpha0 + B * alpha1; });
-        case miopenTensorOpMul:
-            return runCPUDataOp(
-                [alpha0, alpha1](const auto A, const auto B) { return A * alpha0 * B * alpha1; });
-        case miopenTensorOpMin:
-            return runCPUDataOp([alpha0, alpha1](const auto A, const auto B) {
-                return std::min(A * alpha0, B * alpha1);
-            });
-        case miopenTensorOpMax:
-            return runCPUDataOp([alpha0, alpha1](const auto A, const auto B) {
-                return std::max(A * alpha0, B * alpha1);
-            });
-        }
-    }
-
-    template <typename DataOp>
-    std::vector<T> runCPUDataOp(DataOp&& dataOp)
-    {
-        const TestCase& testCase = GetParam();
-
-        const auto a = tensorA;
-        const auto b = tensorB;
-        auto c       = tensorC;
-
-        auto a_idx = testCase.offsets[0];
-        auto b_idx = testCase.offsets[1];
-        auto c_idx = testCase.offsets[2];
-
-        // Currently non standard squashed operation is supported only on 3D tensors
-        // A/C tensors are 1x1xH, tensor B is 1xCxH (C > 1)
-        // This is simulated 3D non standard squashed tensor operation
-        for(auto i = 0; i < testCase.tensorlens_ac[2]; i++)
-        {
-            auto c_val = c.data[c_idx] * testCase.alphabeta[2];
-            for(auto j = 0; j < testCase.tensorlens_b[1]; j++)
-            {
-                c_val += dataOp(a.data[a_idx], b.data[b_idx]);
-                b_idx += testCase.stride_b[1];
-            }
-            c.data[c_idx] = c_val;
-            a_idx += testCase.stride_a[2];
-            c_idx += testCase.stride_c[2];
-            b_idx = testCase.offsets[1] + (i + 1) * testCase.stride_b[2];
-        }
-
-        return c.data;
-    }
-
-    void CompareResults(const std::vector<T>& tensorGPUData, const std::vector<T>& tensorCPUData)
+    void CompareResults(const std::vector<T>& valA, const std::vector<T>& valB)
     {
         const TestCase& testCase = GetParam();
 
@@ -526,8 +417,8 @@ private:
             tolerance = 80;
         }
 
-        double threshold = std::numeric_limits<T>::epsilon() * tolerance;
-        double error     = miopen::rms_range(tensorCPUData, tensorGPUData);
+        const double threshold = std::numeric_limits<T>::epsilon() * tolerance;
+        const double error     = miopen::rms_range(valB, valA);
 
         ASSERT_LE(error, threshold)
             << "TensorOp: " << testCase.operation << std::endl
@@ -598,9 +489,9 @@ void AddTestCases(std::vector<TestCase>& testCases,
                 FAIL() << "Incorrect stride";
             }
 
-            for(const auto& alphabeta : alphabetaArr)
+            for(const auto& operation : operationArr)
             {
-                for(const auto& operation : operationArr)
+                for(const auto& alphabeta : alphabetaArr)
                 {
                     TestCase& testCase = testCases.emplace_back();
 
@@ -623,7 +514,7 @@ std::vector<TestCase> GenCases()
 {
     std::vector<TestCase> testCases;
 
-    for(int i = 0; i < tensorALensArr.size(); i++)
+    for(int i = 0, s = tensorALensArr.size(); i < s; ++i)
     {
         AddTestCases(testCases,
                      tensorALensArr[i],
@@ -643,8 +534,14 @@ inline auto GetCases()
 }
 } // namespace
 
-using GPU_Op2dTensorSquashTest_FP32 = GPU_Op2dTensorSquashTest<float>;
+using Op2dTensorSquashTest_FP16 = Op2dTensorSquashTest<half_float::half>;
+using Op2dTensorSquashTest_FP32 = Op2dTensorSquashTest<float>;
+using Op2dTensorSquashTest_FP64 = Op2dTensorSquashTest<double>;
 
-TEST_P(GPU_Op2dTensorSquashTest_FP32, PortTest) { this->Run(); }
+TEST_P(Op2dTensorSquashTest_FP16, PortTest) { this->Run(); }
+TEST_P(Op2dTensorSquashTest_FP32, PortTest) { this->Run(); }
+TEST_P(Op2dTensorSquashTest_FP64, PortTest) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Op2dTensorSquashTest_FP32, GetCases());
+INSTANTIATE_TEST_SUITE_P(Smoke, Op2dTensorSquashTest_FP16, GetCases());
+INSTANTIATE_TEST_SUITE_P(Smoke, Op2dTensorSquashTest_FP32, GetCases());
+INSTANTIATE_TEST_SUITE_P(Smoke, Op2dTensorSquashTest_FP64, GetCases());

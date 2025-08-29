@@ -319,7 +319,22 @@ extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
             {
                 for(int i = 0; i < RD_BLCK; ++i)
                 {
-                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0) * 16;
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i], (MIOPEN_TYPE)0);
                 }
             }
             for(int bid = ((b_c / 16) * 16); bid < b_c; bid++)
