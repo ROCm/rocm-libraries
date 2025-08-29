@@ -23,9 +23,7 @@
 
 #include <gtest/gtest.h>
 
-#ifndef M_PI
-#  define M_PI 3.1415926535897932
-#endif
+#define M_PI 3.1415926535897932
 
 #define CHECK_CORRECT(std_complex, thrust_complex, real_eps, imag_eps, real_val, imag_val)                   \
   do                                                                                                         \

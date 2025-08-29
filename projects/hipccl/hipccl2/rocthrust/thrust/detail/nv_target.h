@@ -1,5 +1,5 @@
 // MIT License
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +23,12 @@
  *  \brief Includes nv macros depending on the backend.
  */
 
-#include <thrust/detail/config.h>
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#  include <thrust/system/hip/detail/nv/target.h>
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <nv/target>
 #else
+// When using a different backend, e.g. OpenMP, we still need to define the target.
+// We can simply reuse the HIP targets for this.
 #  include <thrust/system/hip/detail/nv/target.h>
 #endif

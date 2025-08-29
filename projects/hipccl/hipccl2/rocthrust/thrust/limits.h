@@ -7,16 +7,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#include <thrust/detail/config.h>
-
 #include <thrust/detail/type_traits.h>
 
 #include <limits>
@@ -24,7 +14,7 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename T>
-struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::numeric_limits") numeric_limits : std::numeric_limits<T>
+struct numeric_limits : std::numeric_limits<T>
 {};
 
 THRUST_NAMESPACE_END

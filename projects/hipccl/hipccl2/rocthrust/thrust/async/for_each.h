@@ -22,22 +22,15 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
-#  include <thrust/detail/type_traits.h>
 #  include <thrust/event.h>
 #  include <thrust/system/detail/adl/async/for_each.h>
+#  include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -50,16 +43,14 @@ namespace async
 namespace unimplemented
 {
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename UnaryFunction>
-THRUST_DEPRECATED THRUST_HOST event<DerivedPolicy>
+THRUST_HOST event<DerivedPolicy>
 async_for_each(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, UnaryFunction)
 {
   THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<ForwardIt, false>::value),
                            "this algorithm is not implemented for the specified system");
   return {};
 }
-THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace unimplemented
 
@@ -70,7 +61,6 @@ using thrust::async::unimplemented::async_for_each;
 
 struct for_each_fn final
 {
-  THRUST_SUPPRESS_DEPRECATED_PUSH
   template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename UnaryFunction>
   THRUST_HOST static auto
   call(thrust::detail::execution_policy_base<DerivedPolicy> const& exec,
@@ -81,26 +71,22 @@ struct for_each_fn final
     THRUST_RETURNS(async_for_each(thrust::detail::derived_cast(thrust::detail::strip_const(exec)),
                                   THRUST_FWD(first),
                                   THRUST_FWD(last),
-                                  THRUST_FWD(f))) THRUST_SUPPRESS_DEPRECATED_POP
+                                  THRUST_FWD(f)))
 
-    template <typename ForwardIt, typename Sentinel, typename UnaryFunction>
-    THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last, UnaryFunction&& f)
-      THRUST_RETURNS(for_each_fn::call(
-        thrust::detail::select_system(typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}),
-        THRUST_FWD(first),
-        THRUST_FWD(last),
-        THRUST_FWD(f)))
+      template <typename ForwardIt, typename Sentinel, typename UnaryFunction>
+      THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last, UnaryFunction&& f)
+        THRUST_RETURNS(for_each_fn::call(
+          thrust::detail::select_system(typename iterator_system<remove_cvref_t<ForwardIt>>::type{}),
+          THRUST_FWD(first),
+          THRUST_FWD(last),
+          THRUST_FWD(f)))
 
-        template <typename... Args>
-        THRUST_NODISCARD THRUST_DEPRECATED THRUST_HOST auto operator()(Args&&... args) const
-    THRUST_RETURNS(call(THRUST_FWD(args)...))
+          template <typename... Args>
+          THRUST_NODISCARD THRUST_HOST auto operator()(Args&&... args) const THRUST_RETURNS(call(THRUST_FWD(args)...))
 };
 
 } // namespace for_each_detail
 
-// note: cannot add a THRUST_DEPRECATED here because the global variable is emitted into cudafe1.stub.c and we cannot
-// suppress the warning there
-//! deprecated [Since 2.8.0]
 THRUST_INLINE_CONSTANT for_each_detail::for_each_fn for_each{};
 
 /*! \endcond

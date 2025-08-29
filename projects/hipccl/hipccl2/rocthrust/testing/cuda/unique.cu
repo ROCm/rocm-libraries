@@ -23,7 +23,7 @@
 template <typename T>
 struct is_equal_div_10_unique
 {
-  _CCCL_HOST_DEVICE bool operator()(const T x, const T& y) const
+  THRUST_HOST_DEVICE bool operator()(const T x, const T& y) const
   {
     return ((int) x / 10) == ((int) y / 10);
   }
@@ -49,7 +49,17 @@ void TestUniqueDevice(ExecutionPolicy exec)
   using Vector = thrust::device_vector<int>;
   using T      = Vector::value_type;
 
-  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
+  Vector data(10);
+  data[0] = 11;
+  data[1] = 11;
+  data[2] = 12;
+  data[3] = 20;
+  data[4] = 29;
+  data[5] = 21;
+  data[6] = 21;
+  data[7] = 31;
+  data[8] = 31;
+  data[9] = 37;
 
   thrust::device_vector<Vector::iterator> new_last_vec(1);
   Vector::iterator new_last;
@@ -63,9 +73,13 @@ void TestUniqueDevice(ExecutionPolicy exec)
   new_last = new_last_vec[0];
 
   ASSERT_EQUAL(new_last - data.begin(), 7);
-  data.erase(new_last, data.end());
-  Vector ref{11, 12, 20, 29, 21, 31, 37}; // should we consider calculating ref from std::algorithm if exists?
-  ASSERT_EQUAL(data, ref);
+  ASSERT_EQUAL(data[0], 11);
+  ASSERT_EQUAL(data[1], 12);
+  ASSERT_EQUAL(data[2], 20);
+  ASSERT_EQUAL(data[3], 29);
+  ASSERT_EQUAL(data[4], 21);
+  ASSERT_EQUAL(data[5], 31);
+  ASSERT_EQUAL(data[6], 37);
 
   unique_kernel<<<1, 1>>>(exec, data.begin(), new_last, is_equal_div_10_unique<T>(), new_last_vec.begin());
   {
@@ -76,9 +90,9 @@ void TestUniqueDevice(ExecutionPolicy exec)
   new_last = new_last_vec[0];
 
   ASSERT_EQUAL(new_last - data.begin(), 3);
-  data.erase(new_last, data.end());
-  ref = {11, 20, 31};
-  ASSERT_EQUAL(data, ref);
+  ASSERT_EQUAL(data[0], 11);
+  ASSERT_EQUAL(data[1], 20);
+  ASSERT_EQUAL(data[2], 31);
 }
 
 void TestUniqueDeviceSeq()
@@ -106,7 +120,17 @@ void TestUniqueCudaStreams(ExecutionPolicy policy)
   using Vector = thrust::device_vector<int>;
   using T      = Vector::value_type;
 
-  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
+  Vector data(10);
+  data[0] = 11;
+  data[1] = 11;
+  data[2] = 12;
+  data[3] = 20;
+  data[4] = 29;
+  data[5] = 21;
+  data[6] = 21;
+  data[7] = 31;
+  data[8] = 31;
+  data[9] = 37;
 
   thrust::device_vector<Vector::iterator> new_last_vec(1);
   Vector::iterator new_last;
@@ -120,17 +144,21 @@ void TestUniqueCudaStreams(ExecutionPolicy policy)
   cudaStreamSynchronize(s);
 
   ASSERT_EQUAL(new_last - data.begin(), 7);
-  data.erase(new_last, data.end());
-  Vector ref{11, 12, 20, 29, 21, 31, 37};
-  ASSERT_EQUAL(data, ref);
+  ASSERT_EQUAL(data[0], 11);
+  ASSERT_EQUAL(data[1], 12);
+  ASSERT_EQUAL(data[2], 20);
+  ASSERT_EQUAL(data[3], 29);
+  ASSERT_EQUAL(data[4], 21);
+  ASSERT_EQUAL(data[5], 31);
+  ASSERT_EQUAL(data[6], 37);
 
   new_last = thrust::unique(streampolicy, data.begin(), new_last, is_equal_div_10_unique<T>());
   cudaStreamSynchronize(s);
 
   ASSERT_EQUAL(new_last - data.begin(), 3);
-  data.erase(new_last, data.end());
-  ref = {11, 20, 31};
-  ASSERT_EQUAL(data, ref);
+  ASSERT_EQUAL(data[0], 11);
+  ASSERT_EQUAL(data[1], 20);
+  ASSERT_EQUAL(data[2], 31);
 
   cudaStreamDestroy(s);
 }
@@ -168,7 +196,17 @@ void TestUniqueCopyDevice(ExecutionPolicy exec)
   using Vector = thrust::device_vector<int>;
   using T      = Vector::value_type;
 
-  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
+  Vector data(10);
+  data[0] = 11;
+  data[1] = 11;
+  data[2] = 12;
+  data[3] = 20;
+  data[4] = 29;
+  data[5] = 21;
+  data[6] = 21;
+  data[7] = 31;
+  data[8] = 31;
+  data[9] = 37;
 
   Vector output(10, -1);
 
@@ -184,9 +222,13 @@ void TestUniqueCopyDevice(ExecutionPolicy exec)
   new_last = new_last_vec[0];
 
   ASSERT_EQUAL(new_last - output.begin(), 7);
-  output.erase(new_last, output.end());
-  Vector ref{11, 12, 20, 29, 21, 31, 37};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 11);
+  ASSERT_EQUAL(output[1], 12);
+  ASSERT_EQUAL(output[2], 20);
+  ASSERT_EQUAL(output[3], 29);
+  ASSERT_EQUAL(output[4], 21);
+  ASSERT_EQUAL(output[5], 31);
+  ASSERT_EQUAL(output[6], 37);
 
   unique_copy_kernel<<<1, 1>>>(
     exec, output.begin(), new_last, data.begin(), is_equal_div_10_unique<T>(), new_last_vec.begin());
@@ -198,9 +240,9 @@ void TestUniqueCopyDevice(ExecutionPolicy exec)
   new_last = new_last_vec[0];
 
   ASSERT_EQUAL(new_last - data.begin(), 3);
-  data.erase(new_last, data.end());
-  ref = {11, 20, 31};
-  ASSERT_EQUAL(data, ref);
+  ASSERT_EQUAL(data[0], 11);
+  ASSERT_EQUAL(data[1], 20);
+  ASSERT_EQUAL(data[2], 31);
 }
 
 void TestUniqueCopyDeviceSeq()
@@ -228,7 +270,17 @@ void TestUniqueCopyCudaStreams(ExecutionPolicy policy)
   using Vector = thrust::device_vector<int>;
   using T      = Vector::value_type;
 
-  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
+  Vector data(10);
+  data[0] = 11;
+  data[1] = 11;
+  data[2] = 12;
+  data[3] = 20;
+  data[4] = 29;
+  data[5] = 21;
+  data[6] = 21;
+  data[7] = 31;
+  data[8] = 31;
+  data[9] = 37;
 
   Vector output(10, -1);
 
@@ -244,17 +296,21 @@ void TestUniqueCopyCudaStreams(ExecutionPolicy policy)
   cudaStreamSynchronize(s);
 
   ASSERT_EQUAL(new_last - output.begin(), 7);
-  output.erase(new_last, output.end());
-  Vector ref{11, 12, 20, 29, 21, 31, 37};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 11);
+  ASSERT_EQUAL(output[1], 12);
+  ASSERT_EQUAL(output[2], 20);
+  ASSERT_EQUAL(output[3], 29);
+  ASSERT_EQUAL(output[4], 21);
+  ASSERT_EQUAL(output[5], 31);
+  ASSERT_EQUAL(output[6], 37);
 
   new_last = thrust::unique_copy(streampolicy, output.begin(), new_last, data.begin(), is_equal_div_10_unique<T>());
   cudaStreamSynchronize(s);
 
   ASSERT_EQUAL(new_last - data.begin(), 3);
-  data.erase(new_last, data.end());
-  ref = {11, 20, 31};
-  ASSERT_EQUAL(data, ref);
+  ASSERT_EQUAL(data[0], 11);
+  ASSERT_EQUAL(data[1], 20);
+  ASSERT_EQUAL(data[2], 31);
 
   cudaStreamDestroy(s);
 }
@@ -291,7 +347,17 @@ void TestUniqueCountDevice(ExecutionPolicy exec)
   using Vector = thrust::device_vector<int>;
   using T      = Vector::value_type;
 
-  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
+  Vector data(10);
+  data[0] = 11;
+  data[1] = 11;
+  data[2] = 12;
+  data[3] = 20;
+  data[4] = 29;
+  data[5] = 21;
+  data[6] = 21;
+  data[7] = 31;
+  data[8] = 31;
+  data[9] = 37;
 
   Vector output(1, -1);
 
@@ -337,7 +403,17 @@ void TestUniqueCountCudaStreams(ExecutionPolicy policy)
   using Vector = thrust::device_vector<int>;
   using T      = Vector::value_type;
 
-  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
+  Vector data(10);
+  data[0] = 11;
+  data[1] = 11;
+  data[2] = 12;
+  data[3] = 20;
+  data[4] = 29;
+  data[5] = 21;
+  data[6] = 21;
+  data[7] = 31;
+  data[8] = 31;
+  data[9] = 37;
 
   cudaStream_t s;
   cudaStreamCreate(&s);

@@ -21,10 +21,6 @@
 
 #include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
-
 template <typename T>
 struct TestPairManipulation
 {
@@ -272,7 +268,7 @@ struct TestPairTupleSize
 };
 SimpleUnitTest<TestPairTupleSize, PairConstVolatileTypes> TestPairTupleSizeInstance;
 
-void TestPairTupleElement()
+void TestPairTupleElement(void)
 {
   using type0 = thrust::tuple_element<0, thrust::pair<int, float>>::type;
   using type1 = thrust::tuple_element<1, thrust::pair<int, float>>::type;
@@ -296,7 +292,7 @@ void TestPairTupleElement()
 };
 DECLARE_UNITTEST(TestPairTupleElement);
 
-void TestPairSwap()
+void TestPairSwap(void)
 {
   int x = 7;
   int y = 13;
@@ -307,8 +303,7 @@ void TestPairSwap()
   thrust::pair<int, int> a(x, y);
   thrust::pair<int, int> b(z, w);
 
-  using _THRUST_STD::swap;
-  swap(a, b);
+  thrust::swap(a, b);
 
   ASSERT_EQUAL(z, a.first);
   ASSERT_EQUAL(w, a.second);
@@ -333,7 +328,7 @@ void TestPairSwap()
 DECLARE_UNITTEST(TestPairSwap);
 
 #if THRUST_CPP_DIALECT >= 2017
-void TestPairStructuredBindings()
+void TestPairStructuredBindings(void)
 {
   const int a = 42;
   const int b = 1337;

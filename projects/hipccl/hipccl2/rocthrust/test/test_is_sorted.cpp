@@ -31,18 +31,16 @@ TYPED_TEST(IsSortedVectorTests, TestIsSortedSimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v{0, 5, 8, 0};
+  Vector v(4);
+  v[0] = 0;
+  v[1] = 5;
+  v[2] = 8;
+  v[3] = 0;
 
   ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 0), true);
   ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 1), true);
 
-  // the following line crashes gcc 4.3
-#if (__GNUC__ == 4) && (__GNUC_MINOR__ == 3)
-  // do nothing
-#else
-  // compile this line on other compilers
   ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 2), true);
-#endif // GCC
 
   ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 3), true);
   ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 4), false);
@@ -61,7 +59,18 @@ TYPED_TEST(IsSortedVectorTests, TestIsSortedRepeatedElements)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v{0, 1, 1, 2, 3, 4, 5, 5, 5, 6};
+  Vector v(10);
+
+  v[0] = 0;
+  v[1] = 1;
+  v[2] = 1;
+  v[3] = 2;
+  v[4] = 3;
+  v[5] = 4;
+  v[6] = 5;
+  v[7] = 5;
+  v[8] = 5;
+  v[9] = 6;
 
   ASSERT_EQ(true, thrust::is_sorted(v.begin(), v.end()));
 }
@@ -93,7 +102,7 @@ TYPED_TEST(IsSortedVectorTests, TestIsSorted)
 }
 
 template <typename InputIterator>
-bool is_sorted(my_system& system, InputIterator /*first*/, InputIterator)
+bool is_sorted(my_system& system, InputIterator, InputIterator)
 {
   system.validate_dispatch();
   return false;

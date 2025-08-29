@@ -28,18 +28,8 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/system/hip/config.h>
 
-#include <thrust/advance.h>
 #include <thrust/system/hip/detail/cross_system.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
@@ -58,19 +48,19 @@ namespace hip_rocprim
 
 // D->D copy requires HIP compiler
 template <class System, class InputIterator, class OutputIterator>
-OutputIterator THRUST_HOST_DEVICE
+OutputIterator THRUST_HIP_FUNCTION
 copy(execution_policy<System>& system, InputIterator first, InputIterator last, OutputIterator result);
 
 template <class System1, class System2, class InputIterator, class OutputIterator>
-OutputIterator THRUST_HOST
+OutputIterator THRUST_HIP_FUNCTION
 copy(cross_system<System1, System2> systems, InputIterator first, InputIterator last, OutputIterator result);
 
 template <class System, class InputIterator, class Size, class OutputIterator>
-OutputIterator THRUST_HOST_DEVICE
+OutputIterator THRUST_HIP_FUNCTION
 copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result);
 
 template <class System1, class System2, class InputIterator, class Size, class OutputIterator>
-OutputIterator THRUST_HOST
+OutputIterator THRUST_HIP_FUNCTION
 copy_n(cross_system<System1, System2> systems, InputIterator first, Size n, OutputIterator result);
 
 } // namespace hip_rocprim
@@ -89,7 +79,7 @@ namespace hip_rocprim
 
 THRUST_EXEC_CHECK_DISABLE
 template <class System, class InputIterator, class OutputIterator>
-OutputIterator THRUST_HOST_DEVICE
+OutputIterator THRUST_HIP_FUNCTION
 copy(execution_policy<System>& system, InputIterator first, InputIterator last, OutputIterator result)
 {
   // struct workaround is required for HIP-clang
@@ -98,12 +88,12 @@ copy(execution_policy<System>& system, InputIterator first, InputIterator last, 
     THRUST_HOST static OutputIterator
     par(execution_policy<System>& system, InputIterator first, InputIterator last, OutputIterator result)
     {
-      return result = __copy::device_to_device(system, first, last, result);
+      return __copy::device_to_device(system, first, last, result);
     }
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<System>& system, InputIterator first, InputIterator last, OutputIterator result)
     {
-      return result = thrust::copy(cvt_to_seq(derived_cast(system)), first, last, result);
+      return thrust::copy(cvt_to_seq(derived_cast(system)), first, last, result);
     }
   };
 
@@ -116,7 +106,7 @@ copy(execution_policy<System>& system, InputIterator first, InputIterator last, 
 
 THRUST_EXEC_CHECK_DISABLE
 template <class System, class InputIterator, class Size, class OutputIterator>
-OutputIterator THRUST_HOST_DEVICE
+OutputIterator THRUST_HIP_FUNCTION
 copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
 {
   // struct workaround is required for HIP-clang
@@ -125,12 +115,12 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
     THRUST_HOST static OutputIterator
     par(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
     {
-      return result = __copy::device_to_device(system, first, thrust::next(first, n), result);
+      return __copy::device_to_device(system, first, first + n, result);
     }
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
     {
-      return result = thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);
+      return thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);
     }
   };
 #  if __THRUST_HAS_HIPRT__
@@ -142,14 +132,14 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
 #endif
 
 template <class System1, class System2, class InputIterator, class OutputIterator>
-OutputIterator THRUST_HOST
+OutputIterator THRUST_HIP_FUNCTION
 copy(cross_system<System1, System2> systems, InputIterator first, InputIterator last, OutputIterator result)
 {
   return __copy::cross_system_copy(systems, first, last, result);
 } // end copy()
 
 template <class System1, class System2, class InputIterator, class Size, class OutputIterator>
-OutputIterator THRUST_HOST
+OutputIterator THRUST_HIP_FUNCTION
 copy_n(cross_system<System1, System2> systems, InputIterator first, Size n, OutputIterator result)
 {
   return __copy::cross_system_copy_n(systems, first, n, result);

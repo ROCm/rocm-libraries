@@ -24,12 +24,17 @@
 #include <unittest/unittest.h>
 
 template <class Vector>
-void TestEqualSimple()
+void TestEqualSimple(void)
 {
   using T = typename Vector::value_type;
 
-  Vector v1{5, 2, 0, 0, 0};
-  Vector v2{5, 2, 0, 6, 1};
+  Vector v1(5);
+  Vector v2(5);
+
+  // clang-format off
+  v1[0] = 5; v1[1] = 2; v1[2] = 0; v1[3] = 0; v1[4] = 0;
+  v2[0] = 5; v2[1] = 2; v2[2] = 0; v2[3] = 6; v2[4] = 1;
+  // clang-format on
 
   ASSERT_EQUAL(thrust::equal(v1.begin(), v1.end(), v1.begin()), true);
   ASSERT_EQUAL(thrust::equal(v1.begin(), v1.end(), v2.begin()), false);

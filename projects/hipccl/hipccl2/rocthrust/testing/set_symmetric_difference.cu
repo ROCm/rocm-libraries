@@ -66,13 +66,20 @@ void TestSetSymmetricDifferenceDispatchImplicit()
 DECLARE_UNITTEST(TestSetSymmetricDifferenceDispatchImplicit);
 
 template <typename Vector>
-void TestSetSymmetricDifferenceSimple()
+void TestSetSymmetricDifferenceSimple(void)
 {
   using Iterator = typename Vector::iterator;
 
-  Vector a{0, 2, 4, 6}, b{0, 3, 3, 4, 7};
+  // clang-format off
+  Vector a(4), b(5);
 
-  Vector ref{2, 3, 3, 6, 7};
+  a[0] = 0; a[1] = 2; a[2] = 4; a[3] = 6;
+  b[0] = 0; b[1] = 3; b[2] = 3; b[3] = 4; b[4] = 7;
+
+  Vector ref(5);
+  ref[0] = 2; ref[1] = 3; ref[2] = 3; ref[3] = 6; ref[4] = 7;
+  // clang-format on
+
   Vector result(5);
 
   Iterator end = thrust::set_symmetric_difference(a.begin(), a.end(), b.begin(), b.end(), result.begin());
@@ -151,7 +158,7 @@ DECLARE_VARIABLE_UNITTEST(TestSetSymmetricDifferenceEquivalentRanges);
 template <typename T>
 void TestSetSymmetricDifferenceMultiset(const size_t n)
 {
-  thrust::host_vector<T> vec = unittest::random_integers<int>(2 * n);
+  thrust::host_vector<T> vec = unittest::random_integers<T>(2 * n);
 
   // restrict elements to [min,13)
   for (typename thrust::host_vector<T>::iterator i = vec.begin(); i != vec.end(); ++i)

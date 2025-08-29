@@ -18,20 +18,9 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/pointer.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/tagged_iterator.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -41,13 +30,11 @@ namespace detail
 // or vice versa
 template <typename FromTag, typename ToTag>
 struct is_retaggable
-    : integral_constant<bool,
-                        (_THRUST_STD::is_convertible<FromTag, ToTag>::value
-                         || _THRUST_STD::is_convertible<ToTag, FromTag>::value)>
+    : integral_constant<bool, (is_convertible<FromTag, ToTag>::value || is_convertible<ToTag, FromTag>::value)>
 {};
 
 template <typename FromTag, typename ToTag, typename Result>
-struct enable_if_retaggable : _THRUST_STD::enable_if<is_retaggable<FromTag, ToTag>::value, Result>
+struct enable_if_retaggable : enable_if<is_retaggable<FromTag, ToTag>::value, Result>
 {}; // end enable_if_retaggable
 
 } // namespace detail

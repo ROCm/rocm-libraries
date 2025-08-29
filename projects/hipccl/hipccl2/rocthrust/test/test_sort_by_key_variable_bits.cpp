@@ -17,15 +17,13 @@
 
 #include <thrust/sort.h>
 
-#include <algorithm>
-
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(SortByKeyVariableTests, UnsignedIntegerTestsParams);
 
-TYPED_TEST(SortByKeyVariableTests, TestSortByKeyVariableBits)
+TYPED_TEST(SortByKeyVariableTests, TestSortVariableBits)
 {
   using T = typename TestFixture::input_type;
 

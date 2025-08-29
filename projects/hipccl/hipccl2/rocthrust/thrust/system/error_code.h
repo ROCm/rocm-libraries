@@ -23,27 +23,17 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/system/detail/errno.h>
 
 #include <iostream>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
 namespace system
 {
 
-/*! \addtogroup system_diagnostics
+/*! \addtogroup system
  *  \{
  */
 
@@ -152,11 +142,17 @@ enum errc_t
 
 } // end namespace errc
 
+/*! \cond
+ */
+
 /*! Specialization of \p is_error_condition_enum for \p errc::errc_t
  */
 template <>
 struct is_error_condition_enum<errc::errc_t> : public thrust::detail::true_type
 {};
+
+/*! \endcond
+ */
 
 // [19.5.1.1] class error_category
 
@@ -170,7 +166,7 @@ class error_category
 public:
   /*! Destructor does nothing.
    */
-  inline virtual ~error_category();
+  inline virtual ~error_category(void);
 
   // XXX enable upon c++0x
   // error_category(const error_category &) = delete;
@@ -178,7 +174,7 @@ public:
 
   /*! \return A string naming the error category.
    */
-  inline virtual const char* name() const = 0;
+  inline virtual const char* name(void) const = 0;
 
   /*! \return \p error_condition(ev, *this).
    */
@@ -217,7 +213,7 @@ public:
  *        shall behave as specified for the class \p error_category. The object's
  *        \p name virtual function shall return a pointer to the string <tt>"generic"</tt>.
  */
-inline const error_category& generic_category();
+inline const error_category& generic_category(void);
 
 /*! \return A reference to an object of a type derived from class \p error_category.
  *  \note The object's \p equivalent virtual functions shall behave as specified for
@@ -230,7 +226,7 @@ inline const error_category& generic_category();
  *        Otherwise, the function shall return <tt>error_condition(ev,system_category())</tt>.
  *        What constitutes correspondence for any given operating system is unspecified.
  */
-inline const error_category& system_category();
+inline const error_category& system_category(void);
 
 // [19.5.2] Class error_code
 
@@ -246,7 +242,7 @@ public:
   /*! Effects: Constructs an object of type \p error_code.
    *  \post <tt>value() == 0</tt> and <tt>category() == &system_category()</tt>.
    */
-  inline error_code();
+  inline error_code(void);
 
   /*! Effects: Constructs an object of type \p error_code.
    *  \post <tt>value() == val</tt> and <tt>category() == &cat</tt>.
@@ -261,8 +257,8 @@ public:
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
              ,
-             _THRUST_STD::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value>* = 0
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+             typename thrust::detail::enable_if<is_error_code_enum<ErrorCodeEnum>::value>::type* = 0
+#endif // THRUST_HOST_COMPILER_MSVC
   );
 
   // [19.5.2.3] modifiers:
@@ -276,40 +272,40 @@ public:
   template <typename ErrorCodeEnum>
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-  _THRUST_STD::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value, error_code>&
+  typename thrust::detail::enable_if<is_error_code_enum<ErrorCodeEnum>::value, error_code>::type&
 #else
   error_code&
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#endif // THRUST_HOST_COMPILER_MSVC
   operator=(ErrorCodeEnum e);
 
   /*! \post <tt>value() == 0</tt> and <tt>category() == system_category()</tt>.
    */
-  inline void clear();
+  inline void clear(void);
 
   // [19.5.2.4] observers:
 
   /*! \return An integral value of this \p error_code object.
    */
-  inline int value() const;
+  inline int value(void) const;
 
   /*! \return An \p error_category describing the category of this \p error_code object.
    */
-  inline const error_category& category() const;
+  inline const error_category& category(void) const;
 
   /*! \return <tt>category().default_error_condition()</tt>.
    */
-  inline error_condition default_error_condition() const;
+  inline error_condition default_error_condition(void) const;
 
   /*! \return <tt>category().message(value())</tt>.
    */
-  inline std::string message() const;
+  inline std::string message(void) const;
 
   // XXX replace the below upon c++0x
   // inline explicit operator bool (void) const;
 
   /*! \return <tt>value() != 0</tt>.
    */
-  inline operator bool() const;
+  inline operator bool(void) const;
 
   /*! \cond
    */
@@ -354,7 +350,7 @@ public:
    *  \post <tt>value() == 0</tt>.
    *  \post <tt>category() == generic_category()</tt>.
    */
-  inline error_condition();
+  inline error_condition(void);
 
   /*! Constructs an object of type \p error_condition.
    *  \post <tt>value() == val</tt>.
@@ -372,7 +368,7 @@ public:
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
                   ,
-                  _THRUST_STD::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value>* = 0
+                  typename thrust::detail::enable_if<is_error_condition_enum<ErrorConditionEnum>::value>::type* = 0
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   );
 
@@ -395,7 +391,7 @@ public:
   template <typename ErrorConditionEnum>
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-  _THRUST_STD::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>&
+  typename thrust::detail::enable_if<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>::type&
 #else
   error_condition&
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
@@ -405,28 +401,28 @@ public:
    *  \post <tt>value == 0</tt>
    *  \post <tt>category() == generic_category()</tt>.
    */
-  inline void clear();
+  inline void clear(void);
 
   // [19.5.3.4] observers
 
   /*! \return The value encoded by this \p error_condition.
    */
-  inline int value() const;
+  inline int value(void) const;
 
   /*! \return A <tt>const</tt> reference to the \p error_category encoded by this \p error_condition.
    */
-  inline const error_category& category() const;
+  inline const error_category& category(void) const;
 
   /*! \return <tt>category().message(value())</tt>.
    */
-  inline std::string message() const;
+  inline std::string message(void) const;
 
   // XXX replace below with this upon c++0x
   // explicit operator bool (void) const;
 
   /*! \return <tt>value() != 0</tt>.
    */
-  inline operator bool() const;
+  inline operator bool(void) const;
 
   /*! \cond
    */
@@ -484,7 +480,7 @@ inline bool operator!=(const error_condition& lhs, const error_code& rhs);
  */
 inline bool operator!=(const error_condition& lhs, const error_condition& rhs);
 
-/*! \} // end system_diagnostics
+/*! \} // end system
  */
 
 } // namespace system

@@ -19,25 +19,13 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
+#include <thrust/reverse.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/reverse.h>
 #include <thrust/system/detail/sequential/stable_merge_sort.h>
 #include <thrust/system/detail/sequential/stable_primitive_sort.h>
 
 #include <thrust/detail/nv_target.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -49,142 +37,170 @@ namespace sequential
 namespace sort_detail
 {
 
+
 ////////////////////
 // Primitive Sort //
 ////////////////////
 
-template <typename KeyType, typename Compare>
-struct needs_reverse : _THRUST_STD::is_same<Compare, typename thrust::greater<KeyType>>
+
+template<typename KeyType, typename Compare>
+struct needs_reverse
+  : thrust::detail::integral_constant<
+      bool,
+      thrust::detail::is_same<Compare, typename thrust::greater<KeyType> >::value
+    >
 {};
 
-template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
-THRUST_HOST_DEVICE void stable_sort(
-  sequential::execution_policy<DerivedPolicy>& exec,
-  RandomAccessIterator first,
-  RandomAccessIterator last,
-  StrictWeakOrdering,
-  thrust::detail::true_type)
+
+template<typename DerivedPolicy,
+         typename RandomAccessIterator,
+         typename StrictWeakOrdering>
+THRUST_HOST_DEVICE
+void stable_sort(sequential::execution_policy<DerivedPolicy> &exec,
+                 RandomAccessIterator first,
+                 RandomAccessIterator last,
+                 StrictWeakOrdering,
+                 thrust::detail::true_type)
 {
   thrust::system::detail::sequential::stable_primitive_sort(exec, first, last);
 
   // if comp is greater<T> then reverse the keys
   using KeyType = typename thrust::iterator_traits<RandomAccessIterator>::value_type;
 
-  if (needs_reverse<KeyType, StrictWeakOrdering>::value)
+  if(needs_reverse<KeyType,StrictWeakOrdering>::value)
   {
     thrust::reverse(exec, first, last);
   }
 }
 
-template <typename DerivedPolicy,
-          typename RandomAccessIterator1,
-          typename RandomAccessIterator2,
-          typename StrictWeakOrdering>
-THRUST_HOST_DEVICE void stable_sort_by_key(
-  sequential::execution_policy<DerivedPolicy>& exec,
-  RandomAccessIterator1 first1,
-  RandomAccessIterator1 last1,
-  RandomAccessIterator2 first2,
-  StrictWeakOrdering,
-  thrust::detail::true_type)
+
+template<typename DerivedPolicy,
+         typename RandomAccessIterator1,
+         typename RandomAccessIterator2,
+         typename StrictWeakOrdering>
+THRUST_HOST_DEVICE
+void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
+                        RandomAccessIterator1 first1,
+                        RandomAccessIterator1 last1,
+                        RandomAccessIterator2 first2,
+                        StrictWeakOrdering,
+                        thrust::detail::true_type)
 {
   // if comp is greater<T> then reverse the keys and values
   using KeyType = typename thrust::iterator_traits<RandomAccessIterator1>::value_type;
 
   // note, we also have to reverse the (unordered) input to preserve stability
-  if (needs_reverse<KeyType, StrictWeakOrdering>::value)
+  if(needs_reverse<KeyType,StrictWeakOrdering>::value)
   {
-    thrust::reverse(exec, first1, last1);
+    thrust::reverse(exec, first1,  last1);
     thrust::reverse(exec, first2, first2 + (last1 - first1));
   }
 
   thrust::system::detail::sequential::stable_primitive_sort_by_key(exec, first1, last1, first2);
 
-  if (needs_reverse<KeyType, StrictWeakOrdering>::value)
+  if(needs_reverse<KeyType,StrictWeakOrdering>::value)
   {
-    thrust::reverse(exec, first1, last1);
+    thrust::reverse(exec, first1,  last1);
     thrust::reverse(exec, first2, first2 + (last1 - first1));
   }
 }
+
 
 ////////////////
 // Merge Sort //
 ////////////////
 
-template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
-THRUST_HOST_DEVICE void stable_sort(
-  sequential::execution_policy<DerivedPolicy>& exec,
-  RandomAccessIterator first,
-  RandomAccessIterator last,
-  StrictWeakOrdering comp,
-  thrust::detail::false_type)
+
+template<typename DerivedPolicy,
+         typename RandomAccessIterator,
+         typename StrictWeakOrdering>
+THRUST_HOST_DEVICE
+void stable_sort(sequential::execution_policy<DerivedPolicy> &exec,
+                 RandomAccessIterator first,
+                 RandomAccessIterator last,
+                 StrictWeakOrdering comp,
+                 thrust::detail::false_type)
 {
   thrust::system::detail::sequential::stable_merge_sort(exec, first, last, comp);
 }
 
-template <typename DerivedPolicy,
-          typename RandomAccessIterator1,
-          typename RandomAccessIterator2,
-          typename StrictWeakOrdering>
-THRUST_HOST_DEVICE void stable_sort_by_key(
-  sequential::execution_policy<DerivedPolicy>& exec,
-  RandomAccessIterator1 first1,
-  RandomAccessIterator1 last1,
-  RandomAccessIterator2 first2,
-  StrictWeakOrdering comp,
-  thrust::detail::false_type)
+
+template<typename DerivedPolicy,
+         typename RandomAccessIterator1,
+         typename RandomAccessIterator2,
+         typename StrictWeakOrdering>
+THRUST_HOST_DEVICE
+void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
+                        RandomAccessIterator1 first1,
+                        RandomAccessIterator1 last1,
+                        RandomAccessIterator2 first2,
+                        StrictWeakOrdering comp,
+                        thrust::detail::false_type)
 {
   thrust::system::detail::sequential::stable_merge_sort_by_key(exec, first1, last1, first2, comp);
 }
 
-template <typename KeyType, typename Compare>
+
+template<typename KeyType, typename Compare>
 struct use_primitive_sort
-    : ::internal::_And<::internal::is_arithmetic<KeyType>,
-                       _THRUST_STD::disjunction<_THRUST_STD::is_same<Compare, thrust::less<KeyType>>,
-                                               _THRUST_STD::is_same<Compare, thrust::greater<KeyType>>>>
+  : thrust::detail::and_<
+      thrust::detail::is_arithmetic<KeyType>,
+      thrust::detail::or_<
+        thrust::detail::is_same<Compare, thrust::less<KeyType> >,
+        thrust::detail::is_same<Compare, thrust::greater<KeyType> >
+      >
+    >
 {};
+
 
 } // end namespace sort_detail
 
-template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
-THRUST_HOST_DEVICE void stable_sort(
-  sequential::execution_policy<DerivedPolicy>& exec,
-  RandomAccessIterator first,
-  RandomAccessIterator last,
-  StrictWeakOrdering comp)
+
+template<typename DerivedPolicy,
+         typename RandomAccessIterator,
+         typename StrictWeakOrdering>
+THRUST_HOST_DEVICE
+void stable_sort(sequential::execution_policy<DerivedPolicy> &exec,
+                 RandomAccessIterator first,
+                 RandomAccessIterator last,
+                 StrictWeakOrdering comp)
 {
-  // the compilation time of stable_primitive_sort is too expensive to use within a single CUDA thread
-  NV_IF_TARGET(
-    NV_IS_HOST,
-    (using KeyType = thrust::iterator_value_t<RandomAccessIterator>;
-     sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
-     sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);),
-    ( // NV_IS_DEVICE:
-      thrust::detail::false_type use_primitive_sort;
-      sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);));
+
+  // the compilation time of stable_primitive_sort is too expensive to use within a single CUDA or HIP thread
+  NV_IF_TARGET(NV_IS_HOST, (
+    using KeyType = thrust::iterator_value_t<RandomAccessIterator>;
+    sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
+    sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);
+  ), ( // NV_IS_DEVICE:
+    thrust::detail::false_type use_primitive_sort;
+    sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);
+  ));
 }
 
-template <typename DerivedPolicy,
-          typename RandomAccessIterator1,
-          typename RandomAccessIterator2,
-          typename StrictWeakOrdering>
-THRUST_HOST_DEVICE void stable_sort_by_key(
-  sequential::execution_policy<DerivedPolicy>& exec,
-  RandomAccessIterator1 first1,
-  RandomAccessIterator1 last1,
-  RandomAccessIterator2 first2,
-  StrictWeakOrdering comp)
+
+template<typename DerivedPolicy,
+         typename RandomAccessIterator1,
+         typename RandomAccessIterator2,
+         typename StrictWeakOrdering>
+THRUST_HOST_DEVICE
+void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
+                        RandomAccessIterator1 first1,
+                        RandomAccessIterator1 last1,
+                        RandomAccessIterator2 first2,
+                        StrictWeakOrdering comp)
 {
-  // the compilation time of stable_primitive_sort_by_key is too expensive to use within a single CUDA thread
-  NV_IF_TARGET(
-    NV_IS_HOST,
-    (using KeyType = thrust::iterator_value_t<RandomAccessIterator1>;
-     sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
-     sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);),
-    ( // NV_IS_DEVICE:
-      thrust::detail::false_type use_primitive_sort;
-      sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);));
+
+  // the compilation time of stable_primitive_sort_by_key is too expensive to use within a single CUDA or HIP thread
+  NV_IF_TARGET(NV_IS_HOST, (
+    using KeyType = thrust::iterator_value_t<RandomAccessIterator1>;
+    sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
+    sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);
+  ), ( // NV_IS_DEVICE:
+    thrust::detail::false_type use_primitive_sort;
+    sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);
+  ));
 }
+
 
 } // end namespace sequential
 } // end namespace detail

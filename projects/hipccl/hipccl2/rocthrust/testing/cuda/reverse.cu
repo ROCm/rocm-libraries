@@ -96,7 +96,12 @@ DECLARE_UNITTEST(TestReverseCopyDeviceDevice);
 void TestReverseCudaStreams()
 {
   using Vector = thrust::device_vector<int>;
-  Vector data{1, 2, 3, 4, 5};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 3;
+  data[3] = 4;
+  data[4] = 5;
 
   cudaStream_t s;
   cudaStreamCreate(&s);
@@ -105,7 +110,12 @@ void TestReverseCudaStreams()
 
   cudaStreamSynchronize(s);
 
-  Vector ref{5, 4, 3, 2, 1};
+  Vector ref(5);
+  ref[0] = 5;
+  ref[1] = 4;
+  ref[2] = 3;
+  ref[3] = 2;
+  ref[4] = 1;
 
   ASSERT_EQUAL(ref, data);
 
@@ -116,7 +126,12 @@ DECLARE_UNITTEST(TestReverseCudaStreams);
 void TestReverseCopyCudaStreams()
 {
   using Vector = thrust::device_vector<int>;
-  Vector data{1, 2, 3, 4, 5};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 3;
+  data[3] = 4;
+  data[4] = 5;
 
   Vector result(5);
 
@@ -127,7 +142,12 @@ void TestReverseCopyCudaStreams()
 
   cudaStreamSynchronize(s);
 
-  Vector ref{5, 4, 3, 2, 1};
+  Vector ref(5);
+  ref[0] = 5;
+  ref[1] = 4;
+  ref[2] = 3;
+  ref[3] = 2;
+  ref[4] = 1;
 
   ASSERT_EQUAL(ref, result);
 

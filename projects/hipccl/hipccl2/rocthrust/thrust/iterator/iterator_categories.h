@@ -31,18 +31,12 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/iterator/detail/device_system_tag.h>
 #include <thrust/iterator/detail/iterator_category_with_system_and_traversal.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
+// #include this for stl's iterator tags
+#include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -66,9 +60,9 @@ THRUST_NAMESPACE_BEGIN
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct input_device_iterator_tag
-    : detail::iterator_category_with_system_and_traversal<_THRUST_STD::input_iterator_tag,
-                                                          device_system_tag,
-                                                          single_pass_traversal_tag>
+    : thrust::detail::iterator_category_with_system_and_traversal<std::input_iterator_tag,
+                                                                  thrust::device_system_tag,
+                                                                  thrust::single_pass_traversal_tag>
 {};
 
 /*! \p output_device_iterator_tag is an empty class: it has no member functions,
@@ -83,9 +77,9 @@ struct input_device_iterator_tag
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct output_device_iterator_tag
-    : detail::iterator_category_with_system_and_traversal<_THRUST_STD::output_iterator_tag,
-                                                          device_system_tag,
-                                                          single_pass_traversal_tag>
+    : thrust::detail::iterator_category_with_system_and_traversal<std::output_iterator_tag,
+                                                                  thrust::device_system_tag,
+                                                                  thrust::single_pass_traversal_tag>
 {};
 
 /*! \p forward_device_iterator_tag is an empty class: it has no member functions,
@@ -100,9 +94,9 @@ struct output_device_iterator_tag
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct forward_device_iterator_tag
-    : detail::iterator_category_with_system_and_traversal<_THRUST_STD::forward_iterator_tag,
-                                                          device_system_tag,
-                                                          forward_traversal_tag>
+    : thrust::detail::iterator_category_with_system_and_traversal<std::forward_iterator_tag,
+                                                                  thrust::device_system_tag,
+                                                                  thrust::forward_traversal_tag>
 {};
 
 /*! \p bidirectional_device_iterator_tag is an empty class: it has no member
@@ -117,9 +111,9 @@ struct forward_device_iterator_tag
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct bidirectional_device_iterator_tag
-    : detail::iterator_category_with_system_and_traversal<_THRUST_STD::bidirectional_iterator_tag,
-                                                          device_system_tag,
-                                                          bidirectional_traversal_tag>
+    : thrust::detail::iterator_category_with_system_and_traversal<std::bidirectional_iterator_tag,
+                                                                  thrust::device_system_tag,
+                                                                  thrust::bidirectional_traversal_tag>
 {};
 
 /*! \p random_access_device_iterator_tag is an empty class: it has no member
@@ -134,9 +128,9 @@ struct bidirectional_device_iterator_tag
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct random_access_device_iterator_tag
-    : detail::iterator_category_with_system_and_traversal<_THRUST_STD::random_access_iterator_tag,
-                                                          device_system_tag,
-                                                          random_access_traversal_tag>
+    : thrust::detail::iterator_category_with_system_and_traversal<std::random_access_iterator_tag,
+                                                                  thrust::device_system_tag,
+                                                                  thrust::random_access_traversal_tag>
 {};
 
 /*! \p input_host_iterator_tag is an empty class: it has no member
@@ -151,7 +145,7 @@ struct random_access_device_iterator_tag
  *  output_host_iterator_tag, forward_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-using input_host_iterator_tag = _THRUST_STD::input_iterator_tag;
+using input_host_iterator_tag = std::input_iterator_tag;
 
 /*! \p output_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -165,7 +159,7 @@ using input_host_iterator_tag = _THRUST_STD::input_iterator_tag;
  *  input_host_iterator_tag, forward_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-using output_host_iterator_tag = _THRUST_STD::output_iterator_tag;
+using output_host_iterator_tag = std::output_iterator_tag;
 
 /*! \p forward_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -179,7 +173,7 @@ using output_host_iterator_tag = _THRUST_STD::output_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-using forward_host_iterator_tag = _THRUST_STD::forward_iterator_tag;
+using forward_host_iterator_tag = std::forward_iterator_tag;
 
 /*! \p bidirectional_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -193,7 +187,7 @@ using forward_host_iterator_tag = _THRUST_STD::forward_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  forward_host_iterator_tag, random_access_host_iterator_tag
  */
-using bidirectional_host_iterator_tag = _THRUST_STD::bidirectional_iterator_tag;
+using bidirectional_host_iterator_tag = std::bidirectional_iterator_tag;
 
 /*! \p random_access_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -207,7 +201,7 @@ using bidirectional_host_iterator_tag = _THRUST_STD::bidirectional_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  forward_host_iterator_tag, bidirectional_host_iterator_tag
  */
-using random_access_host_iterator_tag = _THRUST_STD::random_access_iterator_tag;
+using random_access_host_iterator_tag = std::random_access_iterator_tag;
 
 /*! \} // end iterator_tag_classes
  */

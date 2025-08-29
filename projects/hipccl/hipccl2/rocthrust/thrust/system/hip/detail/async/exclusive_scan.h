@@ -30,32 +30,24 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-#include <thrust/detail/cpp_version_check.h>
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#if THRUST_CPP_DIALECT >= 2017
+#  include <thrust/system/hip/config.h>
 
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  include <thrust/distance.h>
+#  include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/hip/detail/async/customization.h>
+#  include <thrust/system/hip/detail/util.h>
+#  include <thrust/system/hip/future.h>
+#  include <thrust/type_traits/remove_cvref.h>
 
-#    include <thrust/system/hip/config.h>
-
-#    include <thrust/distance.h>
-#    include <thrust/iterator/iterator_traits.h>
-#    include <thrust/system/hip/detail/async/customization.h>
-#    include <thrust/system/hip/detail/util.h>
-#    include <thrust/system/hip/future.h>
-
-#    include <type_traits>
+#  include <type_traits> // IWYU pragma: export
 
 // TODO specialize for thrust::plus to use e.g. ExclusiveSum instead of ExcScan
+//  - Note that thrust::plus<> is transparent, cub::Sum is not. This should be
+//    fixed in CUB first).
+//  - Need to check if CUB actually optimizes for sums before putting in effort
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -142,9 +134,6 @@ auto async_exclusive_scan(
 
 } // namespace hip_rocprim
 
-THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
-#endif // C++17
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

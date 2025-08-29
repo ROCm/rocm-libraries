@@ -31,18 +31,11 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if _CCCL_STD_VER >= 2017
+#if THRUST_CPP_DIALECT >= 2017
 
-#  if _CCCL_HAS_CUDA_COMPILER
+#  ifdef _CCCL_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -61,7 +54,6 @@
 
 #    include <type_traits>
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -89,7 +81,7 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
 
   // Synthesize a suitable new execution policy, because we don't want to
   // try and extract twice from the one we were passed.
-  typename ::cuda::std::remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
+  typename remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
 
   // Copy from the input into the buffer.
 
@@ -292,7 +284,7 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
 
     // Synthesize a suitable new execution policy, because we don't want to
     // try and extract twice from the one we were passed.
-    typename ::cuda::std::remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
+    typename remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
 
     using return_future = decltype(e);
     return return_future(async_copy_n(new_policy0, tag_policy, keys.d_buffers[1], n, keys.d_buffers[0]));
@@ -320,7 +312,6 @@ auto async_stable_sort(execution_policy<DerivedPolicy>& policy, ForwardIt first,
 
 } // namespace cuda_cub
 
-_CCCL_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // _CCCL_CUDA_COMPILER

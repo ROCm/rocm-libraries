@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/execution_policy.h>
 #include <thrust/pair.h>
 
@@ -79,7 +72,7 @@ THRUST_NAMESPACE_BEGIN
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -137,7 +130,7 @@ THRUST_HOST_DEVICE ForwardIterator partition(
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -200,7 +193,7 @@ ForwardIterator partition(ForwardIterator first, ForwardIterator last, Predicate
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -264,7 +257,7 @@ THRUST_HOST_DEVICE ForwardIterator partition(
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -287,7 +280,7 @@ template <typename ForwardIterator, typename InputIterator, typename Predicate>
 ForwardIterator partition(ForwardIterator first, ForwardIterator last, InputIterator stencil, Predicate pred);
 
 /*! \p partition_copy differs from \p partition only in that the reordered
- *  sequence is written to different output sequences, rather than in place.
+ *  sequence is written to difference output sequences, rather than in place.
  *
  *  \p partition_copy copies the elements <tt>[first, last)</tt> based on the
  *  function object \p pred. All of the elements that satisfy \p pred are copied
@@ -328,7 +321,7 @@ ForwardIterator partition(ForwardIterator first, ForwardIterator last, InputIter
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -369,7 +362,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy
   Predicate pred);
 
 /*! \p partition_copy differs from \p partition only in that the reordered
- *  sequence is written to different output sequences, rather than in place.
+ *  sequence is written to difference output sequences, rather than in place.
  *
  *  \p partition_copy copies the elements <tt>[first, last)</tt> based on the
  *  function object \p pred. All of the elements that satisfy \p pred are copied
@@ -404,7 +397,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -436,7 +429,7 @@ thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
   InputIterator first, InputIterator last, OutputIterator1 out_true, OutputIterator2 out_false, Predicate pred);
 
 /*! \p partition_copy differs from \p partition only in that the reordered
- *  sequence is written to different output sequences, rather than in place.
+ *  sequence is written to difference output sequences, rather than in place.
  *
  *  \p partition_copy copies the elements <tt>[first, last)</tt> based on the
  *  function object \p pred which is applied to a range of stencil elements. All of the elements
@@ -485,7 +478,7 @@ thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
  *  const int N = sizeof(A)/sizeof(int);
  *  int *evens = result;
  *  int *odds  = result + 5;
- *  thrust::stable_partition_copy(thrust::host, A, A + N, S, evens, odds, ::internal::identity{});
+ *  thrust::stable_partition_copy(thrust::host, A, A + N, S, evens, odds, thrust::identity<int>());
  *  // A remains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
  *  // S remains {0, 1, 0, 1, 0, 1, 0, 1, 0,  1}
  *  // result is now {2, 4, 6, 8, 10, 1, 3, 5, 7, 9}
@@ -517,7 +510,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy
   Predicate pred);
 
 /*! \p partition_copy differs from \p partition only in that the reordered
- *  sequence is written to different output sequences, rather than in place.
+ *  sequence is written to difference output sequences, rather than in place.
  *
  *  \p partition_copy copies the elements <tt>[first, last)</tt> based on the
  *  function object \p pred which is applied to a range of stencil elements. All of the elements
@@ -560,7 +553,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy
  *  const int N = sizeof(A)/sizeof(int);
  *  int *evens = result;
  *  int *odds  = result + 5;
- *  thrust::stable_partition_copy(A, A + N, S, evens, odds, ::internal::identity{});
+ *  thrust::stable_partition_copy(A, A + N, S, evens, odds, thrust::identity<int>());
  *  // A remains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
  *  // S remains {0, 1, 0, 1, 0, 1, 0, 1, 0,  1}
  *  // result is now {2, 4, 6, 8, 10, 1, 3, 5, 7, 9}
@@ -629,7 +622,7 @@ thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -690,7 +683,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -755,7 +748,7 @@ ForwardIterator stable_partition(ForwardIterator first, ForwardIterator last, Pr
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -821,7 +814,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -891,7 +884,7 @@ ForwardIterator stable_partition(ForwardIterator first, ForwardIterator last, In
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -969,7 +962,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -1052,7 +1045,7 @@ thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
  *  const int N = sizeof(A)/sizeof(int);
  *  int *evens = result;
  *  int *odds  = result + 5;
- *  thrust::stable_partition_copy(thrust::host, A, A + N, S, evens, odds, ::internal::identity{});
+ *  thrust::stable_partition_copy(thrust::host, A, A + N, S, evens, odds, thrust::identity<int>());
  *  // A remains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
  *  // S remains {0, 1, 0, 1, 0, 1, 0, 1, 0,  1}
  *  // result is now {2, 4, 6, 8, 10, 1, 3, 5, 7, 9}
@@ -1129,7 +1122,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
  *  const int N = sizeof(A)/sizeof(int);
  *  int *evens = result;
  *  int *odds  = result + 5;
- *  thrust::stable_partition_copy(A, A + N, S, evens, odds, ::internal::identity{});
+ *  thrust::stable_partition_copy(A, A + N, S, evens, odds, thrust::identity<int>());
  *  // A remains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
  *  // S remains {0, 1, 0, 1, 0, 1, 0, 1, 0,  1}
  *  // result is now {2, 4, 6, 8, 10, 1, 3, 5, 7, 9}
@@ -1185,7 +1178,7 @@ thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
  *
  *  \note Though similar, \p partition_point is not redundant with \p find_if_not.
  *        \p partition_point's precondition provides an opportunity for a
- *        faster implementation.
+ *        faster implemention.
  *
  *  \code
  *  #include <thrust/partition.h>
@@ -1193,7 +1186,7 @@ thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
  *
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -1237,14 +1230,14 @@ THRUST_HOST_DEVICE ForwardIterator partition_point(
  *
  *  \note Though similar, \p partition_point is not redundant with \p find_if_not.
  *        \p partition_point's precondition provides an opportunity for a
- *        faster implementation.
+ *        faster implemention.
  *
  *  \code
  *  #include <thrust/partition.h>
  *
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -1302,7 +1295,7 @@ ForwardIterator partition_point(ForwardIterator first, ForwardIterator last, Pre
  *
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;
@@ -1350,7 +1343,7 @@ THRUST_HOST_DEVICE bool is_partitioned(
  *
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int &x)
  *    {
  *      return (x % 2) == 0;

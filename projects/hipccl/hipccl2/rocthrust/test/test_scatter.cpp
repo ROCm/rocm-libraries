@@ -15,14 +15,13 @@
  *  limitations under the License.
  */
 
+#include <thrust/device_vector.h>
 #include <thrust/fill.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/scatter.h>
 #include <thrust/sequence.h>
-
-#include <algorithm>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
@@ -33,17 +32,44 @@ TESTS_DEFINE(ScatterPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(ScatterTests, TestScatterSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
+  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector map{6, 3, 1, 7, 2};
-  Vector src{0, 1, 2, 3, 4};
-  Vector dst(8, 0);
+  Vector map(5); // scatter indices
+  Vector src(5); // source vector
+  Vector dst(8); // destination vector
 
-  thrust::scatter(src.begin(), src.end(), map.begin(), dst.begin());
+  map[0] = T(6);
+  map[1] = T(3);
+  map[2] = T(1);
+  map[3] = T(7);
+  map[4] = T(2);
+  src[0] = T(0);
+  src[1] = T(1);
+  src[2] = T(2);
+  src[3] = T(3);
+  src[4] = T(4);
+  dst[0] = T(0);
+  dst[1] = T(0);
+  dst[2] = T(0);
+  dst[3] = T(0);
+  dst[4] = T(0);
+  dst[5] = T(0);
+  dst[6] = T(0);
+  dst[7] = T(0);
 
-  Vector ref{0, 2, 4, 1, 0, 0, 0, 3};
-  ASSERT_EQ(dst, ref);
+  thrust::scatter(Policy{}, src.begin(), src.end(), map.begin(), dst.begin());
+
+  ASSERT_EQ(dst[0], T(0));
+  ASSERT_EQ(dst[1], T(2));
+  ASSERT_EQ(dst[2], T(4));
+  ASSERT_EQ(dst[3], T(1));
+  ASSERT_EQ(dst[4], T(0));
+  ASSERT_EQ(dst[5], T(0));
+  ASSERT_EQ(dst[6], T(0));
+  ASSERT_EQ(dst[7], T(3));
 }
 
 template <typename InputIterator1, typename InputIterator2, typename RandomAccessIterator>
@@ -104,7 +130,7 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatter)
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
-        size, get_default_limits<unsigned int>::min(), get_default_limits<unsigned int>::max(), seed);
+        size, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max(), seed);
 
       for (size_t i = 0; i < size; i++)
       {
@@ -113,8 +139,8 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatter)
 
       thrust::device_vector<unsigned int> d_map = h_map;
 
-      thrust::host_vector<T> h_output(output_size, (T) 0);
-      thrust::device_vector<T> d_output(output_size, (T) 0);
+      thrust::host_vector<T> h_output(output_size, T(0));
+      thrust::device_vector<T> d_output(output_size, T(0));
 
       thrust::scatter(h_input.begin(), h_input.end(), h_map.begin(), h_output.begin());
       thrust::scatter(d_input.begin(), d_input.end(), d_map.begin(), d_output.begin());
@@ -144,7 +170,7 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterToDiscardIterator)
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
-        size, get_default_limits<unsigned int>::min(), get_default_limits<unsigned int>::max(), seed);
+        size, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max(), seed);
 
       for (size_t i = 0; i < size; i++)
       {
@@ -164,18 +190,50 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterToDiscardIterator)
 TYPED_TEST(ScatterTests, TestScatterIfSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
+  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector flg{0, 1, 0, 1, 0};
-  Vector map{6, 3, 1, 7, 2};
-  Vector src{0, 1, 2, 3, 4};
-  Vector dst(8, 0);
+  Vector flg(5); // predicate array
+  Vector map(5); // scatter indices
+  Vector src(5); // source vector
+  Vector dst(8); // destination vector
 
-  thrust::scatter_if(src.begin(), src.end(), map.begin(), flg.begin(), dst.begin());
+  flg[0] = T(0);
+  flg[1] = T(1);
+  flg[2] = T(0);
+  flg[3] = T(1);
+  flg[4] = T(0);
+  map[0] = T(6);
+  map[1] = T(3);
+  map[2] = T(1);
+  map[3] = T(7);
+  map[4] = T(2);
+  src[0] = T(0);
+  src[1] = T(1);
+  src[2] = T(2);
+  src[3] = T(3);
+  src[4] = T(4);
+  dst[0] = T(0);
+  dst[1] = T(0);
+  dst[2] = T(0);
+  dst[3] = T(0);
+  dst[4] = T(0);
+  dst[5] = T(0);
+  dst[6] = T(0);
+  dst[7] = T(0);
 
-  Vector ref{0, 0, 0, 1, 0, 0, 0, 3};
-  ASSERT_EQ(dst, ref);
+  thrust::scatter_if(Policy{}, src.begin(), src.end(), map.begin(), flg.begin(), dst.begin());
+
+  ASSERT_EQ(dst[0], T(0));
+  ASSERT_EQ(dst[1], T(0));
+  ASSERT_EQ(dst[2], T(0));
+  ASSERT_EQ(dst[3], T(1));
+  ASSERT_EQ(dst[4], T(0));
+  ASSERT_EQ(dst[5], T(0));
+  ASSERT_EQ(dst[6], T(0));
+  ASSERT_EQ(dst[7], T(3));
 }
 
 template <typename InputIterator1, typename InputIterator2, typename InputIterator3, typename RandomAccessIterator>
@@ -222,7 +280,7 @@ template <typename T>
 class is_even_scatter_if
 {
 public:
-  THRUST_HOST_DEVICE bool operator()(const T i) const
+  __host__ __device__ bool operator()(const T i) const
   {
     return (i % 2) == 0;
   }
@@ -240,15 +298,15 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterIf)
 
     const size_t output_size = std::min((size_t) 10, 2 * size);
 
-    thrust::host_vector<T> h_input(size, (T) 1);
-    thrust::device_vector<T> d_input(size, (T) 1);
+    thrust::host_vector<T> h_input(size, T(1));
+    thrust::device_vector<T> d_input(size, T(1));
 
     for (auto seed : get_seeds())
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
-        size, get_default_limits<unsigned int>::min(), get_default_limits<unsigned int>::max(), seed);
+        size, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max(), seed);
 
       for (size_t i = 0; i < size; i++)
       {
@@ -257,8 +315,8 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterIf)
 
       thrust::device_vector<unsigned int> d_map = h_map;
 
-      thrust::host_vector<T> h_output(output_size, (T) 0);
-      thrust::device_vector<T> d_output(output_size, (T) 0);
+      thrust::host_vector<T> h_output(output_size, T(0));
+      thrust::device_vector<T> d_output(output_size, T(0));
 
       thrust::scatter_if(
         h_input.begin(),
@@ -292,15 +350,15 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterIfToDiscardIterator)
 
     const size_t output_size = std::min((size_t) 10, 2 * size);
 
-    thrust::host_vector<T> h_input(size, (T) 1);
-    thrust::device_vector<T> d_input(size, (T) 1);
+    thrust::host_vector<T> h_input(size, T(1));
+    thrust::device_vector<T> d_input(size, T(1));
 
     for (auto seed : get_seeds())
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
-        size, get_default_limits<unsigned int>::min(), get_default_limits<unsigned int>::max(), seed);
+        size, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max(), seed);
 
       for (size_t i = 0; i < size; i++)
       {
@@ -330,35 +388,39 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterIfToDiscardIterator)
 TYPED_TEST(ScatterTests, TestScatterCountingIterator)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector source(10);
-  thrust::sequence(source.begin(), source.end(), 0);
+  thrust::sequence(Policy{}, source.begin(), source.end(), 0);
 
   Vector map(10);
-  thrust::sequence(map.begin(), map.end(), 0);
+  thrust::sequence(Policy{}, map.begin(), map.end(), 0);
 
   Vector output(10);
 
   // source has any_system_tag
-  thrust::fill(output.begin(), output.end(), 0);
-  thrust::scatter(thrust::make_counting_iterator(0), thrust::make_counting_iterator(10), map.begin(), output.begin());
+  thrust::fill(Policy{}, output.begin(), output.end(), 0);
+  thrust::scatter(
+    Policy{}, thrust::make_counting_iterator(0), thrust::make_counting_iterator(10), map.begin(), output.begin());
 
   ASSERT_EQ(output, map);
 
   // map has any_system_tag
-  thrust::fill(output.begin(), output.end(), 0);
-  thrust::scatter(source.begin(), source.end(), thrust::make_counting_iterator(0), output.begin());
+  thrust::fill(Policy{}, output.begin(), output.end(), 0);
+  thrust::scatter(Policy{}, source.begin(), source.end(), thrust::make_counting_iterator(0), output.begin());
 
   ASSERT_EQ(output, map);
 
   // source and map have any_system_tag
-  thrust::fill(output.begin(), output.end(), 0);
-  thrust::scatter(thrust::make_counting_iterator(0),
-                  thrust::make_counting_iterator(10),
-                  thrust::make_counting_iterator(0),
-                  output.begin());
+  thrust::fill(Policy{}, output.begin(), output.end(), 0);
+  thrust::scatter(
+    Policy{},
+    thrust::make_counting_iterator(0),
+    thrust::make_counting_iterator(10),
+    thrust::make_counting_iterator(0),
+    output.begin());
 
   ASSERT_EQ(output, map);
 }
@@ -366,35 +428,43 @@ TYPED_TEST(ScatterTests, TestScatterCountingIterator)
 TYPED_TEST(ScatterTests, TestScatterIfCountingIterator)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector source(10);
-  thrust::sequence(source.begin(), source.end(), 0);
+  thrust::sequence(Policy{}, source.begin(), source.end(), 0);
 
   Vector map(10);
-  thrust::sequence(map.begin(), map.end(), 0);
+  thrust::sequence(Policy{}, map.begin(), map.end(), 0);
 
   Vector stencil(10, 1);
 
   Vector output(10);
 
   // source has any_system_tag
-  thrust::fill(output.begin(), output.end(), 0);
+  thrust::fill(Policy{}, output.begin(), output.end(), 0);
   thrust::scatter_if(
-    thrust::make_counting_iterator(0), thrust::make_counting_iterator(10), map.begin(), stencil.begin(), output.begin());
+    Policy{},
+    thrust::make_counting_iterator(0),
+    thrust::make_counting_iterator(10),
+    map.begin(),
+    stencil.begin(),
+    output.begin());
 
   ASSERT_EQ(output, map);
 
   // map has any_system_tag
-  thrust::fill(output.begin(), output.end(), 0);
-  thrust::scatter_if(source.begin(), source.end(), thrust::make_counting_iterator(0), stencil.begin(), output.begin());
+  thrust::fill(Policy{}, output.begin(), output.end(), 0);
+  thrust::scatter_if(
+    Policy{}, source.begin(), source.end(), thrust::make_counting_iterator(0), stencil.begin(), output.begin());
 
   ASSERT_EQ(output, map);
 
   // source and map have any_system_tag
-  thrust::fill(output.begin(), output.end(), 0);
+  thrust::fill(Policy{}, output.begin(), output.end(), 0);
   thrust::scatter_if(
+    Policy{},
     thrust::make_counting_iterator(0),
     thrust::make_counting_iterator(10),
     thrust::make_counting_iterator(0),

@@ -30,8 +30,6 @@
 #  include <unittest/unittest.h>
 #  include <unittest/util_async.h>
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template <typename T>
 struct custom_plus
 {

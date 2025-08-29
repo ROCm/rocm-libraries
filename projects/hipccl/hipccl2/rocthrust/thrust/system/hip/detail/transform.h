@@ -29,28 +29,15 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #  include <thrust/distance.h>
-#  include <thrust/iterator/zip_iterator.h>
-#  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/util.h>
-#  include <thrust/zip_function.h>
-
-#  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
-
 namespace hip_rocprim
 {
 namespace __transform
@@ -61,7 +48,7 @@ struct no_stencil_tag
 struct always_true_predicate
 {
   template <class T>
-  constexpr bool THRUST_HIP_DEVICE_FUNCTION operator()(T const&) const
+  bool THRUST_HIP_DEVICE_FUNCTION operator()(T const&) const
   {
     return true;
   }
@@ -181,10 +168,8 @@ struct binary_transform_f<InputIt1, InputIt2, OutputIt, no_stencil_tag, Transfor
   }
 }; // struct binary_transform_f
 
-// EAN 2024-10-04: when force-inlined, gcc's optimizer will generate bad code
-// for this function:
 template <class Policy, class InputIt, class Size, class OutputIt, class StencilIt, class TransformOp, class Predicate>
-OutputIt THRUST_HOST_DEVICE inline unary(
+OutputIt THRUST_HIP_FUNCTION unary(
   Policy& policy,
   InputIt items,
   OutputIt result,
@@ -204,12 +189,9 @@ OutputIt THRUST_HOST_DEVICE inline unary(
   // the function to modify the input iterator! 'rocprim::transform' does not write any
   // effects on the input iterator back to memory.
   hip_rocprim::parallel_for(policy, unary_transform_t(items, result, stencil, transform_op, predicate), num_items);
-
   return result + num_items;
 }
 
-// EAN 2024-10-04: when force-inlined, gcc's optimizer will generate bad code
-// for this function:
 template <class Policy,
           class InputIt1,
           class InputIt2,
@@ -218,7 +200,7 @@ template <class Policy,
           class StencilIt,
           class TransformOp,
           class Predicate>
-OutputIt THRUST_HOST_DEVICE inline binary(
+OutputIt THRUST_HIP_FUNCTION binary(
   Policy& policy,
   InputIt1 items1,
   InputIt2 items2,
@@ -240,7 +222,6 @@ OutputIt THRUST_HOST_DEVICE inline binary(
   // effects on the input iterator back to memory.
   hip_rocprim::parallel_for(
     policy, binary_transform_t(items1, items2, result, stencil, transform_op, predicate), num_items);
-
   return result + num_items;
 }
 
@@ -333,6 +314,7 @@ OutputIt THRUST_HIP_FUNCTION transform(
     transform_op,
     __transform::always_true_predicate());
 } // func transform
+
 } // namespace hip_rocprim
 
 THRUST_NAMESPACE_END

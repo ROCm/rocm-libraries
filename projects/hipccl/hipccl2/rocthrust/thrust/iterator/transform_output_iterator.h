@@ -23,13 +23,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/iterator/detail/transform_output_iterator.inl>
 
 THRUST_NAMESPACE_BEGIN
@@ -63,7 +56,7 @@ THRUST_NAMESPACE_BEGIN
  *  // note: functor inherits from unary_function
  *  struct square_root : public thrust::unary_function<float,float>
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    float operator()(float x) const
  *    {
  *      return sqrtf(x);
@@ -103,7 +96,7 @@ class transform_output_iterator : public detail::transform_output_iterator_base<
 public:
   using super_t = typename detail::transform_output_iterator_base<UnaryFunction, OutputIterator>::type;
 
-  friend class iterator_core_access;
+  friend class thrust::iterator_core_access;
   /*! \endcond
    */
 

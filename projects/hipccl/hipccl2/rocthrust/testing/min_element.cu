@@ -21,11 +21,17 @@
 #include <unittest/unittest.h>
 
 template <class Vector>
-void TestMinElementSimple()
+void TestMinElementSimple(void)
 {
   using T = typename Vector::value_type;
 
-  Vector data{3, 5, 1, 2, 5, 1};
+  Vector data(6);
+  data[0] = 3;
+  data[1] = 5;
+  data[2] = 1;
+  data[3] = 2;
+  data[4] = 5;
+  data[5] = 1;
 
   ASSERT_EQUAL(*thrust::min_element(data.begin(), data.end()), 1);
   ASSERT_EQUAL(thrust::min_element(data.begin(), data.end()) - data.begin(), 2);
@@ -36,11 +42,17 @@ void TestMinElementSimple()
 DECLARE_VECTOR_UNITTEST(TestMinElementSimple);
 
 template <class Vector>
-void TestMinElementWithTransform()
+void TestMinElementWithTransform(void)
 {
   using T = typename Vector::value_type;
 
-  Vector data{3, 5, 1, 2, 5, 1};
+  Vector data(6);
+  data[0] = 3;
+  data[1] = 5;
+  data[2] = 1;
+  data[3] = 2;
+  data[4] = 5;
+  data[5] = 1;
 
   ASSERT_EQUAL(*thrust::min_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
                                     thrust::make_transform_iterator(data.end(), thrust::negate<T>())),
@@ -119,10 +131,8 @@ void TestMinElementWithBigIndexesHelper(int magnitude)
 void TestMinElementWithBigIndexes()
 {
   TestMinElementWithBigIndexesHelper(30);
-#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestMinElementWithBigIndexesHelper(31);
   TestMinElementWithBigIndexesHelper(32);
   TestMinElementWithBigIndexesHelper(33);
-#endif
 }
 DECLARE_UNITTEST(TestMinElementWithBigIndexes);

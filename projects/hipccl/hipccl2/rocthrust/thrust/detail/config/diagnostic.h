@@ -14,55 +14,37 @@
 
 #include <thrust/detail/config/compiler.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 // Enable us to selectively silence host compiler warnings
+#define THRUST_TOSTRING2(_STR) #_STR
+#define THRUST_TOSTRING(_STR)  THRUST_TOSTRING2(_STR)
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
-#  define THRUST_DIAG_PUSH                THRUST_PRAGMA(clang diagnostic push)
-#  define THRUST_DIAG_POP                 THRUST_PRAGMA(clang diagnostic pop)
-#  define THRUST_DIAG_SUPPRESS_CLANG(str) THRUST_PRAGMA(clang diagnostic ignored str)
+#  define THRUST_DIAG_PUSH                _Pragma("clang diagnostic push")
+#  define THRUST_DIAG_POP                 _Pragma("clang diagnostic pop")
+#  define THRUST_DIAG_SUPPRESS_CLANG(str) _Pragma(THRUST_TOSTRING(clang diagnostic ignored str))
 #  define THRUST_DIAG_SUPPRESS_GCC(str)
 #  define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #  define THRUST_DIAG_SUPPRESS_MSVC(str)
-#  define THRUST_DIAG_SUPPRESS_ICC(str)
-#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
-#  define THRUST_DIAG_PUSH THRUST_PRAGMA(GCC diagnostic push)
-#  define THRUST_DIAG_POP  THRUST_PRAGMA(GCC diagnostic pop)
+#elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
+#  define THRUST_DIAG_PUSH _Pragma("GCC diagnostic push")
+#  define THRUST_DIAG_POP  _Pragma("GCC diagnostic pop")
 #  define THRUST_DIAG_SUPPRESS_CLANG(str)
-#  define THRUST_DIAG_SUPPRESS_GCC(str) THRUST_PRAGMA(GCC diagnostic ignored str)
+#  define THRUST_DIAG_SUPPRESS_GCC(str) _Pragma(THRUST_TOSTRING(GCC diagnostic ignored str))
 #  define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #  define THRUST_DIAG_SUPPRESS_MSVC(str)
-#  define THRUST_DIAG_SUPPRESS_ICC(str)
-#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL
-#  define THRUST_DIAG_PUSH THRUST_PRAGMA(GCC diagnostic push)
-#  define THRUST_DIAG_POP  THRUST_PRAGMA(GCC diagnostic pop)
-#  define THRUST_DIAG_SUPPRESS_CLANG(str)
-#  define THRUST_DIAG_SUPPRESS_GCC(str) THRUST_PRAGMA(GCC diagnostic ignored str)
-#  define THRUST_DIAG_SUPPRESS_NVHPC(str)
-#  define THRUST_DIAG_SUPPRESS_MSVC(str)
-#  define THRUST_DIAG_SUPPRESS_ICC(str) THRUST_PRAGMA(warning disable str)
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
-#  define THRUST_DIAG_PUSH THRUST_PRAGMA(diagnostic push)
-#  define THRUST_DIAG_POP  THRUST_PRAGMA(diagnostic pop)
+#  define THRUST_DIAG_PUSH _Pragma("diagnostic push")
+#  define THRUST_DIAG_POP  _Pragma("diagnostic pop")
 #  define THRUST_DIAG_SUPPRESS_CLANG(str)
 #  define THRUST_DIAG_SUPPRESS_GCC(str)
-#  define THRUST_DIAG_SUPPRESS_NVHPC(str) THRUST_PRAGMA(diag_suppress str)
+#  define THRUST_DIAG_SUPPRESS_NVHPC(str) _Pragma(THRUST_TOSTRING(diag_suppress str))
 #  define THRUST_DIAG_SUPPRESS_MSVC(str)
-#  define THRUST_DIAG_SUPPRESS_ICC(str)
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-#  define THRUST_DIAG_PUSH THRUST_PRAGMA(warning(push))
-#  define THRUST_DIAG_POP  THRUST_PRAGMA(warning(pop))
+#  define THRUST_DIAG_PUSH __pragma(warning(push))
+#  define THRUST_DIAG_POP  __pragma(warning(pop))
 #  define THRUST_DIAG_SUPPRESS_CLANG(str)
 #  define THRUST_DIAG_SUPPRESS_GCC(str)
 #  define THRUST_DIAG_SUPPRESS_NVHPC(str)
-#  define THRUST_DIAG_SUPPRESS_MSVC(str) THRUST_PRAGMA(warning(disable : str))
-#  define THRUST_DIAG_SUPPRESS_ICC(str)
+#  define THRUST_DIAG_SUPPRESS_MSVC(str) __pragma(warning(disable : str))
 #else
 #  define THRUST_DIAG_PUSH
 #  define THRUST_DIAG_POP
@@ -70,7 +52,6 @@
 #  define THRUST_DIAG_SUPPRESS_GCC(str)
 #  define THRUST_DIAG_SUPPRESS_NVHPC(str)
 #  define THRUST_DIAG_SUPPRESS_MSVC(str)
-#  define THRUST_DIAG_SUPPRESS_ICC(str)
 #endif
 
 // Convenient shortcuts to silence common warnings
@@ -80,7 +61,7 @@
     THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated") \
     THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated-declarations")
 #  define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
-#elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
+#elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_ICC)
 #  define THRUST_SUPPRESS_DEPRECATED_PUSH    \
     THRUST_DIAG_PUSH                         \
     THRUST_DIAG_SUPPRESS_GCC("-Wdeprecated") \

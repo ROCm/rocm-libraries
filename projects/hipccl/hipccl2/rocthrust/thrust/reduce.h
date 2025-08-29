@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/pair.h>
@@ -156,7 +149,7 @@ typename thrust::iterator_traits<InputIterator>::value_type reduce(InputIterator
  * is convertible to \p T. \tparam T is convertible to \p InputIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p reduce to compute
- *  the sum of a sequence of integers including an initialization value using the \p thrust::host
+ *  the sum of a sequence of integers including an intialization value using the \p thrust::host
  *  execution policy for parallelization:
  *
  *  \code
@@ -200,7 +193,7 @@ THRUST_HOST_DEVICE T reduce(
  * is convertible to \p T. \tparam T is convertible to \p InputIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p reduce to compute
- *  the sum of a sequence of integers including an initialization value.
+ *  the sum of a sequence of integers including an intialization value.
  *
  *  \code
  *  #include <thrust/reduce.h>
@@ -333,6 +326,8 @@ T reduce(InputIterator first, InputIterator last, T init, BinaryFunction binary_
  *  This version of \p reduce_by_key uses the function object \c equal_to
  *  to test for equality and \c plus to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -403,6 +398,8 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  This version of \p reduce_by_key uses the function object \c equal_to
  *  to test for equality and \c plus to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.
  *  \param values_first The beginning of the input value range.
@@ -461,6 +458,8 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c plus to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -537,6 +536,8 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c plus to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.
  *  \param values_first The beginning of the input value range.
@@ -606,6 +607,8 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c binary_op to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -690,6 +693,8 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c binary_op to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.

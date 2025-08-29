@@ -59,18 +59,35 @@ void TestSwapRangesDispatchImplicit()
 DECLARE_UNITTEST(TestSwapRangesDispatchImplicit);
 
 template <class Vector>
-void TestSwapRangesSimple()
+void TestSwapRangesSimple(void)
 {
-  Vector v1{0, 1, 2, 3, 4};
-  Vector v2{5, 6, 7, 8, 9};
+  Vector v1(5);
+  v1[0] = 0;
+  v1[1] = 1;
+  v1[2] = 2;
+  v1[3] = 3;
+  v1[4] = 4;
+
+  Vector v2(5);
+  v2[0] = 5;
+  v2[1] = 6;
+  v2[2] = 7;
+  v2[3] = 8;
+  v2[4] = 9;
 
   thrust::swap_ranges(v1.begin(), v1.end(), v2.begin());
 
-  Vector ref1{5, 6, 7, 8, 9};
-  ASSERT_EQUAL(v1, ref1);
+  ASSERT_EQUAL(v1[0], 5);
+  ASSERT_EQUAL(v1[1], 6);
+  ASSERT_EQUAL(v1[2], 7);
+  ASSERT_EQUAL(v1[3], 8);
+  ASSERT_EQUAL(v1[4], 9);
 
-  Vector ref2{0, 1, 2, 3, 4};
-  ASSERT_EQUAL(v2, ref2);
+  ASSERT_EQUAL(v2[0], 0);
+  ASSERT_EQUAL(v2[1], 1);
+  ASSERT_EQUAL(v2[2], 2);
+  ASSERT_EQUAL(v2[3], 3);
+  ASSERT_EQUAL(v2[4], 4);
 }
 DECLARE_VECTOR_UNITTEST(TestSwapRangesSimple);
 
@@ -96,7 +113,7 @@ void TestSwapRanges(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestSwapRanges);
 
 #if (THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_OMP)
-void TestSwapRangesForcedIterator()
+void TestSwapRangesForcedIterator(void)
 {
   thrust::device_vector<int> A(3, 0);
   thrust::device_vector<int> B(3, 1);
@@ -148,33 +165,14 @@ struct type_with_swap
   bool m_swapped;
 };
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-namespace detail
-{
-THRUST_EXEC_CHECK_DISABLE
-template <typename Assignable1, typename Assignable2>
-THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b)
-{
-  Assignable1 temp = a;
-  a                = b;
-  b                = temp;
-} // end swap()
-} // namespace detail
-#endif
-
 inline THRUST_HOST_DEVICE void swap(type_with_swap& a, type_with_swap& b)
 {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-  using _THRUST_STD::swap;
-#else
-  using ::detail::swap;
-#endif
-  swap(a.m_x, b.m_x);
+  thrust::swap(a.m_x, b.m_x);
   a.m_swapped = true;
   b.m_swapped = true;
 }
 
-void TestSwapRangesUserSwap()
+void TestSwapRangesUserSwap(void)
 {
   thrust::host_vector<type_with_swap> h_A(3, type_with_swap(0));
   thrust::host_vector<type_with_swap> h_B(3, type_with_swap(1));

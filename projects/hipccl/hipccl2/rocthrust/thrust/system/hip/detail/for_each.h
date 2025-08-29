@@ -29,14 +29,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
@@ -44,6 +36,8 @@
 #  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/util.h>
+
+#  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -75,7 +69,6 @@ struct for_each_f
 //-------------------------
 
 // for_each_n
-THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class Input, class Size, class UnaryOp>
 Input THRUST_HIP_FUNCTION for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
 {
@@ -84,7 +77,7 @@ Input THRUST_HIP_FUNCTION for_each_n(execution_policy<Derived>& policy, Input fi
 
   hip_rocprim::parallel_for(policy, for_each_f<Input, wrapped_t>(first, wrapped_op), count);
 
-  return first + count;
+  return first + static_cast<typename std::iterator_traits<Input>::difference_type>(count);
 }
 
 // for_each
@@ -93,9 +86,9 @@ Input THRUST_HIP_FUNCTION for_each(execution_policy<Derived>& policy, Input firs
 {
   using size_type = typename iterator_traits<Input>::difference_type;
   size_type count = static_cast<size_type>(thrust::distance(first, last));
-
-  return THRUST_NS_QUALIFIER::hip_rocprim::for_each_n(policy, first, count, op);
+  return hip_rocprim::for_each_n(policy, first, count, op);
 }
+
 } // namespace hip_rocprim
 
 THRUST_NAMESPACE_END

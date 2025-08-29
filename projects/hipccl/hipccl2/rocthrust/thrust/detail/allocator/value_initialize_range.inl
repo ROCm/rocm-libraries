@@ -17,23 +17,11 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/for_each.h>
 #include <thrust/uninitialized_fill.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -41,62 +29,84 @@ namespace detail
 namespace allocator_traits_detail
 {
 
-template <typename Allocator>
-struct construct1_via_allocator
-{
-  Allocator& a;
 
-  THRUST_HOST_DEVICE construct1_via_allocator(Allocator& a)
-      : a(a)
+template<typename Allocator>
+  struct construct1_via_allocator
+{
+  Allocator &a;
+
+  THRUST_HOST_DEVICE
+  construct1_via_allocator(Allocator &a)
+    : a(a)
   {}
 
-  template <typename T>
-  inline THRUST_HOST_DEVICE void operator()(T& x)
+  template<typename T>
+  inline THRUST_HOST_DEVICE
+  void operator()(T &x)
   {
     allocator_traits<Allocator>::construct(a, &x);
   }
 };
 
+
 // we need to construct T via the allocator if...
-template <typename Allocator, typename T>
-struct needs_default_construct_via_allocator
-    : _THRUST_STD::disjunction<has_member_construct1<Allocator, T>, // if the Allocator does something interesting
-                                                                   // or if T's default constructor does something
-                                                                   // interesting
-                              thrust::detail::not_<_THRUST_STD::is_trivially_default_constructible<T>>>
+template<typename Allocator, typename T>
+  struct needs_default_construct_via_allocator
+    : thrust::detail::or_<
+        has_member_construct1<Allocator,T>,               // if the Allocator does something interesting
+        thrust::detail::not_<has_trivial_constructor<T> > // or if T's default constructor does something interesting
+      >
 {};
+
 
 // we know that std::allocator::construct's only effect is to call T's
 // default constructor, so we needn't use it for default construction
 // unless T's constructor does something interesting
-template <typename U, typename T>
-struct needs_default_construct_via_allocator<std::allocator<U>, T>
-    : thrust::detail::not_<_THRUST_STD::is_trivially_default_constructible<T>>
+template<typename U, typename T>
+  struct needs_default_construct_via_allocator<std::allocator<U>, T>
+    : thrust::detail::not_<has_trivial_constructor<T> >
 {};
 
-template <typename Allocator, typename Pointer, typename Size>
-THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<
-  needs_default_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value>
-value_initialize_range(Allocator& a, Pointer p, Size n)
+
+template<typename Allocator, typename Pointer, typename Size>
+THRUST_HOST_DEVICE
+  typename enable_if<
+    needs_default_construct_via_allocator<
+      Allocator,
+      typename pointer_element<Pointer>::type
+    >::value
+  >::type
+    value_initialize_range(Allocator &a, Pointer p, Size n)
 {
   thrust::for_each_n(allocator_system<Allocator>::get(a), p, n, construct1_via_allocator<Allocator>(a));
 }
 
-template <typename Allocator, typename Pointer, typename Size>
+
+template<typename Allocator, typename Pointer, typename Size>
 THRUST_HOST_DEVICE
-typename disable_if<needs_default_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value>::type
-value_initialize_range(Allocator& a, Pointer p, Size n)
+  typename disable_if<
+    needs_default_construct_via_allocator<
+      Allocator,
+      typename pointer_element<Pointer>::type
+    >::value
+  >::type
+    value_initialize_range(Allocator &a, Pointer p, Size n)
 {
   thrust::uninitialized_fill_n(allocator_system<Allocator>::get(a), p, n, typename pointer_element<Pointer>::type());
 }
 
-} // namespace allocator_traits_detail
 
-template <typename Allocator, typename Pointer, typename Size>
-THRUST_HOST_DEVICE void value_initialize_range(Allocator& a, Pointer p, Size n)
+} // end allocator_traits_detail
+
+
+template<typename Allocator, typename Pointer, typename Size>
+THRUST_HOST_DEVICE
+  void value_initialize_range(Allocator &a, Pointer p, Size n)
 {
-  return allocator_traits_detail::value_initialize_range(a, p, n);
+  return allocator_traits_detail::value_initialize_range(a,p,n);
 }
 
-} // namespace detail
+
+} // end detail
 THRUST_NAMESPACE_END
+

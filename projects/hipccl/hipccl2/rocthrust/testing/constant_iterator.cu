@@ -22,9 +22,7 @@
 
 #include <unittest/unittest.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-
-void TestConstantIteratorConstructFromConvertibleSystem()
+void TestConstantIteratorConstructFromConvertibleSystem(void)
 {
   using namespace thrust;
 
@@ -38,7 +36,7 @@ void TestConstantIteratorConstructFromConvertibleSystem()
 }
 DECLARE_UNITTEST(TestConstantIteratorConstructFromConvertibleSystem);
 
-void TestConstantIteratorIncrement()
+void TestConstantIteratorIncrement(void)
 {
   using namespace thrust;
 
@@ -65,10 +63,10 @@ void TestConstantIteratorIncrement()
   ASSERT_EQUAL(-2, lhs - rhs);
 }
 DECLARE_UNITTEST(TestConstantIteratorIncrement);
-static_assert(_THRUST_STD::is_trivially_copy_constructible<thrust::constant_iterator<int>>::value, "");
-static_assert(_THRUST_STD::is_trivially_copyable<thrust::constant_iterator<int>>::value, "");
+static_assert(std::is_trivially_copy_constructible<thrust::constant_iterator<int>>::value, "");
+static_assert(std::is_trivially_copyable<thrust::constant_iterator<int>>::value, "");
 
-void TestConstantIteratorIncrementBig()
+void TestConstantIteratorIncrementBig(void)
 {
   long long int n = 10000000000ULL;
 
@@ -79,7 +77,7 @@ void TestConstantIteratorIncrementBig()
 }
 DECLARE_UNITTEST(TestConstantIteratorIncrementBig);
 
-void TestConstantIteratorComparison()
+void TestConstantIteratorComparison(void)
 {
   using namespace thrust;
 
@@ -107,7 +105,7 @@ void TestConstantIteratorComparison()
 }
 DECLARE_UNITTEST(TestConstantIteratorComparison);
 
-void TestMakeConstantIterator()
+void TestMakeConstantIterator(void)
 {
   using namespace thrust;
 
@@ -125,7 +123,7 @@ void TestMakeConstantIterator()
 DECLARE_UNITTEST(TestMakeConstantIterator);
 
 template <typename Vector>
-void TestConstantIteratorCopy()
+void TestConstantIteratorCopy(void)
 {
   using namespace thrust;
 
@@ -138,13 +136,15 @@ void TestConstantIteratorCopy()
   ConstIter last  = first + result.size();
   thrust::copy(first, last, result.begin());
 
-  Vector ref(4, 7);
-  ASSERT_EQUAL(ref, result);
+  ASSERT_EQUAL(7, result[0]);
+  ASSERT_EQUAL(7, result[1]);
+  ASSERT_EQUAL(7, result[2]);
+  ASSERT_EQUAL(7, result[3]);
 };
 DECLARE_VECTOR_UNITTEST(TestConstantIteratorCopy);
 
 template <typename Vector>
-void TestConstantIteratorTransform()
+void TestConstantIteratorTransform(void)
 {
   using namespace thrust;
 
@@ -159,17 +159,21 @@ void TestConstantIteratorTransform()
 
   thrust::transform(first1, last1, result.begin(), thrust::negate<T>());
 
-  Vector ref(4, -7);
-  ASSERT_EQUAL(ref, result);
+  ASSERT_EQUAL(-7, result[0]);
+  ASSERT_EQUAL(-7, result[1]);
+  ASSERT_EQUAL(-7, result[2]);
+  ASSERT_EQUAL(-7, result[3]);
 
   thrust::transform(first1, last1, first2, result.begin(), thrust::plus<T>());
 
-  ref = Vector(4, 10);
-  ASSERT_EQUAL(ref, result);
+  ASSERT_EQUAL(10, result[0]);
+  ASSERT_EQUAL(10, result[1]);
+  ASSERT_EQUAL(10, result[2]);
+  ASSERT_EQUAL(10, result[3]);
 };
 DECLARE_VECTOR_UNITTEST(TestConstantIteratorTransform);
 
-void TestConstantIteratorReduce()
+void TestConstantIteratorReduce(void)
 {
   using namespace thrust;
 

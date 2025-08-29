@@ -28,22 +28,13 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#if _CCCL_HAS_CUDA_COMPILER
+#ifdef _CCCL_CUDA_COMPILER
 
 #  include <thrust/system/cuda/config.h>
 
 #  include <cub/device/device_scan.cuh>
 
 #  include <thrust/detail/integer_math.h>
-#  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
@@ -119,10 +110,8 @@ _CCCL_HOST_DEVICE OutputIt inclusive_scan_n_impl(
   InitValueT init,
   ScanOp scan_op)
 {
-  using InputValueT             = cub::detail::InputValue<InitValueT>;
-  using ValueT                  = cub::detail::value_t<InputIt>;
-  using OutputValueT            = cub::detail::value_t<OutputIt>;
-  using AccumT                  = ::cuda::std::__accumulator_t<ScanOp, ValueT, InitValueT>;
+  using InputValueT = cub::detail::InputValue<InitValueT>;
+  using AccumT      = typename ::cuda::std::__accumulator_t<ScanOp, cub::detail::value_t<InputIt>, InitValueT>;
   constexpr bool ForceInclusive = true;
 
   using Dispatch32 =
@@ -132,7 +121,7 @@ _CCCL_HOST_DEVICE OutputIt inclusive_scan_n_impl(
                       InputValueT,
                       std::int32_t,
                       AccumT,
-                      cub::detail::scan::policy_hub<ValueT, OutputValueT, AccumT, std::int32_t, ScanOp>,
+                      cub::DeviceScanPolicy<AccumT, ScanOp>,
                       ForceInclusive>;
   using Dispatch64 =
     cub::DispatchScan<InputIt,
@@ -141,14 +130,14 @@ _CCCL_HOST_DEVICE OutputIt inclusive_scan_n_impl(
                       InputValueT,
                       std::int64_t,
                       AccumT,
-                      cub::detail::scan::policy_hub<ValueT, OutputValueT, AccumT, std::int64_t, ScanOp>,
+                      cub::DeviceScanPolicy<AccumT, ScanOp>,
                       ForceInclusive>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
   cudaError_t status;
 
   // Negative number of items are normalized to `0`
-  if (thrust::detail::is_negative(num_items))
+  if (num_items < 0)
   {
     num_items = 0;
   }
