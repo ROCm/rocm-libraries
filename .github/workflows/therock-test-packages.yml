@@ -28,12 +28,17 @@ jobs:
         with:
           repository: "ROCm/TheRock"
 
+      - name: Setting up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: 3.11
+
       - name: "Configuring CI options"
         env:
           PLATFORM: ${{ inputs.platform }}
           project_to_test: ${{ inputs.project_to_test }}
         id: configure
-        run: python3 ./build_tools/github_actions/fetch_test_configurations.py
+        run: python ./build_tools/github_actions/fetch_test_configurations.py
 
   test_components:
     name: 'Test ${{ matrix.components.job_name }}'
