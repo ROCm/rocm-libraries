@@ -20,14 +20,14 @@ target_sources(hipblaslt
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
-    add_library(hipblaslt-rocroller STATIC)
+    add_library(hipblaslt-rocroller OBJECT)
     target_sources(hipblaslt-rocroller
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_host.cpp"
     )
     target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
     set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_link_libraries(hipblaslt-rocroller PRIVATE origami::origami)
+    target_link_libraries(hipblaslt-rocroller PRIVATE roc::origami-headers)
     if(TARGET roc::rocroller-interface)
         target_link_libraries(hipblaslt-rocroller PRIVATE roc::rocroller-interface)
     else()
