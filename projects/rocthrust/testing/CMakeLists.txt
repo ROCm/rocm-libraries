@@ -135,12 +135,25 @@ function(add_thrust_test TEST)
         )
     endif()
     rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
+
+    # Check for per-test script. Script will be included in the current scope
+    # to allow custom property modifications.
+    set(TEST_CMAKE_SCRIPT "${TEST}.cmake")
+    file(GLOB TEST_CMAKE_SCRIPT
+        RELATIVE "${CMAKE_CURRENT_LIST_DIR}"
+        CONFIGURE_DEPENDS
+        "${TEST_CMAKE_SCRIPT}"
+    )
+    if (TEST_CMAKE_SCRIPT)
+        include("${TEST_CMAKE_SCRIPT}")
+    endif()
 endfunction()
 
 # ****************************************************************************
 # Tests
 # ****************************************************************************
 
+add_thrust_test("address_stability")
 add_thrust_test("adjacent_difference")
 add_thrust_test("advance")
 add_thrust_test("alignment")
@@ -175,8 +188,8 @@ add_thrust_test("distance")
 add_thrust_test("equal")
 add_thrust_test("event")
 add_thrust_test("fill")
-# add_thrust_test("find") # Disabeld due to issue #516
-# add_thrust_test("for_each") # Disabled due to issze #516
+add_thrust_test("find")
+add_thrust_test("for_each")
 add_thrust_test("functional")
 add_thrust_test("functional_arithmetic")
 add_thrust_test("functional_bitwise")
@@ -203,10 +216,10 @@ add_thrust_test("memory")
 add_thrust_test("merge")
 add_thrust_test("merge_by_key")
 add_thrust_test("merge_key_value")
-add_thrust_test("metaprogamming")
-add_thrust_test("minmax_element")
+add_thrust_test("metaprogramming")
 add_thrust_test("min_and_max")
 add_thrust_test("min_element")
+add_thrust_test("minmax_element")
 add_thrust_test("mismatch")
 add_thrust_test("mr_disjoint_pool")
 add_thrust_test("mr_new")
@@ -272,8 +285,8 @@ add_thrust_test("swap_ranges")
 add_thrust_test("tabulate")
 add_thrust_test("tabulate_output_iterator")
 add_thrust_test("transform")
-add_thrust_test("transform_iterator")
 add_thrust_test("transform_input_output_iterator")
+add_thrust_test("transform_iterator")
 add_thrust_test("transform_output_iterator_reduce_by_key")
 add_thrust_test("transform_output_iterator")
 add_thrust_test("transform_reduce")
@@ -290,9 +303,9 @@ add_thrust_test("uninitialized_copy")
 add_thrust_test("uninitialized_fill")
 add_thrust_test("unique")
 add_thrust_test("unique_by_key")
-add_thrust_test("universal_memory")
 add_thrust_test("unittest_static_assert")
 add_thrust_test("unittest_tester")
+add_thrust_test("universal_memory")
 add_thrust_test("vector")
 add_thrust_test("vector_allocators")
 add_thrust_test("vector_insert")

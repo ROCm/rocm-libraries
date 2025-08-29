@@ -377,15 +377,17 @@ class Solution(collections.abc.Mapping):
 
     bpeA = state["ProblemType"]["DataTypeA"].numBytes()
     bpeB = state["ProblemType"]["DataTypeB"].numBytes()
-    asem = state["AssertSummationElementMultiple"]
+    aemA = state["AssertSummationElementMultiple"] if not state["ProblemType"]["TLUA"] else state["AssertFree0ElementMultiple"]
+    aemB = state["AssertSummationElementMultiple"] if not state["ProblemType"]["TLUB"] else state["AssertFree1ElementMultiple"]
     # For DTL, we use nonDTL loads in tail loop only if
     # a partial 32b read is required to read the last few elements of a row/col of A/B
     # i.e. ASEM * BPE % 4 != 0. In this case dword/dwordx4 DTL load will
     # zero out the entire partial 32b read and cause accuracy issues.
-    if (asem * bpeA) % 4 != 0:
-      state["NonDTLTailLoopA"] = not state["ProblemType"]["TLUA"]
-    if (asem * bpeB) % 4 != 0:
-      state["NonDTLTailLoopB"] = not state["ProblemType"]["TLUB"]
+    # For TLU = 0 we check AF{0,1}EM instead of ASEM.
+    if (aemA * bpeA) % 4 != 0 or not state["BufferLoad"]:
+      state["NonDTLTailLoopA"] = True
+    if (aemB * bpeB) % 4 != 0 or not state["BufferLoad"]:
+      state["NonDTLTailLoopB"] = True
 
     if (state["ISA"] != (9, 4, 2)) or \
        (state["ProblemType"]["Sparse"]) or \
@@ -762,17 +764,24 @@ class Solution(collections.abc.Mapping):
     numBytesAB = state["ProblemType"]["DataType%s"%tc].numBytes()
     numBytesPerLoad = state["GlobalReadVectorWidth%s"%tc] * numBytesAB
 
-    # so far, numBytesAB<4 case, TLU=False only (continue with False)
-    if numBytesAB < 4 and state["ProblemType"]["TLU%c"%tc]:
-      return False
+    MT = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+
+    if (MT & (MT-1)) != 0: # Check of MT not power of 2
+      # so far, numBytesAB<4 case, TLU=False only (continue with False)
+      if (numBytesAB < 4 or state["UseF32XEmulation"]) and state["ProblemType"]["TLU%c"%tc]:
+        return False
 
     # x2 DTL is not supported
     if numBytesPerLoad == 8:
-      reject(state, printRejectionReason, "can't use DirectToLds with b64 buffer load")
+      printWarning("can't use DirectToLds with b64 buffer load, using non DirectToLds version instead")
       return False
 
     if numBytesPerLoad == 16 and not canDTLx4:
       reject(state, printRejectionReason, "b128 DirectToLds not supported")
+      return False
+
+    if numBytesPerLoad < 4:
+      reject(state, printRejectionReason, "DirectToLds not supported for loads less than 32bits")
       return False
 
     # so far MFMA only (TODO: enable non MFMA case)
@@ -886,6 +895,7 @@ class Solution(collections.abc.Mapping):
     # the keys "EnableF32XdlMathOp" and "F32XdlMathOp".
     state["EnableF32XdlMathOp"] = False
     state["UseF32XEmulation"] = False #enable emulation for missing hardware support
+    state["UseDot2F32XEmulation"] = True
     #ignore the F32 xDL MathOp by default.
     #enable F32 xDL MathOp only when the input type is f32.
     if "F32XdlMathOp" in state["ProblemType"] \
@@ -1532,7 +1542,7 @@ class Solution(collections.abc.Mapping):
                 ldsPadA = state["VectorWidthA"]
           else:
             if state["DirectToLdsA"]:
-              ldsPadA = max(lrvw, optPadA)
+              ldsPadA = max(lrvw, optPadA) if not state["ProblemType"]["TLUA"] else 0
             else:
               ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
           assert(ldsPadA >= 0)
@@ -1555,7 +1565,7 @@ class Solution(collections.abc.Mapping):
                 ldsPadB = state["VectorWidthB"]
           else:
             if state["DirectToLdsB"]:
-              ldsPadB = max(lrvw, optPadB)
+              ldsPadB = max(lrvw, optPadB) if not state["ProblemType"]["TLUB"] else 0
             else:
               ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
@@ -1577,6 +1587,10 @@ class Solution(collections.abc.Mapping):
                 ldsPadM = 0
           assert(ldsPadM >= 0)
 
+        if state["DirectToLdsA"] and state["ProblemType"]["TLUA"]:
+          ldsPadA = 0
+        if state["DirectToLdsB"] and state["ProblemType"]["TLUB"]:
+          ldsPadB = 0
         # set ldsPadA,B=0 for DirectToVgpr
         if state["DirectToVgprA"]:
           ldsPadA = 0
@@ -2353,6 +2367,11 @@ class Solution(collections.abc.Mapping):
       if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
         #1LDS buffer must be 0 for DirectToLdsA
         state["1LDSBuffer"] = 0
+
+      # Temp: Force enable CLR when DTL is used for TF32.
+      # TODO: Determine why DTL+CLR=0 causes issues
+      if state["UseF32XEmulation"] and state["DirectToLds"]:
+        state["ClusterLocalRead"] = 1
 
       # Re-check DTV + WaveGroup after DTL is confirmed
       if state["DirectToLds"]:

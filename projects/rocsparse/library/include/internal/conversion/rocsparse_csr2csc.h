@@ -209,58 +209,7 @@ rocsparse_status rocsparse_csr2csc_buffer_size(rocsparse_handle     handle,
 *
 *  \par Example
 *  This example computes the symbolic transpose of A
-*  \code{.c}
-*      //     1 2 0 3 0
-*      // A = 0 4 5 0 0
-*      //     6 0 0 7 8
-*
-*      rocsparse_int m_A   = 3;
-*      rocsparse_int n_A   = 5;
-*      rocsparse_int nnz_A = 8;
-*
-*      csr_row_ptr_A[m_A + 1] = {0, 3, 5, 8};           // device memory
-*      csr_col_ind_A[nnz_A] = {0, 1, 3, 1, 2, 0, 3, 4}; // device memory
-*
-*      // Allocate memory for transposed CSR matrix
-*      rocsparse_int m_T   = n_A;
-*      rocsparse_int n_T   = m_A;
-*      rocsparse_int nnz_T = nnz_A;
-*
-*      rocsparse_int* csr_row_ptr_T;
-*      rocsparse_int* csr_col_ind_T;
-*
-*      hipMalloc((void**)&csr_row_ptr_T, sizeof(rocsparse_int) * (m_T + 1));
-*      hipMalloc((void**)&csr_col_ind_T, sizeof(rocsparse_int) * nnz_T);
-*
-*      // Obtain the temporary buffer size
-*      size_t buffer_size;
-*      rocsparse_csr2csc_buffer_size(handle,
-*                                    m_A,
-*                                    n_A,
-*                                    nnz_A,
-*                                    csr_row_ptr_A,
-*                                    csr_col_ind_A,
-*                                    rocsparse_action_symbolic,
-*                                    &buffer_size);
-*
-*      // Allocate temporary buffer
-*      void* temp_buffer;
-*      hipMalloc(&temp_buffer, buffer_size);
-*
-*      rocsparse_scsr2csc(handle,
-*                         m_A,
-*                         n_A,
-*                         nnz_A,
-*                         nullptr,
-*                         csr_row_ptr_A,
-*                         csr_col_ind_A,
-*                         nullptr,
-*                         csr_col_ind_T,
-*                         csr_row_ptr_T,
-*                         rocsparse_action_symbolic,
-*                         rocsparse_index_base_zero,
-*                         temp_buffer);
-*  \endcode
+*  \snippet example_rocsparse_csr2csc.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT
