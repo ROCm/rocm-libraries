@@ -233,9 +233,9 @@ endif()
 
 target_link_libraries(rocroller
     PUBLIC
-       Boost::headers
        hip::host
     PRIVATE
+        Boost::headers
         ${msgpack_libs}
         amd_comgr
 )
