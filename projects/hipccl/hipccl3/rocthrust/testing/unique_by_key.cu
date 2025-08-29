@@ -26,7 +26,7 @@ template <typename ValueT>
 struct index_to_value_t
 {
   template <typename IndexT>
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE ValueT operator()(IndexT index)
+  THRUST_HOST_DEVICE __forceinline__ ValueT operator()(IndexT index)
   {
     if (static_cast<std::uint64_t>(index) == 4300000000ULL)
     {
@@ -137,18 +137,34 @@ template <typename Vector>
 void initialize_keys(Vector& keys)
 {
   keys.resize(9);
-  keys = {11, 11, 21, 20, 21, 21, 21, 37, 37};
+  keys[0] = 11;
+  keys[1] = 11;
+  keys[2] = 21;
+  keys[3] = 20;
+  keys[4] = 21;
+  keys[5] = 21;
+  keys[6] = 21;
+  keys[7] = 37;
+  keys[8] = 37;
 }
 
 template <typename Vector>
 void initialize_values(Vector& values)
 {
   values.resize(9);
-  values = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+  values[0] = 0;
+  values[1] = 1;
+  values[2] = 2;
+  values[3] = 3;
+  values[4] = 4;
+  values[5] = 5;
+  values[6] = 6;
+  values[7] = 7;
+  values[8] = 8;
 }
 
 template <typename Vector>
-void TestUniqueByKeySimple()
+void TestUniqueByKeySimple(void)
 {
   using T = typename Vector::value_type;
 
@@ -165,13 +181,17 @@ void TestUniqueByKeySimple()
 
   ASSERT_EQUAL(new_last.first - keys.begin(), 5);
   ASSERT_EQUAL(new_last.second - values.begin(), 5);
-  keys.resize(5);
-  values.resize(5);
-  Vector keys_ref{11, 21, 20, 21, 37};
-  ASSERT_EQUAL(keys, keys_ref);
+  ASSERT_EQUAL(keys[0], 11);
+  ASSERT_EQUAL(keys[1], 21);
+  ASSERT_EQUAL(keys[2], 20);
+  ASSERT_EQUAL(keys[3], 21);
+  ASSERT_EQUAL(keys[4], 37);
 
-  Vector values_ref{0, 2, 3, 4, 7};
-  ASSERT_EQUAL(values, values_ref);
+  ASSERT_EQUAL(values[0], 0);
+  ASSERT_EQUAL(values[1], 2);
+  ASSERT_EQUAL(values[2], 3);
+  ASSERT_EQUAL(values[3], 4);
+  ASSERT_EQUAL(values[4], 7);
 
   // test BinaryPredicate
   initialize_keys(keys);
@@ -181,20 +201,18 @@ void TestUniqueByKeySimple()
 
   ASSERT_EQUAL(new_last.first - keys.begin(), 3);
   ASSERT_EQUAL(new_last.second - values.begin(), 3);
-  keys_ref.resize(3);
-  keys.resize(3);
-  keys_ref = {11, 21, 37};
-  ASSERT_EQUAL(keys, keys_ref);
+  ASSERT_EQUAL(keys[0], 11);
+  ASSERT_EQUAL(keys[1], 21);
+  ASSERT_EQUAL(keys[2], 37);
 
-  values.resize(3);
-  values_ref.resize(3);
-  values_ref = {0, 2, 7};
-  ASSERT_EQUAL(values, values_ref);
+  ASSERT_EQUAL(values[0], 0);
+  ASSERT_EQUAL(values[1], 2);
+  ASSERT_EQUAL(values[2], 7);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestUniqueByKeySimple);
 
 template <typename Vector>
-void TestUniqueCopyByKeySimple()
+void TestUniqueCopyByKeySimple(void)
 {
   using T = typename Vector::value_type;
 
@@ -215,13 +233,17 @@ void TestUniqueCopyByKeySimple()
 
   ASSERT_EQUAL(new_last.first - output_keys.begin(), 5);
   ASSERT_EQUAL(new_last.second - output_values.begin(), 5);
-  output_keys.resize(5);
-  output_values.resize(5);
-  Vector keys_ref{11, 21, 20, 21, 37};
-  ASSERT_EQUAL(output_keys, keys_ref);
+  ASSERT_EQUAL(output_keys[0], 11);
+  ASSERT_EQUAL(output_keys[1], 21);
+  ASSERT_EQUAL(output_keys[2], 20);
+  ASSERT_EQUAL(output_keys[3], 21);
+  ASSERT_EQUAL(output_keys[4], 37);
 
-  Vector values_ref{0, 2, 3, 4, 7};
-  ASSERT_EQUAL(output_values, values_ref);
+  ASSERT_EQUAL(output_values[0], 0);
+  ASSERT_EQUAL(output_values[1], 2);
+  ASSERT_EQUAL(output_values[2], 3);
+  ASSERT_EQUAL(output_values[3], 4);
+  ASSERT_EQUAL(output_values[4], 7);
 
   // test BinaryPredicate
   initialize_keys(keys);
@@ -232,14 +254,13 @@ void TestUniqueCopyByKeySimple()
 
   ASSERT_EQUAL(new_last.first - output_keys.begin(), 3);
   ASSERT_EQUAL(new_last.second - output_values.begin(), 3);
-  output_keys.resize(3);
-  output_values.resize(3);
-  keys_ref = {11, 21, 37};
-  ASSERT_EQUAL(output_keys, keys_ref);
+  ASSERT_EQUAL(output_keys[0], 11);
+  ASSERT_EQUAL(output_keys[1], 21);
+  ASSERT_EQUAL(output_keys[2], 37);
 
-  values_ref.resize(3);
-  values_ref = {0, 2, 7};
-  ASSERT_EQUAL(output_values, values_ref);
+  ASSERT_EQUAL(output_values[0], 0);
+  ASSERT_EQUAL(output_values[1], 2);
+  ASSERT_EQUAL(output_values[2], 7);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestUniqueCopyByKeySimple);
 
@@ -405,11 +426,6 @@ struct TestUniqueCopyByKeyToDiscardIterator
 };
 VariableUnitTest<TestUniqueCopyByKeyToDiscardIterator, IntegralTypes> TestUniqueCopyByKeyToDiscardIteratorInstance;
 
-// OpenMP has issues with these tests, NVIDIA/cccl#1715
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_OMP
-
-#  ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
-
 template <typename K>
 struct TestUniqueCopyByKeyLargeInput
 {
@@ -466,10 +482,6 @@ struct TestUniqueCopyByKeyLargeOutCount
   }
 };
 SimpleUnitTest<TestUniqueCopyByKeyLargeOutCount, IntegralTypes> TestUniqueCopyByKeyLargeOutCountInstance;
-
-#  endif // THRUST_FORCE_32_BIT_OFFSET_TYPE
-
-#endif // non-OpenMP backend
 
 // This test fails only on GCC 6
 #if !defined(__GNUC__) || __GNUC__ != 6

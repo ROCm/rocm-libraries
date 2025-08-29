@@ -29,33 +29,22 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/minmax.h>
+#  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
-#  include <thrust/detail/type_traits.h>
+#  include <thrust/distance.h>
 #  include <thrust/functional.h>
-#  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
+#  include <thrust/system/hip/detail/transform.h>
 #  include <thrust/system/hip/detail/util.h>
-#  include <thrust/type_traits/is_contiguous_iterator.h>
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
 #  include <cstdint>
-
-#  include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -69,10 +58,8 @@ THRUST_HOST_DEVICE OutputIterator adjacent_difference(
 
 namespace hip_rocprim
 {
-
 namespace __adjacent_difference
 {
-
 template <typename InputIt, typename OutputIt, typename BinaryOp>
 hipError_t THRUST_HIP_RUNTIME_FUNCTION __adjecent_difference(
   void* const temporary_storage,
@@ -114,12 +101,14 @@ hipError_t THRUST_HIP_RUNTIME_FUNCTION __adjecent_difference(
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename BinaryOp>
-OutputIt THRUST_HIP_RUNTIME_FUNCTION
+static OutputIt THRUST_HIP_RUNTIME_FUNCTION
 adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryOp binary_op)
 {
-  const auto num_items     = static_cast<std::size_t>(thrust::distance(first, last));
-  std::size_t storage_size = 0;
-  hipStream_t stream       = hip_rocprim::stream(policy);
+  using size_type = typename iterator_traits<InputIt>::difference_type;
+
+  size_type num_items = thrust::distance(first, last);
+  size_t storage_size = 0;
+  hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
   if (num_items <= 0)
@@ -127,16 +116,18 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
     return result;
   }
 
-  using UnwrapInputIt  = thrust::try_unwrap_contiguous_iterator_t<InputIt>;
-  using UnwrapOutputIt = thrust::try_unwrap_contiguous_iterator_t<OutputIt>;
+  // Check if iterators can be compared
+  using unwrap_input_iterator  = thrust::try_unwrap_contiguous_iterator_t<InputIt>;
+  using unwrap_output_iterator = thrust::try_unwrap_contiguous_iterator_t<OutputIt>;
 
-  using InputValueT  = thrust::iterator_value_t<UnwrapInputIt>;
-  using OutputValueT = thrust::iterator_value_t<UnwrapOutputIt>;
+  using input_value_type  = thrust::iterator_value_t<unwrap_input_iterator>;
+  using output_value_type = thrust::iterator_value_t<unwrap_output_iterator>;
 
   constexpr bool can_compare_iterators =
-    _THRUST_STD::is_pointer<UnwrapInputIt>::value && _THRUST_STD::is_pointer<UnwrapOutputIt>::value
-    && std::is_same<InputValueT, OutputValueT>::value;
+    std::is_pointer<unwrap_input_iterator>::value && std::is_pointer<unwrap_output_iterator>::value
+    && std::is_same<input_value_type, output_value_type>::value;
 
+  // Unwrap iterators to make them comparable
   auto first_unwrap  = thrust::try_unwrap_contiguous_iterator(first);
   auto result_unwrap = thrust::try_unwrap_contiguous_iterator(result);
 
@@ -173,7 +164,7 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
       comparable),
     "adjacent_difference failed on 2nd step");
 
-  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "adjacent_difference failed to synchronize");
+  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy));
 
   return result + num_items;
 }
@@ -184,9 +175,8 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
 // Thrust API entry points
 //-------------------------
 
-THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class OutputIt, class BinaryOp>
-OutputIt THRUST_HOST_DEVICE
+OutputIt THRUST_HIP_FUNCTION
 adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryOp binary_op)
 {
   // struct workaround is required for HIP-clang
@@ -213,7 +203,7 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_HOST_DEVICE
+OutputIt THRUST_HIP_FUNCTION
 adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
   using input_type = typename iterator_traits<InputIt>::value_type;
@@ -224,6 +214,4 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
 THRUST_NAMESPACE_END
 
 //
-#  include <thrust/adjacent_difference.h>
-#  include <thrust/memory.h>
-#endif
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

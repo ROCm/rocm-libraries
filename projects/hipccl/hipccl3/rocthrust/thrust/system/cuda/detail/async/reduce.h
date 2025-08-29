@@ -33,18 +33,11 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if _CCCL_STD_VER >= 2017
+#if THRUST_CPP_DIALECT >= 2017
 
-#  if _CCCL_HAS_CUDA_COMPILER
+#  ifdef _CCCL_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -53,12 +46,10 @@
 #    include <thrust/system/cuda/detail/async/customization.h>
 #    include <thrust/system/cuda/detail/reduce.h>
 #    include <thrust/system/cuda/future.h>
-
-#    include <cuda/std/type_traits>
+#    include <thrust/type_traits/remove_cvref.h>
 
 #    include <type_traits>
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -69,10 +60,10 @@ namespace detail
 {
 
 template <typename DerivedPolicy, typename ForwardIt, typename Size, typename T, typename BinaryOp>
-unique_eager_future<::cuda::std::remove_cvref_t<T>>
+unique_eager_future<remove_cvref_t<T>>
 async_reduce_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, T init, BinaryOp op)
 {
-  using U = ::cuda::std::remove_cvref_t<T>;
+  using U = remove_cvref_t<T>;
 
   auto const device_alloc = get_async_device_allocator(policy);
 
@@ -160,7 +151,7 @@ template <typename DerivedPolicy, typename ForwardIt, typename Size, typename Ou
 unique_eager_event async_reduce_into_n(
   execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt output, T init, BinaryOp op)
 {
-  using U = ::cuda::std::remove_cvref_t<T>;
+  using U = remove_cvref_t<T>;
 
   auto const device_alloc = get_async_device_allocator(policy);
 
@@ -228,7 +219,6 @@ auto async_reduce_into(
 
 } // namespace cuda_cub
 
-_CCCL_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // _CCCL_CUDA_COMPILER

@@ -20,11 +20,7 @@
 
 #include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
-
-void TestDeviceReferenceConstructorFromDeviceReference()
+void TestDeviceReferenceConstructorFromDeviceReference(void)
 {
   using T = int;
 
@@ -49,7 +45,7 @@ void TestDeviceReferenceConstructorFromDeviceReference()
 }
 DECLARE_UNITTEST(TestDeviceReferenceConstructorFromDeviceReference);
 
-void TestDeviceReferenceConstructorFromDevicePointer()
+void TestDeviceReferenceConstructorFromDevicePointer(void)
 {
   using T = int;
 
@@ -75,7 +71,7 @@ void TestDeviceReferenceConstructorFromDevicePointer()
 }
 DECLARE_UNITTEST(TestDeviceReferenceConstructorFromDevicePointer);
 
-void TestDeviceReferenceAssignmentFromDeviceReference()
+void TestDeviceReferenceAssignmentFromDeviceReference(void)
 {
   // test same types
   using T0 = int;
@@ -105,7 +101,7 @@ void TestDeviceReferenceAssignmentFromDeviceReference()
 }
 DECLARE_UNITTEST(TestDeviceReferenceAssignmentFromDeviceReference);
 
-void TestDeviceReferenceManipulation()
+void TestDeviceReferenceManipulation(void)
 {
   using T1 = int;
 
@@ -228,7 +224,7 @@ void TestDeviceReferenceManipulation()
 }
 DECLARE_UNITTEST(TestDeviceReferenceManipulation);
 
-void TestDeviceReferenceSwap()
+void TestDeviceReferenceSwap(void)
 {
   using T = int;
 
@@ -239,9 +235,8 @@ void TestDeviceReferenceSwap()
   ref1 = 7;
   ref2 = 13;
 
-  // test ADL two-step swap
-  using _THRUST_STD::swap;
-  swap(ref1, ref2);
+  // test thrust::swap()
+  thrust::swap(ref1, ref2);
   ASSERT_EQUAL(13, ref1);
   ASSERT_EQUAL(7, ref2);
 

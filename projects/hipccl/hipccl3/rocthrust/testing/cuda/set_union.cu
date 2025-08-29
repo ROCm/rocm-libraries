@@ -40,9 +40,16 @@ void TestSetUnionDevice(ExecutionPolicy exec)
   using Vector   = thrust::device_vector<int>;
   using Iterator = typename Vector::iterator;
 
-  Vector a{0, 2, 4}, b{0, 3, 3, 4};
+  // clang-format off
+  Vector a(3), b(4);
 
-  Vector ref{0, 2, 3, 3, 4};
+  a[0] = 0; a[1] = 2; a[2] = 4;
+  b[0] = 0; b[1] = 3; b[2] = 3; b[3] = 4;
+
+  Vector ref(5);
+  ref[0] = 0; ref[1] = 2; ref[2] = 3; ref[3] = 3; ref[4] = 4;
+  // clang-format on
+
   Vector result(5);
   thrust::device_vector<Iterator> end_vec(1);
 
@@ -74,9 +81,16 @@ void TestSetUnionCudaStreams()
   using Vector   = thrust::device_vector<int>;
   using Iterator = Vector::iterator;
 
-  Vector a{0, 2, 4}, b{0, 3, 3, 4};
+  // clang-format off
+  Vector a(3), b(4);
 
-  Vector ref{0, 2, 3, 3, 4};
+  a[0] = 0; a[1] = 2; a[2] = 4;
+  b[0] = 0; b[1] = 3; b[2] = 3; b[3] = 4;
+
+  Vector ref(5);
+  ref[0] = 0; ref[1] = 2; ref[2] = 3; ref[3] = 3; ref[4] = 4;
+  // clang-format on
+
   Vector result(5);
 
   cudaStream_t s;

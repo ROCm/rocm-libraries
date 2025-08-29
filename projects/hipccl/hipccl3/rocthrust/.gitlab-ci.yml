@@ -228,7 +228,6 @@ build:windows:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=OFF
       -D BUILD_BENCHMARK=OFF
-      -D CMAKE_TOOLCHAIN_FILE=$CI_PROJECT_DIR/toolchain-windows.cmake
       -D CMAKE_CXX_FLAGS=-Wno-deprecated-declarations
       -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
       -D CMAKE_INSTALL_PREFIX:PATH="$CI_PROJECT_DIR/build/install"
@@ -379,8 +378,6 @@ test-bitwise-repro:
 
 .rocm-windows:test:
   extends:
-    - .deps:rocm-windows
-    - .deps:visual-studio-devshell
     - .gpus:rocm-windows
     - .rules:test
   stage: test
@@ -439,21 +436,20 @@ build:cuda-and-omp:
   tags:
     - build
   variables:
-    CCCL_GIT_BRANCH: v2.8.5
+    CCCL_GIT_BRANCH: v2.7.0
     CCCL_DIR: ${CI_PROJECT_DIR}/cccl
   needs: []
   script:
     - git clone -b $CCCL_GIT_BRANCH https://github.com/NVIDIA/cccl.git $CCCL_DIR
     # Replace CCCL Thrust headers with rocThrust headers
-    - rm -r $CCCL_DIR/thrust/thrust
+    - rm -R $CCCL_DIR/thrust/thrust
     - cp -r $CI_PROJECT_DIR/thrust $CCCL_DIR/thrust
-    - sed -i '/include(cmake\/ThrustAddSubdir.cmake)/i \  include(../cmake/CCCLAddSubdirHelper.cmake)' $CCCL_DIR/thrust/CMakeLists.txt
+    - cp $CI_PROJECT_DIR/testing/type_traits.cu $CCCL_DIR/thrust/testing
     # Build tests and examples from CCCL Thrust
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
       -D CMAKE_CUDA_ARCHITECTURES="$GPU_TARGETS"
-      -D CCCL_SOURCE_DIR="$CCCL_DIR"
       -D THRUST_ENABLE_TESTING=ON
       -D THRUST_ENABLE_EXAMPLES=ON
       -D THRUST_ENABLE_BENCHMARKS=OFF

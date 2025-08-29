@@ -33,13 +33,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/reverse_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -156,7 +149,7 @@ class reverse_iterator : public detail::reverse_iterator_base<BidirectionalItera
 private:
   using super_t = typename thrust::detail::reverse_iterator_base<BidirectionalIterator>::type;
 
-  friend class iterator_core_access;
+  friend class thrust::iterator_core_access;
   /*! \endcond
    */
 

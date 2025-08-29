@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -294,7 +287,7 @@ OutputIterator remove_copy(InputIterator first, InputIterator last, OutputIterat
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -364,7 +357,7 @@ THRUST_HOST_DEVICE ForwardIterator remove_if(
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -439,7 +432,7 @@ ForwardIterator remove_if(ForwardIterator first, ForwardIterator last, Predicate
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -499,7 +492,7 @@ THRUST_HOST_DEVICE OutputIterator remove_copy_if(
  *  ...
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -565,7 +558,7 @@ OutputIterator remove_copy_if(InputIterator first, InputIterator last, OutputIte
  *  int A[N] = {1, 4, 2, 8, 5, 7};
  *  int S[N] = {0, 1, 1, 1, 0, 0};
  *
- *  int *new_end = thrust::remove_if(thrust::host, A, A + N, S, ::internal::identity{});
+ *  int *new_end = thrust::remove_if(thrust::host, A, A + N, S, thrust::identity<int>());
  *  // The first three values of A are now {1, 5, 7}
  *  // Values beyond new_end are unspecified
  *  \endcode
@@ -623,7 +616,7 @@ THRUST_HOST_DEVICE ForwardIterator remove_if(
  *  int A[N] = {1, 4, 2, 8, 5, 7};
  *  int S[N] = {0, 1, 1, 1, 0, 0};
  *
- *  int *new_end = thrust::remove_if(A, A + N, S, ::internal::identity{});
+ *  int *new_end = thrust::remove_if(A, A + N, S, thrust::identity<int>());
  *  // The first three values of A are now {1, 5, 7}
  *  // Values beyond new_end are unspecified
  *  \endcode
@@ -683,7 +676,7 @@ ForwardIterator remove_if(ForwardIterator first, ForwardIterator last, InputIter
  *  int V[N] = {-2, 0, -1, 0, 1, 2};
  *  int S[N] = { 1, 1,  0, 1, 0, 1};
  *  int result[2];
- *  thrust::remove_copy_if(thrust::host, V, V + N, S, result, ::internal::identity{});
+ *  thrust::remove_copy_if(thrust::host, V, V + N, S, result, thrust::identity<int>());
  *  // V remains {-2, 0, -1, 0, 1, 2}
  *  // result is now {-1, 1}
  *  \endcode
@@ -745,7 +738,7 @@ THRUST_HOST_DEVICE OutputIterator remove_copy_if(
  *  int V[N] = {-2, 0, -1, 0, 1, 2};
  *  int S[N] = { 1, 1,  0, 1, 0, 1};
  *  int result[2];
- *  thrust::remove_copy_if(V, V + N, S, result, ::internal::identity{});
+ *  thrust::remove_copy_if(V, V + N, S, result, thrust::identity<int>());
  *  // V remains {-2, 0, -1, 0, 1, 2}
  *  // result is now {-1, 1}
  *  \endcode

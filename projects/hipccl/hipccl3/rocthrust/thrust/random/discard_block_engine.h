@@ -23,14 +23,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/random/detail/random_core_access.h>
 
 #include <cstdint>
@@ -66,7 +58,7 @@ namespace random
  *  #include <thrust/random/discard_block_engine.h>
  *  #include <iostream>
  *
- *  int main()
+ *  int main(void)
  *  {
  *    // create a discard_block_engine from minstd_rand, with a cycle length of 13
  *    // keep every first 10 values, and discard the next 3
@@ -130,19 +122,19 @@ public:
 
   /*! This constructor initializes a new \p discard_block_engine with a given seed.
    *
-   *  \param s The seed used to initialize this \p discard_block_engine's adapted base engine.
+   *  \param s The seed used to intialize this \p discard_block_engine's adapted base engine.
    */
   THRUST_HOST_DEVICE explicit discard_block_engine(result_type s);
 
   /*! This method initializes the state of this \p discard_block_engine's adapted base engine
    *  by using its \p default_seed value.
    */
-  THRUST_HOST_DEVICE void seed();
+  THRUST_HOST_DEVICE void seed(void);
 
   /*! This method initializes the state of this \p discard_block_engine's adapted base engine
    *  by using the given seed.
    *
-   *  \param s The seed with which to initialize this \p discard_block_engine's adapted base engine.
+   *  \param s The seed with which to intialize this \p discard_block_engine's adapted base engine.
    */
   THRUST_HOST_DEVICE void seed(result_type s);
 
@@ -168,7 +160,7 @@ public:
    *
    *  \return A const reference to the base engine this \p discard_block_engine adapts.
    */
-  THRUST_HOST_DEVICE const base_type& base() const;
+  THRUST_HOST_DEVICE const base_type& base(void) const;
 
   /*! \cond
    */

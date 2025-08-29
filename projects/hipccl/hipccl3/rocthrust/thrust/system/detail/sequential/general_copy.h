@@ -22,19 +22,8 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/type_traits.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -47,7 +36,7 @@ namespace general_copy_detail
 {
 
 template <typename T1, typename T2>
-struct lazy_is_assignable : _THRUST_STD::is_assignable<typename T1::type, typename T2::type>
+struct lazy_is_assignable : thrust::detail::is_assignable<typename T1::type, typename T2::type>
 {};
 
 // sometimes OutputIterator's reference type is reported as void
@@ -55,7 +44,7 @@ struct lazy_is_assignable : _THRUST_STD::is_assignable<typename T1::type, typena
 template <typename InputIterator, typename OutputIterator>
 struct reference_is_assignable
     : thrust::detail::eval_if<
-        _THRUST_STD::is_same<typename thrust::iterator_reference<OutputIterator>::type, void>::value,
+        thrust::detail::is_same<typename thrust::iterator_reference<OutputIterator>::type, void>::value,
         thrust::detail::true_type,
         lazy_is_assignable<thrust::iterator_reference<OutputIterator>, thrust::iterator_reference<InputIterator>>>::type
 {};
@@ -65,8 +54,9 @@ struct reference_is_assignable
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename OutputIterator, typename InputIterator>
-inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<reference_is_assignable<InputIterator, OutputIterator>::value>
-iter_assign(OutputIterator dst, InputIterator src)
+inline THRUST_HOST_DEVICE
+  typename thrust::detail::enable_if<reference_is_assignable<InputIterator, OutputIterator>::value>::type
+  iter_assign(OutputIterator dst, InputIterator src)
 {
   *dst = *src;
 }

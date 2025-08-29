@@ -37,7 +37,7 @@ namespace detail
 {
 template <typename T,
           typename U,
-          std::enable_if_t<::rocprim::is_integral<T>::value&& ::rocprim::is_unsigned<U>::value, int> = 0>
+          std::enable_if_t<thrust::detail::is_integral<T>::value && std::is_unsigned<U>::value, int> = 0>
 THRUST_HOST_DEVICE inline constexpr auto ceiling_div(const T a, const U b)
 {
   return a / b + (a % b > 0 ? 1 : 0);

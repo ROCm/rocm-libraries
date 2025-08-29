@@ -23,13 +23,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/iterator/detail/transform_input_output_iterator.inl>
 
 THRUST_NAMESPACE_BEGIN
@@ -102,7 +95,7 @@ class transform_input_output_iterator
 public:
   using super_t = typename detail::transform_input_output_iterator_base<InputFunction, OutputFunction, Iterator>::type;
 
-  friend class iterator_core_access;
+  friend class thrust::iterator_core_access;
   /*! \endcond
    */
 

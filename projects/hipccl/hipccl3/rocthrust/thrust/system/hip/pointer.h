@@ -1,4 +1,4 @@
-/*
+/******************************************************************************
  *  Copyright 2008-2020 NVIDIA Corporation
  *  Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
@@ -23,18 +23,10 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/pointer.h>
 #include <thrust/detail/reference.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-
-#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -50,7 +42,7 @@ namespace hip_rocprim
  *  \p hip::pointer can be created with the function \p hip::malloc, or by
  *  explicitly calling its constructor with a raw pointer.
  *
- *  The raw pointer encapsulated by a \p hip::pointer may be obtained by either
+ *  The raw pointer encapsulated by a \p hip::pointer may be obtained by eiter
  *  its <tt>get</tt> member function or the \p raw_pointer_cast function.
  *
  *  \note \p hip::pointer is not a "smart" pointer; it is the programmer's
@@ -75,7 +67,7 @@ using pointer = thrust::pointer<T, thrust::hip_rocprim::tag, thrust::tagged_refe
  *  or by explicitly calling its constructor with a raw pointer.
  *
  *  The raw pointer encapsulated by a \p hip::universal_pointer may be
- *  obtained by either its <tt>get</tt> member function or the \p
+ *  obtained by eiter its <tt>get</tt> member function or the \p
  *  raw_pointer_cast function.
  *
  *  \note \p hip::universal_pointer is not a "smart" pointer; it is the
@@ -102,7 +94,6 @@ template <typename T>
 using reference = thrust::tagged_reference<T, thrust::hip_rocprim::tag>;
 
 } // namespace hip_rocprim
-
 /*! \addtogroup system_backends Systems
  *  \ingroup system
  *  \{
@@ -112,7 +103,7 @@ using reference = thrust::tagged_reference<T, thrust::hip_rocprim::tag>;
  *  \brief \p thrust::system::hip is the namespace containing functionality
  *  for allocating, manipulating, and deallocating memory available to Thrust's
  *  HIP backend system. The identifiers are provided in a separate namespace
- *  underneath \p thrust::system for import convenience but are also
+ *  underneath <tt>thrust::system</tt> for import convenience but are also
  *  aliased in the top-level <tt>thrust::hip</tt> namespace for easy access.
  *
  */

@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/pointer.h>
 #include <thrust/detail/reference.h>
 #include <thrust/system/cuda/detail/execution_policy.h>
@@ -49,7 +42,7 @@ namespace cuda_cub
  *  \p cuda::pointer can be created with the function \p cuda::malloc, or by
  *  explicitly calling its constructor with a raw pointer.
  *
- *  The raw pointer encapsulated by a \p cuda::pointer may be obtained by either
+ *  The raw pointer encapsulated by a \p cuda::pointer may be obtained by eiter
  *  its <tt>get</tt> member function or the \p raw_pointer_cast function.
  *
  *  \note \p cuda::pointer is not a "smart" pointer; it is the programmer's
@@ -74,7 +67,7 @@ using pointer = thrust::pointer<T, thrust::cuda_cub::tag, thrust::tagged_referen
  *  or by explicitly calling its constructor with a raw pointer.
  *
  *  The raw pointer encapsulated by a \p cuda::universal_pointer may be
- *  obtained by either its <tt>get</tt> member function or the \p
+ *  obtained by eiter its <tt>get</tt> member function or the \p
  *  raw_pointer_cast function.
  *
  *  \note \p cuda::universal_pointer is not a "smart" pointer; it is the

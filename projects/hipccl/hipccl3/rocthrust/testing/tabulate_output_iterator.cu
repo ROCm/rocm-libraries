@@ -27,9 +27,9 @@
 #include <thrust/reduce.h>
 #include <thrust/sequence.h>
 
-#include <unittest/unittest.h>
+#include <type_traits>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include <unittest/unittest.h>
 
 template <typename OutItT>
 struct host_write_op
@@ -105,9 +105,9 @@ void TestTabulateOutputIterator()
   Vector output(num_items, T{42});
 
   // Use operator type that supports the targeted system
-  using op_t = typename _THRUST_STD::conditional<(_THRUST_STD::is_same<space, thrust::host_system_tag>::value),
-                                                 host_write_first_op<it_t>,
-                                                 device_write_first_op<it_t>>::type;
+  using op_t = typename std::conditional<(std::is_same<space, thrust::host_system_tag>::value),
+                                         host_write_first_op<it_t>,
+                                         device_write_first_op<it_t>>::type;
 
   // Construct tabulate_output_iterator
   op_t op{output.begin()};
@@ -146,16 +146,22 @@ void TestTabulateOutputIterator()
   thrust::tabulate_output_iterator<op_t> tabulate_out_it{op_t{out.begin()}};
 
   tabulate_out_it[1] = 2;
-  vector_t ref{42, 2, 42, 42};
-  ASSERT_EQUAL(out, ref);
+  ASSERT_EQUAL(out[0], 42);
+  ASSERT_EQUAL(out[1], 2);
+  ASSERT_EQUAL(out[2], 42);
+  ASSERT_EQUAL(out[3], 42);
 
   tabulate_out_it[3] = 0;
-  ref                = {42, 2, 42, 0};
-  ASSERT_EQUAL(out, ref);
+  ASSERT_EQUAL(out[0], 42);
+  ASSERT_EQUAL(out[1], 2);
+  ASSERT_EQUAL(out[2], 42);
+  ASSERT_EQUAL(out[3], 0);
 
   tabulate_out_it[1] = 4;
-  ref                = {42, 4, 42, 0};
-  ASSERT_EQUAL(out, ref);
+  ASSERT_EQUAL(out[0], 42);
+  ASSERT_EQUAL(out[1], 4);
+  ASSERT_EQUAL(out[2], 42);
+  ASSERT_EQUAL(out[3], 0);
 }
 
 DECLARE_UNITTEST(TestTabulateOutputIterator);

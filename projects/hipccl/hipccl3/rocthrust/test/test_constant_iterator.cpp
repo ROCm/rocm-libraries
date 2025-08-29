@@ -16,6 +16,7 @@
  */
 
 #include <thrust/copy.h>
+#include <thrust/device_vector.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/reduce.h>
 #include <thrust/transform.h>
@@ -23,7 +24,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#include _THRUST_STD_INCLUDE(type_traits)
+using namespace thrust;
 
 TESTS_DEFINE(ConstantIteratorTests, VectorSignedTestsParams);
 
@@ -34,11 +35,9 @@ TEST(ConstantIteratorTests, UsingHip)
   ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
-TEST(ConstantIteratorTests, TestConstantIteratorConstructFromConvertibleSystem)
+TEST(ConstantIteratorTests, ConstantIteratorConstructFromConvertibleSystem)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  using namespace thrust;
 
   constant_iterator<int> default_system(13);
 
@@ -49,11 +48,9 @@ TEST(ConstantIteratorTests, TestConstantIteratorConstructFromConvertibleSystem)
   ASSERT_EQ(*default_system, *device_system);
 }
 
-TEST(ConstantIteratorTests, TestConstantIteratorIncrement)
+TEST(ConstantIteratorTests, ConstantIteratorIncrement)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  using namespace thrust;
 
   constant_iterator<int> lhs(0, 0);
   constant_iterator<int> rhs(0, 0);
@@ -61,42 +58,22 @@ TEST(ConstantIteratorTests, TestConstantIteratorIncrement)
   ASSERT_EQ(0, lhs - rhs);
 
   lhs++;
-
   ASSERT_EQ(1, lhs - rhs);
 
   lhs++;
   lhs++;
-
   ASSERT_EQ(3, lhs - rhs);
 
   lhs += 5;
-
   ASSERT_EQ(8, lhs - rhs);
 
   lhs -= 10;
-
   ASSERT_EQ(-2, lhs - rhs);
 }
-static_assert(_THRUST_STD::is_trivially_copy_constructible<thrust::constant_iterator<int>>::value, "");
-static_assert(_THRUST_STD::is_trivially_copyable<thrust::constant_iterator<int>>::value, "");
 
-TEST(ConstantIteratorTests, TestConstantIteratorIncrementBig)
+TEST(ConstantIteratorTests, ConstantIteratorComparison)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  long long int n = 10000000000ULL;
-
-  thrust::constant_iterator<long long int> begin(1);
-  thrust::constant_iterator<long long int> end = begin + n;
-
-  ASSERT_EQ(thrust::distance(begin, end), n);
-}
-
-TEST(ConstantIteratorTests, TestConstantIteratorComparison)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  using namespace thrust;
 
   constant_iterator<int> iter1(0);
   constant_iterator<int> iter2(0);
@@ -125,8 +102,6 @@ TEST(ConstantIteratorTests, TestMakeConstantIterator)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using namespace thrust;
-
   // test one argument version
   constant_iterator<int> iter0 = make_constant_iterator<int>(13);
 
@@ -134,39 +109,37 @@ TEST(ConstantIteratorTests, TestMakeConstantIterator)
 
   // test two argument version
   constant_iterator<int, thrust::detail::intmax_t> iter1 = make_constant_iterator<int, thrust::detail::intmax_t>(13, 7);
-
   ASSERT_EQ(13, *iter1);
   ASSERT_EQ(7, iter1 - iter0);
 }
 
-TYPED_TEST(ConstantIteratorTests, TestConstantIteratorCopy)
+TYPED_TEST(ConstantIteratorTests, MakeConstantIterator)
 {
   using Vector = typename TestFixture::input_type;
-  using namespace thrust;
 
-  using ValueType = typename Vector::value_type;
-  using ConstIter = constant_iterator<ValueType>;
+  using ConstIter = constant_iterator<int>;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector result(4);
 
-  ConstIter first = make_constant_iterator<ValueType>(7);
+  ConstIter first = make_constant_iterator<int>(7);
   ConstIter last  = first + result.size();
-  thrust::copy(first, last, result.begin());
+  copy(first, last, result.begin());
 
-  Vector ref(4, 7);
-  ASSERT_EQ(ref, result);
-}
+  ASSERT_EQ(7, result[0]);
+  ASSERT_EQ(7, result[1]);
+  ASSERT_EQ(7, result[2]);
+  ASSERT_EQ(7, result[3]);
+};
 
-TYPED_TEST(ConstantIteratorTests, TestConstantIteratorTransform)
+TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   using Vector = typename TestFixture::input_type;
-  using namespace thrust;
+  using T      = typename Vector::value_type;
 
-  using T         = typename Vector::value_type;
   using ConstIter = constant_iterator<T>;
 
   Vector result(4);
@@ -177,28 +150,32 @@ TYPED_TEST(ConstantIteratorTests, TestConstantIteratorTransform)
 
   thrust::transform(first1, last1, result.begin(), thrust::negate<T>());
 
-  Vector ref(4, -7);
-  ASSERT_EQ(ref, result);
+  ASSERT_EQ(-7, result[0]);
+  ASSERT_EQ(-7, result[1]);
+  ASSERT_EQ(-7, result[2]);
+  ASSERT_EQ(-7, result[3]);
 
   thrust::transform(first1, last1, first2, result.begin(), thrust::plus<T>());
 
-  ref = Vector(4, 10);
-  ASSERT_EQ(ref, result);
-}
+  ASSERT_EQ(10, result[0]);
+  ASSERT_EQ(10, result[1]);
+  ASSERT_EQ(10, result[2]);
+  ASSERT_EQ(10, result[3]);
+};
 
-TYPED_TEST(ConstantIteratorTests, TestConstantIteratorReduce)
+TYPED_TEST(ConstantIteratorTests, ConstantIteratorReduce)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using namespace thrust;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
-  using T         = int;
   using ConstIter = constant_iterator<T>;
 
   ConstIter first = make_constant_iterator<T>(7);
   ConstIter last  = first + 4;
 
-  T sum = thrust::reduce(first, last);
+  T sum = reduce(first, last);
 
   ASSERT_EQ(sum, 4 * 7);
-}
+};

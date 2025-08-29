@@ -26,20 +26,28 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DIAG_PUSH
-THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
 template <class Vector>
-void TestGatherSimple()
+void TestGatherSimple(void)
 {
-  Vector map{6, 2, 1, 7, 2}; // gather indices
-  Vector src{0, 1, 2, 3, 4, 5, 6, 7}; // source vector
-  Vector dst(5, 0); // destination vector
+  Vector map(5); // gather indices
+  Vector src(8); // source vector
+  Vector dst(5); // destination vector
+
+  // clang-format off
+  map[0] = 6; map[1] = 2; map[2] = 1; map[3] = 7; map[4] = 2;
+  src[0] = 0; src[1] = 1; src[2] = 2; src[3] = 3; src[4] = 4; src[5] = 5; src[6] = 6; src[7] = 7;
+  dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0;
+  // clang-format on
 
   thrust::gather(map.begin(), map.end(), src.begin(), dst.begin());
 
-  Vector ref{6, 2, 1, 7, 2};
-  ASSERT_EQUAL(dst, ref);
+  ASSERT_EQUAL(dst[0], 6);
+  ASSERT_EQUAL(dst[1], 2);
+  ASSERT_EQUAL(dst[2], 1);
+  ASSERT_EQUAL(dst[3], 7);
+  ASSERT_EQUAL(dst[4], 2);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestGatherSimple);
 
@@ -144,17 +152,27 @@ void TestGatherToDiscardIterator(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestGatherToDiscardIterator);
 
 template <class Vector>
-void TestGatherIfSimple()
+void TestGatherIfSimple(void)
 {
-  Vector flg{0, 1, 0, 1, 0}; // predicate array
-  Vector map{6, 2, 1, 7, 2}; // gather indices
-  Vector src{0, 1, 2, 3, 4, 5, 6, 7}; // source vector
-  Vector dst(5, 0); // destination vector
+  Vector flg(5); // predicate array
+  Vector map(5); // gather indices
+  Vector src(8); // source vector
+  Vector dst(5); // destination vector
+
+  // clang-format off
+  flg[0] = 0; flg[1] = 1; flg[2] = 0; flg[3] = 1; flg[4] = 0;
+  map[0] = 6; map[1] = 2; map[2] = 1; map[3] = 7; map[4] = 2;
+  src[0] = 0; src[1] = 1; src[2] = 2; src[3] = 3; src[4] = 4; src[5] = 5; src[6] = 6; src[7] = 7;
+  dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0;
+  // clang-format on
 
   thrust::gather_if(map.begin(), map.end(), flg.begin(), src.begin(), dst.begin());
 
-  Vector ref{0, 2, 0, 7, 0};
-  ASSERT_EQUAL(dst, ref);
+  ASSERT_EQUAL(dst[0], 0);
+  ASSERT_EQUAL(dst[1], 2);
+  ASSERT_EQUAL(dst[2], 0);
+  ASSERT_EQUAL(dst[3], 7);
+  ASSERT_EQUAL(dst[4], 0);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestGatherIfSimple);
 
@@ -324,7 +342,7 @@ void TestGatherIfToDiscardIterator(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestGatherIfToDiscardIterator);
 
 template <typename Vector>
-void TestGatherCountingIterator()
+void TestGatherCountingIterator(void)
 {
   Vector source(10);
   thrust::sequence(source.begin(), source.end(), 0);
@@ -360,4 +378,4 @@ void TestGatherCountingIterator()
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestGatherCountingIterator);
 
-THRUST_DIAG_POP
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END

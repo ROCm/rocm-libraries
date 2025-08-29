@@ -23,13 +23,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/vector_base.h>
 
@@ -72,7 +65,7 @@ public:
 
   /*! This constructor creates an empty \p host_vector.
    */
-  THRUST_HOST host_vector()
+  THRUST_HOST host_vector(void)
       : Parent()
   {}
 
@@ -87,7 +80,7 @@ public:
    */
   //  Define an empty destructor to explicitly specify
   //  its execution space qualifier, as a workaround for nvcc warning
-  THRUST_HOST ~host_vector() {}
+  THRUST_HOST ~host_vector(void) {}
 
   /*! This constructor creates a \p host_vector with the given
    *  size.
@@ -290,12 +283,12 @@ public:
 
     /*! Returns the number of elements in this vector.
      */
-    size_type size() const;
+    size_type size(void) const;
 
     /*! Returns the size() of the largest possible vector.
      *  \return The largest possible return value of size().
      */
-    size_type max_size() const;
+    size_type max_size(void) const;
 
     /*! \brief If n is less than or equal to capacity(), this call has no effect.
      *         Otherwise, this method is a request for allocation of additional memory. If
@@ -308,12 +301,12 @@ public:
     /*! Returns the number of elements which have been reserved in this
      *  vector.
      */
-    size_type capacity() const;
+    size_type capacity(void) const;
 
     /*! This method shrinks the capacity of this vector to exactly
      *  fit its elements.
      */
-    void shrink_to_fit();
+    void shrink_to_fit(void);
 
     /*! \brief Subscript access to the data contained in this vector_dev.
      *  \param n The index of the element for which data should be accessed.
@@ -339,119 +332,119 @@ public:
      *  this vector.
      *  \return mStart
      */
-    iterator begin();
+    iterator begin(void);
 
     /*! This method returns a const_iterator pointing to the beginning
      *  of this vector.
      *  \return mStart
      */
-    const_iterator begin() const;
+    const_iterator begin(void) const;
 
     /*! This method returns a const_iterator pointing to the beginning
      *  of this vector.
      *  \return mStart
      */
-    const_iterator cbegin() const;
+    const_iterator cbegin(void) const;
 
     /*! This method returns a reverse_iterator pointing to the beginning of
      *  this vector's reversed sequence.
      *  \return A reverse_iterator pointing to the beginning of this
      *          vector's reversed sequence.
      */
-    reverse_iterator rbegin();
+    reverse_iterator rbegin(void);
 
     /*! This method returns a const_reverse_iterator pointing to the beginning of
      *  this vector's reversed sequence.
      *  \return A const_reverse_iterator pointing to the beginning of this
      *          vector's reversed sequence.
      */
-    const_reverse_iterator rbegin() const;
+    const_reverse_iterator rbegin(void) const;
 
     /*! This method returns a const_reverse_iterator pointing to the beginning of
      *  this vector's reversed sequence.
      *  \return A const_reverse_iterator pointing to the beginning of this
      *          vector's reversed sequence.
      */
-    const_reverse_iterator crbegin() const;
+    const_reverse_iterator crbegin(void) const;
 
     /*! This method returns an iterator pointing to one element past the
      *  last of this vector.
      *  \return begin() + size().
      */
-    iterator end();
+    iterator end(void);
 
     /*! This method returns a const_iterator pointing to one element past the
      *  last of this vector.
      *  \return begin() + size().
      */
-    const_iterator end() const;
+    const_iterator end(void) const;
 
     /*! This method returns a const_iterator pointing to one element past the
      *  last of this vector.
      *  \return begin() + size().
      */
-    const_iterator cend() const;
+    const_iterator cend(void) const;
 
     /*! This method returns a reverse_iterator pointing to one element past the
      *  last of this vector's reversed sequence.
      *  \return rbegin() + size().
      */
-    reverse_iterator rend();
+    reverse_iterator rend(void);
 
     /*! This method returns a const_reverse_iterator pointing to one element past the
      *  last of this vector's reversed sequence.
      *  \return rbegin() + size().
      */
-    const_reverse_iterator rend() const;
+    const_reverse_iterator rend(void) const;
 
     /*! This method returns a const_reverse_iterator pointing to one element past the
      *  last of this vector's reversed sequence.
      *  \return rbegin() + size().
      */
-    const_reverse_iterator crend() const;
+    const_reverse_iterator crend(void) const;
 
     /*! This method returns a const_reference referring to the first element of this
      *  vector.
      *  \return The first element of this vector.
      */
-    const_reference front() const;
+    const_reference front(void) const;
 
     /*! This method returns a reference pointing to the first element of this
      *  vector.
      *  \return The first element of this vector.
      */
-    reference front();
+    reference front(void);
 
     /*! This method returns a const reference pointing to the last element of
      *  this vector.
      *  \return The last element of this vector.
      */
-    const_reference back() const;
+    const_reference back(void) const;
 
     /*! This method returns a reference referring to the last element of
      *  this vector_dev.
      *  \return The last element of this vector.
      */
-    reference back();
+    reference back(void);
 
     /*! This method returns a pointer to this vector's first element.
      *  \return A pointer to the first element of this vector.
      */
-    pointer data();
+    pointer data(void);
 
     /*! This method returns a const_pointer to this vector's first element.
      *  \return a const_pointer to the first element of this vector.
      */
-    const_pointer data() const;
+    const_pointer data(void) const;
 
     /*! This method resizes this vector to 0.
      */
-    void clear();
+    void clear(void);
 
     /*! This method returns true iff size() == 0.
      *  \return true if size() == 0; false, otherwise.
      */
-    bool empty() const;
+    bool empty(void) const;
 
     /*! This method appends the given element to the end of this vector.
      *  \param x The element to append.
@@ -461,7 +454,7 @@ public:
     /*! This method erases the last element of this vector, invalidating
      *  all iterators and references to it.
      */
-    void pop_back();
+    void pop_back(void);
 
     /*! This method swaps the contents of this host_vector with another vector.
      *  \param v The vector with which to swap.
@@ -528,20 +521,21 @@ public:
     void assign(InputIterator first, InputIterator last);
 
     /*! This method returns a copy of this vector's allocator.
-     *  \return A copy of the allocator used by this vector.
+     *  \return A copy of the alloctor used by this vector.
      */
-    allocator_type get_allocator() const;
+    allocator_type get_allocator(void) const;
 #endif // end doxygen-only members
-
-  /*! Exchanges the values of two vectors.
-   *  \p x The first \p host_vector of interest.
-   *  \p y The second \p host_vector of interest.
-   */
-  friend void swap(host_vector& a, host_vector& b) noexcept(noexcept(a.swap(b)))
-  {
-    a.swap(b);
-  }
 };
+
+/*! Exchanges the values of two vectors.
+ *  \p x The first \p host_vector of interest.
+ *  \p y The second \p host_vector of interest.
+ */
+template <typename T, typename Alloc>
+void swap(host_vector<T, Alloc>& a, host_vector<T, Alloc>& b)
+{
+  a.swap(b);
+}
 
 /*! \}
  */

@@ -23,7 +23,6 @@
 #include <thrust/shuffle.h>
 #include <thrust/sort.h>
 
-#include <algorithm>
 #include <limits>
 #include <map>
 
@@ -408,7 +407,12 @@ constexpr double CephesFunctions::C[];
 template <typename Vector>
 void TestShuffleSimple()
 {
-  Vector data{0, 1, 2, 3, 4};
+  Vector data(5);
+  data[0] = 0;
+  data[1] = 1;
+  data[2] = 2;
+  data[3] = 3;
+  data[4] = 4;
   Vector shuffled(data.begin(), data.end());
   thrust::default_random_engine g(2);
   thrust::shuffle(shuffled.begin(), shuffled.end(), g);
@@ -422,7 +426,12 @@ DECLARE_VECTOR_UNITTEST(TestShuffleSimple);
 template <typename Vector>
 void TestShuffleCopySimple()
 {
-  Vector data{0, 1, 2, 3, 4};
+  Vector data(5);
+  data[0] = 0;
+  data[1] = 1;
+  data[2] = 2;
+  data[3] = 3;
+  data[4] = 4;
   Vector shuffled(5);
   thrust::default_random_engine g(2);
   thrust::shuffle_copy(data.begin(), data.end(), shuffled.begin(), g);
@@ -453,7 +462,10 @@ DECLARE_VARIABLE_UNITTEST(TestHostDeviceIdentical);
 template <typename T>
 void TestFunctionIsBijection(size_t m)
 {
+  thrust::default_random_engine host_g(0xD5);
   thrust::default_random_engine device_g(0xD5);
+
+  thrust::system::detail::generic::feistel_bijection host_f(m, host_g);
   thrust::system::detail::generic::feistel_bijection device_f(m, device_g);
 
   const size_t total_length = device_f.nearest_power_of_two();
@@ -461,7 +473,7 @@ void TestFunctionIsBijection(size_t m)
   {
     return;
   }
-  ASSERT_LEQUAL(total_length, (std::max)(m * 2, size_t(16))); // Check the rounded up size is at most double the input
+  ASSERT_LEQUAL(total_length, std::max(m * 2, size_t(16))); // Check the rounded up size is at most double the input
 
   auto device_result_it = thrust::make_transform_iterator(thrust::make_counting_iterator(T(0)), device_f);
 
@@ -477,7 +489,6 @@ void TestFunctionIsBijection(size_t m)
   ASSERT_EQUAL(true, thrust::equal(unpermuted.begin(), unpermuted.end(), thrust::make_counting_iterator(T(0))));
 }
 DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestFunctionIsBijection);
-
 void TestBijectionLength()
 {
   thrust::default_random_engine g(0xD5);

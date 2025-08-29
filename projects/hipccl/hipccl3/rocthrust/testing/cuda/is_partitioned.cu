@@ -32,7 +32,7 @@ is_partitioned_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Predi
 template <typename T>
 struct is_even
 {
-  _CCCL_HOST_DEVICE bool operator()(T x) const
+  THRUST_HOST_DEVICE bool operator()(T x) const
   {
     return ((int) x % 2) == 0;
   }
@@ -97,23 +97,23 @@ void TestIsPartitionedCudaStreams()
 
   // empty partition
   ASSERT_EQUAL_QUIET(true,
-                     thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.begin(), ::cuda::std::identity{}));
+                     thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.begin(), thrust::identity<int>()));
 
   // one element true partition
   ASSERT_EQUAL_QUIET(
-    true, thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.begin() + 1, ::cuda::std::identity{}));
+    true, thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.begin() + 1, thrust::identity<int>()));
 
   // just true partition
   ASSERT_EQUAL_QUIET(
-    true, thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.begin() + 2, ::cuda::std::identity{}));
+    true, thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.begin() + 2, thrust::identity<int>()));
 
   // both true & false partitions
   ASSERT_EQUAL_QUIET(true,
-                     thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.end(), ::cuda::std::identity{}));
+                     thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.end(), thrust::identity<int>()));
 
   // one element false partition
   ASSERT_EQUAL_QUIET(true,
-                     thrust::is_partitioned(thrust::cuda::par.on(s), v.begin() + 3, v.end(), ::cuda::std::identity{}));
+                     thrust::is_partitioned(thrust::cuda::par.on(s), v.begin() + 3, v.end(), thrust::identity<int>()));
 
   v[0] = 1;
   v[1] = 0;
@@ -122,7 +122,7 @@ void TestIsPartitionedCudaStreams()
 
   // not partitioned
   ASSERT_EQUAL_QUIET(false,
-                     thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.end(), ::cuda::std::identity{}));
+                     thrust::is_partitioned(thrust::cuda::par.on(s), v.begin(), v.end(), thrust::identity<int>()));
 
   cudaStreamDestroy(s);
 }

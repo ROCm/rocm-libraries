@@ -16,37 +16,37 @@
  */
 
 #include <thrust/detail/static_assert.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
-#include <thrust/type_traits/is_contiguous_iterator.h>
 
 #include <array>
-#include <deque>
 #include <iterator>
-#include <list>
-#include <map>
-#include <set>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include <unittest/unittest.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#  include <utility>
+#if THRUST_CPP_DIALECT >= 2017
+#  include <string_view>
 #endif
+#include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+#include <thrust/type_traits/is_contiguous_iterator.h>
+
+#include <deque>
+#include <list>
+#include <map>
+#include <set>
 
 THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::string::iterator>::value));
 
 THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::wstring::iterator>::value));
 
+#if THRUST_CPP_DIALECT >= 2017
 THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::string_view::iterator>::value));
 
 THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::wstring_view::iterator>::value));
+#endif
 
 THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<std::vector<bool>::iterator>::value));
 
@@ -107,7 +107,7 @@ template <typename IteratorT, typename PointerT, typename expected_unwrapped_typ
 struct check_unwrapped_iterator
 {
   using unwrapped_t =
-    _THRUST_STD::remove_reference_t<decltype(thrust::try_unwrap_contiguous_iterator(_THRUST_STD::declval<IteratorT>()))>;
+    typename std::remove_reference<decltype(thrust::try_unwrap_contiguous_iterator(std::declval<IteratorT>()))>::type;
 
   static constexpr bool value =
     std::is_same<expected_unwrapped_type, expect_pointer>::value
