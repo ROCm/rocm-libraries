@@ -44,7 +44,6 @@ namespace rocRoller
             }
             ExpressionPtr orig = x;
 
-            x = lowerBitFieldCombine(x);
             x = convertPropagation(x);
             x = fastDivision(x, m_context);
             x = simplify(x);

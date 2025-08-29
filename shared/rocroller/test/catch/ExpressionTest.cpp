@@ -2544,4 +2544,95 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Code gen for BitFieldCombine", "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        auto ra = std::make_shared<Register::Value>(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        ra->setName("ra");
+        ra->allocateNow();
+
+        auto rb = std::make_shared<Register::Value>(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        rb->setName("rb");
+        rb->allocateNow();
+
+        auto srcExpr = ra->expression();
+        auto dstExpr = rb->expression();
+
+        auto const srcOffset = 10u;
+        auto const dstOffset = 4u;
+        auto const width     = 7u;
+
+        SECTION("Lowering Basic")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(
+                Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width));
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            // 130048     = 00000000000000011111110000000000
+            // 4294965263 = 11111111111111111111100000001111
+            std::string expected = R"(
+                v_and_b32 v2, 130048, v0
+                v_and_b32 v3, 4294965263, v1
+                v_lshrrev_b32 v4, 6, v2
+                v_or_b32 v2, v4, v3
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with srcIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(
+                Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width, true));
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_ashrrev_i32 v2, 6, v0
+                v_and_b32 v3, 4294965263, v1
+                v_or_b32 v4, v2, v3
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with dstIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitFieldCombine(
+                srcExpr, dstExpr, srcOffset, dstOffset, width, std::nullopt, true));
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_and_b32 v2, 130048, v0
+                v_lshrrev_b32 v3, 6, v2
+                v_or_b32 v2, v3, v1
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with srcIsZero & dstIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitFieldCombine(
+                srcExpr, dstExpr, srcOffset, dstOffset, width, true, true));
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_ashrrev_i32 v2, 6, v0
+                v_or_b32 v3, v2, v1
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+    }
 }

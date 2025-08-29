@@ -268,9 +268,9 @@ namespace rocRoller
 
             explicit BitFieldCombine(ExpressionPtr       src /* lhs */,
                                      ExpressionPtr       dst /* rhs */,
-                                     int                 srcOffset,
-                                     int                 dstOffset,
-                                     int                 width,
+                                     unsigned            srcOffset,
+                                     unsigned            dstOffset,
+                                     unsigned            width,
                                      std::optional<bool> srcIsZero = std::nullopt,
                                      std::optional<bool> dstIsZero = std::nullopt,
                                      std::string         comment   = "")
@@ -299,9 +299,9 @@ namespace rocRoller
                 return *this;
             }
 
-            int srcOffset;
-            int dstOffset;
-            int width;
+            unsigned srcOffset;
+            unsigned dstOffset;
+            unsigned width;
 
             // if srcIsZero sets to true, that means bits outside [srcOffset:srcOffset+width-1] are 0
             std::optional<bool> srcIsZero;
