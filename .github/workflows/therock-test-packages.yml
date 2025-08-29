@@ -33,7 +33,7 @@ jobs:
           PLATFORM: ${{ inputs.platform }}
           project_to_test: ${{ inputs.project_to_test }}
         id: configure
-        run: python ./build_tools/github_actions/fetch_test_configurations.py
+        run: python3 ./build_tools/github_actions/fetch_test_configurations.py
 
   test_components:
     name: 'Test ${{ matrix.components.job_name }}'
