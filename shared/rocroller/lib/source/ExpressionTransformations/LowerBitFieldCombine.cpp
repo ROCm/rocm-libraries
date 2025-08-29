@@ -178,12 +178,12 @@ namespace rocRoller
 
         /**
          * Replace a BitFieldCombine expression with:
-     *
-     *   srcMask = ((1 << width) - 1) << srcOffset
-     *   dstMask = ((1 << width) - 1) << dstOffset
-     *   dst = shift((srcMask & src), abs(srcOffset-dstOffset)) | (~dstMask & dst)
-     *
-     *   Note: src=lhs, dst=rhs
+         *
+         *   srcMask = ((1 << width) - 1) << srcOffset
+         *   dstMask = ((1 << width) - 1) << dstOffset
+         *   dst = shift((srcMask & src), abs(srcOffset-dstOffset)) | (~dstMask & dst)
+         *
+         *   Note: src=lhs, dst=rhs
          */
         ExpressionPtr lowerBitFieldCombine(ExpressionPtr expr)
         {
