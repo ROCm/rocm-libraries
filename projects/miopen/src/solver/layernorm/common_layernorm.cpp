@@ -24,6 +24,7 @@ PerformanceConfigLayernorm LayernormBase::GetDefaultPerformanceConfig(
     PerformanceConfigLayernorm config;
     config.HeuristicInit(problem);
     config.local_size = PerformanceConfigLayernorm::default_local_size(problem);
+    config.vectorized = PerformanceConfigLayernorm::default_vectorized(problem);
     MIOPEN_LOG_I(config.ToString());
     return config;
 }
@@ -91,22 +92,23 @@ bool PerformanceConfigLayernorm::SetNextValue(const miopen::layernorm::ProblemDe
     {
         HeuristicInit(problem);
     }
-    if(local_size <= 0)
+    if(local_size < start_local_size)
     {
-        MIOPEN_THROW(miopenStatusInvalidValue, "Local size zero or negative");
+        MIOPEN_THROW(miopenStatusInvalidValue, "Local size below valid value");
     }
-    if(local_size * 2 <= max_local_size)
+    local_size *= 2;
+    if(vectorized == start_vectorized && local_size > max_local_size)
     {
-        local_size *= 2;
-        return true;
+        local_size = start_local_size;
+        vectorized = !start_vectorized;
     }
-    return false;
+    return local_size <= max_local_size;
 #endif
 }
 
 bool PerformanceConfigLayernorm::IsValidValue() const
 {
-    return local_size > 0 && local_size <= max_local_size;
+    return local_size >= start_local_size && local_size <= max_local_size;
 }
 
 bool PerformanceConfigLayernorm::CheckParallelKernelBounds(

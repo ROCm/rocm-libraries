@@ -79,6 +79,7 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
             {"PARALLEL_SIZE", 1},
             {"LOCAL_SIZE", config.local_size},
             {"MODE", mode},
+            {"VECTORIZED", config.vectorized},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
         };

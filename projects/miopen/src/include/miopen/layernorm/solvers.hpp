@@ -48,10 +48,19 @@ using NormalizationTunableSolver =
 struct PerformanceConfigLayernorm : PerfConfigBase<PerformanceConfigLayernorm>
 {
     int local_size;
+    bool vectorized;
     bool initialized = false;
-    PerformanceConfigLayernorm(int _local_size) : local_size(_local_size) {}
-    PerformanceConfigLayernorm() : PerformanceConfigLayernorm(static_cast<int>(1)) {}
-    PerformanceConfigLayernorm(bool) : PerformanceConfigLayernorm(static_cast<int>(1)) {}
+    PerformanceConfigLayernorm(int _local_size, bool _vectorized)
+        : local_size(_local_size), vectorized(_vectorized)
+    {
+    }
+    PerformanceConfigLayernorm() : PerformanceConfigLayernorm(start_local_size, start_vectorized)
+    {
+    }
+    PerformanceConfigLayernorm(bool)
+        : PerformanceConfigLayernorm(start_local_size, start_vectorized)
+    {
+    }
     void HeuristicInit(const miopen::layernorm::ProblemDescription& problem);
     bool SetNextValue(const miopen::layernorm::ProblemDescription& problem);
     bool IsValidValue() const;
@@ -62,6 +71,7 @@ struct PerformanceConfigLayernorm : PerfConfigBase<PerformanceConfigLayernorm>
     static void Visit(Self&& s, F f)
     {
         f(s.local_size, "local_size");
+        f(s.vectorized, "vectorized");
     }
     bool operator==(const PerformanceConfigLayernorm& other) const;
 
@@ -70,12 +80,26 @@ public:
     {
         switch(problem.GetDirection())
         {
-        case miopen::layernorm::Direction::Forward: return 16;
-        case miopen::layernorm::Direction::Backward: return 128;
+        case miopen::layernorm::Direction::Forward:
+            return 16;
+        case miopen::layernorm::Direction::Backward:
+            return 128;
         }
     }
     static constexpr auto max_local_size          = 1024;
     static constexpr auto max_parallel_local_size = 256;
+    static constexpr auto start_local_size        = 1;
+    static constexpr auto default_vectorized(const miopen::layernorm::ProblemDescription& problem)
+    {
+        switch(problem.GetDirection())
+        {
+        case miopen::layernorm::Direction::Forward:
+            return false;
+        case miopen::layernorm::Direction::Backward:
+            return true;
+        }
+    };
+    static constexpr auto start_vectorized = false;
 
 private:
     bool CheckParallelKernelBounds(const ExecutionContext& context,
