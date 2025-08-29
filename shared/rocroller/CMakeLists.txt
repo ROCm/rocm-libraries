@@ -235,7 +235,7 @@ target_link_libraries(rocroller
     PUBLIC
        hip::host
     PRIVATE
-        Boost::headers
+        $<BUILD_INTERFACE:Boost::headers>
         ${msgpack_libs}
         amd_comgr
 )
