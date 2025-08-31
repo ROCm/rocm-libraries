@@ -8,7 +8,7 @@
  rocPRIM documentation
 ********************************************************************
 
-rocPRIM is a header-only library that provides HIP parallel primitives. The purpose of the library is to provide a set of portable, commonly used, GPU-accelerated parallel primitive algorithms. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs.
+rocPRIM1 is a header-only library that provides HIP parallel primitives. The purpose of the library is to provide a set of portable, commonly used, GPU-accelerated parallel primitive algorithms. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs.
 
 The rocPRIM public repository is located at https://github.com/ROCmSoftwarePlatform/rocPRIM.
 
