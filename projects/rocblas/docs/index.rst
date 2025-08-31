@@ -17,7 +17,7 @@ The rocBLAS public repository is located at
 
 .. note::
 
-   The rocBLAS repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/rocBLAS>`_.
+   he rocBLAS repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/rocBLAS>`_.
 
 .. grid:: 2
   :gutter: 3
