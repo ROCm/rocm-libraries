@@ -177,16 +177,19 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         ldsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
-        dividendForKId   = kernel["MatrixInstM"] * kernel["MatrixInstB"]
+        matrixInstT      = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+        numTileInInst    = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]) // matrixInstT
+        dividendForKId   = matrixInstT * kernel["MatrixInstB"]
         num1DBlocks      = kernel["MatrixInstBM"] if (tile01 == 0) else kernel["MatrixInstBN"]
         num1DWaves       = kernel["MIWaveGroup"][0] if (tile01 == 0) else kernel["MIWaveGroup"][1]
         if kernel["SourceSwap"]:
-            dividedForBlkId  = kernel["MatrixInstM"] if (tile01 == 0) else (kernel["MatrixInstM"] * kernel["MatrixInstBM"])
+            dividedForBlkId  = matrixInstT if (tile01 == 0) else (matrixInstT * kernel["MatrixInstBM"])
         else:
             dividedForBlkId  = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (tile01 == 0) else kernel["MatrixInstN"]
+
         dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
         vectorWidth      = kernel["VectorWidth%s"%tc]
-        maxKId = waveWidth // ((kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]) * kernel["MatrixInstB"])
+        maxKId = waveWidth // ((matrixInstT if (tile01 == 0) else kernel["MatrixInstN"]) * kernel["MatrixInstB"])
         writer.states.lraTileProperties[tile01] = LraTilePropertiesMFMA(dividendForKId=dividendForKId, \
                                                                         num1DBlocks=num1DBlocks, \
                                                                         num1DWaves=num1DWaves, \
@@ -199,7 +202,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         mt           = kernel["MacroTile%u" % tile01]
         strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
         strideUnroll = mt + ldsPad
-        strideWave   = kernel["MatrixInstM"] * vectorWidth
+        strideWave   = numTileInInst * matrixInstT * vectorWidth
 
         with writer.allocTmpSgpr(1) as tmpSgprInfo:
             # tile offset = (wtId%16)//8*8
@@ -320,16 +323,19 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         ldsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
-        dividendForKId   = kernel["MatrixInstM"] * kernel["MatrixInstB"]
+        matrixInstT      = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+        numTileInInst    = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]) // matrixInstT
+        dividendForKId   = matrixInstT * kernel["MatrixInstB"]
         num1DBlocks      = kernel["MatrixInstBM"] if (tile01 == 0) else kernel["MatrixInstBN"]
         num1DWaves       = kernel["MIWaveGroup"][0] if (tile01 == 0) else kernel["MIWaveGroup"][1]
         if kernel["SourceSwap"]:
-            dividedForBlkId  = kernel["MatrixInstM"] if (tile01 == 0) else (kernel["MatrixInstM"] * kernel["MatrixInstBM"])
+            dividedForBlkId  = matrixInstT if (tile01 == 0) else (matrixInstT * kernel["MatrixInstBM"])
         else:
             dividedForBlkId  = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (tile01 == 0) else kernel["MatrixInstN"]
+
         dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
         vectorWidth      = kernel["VectorWidth%s"%tc]
-        maxKId = waveWidth // ((kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]) * kernel["MatrixInstB"])
+        maxKId = waveWidth // ((matrixInstT if (tile01 == 0) else kernel["MatrixInstN"]) * kernel["MatrixInstB"])
         writer.states.lraTileProperties[tile01] = LraTilePropertiesMFMA(dividendForKId=dividendForKId, \
                                                                         num1DBlocks=num1DBlocks, \
                                                                         num1DWaves=num1DWaves, \
@@ -342,7 +348,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         mt           = kernel["MacroTile%u" % tile01]
         strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
         strideUnroll = mt + ldsPad
-        strideWave   = kernel["MatrixInstM"] * vectorWidth
+        strideWave   = numTileInInst * matrixInstT * vectorWidth
 
         with writer.allocTmpSgpr(1) as tmpSgprInfo:
             # tile offset = (wtId%8)//4*8
@@ -799,7 +805,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
         strideBlock = numTileInInst * matrixInstT * strideTile
         if enableLDSTr:
-           strideWave = matrixInstT * vectorWidth
+           strideWave = numTileInInst * matrixInstT * vectorWidth
         else:
            strideWave = numTileInInst * matrixInstT * num1DBlocks * strideTile * vectorWidth
 
