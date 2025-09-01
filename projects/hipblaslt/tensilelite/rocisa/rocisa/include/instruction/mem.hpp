@@ -23,6 +23,7 @@
 #pragma once
 #include "instruction/instruction.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -2917,5 +2918,69 @@ namespace rocisa
         {
             return std::make_shared<SStoreB512>(*this);
         }
+    };
+
+    struct TensorLoadToLds : public Instruction
+    {
+        using ContainerPtr = std::shared_ptr<Container>;
+        using RegContainerPtr = std::shared_ptr<RegisterContainer>;
+        TensorLoadToLds(const RegContainerPtr &group0,
+            const RegContainerPtr &group1,
+            const RegContainerPtr &group2,
+            const RegContainerPtr &group3,
+            const std::string &comment = std::string())
+        : Instruction(InstType::INST_TDM, comment), group0(group0), group1(group1), group2(group2), group3(group3)
+        {
+            using std::begin;
+            using std::end;
+            const auto &params = getParams();
+
+            if (std::any_of(begin(params), end(params), [](const InstructionInput &in) {
+                return std::dynamic_pointer_cast<RegisterContainer>(std::get<ContainerPtr>(in))->regType != "s";
+            })) 
+            {
+                throw std::invalid_argument("TensorLoadToLds only supports sgpr as operands only");
+            }
+
+            setInst("tensor_load_to_lds");
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<TensorLoadToLds>(group0, group1, group2, group3, comment);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {group0, group1, group2, group3};
+        }
+
+        std::string getArgStr() const
+        {
+            std::stringstream ss;
+            const auto &params = getParams();
+            for (size_t i = 0; i < params.size(); ++i)
+            {
+                ss << std::get<ContainerPtr>(params.at(i))->toString();
+
+                if (i + 1 != params.size())
+                {
+                    ss << ", ";
+                }
+            }
+            return ss.str();
+        }
+
+        std::string toString() const override
+        {
+            auto kStr = preStr() + " " + getArgStr();
+            return formatWithComment(kStr);
+        }
+
+    private:
+        RegContainerPtr group0;
+        RegContainerPtr group1;
+        RegContainerPtr group2;
+        RegContainerPtr group3;
     };
 } // namespace rocisa
