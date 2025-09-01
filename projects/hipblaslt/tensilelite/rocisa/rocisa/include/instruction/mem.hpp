@@ -107,6 +107,9 @@ namespace rocisa
                 case InstType::INST_TR8_B64:
                     kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b64" : "";
                     break;
+                case InstType::INST_TR16_B128:
+                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b128" : "";
+                    break;
                 default:
                     break;
                 }
@@ -1150,6 +1153,28 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<GlobalLoadTR8B64>(*this);
+        }
+    };
+
+    struct GlobalLoadTR16B128 : public GLOBALLoadInstruction
+    {
+        GlobalLoadTR16B128(const std::shared_ptr<RegisterContainer>& dst,
+                           const std::shared_ptr<RegisterContainer>& vaddr,
+                           const std::shared_ptr<RegisterContainer>& saddr,
+                           std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                           const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_TR16_B128, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadTR16B128(const GlobalLoadTR16B128& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadTR16B128>(*this);
         }
     };
 

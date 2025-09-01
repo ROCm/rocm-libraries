@@ -67,7 +67,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
   VLShiftLeftB64, VLShiftRightB32, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
-  VPrngB32, VReadfirstlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, VLShiftLeftOrB32
+  VPrngB32, VReadfirstlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128
 
 from .Component import Component
 from .KernelWriterModules import *
@@ -3701,10 +3701,11 @@ class KernelWriterAssembly(KernelWriter):
       elif isTr:
         numKr = kernel["MatrixInstK"] // tP["glvw"]
 
-        tmp = self.vgprPool.checkOut(1)
-        module.add(VAndB32(dst=vgpr(tmp), src0=3, src1=vgpr(rReg), comment="%s: tid %% 4"%(swizzledOrTrName)))
-        module.add(VLShiftRightB32(dst=vgpr(rReg), shiftHex=3, src=vgpr(rReg), comment="%s: tid / 8"%(swizzledOrTrName)))
-        module.add(VLShiftLeftB32(dst=vgpr(rReg), shiftHex=2, src=vgpr(rReg), comment="%s: %s * 4"%(swizzledOrTrName, vgpr(rReg))))
+        tmp = self.vgprPool.checkOut(2)
+        with self.allocTmpSgpr(1) as tmpSgprInfo:
+          module.add(vectorStaticDivide(tmp, rReg, tP["bpeGR"]*8, tmpVgprRes, comment="%s: %s = %s / %s"%(swizzledOrTrName, vgpr(tmp), vgpr(rReg), tP["bpeGR"]*8)))
+          module.add(vectorStaticMultiply(vgpr(tmp), vgpr(tmp), tP["bpeGR"]*4, tmpSgprInfo, comment="%s: %s = %s * %s"%(swizzledOrTrName, vgpr(tmp), vgpr(tmp), tP["bpeGR"]*4)))
+        module.add(vectorStaticRemainder(tmp+1, rReg, rReg, tP["bpeGR"]*4, tmpVgprRes, tmpSgprInfo, comment="%s: %s = %s %% %s"%(swizzledOrTrName, vgpr(tmp), vgpr(rReg), tP["bpeGR"]*4)))
         module.add(VAddU32(dst=vgpr(rReg), src0=vgpr(tmp), src1=vgpr(rReg), comment="%s: %s = %s + %s"%(swizzledOrTrName, vgpr(rReg), vgpr(rReg), vgpr(tmp))))
 
       WvG_M = kernel["MIWaveGroup"][0]
@@ -3720,7 +3721,7 @@ class KernelWriterAssembly(KernelWriter):
       if tP["isSwizzled"]:
         self.sgprPool.checkIn(tmp)
       elif isTr:
-        module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(dividendReg), src1=2, src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
+        module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(dividendReg), src1=tP["bpeGR"]+1, src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
         module.add(VAddU32(dst=vgpr(qReg), src0=vgpr(tmp), src1=vgpr(qReg), comment="%s: wave_id += offset for the right half of the tile"%(swizzledOrTrName)))
         self.vgprPool.checkIn(tmp)
     elif isDTVAB:
@@ -3923,8 +3924,9 @@ class KernelWriterAssembly(KernelWriter):
       else:
         validBytesPerLoad *= (kernel["MacroTile%s"%tc] // kernel["NumLoadsPerpendicular%s"%tc] // (kernel["NumThreads"] // kernel["WavefrontSize"]))
 
-    assert (validBytesPerLoad <= maxBytesPerLoad)
-    assert (kernel[tP["lsc"]] * kernel[tP["lsp"]] % tP["glvw"] == 0)
+    isDTVAB = ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc])
+    assert (validBytesPerLoad <= maxBytesPerLoad) or isDTVAB
+    assert (kernel[tP["lsc"]] * kernel[tP["lsp"]] % tP["glvw"] == 0) or isDTVAB
 
     if validBytesPerLoad != maxBytesPerLoad:
       with self.allocTmpSgpr(1) as tmpSgprInfo:
@@ -3970,7 +3972,6 @@ class KernelWriterAssembly(KernelWriter):
                           src1=vgpr("LocalWriteAddr%s"%tc), \
                           comment="xor both lds offsets to enable swapping"))
 
-    isDTVAB = ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc])
     return Module("lwaUnrollAssignment (Empty)") if self.dontAppendCode or isDTVAB else module
 
   ##############################################################################
@@ -7524,7 +7525,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VLShiftRightB32(dst=vgpr(maxGroVgpr), shiftHex=log2(WvG_M), src=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) /= MIWG[0]"%tc))
         module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) *= numKr"%tc))
 
-      module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=2, src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
+      module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=tP["bpeGR"]+1, src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
       module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(tmp2), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id += offset for the right half of the tile"%(tc)))
 
       with self.allocTmpSgpr(1) as tmpSgprInfo:
@@ -7534,10 +7535,11 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(vectorStaticMultiply(vgpr(maxGroVgpr), vgpr(maxGroVgpr), tP["glvw"], tmpSgprInfo, comment="GLTr%s: unroll * glvw(%u)"%(tc, tP["glvw"])))
 
-      module.addComment0("calc last unroll offset")
       strideIdx = tP["lsc"] if tP["tlu"] else tP["lsp"]
       stride = kernel[strideIdx]
       module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(maxGroVgpr), src1=stride*(tP["nrt"]-1)))
+
+      module.addComment0("calc last unroll offset")
       module.add(VMovB32(dst=vgpr(tmp), src=sgpr("SizesSum+%u"%self.states.unrollIdx)))
       with self.allocTmpSgpr(1) as tmpSgprInfo:
         module.add(vectorStaticRemainder(tmp, tmp2, tmp, kernel["DepthU"], tmpVgprRes, tmpSgprInfo))
@@ -12167,6 +12169,8 @@ class KernelWriterAssembly(KernelWriter):
       
       if bpl==8:
         return GlobalLoadTR8B64(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
+      elif bpl==16:
+        return GlobalLoadTR16B128(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
     else:
       flat = FLATModifiers(glc=glc, slc=slc, lds=lds)
       if bpl==2 and hi16:

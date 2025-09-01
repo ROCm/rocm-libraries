@@ -687,11 +687,10 @@ class Solution(collections.abc.Mapping):
         state["NumLoadsCoalesced%c"%tc] != state["DepthU"] // (state["MatrixInstK"] * state["GlobalReadVectorWidth%c"%tc] * state["LocalSplitU"] // state["MIInputPerThread"]):
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports TLU=False and NumLoadsCoalesced%c != DepthU//(MatrixInstK*GlobalReadVectorWidth*LocalSplitU//MIInputPerThread(=%u))"%(tc, tc, state["MIInputPerThread"]))
       return False
-    
-    # Does not work with enableGLTr and GRVW != MatrixInstK * (numBytesGR / 2)
-    if (state["enableGLTr%c"%tc]) and \
-        state["GlobalReadVectorWidth%c"%tc] != int(state["MatrixInstK"] * (numBytesGR / 2)):
-      reject(state, printRejectionReason, "DirectToVgpr%c does not supports enableGLTr%c and GlobalReadVectorWidth != MatrixInstK * (numBytesGR / 2)"%(tc, tc))
+
+    # Does not work with enableGLTr and GRVW != 8
+    if state["enableGLTr%c"%tc] and state["GlobalReadVectorWidth%c"%tc] != 8:
+      reject(state, printRejectionReason, "DirectToVgpr%c does not supports enableGLTr%c and GlobalReadVectorWidth != 8"%(tc, tc))
       return False
 
     # TLU=False case, need GlobalReadVectorWidth == LocalReadVectorWidth
@@ -1324,9 +1323,10 @@ class Solution(collections.abc.Mapping):
       and ((numBytes == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
         or (numBytes == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
-
     state["enableGLTrB"] = state["DirectToVgprB"] and state["ProblemType"]["TLUB"] \
-      and (numBytes == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"])
+      and ((numBytes == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
+        or (numBytes == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
+      )
 
     if state["enableLDSTrA"] or state["enableGLTrA"]:
       state["VectorWidthA"] = 1
