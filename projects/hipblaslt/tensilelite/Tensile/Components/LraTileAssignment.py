@@ -715,10 +715,10 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
         # alloc vgpr
         enableLDSTr = tP["enableLDSTr"]
-        dummy   = writer.vgprPool.checkOut(1,"dummy")
+        dummy = writer.vgprPool.checkOut(1,"dummy")
+        mReg  = writer.vgprPool.checkOut(1,"mReg") # remainder
         if enableLDSTr:
-           sReg    = writer.vgprPool.checkOut(1,"sReg") # remainder
-           mReg    = writer.vgprPool.checkOut(1,"mReg") # remainder
+           sReg = writer.vgprPool.checkOut(1,"sReg") # remainder
 
         duplicateK = writer.states.asmCaps["HasWMMA_V1"]  or ("MXS" in tP["tensorChar"])
 
@@ -945,8 +945,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
         # release register
         writer.vgprPool.checkIn(dummy)
+        writer.vgprPool.checkIn(mReg)
         if enableLDSTr:
            writer.vgprPool.checkIn(sReg)
-           writer.vgprPool.checkIn(mReg)
 
         return module
