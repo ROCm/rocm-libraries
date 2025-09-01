@@ -42,9 +42,9 @@
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
+#include <miopen/conv/heuristics/ai_heuristics.hpp>
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
-#include <miopen/conv/heuristics/ai_heuristics.hpp>
 
 namespace {
 
