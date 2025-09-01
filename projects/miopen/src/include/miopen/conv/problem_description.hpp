@@ -30,6 +30,7 @@
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/names.hpp>
 #include <miopen/scalar.hpp>
+#include <miopen/datatype.hpp>
 
 #include <miopen/problem_description_base.hpp>
 #include <miopen/convolution.hpp>

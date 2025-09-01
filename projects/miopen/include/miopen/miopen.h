@@ -120,6 +120,15 @@ typedef enum
     miopenStatusVersionMismatch = 10, /*!< Version mismatch of the supplied binary data argment. */
 } miopenStatus_t;
 
+/*! @enum miopenStatus_t
+ * Error codes that are returned by all MIOpen API calls.
+ */
+typedef enum
+{
+    miopenMathDefault  = 0, /*!< Default MathType, use TF32 if possible */
+    miopenMathPedantic = 1, /*!< Strict IEEE compliance. Don't allow datatype down conversion. */
+} miopenMathType_t;
+
 #ifdef MIOPEN_BETA_API
 typedef enum
 {
@@ -639,6 +648,8 @@ typedef enum
 #else
 // miopenReserved1 = 2,
 #endif
+    MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE =
+        3, /*!< refer to miopenMathType_t,default is miopenMathDefault >*/
 } miopenConvolutionAttrib_t;
 
 /*! @ingroup convolutions

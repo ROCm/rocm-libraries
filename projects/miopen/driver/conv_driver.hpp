@@ -48,6 +48,7 @@
 #include <miopen/miopen.h>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/tensor.hpp>
+#include <miopen/datatype.hpp>
 
 #include <../test/cpu_bias.hpp>
 #include <../test/cpu_conv.hpp>
@@ -101,10 +102,10 @@ struct AutoMiopenWarmupMode
         miopen::debug::FindEnforceDisable = true;
         miopen::debug::IsWarmupOngoing    = true;
     }
-    AutoMiopenWarmupMode(const AutoMiopenWarmupMode&) = delete;
-    AutoMiopenWarmupMode(AutoMiopenWarmupMode&&)      = delete;
+    AutoMiopenWarmupMode(const AutoMiopenWarmupMode&)            = delete;
+    AutoMiopenWarmupMode(AutoMiopenWarmupMode&&)                 = delete;
     AutoMiopenWarmupMode& operator=(const AutoMiopenWarmupMode&) = delete;
-    AutoMiopenWarmupMode& operator=(AutoMiopenWarmupMode&&) = delete;
+    AutoMiopenWarmupMode& operator=(AutoMiopenWarmupMode&&)      = delete;
     ~AutoMiopenWarmupMode()
     {
         miopen::debug::LoggingQuiet       = debug_logging_quiet_prev;
@@ -127,10 +128,10 @@ struct AutoPrepareForGpuReference
         miopen::debug::AlwaysEnableConvDirectNaive = true;
         miopen::debug::LoggingQuiet                = true;
     }
-    AutoPrepareForGpuReference(const AutoPrepareForGpuReference&) = delete;
-    AutoPrepareForGpuReference(AutoPrepareForGpuReference&&)      = delete;
+    AutoPrepareForGpuReference(const AutoPrepareForGpuReference&)            = delete;
+    AutoPrepareForGpuReference(AutoPrepareForGpuReference&&)                 = delete;
     AutoPrepareForGpuReference& operator=(const AutoPrepareForGpuReference&) = delete;
-    AutoPrepareForGpuReference& operator=(AutoPrepareForGpuReference&&) = delete;
+    AutoPrepareForGpuReference& operator=(AutoPrepareForGpuReference&&)      = delete;
     ~AutoPrepareForGpuReference()
     {
         miopen::debug::LoggingQuiet                = quiet_prev;
@@ -455,6 +456,10 @@ private:
         constexpr bool is_bfp8 = std::is_same<Tgpu, bfloat8_fnuz>::value;
         if(is_bfp8 || is_fp8 || TensorsCasted())
             tolerance *= 37.0;
+
+        // enhance tolerance due to tf32 has same mantissa length as fp16
+        if(std::is_same_v<Tgpu, float> && miopen::EnableTF32())
+            tolerance *= 20.0; // tf32
         return tolerance;
     }
 
@@ -812,6 +817,13 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
         SetTensorNd(weightTensor_vect4, wei_len_vect4, data_type);
     }
     SetConvDescriptorFromCmdLineArgs();
+    auto math_type_ = inflags.GetValueInt("math_type");
+    if(math_type_ < miopenMathDefault || math_type_ > miopenMathPedantic)
+    {
+        std::cout << "Invalid math_type value: " << math_type_ << std::endl;
+        return 1;
+    }
+    miopenSetConvolutionAttribute(convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
 
     std::vector<int> out_len = GetOutputTensorLengths();
     if(miopen::deref(inputTensor).GetLayoutEnum() == miopenTensorNCHWc4 ||
@@ -861,6 +873,8 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
             warmupConvDesc,
             static_cast<int>(miopenConvolutionFindModeNormal)); // Repeat via hidden API.
         miopenSetConvolutionGroupCount(warmupConvDesc, group_count);
+        miopenSetConvolutionAttribute(
+            warmupConvDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
 
         int warmup_out_len_size = miopen::deref(warmupInputTensor).GetNumDims();
         std::vector<int> warmup_out_len(warmup_out_len_size);
@@ -1010,6 +1024,7 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
         "wei_cast_type", 'R', "-1", "Cast type for weight tensor, default to not set", "string");
     inflags.AddInputFlag(
         "init_output_nan", 'N', "0", "populate output buffers with nan values (Default=0)", "int");
+    inflags.AddInputFlag("math_type", 'M', "0", "math type of compute (Default=0)", "int");
 
     return 0;
 }

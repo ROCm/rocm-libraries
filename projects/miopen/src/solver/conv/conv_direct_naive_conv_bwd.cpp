@@ -61,6 +61,10 @@ bool ConvDirectNaiveConvBwd::IsApplicable(const ExecutionContext& ctx,
     if(!(problem.IsFp32() || problem.IsFp16() || problem.IsBfp16() || problem.IsFp8() ||
          problem.IsBfp8()))
         return false;
+
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
+
     if(problem.IsTensorsCasted())
     {
         auto test_cast = [&](const TensorDescriptor& desc) {

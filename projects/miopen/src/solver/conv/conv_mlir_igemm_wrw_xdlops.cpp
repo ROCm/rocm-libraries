@@ -62,7 +62,8 @@ bool ConvMlirIgemmWrWXdlops::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!mlir::IsMlirSupportedHardware(ctx))
         return false;
-
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
     return MiirIsConfigApplicable(mlir::ConstructBuildOptions(ctx, problem, true));
 #else
     std::ignore = ctx;

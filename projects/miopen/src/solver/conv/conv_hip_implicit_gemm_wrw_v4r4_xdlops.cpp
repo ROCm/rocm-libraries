@@ -1077,6 +1077,9 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
     if(!(problem.IsFp32() || problem.IsFp16() || problem.IsBfp16()))
         return false;
 
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
+
     if(!problem.IsDirectionBackwardWrW())
         return false;
 

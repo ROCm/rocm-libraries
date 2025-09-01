@@ -63,6 +63,9 @@ bool ConvAsm7x7c3h224w224k64u2v2p3q3f1::IsApplicable(const ExecutionContext& ctx
     if(problem.IsTensorsCasted())
         return false;
 
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
+
     const auto& target = ctx.GetStream().GetTargetProperties();
     if(target.Xnack() && *target.Xnack())
         return false;

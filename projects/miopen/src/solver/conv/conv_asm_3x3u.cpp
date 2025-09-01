@@ -208,6 +208,9 @@ bool ConvAsm3x3U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.IsTensorsCasted() || problem.IsFp8() || problem.IsBfp8())
         return false;
 
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
+
     constexpr auto GIB                         = static_cast<int64_t>(1024) * 1024 * 1024;
     constexpr auto TIB                         = GIB * 1024;
     constexpr auto ELEM_SZ                     = static_cast<int64_t>(sizeof(float));

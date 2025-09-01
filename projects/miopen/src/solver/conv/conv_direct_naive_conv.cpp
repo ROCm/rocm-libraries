@@ -121,6 +121,11 @@ bool IsOutputInt32(const ProblemDescription& problem)
            problem.GetOutDataType() == miopenInt32;
 }
 
+bool IsComputeTF32(const ProblemDescription& problem)
+{
+    return problem.GetConv().GetMathType() == miopenMathPedantic;
+}
+
 std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
 {
     std::ostringstream kernel_name;
@@ -217,6 +222,9 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
         MIOPEN_THROW("unsupported data type:");
     // NOLINTEND(*-braces-around-statements)
 
+    kernel_name << "_" << static_cast<int>(IsComputeTF32(problem));
+
+    // std::cout << "naive kernel name: " << kernel_name.str() << std::endl;
     return kernel_name.str();
 }
 

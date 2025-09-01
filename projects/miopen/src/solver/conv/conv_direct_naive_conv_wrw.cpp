@@ -58,6 +58,9 @@ bool ConvDirectNaiveConvWrw::IsApplicable(const ExecutionContext& ctx,
          problem.IsBfp8()))
         return false;
 
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
+
     if(!problem.IsDirectionBackwardWrW())
         return false;
     if(!problem.AllTensorsLengthsFitIntoInt())

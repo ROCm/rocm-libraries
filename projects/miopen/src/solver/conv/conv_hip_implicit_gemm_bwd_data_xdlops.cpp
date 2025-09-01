@@ -305,7 +305,10 @@ bool ConvHipImplicitGemmBwdXdlops::IsApplicable(
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
-    case miopenFloat: return CheckCKApplicability<float>(problem);
+    case miopenFloat:
+        if(problem.GetConv().GetMathType() == miopenMathDefault)
+            return false;
+        return CheckCKApplicability<float>(problem);
     case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:

@@ -47,6 +47,9 @@ bool GemmWrwBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
+
     const auto& dyDesc             = problem.GetIn();
     const auto& dwDesc             = problem.GetWeights();
     const auto& xDesc              = problem.GetOut();

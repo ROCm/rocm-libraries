@@ -4524,9 +4524,9 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
     operator==(const PerformanceConfigHipImplicitGemm3DGroupFwdXdlops& other) const;
 
 private:
-    template <typename DataType>
+    template <typename DataType, typename ComputeType = DataType>
     void Init(const miopen::conv::ProblemDescription&);
-    template <typename DataType>
+    template <typename DataType, typename ComputeType = DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
 };
 
@@ -4564,7 +4564,7 @@ struct ConvHipImplicitGemm3DGroupFwdXdlops final
     bool MayNeedWorkspace() const override { return true; }
 
 private:
-    template <typename DataType>
+    template <typename DataType, typename ComputeType = DataType>
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 

@@ -53,7 +53,12 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONVOLUTION_ATTRIB_FP8_ROUNDING_SEED)
 
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_TF32_OVERRIDE, 1);
+MIOPEN_DECLARE_ENV_VAR_BOOL(NVIDIA_TF32_OVERRIDE, 1);
+
 namespace miopen {
+
+MIOPEN_INTERNALS_EXPORT bool EnableTF32();
 
 namespace conv {
 struct ProblemDescription;
@@ -131,6 +136,21 @@ struct MIOPEN_INTERNALS_EXPORT ConvolutionAttribute
             return tmp_val == 1;
         }
     } deterministic;
+
+    class MathType
+    {
+        miopenMathType_t value = miopenMathDefault;
+        friend struct ConvolutionAttribute;
+
+    public:
+        inline int Get() const
+        {
+            if(value == miopenMathDefault)
+                return static_cast<int>(miopen::EnableTF32() ? miopenMathDefault
+                                                             : miopenMathPedantic);
+            return static_cast<int>(value);
+        }
+    } math_type;
 
     /// Tri-state attribute values:
     /// * -1: Default (attribute-specific).
@@ -350,6 +370,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvolutionDescriptor : miopenConvolutionDescript
                                     Data_t dw,
                                     Data_t workSpace,
                                     std::size_t workSpaceSize) const;
+    miopenMathType_t GetMathType() const;
 
     std::size_t spatialDim;
     miopenConvolutionMode_t mode;

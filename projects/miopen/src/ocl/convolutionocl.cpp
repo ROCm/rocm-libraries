@@ -793,7 +793,6 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
             static_cast<miopenConvAlgorithm_t>(algo), conv::Direction::Forward)};
         const auto network_config = problem.MakeNetworkConfig();
         const auto& invoker       = handle.GetInvoker(network_config, {}, algorithm_name);
-
         if(invoker)
         {
             const auto& invoke_ctx = conv::DataInvokeParams{tensors,
@@ -1478,6 +1477,11 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
     });
 }
 
+miopenMathType_t ConvolutionDescriptor::GetMathType() const
+{
+    return static_cast<miopenMathType_t>(this->attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE));
+}
+
 void ConvolutionBackwardBias(const Handle& handle,
                              const void* alpha,
                              const TensorDescriptor& dyDesc,
@@ -1571,6 +1575,17 @@ void ConvolutionBackwardBias(const Handle& handle,
     {
         miopen::checkNumericsOutput(handle, dbDesc, db);
     }
+}
+
+bool EnableTF32()
+{
+    bool bool_miopen = miopen::env::enabled(MIOPEN_TF32_OVERRIDE);
+    bool bool_nvidia = miopen::env::enabled(NVIDIA_TF32_OVERRIDE);
+    if(bool_miopen != bool_nvidia)
+        MIOPEN_LOG_I2("TF32_OVERRIDE is set to different values for MIOPEN_TF32_OVERRIDE ("
+                      << bool_miopen << ") and NVIDIA_TF32_OVERRIDE (" << bool_nvidia
+                      << "). TF32 will be treated as disabled.");
+    return bool_miopen && bool_nvidia;
 }
 
 } // namespace miopen

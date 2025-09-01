@@ -67,6 +67,8 @@ bool ConvMlirIgemmBwd::IsApplicable(const ExecutionContext& ctx,
     const auto device_name = ctx.GetStream().GetDeviceName();
     if(StartsWith(device_name, "gfx900"))
         return false;
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
 
     return MiirIsConfigApplicable(mlir::ConstructBuildOptions(ctx, problem, false));
 #else

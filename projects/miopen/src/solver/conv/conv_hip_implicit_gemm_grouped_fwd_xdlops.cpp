@@ -533,7 +533,10 @@ bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
-    case miopenFloat: return CheckCKApplicability<float>(problem);
+    case miopenFloat:
+        if(problem.GetConv().GetMathType() == miopenMathDefault)
+            return false;
+        return CheckCKApplicability<float>(problem);
     case miopenInt8: return CheckCKApplicability<int8_t>(problem);
     case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
@@ -554,7 +557,7 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val) {
+        [&](auto data_type_val, auto compute_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryFwdNCHW<2,
                                              false,
@@ -563,7 +566,7 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
                                              miopen::conv::DataInvokeParams>(
                 ctx, problem, config.kernel_id);
         },
-        [&](auto data_type_val) {
+        [&](auto data_type_val, auto compute_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryNHWC<false,
                                           DeviceOpGFwdPtrs<T>,

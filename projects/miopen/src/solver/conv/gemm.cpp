@@ -51,6 +51,9 @@ bool GemmFwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
+
     const auto& xDesc = problem.GetIn();
     const auto& wDesc = problem.GetWeights();
     const auto& yDesc = problem.GetOut();

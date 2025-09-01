@@ -1012,6 +1012,9 @@ bool ConvAsmImplicitGemmGTCDynamicBwdXdlops::IsApplicable(const ExecutionContext
     if(!ctx.rmv.IsV3())
         return false;
 
+    if(problem.GetConv().GetMathType() == miopenMathDefault)
+        return false;
+
     // So far, "group" is not supported by the bwd fp32 kernels
     if(problem.IsFp32() && ProblemInterpreter::GetGroupCountG(problem) != 1)
         return false;

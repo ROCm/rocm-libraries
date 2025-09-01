@@ -746,9 +746,14 @@ bool ConvHipImplicitGemmBwdDataV4R1::IsApplicable(const ExecutionContext& ctx,
     if(!static_ck::IsComposableKernelSupportedHardware(ctx))
         return false;
 
-    // Missing instruction: v_mac_f32
-    if(problem.IsFp32() && static_ck::GfxHasMissingFp32Intrinsics(ctx.GetStream().GetDeviceName()))
-        return false;
+    if(problem.IsFp32())
+    {
+        // Missing instruction: v_mac_f32
+        if(static_ck::GfxHasMissingFp32Intrinsics(ctx.GetStream().GetDeviceName()))
+            return false;
+        if(problem.GetConv().GetMathType() == miopenMathDefault)
+            return false;
+    }
 
     if(!problem.IsDirectionBackwardData())
         return false;
