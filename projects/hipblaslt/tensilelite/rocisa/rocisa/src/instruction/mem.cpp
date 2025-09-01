@@ -1515,4 +1515,19 @@ void mem_inst(nb::module_ m_mem)
         .def("__deepcopy__", [](const rocisa::SStoreB512& self, nb::dict&) {
             return new rocisa::SStoreB512(self);
         });
+
+    nb::class_<rocisa::TensorLoadToLds, rocisa::Instruction>(m_mem, "TensorLoadToLds")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::string&>(),
+             nb::arg("group0"),
+             nb::arg("group1"),
+             nb::arg("group2"),
+             nb::arg("group3"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::TensorLoadToLds& self, nb::dict&) {
+            return new rocisa::TensorLoadToLds(self);
+        });
 }
