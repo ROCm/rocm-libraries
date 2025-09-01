@@ -682,14 +682,16 @@ void TAssertEqualGreater()
     static_assert(A >= B, "A not greater or equal to B");
 };
 
-template<class BlockSortConfig, class BlockMergeConfig>
+template<detail::target_arch Arch, class BlockSortConfig, class BlockMergeConfig>
 ROCPRIM_KERNEL
-void device_merge_sort_compile_time_verifier()
+void device_merge_sort_compile_time_verifier_arch()
 {
-    static constexpr merge_sort_block_sort_config_params bs_params
-        = device_params<BlockSortConfig>();
-    static constexpr merge_sort_block_merge_config_params bm_params
-        = device_params<BlockMergeConfig>();
+    using BSArchConfig = typename BlockSortConfig::template architecture_config<Arch>;
+    using BMArchConfig = typename BlockMergeConfig::template architecture_config<Arch>;
+
+    static constexpr auto bs_params = BSArchConfig::params;
+    static constexpr auto bm_params = BMArchConfig::params;
+
     static constexpr unsigned int sort_items_per_block
         = bs_params.kernel_config.block_size * bs_params.kernel_config.items_per_thread;
     static constexpr unsigned int merge_oddeven_items_per_block
@@ -715,21 +717,46 @@ void device_merge_sort_compile_time_verifier()
                   "merge_mergepath_items_per_block");
 }
 
-template<class BlockSortConfig, class BlockMergeConfig, typename key_type, typename value_type>
-inline size_t get_merge_sort_vsmem_size(const size_t size)
+template<class WrappedBSConfig, class WrappedBMConfig>
+inline void device_merge_sort_compile_time_verifier() noexcept
 {
+    static const bool once = []
+    {
+        for_each_arch(
+            [](auto arch_tag)
+            {
+                constexpr auto A = decltype(arch_tag)::value;
+                (void)&device_merge_sort_compile_time_verifier_arch<A,
+                                                                    WrappedBSConfig,
+                                                                    WrappedBMConfig>;
+            });
+        (void)&device_merge_sort_compile_time_verifier_arch<target_arch::unknown,
+                                                            WrappedBSConfig,
+                                                            WrappedBMConfig>;
+        return true;
+    }();
+    (void)once;
+}
 
-    size_t                                               virtual_shared_memory_size = 0;
-    static constexpr merge_sort_block_sort_config_params bs_params
-        = device_params<BlockSortConfig>();
-    static constexpr merge_sort_block_merge_config_params bm_params
-        = device_params<BlockMergeConfig>();
-    using bs_sort_impl = block_sort_impl<key_type,
-                                         value_type,
+template<detail::target_arch Arch,
+         class BlockSortConfig,
+         class BlockMergeConfig,
+         typename Key,
+         typename Value>
+inline size_t merge_sort_vsmem_size_for_arch(size_t size)
+{
+    using BSArchConfig = typename BlockSortConfig::template architecture_config<Arch>;
+    using BMArchConfig = typename BlockMergeConfig::template architecture_config<Arch>;
+
+    static constexpr auto bs_params = BSArchConfig::params;
+    static constexpr auto bm_params = BMArchConfig::params;
+
+    using bs_sort_impl = block_sort_impl<Key,
+                                         Value,
                                          bs_params.kernel_config.block_size,
                                          bs_params.kernel_config.items_per_thread>;
-    using bm_sort_impl = block_merge_impl<key_type,
-                                          value_type,
+    using bm_sort_impl = block_merge_impl<Key,
+                                          Value,
                                           bm_params.merge_mergepath_config.block_size,
                                           bm_params.merge_mergepath_config.items_per_thread>;
 
@@ -744,6 +771,8 @@ inline size_t get_merge_sort_vsmem_size(const size_t size)
         = ceiling_div(size, merge_mergepath_items_per_block);
 
     const bool use_mergepath = size > bm_params.merge_oddeven_config.size_limit;
+
+    size_t virtual_shared_memory_size = 0;
 
     // Check if vsmem is needed
     if(BlockSortVSmemHelperT::vsmem_per_block + MergeSortVSmemHelperT::vsmem_per_block > 0)
@@ -763,6 +792,37 @@ inline size_t get_merge_sort_vsmem_size(const size_t size)
         virtual_shared_memory_size = (std::max)(block_sort_smem_size, merge_smem_size);
     }
     return virtual_shared_memory_size;
+}
+
+template<class BlockSortConfig, class BlockMergeConfig, typename Key, typename Value>
+inline size_t get_merge_sort_vsmem_size(detail::target_arch arch, size_t size) noexcept
+{
+    std::optional<size_t> out;
+
+    for_each_arch(
+        [&](auto arch_tag)
+        {
+            if(out)
+                return;
+            constexpr auto Arch = decltype(arch_tag)::value;
+            if(Arch != arch)
+                return;
+
+            out = merge_sort_vsmem_size_for_arch<Arch,
+                                                 BlockSortConfig,
+                                                 BlockMergeConfig,
+                                                 Key,
+                                                 Value>(size);
+        });
+    if(!out)
+    {
+        out = merge_sort_vsmem_size_for_arch<detail::target_arch::unknown,
+                                             BlockSortConfig,
+                                             BlockMergeConfig,
+                                             Key,
+                                             Value>(size);
+    }
+    return *out;
 }
 
 template<class Config,
@@ -801,9 +861,8 @@ inline hipError_t merge_sort_impl(
     using wrapped_bm_config
         = wrapped_merge_sort_block_merge_config<block_merge_config, key_type, value_type>;
 
-    (void)device_merge_sort_compile_time_verifier<
-        wrapped_bs_config,
-        wrapped_bm_config>; // Some helpful checks during compile-time
+    // Some helpful checks during compile-time
+    device_merge_sort_compile_time_verifier<wrapped_bs_config, wrapped_bm_config>();
 
     unsigned int sort_items_per_block = 1; // We will get this later from the block_sort algorithm
 
@@ -825,6 +884,7 @@ inline hipError_t merge_sort_impl(
     void*  vsmem = nullptr;
     size_t virtual_shared_memory_size
         = get_merge_sort_vsmem_size<wrapped_bs_config, wrapped_bm_config, key_type, value_type>(
+            target_arch,
             size);
 
     // temporary storage needed for both block merge and block sort
