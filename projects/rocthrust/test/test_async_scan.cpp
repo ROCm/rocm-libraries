@@ -25,8 +25,6 @@
 
 TESTS_DEFINE(AsyncScanTests, NumericalTestsParams)
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 enum wait_policy
 {
   wait_for_futures,

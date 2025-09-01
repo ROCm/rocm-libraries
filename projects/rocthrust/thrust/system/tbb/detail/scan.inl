@@ -18,13 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/advance.h>
 #include <thrust/detail/function.h>
 #include <thrust/detail/type_traits.h>
@@ -33,12 +26,20 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/tbb/detail/scan.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/__functional/invoke.h>
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#  include <rocprim/type_traits_functions.hpp>
 #endif
+
+#include <iterator>
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_scan.h>
+
+#ifndef _CCCL_IF_CONSTEXPR
+#  define _CCCL_IF_CONSTEXPR(x) if constexpr (x)
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -59,11 +60,11 @@ struct inclusive_body
   ValueType sum;
   bool first_call;
 
-  inclusive_body(InputIterator input, OutputIterator output, BinaryFunction binary_op, ValueType init)
+  inclusive_body(InputIterator input, OutputIterator output, BinaryFunction binary_op, ValueType dummy)
       : input(input)
       , output(output)
       , binary_op{binary_op}
-      , sum(init)
+      , sum(dummy)
       , first_call(true)
   {}
 
@@ -109,7 +110,7 @@ struct inclusive_body
 
     if (first_call)
     {
-      THRUST_IF_CONSTEXPR (HasInit)
+      _CCCL_IF_CONSTEXPR (HasInit)
       {
         *iter2 = sum = binary_op(sum, *iter1);
       }
@@ -266,9 +267,16 @@ OutputIterator inclusive_scan(
 {
   using namespace thrust::detail;
 
-  // Use the input iterator's value type and the initial value type per wg21.link/p2322
-  using ValueType = typename ::internal::
-    accumulator_t<BinaryFunction, typename _THRUST_STD::iterator_traits<InputIterator>::value_type, InitialValueType>;
+// Use the input iterator's value type and the initial value type per wg21.link/p2322
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ValueType = typename ::cuda::std::
+    __accumulator_t<BinaryFunction, typename ::cuda::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+  using ValueType = ::rocprim::
+    accumulator_t<BinaryFunction, typename ::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
+#else
+  using ValueType = typename std::iterator_traits<InputIterator>::value_type;
+#endif
 
   using Size = typename thrust::iterator_difference<InputIterator>::type;
   Size n     = thrust::distance(first, last);

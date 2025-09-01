@@ -31,15 +31,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-#include <thrust/detail/cpp_version_check.h>
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
@@ -53,7 +44,6 @@
 
 #  include <type_traits>
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -84,8 +74,9 @@ struct async_transform_fn
 };
 
 template <typename DerivedPolicy, typename ForwardIt, typename Size, typename OutputIt, typename UnaryOperation>
-unique_eager_event
-async_transform_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt output, UnaryOperation op)
+auto async_transform_n(
+  execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt output, UnaryOperation op)
+  -> unique_eager_event
 {
   unique_eager_event e;
 
@@ -101,6 +92,12 @@ async_transform_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size
   else
   {
     e = make_dependent_event(extract_dependencies(std::move(thrust::detail::derived_cast(policy))));
+  }
+
+  if (n == 0)
+  {
+    e.ready();
+    return e;
   }
 
   // Run transform.
@@ -130,7 +127,6 @@ auto async_transform(
 
 } // namespace hip_rocprim
 
-THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

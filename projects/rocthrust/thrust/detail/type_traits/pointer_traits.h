@@ -18,20 +18,13 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/detail/type_traits/is_metafunction_defined.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(cstddef)
-#include _THRUST_STD_INCLUDE(type_traits)
+#include <cstddef>
+#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -61,7 +54,7 @@ struct pointer_difference
 template <typename T>
 struct pointer_difference<T*>
 {
-  using type = _THRUST_STD::ptrdiff_t;
+  using type = std::ptrdiff_t;
 };
 
 template <typename Ptr, typename T>
@@ -91,7 +84,7 @@ template <template <typename, typename, typename, typename...> class Ptr,
           typename T>
 struct rebind_pointer<Ptr<OldT, Tag, Ref<OldT, RefTail...>, PtrTail...>, T>
 {
-  //  static_assert(_THRUST_STD::is_same<OldT, Tag>::value, "0");
+  //  static_assert(std::is_same<OldT, Tag>::value, "0");
   using type = Ptr<T, Tag, Ref<T, RefTail...>, PtrTail...>;
 };
 
@@ -109,7 +102,7 @@ template <template <typename, typename, typename, typename...> class Ptr,
           typename T>
 struct rebind_pointer<Ptr<OldT, Tag, Ref<OldT, RefTail...>, DerivedPtr<OldT, DerivedPtrTail...>>, T>
 {
-  //  static_assert(_THRUST_STD::is_same<OldT, Tag>::value, "1");
+  //  static_assert(std::is_same<OldT, Tag>::value, "1");
   using type = Ptr<T, Tag, Ref<T, RefTail...>, DerivedPtr<T, DerivedPtrTail...>>;
 };
 
@@ -119,10 +112,10 @@ template <template <typename, typename, typename, typename...> class Ptr,
           typename Tag,
           typename... PtrTail,
           typename T>
-struct rebind_pointer<Ptr<OldT, Tag, typename _THRUST_STD::add_lvalue_reference<OldT>::type, PtrTail...>, T>
+struct rebind_pointer<Ptr<OldT, Tag, typename std::add_lvalue_reference<OldT>::type, PtrTail...>, T>
 {
-  //  static_assert(_THRUST_STD::is_same<OldT, Tag>::value, "2");
-  using type = Ptr<T, Tag, typename _THRUST_STD::add_lvalue_reference<T>::type, PtrTail...>;
+  //  static_assert(std::is_same<OldT, Tag>::value, "2");
+  using type = Ptr<T, Tag, typename std::add_lvalue_reference<T>::type, PtrTail...>;
 };
 
 // Rebind `thrust::pointer`-like things with native reference types and templated
@@ -134,12 +127,11 @@ template <template <typename, typename, typename, typename...> class Ptr,
           class DerivedPtr,
           typename... DerivedPtrTail,
           typename T>
-struct rebind_pointer<
-  Ptr<OldT, Tag, typename _THRUST_STD::add_lvalue_reference<OldT>::type, DerivedPtr<OldT, DerivedPtrTail...>>,
-  T>
+struct rebind_pointer<Ptr<OldT, Tag, typename std::add_lvalue_reference<OldT>::type, DerivedPtr<OldT, DerivedPtrTail...>>,
+                      T>
 {
-  //  static_assert(_THRUST_STD::is_same<OldT, Tag>::value, "3");
-  using type = Ptr<T, Tag, typename _THRUST_STD::add_lvalue_reference<T>::type, DerivedPtr<T, DerivedPtrTail...>>;
+  //  static_assert(std::is_same<OldT, Tag>::value, "3");
+  using type = Ptr<T, Tag, typename std::add_lvalue_reference<T>::type, DerivedPtr<T, DerivedPtrTail...>>;
 };
 
 namespace pointer_traits_detail
@@ -156,7 +148,7 @@ struct pointer_raw_pointer_impl<T*>
 };
 
 template <typename Ptr>
-struct pointer_raw_pointer_impl<Ptr, _THRUST_STD::void_t<typename Ptr::raw_pointer>>
+struct pointer_raw_pointer_impl<Ptr, std::void_t<typename Ptr::raw_pointer>>
 {
   using type = typename Ptr::raw_pointer;
 };
@@ -189,9 +181,9 @@ struct capture_address
 // metafunction to compute the type of pointer_to's parameter below
 template <typename T>
 struct pointer_to_param
-    : thrust::detail::eval_if<_THRUST_STD::is_void<T>::value,
+    : thrust::detail::eval_if<thrust::detail::is_void<T>::value,
                               thrust::detail::identity_<capture_address<T>>,
-                              _THRUST_STD::add_lvalue_reference<T>>
+                              thrust::detail::add_reference<T>>
 {};
 
 } // namespace pointer_traits_detail
@@ -316,20 +308,20 @@ struct pointer_traits<const void*>
 
 template <typename FromPtr, typename ToPtr>
 struct is_pointer_system_convertible
-    : _THRUST_STD::is_convertible<typename iterator_system<FromPtr>::type, typename iterator_system<ToPtr>::type>
+    : thrust::detail::is_convertible<typename iterator_system<FromPtr>::type, typename iterator_system<ToPtr>::type>
 {};
 
 template <typename FromPtr, typename ToPtr>
 struct is_pointer_convertible
-    : ::internal::_And<
-        _THRUST_STD::is_convertible<typename pointer_element<FromPtr>::type*, typename pointer_element<ToPtr>::type*>,
+    : thrust::detail::and_<
+        thrust::detail::is_convertible<typename pointer_element<FromPtr>::type*, typename pointer_element<ToPtr>::type*>,
         is_pointer_system_convertible<FromPtr, ToPtr>>
 {};
 
 template <typename FromPtr, typename ToPtr>
 struct is_void_pointer_system_convertible
-    : ::internal::_And<_THRUST_STD::is_same<typename pointer_element<FromPtr>::type, void>,
-                       is_pointer_system_convertible<FromPtr, ToPtr>>
+    : thrust::detail::and_<thrust::detail::is_same<typename pointer_element<FromPtr>::type, void>,
+                           is_pointer_system_convertible<FromPtr, ToPtr>>
 {};
 
 // this could be a lot better, but for our purposes, it's probably
@@ -355,12 +347,12 @@ struct lazy_is_void_pointer_system_convertible
 
 template <typename FromPtr, typename ToPtr, typename T = void>
 struct enable_if_pointer_is_convertible
-    : _THRUST_STD::enable_if<lazy_is_pointer_convertible<FromPtr, ToPtr>::type::value, T>
+    : thrust::detail::enable_if<lazy_is_pointer_convertible<FromPtr, ToPtr>::type::value, T>
 {};
 
 template <typename FromPtr, typename ToPtr, typename T = void>
 struct enable_if_void_pointer_is_system_convertible
-    : _THRUST_STD::enable_if<lazy_is_void_pointer_system_convertible<FromPtr, ToPtr>::type::value, T>
+    : thrust::detail::enable_if<lazy_is_void_pointer_system_convertible<FromPtr, ToPtr>::type::value, T>
 {};
 
 } // namespace detail

@@ -26,7 +26,7 @@
 #include <iostream>
 #include <iterator>
 
-int main()
+int main(void)
 {
   // this example computes indices for all the nonzero values in a sequence
 
@@ -51,7 +51,7 @@ int main()
   // compute indices of nonzero elements
   using IndexIterator = thrust::device_vector<int>::iterator;
 
-  IndexIterator indices_end = thrust::copy_if(first, last, stencil.begin(), indices.begin(), ::internal::identity{});
+  IndexIterator indices_end = thrust::copy_if(first, last, stencil.begin(), indices.begin(), thrust::identity<int>());
   // indices now contains [1,2,5,7]
 
   // print result

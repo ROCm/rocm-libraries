@@ -29,36 +29,62 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#  include <thrust/system/hip/config.h>
-
-#  include <thrust/detail/integer_math.h>
+#  include <thrust/detail/alignment.h>
+#  include <thrust/detail/minmax.h>
+#  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits.h>
+#  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #  include <thrust/distance.h>
-#  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/system/hip/detail/dispatch.h>
+#  include <thrust/functional.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/par_to_seq.h>
+#  include <thrust/system/hip/detail/util.h>
 
 #  include <cstdint>
+#  include <iterator>
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
 THRUST_NAMESPACE_BEGIN
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename AssociativeOperator>
+THRUST_HIP_FUNCTION OutputIterator inclusive_scan(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  AssociativeOperator binary_op);
+
+template <typename DerivedPolicy,
+          typename InputIterator,
+          typename OutputIterator,
+          typename InitValueT,
+          typename AssociativeOperator>
+THRUST_HIP_FUNCTION OutputIterator inclusive_scan(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  InitValueT init,
+  AssociativeOperator binary_op);
+
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T, typename AssociativeOperator>
+THRUST_HIP_FUNCTION OutputIterator exclusive_scan(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  T init,
+  AssociativeOperator binary_op);
+
 namespace hip_rocprim
 {
+
 namespace __scan
 {
-
 template <typename Derived, typename InputIt, typename OutputIt, typename Size, typename ScanOp>
 THRUST_HIP_RUNTIME_FUNCTION auto invoke_inclusive_scan(
   execution_policy<Derived>& policy,
@@ -275,102 +301,96 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt exclusive_scan(
 // Thrust API entry points
 //-------------------------
 
-template <typename Derived, typename InputIt, typename Size, typename OutputIt, typename T, typename ScanOp>
-THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
-  thrust::hip_rocprim::execution_policy<Derived>& policy,
-  InputIt first,
-  Size num_items,
-  OutputIt result,
-  T init,
-  ScanOp scan_op)
+template <class Derived, class InputIt, class Size, class OutputIt, class ScanOp>
+THRUST_HIP_FUNCTION OutputIt
+inclusive_scan_n(execution_policy<Derived>& policy, InputIt input_it, Size num_items, OutputIt result, ScanOp scan_op)
 {
   // struct workaround is required for HIP-clang
   struct workaround
   {
     THRUST_HOST static OutputIt
-    par(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
+    par(execution_policy<Derived>& policy, InputIt input_it, Size num_items, OutputIt result, ScanOp scan_op)
     {
-      return result = __scan::inclusive_scan(policy, first, result, num_items, init, scan_op);
+      return __scan::inclusive_scan(policy, input_it, result, num_items, scan_op);
     }
     THRUST_DEVICE static OutputIt
-    seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
+    seq(execution_policy<Derived>& policy, InputIt input_it, Size num_items, OutputIt result, ScanOp scan_op)
     {
-      return result = thrust::inclusive_scan(
-               cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
+      return thrust::inclusive_scan(cvt_to_seq(derived_cast(policy)), input_it, input_it + num_items, result, scan_op);
     }
   };
 #  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, num_items, result, init, scan_op);
+  return workaround::par(policy, input_it, num_items, result, scan_op);
 #  else
-  return workaround::seq(policy, first, num_items, result, init, scan_op);
+  return workaround::seq(policy, input_it, num_items, result, scan_op);
 #  endif
 }
 
-template <typename Derived, typename InputIt, typename Size, typename OutputIt, typename ScanOp>
-THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
-  thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, ScanOp scan_op)
+template <class Derived, class InputIt, class Size, class OutputIt, class InitValueT, class ScanOp>
+THRUST_HIP_FUNCTION OutputIt inclusive_scan_n(
+  execution_policy<Derived>& policy, InputIt input_it, Size num_items, OutputIt result, InitValueT init, ScanOp scan_op)
 {
   // struct workaround is required for HIP-clang
   struct workaround
   {
     THRUST_HOST static OutputIt
-    par(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, ScanOp scan_op)
+    par(execution_policy<Derived>& policy,
+        InputIt input_it,
+        Size num_items,
+        OutputIt result,
+        InitValueT init,
+        ScanOp scan_op)
     {
-      return result = __scan::inclusive_scan(policy, first, result, num_items, scan_op);
+      return __scan::inclusive_scan(policy, input_it, result, num_items, init, scan_op);
     }
     THRUST_DEVICE static OutputIt
-    seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, ScanOp scan_op)
+    seq(execution_policy<Derived>& policy,
+        InputIt input_it,
+        Size num_items,
+        OutputIt result,
+        InitValueT init,
+        ScanOp scan_op)
     {
-      return result =
-               thrust::inclusive_scan(cvt_to_seq(derived_cast(policy)), first, first + num_items, result, scan_op);
+      return thrust::inclusive_scan(
+        cvt_to_seq(derived_cast(policy)), input_it, input_it + num_items, result, init, scan_op);
     }
   };
 #  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, num_items, result, scan_op);
+  return workaround::par(policy, input_it, num_items, result, init, scan_op);
 #  else
-  return workaround::seq(policy, first, num_items, result, scan_op);
+  return workaround::seq(policy, input_it, num_items, result, init, scan_op);
 #  endif
 }
 
-template <typename Derived, typename InputIt, typename OutputIt, typename ScanOp>
-THRUST_HOST_DEVICE OutputIt inclusive_scan(
-  thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, ScanOp scan_op)
+template <class Derived, class InputIt, class OutputIt, class ScanOp>
+OutputIt THRUST_HIP_FUNCTION
+inclusive_scan(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, ScanOp scan_op)
 {
   using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
   diff_t const num_items = thrust::distance(first, last);
   return thrust::hip_rocprim::inclusive_scan_n(policy, first, num_items, result, scan_op);
 }
 
-template <typename Derived, typename InputIt, typename OutputIt, typename T, typename ScanOp>
-THRUST_HOST_DEVICE OutputIt inclusive_scan(
-  thrust::hip_rocprim::execution_policy<Derived>& policy,
-  InputIt first,
-  InputIt last,
-  OutputIt result,
-  T init,
-  ScanOp scan_op)
+template <class Derived, class InputIt, class OutputIt, class InitValueT, class ScanOp>
+OutputIt THRUST_HIP_FUNCTION inclusive_scan(
+  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, InitValueT init, ScanOp scan_op)
 {
   using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
   diff_t const num_items = thrust::distance(first, last);
   return thrust::hip_rocprim::inclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
 
-template <typename Derived, typename InputIt, typename OutputIt>
-THRUST_HOST_DEVICE OutputIt
-inclusive_scan(thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
+template <class Derived, class InputIt, class OutputIt>
+OutputIt THRUST_HIP_FUNCTION
+inclusive_scan(execution_policy<Derived>& policy, InputIt first, OutputIt last, OutputIt result)
 {
   return thrust::hip_rocprim::inclusive_scan(policy, first, last, result, thrust::plus<>{});
 }
 
 THRUST_EXEC_CHECK_DISABLE
-template <typename Derived, typename InputIt, typename Size, typename OutputIt, typename T, typename ScanOp>
-THRUST_HOST_DEVICE OutputIt exclusive_scan_n(
-  thrust::hip_rocprim::execution_policy<Derived>& policy,
-  InputIt first,
-  Size num_items,
-  OutputIt result,
-  T init,
-  ScanOp scan_op)
+template <class Derived, class InputIt, class Size, class OutputIt, class T, class ScanOp>
+OutputIt THRUST_HIP_FUNCTION exclusive_scan_n(
+  execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
 {
   // struct workaround is required for HIP-clang
   struct workaround
@@ -378,14 +398,13 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan_n(
     THRUST_HOST static OutputIt
     par(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
     {
-      return result = __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
+      return __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
     }
 
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
     {
-      return result = thrust::exclusive_scan(
-               cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
+      return thrust::exclusive_scan(cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
     }
   };
 
@@ -396,36 +415,32 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan_n(
 #  endif
 }
 
-template <typename Derived, typename InputIt, typename OutputIt, typename T, typename ScanOp>
-THRUST_HOST_DEVICE OutputIt exclusive_scan(
-  thrust::hip_rocprim::execution_policy<Derived>& policy,
-  InputIt first,
-  InputIt last,
-  OutputIt result,
-  T init,
-  ScanOp scan_op)
+template <class Derived, class InputIt, class OutputIt, class T, class ScanOp>
+OutputIt THRUST_HIP_FUNCTION
+exclusive_scan(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, T init, ScanOp scan_op)
 {
   using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
   diff_t const num_items = thrust::distance(first, last);
-  return thrust::hip_rocprim::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
+  return hip_rocprim::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
 
-template <typename Derived, typename InputIt, typename OutputIt, typename T>
-THRUST_HOST_DEVICE OutputIt exclusive_scan(
-  thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, T init)
+template <class Derived, class InputIt, class OutputIt, class T>
+OutputIt THRUST_HIP_FUNCTION
+exclusive_scan(execution_policy<Derived>& policy, InputIt first, OutputIt last, OutputIt result, T init)
 {
   return thrust::hip_rocprim::exclusive_scan(policy, first, last, result, init, thrust::plus<>{});
 }
 
-template <typename Derived, typename InputIt, typename OutputIt>
-THRUST_HOST_DEVICE OutputIt
-exclusive_scan(thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
+template <class Derived, class InputIt, class OutputIt>
+OutputIt THRUST_HIP_FUNCTION
+exclusive_scan(execution_policy<Derived>& policy, InputIt first, OutputIt last, OutputIt result)
 {
   using init_type = typename thrust::iterator_traits<InputIt>::value_type;
   return hip_rocprim::exclusive_scan(policy, first, last, result, init_type{});
 }
 
-} // namespace hip_rocprim
+} // namespace  hip_rocprim
+
 THRUST_NAMESPACE_END
 
 #  include <thrust/scan.h>
