@@ -1402,9 +1402,6 @@ try
                                        mat_B->data_type,
                                        mat_C->data_type));
 
-    //std::cout << "mat_A->data_type: " << mat_A->data_type << " mat_B->data_type: " << mat_B->data_type << " mat_C->data_type: " << mat_C->data_type << std::endl;
-    //std::cout << "compute_type: " << compute_type << std::endl;
-
     RETURN_IF_ROCSPARSE_ERROR(sddmm_function(mat_C->format,
                                              handle,
                                              trans_A,
