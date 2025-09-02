@@ -123,7 +123,7 @@ namespace mxDataGeneratorTest
             std::vector<uint32_t> shuffledSeeds = {9861u, 12345u};
             std::shuffle(shuffledSeeds.begin(), shuffledSeeds.end(), std::default_random_engine{});
 
-            int              originalThreads = omp_get_max_threads();
+            const int        originalThreads = omp_get_max_threads();
             std::vector<int> threadCounts    = {originalThreads, 1, 2, 4, 8};
 
             for(int threadCount : threadCounts)
@@ -192,7 +192,7 @@ namespace mxDataGeneratorTest
             auto             dataType = TypeInfo<rrDT>::Var.dataType;
             TensorDescriptor desc(dataType, {dim1, dim2}, "T");
 
-            int originalThreads = omp_get_max_threads();
+            const int originalThreads = omp_get_max_threads();
 
             std::vector<int> threadCounts = {2, 4, 7, 8}; // ref is 1
             threadCounts.erase(
@@ -224,9 +224,9 @@ namespace mxDataGeneratorTest
                     auto       testScale = testGen.getScaleBytes();
                     auto       testFloat = testGen.getReferenceFloat();
 
-                    dataCorrect += (refData == testData) ? 1 : 0;
-                    scaleCorrect += (refScale == testScale) ? 1 : 0;
-                    floatCorrect += (refFloat == testFloat) ? 1 : 0;
+                    dataCorrect += refData == testData;
+                    scaleCorrect += refScale == testScale;
+                    floatCorrect += refFloat == testFloat;
                 }
 
                 CHECK(dataCorrect == threadCounts.size());
