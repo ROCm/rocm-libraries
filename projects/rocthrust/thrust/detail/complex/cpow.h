@@ -23,29 +23,30 @@
 #include <thrust/complex.h>
 #include <thrust/detail/type_traits.h>
 
+#include <cmath>
+#include <type_traits>
+
 THRUST_NAMESPACE_BEGIN
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 pow(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return exp(log(complex<T>(x)) * complex<T>(y));
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
-pow(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const complex<T0>& x, const T1& y)
 {
-  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return exp(log(complex<T>(x)) * T(y));
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
-pow(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const T0& x, const complex<T1>& y)
 {
-  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
 #ifdef __HIP_DEVICE_COMPILE__
   using ::log;
 #else

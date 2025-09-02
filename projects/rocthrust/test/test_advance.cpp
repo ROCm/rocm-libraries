@@ -18,43 +18,25 @@
 #include <thrust/advance.h>
 #include <thrust/sequence.h>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(AdvanceVectorTests, VectorSignedIntegerTestsParams);
 
-// TODO expand this with other iterator types (forward, bidirectional, etc.)
-
 TYPED_TEST(AdvanceVectorTests, TestAdvance)
 {
-  using Vector   = typename TestFixture::input_type;
-  using T        = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(10);
+  Vector v(100);
   thrust::sequence(v.begin(), v.end());
 
   Iterator i = v.begin();
-
-  thrust::advance(i, 1);
-
-  ASSERT_EQ(*i, T(1));
-
-  thrust::advance(i, 8);
-
-  ASSERT_EQ(*i, T(9));
-
-  thrust::advance(i, -4);
-
-  ASSERT_EQ(*i, T(5));
-
-  v = Vector(100);
-  thrust::sequence(v.begin(), v.end());
-
-  i = v.begin();
 
   thrust::advance(i, 7);
 
@@ -71,10 +53,9 @@ TYPED_TEST(AdvanceVectorTests, TestAdvance)
 
 TYPED_TEST(AdvanceVectorTests, TestNext)
 {
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
-  using Vector   = typename TestFixture::input_type;
-  using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   Vector v(10);
@@ -103,10 +84,9 @@ TYPED_TEST(AdvanceVectorTests, TestNext)
 
 TYPED_TEST(AdvanceVectorTests, TestPrev)
 {
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
-  using Vector   = typename TestFixture::input_type;
-  using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   Vector v(10);

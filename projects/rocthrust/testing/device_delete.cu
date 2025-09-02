@@ -25,11 +25,11 @@
 
 struct Foo
 {
-  THRUST_HOST_DEVICE Foo()
+  THRUST_HOST_DEVICE Foo(void)
       : set_me_upon_destruction{nullptr}
   {}
 
-  THRUST_HOST_DEVICE ~Foo()
+  THRUST_HOST_DEVICE ~Foo(void)
   {
     NV_IF_TARGET(NV_IS_DEVICE, (if (set_me_upon_destruction != nullptr) { *set_me_upon_destruction = true; }));
   }
@@ -38,7 +38,7 @@ struct Foo
 };
 
 #if !defined(__QNX__)
-void TestDeviceDeleteDestructorInvocation()
+void TestDeviceDeleteDestructorInvocation(void)
 {
   KNOWN_FAILURE;
   //

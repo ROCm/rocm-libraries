@@ -17,10 +17,6 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/type_traits.h>
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <async/exclusive_scan/mixin.h>
@@ -50,7 +46,7 @@ struct adl_host_synchronous
     thrust::host_vector<input_value_type> host_input(input.cbegin(), input.cend());
     thrust::host_vector<output_value_type> host_output(host_input.size());
 
-    using OutIter = ::internal::remove_cvref_t<decltype(host_output.begin())>;
+    using OutIter = thrust::remove_cvref_t<decltype(host_output.begin())>;
 
     // ADL should resolve this to the synchronous `thrust::` algorithm.
     // This is checked by ensuring that the call returns an output iterator.
@@ -90,7 +86,6 @@ struct using_namespace
     // Importing the CPO into the current namespace should unambiguously resolve
     // this call to the CPO, as opposed to resolving to the thrust:: algorithm
     // via ADL. This is verified by checking that an event is returned.
-    THRUST_SUPPRESS_DEPRECATED_PUSH
     using namespace thrust::async;
     thrust::device_event e = exclusive_scan(
       std::get<PrefixArgIndices>(THRUST_FWD(prefix_tuple))...,
@@ -98,7 +93,6 @@ struct using_namespace
       input.cend(),
       output.begin(),
       std::get<PostfixArgIndices>(THRUST_FWD(postfix_tuple))...);
-    THRUST_SUPPRESS_DEPRECATED_POP
     return e;
   }
 };
@@ -123,14 +117,12 @@ struct using_cpo
     // this call to the CPO, as opposed to resolving to the thrust:: algorithm
     // via ADL. This is verified by checking that an event is returned.
     using thrust::async::exclusive_scan;
-    THRUST_SUPPRESS_DEPRECATED_PUSH
     thrust::device_event e = exclusive_scan(
       std::get<PrefixArgIndices>(THRUST_FWD(prefix_tuple))...,
       input.cbegin(),
       input.cend(),
       output.begin(),
       std::get<PostfixArgIndices>(THRUST_FWD(postfix_tuple))...);
-    THRUST_SUPPRESS_DEPRECATED_POP
     return e;
   }
 };
@@ -188,9 +180,4 @@ void test_using_cpo()
 }
 DECLARE_UNITTEST(test_using_cpo);
 
-#endif // C++17
-
-// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-THRUST_SUPPRESS_DEPRECATED_POP
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#endif // C++14

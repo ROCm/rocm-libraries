@@ -31,18 +31,11 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if _CCCL_STD_VER >= 2017
+#if THRUST_CPP_DIALECT >= 2017
 
-#  if _CCCL_HAS_CUDA_COMPILER
+#  ifdef _CCCL_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -61,7 +54,6 @@
 
 #    include <type_traits>
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -129,7 +121,9 @@ auto async_copy_n(thrust::cuda::execution_policy<FromPolicy>& from_exec,
                                       decltype(is_device_to_device_copy(from_exec, to_exec))>::value,
                           unique_eager_event>::type
 {
-  return async_transform_n(select_device_system(from_exec, to_exec), first, n, output, ::cuda::std::identity{});
+  using T = typename iterator_traits<ForwardIt>::value_type;
+
+  return async_transform_n(select_device_system(from_exec, to_exec), first, n, output, thrust::identity<T>());
 }
 
 template <typename OutputIt>
@@ -354,7 +348,6 @@ auto async_copy(thrust::cuda::execution_policy<FromPolicy>& from_exec,
 
 } // namespace cuda_cub
 
-_CCCL_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // _CCCL_CUDA_COMPILER

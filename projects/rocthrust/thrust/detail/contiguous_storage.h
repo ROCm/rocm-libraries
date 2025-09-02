@@ -18,14 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/normal_iterator.h>
@@ -142,8 +134,6 @@ public:
   // on move assignment
   THRUST_HOST_DEVICE contiguous_storage& operator=(contiguous_storage&& other);
 
-  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(contiguous_storage, const_iterator);
-
 private:
   // XXX we could inherit from this to take advantage of empty base class optimization
   allocator_type m_allocator;
@@ -181,14 +171,12 @@ private:
   THRUST_HOST_DEVICE void propagate_allocator_dispatch(true_type, contiguous_storage& other);
 
   THRUST_HOST_DEVICE void propagate_allocator_dispatch(false_type, contiguous_storage& other);
-
-  friend THRUST_HOST_DEVICE void swap(contiguous_storage& lhs, contiguous_storage& rhs) noexcept(noexcept(lhs.swap(rhs)))
-  {
-    lhs.swap(rhs);
-  }
 }; // end contiguous_storage
 
 } // namespace detail
+
+template <typename T, typename Alloc>
+THRUST_HOST_DEVICE void swap(detail::contiguous_storage<T, Alloc>& lhs, detail::contiguous_storage<T, Alloc>& rhs);
 
 THRUST_NAMESPACE_END
 

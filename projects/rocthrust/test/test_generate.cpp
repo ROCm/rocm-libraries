@@ -19,9 +19,10 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
 using VectorParams = ::testing::Types<Params<thrust::host_vector<short>>, Params<thrust::host_vector<int>>>;
 
@@ -36,20 +37,18 @@ TEST(ReplaceTests, UsingHip)
   ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
-THRUST_DIAG_PUSH
-THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
-
 template <typename T>
 struct return_value
 {
   T val;
 
-  return_value() {}
+  return_value(void) {}
+
   return_value(T v)
       : val(v)
   {}
 
-  THRUST_HOST_DEVICE T operator()(void)
+  __host__ __device__ T operator()(void)
   {
     return val;
   }
@@ -70,12 +69,15 @@ TYPED_TEST(GenerateVectorTests, TestGenerateSimple)
 
   thrust::generate(result.begin(), result.end(), f);
 
-  Vector ref(result.size(), value);
-  ASSERT_EQ(result, ref);
+  ASSERT_EQ(result[0], value);
+  ASSERT_EQ(result[1], value);
+  ASSERT_EQ(result[2], value);
+  ASSERT_EQ(result[3], value);
+  ASSERT_EQ(result[4], value);
 }
 
 template <typename ForwardIterator, typename Generator>
-void generate(my_system& system, ForwardIterator /*first*/, ForwardIterator, Generator)
+__host__ __device__ void generate(my_system& system, ForwardIterator, ForwardIterator, Generator)
 {
   system.validate_dispatch();
 }
@@ -93,7 +95,7 @@ TEST(GenerateTests, TestGenerateDispatchExplicit)
 }
 
 template <typename ForwardIterator, typename Generator>
-void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
+__host__ __device__ void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
 {
   *first = 13;
 }
@@ -115,10 +117,9 @@ TYPED_TEST(GenerateVariablesTests, TestGenerate)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (auto size : get_sizes())
+  const std::vector<size_t> sizes = get_sizes();
+  for (auto size : sizes)
   {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
-
     thrust::host_vector<T> h_result(size);
     thrust::device_vector<T> d_result(size);
 
@@ -165,12 +166,15 @@ TYPED_TEST(GenerateVectorTests, TestGenerateNSimple)
 
   thrust::generate_n(result.begin(), result.size(), f);
 
-  Vector ref(result.size(), value);
-  ASSERT_EQ(result, ref);
+  ASSERT_EQ(result[0], value);
+  ASSERT_EQ(result[1], value);
+  ASSERT_EQ(result[2], value);
+  ASSERT_EQ(result[3], value);
+  ASSERT_EQ(result[4], value);
 }
 
 template <typename ForwardIterator, typename Size, typename Generator>
-ForwardIterator generate_n(my_system& system, ForwardIterator first, Size, Generator)
+__host__ __device__ ForwardIterator generate_n(my_system& system, ForwardIterator first, Size, Generator)
 {
   system.validate_dispatch();
   return first;
@@ -189,7 +193,7 @@ TEST(GenerateTests, TestGenerateNDispatchExplicit)
 }
 
 template <typename ForwardIterator, typename Size, typename Generator>
-ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
+__host__ __device__ ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
 {
   *first = 13;
   return first;
@@ -212,10 +216,9 @@ TYPED_TEST(GenerateVariablesTests, TestGenerateNToDiscardIterator)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (auto size : get_sizes())
+  const std::vector<size_t> sizes = get_sizes();
+  for (auto size : sizes)
   {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
-
     T value = 13;
     return_value<T> f(value);
 
@@ -246,10 +249,12 @@ TYPED_TEST(GenerateVectorTests, TestGenerateZipIterator)
                    thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end())),
                    return_value<thrust::tuple<T, T>>(thrust::tuple<T, T>(4, 7)));
 
-  Vector ref1(3, 4);
-  Vector ref2(3, 7);
-  ASSERT_EQ(v1, ref1);
-  ASSERT_EQ(v2, ref2);
+  ASSERT_EQ(v1[0], 4);
+  ASSERT_EQ(v1[1], 4);
+  ASSERT_EQ(v1[2], 4);
+  ASSERT_EQ(v2[0], 7);
+  ASSERT_EQ(v2[1], 7);
+  ASSERT_EQ(v2[2], 7);
 }
 
 TEST(GenerateTests, TestGenerateTuple)
@@ -268,4 +273,4 @@ TEST(GenerateTests, TestGenerateTuple)
   ASSERT_EQ_QUIET(h, d);
 }
 
-THRUST_DIAG_POP
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
