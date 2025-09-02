@@ -22,6 +22,14 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  define PARALLEL_FOR thrust::hip_rocprim::parallel_for
+#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  define PARALLEL_FOR thrust::cuda_cub::parallel_for
+#endif
+
+#ifdef PARALLEL_FOR
+
 using TestsParams = ::testing::Types<Params<unsigned int>, Params<unsigned long long>>;
 
 TESTS_DEFINE(ParallelForTests, TestsParams)
@@ -61,7 +69,7 @@ TYPED_TEST(ParallelForTests, HostPathSimpleTest)
     func.ptr = raw_ptr;
 
     // Add all numbers: 1+2+...+size = size * (size+1) / 2
-    thrust::hip_rocprim::parallel_for(tag, func, size);
+    PARALLEL_FOR(tag, func, size);
 
     T output;
     HIP_CHECK(hipMemcpy(&output, raw_ptr, sizeof(T), hipMemcpyDeviceToHost));
@@ -73,3 +81,6 @@ TYPED_TEST(ParallelForTests, HostPathSimpleTest)
     thrust::free(tag, ptr);
   }
 }
+
+#  undef PARALLEL_FOR
+#endif

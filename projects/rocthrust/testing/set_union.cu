@@ -66,13 +66,27 @@ void TestSetUnionDispatchImplicit()
 DECLARE_UNITTEST(TestSetUnionDispatchImplicit);
 
 template <typename Vector>
-void TestSetUnionSimple()
+void TestSetUnionSimple(void)
 {
   using Iterator = typename Vector::iterator;
 
-  Vector a{0, 2, 4}, b{0, 3, 3, 4};
+  Vector a(3), b(4);
 
-  Vector ref{0, 2, 3, 3, 4};
+  a[0] = 0;
+  a[1] = 2;
+  a[2] = 4;
+  b[0] = 0;
+  b[1] = 3;
+  b[2] = 3;
+  b[3] = 4;
+
+  Vector ref(5);
+  ref[0] = 0;
+  ref[1] = 2;
+  ref[2] = 3;
+  ref[3] = 3;
+  ref[4] = 4;
+
   Vector result(5);
 
   Iterator end = thrust::set_union(a.begin(), a.end(), b.begin(), b.end(), result.begin());
@@ -83,13 +97,28 @@ void TestSetUnionSimple()
 DECLARE_VECTOR_UNITTEST(TestSetUnionSimple);
 
 template <typename Vector>
-void TestSetUnionWithEquivalentElementsSimple()
+void TestSetUnionWithEquivalentElementsSimple(void)
 {
   using Iterator = typename Vector::iterator;
 
-  Vector a{0, 2, 2}, b{0, 2, 2, 2, 3};
+  Vector a(3), b(5);
 
-  Vector ref{0, 2, 2, 2, 3};
+  a[0] = 0;
+  a[1] = 2;
+  a[2] = 2;
+  b[0] = 0;
+  b[1] = 2;
+  b[2] = 2;
+  b[3] = 2;
+  b[4] = 3;
+
+  Vector ref(5);
+  ref[0] = 0;
+  ref[1] = 2;
+  ref[2] = 2;
+  ref[3] = 2;
+  ref[4] = 3;
+
   Vector result(5);
 
   Iterator end = thrust::set_union(a.begin(), a.end(), b.begin(), b.end(), result.begin());

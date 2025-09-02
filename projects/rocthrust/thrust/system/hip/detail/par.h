@@ -29,16 +29,10 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/allocator_aware_execution_policy.h>
 #include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 #include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -66,39 +60,9 @@ public:
   }
 
 private:
-  friend THRUST_HOST_DEVICE hipStream_t get_stream(const execute_on_stream_base& exec)
+  friend hipStream_t THRUST_HOST_DEVICE get_stream(const execute_on_stream_base& exec)
   {
     return exec.stream;
-  }
-};
-
-template <class Derived>
-struct execute_on_stream_nosync_base : execution_policy<Derived>
-{
-private:
-  hipStream_t stream;
-
-public:
-  THRUST_HOST_DEVICE execute_on_stream_nosync_base(hipStream_t stream_ = default_stream())
-      : stream(stream_)
-  {}
-
-  THRUST_HIP_RUNTIME_FUNCTION Derived on(hipStream_t const& s) const
-  {
-    Derived result = derived_cast(*this);
-    result.stream  = s;
-    return result;
-  }
-
-private:
-  friend THRUST_HOST_DEVICE hipStream_t get_stream(const execute_on_stream_nosync_base& exec)
-  {
-    return exec.stream;
-  }
-
-  friend THRUST_HOST_DEVICE bool must_perform_optional_stream_synchronization(const execute_on_stream_nosync_base&)
-  {
-    return false;
   }
 };
 
@@ -112,6 +76,25 @@ struct execute_on_stream : execute_on_stream_base<execute_on_stream>
       : base_t(stream){};
 };
 
+template <class Derived>
+struct execute_on_stream_nosync_base : execute_on_stream_base<Derived>
+{
+private:
+  using base_t = execute_on_stream_base<Derived>;
+
+public:
+  THRUST_HOST_DEVICE execute_on_stream_nosync_base()
+      : base_t(){};
+  THRUST_HOST_DEVICE execute_on_stream_nosync_base(hipStream_t stream)
+      : base_t(stream){};
+
+private:
+  friend THRUST_HOST_DEVICE bool must_perform_optional_stream_synchronization(const execute_on_stream_nosync_base&)
+  {
+    return false;
+  }
+};
+
 struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_stream_nosync>
 {
   using base_t = execute_on_stream_nosync_base<execute_on_stream_nosync>;
@@ -122,7 +105,6 @@ struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_strea
       : base_t(stream){};
 };
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 struct par_t
     : execution_policy<par_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
@@ -130,7 +112,7 @@ struct par_t
 {
   using base_t = execution_policy<par_t>;
 
-  THRUST_HOST_DEVICE constexpr par_t()
+  THRUST_DEVICE THRUST_HOST constexpr par_t()
       : base_t()
   {}
 
@@ -142,9 +124,7 @@ struct par_t
     return execute_on_stream(stream);
   }
 };
-THRUST_SUPPRESS_DEPRECATED_POP
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 struct par_nosync_t
     : execution_policy<par_nosync_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
@@ -165,8 +145,8 @@ struct par_nosync_t
   }
 
 private:
-  // this function is defined to allow non-blocking calls on the default_stream() with thrust::hip::par_nosync
-  // without explicitly using thrust::hip::par_nosync.on(default_stream())
+  // this function is defined to allow non-blocking calls on the default_stream() with thrust::cuda::par_nosync
+  // without explicitly using thrust::cuda::par_nosync.on(default_stream())
   friend THRUST_HOST_DEVICE bool must_perform_optional_stream_synchronization(const par_nosync_t&)
   {
     return false;
@@ -285,57 +265,8 @@ private:
     return {};
   }
 };
-THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_INLINE_CONSTANT par_t par;
-
-/*! \p thrust::hip::par_nosync is a parallel execution policy targeting Thrust's HIP device backend.
- *  Similar to \p thrust::hip::par it allows execution of Thrust algorithms in a specific HIP stream.
- *
- *  \p thrust::hip::par_nosync indicates that an algorithm is free to avoid any synchronization of the
- *  associated stream that is not strictly required for correctness. Additionally, algorithms may return
- *  before the corresponding kernels are completed, similar to asynchronous kernel launches via <<< >>> syntax.
- *  The user must take care to perform explicit synchronization if necessary.
- *
- *  The following code snippet demonstrates how to use \p thrust::hip::par_nosync :
- *
- *  \code
- *    #include <thrust/device_vector.h>
- *    #include <thrust/for_each.h>
- *    #include <thrust/execution_policy.h>
- *
- *    struct IncFunctor{
- *        __host__ __device__
- *        void operator()(std::size_t& x){ x = x + 1; };
- *    };
- *
- *    int main(){
- *        std::size_t N = 1000000;
- *        thrust::device_vector<std::size_t> d_vec(N);
- *
- *        hipStream_t stream;
- *        hipStreamCreate(&stream);
- *        auto nosync_policy = thrust::hip::par_nosync.on(stream);
- *
- *        thrust::for_each(nosync_policy, d_vec.begin(), d_vec.end(), IncFunctor{});
- *        thrust::for_each(nosync_policy, d_vec.begin(), d_vec.end(), IncFunctor{});
- *        thrust::for_each(nosync_policy, d_vec.begin(), d_vec.end(), IncFunctor{});
- *
- *        //for_each may return before completion. Could do other cpu work in the meantime
- *        // ...
- *
- *        //Wait for the completion of all for_each kernels
- *        hipStreamSynchronize(stream);
- *
- *        std::size_t x = thrust::reduce(nosync_policy, d_vec.begin(), d_vec.end());
- *        //Currently, this synchronization is not necessary. reduce will still perform
- *        //implicit synchronization to transfer the reduced value to the host to return it.
- *        hipStreamSynchronize(stream);
- *        hipStreamDestroy(stream);
- *    }
- *  \endcode
- *
- */
 THRUST_INLINE_CONSTANT par_nosync_t par_nosync;
 THRUST_INLINE_CONSTANT par_det_t par_det;
 THRUST_INLINE_CONSTANT par_det_nosync_t par_det_nosync;

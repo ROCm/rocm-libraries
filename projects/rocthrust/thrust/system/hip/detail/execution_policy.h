@@ -25,19 +25,9 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
-
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/system/hip/config.h>
 
 #include <thrust/detail/allocator_aware_execution_policy.h>
@@ -46,11 +36,12 @@
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/version.h>
 
+#include <hip/hip_runtime.h>
+
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
-
 struct tag;
 
 template <class>
@@ -62,19 +53,17 @@ struct execution_policy<tag> : thrust::execution_policy<tag>
   using tag_type = tag;
 };
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 struct tag
     : execution_policy<tag>
     , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
     , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
 {};
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
 {
   using tag_type = tag;
-  THRUST_HOST_DEVICE operator tag() const
+  operator tag() const
   {
     return tag();
   }

@@ -18,14 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/advance.h>
 #include <thrust/detail/tuple_meta_transform.h>
 #include <thrust/detail/tuple_transform.h>
@@ -97,7 +89,7 @@ struct dereference_iterator
     using type = typename iterator_traits<Iterator>::reference;
   }; // end apply
 
-  // XXX silence warnings of the form "calling a __host__ function from a __host__ __device__ function is not allowed
+  // XXX silence warnings of the form "calling a __host__ function from a THRUST_HOST_DEVICE function is not allowed
   THRUST_EXEC_CHECK_DISABLE
   template <typename Iterator>
   THRUST_HOST_DEVICE typename apply<Iterator>::type operator()(Iterator const& it)
@@ -174,7 +166,7 @@ inline THRUST_HOST_DEVICE Fun tuple_for_each(thrust::tuple<Ts...>& t, Fun f)
 } // namespace tuple_impl_specific
 
 // Metafunction to obtain the type of the tuple whose element types
-// are the value_types of an iterator tuple.
+// are the value_types of an iterator tupel.
 //
 template <typename IteratorTuple>
 struct tuple_of_value_types : tuple_meta_transform<IteratorTuple, iterator_value>

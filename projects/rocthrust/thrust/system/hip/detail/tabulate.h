@@ -29,20 +29,13 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
-#  include <thrust/system/hip/detail/parallel_for.h>
-#  include <thrust/system/hip/execution_policy.h>
+#  include <thrust/iterator/counting_iterator.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/transform.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -71,7 +64,7 @@ struct functor
 } // namespace __tabulate
 
 template <class Derived, class Iterator, class TabulateOp>
-void THRUST_HOST_DEVICE
+void THRUST_HIP_FUNCTION
 tabulate(execution_policy<Derived>& policy, Iterator first, Iterator last, TabulateOp tabulate_op)
 {
   using size_type = typename iterator_traits<Iterator>::difference_type;

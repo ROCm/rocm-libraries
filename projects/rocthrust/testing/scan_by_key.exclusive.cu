@@ -30,32 +30,63 @@ void TestExclusiveScanByKeySimple()
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
-  Vector keys{0, 1, 1, 1, 2, 3, 3};
-  Vector vals{1, 2, 3, 4, 5, 6, 7};
+  Vector keys(7);
+  Vector vals(7);
+
   Vector output(7, 0);
+
+  // clang-format off
+  keys[0] = 0; vals[0] = 1;
+  keys[1] = 1; vals[1] = 2;
+  keys[2] = 1; vals[2] = 3;
+  keys[3] = 1; vals[3] = 4;
+  keys[4] = 2; vals[4] = 5;
+  keys[5] = 3; vals[5] = 6;
+  keys[6] = 3; vals[6] = 7;
+  // clang-format on
 
   Iterator iter = thrust::exclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin());
 
   ASSERT_EQUAL_QUIET(iter, output.end());
 
-  Vector ref{0, 0, 2, 5, 0, 0, 6};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 0);
+  ASSERT_EQUAL(output[1], 0);
+  ASSERT_EQUAL(output[2], 2);
+  ASSERT_EQUAL(output[3], 5);
+  ASSERT_EQUAL(output[4], 0);
+  ASSERT_EQUAL(output[5], 0);
+  ASSERT_EQUAL(output[6], 6);
 
   thrust::exclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin(), T(10));
 
-  ref = {10, 10, 12, 15, 10, 10, 16};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 10);
+  ASSERT_EQUAL(output[1], 10);
+  ASSERT_EQUAL(output[2], 12);
+  ASSERT_EQUAL(output[3], 15);
+  ASSERT_EQUAL(output[4], 10);
+  ASSERT_EQUAL(output[5], 10);
+  ASSERT_EQUAL(output[6], 16);
 
   thrust::exclusive_scan_by_key(
     keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), thrust::equal_to<T>(), thrust::multiplies<T>());
 
-  ref = {10, 10, 20, 60, 10, 10, 60};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 10);
+  ASSERT_EQUAL(output[1], 10);
+  ASSERT_EQUAL(output[2], 20);
+  ASSERT_EQUAL(output[3], 60);
+  ASSERT_EQUAL(output[4], 10);
+  ASSERT_EQUAL(output[5], 10);
+  ASSERT_EQUAL(output[6], 60);
 
   thrust::exclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), thrust::equal_to<T>());
 
-  ref = {10, 10, 12, 15, 10, 10, 16};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 10);
+  ASSERT_EQUAL(output[1], 10);
+  ASSERT_EQUAL(output[2], 12);
+  ASSERT_EQUAL(output[3], 15);
+  ASSERT_EQUAL(output[4], 10);
+  ASSERT_EQUAL(output[5], 10);
+  ASSERT_EQUAL(output[6], 16);
 }
 DECLARE_VECTOR_UNITTEST(TestExclusiveScanByKeySimple);
 
@@ -113,29 +144,61 @@ void TestScanByKeyHeadFlags()
 {
   using T = typename Vector::value_type;
 
-  Vector keys{0, 1, 0, 0, 1, 1, 0};
-  Vector vals{1, 2, 3, 4, 5, 6, 7};
+  Vector keys(7);
+  Vector vals(7);
+
   Vector output(7, 0);
+
+  // clang-format off
+  keys[0] = 0; vals[0] = 1;
+  keys[1] = 1; vals[1] = 2;
+  keys[2] = 0; vals[2] = 3;
+  keys[3] = 0; vals[3] = 4;
+  keys[4] = 1; vals[4] = 5;
+  keys[5] = 1; vals[5] = 6;
+  keys[6] = 0; vals[6] = 7;
+  // clang-format on
 
   thrust::exclusive_scan_by_key(
     keys.begin(), keys.end(), vals.begin(), output.begin(), T(10), head_flag_predicate(), thrust::plus<T>());
 
-  Vector ref{10, 10, 12, 15, 10, 10, 16};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 10);
+  ASSERT_EQUAL(output[1], 10);
+  ASSERT_EQUAL(output[2], 12);
+  ASSERT_EQUAL(output[3], 15);
+  ASSERT_EQUAL(output[4], 10);
+  ASSERT_EQUAL(output[5], 10);
+  ASSERT_EQUAL(output[6], 16);
 }
 DECLARE_VECTOR_UNITTEST(TestScanByKeyHeadFlags);
 
 template <typename Vector>
 void TestScanByKeyReusedKeys()
 {
-  Vector keys{0, 1, 1, 1, 0, 1, 1};
-  Vector vals{1, 2, 3, 4, 5, 6, 7};
+  Vector keys(7);
+  Vector vals(7);
+
   Vector output(7, 0);
+
+  // clang-format off
+  keys[0] = 0; vals[0] = 1;
+  keys[1] = 1; vals[1] = 2;
+  keys[2] = 1; vals[2] = 3;
+  keys[3] = 1; vals[3] = 4;
+  keys[4] = 0; vals[4] = 5;
+  keys[5] = 1; vals[5] = 6;
+  keys[6] = 1; vals[6] = 7;
+  // clang-format on
 
   thrust::exclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin(), typename Vector::value_type(10));
 
-  Vector ref{10, 10, 12, 15, 10, 10, 16};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 10);
+  ASSERT_EQUAL(output[1], 10);
+  ASSERT_EQUAL(output[2], 12);
+  ASSERT_EQUAL(output[3], 15);
+  ASSERT_EQUAL(output[4], 10);
+  ASSERT_EQUAL(output[5], 10);
+  ASSERT_EQUAL(output[6], 16);
 }
 DECLARE_VECTOR_UNITTEST(TestScanByKeyReusedKeys);
 
