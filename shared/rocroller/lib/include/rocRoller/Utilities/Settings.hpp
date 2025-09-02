@@ -252,6 +252,9 @@ namespace rocRoller
             0,
             -1};
 
+        static inline const SettingsOption<std::string> WriteOnFailDir{
+            "ROCROLLER_WRITE_ON_FAIL_DIR", "Directory to write GEMM failures to", "failures/", -1};
+
         /**
          * @brief Creates a help dialog for the environment variables with
          * their names, default values and bit-offset (if it has one).

@@ -820,8 +820,9 @@ namespace GEMMDriverTest
                 auto writeOnFailLimit = Settings::getInstance()->get(Settings::WriteOnFail);
                 if(!res.ok && writeOnFailLimit > 0)
                 {
+                    auto writeOnFailDir = Settings::getInstance()->get(Settings::WriteOnFailDir);
                     std::filesystem::path base
-                        = std::filesystem::absolute(std::filesystem::path("failures/"));
+                        = std::filesystem::absolute(std::filesystem::path(writeOnFailDir));
                     if(!std::filesystem::exists(base))
                     {
                         std::filesystem::create_directories(base);
