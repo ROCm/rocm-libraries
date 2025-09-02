@@ -255,7 +255,10 @@ rocblas_status rocsolver_geqr2_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // get device prop
-    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
 
     I dim = std::min(m, n); // total number of pivots
     for(I j = 0; j < dim; ++j)
@@ -263,8 +266,8 @@ rocblas_status rocsolver_geqr2_template(rocblas_handle handle,
         I mm = m - j;
         I nn = n - j;
 
-        const size_t lmemsize = ((256 / props->warpSize) + mm + nn + 1 + mm * nn) * sizeof(T);
-        if(lmemsize <= props->sharedMemPerBlock && nn == mm)
+        const size_t lmemsize = ((256 / props.warpSize) + mm + nn + 1 + mm * nn) * sizeof(T);
+        if(lmemsize <= props.sharedMemPerBlock && nn == mm)
         {
             ROCSOLVER_LAUNCH_KERNEL((geqr2_kernel_small<256, T>), dim3(1, 1, batch_count), dim3(256),
                                     lmemsize, stream, mm, nn, A, shiftA + idx2D(j, j, lda), lda,

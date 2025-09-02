@@ -314,16 +314,19 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
     }
 
     // get device prop
-    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
 
     // determine side
     bool leftside = (side == rocblas_side_left);
 
     static constexpr int NB = 1024;
-    const int lds_size = leftside ? (m + (NB / props->warpSize)) * sizeof(T)
-                                  : (n + (NB / props->warpSize)) * sizeof(T);
+    const int lds_size = leftside ? (m + (NB / props.warpSize)) * sizeof(T)
+                                  : (n + (NB / props.warpSize)) * sizeof(T);
 
-    if(lds_size <= props->sharedMemPerBlock)
+    if(lds_size <= props.sharedMemPerBlock)
     {
         // Launch larf kernel if tune parameters are met.
         if(leftside && (n <= 1024 || m >= 2048))

@@ -388,7 +388,10 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
     T one = T(1);
     T zero = T(0);
 
-    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    rocblas_int device_id;
+    HIP_CHECK(hipGetDevice(&device_id));
+    hipDeviceProp_t properties;
+    HIP_CHECK(hipGetDeviceProperties(&properties, device_id));
 
     // The general idea is as follows: Given a m by n (m >= n) matrix A, we
     // compute the eigendecomposition of A^*A with Divide-and-Conquer to obtain
@@ -437,8 +440,8 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
                                                     (T*)work3, (T*)work4, (T**)workArr);
 
         rocblas_int blocks = (n - 1) / BS1 + 1;
-        blocks = std::min(blocks, props->maxGridSize[0]);
-        auto bc = std::min(batch_count, props->maxGridSize[1]);
+        blocks = std::min(blocks, properties.maxGridSize[0]);
+        auto bc = std::min(batch_count, properties.maxGridSize[1]);
         ROCSOLVER_LAUNCH_KERNEL(gesdd_flip_signs<T>, dim3(blocks, bc, 1), dim3(BS1, 1, 1), 0,
                                 stream, n, S, strideS, U_gemm, ldu_gemm, strideU_gemm, V_gemm,
                                 ldv_gemm, strideV_gemm, batch_count);
@@ -489,8 +492,8 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
                                                     (T*)work3, (T*)work4, (T**)workArr);
 
         rocblas_int blocks = (m - 1) / BS1 + 1;
-        blocks = std::min(blocks, props->maxGridSize[0]);
-        auto bc = std::min(batch_count, props->maxGridSize[1]);
+        blocks = std::min(blocks, properties.maxGridSize[0]);
+        auto bc = std::min(batch_count, properties.maxGridSize[1]);
         ROCSOLVER_LAUNCH_KERNEL(gesdd_flip_signs<T>, dim3(blocks, bc, 1), dim3(BS1, 1, 1), 0,
                                 stream, m, S, strideS, V_gemm, ldv_gemm, strideV_gemm, U_gemm,
                                 ldu_gemm, strideU_gemm, batch_count);
