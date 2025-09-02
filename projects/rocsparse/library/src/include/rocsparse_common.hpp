@@ -1354,12 +1354,6 @@ namespace rocsparse
     __device__ __forceinline__ _Float16 wfreduce_sum(_Float16 sum)
     {
         return wfreduce_sum<WFSIZE>((float)sum);
-        //for(int i = WFSIZE >> 1; i > 0; i >>= 1)
-        //{
-        //    sum += __shfl_xor(sum, i);
-        //}
-
-        return sum;
     }
 
     // DPP-based double wavefront partial reduction
@@ -1867,12 +1861,6 @@ namespace rocsparse
     __device__ __forceinline__ _Float16 wfreduce_sum(_Float16 sum)
     {
         return wfreduce_sum<WFSIZE>((float)sum);
-        //for(int i = WFSIZE >> 1; i > 0; i >>= 1)
-        //{
-        //    sum += __shfl_xor(sum, i);
-        //}
-
-        return sum;
     }
 
     template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>

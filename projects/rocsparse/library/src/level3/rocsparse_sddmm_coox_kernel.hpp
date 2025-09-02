@@ -109,7 +109,7 @@ namespace rocsparse
 
         if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)
         {
-            coo_val[innz] = beta * coo_val[innz] + alpha * sum;
+            coo_val[innz] = rocsparse::fma<T>(beta, coo_val[innz], alpha * sum);
         }
     }
 

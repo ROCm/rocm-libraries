@@ -3,27 +3,6 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## rocSPARSE 4.1.0 for ROCm 7.1.0 (Unreleased)
-
-### Added
-
-* Adds brain half float mixed precision to `rocsparse_axpby` where X and Y use bfloat16 and result and the compute type use float
-* Adds brain half float mixed precision to `rocsparse_spvv` where X and Y use bfloat16 and result and the compute type use float
-* Adds brain half float mixed precision to `rocsparse_spmv` where A and X use bfloat16 and Y and the compute type use float
-* Adds brain half float mixed precision to `rocsparse_spmm` where A and B use bfloat16 and C and the compute type use float
-* Adds brain half float mixed precision to `rocsparse_sddmm` where A and B use bfloat16 and C and the compute type use float
-* Adds brain half float mixed precision to `rocsparse_sddmm` where A and B and C use bfloat16 and the compute type use float
-* Adds half float mixed precision to `rocsparse_sddmm` where A and B and C use float16 and the compute type use float
-* Adds brain half float uniform precision to `rocsparse_scatter` and `rocsparse_gather` routines
-
-### Optimized
-
-* Improved the user documentation
-
-### Upcoming changes
-
-* Deprecate trace, debug, and bench logging.
-
 ## rocSPARSE 4.0.2 for ROCm 7.0.0
 
 ### Added
