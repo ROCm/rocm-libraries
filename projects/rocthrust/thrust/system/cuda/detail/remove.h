@@ -28,15 +28,7 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#if _CCCL_HAS_CUDA_COMPILER
+#ifdef _CCCL_CUDA_COMPILER
 #  include <thrust/system/cuda/detail/copy_if.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -44,8 +36,7 @@ namespace cuda_cub
 {
 
 // in-place
-
-_CCCL_EXEC_CHECK_DISABLE
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class StencilIt, class Predicate>
 InputIt _CCCL_HOST_DEVICE
 remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, StencilIt stencil, Predicate predicate)
@@ -55,9 +46,9 @@ remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Stenci
                       (return thrust::remove_if(cvt_to_seq(derived_cast(policy)), first, last, stencil, predicate);));
 }
 
-_CCCL_EXEC_CHECK_DISABLE
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class Predicate>
-InputIt _CCCL_HOST_DEVICE remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
+InputIt THRUST_HOST_DEVICE remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
   THRUST_CDP_DISPATCH(
     (return cuda_cub::detail::copy_if<cuda_cub::detail::InputMayAliasOutput::yes>(

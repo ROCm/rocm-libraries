@@ -15,26 +15,28 @@
  *  limitations under the License.
  */
 
+#include <thrust/device_vector.h>
 #include <thrust/generate.h>
 #include <thrust/random.h>
+#include <thrust/random/detail/normal_distribution_base.h>
 
+#include <cmath>
+#include <limits>
 #include <sstream>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 template <typename Engine>
 struct ValidateEngine
 {
-  THRUST_HOST_DEVICE ValidateEngine(const typename Engine::result_type value_10000)
+  __host__ __device__ ValidateEngine(const typename Engine::result_type value_10000)
       : m_value_10000(value_10000)
   {}
 
-  THRUST_HOST_DEVICE bool operator()(void) const
+  __host__ __device__ bool operator()(void) const
   {
     Engine e;
     e.discard(9999);
@@ -49,7 +51,7 @@ struct ValidateEngine
 template <typename Engine, bool trivial_min = (Engine::min == 0)>
 struct ValidateEngineMin
 {
-  THRUST_HOST_DEVICE bool operator()(void) const
+  __host__ __device__ bool operator()(void) const
   {
     Engine e;
 
@@ -67,7 +69,7 @@ struct ValidateEngineMin
 template <typename Engine>
 struct ValidateEngineMin<Engine, true>
 {
-  THRUST_HOST_DEVICE bool operator()(void) const
+  __host__ __device__ bool operator()(void) const
   {
     return true;
   }
@@ -76,7 +78,7 @@ struct ValidateEngineMin<Engine, true>
 template <typename Engine>
 struct ValidateEngineMax
 {
-  THRUST_HOST_DEVICE bool operator()(void) const
+  __host__ __device__ bool operator()(void) const
   {
     Engine e;
 
@@ -94,7 +96,7 @@ struct ValidateEngineMax
 template <typename Engine>
 struct ValidateEngineEqual
 {
-  THRUST_HOST_DEVICE bool operator()(void) const
+  __host__ __device__ bool operator()(void) const
   {
     bool result = true;
 
@@ -126,7 +128,7 @@ struct ValidateEngineEqual
 template <typename Engine>
 struct ValidateEngineUnequal
 {
-  THRUST_HOST_DEVICE bool operator()(void) const
+  __host__ __device__ bool operator()(void) const
   {
     bool result = true;
 
@@ -166,11 +168,11 @@ struct ValidateDistributionMin
 {
   using random_engine = Engine;
 
-  THRUST_HOST_DEVICE ValidateDistributionMin(const Distribution& dd)
+  __host__ __device__ ValidateDistributionMin(const Distribution& dd)
       : d(dd)
   {}
 
-  THRUST_HOST_DEVICE bool operator()(void)
+  __host__ __device__ bool operator()(void)
   {
     Engine e;
 
@@ -192,11 +194,11 @@ struct ValidateDistributionMax
 {
   using random_engine = Engine;
 
-  THRUST_HOST_DEVICE ValidateDistributionMax(const Distribution& dd)
+  __host__ __device__ ValidateDistributionMax(const Distribution& dd)
       : d(dd)
   {}
 
-  THRUST_HOST_DEVICE bool operator()(void)
+  __host__ __device__ bool operator()(void)
   {
     Engine e;
 
@@ -216,7 +218,7 @@ struct ValidateDistributionMax
 template <typename Distribution>
 struct ValidateDistributionEqual
 {
-  THRUST_HOST_DEVICE bool operator()(void) const
+  __host__ __device__ bool operator()(void) const
   {
     return d0 == d1;
   }
@@ -227,15 +229,13 @@ struct ValidateDistributionEqual
 template <typename Distribution>
 struct ValidateDistributionUnqual
 {
-  THRUST_HOST_DEVICE bool operator()(void) const
+  __host__ __device__ bool operator()(void) const
   {
     return d0 != d1;
   }
 
   Distribution d0, d1;
 };
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 TEST(RandomTests, UsingHip)
 {
@@ -244,10 +244,8 @@ TEST(RandomTests, UsingHip)
   ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
-#endif
-
 template <typename Engine, std::uint64_t value_10000>
-void TestEngineValidation()
+void TestEngineValidation(void)
 {
   // test host
   thrust::host_vector<bool> h(1);
@@ -263,7 +261,7 @@ void TestEngineValidation()
 }
 
 template <typename Engine>
-void TestEngineMax()
+void TestEngineMax(void)
 {
   // test host
   thrust::host_vector<bool> h(1);
@@ -279,7 +277,7 @@ void TestEngineMax()
 }
 
 template <typename Engine>
-void TestEngineMin()
+void TestEngineMin(void)
 {
   // test host
   thrust::host_vector<bool> h(1);
@@ -295,7 +293,7 @@ void TestEngineMin()
 }
 
 template <typename Engine>
-void TestEngineSaveRestore()
+void TestEngineSaveRestore(void)
 {
   // create a default engine
   Engine e0;
@@ -323,7 +321,7 @@ void TestEngineSaveRestore()
 }
 
 template <typename Engine>
-void TestEngineEqual()
+void TestEngineEqual(void)
 {
   ValidateEngineEqual<Engine> f;
 
@@ -341,7 +339,7 @@ void TestEngineEqual()
 }
 
 template <typename Engine>
-void TestEngineUnequal()
+void TestEngineUnequal(void)
 {
   ValidateEngineUnequal<Engine> f;
 
@@ -457,16 +455,6 @@ TEST(RandomTests, TestRanlux48BaseEqual)
   TestEngineEqual<Engine>();
 }
 
-#if defined(__INTEL_COMPILER) && 1800 >= __INTEL_COMPILER
-TEST(RandomTests, TestRanlux48BaseUnequal)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  // ICPC has a known failure with this test.
-  // See nvbug 200414000.
-  GTEST_NONFATAL_FAILURE_("Known failure")
-}
-#else
 TEST(RandomTests, TestRanlux48BaseUnequal)
 {
   using Engine = thrust::random::ranlux48_base;
@@ -475,7 +463,6 @@ TEST(RandomTests, TestRanlux48BaseUnequal)
 
   TestEngineUnequal<Engine>();
 }
-#endif
 
 TEST(RandomTests, TestMinstdRandValidation)
 {
@@ -747,10 +734,8 @@ TEST(RandomTests, TestRanlux48Unequal)
   TestEngineUnequal<Engine>();
 }
 
-THRUST_DIAG_PUSH
-THRUST_DIAG_SUPPRESS_MSVC(4305) // truncation warning
 template <typename Distribution, typename Validator>
-void ValidateDistributionCharacteristic()
+void ValidateDistributionCharacteristic(void)
 {
   using Engine = typename Validator::random_engine;
 
@@ -770,7 +755,7 @@ void ValidateDistributionCharacteristic()
 
   // test distribution & engine with comparable ranges
   // only do this if they have the same result_type
-  if (_THRUST_STD::is_same<typename Distribution::result_type, typename Engine::result_type>::value)
+  if (thrust::detail::is_same<typename Distribution::result_type, typename Engine::result_type>::value)
   {
     // test Distribution with same range as engine
 
@@ -810,10 +795,9 @@ void ValidateDistributionCharacteristic()
 
   ASSERT_EQ(true, d[0]);
 }
-THRUST_DIAG_POP
 
 template <typename Distribution>
-void TestDistributionSaveRestore()
+void TestDistributionSaveRestore(void)
 {
   // create a default distribution
   Distribution d0(7, 13);
@@ -985,3 +969,5 @@ TEST(RandomTests, erfcinvFunction)
     }
   }
 }
+
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

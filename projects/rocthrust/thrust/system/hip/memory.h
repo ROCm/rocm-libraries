@@ -23,13 +23,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/memory.h>
 #include <thrust/mr/allocator.h>
@@ -82,15 +75,12 @@ inline THRUST_HOST_DEVICE void free(pointer<void> ptr);
 template <typename T>
 using allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::hip::memory_resource>;
 
-//! \p hip::universal_allocator allocates managed memory that can be used by the \p hip system and host systems.
+/*! \p hip::universal_allocator allocates memory that can be used by the \p hip
+ *  system and host systems.
+ */
 template <typename T>
 using universal_allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::hip::universal_memory_resource>;
 
-//! \p hip::universal_host_pinned_allocator allocates pinned host memory that can be used by the \p hip system and
-//! host systems.
-template <typename T>
-using universal_host_pinned_allocator =
-  thrust::mr::stateless_resource_allocator<T, thrust::system::hip::universal_host_pinned_memory_resource>;
 } // namespace hip_rocprim
 
 namespace system
@@ -101,7 +91,6 @@ using thrust::hip_rocprim::allocator;
 using thrust::hip_rocprim::free;
 using thrust::hip_rocprim::malloc;
 using thrust::hip_rocprim::universal_allocator;
-using thrust::hip_rocprim::universal_host_pinned_allocator;
 } // namespace hip
 } // namespace system
 
@@ -114,7 +103,6 @@ using thrust::hip_rocprim::allocator;
 using thrust::hip_rocprim::free;
 using thrust::hip_rocprim::malloc;
 using thrust::hip_rocprim::universal_allocator;
-using thrust::hip_rocprim::universal_host_pinned_allocator;
 } // namespace hip
 
 THRUST_NAMESPACE_END

@@ -22,24 +22,20 @@
 
 #include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
-
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge(Args&&... args) -> decltype(thrust::merge(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+  THRUST_IF_CONSTEXPR (std::is_void<CompareOp>::value)
   {
     return thrust::merge(std::forward<Args>(args)...);
   }
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+    using C = std::conditional_t<std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+
     return thrust::merge(std::forward<Args>(args)..., C{});
   }
-  __builtin_unreachable();
 }
 
 template <typename U, typename CompareOp = void>
@@ -60,15 +56,14 @@ void TestMergeKeyValue(size_t n)
     h_b[i] = T(h_keys_b[i], h_values_b[i]);
   }
 
-  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+  THRUST_IF_CONSTEXPR (std::is_void<CompareOp>::value)
   {
     thrust::stable_sort(h_a.begin(), h_a.end());
     thrust::stable_sort(h_b.begin(), h_b.end());
   }
   else
   {
-    // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+    using C = std::conditional_t<std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
     thrust::stable_sort(h_a.begin(), h_a.end(), C{});
     thrust::stable_sort(h_b.begin(), h_b.end(), C{});
   }
@@ -79,8 +74,9 @@ void TestMergeKeyValue(size_t n)
   thrust::host_vector<T> h_result(h_a.size() + h_b.size());
   thrust::device_vector<T> d_result(d_a.size() + d_b.size());
 
-  const auto h_end = call_merge<T, CompareOp>(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
-  const auto d_end = call_merge<T, CompareOp>(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
+  const auto h_end = thrust::merge(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+
+  const auto d_end = thrust::merge(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
 
   ASSERT_EQUAL_QUIET(h_result, d_result);
   ASSERT_EQUAL(true, h_end == h_result.end());

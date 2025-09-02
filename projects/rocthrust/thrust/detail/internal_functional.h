@@ -23,14 +23,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/detail/memory_wrapper.h> // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>
@@ -38,10 +30,6 @@
 #include <thrust/iterator/detail/tuple_of_iterator_references.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/tuple.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -185,15 +173,14 @@ struct device_generate_functor
 
 template <typename System, typename Generator>
 struct generate_functor
-    : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
+    : thrust::detail::eval_if<thrust::detail::is_convertible<System, thrust::host_system_tag>::value,
                               thrust::detail::identity_<host_generate_functor<Generator>>,
                               thrust::detail::identity_<device_generate_functor<Generator>>>
 {};
-
 template <typename T>
 struct is_non_const_reference
-    : ::internal::_And<thrust::detail::not_<_THRUST_STD::is_const<T>>,
-                       _THRUST_STD::disjunction<_THRUST_STD::is_reference<T>, thrust::detail::is_proxy_reference<T>>>
+    : thrust::detail::and_<thrust::detail::not_<thrust::detail::is_const<T>>,
+                           thrust::detail::or_<thrust::detail::is_reference<T>, thrust::detail::is_proxy_reference<T>>>
 {};
 
 template <typename T>
@@ -208,7 +195,7 @@ struct is_tuple_of_iterator_references<thrust::detail::tuple_of_iterator_referen
 // XXX revisit this problem with c++11 perfect forwarding
 template <typename T>
 struct enable_if_non_const_reference_or_tuple_of_iterator_references
-    : _THRUST_STD::enable_if<is_non_const_reference<T>::value || is_tuple_of_iterator_references<T>::value>
+    : thrust::detail::enable_if<is_non_const_reference<T>::value || is_tuple_of_iterator_references<T>::value>
 {};
 
 template <typename UnaryFunction>
@@ -344,7 +331,7 @@ struct device_destroy_functor
 
 template <typename System, typename T>
 struct destroy_functor
-    : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
+    : thrust::detail::eval_if<thrust::detail::is_convertible<System, thrust::host_system_tag>::value,
                               thrust::detail::identity_<host_destroy_functor<T>>,
                               thrust::detail::identity_<device_destroy_functor<T>>>
 {};

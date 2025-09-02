@@ -29,18 +29,9 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#  include <thrust/system/hip/config.h>
-
+#  include <thrust/detail/alignment.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/pair.h>
@@ -60,10 +51,8 @@
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
-namespace detail
+namespace __partition
 {
-
 template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
 THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition(
   execution_policy<Derived>& policy,
@@ -190,6 +179,49 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION partition(
   return thrust::make_pair(selected_result + num_selected, rejected_result);
 }
 
+template <typename Derived, typename Iterator, typename Predicate>
+Iterator THRUST_HIP_RUNTIME_FUNCTION
+partition_inplace(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
+{
+  using size_type  = typename iterator_traits<Iterator>::difference_type;
+  using value_type = typename iterator_traits<Iterator>::value_type;
+
+  size_type num_items = thrust::distance(first, last);
+
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<value_type, Derived> tmp(policy, num_items);
+
+  hip_rocprim::uninitialized_copy(policy, first, last, tmp.begin());
+
+  pair<Iterator, Iterator> result = partition(policy, tmp.begin(), tmp.begin() + num_items, first, first, predicate);
+
+  size_type num_selected = result.first - first;
+
+  return first + num_selected;
+}
+
+template <typename Derived, typename Iterator, typename StencilIt, typename Predicate>
+Iterator THRUST_HIP_RUNTIME_FUNCTION partition_inplace(
+  execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
+{
+  using size_type  = typename iterator_traits<Iterator>::difference_type;
+  using value_type = typename iterator_traits<Iterator>::value_type;
+
+  size_type num_items = thrust::distance(first, last);
+
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<value_type, Derived> tmp(policy, num_items);
+
+  hip_rocprim::uninitialized_copy(policy, first, last, tmp.begin());
+
+  pair<Iterator, Iterator> result =
+    partition(policy, tmp.begin(), tmp.begin() + num_items, stencil, first, first, predicate);
+
+  size_type num_selected = result.first - first;
+
+  return first + num_selected;
+}
+
 template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
 THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
   execution_policy<Derived>& policy,
@@ -337,60 +369,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
 
   return thrust::make_pair(selected_result + num_selected, rejected_result + num_items - num_selected);
 }
-
-template <typename Derived, typename InputIt, typename Predicate>
-THRUST_HIP_RUNTIME_FUNCTION InputIt
-inplace_partition(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
-{
-  if (thrust::distance(first, last) <= 0)
-  {
-    return first;
-  }
-
-  // Element type of the input iterator
-  using value_t         = typename iterator_traits<InputIt>::value_type;
-  std::size_t num_items = static_cast<std::size_t>(thrust::distance(first, last));
-
-  // Allocate temporary storage, which will serve as the input to the partition
-  thrust::detail::temporary_array<value_t, Derived> tmp(policy, num_items);
-  hip_rocprim::uninitialized_copy(policy, first, last, tmp.begin());
-
-  // Partition input from temporary storage to the user-provided range [`first`, `last`)
-  pair<InputIt, InputIt> result =
-    partition(policy, tmp.data().get(), tmp.data().get() + num_items, first, first, predicate);
-
-  std::size_t num_selected = result.first - first;
-
-  return first + num_selected;
-}
-
-template <typename Derived, typename InputIt, typename StencilIt, typename Predicate>
-THRUST_HIP_RUNTIME_FUNCTION InputIt inplace_partition(
-  execution_policy<Derived>& policy, InputIt first, InputIt last, StencilIt stencil, Predicate predicate)
-{
-  if (thrust::distance(first, last) <= 0)
-  {
-    return first;
-  }
-
-  // Element type of the input iterator
-  using value_t         = typename iterator_traits<InputIt>::value_type;
-  std::size_t num_items = static_cast<std::size_t>(thrust::distance(first, last));
-
-  // Allocate temporary storage, which will serve as the input to the partition
-  thrust::detail::temporary_array<value_t, Derived> tmp(policy, num_items);
-  hip_rocprim::uninitialized_copy(policy, first, last, tmp.begin());
-
-  // Partition input from temporary storage to the user-provided range [`first`, `last`)
-  pair<InputIt, InputIt> result =
-    partition(policy, tmp.data().get(), tmp.data().get() + num_items, stencil, first, first, predicate);
-
-  std::size_t num_selected = result.first - first;
-
-  return first + num_selected;
-}
-
-} // namespace detail
+} // namespace __partition
 
 //-------------------------
 // Thrust API entry points
@@ -398,7 +377,7 @@ THRUST_HIP_RUNTIME_FUNCTION InputIt inplace_partition(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class StencilIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
+pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_FUNCTION partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -419,7 +398,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
         RejectedOutIt rejected_result,
         Predicate predicate)
     {
-      return detail::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
+      return __partition::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
     }
 
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
@@ -444,7 +423,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
+pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_FUNCTION partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -463,7 +442,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
         RejectedOutIt rejected_result,
         Predicate predicate)
     {
-      return detail::partition_copy(policy, first, last, selected_result, rejected_result, predicate);
+      return __partition::partition_copy(policy, first, last, selected_result, rejected_result, predicate);
     }
 
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
@@ -475,6 +454,49 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
         Predicate predicate)
     {
       return thrust::partition_copy(
+        cvt_to_seq(derived_cast(policy)), first, last, selected_result, rejected_result, predicate);
+    }
+  };
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
+#  else
+  return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);
+#  endif
+}
+
+THRUST_EXEC_CHECK_DISABLE
+template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
+pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_FUNCTION stable_partition_copy(
+  execution_policy<Derived>& policy,
+  InputIt first,
+  InputIt last,
+  SelectedOutIt selected_result,
+  RejectedOutIt rejected_result,
+  Predicate predicate)
+{
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static pair<SelectedOutIt, RejectedOutIt>
+    par(execution_policy<Derived>& policy,
+        InputIt first,
+        InputIt last,
+        SelectedOutIt selected_result,
+        RejectedOutIt rejected_result,
+        Predicate predicate)
+    {
+      return __partition::partition_copy(policy, first, last, selected_result, rejected_result, predicate);
+    }
+
+    THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
+    seq(execution_policy<Derived>& policy,
+        InputIt first,
+        InputIt last,
+        SelectedOutIt selected_result,
+        RejectedOutIt rejected_result,
+        Predicate predicate)
+    {
+      return thrust::stable_partition_copy(
         cvt_to_seq(derived_cast(policy)), first, last, selected_result, rejected_result, predicate);
     }
   };
@@ -487,7 +509,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class StencilIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
+pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_FUNCTION stable_partition_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -508,7 +530,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
         RejectedOutIt rejected_result,
         Predicate predicate)
     {
-      return detail::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
+      return __partition::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
     }
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
@@ -530,54 +552,10 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
 #  endif
 }
 
-THRUST_EXEC_CHECK_DISABLE
-template <class Derived, class InputIt, class SelectedOutIt, class RejectedOutIt, class Predicate>
-pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
-  execution_policy<Derived>& policy,
-  InputIt first,
-  InputIt last,
-  SelectedOutIt selected_result,
-  RejectedOutIt rejected_result,
-  Predicate predicate)
-{
-  // struct workaround is required for HIP-clang
-  struct workaround
-  {
-    THRUST_HOST static pair<SelectedOutIt, RejectedOutIt>
-    par(execution_policy<Derived>& policy,
-        InputIt first,
-        InputIt last,
-        SelectedOutIt selected_result,
-        RejectedOutIt rejected_result,
-        Predicate predicate)
-    {
-      return detail::partition_copy(policy, first, last, selected_result, rejected_result, predicate);
-    }
-
-    THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
-    seq(execution_policy<Derived>& policy,
-        InputIt first,
-        InputIt last,
-        SelectedOutIt selected_result,
-        RejectedOutIt rejected_result,
-        Predicate predicate)
-    {
-      return thrust::stable_partition_copy(
-        cvt_to_seq(derived_cast(policy)), first, last, selected_result, rejected_result, predicate);
-    }
-  };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
-#  else
-  return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);
-#  endif
-}
-
 /// inplace
-
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class Iterator, class StencilIt, class Predicate>
-Iterator THRUST_HOST_DEVICE
+Iterator THRUST_HIP_FUNCTION
 partition(execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
 {
   // struct workaround is required for HIP-clang
@@ -586,12 +564,14 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Sten
     THRUST_HOST static Iterator
     par(execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
     {
-      return last = detail::inplace_partition(policy, first, last, stencil, predicate);
+      Iterator result = __partition::partition_inplace(policy, first, last, stencil, predicate);
+      hip_rocprim::reverse<Derived, Iterator>(policy, result, last);
+      return result;
     }
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
     {
-      return last = thrust::partition(cvt_to_seq(derived_cast(policy)), first, last, stencil, predicate);
+      return thrust::partition(cvt_to_seq(derived_cast(policy)), first, last, stencil, predicate);
     }
   };
 #  if __THRUST_HAS_HIPRT__
@@ -603,7 +583,7 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Sten
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class Iterator, class Predicate>
-Iterator THRUST_HOST_DEVICE
+Iterator THRUST_HIP_FUNCTION
 partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
 {
   // struct workaround is required for HIP-clang
@@ -612,12 +592,12 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Pred
     THRUST_HOST static Iterator
     par(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
     {
-      return last = detail::inplace_partition(policy, first, last, predicate);
+      return __partition::partition_inplace(policy, first, last, predicate);
     }
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
     {
-      return last = thrust::partition(cvt_to_seq(derived_cast(policy)), first, last, predicate);
+      return thrust::partition(cvt_to_seq(derived_cast(policy)), first, last, predicate);
     }
   };
 #  if __THRUST_HAS_HIPRT__
@@ -629,7 +609,7 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Pred
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class Iterator, class StencilIt, class Predicate>
-Iterator THRUST_HOST_DEVICE stable_partition(
+Iterator THRUST_HIP_FUNCTION stable_partition(
   execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
 {
   // struct workaround is required for HIP-clang
@@ -638,12 +618,9 @@ Iterator THRUST_HOST_DEVICE stable_partition(
     THRUST_HOST static Iterator
     par(execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
     {
-      Iterator ret = detail::inplace_partition(policy, first, last, stencil, predicate);
-
-      /* partition returns rejected values in reverse order
-        so reverse the rejected elements to make it stable */
-      hip_rocprim::reverse(policy, ret, last);
-      return ret;
+      Iterator result = __partition::partition_inplace(policy, first, last, stencil, predicate);
+      hip_rocprim::reverse<Derived, Iterator>(policy, result, last);
+      return result;
     }
 
     THRUST_DEVICE static Iterator
@@ -661,7 +638,7 @@ Iterator THRUST_HOST_DEVICE stable_partition(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class Iterator, class Predicate>
-Iterator THRUST_HOST_DEVICE
+Iterator THRUST_HIP_FUNCTION
 stable_partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
 {
   // struct workaround is required for HIP-clang
@@ -670,12 +647,9 @@ stable_partition(execution_policy<Derived>& policy, Iterator first, Iterator las
     THRUST_HOST static Iterator
     par(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
     {
-      Iterator ret = detail::inplace_partition(policy, first, last, predicate);
-
-      /* partition returns rejected values in reverse order
-        so reverse the rejected elements to make it stable */
-      hip_rocprim::reverse(policy, ret, last);
-      return ret;
+      Iterator result = __partition::partition_inplace(policy, first, last, predicate);
+      hip_rocprim::reverse<Derived, Iterator>(policy, result, last);
+      return result;
     }
 
     THRUST_DEVICE static Iterator
@@ -692,7 +666,7 @@ stable_partition(execution_policy<Derived>& policy, Iterator first, Iterator las
 }
 
 template <class Derived, class ItemsIt, class Predicate>
-bool THRUST_HOST_DEVICE
+bool THRUST_HIP_FUNCTION
 is_partitioned(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, Predicate predicate)
 {
   ItemsIt boundary = hip_rocprim::find_if_not(policy, first, last, predicate);

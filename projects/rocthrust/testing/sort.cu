@@ -58,14 +58,26 @@ template <class Vector>
 void InitializeSimpleKeySortTest(Vector& unsorted_keys, Vector& sorted_keys)
 {
   unsorted_keys.resize(7);
-  unsorted_keys = {1, 3, 6, 5, 2, 0, 4};
+  unsorted_keys[0] = 1;
+  unsorted_keys[1] = 3;
+  unsorted_keys[2] = 6;
+  unsorted_keys[3] = 5;
+  unsorted_keys[4] = 2;
+  unsorted_keys[5] = 0;
+  unsorted_keys[6] = 4;
 
   sorted_keys.resize(7);
-  sorted_keys = {0, 1, 2, 3, 4, 5, 6};
+  sorted_keys[0] = 0;
+  sorted_keys[1] = 1;
+  sorted_keys[2] = 2;
+  sorted_keys[3] = 3;
+  sorted_keys[4] = 4;
+  sorted_keys[5] = 5;
+  sorted_keys[6] = 6;
 }
 
 template <class Vector>
-void TestSortSimple()
+void TestSortSimple(void)
 {
   Vector unsorted_keys;
   Vector sorted_keys;
@@ -91,7 +103,7 @@ void TestSortAscendingKey(const size_t n)
 }
 DECLARE_VARIABLE_UNITTEST(TestSortAscendingKey);
 
-void TestSortDescendingKey()
+void TestSortDescendingKey(void)
 {
   const size_t n = 10027;
 
@@ -105,7 +117,7 @@ void TestSortDescendingKey()
 }
 DECLARE_UNITTEST(TestSortDescendingKey);
 
-void TestSortBool()
+void TestSortBool(void)
 {
   const size_t n = 10027;
 
@@ -119,7 +131,7 @@ void TestSortBool()
 }
 DECLARE_UNITTEST(TestSortBool);
 
-void TestSortBoolDescending()
+void TestSortBoolDescending(void)
 {
   const size_t n = 10027;
 
@@ -132,3 +144,49 @@ void TestSortBoolDescending()
   ASSERT_EQUAL(h_data, d_data);
 }
 DECLARE_UNITTEST(TestSortBoolDescending);
+
+template <typename T>
+struct TestRadixSortDispatch
+{
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::less<T>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::greater<T>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::less<T>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::greater<T>>::value, "");
+
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::less<>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::greater<>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::less<>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::greater<>>::value, "");
+#endif
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, thrust::less<T>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, thrust::greater<T>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, std::less<T>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, std::greater<T>>::value, "");
+
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, thrust::less<>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, thrust::greater<>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, std::less<>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, std::greater<>>::value, "");
+#endif
+  void operator()() const {}
+};
+
+SimpleUnitTest<TestRadixSortDispatch,
+               unittest::concat<IntegralTypes,
+                                FloatingPointTypes
+#ifndef _LIBCUDACXX_HAS_NO_INT128
+                                ,
+                                unittest::type_list<__int128_t, __uint128_t>
+#endif // _LIBCUDACXX_HAS_NO_INT128
+#ifdef _CCCL_HAS_NVFP16
+                                ,
+                                unittest::type_list<__half>
+#endif // _CCCL_HAS_NVFP16
+#ifdef _CCCL_HAS_NVBF16
+                                ,
+                                unittest::type_list<__nv_bfloat16>
+#endif // _CCCL_HAS_NVBF16
+                                >>
+  TestRadixSortDispatchInstance;

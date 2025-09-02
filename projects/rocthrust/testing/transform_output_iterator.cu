@@ -27,7 +27,7 @@
 #include <unittest/unittest.h>
 
 template <class Vector>
-void TestTransformOutputIterator()
+void TestTransformOutputIterator(void)
 {
   using T = typename Vector::value_type;
 
@@ -45,14 +45,18 @@ void TestTransformOutputIterator()
 
   thrust::copy(input.begin(), input.end(), output_iter);
 
-  Vector gold_output{1, 4, 9, 16};
+  Vector gold_output(4);
+  gold_output[0] = 1;
+  gold_output[1] = 4;
+  gold_output[2] = 9;
+  gold_output[3] = 16;
 
   ASSERT_EQUAL(output, gold_output);
 }
 DECLARE_VECTOR_UNITTEST(TestTransformOutputIterator);
 
 template <class Vector>
-void TestMakeTransformOutputIterator()
+void TestMakeTransformOutputIterator(void)
 {
   using T = typename Vector::value_type;
 
@@ -66,7 +70,11 @@ void TestMakeTransformOutputIterator()
 
   thrust::copy(input.begin(), input.end(), thrust::make_transform_output_iterator(output.begin(), UnaryFunction()));
 
-  Vector gold_output{1, 4, 9, 16};
+  Vector gold_output(4);
+  gold_output[0] = 1;
+  gold_output[1] = 4;
+  gold_output[2] = 9;
+  gold_output[3] = 16;
   ASSERT_EQUAL(output, gold_output);
 }
 DECLARE_VECTOR_UNITTEST(TestMakeTransformOutputIterator);

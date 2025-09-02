@@ -23,13 +23,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/iterator/detail/constant_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
 
@@ -104,7 +97,7 @@ class constant_iterator : public detail::constant_iterator_base<Value, Increment
 {
   /*! \cond
    */
-  friend class iterator_core_access;
+  friend class thrust::iterator_core_access;
   using super_t       = typename detail::constant_iterator_base<Value, Incrementable, System>::type;
   using incrementable = typename detail::constant_iterator_base<Value, Incrementable, System>::incrementable;
   using base_iterator = typename detail::constant_iterator_base<Value, Incrementable, System>::base_iterator;

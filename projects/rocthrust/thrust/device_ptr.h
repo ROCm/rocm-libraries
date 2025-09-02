@@ -24,13 +24,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/memory.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -50,9 +43,8 @@ class device_reference;
  *  arithmetic.
  *
  *  \c device_ptr can be created with \ref device_new, \ref device_malloc,
- *  \ref device_malloc_allocator, \ref device_allocator, or
- *  \ref device_pointer_cast, or by explicitly calling its constructor with a
- *  raw pointer.
+ *  \ref device_allocator, or \ref device_pointer_cast, or by explicitly
+ *  calling its constructor with a raw pointer.
  *
  *  The raw pointer contained in a \c device_ptr may be obtained via \c get
  *  member function or the \ref raw_pointer_cast free function.
@@ -65,7 +57,6 @@ class device_reference;
  *
  *  \see device_new
  *  \see device_malloc
- *  \see device_malloc_allocator
  *  \see device_allocator
  *  \see device_pointer_cast
  *  \see raw_pointer_cast
@@ -78,7 +69,13 @@ private:
   using super_t = thrust::pointer<T, thrust::device_system_tag, thrust::device_reference<T>, thrust::device_ptr<T>>;
 
 public:
-  inline device_ptr() = default;
+  /*! \brief Construct a null \c device_ptr.
+   *
+   *  \post <tt>get() == nullptr</tt>.
+   */
+  THRUST_HOST_DEVICE device_ptr()
+      : super_t()
+  {}
 
   /*! \brief Construct a null \c device_ptr.
    *
@@ -155,14 +152,14 @@ public:
     return *this;
   }
 
-#ifdef THRUST_DOXYGEN_INVOKED
+#if THRUST_DOXYGEN
   /*! \brief Return the raw pointer that this \c device_ptr points to.
    */
   THRUST_HOST_DEVICE T* get() const;
 #endif
 };
 
-#ifdef THRUST_DOXYGEN_INVOKED
+#if THRUST_DOXYGEN
 /*! Write the address that a \c device_ptr points to to an output stream.
  *
  *  \param os The output stream.

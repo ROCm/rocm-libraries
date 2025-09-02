@@ -21,13 +21,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/pointer.h>
 #include <thrust/detail/reference.h>
 #include <thrust/system/cpp/detail/execution_policy.h>
@@ -50,7 +43,7 @@ namespace cpp
  *  \p cpp::pointer can be created with the function \p cpp::malloc, or by
  *  explicitly calling its constructor with a raw pointer.
  *
- *  The raw pointer encapsulated by a \p cpp::pointer may be obtained by either its
+ *  The raw pointer encapsulated by a \p cpp::pointer may be obtained by eiter its
  *  <tt>get</tt> member function or the \p raw_pointer_cast function.
  *
  *  \note \p cpp::pointer is not a "smart" pointer; it is the programmer's
@@ -75,7 +68,7 @@ using pointer = thrust::pointer<T, thrust::system::cpp::tag, thrust::tagged_refe
  *  or by explicitly calling its constructor with a raw pointer.
  *
  *  The raw pointer encapsulated by a \p cpp::universal_pointer may be obtained
- *  by either its <tt>get</tt> member function or the \p raw_pointer_cast
+ *  by eiter its <tt>get</tt> member function or the \p raw_pointer_cast
  *  function.
  *
  *  \note \p cpp::universal_pointer is not a "smart" pointer; it is the

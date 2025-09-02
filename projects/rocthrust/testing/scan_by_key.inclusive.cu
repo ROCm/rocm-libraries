@@ -30,27 +30,53 @@ void TestInclusiveScanByKeySimple()
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
-  Vector keys{0, 1, 1, 1, 2, 3, 3};
-  Vector vals{1, 2, 3, 4, 5, 6, 7};
+  Vector keys(7);
+  Vector vals(7);
+
   Vector output(7, 0);
+
+  // clang-format off
+  keys[0] = 0; vals[0] = 1;
+  keys[1] = 1; vals[1] = 2;
+  keys[2] = 1; vals[2] = 3;
+  keys[3] = 1; vals[3] = 4;
+  keys[4] = 2; vals[4] = 5;
+  keys[5] = 3; vals[5] = 6;
+  keys[6] = 3; vals[6] = 7;
+  // clang-format on
 
   Iterator iter = thrust::inclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin());
 
   ASSERT_EQUAL_QUIET(iter, output.end());
 
-  Vector ref{1, 2, 5, 9, 5, 6, 13};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 1);
+  ASSERT_EQUAL(output[1], 2);
+  ASSERT_EQUAL(output[2], 5);
+  ASSERT_EQUAL(output[3], 9);
+  ASSERT_EQUAL(output[4], 5);
+  ASSERT_EQUAL(output[5], 6);
+  ASSERT_EQUAL(output[6], 13);
 
   thrust::inclusive_scan_by_key(
     keys.begin(), keys.end(), vals.begin(), output.begin(), thrust::equal_to<T>(), thrust::multiplies<T>());
 
-  ref = {1, 2, 6, 24, 5, 6, 42};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 1);
+  ASSERT_EQUAL(output[1], 2);
+  ASSERT_EQUAL(output[2], 6);
+  ASSERT_EQUAL(output[3], 24);
+  ASSERT_EQUAL(output[4], 5);
+  ASSERT_EQUAL(output[5], 6);
+  ASSERT_EQUAL(output[6], 42);
 
   thrust::inclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin(), thrust::equal_to<T>());
 
-  ref = {1, 2, 5, 9, 5, 6, 13};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 1);
+  ASSERT_EQUAL(output[1], 2);
+  ASSERT_EQUAL(output[2], 5);
+  ASSERT_EQUAL(output[3], 9);
+  ASSERT_EQUAL(output[4], 5);
+  ASSERT_EQUAL(output[5], 6);
+  ASSERT_EQUAL(output[6], 13);
 }
 DECLARE_VECTOR_UNITTEST(TestInclusiveScanByKeySimple);
 
@@ -108,16 +134,31 @@ void TestScanByKeyHeadFlags()
 {
   using T = typename Vector::value_type;
 
-  Vector keys{0, 1, 0, 0, 1, 1, 0};
-  Vector vals{1, 2, 3, 4, 5, 6, 7};
+  Vector keys(7);
+  Vector vals(7);
 
   Vector output(7, 0);
+
+  // clang-format off
+  keys[0] = 0; vals[0] = 1;
+  keys[1] = 1; vals[1] = 2;
+  keys[2] = 0; vals[2] = 3;
+  keys[3] = 0; vals[3] = 4;
+  keys[4] = 1; vals[4] = 5;
+  keys[5] = 1; vals[5] = 6;
+  keys[6] = 0; vals[6] = 7;
+  // clang-format on
 
   thrust::inclusive_scan_by_key(
     keys.begin(), keys.end(), vals.begin(), output.begin(), head_flag_predicate(), thrust::plus<T>());
 
-  Vector ref{1, 2, 5, 9, 5, 6, 13};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 1);
+  ASSERT_EQUAL(output[1], 2);
+  ASSERT_EQUAL(output[2], 5);
+  ASSERT_EQUAL(output[3], 9);
+  ASSERT_EQUAL(output[4], 5);
+  ASSERT_EQUAL(output[5], 6);
+  ASSERT_EQUAL(output[6], 13);
 }
 DECLARE_VECTOR_UNITTEST(TestScanByKeyHeadFlags);
 
@@ -126,29 +167,61 @@ void TestInclusiveScanByKeyTransformIterator()
 {
   using T = typename Vector::value_type;
 
-  Vector keys{0, 1, 1, 1, 2, 3, 3};
-  Vector vals{1, 2, 3, 4, 5, 6, 7};
+  Vector keys(7);
+  Vector vals(7);
+
   Vector output(7, 0);
+
+  // clang-format off
+  keys[0] = 0; vals[0] = 1;
+  keys[1] = 1; vals[1] = 2;
+  keys[2] = 1; vals[2] = 3;
+  keys[3] = 1; vals[3] = 4;
+  keys[4] = 2; vals[4] = 5;
+  keys[5] = 3; vals[5] = 6;
+  keys[6] = 3; vals[6] = 7;
+  // clang-format on
 
   thrust::inclusive_scan_by_key(
     keys.begin(), keys.end(), thrust::make_transform_iterator(vals.begin(), thrust::negate<T>()), output.begin());
 
-  Vector ref{-1, -2, -5, -9, -5, -6, -13};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], -1);
+  ASSERT_EQUAL(output[1], -2);
+  ASSERT_EQUAL(output[2], -5);
+  ASSERT_EQUAL(output[3], -9);
+  ASSERT_EQUAL(output[4], -5);
+  ASSERT_EQUAL(output[5], -6);
+  ASSERT_EQUAL(output[6], -13);
 }
 DECLARE_VECTOR_UNITTEST(TestInclusiveScanByKeyTransformIterator);
 
 template <typename Vector>
 void TestScanByKeyReusedKeys()
 {
-  Vector keys{0, 1, 1, 1, 0, 1, 1};
-  Vector vals{1, 2, 3, 4, 5, 6, 7};
+  Vector keys(7);
+  Vector vals(7);
+
   Vector output(7, 0);
+
+  // clang-format off
+  keys[0] = 0; vals[0] = 1;
+  keys[1] = 1; vals[1] = 2;
+  keys[2] = 1; vals[2] = 3;
+  keys[3] = 1; vals[3] = 4;
+  keys[4] = 0; vals[4] = 5;
+  keys[5] = 1; vals[5] = 6;
+  keys[6] = 1; vals[6] = 7;
+  // clang-format on
 
   thrust::inclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin());
 
-  Vector ref{1, 2, 5, 9, 5, 6, 13};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], 1);
+  ASSERT_EQUAL(output[1], 2);
+  ASSERT_EQUAL(output[2], 5);
+  ASSERT_EQUAL(output[3], 9);
+  ASSERT_EQUAL(output[4], 5);
+  ASSERT_EQUAL(output[5], 6);
+  ASSERT_EQUAL(output[6], 13);
 }
 DECLARE_VECTOR_UNITTEST(TestScanByKeyReusedKeys);
 

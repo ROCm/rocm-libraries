@@ -28,25 +28,13 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/system/cuda/config.h>
 
 #include <thrust/detail/allocator_aware_execution_policy.h>
+#include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/version.h>
-
-#if !_CCCL_COMPILER(NVRTC)
-#  include <thrust/detail/dependencies_aware_execution_policy.h>
-#endif // !_CCCL_COMPILER(NVRTC)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -64,21 +52,17 @@ struct execution_policy<tag> : thrust::execution_policy<tag>
   using tag_type = tag;
 };
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 struct tag
     : execution_policy<tag>
     , thrust::detail::allocator_aware_execution_policy<cuda_cub::execution_policy>
-#if !_CCCL_COMPILER(NVRTC)
     , thrust::detail::dependencies_aware_execution_policy<cuda_cub::execution_policy>
-#endif // !_CCCL_COMPILER(NVRTC)
 {};
-_CCCL_SUPPRESS_DEPRECATED_POP
 
 template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
 {
   using tag_type = tag;
-  _CCCL_HOST_DEVICE operator tag() const
+  operator tag() const
   {
     return tag();
   }

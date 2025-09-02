@@ -17,16 +17,6 @@
 
 #pragma once
 
-// Internal config header that is only included through thrust/detail/config/config.h
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/detail/config/device_system.h>
 #include <thrust/version.h>
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
@@ -101,116 +91,60 @@
 #  define THRUST_NS_QUALIFIER ::thrust
 #endif
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#  define THRUST_DETAIL_PP_EXPAND(...) __VA_ARGS__
-#  define THRUST_PP_EVAL(_M, ...)      _M(__VA_ARGS__)
-
-#  define THRUST_PP_CAT(_X, _Y) THRUST_PP_CAT_IMPL0(_X, _Y)
-
-#  if defined(_MSC_VER) && (defined(__EDG__) || defined(__EDG_VERSION__)) \
-    && (defined(__INTELLISENSE__) || __EDG_VERSION__ >= 308)
-#    define THRUST_PP_CAT_IMPL0(_X, _Y) THRUST_PP_CAT_IMPL1(~, _X##_Y)
-#    define THRUST_PP_CAT_IMPL1(_X, _Y) _Y
-#  else
-#    define THRUST_PP_CAT_IMPL0(_X, _Y) _X##_Y
-#  endif
-
-///////////////////////////////////////////////////////////////////////////////
-
-// Count the number of arguments. There must be at least one argument and fewer
-// than 126 arguments.
 // clang-format off
-#  define THRUST_PP_COUNT_IMPL(                                                                     \
-    _125, _124, _123, _122, _121, _120, _119, _118, _117, _116, _115, _114, _113, _112, _111, _110, \
-    _109, _108, _107, _106, _105, _104, _103, _102, _101, _100, _99, _98, _97, _96, _95, _94,       \
-    _93, _92, _91, _90, _89, _88, _87, _86, _85, _84, _83, _82, _81, _80, _79, _78,                 \
-    _77, _76, _75, _74, _73, _72, _71, _70, _69, _68, _67, _66, _65, _64, _63, _62,                 \
-    _61, _60, _59, _58, _57, _56, _55, _54, _53, _52, _51, _50, _49, _48, _47, _46,                 \
-    _45, _44, _43, _42, _41, _40, _39, _38, _37, _36, _35, _34, _33, _32, _31, _30,                 \
-    _29, _28, _27, _26, _25, _24, _23, _22, _21, _20, _19, _18, _17, _16, _15, _14,                 \
-    _13, _12, _11, _10, _9, _8, _7, _6, _5, _4, _3, _2, _1, _0, ...) _0
-
-#  define THRUST_PP_COUNT(...)                                                        \
-    THRUST_DETAIL_PP_EXPAND(THRUST_PP_COUNT_IMPL( __VA_ARGS__,                        \
-      125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114, 113, 112, 111, 110, \
-      109, 108, 107, 106, 105, 104, 103, 102, 101, 100, 99, 98, 97, 96, 95, 94,       \
-      93, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82, 81, 80, 79, 78,                 \
-      77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62,                 \
-      61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46,                 \
-      45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30,                 \
-      29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14,                 \
-      13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
-// clang-format on
-
-///////////////////////////////////////////////////////////////////////////////
-
-#  define THRUST_PP_SPLICE_WITH_IMPL1(SEP, P1) P1
-#  define THRUST_PP_SPLICE_WITH_IMPL2(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL1(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL3(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL2(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL4(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL3(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL5(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL4(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL6(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL5(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL7(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL6(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL8(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL7(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL9(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL8(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL10(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL9(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL11(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL10(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL12(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL11(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL13(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL12(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL14(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL13(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL15(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL14(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL16(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL15(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL17(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL16(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL18(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL17(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL19(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL18(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL20(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL19(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL21(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL20(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL22(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL21(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL23(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL22(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL24(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL23(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL25(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL24(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL26(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL25(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL27(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL26(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL28(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL27(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL29(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL28(SEP, __VA_ARGS__))
-#  define THRUST_PP_SPLICE_WITH_IMPL30(SEP, P1, ...) \
-    THRUST_PP_CAT(P1##SEP, THRUST_PP_SPLICE_WITH_IMPL29(SEP, __VA_ARGS__))
-
-#  define THRUST_PP_SPLICE_WITH_IMPL_DISPATCH(N) THRUST_PP_SPLICE_WITH_IMPL##N
-
-// Splices a pack of arguments into a single token, separated by SEP
-// E.g., THRUST_PP_SPLICE_WITH(_, A, B, C) will evaluate to A_B_C
-#  define THRUST_PP_SPLICE_WITH(SEP, ...) \
-    THRUST_DETAIL_PP_EXPAND(              \
-      THRUST_PP_EVAL(THRUST_PP_SPLICE_WITH_IMPL_DISPATCH, THRUST_PP_COUNT(__VA_ARGS__))(SEP, __VA_ARGS__))
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#  if !defined(THRUST_DETAIL_ABI_NS_NAME)
+#    define THRUST_DETAIL_COUNT_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, \
+                                  _14, _15, _16, _17, _18, _19, _20, N, ...)              \
+                                  N
+#    define THRUST_DETAIL_COUNT(...)                                                      \
+      THRUST_DETAIL_IDENTITY(THRUST_DETAIL_COUNT_N(__VA_ARGS__, 20, 19, 18, 17, 16, 15, 14, 13, 12, \
+                                                   11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
+#    define THRUST_DETAIL_IDENTITY(N) N
+#    define THRUST_DETAIL_APPLY(MACRO, ...) THRUST_DETAIL_IDENTITY(MACRO(__VA_ARGS__))
+#    define THRUST_DETAIL_ABI_NS_NAME1(P1) \
+        THRUST_##P1##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME2(P1, P2) \
+        THRUST_##P1##_##P2##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME3(P1, P2, P3) \
+        THRUST_##P1##_##P2##_##P3##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME4(P1, P2, P3, P4) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME5(P1, P2, P3, P4, P5) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME6(P1, P2, P3, P4, P5, P6) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME7(P1, P2, P3, P4, P5, P6, P7) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME8(P1, P2, P3, P4, P5, P6, P7, P8) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME9(P1, P2, P3, P4, P5, P6, P7, P8, P9) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME10(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME11(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME12(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME13(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_##P13##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME14(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_##P13##_##P14##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME15(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_##P13##_##P14##_##P15##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME16(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_##P13##_##P14##_##P15##_##P16##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME17(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16, P17) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_##P13##_##P14##_##P15##_##P16##_##P17##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME18(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16, P17, P18) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_##P13##_##P14##_##P15##_##P16##_##P17##_##P18##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME19(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16, P17, P18, P19) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_##P13##_##P14##_##P15##_##P16##_##P17##_##P18##_##P19##_NS
+#    define THRUST_DETAIL_ABI_NS_NAME20(P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16, P17, P18, P19, P20) \
+        THRUST_##P1##_##P2##_##P3##_##P4##_##P5##_##P6##_##P7##_##P8##_##P9##_##P10##_##P11##_##P12##_##P13##_##P14##_##P15##_##P16##_##P17##_##P18##_##P19##_##P20##_NS
+#    define THRUST_DETAIL_DISPATCH(N) THRUST_DETAIL_ABI_NS_NAME ## N
+#    define THRUST_DETAIL_ABI_NS_NAME(...) THRUST_DETAIL_IDENTITY(THRUST_DETAIL_APPLY(THRUST_DETAIL_DISPATCH, THRUST_DETAIL_COUNT(__VA_ARGS__))(__VA_ARGS__))
+#  endif // !defined(THRUST_DETAIL_ABI_NS_NAME)
 
 #  if defined(THRUST_DISABLE_ABI_NAMESPACE) || defined(THRUST_WRAPPED_NAMESPACE)
 #    if !defined(THRUST_WRAPPED_NAMESPACE)
@@ -223,27 +157,22 @@
 #  else // not defined(THRUST_DISABLE_ABI_NAMESPACE)
 #    if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #      if defined(_NVHPC_CUDA)
-#        define THRUST_DETAIL_ABI_NS_BEGIN                                                                            \
-          inline namespace THRUST_PP_SPLICE_WITH(_, THRUST, THRUST_VERSION, SM, NV_TARGET_SM_INTEGER_LIST, NVHPC, NS) \
-          {
+#        define THRUST_DETAIL_ABI_NS_BEGIN inline namespace THRUST_DETAIL_ABI_NS_NAME(THRUST_VERSION, NV_TARGET_SM_INTEGER_LIST) {
 #        define THRUST_DETAIL_ABI_NS_END }
 #      else // not defined(_NVHPC_CUDA)
-#        define THRUST_DETAIL_ABI_NS_BEGIN                                                              \
-          inline namespace THRUST_PP_SPLICE_WITH(_, THRUST, THRUST_VERSION, SM, __CUDA_ARCH_LIST__, NS) \
-          {
+#        define THRUST_DETAIL_ABI_NS_BEGIN inline namespace THRUST_DETAIL_ABI_NS_NAME(THRUST_VERSION, __CUDA_ARCH_LIST__) {
 #        define THRUST_DETAIL_ABI_NS_END }
 #      endif // not defined(_NVHPC_CUDA)
 #    else // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#      define THRUST_DETAIL_ABI_NS_BEGIN                                                         \
-        inline namespace THRUST_PP_SPLICE_WITH(_, THRUST, THRUST_VERSION, ROCTHRUST_VERSION, NS) \
-        {
-#      define THRUST_DETAIL_ABI_NS_END }
+#        define THRUST_DETAIL_ABI_NS_BEGIN inline namespace THRUST_DETAIL_ABI_NS_NAME(THRUST_VERSION, ROCTHRUST_VERSION) {
+#        define THRUST_DETAIL_ABI_NS_END }
 #    endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  endif // not defined(THRUST_DISABLE_ABI_NAMESPACE)
 #else // !(THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP)
 #  define THRUST_DETAIL_ABI_NS_BEGIN
 #  define THRUST_DETAIL_ABI_NS_END
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+// clang-format on
 
 /**
  * \def THRUST_NAMESPACE_BEGIN

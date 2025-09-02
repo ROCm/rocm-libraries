@@ -29,41 +29,27 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/minmax.h>
 #  include <thrust/distance.h>
-#  include <thrust/iterator/counting_iterator.h>
-#  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
-
-#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#    include <iterator>
-#  endif
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-// XXX forward declare to circumvent circular dependency
+// XXX forward declare to circumvent circular depedency
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HOST_DEVICE find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate);
+InputIt THRUST_HIP_FUNCTION find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate);
 
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HOST_DEVICE
+InputIt THRUST_HIP_FUNCTION
 find_if_not(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate);
 
 template <class Derived, class InputIt, class T>
-InputIt THRUST_HOST_DEVICE find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value);
+InputIt THRUST_HIP_FUNCTION find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value);
 
 }; // namespace hip_rocprim
 THRUST_NAMESPACE_END
@@ -74,14 +60,12 @@ THRUST_NAMESPACE_END
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
 namespace __find_if
 {
-
 template <typename TupleType>
 struct functor
 {
-  THRUST_HIP_DEVICE_FUNCTION TupleType operator()(const TupleType& lhs, const TupleType& rhs) const
+  TupleType THRUST_HIP_DEVICE_FUNCTION operator()(const TupleType& lhs, const TupleType& rhs) const
   {
     // select the smallest index among true results
     if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
@@ -98,106 +82,10 @@ struct functor
     }
   }
 };
-
-template <class ValueType, class InputIt, class UnaryOp>
-struct transform_input_iterator_t
-{
-  using self_t            = transform_input_iterator_t;
-  using difference_type   = typename iterator_traits<InputIt>::difference_type;
-  using value_type        = ValueType;
-  using pointer           = void;
-  using reference         = value_type;
-  using iterator_category = _THRUST_STD::random_access_iterator_tag;
-
-  InputIt input;
-  mutable UnaryOp op;
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE transform_input_iterator_t(InputIt input, UnaryOp op)
-      : input(input)
-      , op(op)
-  {}
-
-  transform_input_iterator_t(const self_t&) = default;
-
-  // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
-  // an explicit copy assignment operator that doesn't try to assign it.
-  THRUST_HOST_DEVICE self_t& operator=(const self_t& o)
-  {
-    input = o.input;
-    return *this;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator++(int)
-  {
-    self_t retval = *this;
-    ++input;
-    return retval;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator++()
-  {
-    ++input;
-    return *this;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator*() const
-  {
-    typename thrust::iterator_value<InputIt>::type x = *input;
-    return op(x);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator*()
-  {
-    typename thrust::iterator_value<InputIt>::type x = *input;
-    return op(x);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator+(difference_type n) const
-  {
-    return self_t(input + n, op);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t& operator+=(difference_type n)
-  {
-    input += n;
-    return *this;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator-(difference_type n) const
-  {
-    return self_t(input - n, op);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t& operator-=(difference_type n)
-  {
-    input -= n;
-    return *this;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE difference_type operator-(self_t other) const
-  {
-    return input - other.input;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator[](difference_type n) const
-  {
-    return op(input[n]);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE bool operator==(const self_t& rhs) const
-  {
-    return (input == rhs.input);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE bool operator!=(const self_t& rhs) const
-  {
-    return (input != rhs.input);
-  }
-};
 } // namespace __find_if
 
 template <class Derived, class InputIt, class Size, class Predicate>
-InputIt THRUST_HOST_DEVICE
+InputIt THRUST_HIP_FUNCTION
 find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
 {
   using result_type = typename thrust::tuple<bool, Size>;
@@ -218,14 +106,12 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
   const Size interval_threshold = 1 << 20;
   const Size interval_size      = (thrust::min)(interval_threshold, num_items);
 
-  // FIXME(bgruber): we should also be able to use transform_iterator here, but it makes nvc++ hang. See:
-  // https://github.com/NVIDIA/cccl/issues/3594. The problem does not occur with nvcc, so we could not add a test :/
-  using XfrmIterator = __find_if::transform_input_iterator_t<bool, InputIt, Predicate>;
-  // using XfrmIterator  = transform_iterator<Predicate, InputIt>;
-  using IteratorTuple = thrust::tuple<XfrmIterator, counting_iterator<Size>>;
+  // force transform_iterator output to bool
+  using XfrmIterator  = transform_input_iterator_t<bool, InputIt, Predicate>;
+  using IteratorTuple = thrust::tuple<XfrmIterator, counting_iterator_t<Size>>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  IteratorTuple iter_tuple = thrust::make_tuple(XfrmIterator(first, predicate), counting_iterator<Size>(0));
+  IteratorTuple iter_tuple = thrust::make_tuple(XfrmIterator(first, predicate), counting_iterator_t<Size>(0));
 
   ZipIterator begin = thrust::make_zip_iterator(iter_tuple);
   ZipIterator end   = begin + num_items;
@@ -248,28 +134,29 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
     }
   }
 
+  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "find_if_n: failed to synchronize");
+
   // nothing was found if we reach here...
   return first + num_items;
 }
 
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HOST_DEVICE find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
+InputIt THRUST_HIP_FUNCTION find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
   return hip_rocprim::find_if_n(policy, first, thrust::distance(first, last), predicate);
 }
 
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HOST_DEVICE
+InputIt THRUST_HIP_FUNCTION
 find_if_not(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
   return hip_rocprim::find_if(policy, first, last, thrust::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>
-InputIt THRUST_HOST_DEVICE find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value)
+InputIt THRUST_HIP_FUNCTION find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value)
 {
   using thrust::placeholders::_1;
-
   return hip_rocprim::find_if(policy, first, last, _1 == value);
 }
 

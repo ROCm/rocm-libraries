@@ -25,7 +25,7 @@
 template <typename T>
 struct is_even
 {
-  _CCCL_HOST_DEVICE bool operator()(T x)
+  THRUST_HOST_DEVICE bool operator()(T x)
   {
     return (static_cast<unsigned int>(x) & 1) == 0;
   }
@@ -34,7 +34,7 @@ struct is_even
 template <typename T>
 struct mod_3
 {
-  _CCCL_HOST_DEVICE unsigned int operator()(T x)
+  THRUST_HOST_DEVICE unsigned int operator()(T x)
   {
     return static_cast<unsigned int>(x) % 3;
   }
@@ -44,7 +44,7 @@ template <typename T>
 struct mod_n
 {
   T mod;
-  _CCCL_HOST_DEVICE bool operator()(T x)
+  THRUST_HOST_DEVICE bool operator()(T x)
   {
     return (x % mod == 0) ? true : false;
   }
@@ -54,7 +54,7 @@ template <typename T>
 struct multiply_n
 {
   T multiplier;
-  _CCCL_HOST_DEVICE T operator()(T x)
+  THRUST_HOST_DEVICE T operator()(T x)
   {
     return x * multiplier;
   }
@@ -144,8 +144,14 @@ void TestCopyIfCudaStreams(ExecutionPolicy policy)
 {
   using Vector = thrust::device_vector<int>;
 
-  Vector data{1, 2, 1, 3, 2};
-  Vector result(data.size());
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 3;
+  data[4] = 2;
+
+  Vector result(5);
 
   cudaStream_t s;
   cudaStreamCreate(&s);
@@ -153,9 +159,9 @@ void TestCopyIfCudaStreams(ExecutionPolicy policy)
   Vector::iterator end = thrust::copy_if(policy.on(s), data.begin(), data.end(), result.begin(), is_even<int>());
 
   ASSERT_EQUAL(end - result.begin(), 2);
-  result.resize(end - result.begin());
-  Vector ref{2, 2};
-  ASSERT_EQUAL(result, ref);
+
+  ASSERT_EQUAL(result[0], 2);
+  ASSERT_EQUAL(result[1], 2);
 
   cudaStreamDestroy(s);
 }
@@ -273,23 +279,32 @@ void TestCopyIfStencilCudaStreams(ExecutionPolicy policy)
   using Vector = thrust::device_vector<int>;
   using T      = Vector::value_type;
 
-  Vector data{1, 2, 1, 3, 2};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 3;
+  data[4] = 2;
 
   Vector result(5);
 
-  Vector stencil{0, 1, 0, 0, 1};
+  Vector stencil(5);
+  stencil[0] = 0;
+  stencil[1] = 1;
+  stencil[2] = 0;
+  stencil[3] = 0;
+  stencil[4] = 1;
 
   cudaStream_t s;
   cudaStreamCreate(&s);
 
   Vector::iterator end =
-    thrust::copy_if(policy.on(s), data.begin(), data.end(), stencil.begin(), result.begin(), ::cuda::std::identity{});
+    thrust::copy_if(policy.on(s), data.begin(), data.end(), stencil.begin(), result.begin(), thrust::identity<T>());
 
   ASSERT_EQUAL(end - result.begin(), 2);
-  result.resize(end - result.begin());
 
-  Vector ref{2, 2};
-  ASSERT_EQUAL(result, ref);
+  ASSERT_EQUAL(result[0], 2);
+  ASSERT_EQUAL(result[1], 2);
 
   cudaStreamDestroy(s);
 }

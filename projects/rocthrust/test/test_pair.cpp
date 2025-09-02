@@ -19,30 +19,19 @@
 #include <thrust/swap.h>
 #include <thrust/tuple.h>
 
+#include <type_traits>
+#include <utility>
+
 #include "test_param_fixtures.hpp"
-#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
-#include _THRUST_STD_INCLUDE(type_traits)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
-
 TESTS_DEFINE(PairTests, NumericalTestsParams);
+
 TYPED_TEST(PairTests, TestTriviallyCopyable)
 {
   using T = typename TestFixture::input_type;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  static_assert(_THRUST_STD::is_copy_constructible<thrust::pair<T, T>>::value, "");
-
-// 'libhipcxx' is now up to par with 'libcudacxx'
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  static_assert(_THRUST_STD::is_trivially_copyable<thrust::pair<T, T>>::value,
+  static_assert(std::is_trivially_copyable<thrust::pair<T, T>>::value,
                 "thrust::pair is not trivially copyable even though it should be!");
-#endif
 }
 
 TYPED_TEST(PairTests, TestPairManipulation)
@@ -272,6 +261,7 @@ TYPED_TEST(PairTests, TestPairGet)
 
     thrust::host_vector<T> data =
       get_random_data<T>(2, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+    ;
 
     thrust::pair<T, T> p(data[0], data[1]);
 
@@ -284,33 +274,20 @@ TEST(PairTests, TestPairTupleSize)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  ASSERT_EQ(2, static_cast<int>(thrust::tuple_size<thrust::pair<int, int>>::value));
+  int result = thrust::tuple_size<thrust::pair<int, int>>::value;
+  ASSERT_EQ(2, result);
 }
 
 TEST(PairTests, TestPairTupleElement)
 {
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
   using type0 = thrust::tuple_element<0, thrust::pair<int, float>>::type;
   using type1 = thrust::tuple_element<1, thrust::pair<int, float>>::type;
-  static_assert(std::is_same<int, type0>::value, "");
-  static_assert(std::is_same<float, type1>::value, "");
 
-  using c_type0 = thrust::tuple_element<0, thrust::pair<int, float> const>::type;
-  using c_type1 = thrust::tuple_element<1, thrust::pair<int, float> const>::type;
-  static_assert(std::is_same<int const, c_type0>::value, "");
-  static_assert(std::is_same<float const, c_type1>::value, "");
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using v_type0 = thrust::tuple_element<0, thrust::pair<int, float> volatile>::type;
-  using v_type1 = thrust::tuple_element<1, thrust::pair<int, float> volatile>::type;
-  static_assert(std::is_same<int volatile, v_type0>::value, "");
-  static_assert(std::is_same<float volatile, v_type1>::value, "");
-
-  using cv_type0 = thrust::tuple_element<0, thrust::pair<int, float> const volatile>::type;
-  using cv_type1 = thrust::tuple_element<1, thrust::pair<int, float> const volatile>::type;
-  static_assert(std::is_same<int const volatile, cv_type0>::value, "");
-  static_assert(std::is_same<float const volatile, cv_type1>::value, "");
-};
+  ASSERT_EQ(typeid(int), typeid(type0));
+  ASSERT_EQ(typeid(float), typeid(type1));
+}
 
 TEST(PairTests, TestPairSwap)
 {
@@ -325,8 +302,7 @@ TEST(PairTests, TestPairSwap)
   thrust::pair<int, int> a(x, y);
   thrust::pair<int, int> b(z, w);
 
-  using _THRUST_STD::swap;
-  swap(a, b);
+  thrust::swap(a, b);
 
   ASSERT_EQ(z, a.first);
   ASSERT_EQ(w, a.second);
@@ -343,36 +319,8 @@ TEST(PairTests, TestPairSwap)
 
   swappable_pair ref(user_swappable(true), user_swappable(true));
 
-  ASSERT_EQ_QUIET(ref, h_v1[0]);
-  ASSERT_EQ_QUIET(ref, h_v1[0]);
-  ASSERT_EQ_QUIET(ref, (swappable_pair) d_v1[0]);
-  ASSERT_EQ_QUIET(ref, (swappable_pair) d_v1[0]);
+  ASSERT_EQ(ref, h_v1[0]);
+  ASSERT_EQ(ref, h_v1[0]);
+  ASSERT_EQ(ref, (swappable_pair) d_v1[0]);
+  ASSERT_EQ(ref, (swappable_pair) d_v1[0]);
 }
-
-#if THRUST_CPP_DIALECT >= 2017
-TEST(PairTests, TestPairStructuredBindings)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  const int a = 42;
-  const int b = 1337;
-  thrust::pair<int, int> p(a, b);
-
-  auto [a2, b2] = p;
-  ASSERT_EQ(a, a2);
-  ASSERT_EQ(b, b2);
-}
-
-TEST(PairTests, TestPairCTAD)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  const int a = 42;
-  const int b = 1337;
-  thrust::pair p(a, b);
-
-  auto [a2, b2] = p;
-  ASSERT_EQ(a, a2);
-  ASSERT_EQ(b, b2);
-}
-#endif // THRUST_CPP_DIALECT >= 2017

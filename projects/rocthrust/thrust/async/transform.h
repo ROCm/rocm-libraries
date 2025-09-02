@@ -22,22 +22,15 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
-#  include <thrust/detail/type_traits.h>
 #  include <thrust/event.h>
 #  include <thrust/system/detail/adl/async/transform.h>
+#  include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -50,20 +43,14 @@ namespace async
 namespace unimplemented
 {
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>
-THRUST_DEPRECATED THRUST_HOST event<DerivedPolicy> async_transform(
-  thrust::execution_policy<DerivedPolicy>& /*exec*/,
-  ForwardIt /*first*/,
-  Sentinel /*last*/,
-  OutputIt /*output*/,
-  UnaryOperation /*op*/)
+THRUST_HOST event<DerivedPolicy>
+async_transform(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, OutputIt, UnaryOperation)
 {
   THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<ForwardIt, false>::value),
                            "this algorithm is not implemented for the specified system");
   return {};
 }
-THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace unimplemented
 
@@ -75,7 +62,6 @@ using thrust::async::unimplemented::async_transform;
 // clang-format off
 struct transform_fn final
 {
-  THRUST_SUPPRESS_DEPRECATED_PUSH
   template <
     typename DerivedPolicy
   , typename ForwardIt, typename Sentinel, typename OutputIt
@@ -98,7 +84,6 @@ struct transform_fn final
     , THRUST_FWD(op)
     )
   )
-  THRUST_SUPPRESS_DEPRECATED_POP
 
   template <
     typename ForwardIt, typename Sentinel, typename OutputIt
@@ -113,8 +98,8 @@ struct transform_fn final
   THRUST_RETURNS(
     transform_fn::call(
       thrust::detail::select_system(
-        typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}
-      , typename iterator_system<::internal::remove_cvref_t<OutputIt>>::type{}
+        typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
+      , typename iterator_system<remove_cvref_t<OutputIt>>::type{}
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(output)
@@ -123,8 +108,8 @@ struct transform_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD THRUST_DEPRECATED THRUST_HOST
- auto operator()(Args&&... args) const
+  THRUST_NODISCARD THRUST_HOST
+  auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )
@@ -133,9 +118,6 @@ struct transform_fn final
 
 } // namespace transform_detail
 
-// note: cannot add a THRUST_DEPRECATED here because the global variable is emitted into cudafe1.stub.c and we cannot
-// suppress the warning there
-//! deprecated [Since 2.8.0]
 THRUST_INLINE_CONSTANT transform_detail::transform_fn transform{};
 
 /*! \endcond

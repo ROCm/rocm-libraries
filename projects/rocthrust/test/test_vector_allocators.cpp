@@ -15,24 +15,16 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
-
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
 
 template <typename BaseAlloc, bool PropagateOnSwap>
 class stateful_allocator : public BaseAlloc
 {
-  using base_traits = thrust::detail::allocator_traits<BaseAlloc>;
-
 public:
   stateful_allocator(int i)
       : state(i)
@@ -68,35 +60,18 @@ public:
   static int last_allocated;
   static int last_deallocated;
 
-  using pointer         = typename base_traits::pointer;
-  using const_pointer   = typename base_traits::const_pointer;
-  using reference       = typename base_traits::reference;
-  using const_reference = typename base_traits::const_reference;
+  using pointer = typename thrust::detail::allocator_traits<BaseAlloc>::pointer;
 
   pointer allocate(std::size_t size)
   {
-    BaseAlloc alloc;
     last_allocated = state;
-    return base_traits::allocate(alloc, size);
+    return BaseAlloc::allocate(size);
   }
 
-  void deallocate(pointer ptr, std::size_t size) noexcept
+  void deallocate(pointer ptr, std::size_t size)
   {
-    BaseAlloc alloc;
     last_deallocated = state;
-    return base_traits::deallocate(alloc, ptr, size);
-  }
-
-  static void construct(pointer ptr)
-  {
-    BaseAlloc alloc;
-    return base_traits::construct(alloc, ptr);
-  }
-
-  static void destroy(pointer ptr) noexcept
-  {
-    BaseAlloc alloc;
-    return base_traits::destroy(alloc, ptr);
+    return BaseAlloc::deallocate(ptr, size);
   }
 
   bool operator==(const stateful_allocator& rhs) const
@@ -281,15 +256,14 @@ void TestVectorAllocatorPropagateOnSwap()
 
   Vector v1(10, alloc1);
   Vector v2(17, alloc1);
-  using _THRUST_STD::swap;
-  swap(v1, v2);
+  thrust::swap(v1, v2);
 
   ASSERT_EQ(v1.size(), 17u);
   ASSERT_EQ(v2.size(), 10u);
 
   Vector v3(15, alloc1);
   Vector v4(31, alloc2);
-  ASSERT_THROW(swap(v3, v4), thrust::detail::allocator_mismatch_on_swap);
+  ASSERT_THROW(thrust::swap(v3, v4), thrust::detail::allocator_mismatch_on_swap);
 }
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnSwapHost)
