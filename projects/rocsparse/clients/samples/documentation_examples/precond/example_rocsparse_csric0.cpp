@@ -206,7 +206,7 @@ int main()
         printf("L has structural and/or numerical zero at L(%d,%d)\n", position, position);
     }
 
-    // Copy incomplete LL^T factorization to host (note only lower L is stored)
+    // Copy incomplete LL^T factorization to host (note only lower L is stored and is written inplace into the original matrix)
     HIP_CHECK(
         hipMemcpy(hcsr_row_ptr.data(), dcsr_row_ptr, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
     HIP_CHECK(
