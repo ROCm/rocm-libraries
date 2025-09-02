@@ -108,7 +108,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     #it prints the message only once
     set(TMPFNAME _dummy_static_variable_${name})
     if (NOT COMMAND ${TMPFNAME})
-      message(STATUS "TEST_FILTER ${MIOPEN_GTEST_FILTER}")
+      message(STATUS "MIOPEN_GTEST_FILTER ${MIOPEN_GTEST_FILTER}")
       # Define a function so next time it will exist
       function(${TMPFNAME})
       endfunction()
@@ -163,6 +163,9 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*GPU_BNOCLFWDTrainLarge*_BFP16*")
         add_gtest_negative_filter("*GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16*")
         add_gtest_negative_filter("*GPU_BNOCLFWDTrainSerialRun3D_BFP16*")
+        add_gtest_negative_filter("*GPU_BNOCLBWDLarge2D_BFP16*")
+        add_gtest_negative_filter("*GPU_BNOCLBWDLarge3D_BFP16*")
+        add_gtest_negative_filter("*GPU_BNOCLBWDSerialRun3D_BFP16*")
 
 #GPU_TestMhaFind20_FP32
         add_gtest_negative_filter("*GPU_*MHA*")

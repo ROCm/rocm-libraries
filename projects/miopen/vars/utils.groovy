@@ -67,7 +67,7 @@ def cmake_build(Map conf=[:]){
     def compiler = conf.get("compiler","/opt/rocm/llvm/bin/clang++")
     def make_targets = conf.get("make_targets","check")
     def debug_flags = "-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored " + conf.get("extradebugflags", "")
-    def build_envs = "CTEST_PARALLEL_LEVEL=4 " + conf.get("build_env","")
+    def build_envs = "CTEST_PARALLEL_LEVEL=1 " + conf.get("build_env","")
     def prefixpath = conf.get("prefixpath","/opt/rocm")
     def build_type_debug = (conf.get("build_type",'release') == 'debug')
     def miopen_install_path = conf.get("miopen_install_path", "${env.WORKSPACE}/${env.REPO_DIR}/install")
