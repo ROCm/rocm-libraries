@@ -780,6 +780,10 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "b128 DirectToLds not supported")
       return False
 
+    if numBytesPerLoad < 4:
+      reject(state, printRejectionReason, "DirectToLds not supported for loads less than 32bits")
+      return False
+
     # so far MFMA only (TODO: enable non MFMA case)
     if not state["EnableMatrixInstruction"]:
       reject(state, printRejectionReason, "DirectToLds is for MatrixInstruction only for now (tentative)")
