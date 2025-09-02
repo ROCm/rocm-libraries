@@ -107,10 +107,13 @@ namespace rocsparse_clients
     template <typename T, typename I, typename J>
     struct csr_tridiag_matrix_t
     {
+    protected:
         host_csr_matrix<T, I, J>*  m_h;
         device_csr_matrix<T, I, J> m_d;
         rocsparse_local_spmat      m_spmat;
-                                   operator rocsparse_spmat_descr&()
+
+    public:
+        operator rocsparse_spmat_descr&()
         {
             return this->m_spmat;
         }

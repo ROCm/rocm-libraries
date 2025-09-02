@@ -167,25 +167,19 @@ void rocsparse_clients::configurable_event_listener::OnTestProgramEnd(
 void rocsparse_clients::stream_redirector::redirect()
 {
     // Save original buffers
-    if(0)
-    {
-        this->m_old_cout_buf = std::cout.rdbuf();
-        this->m_old_cerr_buf = std::cerr.rdbuf();
+    this->m_old_cout_buf = std::cout.rdbuf();
+    this->m_old_cerr_buf = std::cerr.rdbuf();
 
-        // Redirect to our ostringstream
-        std::cout.rdbuf(this->m_stream.rdbuf());
-        std::cerr.rdbuf(this->m_stream.rdbuf());
-    }
+    // Redirect to our ostringstream
+    std::cout.rdbuf(this->m_stream.rdbuf());
+    std::cerr.rdbuf(this->m_stream.rdbuf());
 }
 
 void rocsparse_clients::stream_redirector::restore()
 {
     // Restore original buffers
-    if(0)
-    {
-        std::cout.rdbuf(this->m_old_cout_buf);
-        std::cerr.rdbuf(this->m_old_cerr_buf);
-    }
+    std::cout.rdbuf(this->m_old_cout_buf);
+    std::cerr.rdbuf(this->m_old_cerr_buf);
 }
 
 std::ostringstream& rocsparse_clients::stream_redirector::get_stream()

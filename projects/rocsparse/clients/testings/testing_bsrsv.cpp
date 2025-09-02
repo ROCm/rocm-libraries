@@ -192,6 +192,9 @@ void testing_bsrsv(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
 
+    hipStream_t stream{};
+    CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
+
     // Create matrix descriptor
     rocsparse_local_mat_descr descr;
 
@@ -296,7 +299,7 @@ void testing_bsrsv(const Arguments& arg)
             CHECK_ROCSPARSE_ERROR(rocsparse_bsrsv_analysis<T>(PARAMS_ANALYSIS(dA)));
             {
                 auto st = rocsparse_bsrsv_zero_pivot(handle, info, analysis_pivot);
-                CHECK_HIP_ERROR(hipDeviceSynchronize());
+                CHECK_HIP_ERROR(hipStreamSynchronize(stream));
                 EXPECT_ROCSPARSE_STATUS(st,
                                         (*analysis_pivot != -1) ? rocsparse_status_zero_pivot
                                                                 : rocsparse_status_success);
@@ -305,7 +308,7 @@ void testing_bsrsv(const Arguments& arg)
                 testing::rocsparse_bsrsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)));
             {
                 auto st = rocsparse_bsrsv_zero_pivot(handle, info, solve_pivot);
-                CHECK_HIP_ERROR(hipDeviceSynchronize());
+                CHECK_HIP_ERROR(hipStreamSynchronize(stream));
                 EXPECT_ROCSPARSE_STATUS(st,
                                         (*solve_pivot != -1) ? rocsparse_status_zero_pivot
                                                              : rocsparse_status_success);
@@ -348,13 +351,13 @@ void testing_bsrsv(const Arguments& arg)
             EXPECT_ROCSPARSE_STATUS(rocsparse_bsrsv_zero_pivot(handle, info, d_analysis_pivot),
                                     (*h_analysis_pivot != -1) ? rocsparse_status_zero_pivot
                                                               : rocsparse_status_success);
-            CHECK_HIP_ERROR(hipDeviceSynchronize());
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
             CHECK_ROCSPARSE_ERROR(
                 testing::rocsparse_bsrsv_solve<T>(PARAMS_SOLVE(d_alpha, dA, dx, dy)));
             EXPECT_ROCSPARSE_STATUS(rocsparse_bsrsv_zero_pivot(handle, info, d_solve_pivot),
                                     (*h_solve_pivot != -1) ? rocsparse_status_zero_pivot
                                                            : rocsparse_status_success);
-            CHECK_HIP_ERROR(hipDeviceSynchronize());
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
             h_analysis_pivot.unit_check(d_analysis_pivot);
             h_solve_pivot.unit_check(d_solve_pivot);
         }

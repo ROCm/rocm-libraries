@@ -21,7 +21,6 @@
  *
  * ************************************************************************ */
 
-#include <map>
 #include <sstream>
 
 #include "internal/generic/rocsparse_spsv.h"
@@ -350,16 +349,6 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::spsv(handle, trans, alpha, mat, x, y, alg, stage, buffer_size, temp_buffer));
-#if 0
-    rocsparse::spsv_template_t spsv_function;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spsv_template_find(&spsv_function,
-                                                            compute_type,
-                                                            rocsparse::determine_I_indextype(mat),
-                                                            rocsparse::determine_J_indextype(mat)));
-
-    RETURN_IF_ROCSPARSE_ERROR(
-        spsv_function(handle, trans, alpha, mat, x, y, alg, stage, buffer_size, temp_buffer));
-#endif
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

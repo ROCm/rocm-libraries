@@ -435,8 +435,13 @@ void testing_sptrsm_csr_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_sptrsm_csr(const Arguments& arg)
 {
-    J                          M               = arg.M;
-    J                          N               = arg.N;
+    J M = arg.M;
+    J N = arg.N;
+    if(M != N)
+    {
+        return;
+    }
+
     const J                    K               = arg.K;
     const rocsparse_operation  trans_A         = arg.transA;
     const rocsparse_operation  trans_B         = arg.transB;
@@ -486,7 +491,8 @@ void testing_sptrsm_csr(const Arguments& arg)
         {
             mx = std::max(mx, std::abs(hA.val[i]));
         }
-        mx = floating_data_t<T>(1.0) / mx;
+        mx = (mx != floating_data_t<T>(0)) ? floating_data_t<T>(1.0) / mx : floating_data_t<T>(1.0);
+
         for(size_t i = 0; i < size; ++i)
         {
             hA.val[i] *= mx;
