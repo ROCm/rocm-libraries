@@ -104,7 +104,7 @@ namespace rocsparse
         {
             sum = rocsparse::fma<T>(x[k * incx], y[k * incy], sum);
         }
-       
+
         sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
 
         if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)

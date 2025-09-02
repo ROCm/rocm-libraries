@@ -5313,7 +5313,7 @@ void rocsparse_host<T, I, J, A, B, C>::csrddmm(rocsparse_operation  transA,
     for(J i = 0; i < M; ++i)
     {
         const I start = csr_row_ptr_C[i] - base_C;
-        const I end = csr_row_ptr_C[i + 1] - base_C;
+        const I end   = csr_row_ptr_C[i + 1] - base_C;
 
         for(I at = start; at < end; ++at)
         {
