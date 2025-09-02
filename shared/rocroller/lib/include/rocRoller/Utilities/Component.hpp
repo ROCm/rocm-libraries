@@ -161,31 +161,6 @@ namespace rocRoller
         template <Component Comp>
         bool RegisterComponentImpl();
 
-#define RegisterComponentBaseCustom(base, name) const std::string base::Basename = #name
-
-#define RegisterComponentBase(base) RegisterComponentBaseCustom(base, #base)
-
-#define VAR_CAT2(a, b) a##b
-#define VAR_CAT(a, b) VAR_CAT2(a, b)
-#define RegisterComponentCustom(component, name)                        \
-    const std::string component::Name = name;                           \
-    namespace                                                           \
-    {                                                                   \
-        auto VAR_CAT(_component_, __LINE__)                             \
-            = rocRoller::Component::RegisterComponentImpl<component>(); \
-    }
-
-#define RegisterComponent(component) RegisterComponentCustom(component, #component)
-
-#define RegisterComponentTemplateSpec(component, types...)                     \
-    template <>                                                                \
-    const std::string component<types>::Name = #component "<" #types ">";      \
-    namespace                                                                  \
-    {                                                                          \
-        auto VAR_CAT(_component_, __LINE__)                                    \
-            = rocRoller::Component::RegisterComponentImpl<component<types>>(); \
-    }
-
         class ComponentFactoryBase
         {
         public:
