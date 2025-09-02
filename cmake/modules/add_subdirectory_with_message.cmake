@@ -5,22 +5,32 @@
 # and optionally checks for an expected target.
 #
 # Usage:
-#   add_subdirectory_with_message(<subdir> [EXPECT_TARGET <target>])
+#   add_subdirectory_with_message(COMPONENT <component> PATH_PREFIX <prefix> [EXPECT_TARGET <target>])
 #
 # Arguments:
-#   <subdir>               - Path to subdirectory.
-#   EXPECT_TARGET <target> - A target name produced by the subdirectory.
-function(add_subdirectory_with_message _subdir)
-    cmake_parse_arguments(ARG "" "EXPECT_TARGET" "" ${ARGN})
+#   COMPONENT <component>  - Component name (e.g., "mxdatagenerator").
+#   PATH_PREFIX <prefix>   - Path prefix (e.g., "shared", "projects").
+#   EXPECT_TARGET <target> - Optional target name produced by the subdirectory.
+function(add_subdirectory_with_message)
+    cmake_parse_arguments(ARG "" "COMPONENT;PATH_PREFIX;EXPECT_TARGET" "" ${ARGN})
 
-    list(APPEND CMAKE_MESSAGE_CONTEXT "${_subdir}")
-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/${_subdir}")
-
-    if(${ARG_EXPECT_TARGET} AND NOT TARGET ${ARG_EXPECT_TARGET})
-        message(
-            FATAL_ERROR
-                "[rocm-libraries] Expected target ${ARG_EXPECT_TARGET} not found in ${_subdir}"
-        )
+    if(NOT ARG_COMPONENT)
+        message(FATAL_ERROR "add_subdirectory_with_message: COMPONENT is required")
     endif()
+    if(NOT ARG_PATH_PREFIX)
+        message(FATAL_ERROR "add_subdirectory_with_message: PATH_PREFIX is required")
+    endif()
+
+    set(_subdir_path "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_PATH_PREFIX}/${ARG_COMPONENT}")
+    file(TO_CMAKE_PATH "${_subdir_path}" _subdir_path)
+
+    list(APPEND CMAKE_MESSAGE_CONTEXT "${ARG_COMPONENT}")
+
+    add_subdirectory("${_subdir_path}")
+
+    if(ARG_EXPECT_TARGET AND NOT TARGET ${ARG_EXPECT_TARGET})
+        message(FATAL_ERROR "Expected target ${ARG_EXPECT_TARGET} not found in ${_subdir_path}")
+    endif()
+
     list(POP_BACK CMAKE_MESSAGE_CONTEXT)
 endfunction()

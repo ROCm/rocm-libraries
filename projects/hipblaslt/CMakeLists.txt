@@ -98,7 +98,7 @@ if(HIPBLASLT_ENABLE_HOST)
     else()
         set(hipblas_target hipblas-common)
     endif()
-    if(NOT ROCM_LIBRARIES_SUPERBUILD) 
+    if(NOT ROCM_LIBS_SUPERBUILD) 
         find_package(${hipblas_target} REQUIRED)
     endif()
     if(HIPBLASLT_ENABLE_MARKER)
@@ -162,7 +162,7 @@ else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 
-if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
+if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
     if(HIPBLASLT_ENABLE_FETCH)
         block(SCOPE_FOR VARIABLES)
             #set(ROCROLLER_ENABLE_FETCH ON)
@@ -485,7 +485,7 @@ if(HIPBLASLT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
 endif()
 
-if(ROCM_LIBRARIES_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
+if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
     # rocm_create_package makes decisions on what type of package to produce
     # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
     # a dev package.

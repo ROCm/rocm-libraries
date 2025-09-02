@@ -14,7 +14,7 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-if(NOT ROCM_LIBRARIES_SUPERBUILD)
+if(NOT ROCM_LIBS_SUPERBUILD)
     find_package(mxDataGenerator QUIET)
     if(NOT mxDataGenerator_FOUND)
         if(ROCROLLER_ENABLE_FETCH)
