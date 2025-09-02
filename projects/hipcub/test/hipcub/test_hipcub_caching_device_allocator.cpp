@@ -29,9 +29,11 @@
 
 #include "common_test_header.hpp"
 
-#include "hipcub/util_allocator.hpp"
+#include <hipcub/util_allocator.hpp>
 
-__global__ void EmptyKernel() { }
+__global__
+void EmptyKernel()
+{}
 
 // Hipified test/test_allocator.cu
 

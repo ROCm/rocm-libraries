@@ -829,15 +829,11 @@ rocblas_status rocsolver_steqr_template(rocblas_handle handle,
         }
         else
         {
-            int device;
-            HIP_CHECK(hipGetDevice(&device));
-            hipDeviceProp_t deviceProperties;
-            HIP_CHECK(hipGetDeviceProperties(&deviceProperties, device));
+            const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
-            ROCSOLVER_LAUNCH_KERNEL((steqr_kernel<T>), dim3(1, batch_count),
-                                    dim3(deviceProperties.warpSize), 0, stream, n, D + shiftD,
-                                    strideD, E + shiftE, strideE, C, shiftC, ldc, strideC, info,
-                                    (S*)work_stack, 30 * n, eps, ssfmin, ssfmax);
+            ROCSOLVER_LAUNCH_KERNEL((steqr_kernel<T>), dim3(1, batch_count), dim3(props->warpSize),
+                                    0, stream, n, D + shiftD, strideD, E + shiftE, strideE, C, shiftC,
+                                    ldc, strideC, info, (S*)work_stack, 30 * n, eps, ssfmin, ssfmax);
         }
     }
 
