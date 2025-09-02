@@ -39,6 +39,7 @@
 #include <miopen/conv/solvers.hpp>
 #include <miopen/filesystem.hpp>
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 using namespace miopen::solver::conv;
 
 namespace {
@@ -442,3 +443,11 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Conv3DKernelTuning_FP32,
                          ::testing::ValuesIn(GenFullTestCases()),
                          Conv3DKernelTuningTestName);
+
+#else
+// Dummy test when AI kernel tuning is disabled
+TEST(Conv3DKernelTuningDisabled, FeatureDisabled)
+{
+    GTEST_SKIP() << "AI kernel tuning features are disabled in this build";
+}
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING

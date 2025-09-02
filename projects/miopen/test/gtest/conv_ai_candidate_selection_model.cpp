@@ -32,6 +32,7 @@
 #include <vector>
 #include <sstream>
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 using namespace miopen::ai::tuning::candidate_selection;
 
 namespace {
@@ -323,3 +324,11 @@ INSTANTIATE_TEST_SUITE_P(Full,
                              PrintTo(info.param, &os);
                              return os.str();
                          });
+
+#else
+// Add a dummy test when AI kernel tuning is disabled
+TEST(CandidateSelectionDisabled, FeatureDisabled)
+{
+    GTEST_SKIP() << "AI candidate selection features are disabled in this build";
+}
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING

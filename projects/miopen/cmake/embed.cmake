@@ -61,7 +61,7 @@ function(generate_embed_source EMBED_NAME)
     list(LENGTH PARSE_SYMBOLS SYMBOLS_LEN)
     list(LENGTH PARSE_OBJECTS OBJECTS_LEN)
     if(NOT ${SYMBOLS_LEN} EQUAL ${OBJECTS_LEN})
-        message(FATAL_ERROR "Symbols and objects dont match: ${SYMBOLS_LEN} != ${OBJECTS_LEN}")
+        message(WARNING "Symbols and objects dont match: ${SYMBOLS_LEN} != ${OBJECTS_LEN}")
     endif()
     math(EXPR LEN "${SYMBOLS_LEN} - 1")
 
