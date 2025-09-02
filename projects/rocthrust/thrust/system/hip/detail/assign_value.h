@@ -19,14 +19,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
@@ -40,58 +32,38 @@ namespace hip_rocprim
 {
 
 template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
-inline THRUST_HOST_DEVICE void
-assign_value(thrust::hip::execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
+THRUST_HIP_FUNCTION void assign_value(thrust::hip::execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
 {
-  // XXX war nvbugs/881631
-  struct war_nvbugs_881631
-  {
-    THRUST_HOST inline static void
-    host_path(thrust::hip::execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
-    {
-      hip_rocprim::copy(exec, src, src + 1, dst);
-    }
-
-    THRUST_DEVICE inline static void
-    device_path(thrust::hip::execution_policy<DerivedPolicy>&, Pointer1 dst, Pointer2 src)
-    {
-      *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);
-    }
-  };
-
+  // WORKAROUND
   NV_IF_TARGET(
-    NV_IS_HOST, (war_nvbugs_881631::host_path(exec, dst, src);), (war_nvbugs_881631::device_path(exec, dst, src);));
+    NV_IS_HOST,
+    (hip_rocprim::copy(exec, src, src + 1, dst);),
+    (THRUST_UNUSED_VAR(exec);
+     Pointer1(*fptr)(thrust::hip::execution_policy<DerivedPolicy>&, Pointer2, Pointer2, Pointer1) = hip_rocprim::copy;
+     (void) fptr;
 
+     *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);));
 } // end assign_value()
 
 template <typename System1, typename System2, typename Pointer1, typename Pointer2>
-inline THRUST_HOST_DEVICE void assign_value(cross_system<System1, System2>& systems, Pointer1 dst, Pointer2 src)
+THRUST_HIP_FUNCTION void assign_value(cross_system<System1, System2>& systems, Pointer1 dst, Pointer2 src)
 {
-  // XXX war nvbugs/881631
-  struct war_nvbugs_881631
-  {
-    THRUST_HOST inline static void host_path(cross_system<System1, System2>& systems, Pointer1 dst, Pointer2 src)
-    {
-      // rotate the systems so that they are ordered the same as (src, dst)
-      // for the call to thrust::copy
-      cross_system<System2, System1> rotated_systems = systems.rotate();
-      hip_rocprim::copy(rotated_systems, src, src + 1, dst);
-    }
+  // WORKAROUND
+  NV_IF_TARGET(
+    NV_IS_HOST,
+    (cross_system<System2, System1> rotated_systems = systems.rotate();
+     hip_rocprim::copy(rotated_systems, src, src + 1, dst);),
+    (THRUST_UNUSED_VAR(systems);
+     Pointer1(*fptr)(cross_system<System2, System1>, Pointer2, Pointer2, Pointer1) = hip_rocprim::copy;
+     (void) fptr;
+     // WORKAROUND build error fixed - start here
+     // thrust::hip::tag hip_tag;
+     // thrust::hip_rocprim::assign_value(hip_tag, dst, src);
+     *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);
+     // WORKAROUND - end here
+     ));
 
-    THRUST_DEVICE inline static void device_path(cross_system<System1, System2>&, Pointer1 dst, Pointer2 src)
-    {
-      // XXX forward the true hip::execution_policy inside systems here
-      //     instead of materializing a tag
-      thrust::hip::tag hip_tag;
-      thrust::hip_rocprim::assign_value(hip_tag, dst, src);
-    }
-  };
-
-  NV_IF_TARGET(NV_IS_HOST,
-               (war_nvbugs_881631::host_path(systems, dst, src);),
-               (war_nvbugs_881631::device_path(systems, dst, src);));
 } // end assign_value()
-
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 #endif

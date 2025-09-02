@@ -15,8 +15,11 @@
  *  limitations under the License.
  */
 
+#include <thrust/device_vector.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
-#include <thrust/mismatch.h>
+#include <thrust/tabulate.h>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
@@ -26,21 +29,31 @@ TESTS_DEFINE(MismatchTests, FullTestsParams);
 TYPED_TEST(MismatchTests, TestMismatchSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
+  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a{1, 2, 3, 4};
-  Vector b{1, 2, 4, 3};
+  Vector a(4);
+  Vector b(4);
+  a[0] = T(1);
+  b[0] = T(1);
+  a[1] = T(2);
+  b[1] = T(2);
+  a[2] = T(3);
+  b[2] = T(4);
+  a[3] = T(4);
+  b[3] = T(3);
 
-  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).first - a.begin(), 2);
-  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).second - b.begin(), 2);
+  ASSERT_EQ(thrust::mismatch(Policy{}, a.begin(), a.end(), b.begin()).first - a.begin(), 2);
+  ASSERT_EQ(thrust::mismatch(Policy{}, a.begin(), a.end(), b.begin()).second - b.begin(), 2);
 
-  b[2] = 3;
+  b[2] = T(3);
 
-  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).first - a.begin(), 3);
-  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).second - b.begin(), 3);
+  ASSERT_EQ(thrust::mismatch(Policy{}, a.begin(), a.end(), b.begin()).first - a.begin(), 3);
+  ASSERT_EQ(thrust::mismatch(Policy{}, a.begin(), a.end(), b.begin()).second - b.begin(), 3);
 
-  b[3] = 4;
+  b[3] = T(4);
 
   ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).first - a.begin(), 4);
   ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).second - b.begin(), 4);

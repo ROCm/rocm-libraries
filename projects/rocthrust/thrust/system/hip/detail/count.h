@@ -29,19 +29,10 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
-#  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/hip/detail/reduce.h>
 #  include <thrust/system/hip/detail/util.h>
 
@@ -50,21 +41,21 @@ namespace hip_rocprim
 {
 
 template <class Derived, class InputIt, class UnaryPred>
-typename iterator_traits<InputIt>::difference_type THRUST_HOST_DEVICE
+typename iterator_traits<InputIt>::difference_type THRUST_HIP_FUNCTION
 count_if(execution_policy<Derived>& policy, InputIt first, InputIt last, UnaryPred unary_pred)
 {
   using size_type       = typename iterator_traits<InputIt>::difference_type;
-  using flag_iterator_t = transform_iterator<UnaryPred, InputIt, size_type, size_type>;
+  using flag_iterator_t = transform_input_iterator_t<size_type, InputIt, UnaryPred>;
 
-  return hip_rocprim::reduce_n(
+  return reduce_n(
     policy, flag_iterator_t(first, unary_pred), thrust::distance(first, last), size_type(0), plus<size_type>());
 }
 
 template <class Derived, class InputIt, class Value>
-typename iterator_traits<InputIt>::difference_type THRUST_HOST_DEVICE
+typename iterator_traits<InputIt>::difference_type THRUST_HIP_FUNCTION
 count(execution_policy<Derived>& policy, InputIt first, InputIt last, Value const& value)
 {
-  return hip_rocprim::count_if(policy, first, last, thrust::detail::equal_to_value<Value>(value));
+  return count_if(policy, first, last, thrust::detail::equal_to_value<Value>(value));
 }
 
 } // namespace hip_rocprim

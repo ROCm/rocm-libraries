@@ -18,19 +18,9 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/type_deduction.h>
 #include <thrust/system/detail/generic/select_system.h>
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(type_traits)
-#endif
+#include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 

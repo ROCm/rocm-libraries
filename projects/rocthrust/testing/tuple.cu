@@ -21,16 +21,7 @@
 
 #include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
-
 using namespace unittest;
-
-// Yes we're using 'thrust::null_type', I don't care >:(
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-THRUST_SUPPRESS_DEPRECATED_PUSH
-#endif
 
 template <typename T>
 struct TestTupleConstructor
@@ -484,7 +475,7 @@ struct TestTupleTie
 };
 SimpleUnitTest<TestTupleTie, NumericTypes> TestTupleTieInstance;
 
-void TestTupleSwap()
+void TestTupleSwap(void)
 {
   int a = 7;
   int b = 13;
@@ -497,8 +488,7 @@ void TestTupleSwap()
   thrust::tuple<int, int, int> t1(a, b, c);
   thrust::tuple<int, int, int> t2(x, y, z);
 
-  using _THRUST_STD::swap;
-  swap(t1, t2);
+  thrust::swap(t1, t2);
 
   ASSERT_EQUAL(x, thrust::get<0>(t1));
   ASSERT_EQUAL(y, thrust::get<1>(t1));
@@ -525,7 +515,7 @@ void TestTupleSwap()
 DECLARE_UNITTEST(TestTupleSwap);
 
 #if THRUST_CPP_DIALECT >= 2017
-void TestTupleStructuredBindings()
+void TestTupleStructuredBindings(void)
 {
   const int a = 0;
   const int b = 42;
@@ -554,12 +544,7 @@ void TestTupleCTAD(void)
 DECLARE_UNITTEST(TestTupleCTAD);
 #endif // THRUST_CPP_DIALECT >= 2017
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-THRUST_SUPPRESS_DEPRECATED_POP
-#endif
-
 // Ensure that we are backwards compatible with the old thrust::tuple implementation
-THRUST_SUPPRESS_DEPRECATED_PUSH
 static_assert(
   thrust::tuple_size<thrust::tuple<thrust::null_type,
                                    thrust::null_type,
@@ -656,4 +641,3 @@ static_assert(
 static_assert(
   thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, int, thrust::null_type>>::value == 9, "");
 static_assert(thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, int, int>>::value == 10, "");
-THRUST_SUPPRESS_DEPRECATED_POP

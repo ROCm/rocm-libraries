@@ -32,7 +32,7 @@
 //
 // Using iterators in the manner described here is generally discouraged.
 // Users should only resort to this technique if there is no viable
-// implementation of a given operation in terms of Thrust algorithms.
+// implemention of a given operation in terms of Thrust algorithms.
 // For example this particular example is better solved with thrust::copy,
 // which is safer and potentially faster.  Only use this approach after all
 // safer alternatives have been exhausted.
@@ -97,7 +97,7 @@ void print(const std::string& name, const Vector& v)
   std::cout << "\n";
 }
 
-int main()
+int main(void)
 {
   using Vector   = thrust::device_vector<int>;
   using Iterator = Vector::iterator;

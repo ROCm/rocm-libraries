@@ -26,7 +26,7 @@
 const size_t NUM_SAMPLES = 10000;
 
 template <class InputVector, class OutputVector, class Operator, class ReferenceOperator>
-void TestBinaryFunctional()
+void TestBinaryFunctional(void)
 {
   using InputType  = typename InputVector::value_type;
   using OutputType = typename OutputVector::value_type;
@@ -70,12 +70,12 @@ void TestBinaryFunctional()
                        std::operator_name<data_type>>();
 // op(T,T) -> T
 #define DECLARE_BINARY_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                      \
-  void Test##OperatorName##FunctionalHost()                                                             \
+  void Test##OperatorName##FunctionalHost(void)                                                         \
   {                                                                                                     \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_BINARY_ARITHMETIC_FUNCTIONAL_TEST, host_vector, operator_name);   \
   }                                                                                                     \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalHost);                                                 \
-  void Test##OperatorName##FunctionalDevice()                                                           \
+  void Test##OperatorName##FunctionalDevice(void)                                                       \
   {                                                                                                     \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_BINARY_ARITHMETIC_FUNCTIONAL_TEST, device_vector, operator_name); \
   }                                                                                                     \
@@ -83,12 +83,12 @@ void TestBinaryFunctional()
 
 // op(T,T) -> T (for integer T only)
 #define DECLARE_BINARY_INTEGER_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                  \
-  void Test##OperatorName##FunctionalHost()                                                                 \
+  void Test##OperatorName##FunctionalHost(void)                                                             \
   {                                                                                                         \
     INSTANTIATE_INTEGER_TYPES(INSTANTIATE_BINARY_ARITHMETIC_FUNCTIONAL_TEST, host_vector, operator_name);   \
   }                                                                                                         \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalHost);                                                     \
-  void Test##OperatorName##FunctionalDevice()                                                               \
+  void Test##OperatorName##FunctionalDevice(void)                                                           \
   {                                                                                                         \
     INSTANTIATE_INTEGER_TYPES(INSTANTIATE_BINARY_ARITHMETIC_FUNCTIONAL_TEST, device_vector, operator_name); \
   }                                                                                                         \

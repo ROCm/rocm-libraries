@@ -19,8 +19,11 @@
 #include <thrust/transform.h>
 #include <thrust/tuple.h>
 
-#include <unittest/hip/testframework.h>
 #include <unittest/unittest.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <unittest/cuda/testframework.h>
+#endif
 
 using namespace unittest;
 
@@ -65,14 +68,14 @@ struct TestTupleScan
     device_vector<tuple<T, T>> d_output(n, zero);
 
     // inclusive_scan
-    thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), SumTupleFunctor());
-    thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), SumTupleFunctor());
+    inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), SumTupleFunctor());
+    inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), SumTupleFunctor());
     ASSERT_EQUAL_QUIET(h_output, d_output);
 
     // exclusive_scan
     tuple<T, T> init(13, 17);
-    thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), init, SumTupleFunctor());
-    thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), init, SumTupleFunctor());
+    exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), init, SumTupleFunctor());
+    exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), init, SumTupleFunctor());
 
     ASSERT_EQUAL_QUIET(h_output, d_output);
   }

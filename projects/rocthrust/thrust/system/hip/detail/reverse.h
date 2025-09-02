@@ -29,28 +29,18 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
 template <class Derived, class ItemsIt, class ResultIt>
 ResultIt THRUST_HOST_DEVICE
 reverse_copy(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, ResultIt result);
 
 template <class Derived, class ItemsIt>
 void THRUST_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last);
-
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
@@ -63,15 +53,15 @@ THRUST_NAMESPACE_END
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
 template <class Derived, class ItemsIt, class ResultIt>
-ResultIt THRUST_HOST_DEVICE reverse_copy(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, ResultIt result)
+ResultIt THRUST_HIP_FUNCTION
+reverse_copy(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, ResultIt result)
 {
   return hip_rocprim::copy(policy, thrust::make_reverse_iterator(last), thrust::make_reverse_iterator(first), result);
 }
 
 template <class Derived, class ItemsIt>
-void THRUST_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
+void THRUST_HIP_FUNCTION reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
   using difference_type = typename thrust::iterator_difference<ItemsIt>::type;
 
@@ -82,7 +72,6 @@ void THRUST_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first
 
   hip_rocprim::swap_ranges(policy, first, mid, thrust::make_reverse_iterator(last));
 }
-
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 #endif

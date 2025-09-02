@@ -15,32 +15,13 @@
  *  limitations under the License.
  */
 
+#include <thrust/device_vector.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/replace.h>
 
 #include "test_param_fixtures.hpp"
-#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
-
-// There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
-// Adding this attribute suffices that this miscompilation does not appear anymore
-#if defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
-#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
-#else
-#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
-#endif
-
-// GCC 12 + omp + c++11 miscompiles some test cases and emits spurious warnings.
-#if defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ == 12 && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_OMP \
-  && THRUST_CPP_DIALECT == 2011
-#  define THRUST_GCC12_OMP_MISCOMPILE
-#endif
-
-// New GCC, new miscompile. 13 + TBB this time.
-#if defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ == 13 && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_TBB
-#  define THRUST_GCC13_TBB_MISCOMPILE
-#endif
 
 TESTS_DEFINE(ReplaceTests, FullTestsParams);
 
@@ -53,19 +34,30 @@ TEST(ReplaceTests, UsingHip)
   ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
-TYPED_TEST(ReplaceTests, TestReplaceSimple)
+TYPED_TEST(ReplaceTests, SimpleReplace)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data{1, 2, 1, 3, 2};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 3;
+  data[4] = 2;
 
-  thrust::replace(data.begin(), data.end(), (T) 1, (T) 4);
-  thrust::replace(data.begin(), data.end(), (T) 2, (T) 5);
+  thrust::replace(Policy{}, data.begin(), data.end(), (T) 1, (T) 4);
+  thrust::replace(Policy{}, data.begin(), data.end(), (T) 2, (T) 5);
 
-  Vector result{4, 5, 4, 3, 5};
+  Vector result(5);
+  result[0] = 4;
+  result[1] = 5;
+  result[2] = 4;
+  result[3] = 3;
+  result[4] = 5;
 
   ASSERT_EQ(data, result);
 }
@@ -76,7 +68,7 @@ void replace(my_system& system, ForwardIterator, ForwardIterator, const T&, cons
   system.validate_dispatch();
 }
 
-TEST(ReplaceTests, TestReplaceDispatchExplicit)
+TEST(ReplaceTests, ValidateDispatch)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -85,7 +77,7 @@ TEST(ReplaceTests, TestReplaceDispatchExplicit)
   my_system sys(0);
   thrust::replace(sys, vec.begin(), vec.begin(), 0, 0);
 
-  ASSERT_EQ(true, sys.is_valid());
+  ASSERT_EQ(sys.is_valid(), true);
 }
 
 template <typename ForwardIterator, typename T>
@@ -94,7 +86,7 @@ void replace(my_tag, ForwardIterator first, ForwardIterator, const T&, const T&)
   *first = 13;
 }
 
-TEST(ReplaceTests, TestReplaceDispatchImplicit)
+TEST(ReplaceTests, ValidateDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -105,7 +97,7 @@ TEST(ReplaceTests, TestReplaceDispatchImplicit)
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(PrimitiveReplaceTests, TestReplace)
+TYPED_TEST(PrimitiveReplaceTests, ReplaceWithRandomDataAndDifferentSizes)
 {
   using T = typename TestFixture::input_type;
 
@@ -115,44 +107,66 @@ TYPED_TEST(PrimitiveReplaceTests, TestReplace)
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
-
-    T old_value = 0;
-    T new_value = 1;
-
-    thrust::replace(h_data.begin(), h_data.end(), old_value, new_value);
-    thrust::replace(d_data.begin(), d_data.end(), old_value, new_value);
-
-    thrust::host_vector<T> h_data_d(d_data);
-    for (size_t i = 0; i < size; ++i)
+    for (auto seed : get_seeds())
     {
-      ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 10, seed);
+      thrust::device_vector<T> d_data = h_data;
+
+      T new_value = (T) 0;
+      T old_value = (T) 1;
+
+      thrust::replace(h_data.begin(), h_data.end(), old_value, new_value);
+      thrust::replace(d_data.begin(), d_data.end(), old_value, new_value);
+
+      ASSERT_EQ(h_data.size(), size);
+      ASSERT_EQ(d_data.size(), size);
+
+      thrust::host_vector<T> h_data_d(d_data);
+      for (size_t i = 0; i < size; i++)
+      {
+        ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+      }
     }
   }
 }
 
-#ifndef THRUST_GCC13_TBB_MISCOMPILE
-#  ifndef THRUST_GCC12_OMP_MISCOMPILE
-TYPED_TEST(ReplaceTests, TestReplaceCopySimple)
+TYPED_TEST(ReplaceTests, SimpleCopyReplace)
 {
-  using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
+  using Vector      = typename TestFixture::input_type;
+  using Policy      = typename TestFixture::execution_policy;
+  using T           = typename Vector::value_type;
+  const size_t size = 5;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data{1, 2, 1, 3, 2};
+  Vector data(size);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 3;
+  data[4] = 2;
 
-  Vector dest(5);
+  Vector dest(size);
 
-  thrust::replace_copy(data.begin(), data.end(), dest.begin(), (T) 1, (T) 4);
-  thrust::replace_copy(dest.begin(), dest.end(), dest.begin(), (T) 2, (T) 5);
+  thrust::replace_copy(Policy{}, data.begin(), data.end(), dest.begin(), (T) 1, (T) 4);
+  thrust::replace_copy(Policy{}, dest.begin(), dest.end(), dest.begin(), (T) 2, (T) 5);
 
-  Vector result{4, 5, 4, 3, 5};
-  ASSERT_EQ(dest, result);
+  Vector result(size);
+  result[0] = 4;
+  result[1] = 5;
+  result[2] = 4;
+  result[3] = 3;
+  result[4] = 5;
+
+  thrust::host_vector<T> h_dest(dest);
+  thrust::host_vector<T> h_result(result);
+  for (size_t i = 0; i < size; i++)
+  {
+    ASSERT_NEAR(h_dest[i], h_result[i], T(0.1));
+  }
 }
-#  endif
-#endif
 
 template <typename InputIterator, typename OutputIterator, typename T>
 OutputIterator replace_copy(my_system& system, InputIterator, InputIterator, OutputIterator result, const T&, const T&)
@@ -161,7 +175,7 @@ OutputIterator replace_copy(my_system& system, InputIterator, InputIterator, Out
   return result;
 }
 
-TEST(ReplaceTests, TestReplaceCopyDispatchExplicit)
+TEST(ReplaceTests, ReplaceCopyValidateDispatch)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -180,7 +194,7 @@ OutputIterator replace_copy(my_tag, InputIterator, InputIterator, OutputIterator
   return result;
 }
 
-TEST(ReplaceTests, TestReplaceCopyDispatchImplicit)
+TEST(ReplaceTests, ReplaceCopyValidateDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -192,7 +206,7 @@ TEST(ReplaceTests, TestReplaceCopyDispatchImplicit)
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopy)
+TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyWithRandomData)
 {
   using T = typename TestFixture::input_type;
 
@@ -202,29 +216,34 @@ TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopy)
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
-
-    T old_value = 0;
-    T new_value = 1;
-
-    thrust::host_vector<T> h_dest(size);
-    thrust::device_vector<T> d_dest(size);
-
-    thrust::replace_copy(h_data.begin(), h_data.end(), h_dest.begin(), old_value, new_value);
-    thrust::replace_copy(d_data.begin(), d_data.end(), d_dest.begin(), old_value, new_value);
-
-    thrust::host_vector<T> h_data_d(d_data);
-    thrust::host_vector<T> h_dest_d(d_dest);
-    for (size_t i = 0; i < size; ++i)
+    for (auto seed : get_seeds())
     {
-      ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
-      ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 10, seed);
+      thrust::device_vector<T> d_data = h_data;
+
+      T old_value = (T) 0;
+      T new_value = (T) 1;
+
+      thrust::host_vector<T> h_dest(size);
+      thrust::device_vector<T> d_dest(size);
+
+      thrust::replace_copy(h_data.begin(), h_data.end(), h_dest.begin(), old_value, new_value);
+      thrust::replace_copy(d_data.begin(), d_data.end(), d_dest.begin(), old_value, new_value);
+
+      thrust::host_vector<T> h_data_d(d_data);
+      thrust::host_vector<T> h_dest_d(d_dest);
+      for (size_t i = 0; i < size; i++)
+      {
+        ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+        ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+      }
     }
   }
 }
 
-TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyToDiscardIterator)
+TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyToDiscardIterator)
 {
   using T = typename TestFixture::input_type;
 
@@ -234,48 +253,69 @@ TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyToDiscardIterator)
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    T old_value = 0;
-    T new_value = 1;
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 10, seed);
+      thrust::device_vector<T> d_data = h_data;
 
-    thrust::discard_iterator<> h_result =
-      thrust::replace_copy(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), old_value, new_value);
+      T old_value = 0;
+      T new_value = 1;
 
-    thrust::discard_iterator<> d_result =
-      thrust::replace_copy(d_data.begin(), d_data.end(), thrust::make_discard_iterator(), old_value, new_value);
+      thrust::discard_iterator<> h_result =
+        thrust::replace_copy(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), old_value, new_value);
 
-    thrust::discard_iterator<> reference(size);
+      thrust::discard_iterator<> d_result =
+        thrust::replace_copy(d_data.begin(), d_data.end(), thrust::make_discard_iterator(), old_value, new_value);
 
-    ASSERT_EQ_QUIET(reference, h_result);
-    ASSERT_EQ_QUIET(reference, d_result);
+      thrust::discard_iterator<> reference(size);
+
+      ASSERT_EQ(reference, d_result);
+      ASSERT_EQ(reference, h_result);
+    }
   }
 }
 
 template <typename T>
 struct less_than_five
 {
-  THRUST_HOST_DEVICE bool operator()(const T& val) const
+  __host__ __device__ bool operator()(const T& val) const
   {
     return val < 5;
   }
 };
 
-TYPED_TEST(ReplaceTests, TestReplaceIfSimple)
+TYPED_TEST(ReplaceTests, ReplaceIfSimple)
 {
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
+  size_t size  = 5;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data{1, 3, 4, 6, 5};
+  Vector data(size);
+  data[0] = 1;
+  data[1] = 3;
+  data[2] = 4;
+  data[3] = 6;
+  data[4] = 5;
 
   thrust::replace_if(data.begin(), data.end(), less_than_five<T>(), (T) 0);
 
-  Vector result{0, 0, 0, 6, 5};
+  Vector result(size);
+  result[0] = 0;
+  result[1] = 0;
+  result[2] = 0;
+  result[3] = 6;
+  result[4] = 5;
 
-  ASSERT_EQ(data, result);
+  thrust::host_vector<T> h_data(data);
+  thrust::host_vector<T> h_result(result);
+  for (size_t i = 0; i < size; i++)
+  {
+    ASSERT_NEAR(h_data[i], h_result[i], T(0.1));
+  }
 }
 
 template <typename ForwardIterator, typename Predicate, typename T>
@@ -284,16 +324,16 @@ void replace_if(my_system& system, ForwardIterator, ForwardIterator, Predicate, 
   system.validate_dispatch();
 }
 
-TEST(ReplaceTests, TestReplaceIfDispatchExplicit)
+TEST(ReplaceTests, ValidateDispatchReplaceIf)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::replace_if(sys, vec.begin(), vec.begin(), 0, 0);
+  thrust::replace_if(sys, vec.begin(), vec.begin(), less_than_five<int>(), 0);
 
-  ASSERT_EQ(true, sys.is_valid());
+  ASSERT_EQ(sys.is_valid(), true);
 }
 
 template <typename ForwardIterator, typename Predicate, typename T>
@@ -302,32 +342,64 @@ void replace_if(my_tag, ForwardIterator first, ForwardIterator, Predicate, const
   *first = 13;
 }
 
-TEST(ReplaceTests, TestReplaceIfDispatchImplicit)
+template <class T>
+struct always_true
+{
+  __host__ __device__ bool operator()(const T&) const
+  {
+    return true;
+  }
+};
+
+TEST(ReplaceTests, ValidateDispatchImplicitReplaceIf)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   thrust::device_vector<int> vec(1);
 
-  thrust::replace_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0, 0);
+  thrust::replace_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), always_true<int>(), 0);
 
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(ReplaceTests, TestReplaceIfStencilSimple) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+TYPED_TEST(ReplaceTests, ReplaceIfStencilSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
+  size_t size  = 5;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data{1, 3, 4, 6, 5};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 3;
+  data[2] = 4;
+  data[3] = 6;
+  data[4] = 5;
 
-  Vector stencil{5, 4, 6, 3, 7};
-  thrust::replace_if(data.begin(), data.end(), stencil.begin(), less_than_five<T>(), (T) 0);
+  Vector stencil(5);
+  stencil[0] = 5;
+  stencil[1] = 4;
+  stencil[2] = 6;
+  stencil[3] = 3;
+  stencil[4] = 7;
 
-  Vector result{1, 0, 4, 0, 5};
+  thrust::replace_if(Policy{}, data.begin(), data.end(), stencil.begin(), less_than_five<T>(), (T) 0);
 
-  ASSERT_EQ(data, result);
+  Vector result(5);
+  result[0] = 1;
+  result[1] = 0;
+  result[2] = 4;
+  result[3] = 0;
+  result[4] = 5;
+
+  thrust::host_vector<T> h_data(data);
+  thrust::host_vector<T> h_result(result);
+  for (size_t i = 0; i < size; i++)
+  {
+    ASSERT_NEAR(h_data[i], h_result[i], T(0.1));
+  }
 }
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
@@ -336,14 +408,14 @@ void replace_if(my_system& system, ForwardIterator, ForwardIterator, InputIterat
   system.validate_dispatch();
 }
 
-TEST(ReplaceTests, TestReplaceIfStencilDispatchExplicit)
+TEST(ReplaceTests, ReplaceIfStencilDispatchExplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::replace_if(sys, vec.begin(), vec.begin(), vec.begin(), 0, 0);
+  thrust::replace_if(sys, vec.begin(), vec.begin(), vec.begin(), less_than_five<int>(), 0);
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -354,19 +426,23 @@ void replace_if(my_tag, ForwardIterator first, ForwardIterator, InputIterator, P
   *first = 13;
 }
 
-TEST(ReplaceTests, TestReplaceIfStencilDispatchImplicit)
+TEST(ReplaceTests, ReplaceIfStencilDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   thrust::device_vector<int> vec(1);
 
   thrust::replace_if(
-    thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0, 0);
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    always_true<int>(),
+    0);
 
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(PrimitiveReplaceTests, TestReplaceIf) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+TYPED_TEST(PrimitiveReplaceTests, ReplaceIfWithRandomData)
 {
   using T = typename TestFixture::input_type;
 
@@ -376,62 +452,57 @@ TYPED_TEST(PrimitiveReplaceTests, TestReplaceIf) THRUST_DISABLE_BROKEN_GCC_VECTO
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
-
-    thrust::replace_if(h_data.begin(), h_data.end(), less_than_five<T>(), (T) 0);
-    thrust::replace_if(d_data.begin(), d_data.end(), less_than_five<T>(), (T) 0);
-
-    thrust::host_vector<T> h_data_d(d_data);
-    for (size_t i = 0; i < size; ++i)
+    for (auto seed : get_seeds())
     {
-      ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 10, seed);
+      thrust::device_vector<T> d_data = h_data;
+
+      thrust::replace_if(h_data.begin(), h_data.end(), less_than_five<T>(), (T) 0);
+      thrust::replace_if(d_data.begin(), d_data.end(), less_than_five<T>(), (T) 0);
+
+      thrust::host_vector<T> h_data_d(d_data);
+      for (size_t i = 0; i < size; i++)
+      {
+        ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+      }
     }
   }
 }
 
-TYPED_TEST(PrimitiveReplaceTests, TestReplaceIfStencil) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
-{
-  using T = typename TestFixture::input_type;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  for (auto size : get_sizes())
-  {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
-
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
-
-    thrust::host_vector<T> h_stencil   = random_samples<T>(size);
-    thrust::device_vector<T> d_stencil = h_stencil;
-
-    thrust::replace_if(h_data.begin(), h_data.end(), h_stencil.begin(), less_than_five<T>(), (T) 0);
-    thrust::replace_if(d_data.begin(), d_data.end(), d_stencil.begin(), less_than_five<T>(), (T) 0);
-
-    thrust::host_vector<T> h_data_d(d_data);
-    for (size_t i = 0; i < size; ++i)
-    {
-      ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
-    }
-  }
-}
-
-TYPED_TEST(ReplaceTests, TestReplaceCopyIfSimple) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+TYPED_TEST(ReplaceTests, ReplaceCopyIfSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
+  size_t size  = 5;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data{1, 3, 4, 6, 5};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 3;
+  data[2] = 4;
+  data[3] = 6;
+  data[4] = 5;
 
   Vector dest(5);
+  thrust::replace_copy_if(Policy{}, data.begin(), data.end(), dest.begin(), less_than_five<T>(), (T) 0);
 
-  thrust::replace_copy_if(data.begin(), data.end(), dest.begin(), less_than_five<T>(), (T) 0);
+  Vector result(5);
+  result[0] = 0;
+  result[1] = 0;
+  result[2] = 0;
+  result[3] = 6;
+  result[4] = 5;
 
-  Vector result{0, 0, 0, 6, 5};
-  ASSERT_EQ(dest, result);
+  thrust::host_vector<T> h_dest(dest);
+  thrust::host_vector<T> h_result(result);
+  for (size_t i = 0; i < size; i++)
+  {
+    ASSERT_NEAR(h_dest[i], h_result[i], T(0.1));
+  }
 }
 
 template <typename InputIterator, typename OutputIterator, typename Predicate, typename T>
@@ -442,14 +513,14 @@ replace_copy_if(my_system& system, InputIterator, InputIterator, OutputIterator 
   return result;
 }
 
-TEST(ReplaceTests, TestReplaceCopyIfDispatchExplicit)
+TEST(ReplaceTests, ReplaceCopyIfDispatchExplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::replace_copy_if(sys, vec.begin(), vec.begin(), vec.begin(), 0, 0);
+  thrust::replace_copy_if(sys, vec.begin(), vec.begin(), vec.begin(), always_true<int>(), 0);
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -461,35 +532,61 @@ OutputIterator replace_copy_if(my_tag, InputIterator, InputIterator, OutputItera
   return result;
 }
 
-TEST(ReplaceTests, TestReplaceCopyIfDispatchImplicit)
+TEST(ReplaceTests, ReplaceCopyIfDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   thrust::device_vector<int> vec(1);
 
   thrust::replace_copy_if(
-    thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0, 0);
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    always_true<int>(),
+    0);
 
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(ReplaceTests, TestReplaceCopyIfStencilSimple) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+TYPED_TEST(ReplaceTests, ReplaceCopyIfStencilSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
+  size_t size  = 5;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data{1, 3, 4, 6, 5};
-  Vector stencil{1, 5, 4, 7, 8};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 3;
+  data[2] = 4;
+  data[3] = 6;
+  data[4] = 5;
+
+  Vector stencil(5);
+  stencil[0] = 1;
+  stencil[1] = 5;
+  stencil[2] = 4;
+  stencil[3] = 7;
+  stencil[4] = 8;
 
   Vector dest(5);
+  thrust::replace_copy_if(Policy{}, data.begin(), data.end(), stencil.begin(), dest.begin(), less_than_five<T>(), (T) 0);
 
-  thrust::replace_copy_if(data.begin(), data.end(), stencil.begin(), dest.begin(), less_than_five<T>(), (T) 0);
+  Vector result(5);
+  result[0] = 0;
+  result[1] = 3;
+  result[2] = 0;
+  result[3] = 6;
+  result[4] = 5;
 
-  Vector result{0, 3, 0, 6, 5};
-
-  ASSERT_EQ(dest, result);
+  thrust::host_vector<T> h_dest(dest);
+  thrust::host_vector<T> h_result(result);
+  for (size_t i = 0; i < size; i++)
+  {
+    ASSERT_NEAR(h_dest[i], h_result[i], T(0.1));
+  }
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate, typename T>
@@ -507,7 +604,7 @@ TEST(ReplaceTests, TestReplaceCopyIfStencilDispatchExplicit)
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::replace_copy_if(sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), 0, 0);
+  thrust::replace_copy_if(sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), always_true<int>(), 0);
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -520,7 +617,7 @@ replace_copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIt
   return result;
 }
 
-TEST(ReplaceTests, TestReplaceCopyIfStencilDispatchImplicit)
+TEST(ReplaceTests, ReplaceCopyIfStencilDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -531,13 +628,13 @@ TEST(ReplaceTests, TestReplaceCopyIfStencilDispatchImplicit)
     thrust::retag<my_tag>(vec.begin()),
     thrust::retag<my_tag>(vec.begin()),
     thrust::retag<my_tag>(vec.begin()),
-    0,
+    always_true<int>(),
     0);
 
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyIf) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfWithRandomData)
 {
   using T = typename TestFixture::input_type;
 
@@ -547,26 +644,31 @@ TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyIf) THRUST_DISABLE_BROKEN_GCC_V
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
-
-    thrust::host_vector<T> h_dest(size);
-    thrust::device_vector<T> d_dest(size);
-
-    thrust::replace_copy_if(h_data.begin(), h_data.end(), h_dest.begin(), less_than_five<T>(), T{0});
-    thrust::replace_copy_if(d_data.begin(), d_data.end(), d_dest.begin(), less_than_five<T>(), T{0});
-
-    thrust::host_vector<T> h_data_d(d_data);
-    thrust::host_vector<T> h_dest_d(d_dest);
-    for (size_t i = 0; i < size; ++i)
+    for (auto seed : get_seeds())
     {
-      ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
-      ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 10, seed);
+      thrust::device_vector<T> d_data = h_data;
+
+      thrust::host_vector<T> h_dest(size);
+      thrust::device_vector<T> d_dest(size);
+
+      thrust::replace_copy_if(h_data.begin(), h_data.end(), h_dest.begin(), less_than_five<T>(), 0);
+      thrust::replace_copy_if(d_data.begin(), d_data.end(), d_dest.begin(), less_than_five<T>(), 0);
+
+      thrust::host_vector<T> h_data_d(d_data);
+      thrust::host_vector<T> h_dest_d(d_dest);
+      for (size_t i = 0; i < size; i++)
+      {
+        ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+        ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+      }
     }
   }
 }
 
-TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyIfToDiscardIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfToDiscardIteratorRandomData)
 {
   using T = typename TestFixture::input_type;
 
@@ -576,55 +678,28 @@ TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyIfToDiscardIterator) THRUST_DIS
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
-
-    thrust::discard_iterator<> h_result =
-      thrust::replace_copy_if(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), less_than_five<T>(), T{0});
-
-    thrust::discard_iterator<> d_result =
-      thrust::replace_copy_if(d_data.begin(), d_data.end(), thrust::make_discard_iterator(), less_than_five<T>(), T{0});
-
-    thrust::discard_iterator<> reference(size);
-
-    ASSERT_EQ_QUIET(reference, h_result);
-    ASSERT_EQ_QUIET(reference, d_result);
-  }
-}
-
-TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyIfStencil) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
-{
-  using T = typename TestFixture::input_type;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  for (auto size : get_sizes())
-  {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
-
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
-
-    thrust::host_vector<T> h_stencil   = random_samples<T>(size);
-    thrust::device_vector<T> d_stencil = h_stencil;
-
-    thrust::host_vector<T> h_dest(size);
-    thrust::device_vector<T> d_dest(size);
-
-    thrust::replace_copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_dest.begin(), less_than_five<T>(), T{0});
-    thrust::replace_copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_dest.begin(), less_than_five<T>(), T{0});
-
-    thrust::host_vector<T> h_data_d(d_data);
-    thrust::host_vector<T> h_dest_d(d_dest);
-    for (size_t i = 0; i < size; ++i)
+    for (auto seed : get_seeds())
     {
-      ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
-      ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 10, seed);
+      thrust::device_vector<T> d_data = h_data;
+
+      thrust::discard_iterator<> h_result =
+        thrust::replace_copy_if(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), less_than_five<T>(), 0);
+
+      thrust::discard_iterator<> d_result =
+        thrust::replace_copy_if(d_data.begin(), d_data.end(), thrust::make_discard_iterator(), less_than_five<T>(), 0);
+
+      thrust::discard_iterator<> reference(size);
+
+      ASSERT_EQ(reference, h_result);
+      ASSERT_EQ(reference, d_result);
     }
   }
 }
 
-TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyIfStencilToDiscardIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencil)
 {
   using T = typename TestFixture::input_type;
 
@@ -634,22 +709,64 @@ TYPED_TEST(PrimitiveReplaceTests, TestReplaceCopyIfStencilToDiscardIterator) THR
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    thrust::host_vector<T> h_data   = random_samples<T>(size);
-    thrust::device_vector<T> d_data = h_data;
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    thrust::host_vector<T> h_stencil   = random_samples<T>(size);
-    thrust::device_vector<T> d_stencil = h_stencil;
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 10, seed);
+      thrust::device_vector<T> d_data = h_data;
 
-    thrust::discard_iterator<> h_result = thrust::replace_copy_if(
-      h_data.begin(), h_data.end(), h_stencil.begin(), thrust::make_discard_iterator(), less_than_five<T>(), T{0});
+      thrust::host_vector<T> h_stencil   = get_random_data<T>(size, 0, 10, seed + seed_value_addition);
+      thrust::device_vector<T> d_stencil = h_stencil;
 
-    thrust::discard_iterator<> d_result = thrust::replace_copy_if(
-      d_data.begin(), d_data.end(), d_stencil.begin(), thrust::make_discard_iterator(), less_than_five<T>(), T{0});
+      thrust::host_vector<T> h_dest(size);
+      thrust::device_vector<T> d_dest(size);
 
-    thrust::discard_iterator<> reference(size);
+      thrust::replace_copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_dest.begin(), less_than_five<T>(), 0);
+      thrust::replace_copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_dest.begin(), less_than_five<T>(), 0);
 
-    ASSERT_EQ_QUIET(reference, h_result);
-    ASSERT_EQ_QUIET(reference, d_result);
+      thrust::host_vector<T> h_data_d(d_data);
+      thrust::host_vector<T> h_dest_d(d_dest);
+      for (size_t i = 0; i < size; i++)
+      {
+        ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+        ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+      }
+    }
+  }
+}
+
+TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencilToDiscardIteratorRandomData)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 10, seed);
+      thrust::device_vector<T> d_data = h_data;
+
+      thrust::host_vector<T> h_stencil   = get_random_data<T>(size, 0, 10, seed + seed_value_addition);
+      thrust::device_vector<T> d_stencil = h_stencil;
+
+      thrust::discard_iterator<> h_result = thrust::replace_copy_if(
+        h_data.begin(), h_data.end(), h_stencil.begin(), thrust::make_discard_iterator(), less_than_five<T>(), 0);
+
+      thrust::discard_iterator<> d_result = thrust::replace_copy_if(
+        d_data.begin(), d_data.end(), d_stencil.begin(), thrust::make_discard_iterator(), less_than_five<T>(), 0);
+
+      thrust::discard_iterator<> reference(size);
+
+      ASSERT_EQ(reference, h_result);
+      ASSERT_EQ(reference, d_result);
+    }
   }
 }
 

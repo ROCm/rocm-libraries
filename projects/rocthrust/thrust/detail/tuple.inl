@@ -19,20 +19,31 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/detail/type_traits.h>
+#include <thrust/detail/swap.h>
 
 THRUST_NAMESPACE_BEGIN
 
-THRUST_EXEC_CHECK_DISABLE
-template <typename Assignable1, typename Assignable2>
-THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b)
-{
-  Assignable1 temp = a;
-  a                = b;
-  b                = temp;
-} // end swap()
+// define null_type
+struct null_type {};
 
-// We can ignore deprecated 'null_type' usage here.
-THRUST_SUPPRESS_DEPRECATED_PUSH
+// null_type comparisons
+THRUST_HOST_DEVICE inline
+bool operator==(const null_type&, const null_type&) { return true; }
+
+THRUST_HOST_DEVICE inline
+bool operator>=(const null_type&, const null_type&) { return true; }
+
+THRUST_HOST_DEVICE inline
+bool operator<=(const null_type&, const null_type&) { return true; }
+
+THRUST_HOST_DEVICE inline
+bool operator!=(const null_type&, const null_type&) { return false; }
+
+THRUST_HOST_DEVICE inline
+bool operator<(const null_type&, const null_type&) { return false; }
+
+THRUST_HOST_DEVICE inline
+bool operator>(const null_type&, const null_type&) { return false; }
 
 // forward declaration for tuple
 template <
@@ -41,6 +52,7 @@ template <
   class T6 = null_type, class T7 = null_type, class T8 = null_type,
   class T9 = null_type>
 class tuple;
+
 
 template <size_t N, class T> struct tuple_element;
 
@@ -144,7 +156,7 @@ template <class T> struct access_traits
   using const_type = const T&;
   using non_const_type = T&;
 
-  using parameter_type = const typename ::std::remove_cv<T>::type&;
+  using parameter_type = const typename thrust::detail::remove_cv<T>::type&;
 
 // used as the tuple constructors parameter types
 // Rationale: non-reference tuple element types can be cv-qualified.
@@ -992,7 +1004,5 @@ inline bool operator>=(const detail::cons<T1, T2>& lhs, const detail::cons<S1, S
 
   return detail::gte(lhs, rhs);
 } // end operator>=()
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END
