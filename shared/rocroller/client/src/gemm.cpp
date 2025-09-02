@@ -67,25 +67,41 @@ template <typename T>
 class RotatingBuffer
 {
 public:
-    RotatingBuffer(const std::vector<T>& hostData, size_t rotationSize)
-        : numElems(hostData.size()), rotationSize(rotationSize), currentOffset(0)
+    RotatingBuffer(const std::vector<T>& hostData, size_t rotatingBufferSizeBytes)
+        : numElems(hostData.size()),
+          rotatingBufferElems(rotatingBufferSizeBytes > 0 ? rotatingBufferSizeBytes / sizeof(T) : 0),
+          currentOffset(0)
     {
-        // allocate a single large buffer, with extra space for rotations
-        buffer = make_shared_device<T>(numElems + rotationSize, T{});
-
-        //Copy host data into every rotated segment
-        if(!hostData.empty())
+        if(hostData.empty())
         {
-            if(hostData.size() != numElems)
-            {
-                Throw<FatalError>("RotatingBuffer: host data size does not match device buffer size.");
-            }
+            Throw<FatalError>("RotatingBuffer: hostData is empty");
+        }
 
-            // For each rotation offset, copy hostData into device
-            size_t numRotations = (numElems + rotationSize - 1) / rotationSize + 1;
-            for(size_t r = 0; r < numRotations; ++r)
+        // If rotatingBufferSize == 0, disable rotation
+        if(rotatingBufferSizeBytes == 0)
+        {
+            buffer = make_shared_device<T>(numElems, T{});
+            hipMemcpy(buffer.get(), hostData.data(), numElems * sizeof(T), hipMemcpyHostToDevice);
+            return;
+        }
+
+        if(rotatingBufferElems == 0)
+        {
+            Throw<FatalError>("RotatingBuffer: rotatingBufferSizeBytes too small for element size");
+        }
+
+        if(numElems >= rotatingBufferElems)
+        {
+            buffer = make_shared_device<T>(numElems, T{});
+            hipMemcpy(buffer.get(), hostData.data(), numElems * sizeof(T), hipMemcpyHostToDevice);
+        }
+        else
+        {
+            buffer = make_shared_device<T>(rotatingBufferElems, T{});
+            size_t numCopies = rotatingBufferElems / numElems;
+            for(size_t r = 0; r < numCopies; ++r)
             {
-                T* dst = buffer.get() + r * rotationSize;
+                T* dst = buffer.get() + r * numElems;
                 hipMemcpy(dst, hostData.data(), numElems * sizeof(T), hipMemcpyHostToDevice);
             }
         }
@@ -93,20 +109,31 @@ public:
 
     std::span<T> next()
     {
-        // Return an empty span if numElems is 0
-        if (numElems == 0) {
-            return std::span<T>();
+        if(rotatingBufferElems == 0)
+        {
+            currentOffset = 0;
+            return std::span<T>(buffer.get(), numElems);
         }
-        // Apply rotation only when rotationSize > 0
-        if (rotationSize > 0) {
-            currentOffset = (currentOffset + rotationSize) % numElems;
+
+        if(numElems < rotatingBufferElems)
+        {
+            currentOffset = (currentOffset + numElems) % rotatingBufferElems;
         }
+        else
+        {
+            currentOffset = 0; // always return base
+        }
+        if(currentOffset + numElems > (numElems < rotatingBufferElems ? rotatingBufferElems : numElems))
+        {
+            Throw<FatalError>("RotatingBuffer::next: computed offset out of bounds");
+        }
+
         return std::span<T>(buffer.get() + currentOffset, numElems);
     }
 
 private:
-    size_t numElems;
-    size_t rotationSize;
+    size_t numElems;                // number of elements in one matrix
+    size_t rotatingBufferElems;     // rotating buffer size, in elements (0 means rotation is disabled)
     size_t currentOffset;
     std::shared_ptr<T> buffer;
 };
