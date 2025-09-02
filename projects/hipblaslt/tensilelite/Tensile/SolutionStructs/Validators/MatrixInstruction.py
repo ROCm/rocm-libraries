@@ -136,10 +136,12 @@ def matrixInstructionToMIParameters(
     sparseB = False if not isSparse else True if isSparse == 2 else False
     result['MIInputPerThreadA'] = result['MIInputPerThreadA'] if not sparseA else result['MIInputPerThreadA'] // 2
     if problemType["MXBlockA"]:
-      result['MIInputPerThreadMXSA'] = result['MIInputPerThreadA'] // problemType["MXBlockA"] * 2
+      duplicateFactor = 32 // result["MatrixInstM"]
+      result['MIInputPerThreadMXSA'] = result['MIInputPerThreadA'] // problemType["MXBlockA"] * duplicateFactor
     result['MIInputPerThreadB'] = result['MIInputPerThreadB'] if not sparseB else result['MIInputPerThreadB'] // 2
     if problemType["MXBlockB"]:
-      result['MIInputPerThreadMXSB'] = result['MIInputPerThreadB'] // problemType["MXBlockB"] * 2
+      duplicateFactor = 32 // result["MatrixInstN"]
+      result['MIInputPerThreadMXSB'] = result['MIInputPerThreadB'] // problemType["MXBlockB"] * duplicateFactor
     result['MIInputPerThreadMetadata'] = result['MIInputPerThread'] if not isSparse else result['MIInputPerThread'] // 8
 
     print2(f">> MI Parameters: {pprint.pformat(result)}")
