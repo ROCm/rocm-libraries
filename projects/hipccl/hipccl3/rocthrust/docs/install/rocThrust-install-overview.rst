@@ -6,9 +6,18 @@
 rocThrust installation overview 
 *********************************
 
-The rocThrust source code is available from the `rocThrust GitHub Repository <https://github.com/ROCmSoftwarePlatform/rocThrust>`_. 
+The rocThrust source code is available from the `ROCm libraries GitHub Repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocthrust>`_. Use sparse checkout when cloning the rocThrust project:
 
-The develop branch is the default branch. The develop branch is intended for users who want to preview new features or contribute to the rocThrust code base.
+.. code::
+
+  git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+  cd rocm-libraries
+  git sparse-checkout init --cone
+  git sparse-checkout set projects/rocthrust
+
+Then use ``git checkout`` to check out the branch you need.
+
+The develop branch is intended for users who want to preview new features or contribute to the rocThrust code base.
 
 If you don't intend to contribute to the rocThrust code base and won't be previewing features, use a branch that matches the version of ROCm installed on your system.
 

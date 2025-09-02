@@ -17,7 +17,7 @@ Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` depending on the co
     CXX=amdclang++
     CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
 
-Create the ``build`` directory inside the ``rocThrust`` directory, then change directory to the ``build`` directory:
+After :doc:`cloning the project <./rocThrust-install-overview>`, create the ``build`` directory under the ``rocthrust`` root directory, then change directory to the ``build`` directory:
 
 .. code:: shell
 
