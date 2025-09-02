@@ -67,7 +67,7 @@ rocm_install(DIRECTORY "${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake"
   FILES_MATCHING
   PATTERN *
-  PATTERN *.cmake.in EXCLUDE
+  REGEX .*header-search.cmake.* EXCLUDE
 )
 
 set(install_location "${CMAKE_INSTALL_LIBDIR}/cmake/libhipcxx")
