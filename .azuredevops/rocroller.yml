@@ -8,7 +8,7 @@ parameters:
   default: refs/heads/develop
 - name: triggerDownstreamJobs
   type: boolean
-  default: true
+  default: false
 
 resources:
   repositories:
