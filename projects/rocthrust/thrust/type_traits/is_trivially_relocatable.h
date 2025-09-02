@@ -25,30 +25,29 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
-#  include _THRUST_STD_INCLUDE(__fwd/pair.h)
-#  include _THRUST_STD_INCLUDE(__fwd/tuple.h)
-#  include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
-// clang-format on
-#endif
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/tuple>
+#  include <cuda/std/type_traits>
+#  include <cuda/std/utility>
+#elif defined(__has_include)
+#  if __has_include(<cuda/std/tuple>)
+#    include <cuda/std/tuple>
+#  endif // __has_include(<cuda/std/tuple>)
+#  if __has_include(<cuda/std/type_traits>)
+#    include <cuda/std/type_traits>
+#  endif // __has_include(<cuda/std/type_traits>)
+#  if __has_include(<cuda/std/utility>)
+#    include <cuda/std/utility>
+#  endif // __has_include(<cuda/std/utility>)
+#endif // THRUST_DEVICE_SYSTEM
 
+#include <tuple>
 #include <type_traits>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <tuple>
-#  include <utility>
-#endif
+#include <utility>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -122,7 +121,7 @@ constexpr bool is_trivially_relocatable_v = is_trivially_relocatable<T>::value;
  */
 template <typename From, typename To>
 using is_trivially_relocatable_to =
-  integral_constant<bool, _THRUST_STD::is_same<From, To>::value && is_trivially_relocatable<To>::value>;
+  integral_constant<bool, detail::is_same<From, To>::value && is_trivially_relocatable<To>::value>;
 
 #if THRUST_CPP_DIALECT >= 2017
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c From is
@@ -224,10 +223,40 @@ struct proclaim_trivially_relocatable : false_type
 namespace detail
 {
 
+// There is no way to actually detect the libstdc++ version; __GLIBCXX__
+// is always set to the date of libstdc++ being packaged, not the release
+// day or version. This means that we can't detect the libstdc++ version,
+// except when compiling with GCC.
+//
+// Therefore, for the best approximation of is_trivially_copyable, we need to
+// handle three distinct cases:
+// 1) GCC above 5, or another C++11 compiler not using libstdc++: use the
+//      standard trait directly.
+// 2) A C++11 compiler using libstdc++ that provides the intrinsic: use the
+//      intrinsic.
+// 3) Any other case (essentially: compiling without C++11): has_trivial_assign.
+
+#ifndef __has_feature
+#  define __has_feature(x) 0
+#endif
+
+template <typename T>
+struct is_trivially_copyable_impl
+    : integral_constant<bool,
+#if defined(__GLIBCXX__) && __has_feature(is_trivially_copyable)
+                        __is_trivially_copyable(T)
+#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC && THRUST_GCC_VERSION >= 50000
+                        std::is_trivially_copyable<T>::value
+#else
+                        has_trivial_assign<T>::value
+#endif
+                        >
+{};
+
 // https://wg21.link/P1144R0#wording-inheritance
 template <typename T>
 struct is_trivially_relocatable_impl
-    : integral_constant<bool, _THRUST_STD::is_trivially_copyable<T>::value || proclaim_trivially_relocatable<T>::value>
+    : integral_constant<bool, is_trivially_copyable_impl<T>::value || proclaim_trivially_relocatable<T>::value>
 {};
 
 template <typename T, std::size_t N>
@@ -238,7 +267,7 @@ struct is_trivially_relocatable_impl<T[N]> : is_trivially_relocatable_impl<T>
 
 THRUST_NAMESPACE_END
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(char1)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(char2)
@@ -298,15 +327,27 @@ THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double4)
 #endif
 
 THRUST_NAMESPACE_BEGIN
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 template <typename T, typename U>
-struct proclaim_trivially_relocatable<_THRUST_STD::pair<T, U>>
-    : _THRUST_STD::conjunction<is_trivially_relocatable<T>, is_trivially_relocatable<U>>
+struct proclaim_trivially_relocatable<::cuda::std::pair<T, U>>
+    : ::cuda::std::conjunction<is_trivially_relocatable<T>, is_trivially_relocatable<U>>
 {};
 
 template <typename... Ts>
-struct proclaim_trivially_relocatable<_THRUST_STD::tuple<Ts...>>
-    : _THRUST_STD::conjunction<is_trivially_relocatable<Ts>...>
+struct proclaim_trivially_relocatable<::cuda::std::tuple<Ts...>>
+    : ::cuda::std::conjunction<is_trivially_relocatable<Ts>...>
 {};
+#else
+template <typename T, typename U>
+struct proclaim_trivially_relocatable<std::pair<T, U>>
+    : std::conjunction<is_trivially_relocatable<T>, is_trivially_relocatable<U>>
+{};
+
+template <typename... Ts>
+struct proclaim_trivially_relocatable<std::tuple<Ts...>> : std::conjunction<is_trivially_relocatable<Ts>...>
+{};
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 THRUST_NAMESPACE_END
 
 /*! \endcond

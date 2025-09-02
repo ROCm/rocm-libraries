@@ -54,25 +54,6 @@ CmpHelperEQQuite(const char* lhs_expression, const char* rhs_expression, const T
 
 #define ASSERT_EQ_QUIET(val1, val2) ASSERT_PRED_FORMAT2(CmpHelperEQQuite, val1, val2)
 
-template <typename T1, typename T2>
-testing::AssertionResult
-CmpHelperNEQuite(const char* lhs_expression, const char* rhs_expression, const T1& lhs, const T2& rhs)
-{
-  if (lhs != rhs)
-  {
-    return testing::AssertionSuccess();
-  }
-
-  testing::Message msg;
-  msg << "Expressions during equality check:";
-  msg << "\n  " << lhs_expression;
-  msg << "\n  " << rhs_expression;
-
-  return testing::AssertionFailure() << msg;
-}
-
-#define ASSERT_NE_QUIET(val1, val2) ASSERT_PRED_FORMAT2(CmpHelperNEQuite, val1, val2)
-
 template <typename T>
 testing::AssertionResult bitwise_equal(const char* a_expr, const char* b_expr, const T& a, const T& b)
 {
@@ -121,26 +102,3 @@ void assert_bit_eq(const thrust::host_vector<T>& result, const thrust::host_vect
   assert_bit_eq(result.begin(), result.end(), expected.begin(), expected.end());
 }
 
-#define ASSERT_THROWS_EQ_WITH_FILE_AND_LINE(EXPR, EXCEPTION_TYPE, VALUE, FILE_, LINE_)                  \
-  {                                                                                                     \
-    threw_status THRUST_PP_CAT2(__s, LINE_) = did_not_throw;                                            \
-    try                                                                                                 \
-    {                                                                                                   \
-      EXPR;                                                                                             \
-    }                                                                                                   \
-    catch (EXCEPTION_TYPE const& THRUST_PP_CAT2(__e, LINE_))                                            \
-    {                                                                                                   \
-      if (VALUE == THRUST_PP_CAT2(__e, LINE_))                                                          \
-        THRUST_PP_CAT2(__s, LINE_) = threw_right_type;                                                  \
-      else                                                                                              \
-        THRUST_PP_CAT2(__s, LINE_) = threw_right_type_but_wrong_value;                                  \
-    }                                                                                                   \
-    catch (...)                                                                                         \
-    {                                                                                                   \
-      THRUST_PP_CAT2(__s, LINE_) = threw_wrong_type;                                                    \
-    }                                                                                                   \
-    check_assert_throws(THRUST_PP_CAT2(__s, LINE_), THRUST_PP_STRINGIZE(EXCEPTION_TYPE), FILE_, LINE_); \
-  }
-
-#define ASSERT_THROWS_EQ(EXPR, EXCEPTION_TYPE, VALUE) \
-  ASSERT_THROWS_EQ_WITH_FILE_AND_LINE(EXPR, EXCEPTION_TYPE, VALUE, __FILE__, __LINE__)

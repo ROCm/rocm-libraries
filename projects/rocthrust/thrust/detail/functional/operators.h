@@ -1,5 +1,5 @@
 /*
- *  Copyright 2024 NVIDIA Corporation
+ *  Copyright 2008-2013 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,17 +27,11 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
+#include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/functional.h>
 #include <thrust/tuple.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -212,11 +206,11 @@ struct bit_rshift
   }
 };
 
-#define MAKE_BINARY_COMPOSITE(op, functor)                                                                       \
-  template <typename A, typename B, _THRUST_STD::enable_if_t<is_actor<A>::value || is_actor<B>::value, int> = 0> \
-  THRUST_HOST_DEVICE auto operator op(const A& a, const B& b) -> decltype(compose(functor{}, a, b))              \
-  {                                                                                                              \
-    return compose(functor{}, a, b);                                                                             \
+#define MAKE_BINARY_COMPOSITE(op, functor)                                                               \
+  template <typename A, typename B, std::enable_if_t<is_actor<A>::value || is_actor<B>::value, int> = 0> \
+  THRUST_HOST_DEVICE auto operator op(const A& a, const B& b) -> decltype(compose(functor{}, a, b))      \
+  {                                                                                                      \
+    return compose(functor{}, a, b);                                                                     \
   }
 
 MAKE_BINARY_COMPOSITE(==, thrust::equal_to<>)
@@ -340,7 +334,7 @@ struct bit_not
 }; // end prefix_increment
 
 #define MAKE_UNARY_COMPOSITE(op, functor)                                            \
-  template <typename A, _THRUST_STD::enable_if_t<is_actor<A>::value, int> = 0>       \
+  template <typename A, std::enable_if_t<is_actor<A>::value, int> = 0>               \
   THRUST_HOST_DEVICE auto operator op(const A& a) -> decltype(compose(functor{}, a)) \
   {                                                                                  \
     return compose(functor{}, a);                                                    \
@@ -356,7 +350,7 @@ MAKE_UNARY_COMPOSITE(~, bit_not)
 #undef MAKE_UNARY_COMPOSITE
 
 #define MAKE_UNARY_COMPOSITE_POSTFIX(op, functor)                                         \
-  template <typename A, _THRUST_STD::enable_if_t<is_actor<A>::value, int> = 0>            \
+  template <typename A, std::enable_if_t<is_actor<A>::value, int> = 0>                    \
   THRUST_HOST_DEVICE auto operator op(const A& a, int) -> decltype(compose(functor{}, a)) \
   {                                                                                       \
     return compose(functor{}, a);                                                         \

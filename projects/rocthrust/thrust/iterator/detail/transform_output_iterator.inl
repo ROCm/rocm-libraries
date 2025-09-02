@@ -18,47 +18,40 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/transform_output_iterator.h>
+#include <thrust/iterator/iterator_adaptor.h>
 
 THRUST_NAMESPACE_BEGIN
 
 template <typename UnaryFunction, typename OutputIterator>
-class transform_output_iterator;
+  class transform_output_iterator;
 
 namespace detail
 {
 
-// Proxy reference that uses Unary Function to transform the rhs of assignment
+// Proxy reference that uses Unary Function to transform the rhs of assigment
 // operator before writing the result to OutputIterator
 template <typename UnaryFunction, typename OutputIterator>
-class transform_output_iterator_proxy
+  class transform_output_iterator_proxy
 {
-public:
-  THRUST_HOST_DEVICE transform_output_iterator_proxy(const OutputIterator& out, UnaryFunction fun)
-      : out(out)
-      , fun(fun)
-  {}
+  public:
+    THRUST_HOST_DEVICE
+    transform_output_iterator_proxy(const OutputIterator& out, UnaryFunction fun) : out(out), fun(fun)
+    {
+    }
 
-  THRUST_EXEC_CHECK_DISABLE
-  template <typename T>
-  THRUST_HOST_DEVICE transform_output_iterator_proxy operator=(const T& x)
-  {
-    *out = fun(x);
-    return *this;
-  }
+    THRUST_EXEC_CHECK_DISABLE
+    template <typename T>
+    THRUST_HOST_DEVICE
+    transform_output_iterator_proxy operator=(const T& x)
+    {
+      *out = fun(x);
+      return *this;
+    }
 
-private:
-  OutputIterator out;
-  UnaryFunction fun;
+  private:
+    OutputIterator out;
+    UnaryFunction fun;
 };
 
 // Compute the iterator_adaptor instantiation to be used for transform_output_iterator
@@ -77,9 +70,10 @@ struct transform_output_iterator_base
 // Register transform_output_iterator_proxy with 'is_proxy_reference' from
 // type_traits to enable its use with algorithms.
 template <class UnaryFunction, class OutputIterator>
-struct is_proxy_reference<transform_output_iterator_proxy<UnaryFunction, OutputIterator>>
-    : public thrust::detail::true_type
-{};
+struct is_proxy_reference<
+    transform_output_iterator_proxy<UnaryFunction, OutputIterator> >
+    : public thrust::detail::true_type {};
 
-} // namespace detail
+
+} // end detail
 THRUST_NAMESPACE_END

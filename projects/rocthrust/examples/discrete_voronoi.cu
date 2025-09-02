@@ -228,7 +228,7 @@ void display_time(timer& t)
   std::cout << "  ( " << 1e3 * t.elapsed() << "ms )" << std::endl;
 }
 
-int main()
+int main(void)
 {
   int m = 2048; // number of rows
   int n = 2048; // number of columns
@@ -237,7 +237,7 @@ int main()
   timer t;
 
   // Host vector to encode a 2D image
-  std::cout << "[Initialize " << m << "x" << n << " Image]" << std::endl;
+  std::cout << "[Inititialize " << m << "x" << n << " Image]" << std::endl;
   t.restart();
   thrust::host_vector<int> seeds_host(m * n, m * n);
   generate_random_sites(seeds_host, s, m, n);

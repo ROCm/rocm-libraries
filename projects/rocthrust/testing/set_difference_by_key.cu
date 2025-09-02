@@ -95,12 +95,20 @@ void TestSetDifferenceByKeyDispatchImplicit()
 DECLARE_UNITTEST(TestSetDifferenceByKeyDispatchImplicit);
 
 template <typename Vector>
-void TestSetDifferenceByKeySimple()
+void TestSetDifferenceByKeySimple(void)
 {
   using Iterator = typename Vector::iterator;
 
-  Vector a_key{0, 2, 4, 5}, b_key{0, 3, 3, 4, 6};
-  Vector a_val(4, 0), b_val(5, 1);
+  Vector a_key(4), b_key(5);
+  Vector a_val(4), b_val(5);
+
+  // clang-format off
+  a_key[0] = 0; a_key[1] = 2; a_key[2] = 4; a_key[3] = 5;
+  a_val[0] = 0; a_val[1] = 0; a_val[2] = 0; a_val[3] = 0;
+
+  b_key[0] = 0; b_key[1] = 3; b_key[2] = 3; b_key[3] = 4; b_key[4] = 6;
+  b_val[0] = 1; b_val[1] = 1; b_val[2] = 1; b_val[3] = 1; b_val[4] = 1;
+  // clang-format on
 
   Vector ref_key(2), ref_val(2);
   ref_key[0] = 2;
@@ -252,7 +260,7 @@ DECLARE_VARIABLE_UNITTEST(TestSetDifferenceByKeyEquivalentRanges);
 template <typename T>
 void TestSetDifferenceByKeyMultiset(const size_t n)
 {
-  thrust::host_vector<T> vec = unittest::random_integers<int>(2 * n);
+  thrust::host_vector<T> vec = unittest::random_integers<T>(2 * n);
 
   // restrict elements to [min,13)
   for (typename thrust::host_vector<T>::iterator i = vec.begin(); i != vec.end(); ++i)

@@ -18,25 +18,17 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/execute_with_dependencies.h>
 
 #include <tuple>
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
 
 template <template <typename> class ExecutionPolicyCRTPBase>
-struct THRUST_DEPRECATED dependencies_aware_execution_policy
+struct dependencies_aware_execution_policy
 {
   template <typename... Dependencies>
   THRUST_HOST thrust::detail::execute_with_dependencies<ExecutionPolicyCRTPBase, Dependencies...>
@@ -81,5 +73,4 @@ struct THRUST_DEPRECATED dependencies_aware_execution_policy
 
 } // namespace detail
 
-THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END

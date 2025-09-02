@@ -18,18 +18,21 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/sort.h>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+#if defined(_WIN32) && defined(__HIP__)
+using TestParams = ::testing::Types<Params<int16_t>, Params<int32_t>>;
+#else
 using TestParams = ::testing::Types<Params<int8_t>, Params<int16_t>, Params<int32_t>>;
+#endif
 
 TESTS_DEFINE(ZipIteratorStableSortByKeyTests, TestParams);
 
-TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSortByKey)
+TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSort)
 {
   using T = typename TestFixture::input_type;
-  using namespace thrust;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -41,22 +44,27 @@ TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSortByKey)
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      host_vector<T> h1 = get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-      host_vector<T> h2 = get_random_data<T>(
+      thrust::host_vector<T> h1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h2 = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
-      host_vector<T> h3 = get_random_data<T>(
+      thrust::host_vector<T> h3 = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + 2 * seed_value_addition);
-      host_vector<T> h4 = get_random_data<T>(
+      thrust::host_vector<T> h4 = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + 3 * +seed_value_addition);
 
-      device_vector<T> d1 = h1;
-      device_vector<T> d2 = h2;
-      device_vector<T> d3 = h3;
-      device_vector<T> d4 = h4;
+      thrust::device_vector<T> d1 = h1;
+      thrust::device_vector<T> d2 = h2;
+      thrust::device_vector<T> d3 = h3;
+      thrust::device_vector<T> d4 = h4;
 
       // sort with (tuple, scalar)
-      stable_sort_by_key(make_zip_iterator(h1.begin(), h2.begin()), make_zip_iterator(h1.end(), h2.end()), h3.begin());
-      stable_sort_by_key(make_zip_iterator(d1.begin(), d2.begin()), make_zip_iterator(d1.end(), d2.end()), d3.begin());
+      thrust::stable_sort_by_key(thrust::make_zip_iterator(thrust::make_tuple(h1.begin(), h2.begin())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(h1.end(), h2.end())),
+                                 h3.begin());
+      thrust::stable_sort_by_key(thrust::make_zip_iterator(thrust::make_tuple(d1.begin(), d2.begin())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(d1.end(), d2.end())),
+                                 d3.begin());
 
       ASSERT_EQ_QUIET(h1, d1);
       ASSERT_EQ_QUIET(h2, d2);
@@ -64,16 +72,18 @@ TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSortByKey)
       ASSERT_EQ_QUIET(h4, d4);
 
       // sort with (scalar, tuple)
-      stable_sort_by_key(h1.begin(), h1.end(), make_zip_iterator(h3.begin(), h4.begin()));
-      stable_sort_by_key(d1.begin(), d1.end(), make_zip_iterator(d3.begin(), d4.begin()));
+      thrust::stable_sort_by_key(
+        h1.begin(), h1.end(), thrust::make_zip_iterator(thrust::make_tuple(h3.begin(), h4.begin())));
+      thrust::stable_sort_by_key(
+        d1.begin(), d1.end(), thrust::make_zip_iterator(thrust::make_tuple(d3.begin(), d4.begin())));
 
       // sort with (tuple, tuple)
-      stable_sort_by_key(make_zip_iterator(h1.begin(), h2.begin()),
-                         make_zip_iterator(h1.end(), h2.end()),
-                         make_zip_iterator(h3.begin(), h4.begin()));
-      stable_sort_by_key(make_zip_iterator(d1.begin(), d2.begin()),
-                         make_zip_iterator(d1.end(), d2.end()),
-                         make_zip_iterator(d3.begin(), d4.begin()));
+      thrust::stable_sort_by_key(thrust::make_zip_iterator(thrust::make_tuple(h1.begin(), h2.begin())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(h1.end(), h2.end())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(h3.begin(), h4.begin())));
+      thrust::stable_sort_by_key(thrust::make_zip_iterator(thrust::make_tuple(d1.begin(), d2.begin())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(d1.end(), d2.end())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(d3.begin(), d4.begin())));
 
       ASSERT_EQ_QUIET(h1, d1);
       ASSERT_EQ_QUIET(h2, d2);
