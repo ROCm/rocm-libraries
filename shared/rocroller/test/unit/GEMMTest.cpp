@@ -817,10 +817,24 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                auto writeOnFailLimit = Settings::getInstance()->get(Settings::WriteOnFail);
+                static const SettingsOption<int> WriteOnFail{
+                    "ROCROLLER_WRITE_ON_FAIL",
+                    "Write input/output matrices to file when GEMM tests fail (0 = disabled, >0 = "
+                    "max "
+                    "files)",
+                    0,
+                    -1};
+
+                static const SettingsOption<std::string> WriteOnFailDir{
+                    "ROCROLLER_WRITE_ON_FAIL_DIR",
+                    "Directory to write GEMM failures to",
+                    "failures/",
+                    -1};
+
+                auto writeOnFailLimit = Settings::getInstance()->get(WriteOnFail);
                 if(!res.ok && writeOnFailLimit > 0)
                 {
-                    auto writeOnFailDir = Settings::getInstance()->get(Settings::WriteOnFailDir);
+                    auto writeOnFailDir = Settings::getInstance()->get(WriteOnFailDir);
                     std::filesystem::path base
                         = std::filesystem::absolute(std::filesystem::path(writeOnFailDir));
                     if(!std::filesystem::exists(base))
