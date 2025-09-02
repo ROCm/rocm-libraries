@@ -978,7 +978,8 @@ TEST_CASE("BitFieldCombine epxression and lowering", "[expression][expression-tr
             Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width));
 
         auto expected
-            = ((Expression::literal(((1u << width) - 1u) << srcOffset) & srcExpr) >> offsetDiff)
+            = logicalShiftR((Expression::literal(((1u << width) - 1u) << srcOffset) & srcExpr),
+                            offsetDiff)
               | (~Expression::literal(((1u << width) - 1u) << dstOffset) & dstExpr);
 
         CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
@@ -989,7 +990,7 @@ TEST_CASE("BitFieldCombine epxression and lowering", "[expression][expression-tr
         auto bfc = std::make_shared<Expression::Expression>(
             Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width, true));
 
-        auto expected = (srcExpr >> offsetDiff)
+        auto expected = logicalShiftR(srcExpr, offsetDiff)
                         | (~Expression::literal(((1u << width) - 1u) << dstOffset) & dstExpr);
 
         CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
@@ -1001,7 +1002,8 @@ TEST_CASE("BitFieldCombine epxression and lowering", "[expression][expression-tr
             srcExpr, dstExpr, srcOffset, dstOffset, width, std::nullopt, true));
 
         auto expected
-            = ((Expression::literal(((1u << width) - 1u) << srcOffset) & srcExpr) >> offsetDiff)
+            = logicalShiftR((Expression::literal(((1u << width) - 1u) << srcOffset) & srcExpr),
+                            offsetDiff)
               | dstExpr;
 
         CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
@@ -1012,7 +1014,7 @@ TEST_CASE("BitFieldCombine epxression and lowering", "[expression][expression-tr
         auto bfc = std::make_shared<Expression::Expression>(
             Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width, true, true));
 
-        auto expected = (srcExpr >> offsetDiff) | dstExpr;
+        auto expected = logicalShiftR(srcExpr, offsetDiff) | dstExpr;
 
         CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
     }

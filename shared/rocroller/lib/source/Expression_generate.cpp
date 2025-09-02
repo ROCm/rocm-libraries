@@ -1212,9 +1212,6 @@ namespace rocRoller
                 destStr = dest->description();
             co_yield Instruction::Comment("Generate " + toString(expr) + " into " + destStr);
 
-            // Replace BitFieldCombine expression with shift and bitwise AND/OR
-            expr = lowerBitFieldCombine(expr);
-
             // Replace RandomNumber expression with expressions that implement the PRNG algorithm
             // if PRNG instruction is unavailable
             expr = lowerPRNG(expr, context);

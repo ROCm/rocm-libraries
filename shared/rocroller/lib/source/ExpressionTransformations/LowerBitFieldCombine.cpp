@@ -154,7 +154,7 @@ namespace rocRoller
                 if(expr.dstOffset > expr.srcOffset)
                     lhs = lhs << literal(expr.dstOffset - expr.srcOffset);
                 else if(expr.dstOffset < expr.srcOffset)
-                    lhs = lhs >> literal(expr.srcOffset - expr.dstOffset);
+                    lhs = logicalShiftR(lhs, literal(expr.srcOffset - expr.dstOffset));
 
                 ExpressionPtr ret = lhs | rhs;
                 setComment(ret, expr.comment);
