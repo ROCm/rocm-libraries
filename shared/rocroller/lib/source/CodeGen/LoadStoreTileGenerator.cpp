@@ -447,6 +447,16 @@ namespace rocRoller
                 coords.setCoordinate(increment, L(0u));
             }
 
+            if(base < 0 && offset > 0)
+            {
+                auto offsetType = Register::Type::Vector;
+                if(ci.isDirect2LDS)
+                    offsetType = Register::Type::Scalar;
+                auto offsetReg = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
+                offsetReg->setName(concatenate("Offset", tag));
+                scope->addRegister(offset);
+            }
+
             // Create a buffer descriptor
             if(buffer > 0)
             {
