@@ -322,6 +322,32 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
         ptrs.begin(), ptrs.end(), [&args](auto& ptr) { return args.IsSupportedBy(ptr); });
 }
 
+template <typename DeviceOpType,
+          typename CKArgsType,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
+{
+    const auto args         = CKArgsType{problem};
+    auto max_workspace_size = 0;
+
+    const auto ptrs = DeviceOpType::GetInstances();
+    for(auto& ptr : ptrs)
+    {
+        auto split_k = CkSplitkAutoDeduce;
+        do
+        {
+            if(args.IsSupportedBySplitK(ptr, split_k))
+            {
+                auto workspace_size = args.GetCKSplitkWorkspaceSize(ptr, split_k);
+                if(workspace_size > max_workspace_size)
+                    max_workspace_size = workspace_size;
+            }
+        } while(!NextCKSplitkValue<1, 128>(split_k));
+    }
+
+    return max_workspace_size;
+}
+
 #define WORKAROUND_CK_ISSUE_1184 1
 #if WORKAROUND_CK_ISSUE_1184
 using WorkAroundHipEventProfiler = HipEventProfiler;
@@ -766,13 +792,14 @@ inline bool CKWrwRequireWorkspace(
 }
 
 /// \todo move to a cpp file
-inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDescription& problem)
+inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDescription& problem,
+                                                  size_t ck_ws_size = -1)
 {
     if(problem.IsLayoutNHWC())
     {
         if(problem.GetDirection() == ::miopen::conv::Direction::BackwardWeights)
         {
-            return GetCKAlphaBetaWorkspace(problem);
+            return (ck_ws_size == -1) ? GetCKAlphaBetaWorkspace(problem) : ck_ws_size;
         }
         return 0;
     }
@@ -781,10 +808,11 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
 
     if(problem.GetDirection() == ::miopen::conv::Direction::BackwardWeights)
     {
-        MultiBufferWorkspaceTraits wt({GetPackedSize(problem.GetIn()),
-                                       GetPackedSize(problem.GetWeights()),
-                                       GetPackedSize(problem.GetOut()),
-                                       GetCKAlphaBetaWorkspace(problem)});
+        MultiBufferWorkspaceTraits wt(
+            {GetPackedSize(problem.GetIn()),
+             GetPackedSize(problem.GetWeights()),
+             GetPackedSize(problem.GetOut()),
+             (ck_ws_size == -1) ? GetCKAlphaBetaWorkspace(problem) : ck_ws_size});
         return wt.GetSize();
     }
 
@@ -1100,11 +1128,6 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     }
 
     std::optional<CKBWDWeightBufferDescriptor> _ck_buff_des;
-
-    if(problem.IsDirectionBackwardWrW())
-    {
-        _ck_buff_des.emplace(GetCKAlphaBetaWorkspace(problem), 0);
-    }
 
     auto ptr_iter = FindConvPtrByID(conv_ptrs, id_string);
     if(ptr_iter == conv_ptrs.end())
