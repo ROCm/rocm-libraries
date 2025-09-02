@@ -817,7 +817,8 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                if(!res.ok && Settings::getInstance()->get(Settings::WriteOnFail))
+                auto writeOnFailLimit = Settings::getInstance()->get(Settings::WriteOnFail);
+                if(!res.ok && writeOnFailLimit > 0)
                 {
                     std::filesystem::path base
                         = std::filesystem::absolute(std::filesystem::path("failures/"));
@@ -826,87 +827,104 @@ namespace GEMMDriverTest
                         std::filesystem::create_directories(base);
                     }
 
-                    std::filesystem::path valuesFilePath
-                        = base
-                          / fmt::format("{}_iter_{}.txt", commandKernel.getKernelName(), iteration);
-
-                    std::ofstream valuesFile(valuesFilePath);
-
-                    if(!valuesFile.is_open())
+                    int existingFileCount = 0;
+                    for(const auto& entry : std::filesystem::directory_iterator(base))
                     {
-                        Log::error("Failed to open output files for writing");
-                        break;
+                        if(entry.is_regular_file())
+                        {
+                            existingFileCount++;
+                        }
                     }
 
-                    Log::info("Values file written to: {}", valuesFilePath.string());
-
-                    valuesFile << fmt::format("RNorm is {} (acceptable {}, iteration {})",
-                                              res.relativeNormL2,
-                                              res.acceptableError.relativeL2Tolerance,
-                                              iteration)
-                               << std::endl;
-
-                    valuesFile << "Diffs:\n";
-                    for(size_t i = 0; i < M; i++)
+                    if(existingFileCount < writeOnFailLimit)
                     {
-                        for(size_t j = 0; j < N; j++)
+                        std::filesystem::path valuesFilePath
+                            = base
+                              / fmt::format(
+                                  "{}_iter_{}.txt", commandKernel.getKernelName(), iteration);
+
+                        std::ofstream valuesFile(valuesFilePath);
+
+                        if(!valuesFile.is_open())
                         {
-                            auto a = d_result[i * N + j];
-                            auto b = h_result[i * N + j];
-                            if((a - b) * (a - b) / (b * b)
-                               > res.acceptableError.relativeL2Tolerance)
+                            Log::error("Failed to open output files for writing");
+                            break;
+                        }
+
+                        Log::info("Values file written to: {} (file {} of {} allowed)",
+                                  valuesFilePath.string(),
+                                  existingFileCount++,
+                                  writeOnFailLimit);
+
+                        valuesFile << fmt::format("RNorm is {} (acceptable {}, iteration {})",
+                                                  res.relativeNormL2,
+                                                  res.acceptableError.relativeL2Tolerance,
+                                                  iteration)
+                                   << std::endl;
+
+                        valuesFile << "Diffs:\n";
+                        for(size_t i = 0; i < M; i++)
+                        {
+                            for(size_t j = 0; j < N; j++)
                             {
-                                valuesFile << std::setw(8) << i << std::setw(8) << j //
-                                           << std::setw(16) << std::scientific << a //
-                                           << std::setw(16) << std::scientific << b //
-                                           << std::setw(16) << std::scientific << a - b //
-                                           << std::endl;
+                                auto a = d_result[i * N + j];
+                                auto b = h_result[i * N + j];
+                                if((a - b) * (a - b) / (b * b)
+                                   > res.acceptableError.relativeL2Tolerance)
+                                {
+                                    valuesFile << std::setw(8) << i << std::setw(8) << j //
+                                               << std::setw(16) << std::scientific << a //
+                                               << std::setw(16) << std::scientific << b //
+                                               << std::setw(16) << std::scientific << a - b //
+                                               << std::endl;
+                                }
                             }
                         }
+
+                        const auto logMatrixFloats = [&valuesFile](const auto& name,
+                                                                   const auto& matrix,
+                                                                   const auto  I,
+                                                                   const auto  J) {
+                            const auto floatMatrix = unpackToFloat(matrix);
+                            AssertFatal(floatMatrix.size() == I * J,
+                                        ShowValue(floatMatrix.size()),
+                                        ShowValue(I),
+                                        ShowValue(J));
+                            valuesFile << name << "\n";
+                            for(size_t i = 0; i < I; i++)
+                            {
+                                for(size_t j = 0; j < J; j++)
+                                {
+                                    auto v = floatMatrix[i * J + j];
+                                    valuesFile << std::setw(16) << std::scientific << v << " ";
+                                }
+                                valuesFile << std::endl;
+                            }
+                            valuesFile << std::endl;
+                        };
+
+                        valuesFile << "Values as floats:\n";
+                        logMatrixFloats("A", hostA, K, M);
+                        logMatrixFloats("B", hostB, N, K);
+                        logMatrixFloats("C", hostC, M, N);
+                        logMatrixFloats("D", d_result, M, N);
+
+                        const auto logBytes = [&valuesFile](const auto& name, const auto& vector) {
+                            valuesFile << name << std::endl;
+                            for(const auto& v : vector)
+                            {
+                                valuesFile << +v << std::endl;
+                            }
+                            valuesFile << std::endl;
+                        };
+
+                        valuesFile << "Scales:\n";
+                        logBytes("ScaleA", hostScaleA);
+                        logBytes("ScaleB", hostScaleB);
+
+                        logMatrixFloats("Host Result", h_result, M, N);
+                        logMatrixFloats("Device Result", d_result, M, N);
                     }
-
-                    const auto logMatrixFloats
-                        = [&valuesFile](
-                              const auto& name, const auto& matrix, const auto I, const auto J) {
-                              const auto floatMatrix = unpackToFloat(matrix);
-                              AssertFatal(floatMatrix.size() == I * J,
-                                          ShowValue(floatMatrix.size()),
-                                          ShowValue(I),
-                                          ShowValue(J));
-                              valuesFile << name << "\n";
-                              for(size_t i = 0; i < I; i++)
-                              {
-                                  for(size_t j = 0; j < J; j++)
-                                  {
-                                      auto v = floatMatrix[i * J + j];
-                                      valuesFile << std::setw(16) << std::scientific << v << " ";
-                                  }
-                                  valuesFile << std::endl;
-                              }
-                              valuesFile << std::endl;
-                          };
-
-                    valuesFile << "Values as floats:\n";
-                    logMatrixFloats("A", hostA, K, M);
-                    logMatrixFloats("B", hostB, N, K);
-                    logMatrixFloats("C", hostC, M, N);
-                    logMatrixFloats("D", d_result, M, N);
-
-                    const auto logBytes = [&valuesFile](const auto& name, const auto& vector) {
-                        valuesFile << name << std::endl;
-                        for(const auto& v : vector)
-                        {
-                            valuesFile << +v << std::endl;
-                        }
-                        valuesFile << std::endl;
-                    };
-
-                    valuesFile << "Scales:\n";
-                    logBytes("ScaleA", hostScaleA);
-                    logBytes("ScaleB", hostScaleB);
-
-                    logMatrixFloats("Host Result", h_result, M, N);
-                    logMatrixFloats("Device Result", d_result, M, N);
                 }
                 EXPECT_TRUE(res.ok) << res.message();
             }

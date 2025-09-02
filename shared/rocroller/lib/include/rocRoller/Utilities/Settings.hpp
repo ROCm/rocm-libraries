@@ -245,10 +245,11 @@ namespace rocRoller
             getDefaultValueForKernelGraphDOTSerialization,
             -1};
 
-        static inline const SettingsOption<bool> WriteOnFail{
+        static inline const SettingsOption<int> WriteOnFail{
             "ROCROLLER_WRITE_ON_FAIL",
-            "Write input/output matrices to file when GEMM tests fail",
-            false,
+            "Write input/output matrices to file when GEMM tests fail (0 = disabled, >0 = max "
+            "files)",
+            0,
             -1};
 
         /**
