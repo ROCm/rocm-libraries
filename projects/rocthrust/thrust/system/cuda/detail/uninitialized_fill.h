@@ -28,15 +28,7 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#if _CCCL_HAS_CUDA_COMPILER
+#ifdef _CCCL_CUDA_COMPILER
 #  include <thrust/distance.h>
 #  include <thrust/system/cuda/detail/execution_policy.h>
 #  include <thrust/system/cuda/detail/parallel_for.h>
@@ -71,7 +63,7 @@ struct functor
   {
     value_type& out = raw_reference_cast(items[idx]);
 
-#  if _CCCL_CUDA_COMPILER(CLANG)
+#  if defined(__CUDA__) && defined(__clang__)
     // XXX unsafe. cuda-clang is seemingly unable to call ::new in device code
     out = value;
 #  else

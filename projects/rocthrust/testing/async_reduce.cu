@@ -19,9 +19,6 @@
 
 #include <thrust/detail/config.h>
 
-// need to suppress deprecation warnings inside several thrust headers
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <thrust/async/copy.h>
@@ -909,8 +906,3 @@ struct test_async_reduce_bug1886
 DECLARE_UNITTEST(test_async_reduce_bug1886);
 
 #endif
-
-// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-THRUST_SUPPRESS_DEPRECATED_POP
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC

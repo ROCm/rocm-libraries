@@ -25,8 +25,6 @@
 
 #  include <unittest/unittest.h>
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 #  define DEFINE_ASYNC_FOR_EACH_CALLABLE(name, ...)                                            \
     struct THRUST_PP_CAT2(name, _fn)                                                           \
     {                                                                                          \
@@ -40,6 +38,7 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
     /**/
 
 DEFINE_ASYNC_FOR_EACH_CALLABLE(invoke_async_for_each);
+
 DEFINE_ASYNC_FOR_EACH_CALLABLE(invoke_async_for_each_device, thrust::device);
 
 #  undef DEFINE_ASYNC_FOR_EACH_CALLABLE

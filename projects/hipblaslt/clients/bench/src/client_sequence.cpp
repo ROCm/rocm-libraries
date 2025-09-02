@@ -579,7 +579,7 @@ int main(int argc, char** argv)
         CHECK_HIP_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
         CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_start));
         CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
-        hipGraphLaunch(graph_exec, stream);
+        CHECK_HIP_ERROR(hipGraphLaunch(graph_exec, stream));
         CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
         CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
         CHECK_HIP_ERROR(hipGraphExecDestroy(graph_exec));

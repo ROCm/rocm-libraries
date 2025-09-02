@@ -25,9 +25,10 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/scan.h>
 
-#include <unittest/unittest.h>
+#include <array>
+#include <ostream>
 
-#include _THRUST_STD_INCLUDE(array)
+#include <unittest/unittest.h>
 
 template <typename T>
 struct max_functor
@@ -39,10 +40,9 @@ struct max_functor
 };
 
 template <class Vector>
-void TestScanSimple()
+void TestScanSimple(void)
 {
   using T = typename Vector::value_type;
-
   // icc miscompiles the intermediate sum updates for custom_numeric.
   // The issue doesn't happen with opts disabled, or on other compilers.
   // Printing the intermediate sum each iteration "fixes" the issue,
@@ -207,7 +207,7 @@ void TestExclusiveScanDispatchImplicit()
 }
 DECLARE_UNITTEST(TestExclusiveScanDispatchImplicit);
 
-void TestInclusiveScan32()
+void TestInclusiveScan32(void)
 {
   using T  = int;
   size_t n = 32;
@@ -225,7 +225,7 @@ void TestInclusiveScan32()
 }
 DECLARE_UNITTEST(TestInclusiveScan32);
 
-void TestExclusiveScan32()
+void TestExclusiveScan32(void)
 {
   using T  = int;
   size_t n = 32;
@@ -245,7 +245,7 @@ void TestExclusiveScan32()
 DECLARE_UNITTEST(TestExclusiveScan32);
 
 template <class IntVector, class FloatVector>
-void TestScanMixedTypes()
+void TestScanMixedTypes(void)
 {
   // make sure we get types for default args and operators correct
   IntVector int_input{1, 2, 3, 4};
@@ -296,12 +296,12 @@ void TestScanMixedTypes()
   ASSERT_EQUAL(float_output[2], 8.5f); // out: 8.0f  in: 3 accum: 11.5f
   ASSERT_EQUAL(float_output[3], 11.5f); // out: 11.f  in: 4 accum: 15.5f
 }
-void TestScanMixedTypesHost()
+void TestScanMixedTypesHost(void)
 {
   TestScanMixedTypes<thrust::host_vector<int>, thrust::host_vector<float>>();
 }
 DECLARE_UNITTEST(TestScanMixedTypesHost);
-void TestScanMixedTypesDevice()
+void TestScanMixedTypesDevice(void)
 {
   TestScanMixedTypes<thrust::device_vector<int>, thrust::device_vector<float>>();
 }
@@ -431,7 +431,7 @@ struct TestScanToDiscardIterator
 VariableUnitTest<TestScanToDiscardIterator, unittest::type_list<unittest::int8_t, unittest::int16_t, unittest::int32_t>>
   TestScanToDiscardIteratorInstance;
 
-void TestScanMixedTypes()
+void TestScanMixedTypes(void)
 {
   const unsigned int n = 113;
 
@@ -471,7 +471,7 @@ void TestScanMixedTypes()
 DECLARE_UNITTEST(TestScanMixedTypes);
 
 template <typename T, unsigned int N>
-void _TestScanWithLargeTypes()
+void _TestScanWithLargeTypes(void)
 {
   size_t n = (1024 * 1024) / sizeof(FixedVector<T, N>);
 
@@ -497,7 +497,7 @@ void _TestScanWithLargeTypes()
   ASSERT_EQUAL_QUIET(h_output, d_output);
 }
 
-void TestScanWithLargeTypes()
+void TestScanWithLargeTypes(void)
 {
   _TestScanWithLargeTypes<int, 1>();
 
@@ -526,7 +526,7 @@ struct plus_mod3
 };
 
 template <typename Vector>
-void TestInclusiveScanWithIndirection()
+void TestInclusiveScanWithIndirection(void)
 {
   // add numbers modulo 3 with external lookup table
   using T = typename Vector::value_type;
@@ -555,11 +555,10 @@ struct const_ref_plus_mod3
 };
 
 template <typename Vector>
-void TestInclusiveScanWithConstAccumulator()
+void TestInclusiveScanWithConstAccumulator(void)
 {
   // add numbers modulo 3 with external lookup table
   using T = typename Vector::value_type;
-
   Vector data{0, 1, 2, 1, 2, 0, 1};
   Vector table{0, 1, 2, 0, 1, 2};
   thrust::inclusive_scan(
@@ -611,16 +610,6 @@ struct iterator_traits<only_set_when_expected_it>
 };
 THRUST_NAMESPACE_END
 
-namespace std
-{
-template <>
-struct iterator_traits<only_set_when_expected_it>
-{
-  using value_type = long long;
-  using reference  = only_set_when_expected_it;
-};
-} // namespace std
-
 void TestInclusiveScanWithBigIndexesHelper(int magnitude)
 {
   thrust::constant_iterator<long long> begin(1);
@@ -644,10 +633,8 @@ void TestInclusiveScanWithBigIndexes()
 {
   TestInclusiveScanWithBigIndexesHelper(30);
   TestInclusiveScanWithBigIndexesHelper(31);
-#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestInclusiveScanWithBigIndexesHelper(32);
   TestInclusiveScanWithBigIndexesHelper(33);
-#endif
 }
 
 DECLARE_UNITTEST(TestInclusiveScanWithBigIndexes);
@@ -675,10 +662,8 @@ void TestExclusiveScanWithBigIndexes()
 {
   TestExclusiveScanWithBigIndexesHelper(30);
   TestExclusiveScanWithBigIndexesHelper(31);
-#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestExclusiveScanWithBigIndexesHelper(32);
   TestExclusiveScanWithBigIndexesHelper(33);
-#endif
 }
 
 DECLARE_UNITTEST(TestExclusiveScanWithBigIndexes);
@@ -710,12 +695,12 @@ DECLARE_UNITTEST(TestInclusiveScanWithUserDefinedType);
 
 // Represents a permutation as a tuple of integers, see also: https://en.wikipedia.org/wiki/Permutation
 // We need a distinct type (instead of an alias) for operator<< to be found via ADL
-struct permutation_t : _THRUST_STD::array<int, 5>
+struct permutation_t : std::array<int, 5>
 {
   permutation_t() = default;
 
   constexpr THRUST_HOST_DEVICE permutation_t(int a, int b, int c, int d, int e)
-      : _THRUST_STD::array<int, 5>{a, b, c, d, e}
+      : std::array<int, 5>{a, b, c, d, e}
   {}
 
   friend std::ostream& operator<<(std::ostream& os, const permutation_t& p)

@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/memory.h>
 #include <thrust/mr/allocator.h>
@@ -83,14 +76,12 @@ inline void free(pointer<void> ptr);
 template <typename T>
 using allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::cpp::memory_resource>;
 
-//! \p cpp::universal_allocator allocates memory that can be used by the \p cpp system and host systems.
+/*! \p cpp::universal_allocator allocates memory that can be used by the \p cpp
+ *  system and host systems.
+ */
 template <typename T>
 using universal_allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::cpp::universal_memory_resource>;
 
-//! \p cpp::universal_host_pinned_allocator allocates memory that can be used by the \p cpp system and host systems.
-template <typename T>
-using universal_host_pinned_allocator =
-  thrust::mr::stateless_resource_allocator<T, thrust::system::cpp::universal_host_pinned_memory_resource>;
 } // namespace cpp
 } // namespace system
 

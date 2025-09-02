@@ -18,45 +18,54 @@
 #include <thrust/binary_search.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/sort.h>
-
-#include <cstdint>
 
 #include <unittest/unittest.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
-#include _THRUST_STD_INCLUDE(type_traits)
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/iterator>
+#  include <cuda/std/type_traits>
+#elif defined(__has_include)
+#  if __has_include(<cuda/std/iterator>)
+#    include <cuda/std/iterator>
+#  endif // __has_include(<cuda/std/iterator>)
+#  if __has_include(<cuda/std/type_traits>)
+#    include <cuda/std/type_traits>
+#  endif // __has_include(<cuda/std/type_traits>)
+#endif // THRUST_DEVICE_SYSTEM
 
-THRUST_DIAG_PUSH
-THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
+#include <cstdint>
 
-// ensure that we properly support thrust::counting_iterator from _THRUST_STD
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+// ensure that we properly support thrust::counting_iterator from cuda::std
 void test_iterator_traits()
 {
-  using It       = _THRUST_STD::iterator_traits<thrust::counting_iterator<int>>;
-  using category = thrust::detail::iterator_category_with_system_and_traversal<::std::random_access_iterator_tag,
+  using It       = cuda::std::iterator_traits<thrust::counting_iterator<int>>;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<std::random_access_iterator_tag,
                                                                                thrust::any_system_tag,
                                                                                thrust::random_access_traversal_tag>;
 
-  static_assert(_THRUST_STD::is_same<It::difference_type, ptrdiff_t>::value, "");
-  static_assert(_THRUST_STD::is_same<It::value_type, int>::value, "");
-  static_assert(_THRUST_STD::is_same<It::pointer, void>::value, "");
-  static_assert(_THRUST_STD::is_same<It::reference, signed int>::value, "");
-  static_assert(_THRUST_STD::is_same<It::iterator_category, category>::value, "");
+  static_assert(cuda::std::is_same<It::difference_type, ptrdiff_t>::value, "");
+  static_assert(cuda::std::is_same<It::value_type, int>::value, "");
+  static_assert(cuda::std::is_same<It::pointer, void>::value, "");
+  static_assert(cuda::std::is_same<It::reference, signed int>::value, "");
+  static_assert(cuda::std::is_same<It::iterator_category, category>::value, "");
 
-  static_assert(::thrust::detail::is_cpp17_random_access_iterator<thrust::counting_iterator<int>>::value, "");
+  static_assert(cuda::std::__is_cpp17_random_access_iterator<thrust::counting_iterator<int>>::value, "");
 }
+#endif
 
 template <typename T>
-void TestCountingDefaultConstructor()
+void TestCountingDefaultConstructor(void)
 {
   thrust::counting_iterator<T> iter0;
   ASSERT_EQUAL(*iter0, T{});
 }
 DECLARE_GENERIC_UNITTEST(TestCountingDefaultConstructor);
 
-void TestCountingIteratorCopyConstructor()
+void TestCountingIteratorCopyConstructor(void)
 {
   thrust::counting_iterator<int> iter0(100);
 
@@ -73,10 +82,10 @@ void TestCountingIteratorCopyConstructor()
   ASSERT_EQUAL(*iter0, *d_iter);
 }
 DECLARE_UNITTEST(TestCountingIteratorCopyConstructor);
-static_assert(_THRUST_STD::is_trivially_copy_constructible<thrust::counting_iterator<int>>::value, "");
-static_assert(_THRUST_STD::is_trivially_copyable<thrust::counting_iterator<int>>::value, "");
+static_assert(std::is_trivially_copy_constructible<thrust::counting_iterator<int>>::value, "");
+static_assert(std::is_trivially_copyable<thrust::counting_iterator<int>>::value, "");
 
-void TestCountingIteratorIncrement()
+void TestCountingIteratorIncrement(void)
 {
   thrust::counting_iterator<int> iter(0);
 
@@ -101,7 +110,7 @@ void TestCountingIteratorIncrement()
 }
 DECLARE_UNITTEST(TestCountingIteratorIncrement);
 
-void TestCountingIteratorComparison()
+void TestCountingIteratorComparison(void)
 {
   thrust::counting_iterator<int> iter1(0);
   thrust::counting_iterator<int> iter2(0);
@@ -127,7 +136,7 @@ void TestCountingIteratorComparison()
 }
 DECLARE_UNITTEST(TestCountingIteratorComparison);
 
-void TestCountingIteratorFloatComparison()
+void TestCountingIteratorFloatComparison(void)
 {
   thrust::counting_iterator<float> iter1(0);
   thrust::counting_iterator<float> iter2(0);
@@ -191,7 +200,7 @@ void TestCountingIteratorFloatComparison()
 }
 DECLARE_UNITTEST(TestCountingIteratorFloatComparison);
 
-void TestCountingIteratorDistance()
+void TestCountingIteratorDistance(void)
 {
   thrust::counting_iterator<int> iter1(0);
   thrust::counting_iterator<int> iter2(5);
@@ -208,7 +217,7 @@ void TestCountingIteratorDistance()
 }
 DECLARE_UNITTEST(TestCountingIteratorDistance);
 
-void TestCountingIteratorUnsignedType()
+void TestCountingIteratorUnsignedType(void)
 {
   thrust::counting_iterator<unsigned int> iter0(0);
   thrust::counting_iterator<unsigned int> iter1(5);
@@ -221,7 +230,7 @@ void TestCountingIteratorUnsignedType()
 }
 DECLARE_UNITTEST(TestCountingIteratorUnsignedType);
 
-void TestCountingIteratorLowerBound()
+void TestCountingIteratorLowerBound(void)
 {
   size_t n       = 10000;
   const size_t M = 100;
@@ -250,7 +259,7 @@ void TestCountingIteratorLowerBound()
 }
 DECLARE_UNITTEST(TestCountingIteratorLowerBound);
 
-void TestCountingIteratorDifference()
+void TestCountingIteratorDifference(void)
 {
   using Iterator   = thrust::counting_iterator<std::uint64_t>;
   using Difference = thrust::iterator_difference<Iterator>::type;
@@ -264,4 +273,4 @@ void TestCountingIteratorDifference()
 }
 DECLARE_UNITTEST(TestCountingIteratorDifference);
 
-THRUST_DIAG_POP
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END

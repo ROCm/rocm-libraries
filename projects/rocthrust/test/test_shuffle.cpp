@@ -18,17 +18,15 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/random.h>
-#include <thrust/scatter.h>
 #include <thrust/sequence.h>
 #include <thrust/shuffle.h>
 #include <thrust/sort.h>
 
-#include <algorithm>
 #include <limits>
 #include <map>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(ShuffleTests, FullTestsParams);
@@ -419,7 +417,12 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleSimple)
 
   using Vector = typename TestFixture::input_type;
 
-  Vector data{0, 1, 2, 3, 4};
+  Vector data(5);
+  data[0] = 0;
+  data[1] = 1;
+  data[2] = 2;
+  data[3] = 3;
+  data[4] = 4;
   Vector shuffled(data.begin(), data.end());
   thrust::default_random_engine g(2);
   thrust::shuffle(shuffled.begin(), shuffled.end(), g);
@@ -435,7 +438,12 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleCopySimple)
 
   using Vector = typename TestFixture::input_type;
 
-  Vector data{0, 1, 2, 3, 4};
+  Vector data(5);
+  data[0] = 0;
+  data[1] = 1;
+  data[2] = 2;
+  data[3] = 3;
+  data[4] = 4;
   Vector shuffled(5);
   thrust::default_random_engine g(2);
   thrust::shuffle_copy(data.begin(), data.end(), shuffled.begin(), g);
@@ -454,9 +462,9 @@ TYPED_TEST(ShuffleVariablesTests, TestHostDeviceIdentical)
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
     thrust::host_vector<T> host_result(size);
-    thrust::device_vector<T> device_result(size);
-    thrust::sequence(host_result.begin(), host_result.end(), T{});
-    thrust::sequence(device_result.begin(), device_result.end(), T{});
+    thrust::host_vector<T> device_result(size);
+    thrust::sequence(host_result.begin(), host_result.end(), 0llu);
+    thrust::sequence(device_result.begin(), device_result.end(), 0llu);
 
     thrust::default_random_engine host_g(183);
     thrust::default_random_engine device_g(183);
@@ -473,34 +481,35 @@ TYPED_TEST(ShuffleVariablesTests, TestFunctionIsBijection)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
 
-  thrust::default_random_engine device_g(0xD5);
-
   for (auto size : get_sizes())
   {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
+    thrust::default_random_engine host_g(0xD5);
+    thrust::default_random_engine device_g(0xD5);
 
+    thrust::system::detail::generic::feistel_bijection host_f(size, host_g);
     thrust::system::detail::generic::feistel_bijection device_f(size, device_g);
 
-    const size_t total_length = device_f.nearest_power_of_two();
-    if (static_cast<double>(total_length) >= static_cast<double>(std::numeric_limits<T>::max()) || size == 0)
+    if (host_f.nearest_power_of_two() >= std::numeric_limits<T>::max() || size == 0)
     {
       return;
     }
-    ASSERT_LE(total_length, (std::max)(size * 2, size_t(16))); // Check the rounded up size is at most double the input
 
-    auto device_result_it = thrust::make_transform_iterator(thrust::make_counting_iterator(T(0)), device_f);
+    thrust::host_vector<T> host_result(host_f.nearest_power_of_two());
+    thrust::host_vector<T> device_result(device_f.nearest_power_of_two());
+    thrust::sequence(host_result.begin(), host_result.end(), 0llu);
+    thrust::sequence(device_result.begin(), device_result.end(), 0llu);
 
-    thrust::device_vector<T> unpermuted(total_length, T(0));
+    thrust::transform(host_result.begin(), host_result.end(), host_result.begin(), host_f);
+    thrust::transform(device_result.begin(), device_result.end(), device_result.begin(), device_f);
 
-    // Run a scatter, this should copy each value to the index matching is value, the result should be in ascending
-    // order
-    thrust::scatter(device_result_it,
-                    device_result_it + static_cast<T>(total_length), // total_length is guaranteed to fit T
-                    device_result_it,
-                    unpermuted.begin());
+    ASSERT_EQ(host_result, device_result);
 
-    // Check every index is in the result, if any are missing then the function was not a bijection over [0,size)
-    ASSERT_EQ(true, thrust::equal(unpermuted.begin(), unpermuted.end(), thrust::make_counting_iterator(T(0))));
+    thrust::sort(host_result.begin(), host_result.end());
+    // Assert all values were generated exactly once
+    for (uint64_t i = 0; i < size; i++)
+    {
+      ASSERT_EQ((uint64_t) host_result[i], i);
+    }
   }
 }
 
@@ -529,8 +538,9 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleKeyPosition)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using Vector       = typename TestFixture::input_type;
-  using T            = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
   size_t m           = 20;
   size_t num_samples = 100;
   thrust::host_vector<size_t> index_sum(m, 0);
@@ -560,7 +570,7 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleKeyPosition)
   // Tabulated chi-squared critical value for m-1=19 degrees of freedom
   // and 99.9% confidence
   double confidence_threshold = 43.82;
-  ASSERT_LT(chi_squared, confidence_threshold);
+  ASSERT_TRUE(chi_squared < confidence_threshold);
 }
 
 struct vector_compare
@@ -616,15 +626,16 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleUniformPermutation)
     chi_squared += std::pow(expected_count - kv.second, 2) / expected_count;
   }
   double p_score = CephesFunctions::cephes_igamc((double) (total_permutations - 1) / 2.0, chi_squared / 2.0);
-  ASSERT_GT(p_score, 0.01);
+  ASSERT_TRUE(p_score > 0.01);
 }
 
 TYPED_TEST(ShuffleVectorTests, TestShuffleEvenSpacingBetweenOccurances)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using Vector                = typename TestFixture::input_type;
-  using T                     = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
   const uint64_t shuffle_size = 10;
   const uint64_t num_samples  = 1000;
 
@@ -669,7 +680,7 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenSpacingBetweenOccurances)
       }
 
       double p_score = CephesFunctions::cephes_igamc((double) (shuffle_size - 2) / 2.0, chi_squared / 2.0);
-      ASSERT_GT(p_score, 0.01);
+      ASSERT_TRUE(p_score > 0.01);
     }
   }
 }
@@ -678,13 +689,14 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenDistribution)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using Vector                   = typename TestFixture::input_type;
-  using T                        = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
   const uint64_t shuffle_sizes[] = {10, 100, 500};
   thrust::default_random_engine g(0xD5);
   for (auto shuffle_size : shuffle_sizes)
   {
-    if (shuffle_size > (uint64_t) std::numeric_limits<T>::max())
+    if (shuffle_size > std::numeric_limits<T>::max())
     {
       continue;
     }
@@ -713,15 +725,15 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenDistribution)
       {
         auto count_pos = counts.at(i * shuffle_size + j);
         auto count_num = counts.at(j * shuffle_size + i);
-        chi_squared_pos += std::pow((double) count_pos - expected_occurances, 2) / expected_occurances;
-        chi_squared_num += std::pow((double) count_num - expected_occurances, 2) / expected_occurances;
+        chi_squared_pos += pow((double) count_pos - expected_occurances, 2) / expected_occurances;
+        chi_squared_num += pow((double) count_num - expected_occurances, 2) / expected_occurances;
       }
 
       double p_score_pos = CephesFunctions::cephes_igamc((double) (shuffle_size - 1) / 2.0, chi_squared_pos / 2.0);
-      ASSERT_GT(p_score_pos, 0.001 / (double) shuffle_size);
+      ASSERT_TRUE(p_score_pos > 0.001 / (double) shuffle_size);
 
       double p_score_num = CephesFunctions::cephes_igamc((double) (shuffle_size - 1) / 2.0, chi_squared_num / 2.0);
-      ASSERT_GT(p_score_num, 0.001 / (double) shuffle_size);
+      ASSERT_TRUE(p_score_num > 0.001 / (double) shuffle_size);
     }
   }
 }

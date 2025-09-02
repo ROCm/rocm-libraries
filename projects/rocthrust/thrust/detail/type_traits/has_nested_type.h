@@ -16,16 +16,6 @@
 
 #pragma once
 
-#include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/detail/type_traits.h>
 
 #define __THRUST_DEFINE_HAS_NESTED_TYPE(trait_name, nested_type_name)         \
@@ -35,9 +25,9 @@
     using yes_type = char;                                                    \
     using no_type  = int;                                                     \
     template <typename S>                                                     \
-    THRUST_HOST_DEVICE static yes_type test(typename S::nested_type_name*);   \
+    static yes_type test(typename S::nested_type_name*);                      \
     template <typename S>                                                     \
-    THRUST_HOST_DEVICE static no_type test(...);                              \
+    static no_type test(...);                                                 \
     static bool const value = sizeof(test<T>(0)) == sizeof(yes_type);         \
     using type              = thrust::detail::integral_constant<bool, value>; \
   };
