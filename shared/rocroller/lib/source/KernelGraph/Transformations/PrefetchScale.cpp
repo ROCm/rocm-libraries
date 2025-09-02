@@ -40,22 +40,46 @@ namespace rocRoller
         using namespace Expression;
 
         void insertPreLoopLoads(KernelGraph&            graph,
-                                std::vector<int> const& preLoopLoad,
-                                int                     firstLoad)
+                                UnrollColouring const&  colouring,
+                                std::vector<int> const& preLoopLoads,
+                                std::vector<int>        loads)
         {
             auto preNOP = graph.control.addElement(NOP());
             auto prev   = preNOP;
-            for(auto next : preLoopLoad)
+            for(auto const next : preLoopLoads)
             {
                 graph.control.addElement(Sequence(), {prev}, {next});
                 prev = next;
             }
-            auto topOp = getTopSetCoordinate(graph, firstLoad);
-            insertBefore(graph, topOp, preNOP, prev);
+
+            std::optional<int> unrollKVal;
+            std::optional<int> prevLoad;
+            std::optional<int> nextLoad;
+            for(auto const load : loads)
+            {
+                auto unrollMap  = colouring.operationColour.at(load);
+                auto unrollKDim = graph.mapper.get<Unroll>(load, 2);
+                if(unrollKVal.has_value() && unrollKVal.value() != unrollMap.at(unrollKDim))
+                {
+                    nextLoad = load;
+                    break;
+                }
+                unrollKVal = unrollMap.at(unrollKDim);
+                prevLoad   = load;
+            }
+
+            AssertFatal(prevLoad.has_value() && nextLoad.has_value(),
+                        "couldn't find a position to in-loop scale prefetch");
+
+            auto prevTopOp = getTopSetCoordinate(graph, prevLoad.value());
+            auto nextTopOp = getTopSetCoordinate(graph, nextLoad.value());
+            graph.control.addElement(Sequence(), {prevTopOp}, {preNOP});
+            graph.control.addElement(Sequence(), {prev}, {nextTopOp});
         }
 
         void insertInLoopLoads(KernelGraph&                            graph,
-                               std::vector<std::pair<int, int>> const& inLoopLoad,
+                               UnrollColouring const&                  colouring,
+                               std::vector<std::pair<int, int>> const& inLoopLoads,
                                int                                     forLoop)
         {
             auto loopLoads = filter(graph.control.isElemType<LoadTiled>(),
@@ -67,18 +91,39 @@ namespace rocRoller
                       loopLoads.end(),
                       TopologicalCompare(std::make_shared<KernelGraph>(graph)));
 
+            std::optional<int> unrollKVal;
+            std::optional<int> prevLoad;
+            std::optional<int> nextLoad;
+            for(auto const loopLoad : loopLoads)
+            {
+                auto unrollMap  = colouring.operationColour.at(loopLoad);
+                auto unrollKDim = graph.mapper.get<Unroll>(loopLoad, 2);
+                if(unrollKVal.has_value() && unrollKVal.value() != unrollMap.at(unrollKDim))
+                {
+                    nextLoad = loopLoad;
+                    break;
+                }
+                unrollKVal = unrollMap.at(unrollKDim);
+                prevLoad   = loopLoad;
+            }
+
+            AssertFatal(prevLoad.has_value() && nextLoad.has_value(),
+                        "couldn't find a position to in-loop scale prefetch");
+
             auto postNOP = graph.control.addElement(NOP());
             auto prev    = postNOP;
-            for(auto [loadChain, _ignore] : inLoopLoad)
+            for(auto const [loadChain, _ignore] : inLoopLoads)
             {
                 graph.control.addElement(Sequence(), {prev}, {loadChain});
                 prev = loadChain;
             }
-            auto topOp = getTopSetCoordinate(graph, loopLoads[0]);
-            insertBefore(graph, topOp, postNOP, prev);
+            auto prevTopOp = getTopSetCoordinate(graph, prevLoad.value());
+            auto nextTopOp = getTopSetCoordinate(graph, nextLoad.value());
+            graph.control.addElement(Sequence(), {prevTopOp}, {postNOP});
+            graph.control.addElement(Sequence(), {prev}, {nextTopOp});
 
             // Update SetCoordinates
-            for(auto [loadChain, unrollCoord] : inLoopLoad)
+            for(auto const [loadChain, unrollCoord] : inLoopLoads)
             {
                 std::optional<int> maybeOperation = loadChain;
                 while(maybeOperation)
@@ -113,13 +158,15 @@ namespace rocRoller
 
         void insertInLoopCopies(KernelGraph& graph, auto const& copies)
         {
-            for(auto copy : copies)
+            for(auto const copy : copies)
             {
                 auto exchangeTags = copy.second;
                 std::sort(exchangeTags.begin(),
                           exchangeTags.end(),
                           TopologicalCompare(std::make_shared<KernelGraph>(graph)));
                 insertBefore(graph, exchangeTags[0], copy.first, copy.first);
+                for(auto const exchangeTag : exchangeTags)
+                    graph.control.addElement(Sequence(), {copy.first}, {exchangeTag});
             }
         }
 
@@ -127,9 +174,9 @@ namespace rocRoller
         {
             auto root = graph.control.roots().only().value();
 
-            std::vector<int>                 preLoopLoad;
-            std::map<int, std::vector<int>>  inLoopCopy;
-            std::vector<std::pair<int, int>> inLoopLoad;
+            std::vector<int>                 preLoopLoads;
+            std::map<int, std::vector<int>>  inLoopCopies;
+            std::vector<std::pair<int, int>> inLoopLoads;
 
             auto forLoop = -1;
 
@@ -138,13 +185,15 @@ namespace rocRoller
                 = filter(graph.control.isElemType<LoadTiled>(), graph.control.depthFirstVisit(root))
                       .to<std::vector>();
 
+            auto colouring = colourByUnrollValue(graph);
+
             // sort the loads
             // this brings the first load in the sequence to the front
             std::sort(loads.begin(),
                       loads.end(),
                       TopologicalCompare(std::make_shared<KernelGraph>(graph)));
 
-            for(auto loadTag : loads)
+            for(auto const loadTag : loads)
             {
                 auto macTileTag = graph.mapper.get<MacroTile>(loadTag);
                 auto macTile    = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -192,9 +241,11 @@ namespace rocRoller
                     auto topOp = getTopSetCoordinate(graph, loadTag);
                     replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
 
-                    preLoopLoad.push_back(topOp);
-                    inLoopLoad.push_back(std::make_pair(duplicateChain(graph, {topOp}),
-                                                        graph.mapper.get<Unroll>(loadTag, 2)));
+                    preLoopLoads.push_back(topOp);
+                    auto inLoopLoad = duplicateChain(graph, {topOp});
+                    graph.control.addElement(Sequence(), {copyTag}, {inLoopLoad});
+                    inLoopLoads.push_back(
+                        std::make_pair(inLoopLoad, graph.mapper.get<Unroll>(loadTag, 2)));
 
                     // update the indexes of the associated exchange macrotiles
                     auto location = graph.coordinates.getLocation(macTileTag);
@@ -212,7 +263,8 @@ namespace rocRoller
                             edge, {exchangeTileTag.value()}, {destMacTileTag});
 
                         std::optional<int> exchangeTag;
-                        for(auto c : graph.mapper.getCoordinateConnections(exchangeTileTag.value()))
+                        for(auto const c :
+                            graph.mapper.getCoordinateConnections(exchangeTileTag.value()))
                         {
                             auto maybeExchange = graph.control.get<Exchange>(c.control);
                             if(maybeExchange)
@@ -222,22 +274,22 @@ namespace rocRoller
                             }
                         }
                         AssertFatal(exchangeTag.has_value());
-                        inLoopCopy[copyTag].push_back(
+                        inLoopCopies[copyTag].push_back(
                             getTopSetCoordinate(graph, exchangeTag.value()));
                     }
                 }
             }
 
-            if(preLoopLoad.empty())
+            if(preLoopLoads.empty())
                 return;
 
             AssertFatal(!loads.empty());
-            insertPreLoopLoads(graph, preLoopLoad, loads[0]);
+            insertPreLoopLoads(graph, colouring, preLoopLoads, loads);
 
             AssertFatal(forLoop != -1);
-            insertInLoopLoads(graph, inLoopLoad, forLoop);
+            insertInLoopLoads(graph, colouring, inLoopLoads, forLoop);
 
-            insertInLoopCopies(graph, inLoopCopy);
+            insertInLoopCopies(graph, inLoopCopies);
         }
 
         KernelGraph PrefetchScale::apply(KernelGraph const& original)

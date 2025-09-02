@@ -31,11 +31,11 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_exchange.hpp"
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_radix_rank.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/util_type.hpp"
+#include <hipcub/block/block_exchange.hpp>
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_radix_rank.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/util_type.hpp>
 
 #include <bitset>
 #include <numeric>
@@ -596,7 +596,6 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
 
     const size_t pfs_size       = (1 << RadixBits);
     const size_t pfs_offset     = (blockIdx.x * pfs_size) + (threadIdx.x * bins_tracked_per_thread);
-    [[maybe_unused]] const size_t pfs_total_size = pfs_size * blockDim.x;
 
     for(size_t i = 0; i < bins_tracked_per_thread; i++)
     {
@@ -722,7 +721,7 @@ void test_radix_rank_with_prefix_sum_output()
 
                     ++histogram[bit_rep];
                 }
-                #if defined(_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE >= 9)
+                #if defined(_WIN32) || (defined(_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE >= 9))
                     std::exclusive_scan(histogram.begin(),
                                         histogram.end(),
                                         pfs_expected.begin() + pfs_offset,

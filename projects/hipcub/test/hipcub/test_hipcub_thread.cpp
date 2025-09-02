@@ -27,11 +27,11 @@
  *
  ******************************************************************************/
 
-#include "hipcub/thread/thread_load.hpp"
-#include "hipcub/thread/thread_store.hpp"
-#include "hipcub/thread/thread_reduce.hpp"
-#include "hipcub/thread/thread_scan.hpp"
-#include "hipcub/thread/thread_search.hpp"
+#include <hipcub/thread/thread_load.hpp>
+#include <hipcub/thread/thread_reduce.hpp>
+#include <hipcub/thread/thread_scan.hpp>
+#include <hipcub/thread/thread_search.hpp>
+#include <hipcub/thread/thread_store.hpp>
 
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_half.hpp"

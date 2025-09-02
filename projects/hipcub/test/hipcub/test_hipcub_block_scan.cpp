@@ -23,7 +23,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_scan.hpp"
+#include <hipcub/block/block_scan.hpp>
 
 // Params for tests
 template<class T,

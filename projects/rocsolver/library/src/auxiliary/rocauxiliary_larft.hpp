@@ -597,10 +597,7 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(set_tau, dim3(blocks, batch_count), dim3(32, 1), 0, stream, k, tau,
                             strideT);
 
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
     size_t lmemsize = sizeof(T) * (k + 1) * k;
 
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
@@ -614,7 +611,7 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
         //      IT WILL WORK ON THE ENTIRE MATRIX/VECTOR REGARDLESS OF
         //      ZERO ENTRIES ****
 
-        if(k <= LARFT_SWITCHSIZE && lmemsize <= props.sharedMemPerBlock)
+        if(k <= LARFT_SWITCHSIZE && lmemsize <= props->sharedMemPerBlock)
         {
             ROCSOLVER_LAUNCH_KERNEL(larft_kernel_forward, dim3(1, batch_count), dim3(BS1, 1),
                                     lmemsize, stream, storev, u1_n, k, V, shiftV, ldv, strideV, tau,
@@ -668,7 +665,7 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
         //      IT WILL WORK ON THE ENTIRE MATRIX/VECTOR REGARDLESS OF
         //      ZERO ENTRIES ****
 
-        if(k <= LARFT_SWITCHSIZE && lmemsize <= props.sharedMemPerBlock)
+        if(k <= LARFT_SWITCHSIZE && lmemsize <= props->sharedMemPerBlock)
         {
             auto shiftU2 = shiftV
                 + ((storev == rocblas_column_wise) ? idx2D(u2_n, 0, ldv) : idx2D(0, u2_n, ldv));
