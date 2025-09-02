@@ -33,6 +33,7 @@
 #include <miopen/tensor_ops.hpp>
 #include <miopen/miopen_internal.h>
 #include <miopen/fusion/fusion_invoke_params.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
