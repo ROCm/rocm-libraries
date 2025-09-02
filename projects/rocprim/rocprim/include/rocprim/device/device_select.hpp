@@ -220,7 +220,7 @@ inline hipError_t select(void*                       temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// auto predicate =
-///     [] __device__ (int a) -> bool
+///     [](int a) -> bool
 ///     {
 ///         return (a % 2) == 0;
 ///     };
@@ -361,7 +361,7 @@ inline hipError_t select(void*                       temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// auto predicate =
-///     [] __device__ (int a) -> bool
+///     [](int a) -> bool
 ///     {
 ///         return (a % 2) == 0;
 ///     };

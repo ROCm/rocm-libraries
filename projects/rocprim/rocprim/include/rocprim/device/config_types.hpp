@@ -321,6 +321,20 @@ struct blev_batch_memcpy_config_selector
 };
 
 template<typename Config, target_arch Arch>
+struct histogram_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.histogram_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct histogram_global_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.histogram_global_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
 struct merge_oddeven_config_selector
 {
     static constexpr unsigned int block_size
