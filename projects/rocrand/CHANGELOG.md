@@ -3,6 +3,13 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 4.1.0 for ROCm 7.1
+
+### Resolved issues
+
+* Updated error handling for several rocRAND unit tests to accomodate the new hipGetLastError behaviour that was introduced in ROCm 7.0.
+As of ROCm 7.0, the internal error state is cleared on each call to `hipGetLastError` rather than on every HIP API call.
+
 ## rocRAND 4.0.0 for ROCm 7.0
 
 ### Added
