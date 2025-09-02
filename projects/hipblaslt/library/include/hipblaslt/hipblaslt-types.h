@@ -49,7 +49,7 @@ extern "C" {
 /*! \brief Single precision floating point type */
 typedef float hipblasLtFloat;
 
-#ifdef ROCM_USE_FLOAT16
+#if defined(ROCM_USE_FLOAT16) && defined(__FLT16_MANT_DIG__)
 typedef _Float16 hipblasLtHalf;
 #else
 /*! \brief Structure definition for hipblasLtHalf */
