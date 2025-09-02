@@ -22,7 +22,7 @@ Documentation for rocSPARSE is available at
 
 ### Upcoming changes
 
-* Deprecate trace, debug, and bench logging.
+* Deprecate trace, debug, and bench logging using environment variable `ROCSPARSE_LAYER`.
 
 ## rocSPARSE 4.0.2 for ROCm 7.0.0
 
