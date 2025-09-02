@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -26,24 +25,30 @@
 
 #include <unittest/unittest.h>
 
-// There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
+// There is a unfortunate miscompilation of the gcc-12 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 12
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 #endif
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnarySimple()
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnarySimple(void)
 {
   using T = typename Vector::value_type;
 
   typename Vector::iterator iter;
 
-  Vector input{1, -2, 3};
+  Vector input(3);
   Vector output(3);
-  Vector result{-1, 2, -3};
+  Vector result(3);
+  input[0]  = 1;
+  input[1]  = -2;
+  input[2]  = 3;
+  result[0] = -1;
+  result[1] = 2;
+  result[2] = -3;
 
   iter = thrust::transform(input.begin(), input.end(), output.begin(), thrust::negate<T>());
 
@@ -53,7 +58,8 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnarySimple()
 DECLARE_VECTOR_UNITTEST(TestTransformUnarySimple);
 
 template <typename InputIterator, typename OutputIterator, typename UnaryFunction>
-OutputIterator transform(my_system& system, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
+THRUST_HOST_DEVICE OutputIterator
+transform(my_system& system, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
 {
   system.validate_dispatch();
   return result;
@@ -71,7 +77,7 @@ void TestTransformUnaryDispatchExplicit()
 DECLARE_UNITTEST(TestTransformUnaryDispatchExplicit);
 
 template <typename InputIterator, typename OutputIterator, typename UnaryFunction>
-OutputIterator transform(my_tag, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
+THRUST_HOST_DEVICE OutputIterator transform(my_tag, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
 {
   *result = 13;
   return result;
@@ -89,17 +95,27 @@ void TestTransformUnaryDispatchImplicit()
 DECLARE_UNITTEST(TestTransformUnaryDispatchImplicit);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnaryNoStencilSimple()
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnaryNoStencilSimple(void)
 {
   using T = typename Vector::value_type;
 
   typename Vector::iterator iter;
 
-  Vector input{0, -2, 0};
-  Vector output{-1, -2, -3};
-  Vector result{-1, 2, -3};
+  Vector input(3);
+  Vector output(3);
+  Vector result(3);
 
-  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::internal::identity{});
+  input[0]  = 0;
+  input[1]  = -2;
+  input[2]  = 0;
+  output[0] = -1;
+  output[1] = -2;
+  output[2] = -3;
+  result[0] = -1;
+  result[1] = 2;
+  result[2] = -3;
+
+  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
 
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(output, result);
@@ -107,7 +123,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnaryNoStencilSimple()
 DECLARE_VECTOR_UNITTEST(TestTransformIfUnaryNoStencilSimple);
 
 template <typename InputIterator, typename ForwardIterator, typename UnaryFunction, typename Predicate>
-ForwardIterator
+THRUST_HOST_DEVICE ForwardIterator
 transform_if(my_system& system, InputIterator, InputIterator, ForwardIterator result, UnaryFunction, Predicate)
 {
   system.validate_dispatch();
@@ -126,7 +142,8 @@ void TestTransformIfUnaryNoStencilDispatchExplicit()
 DECLARE_UNITTEST(TestTransformIfUnaryNoStencilDispatchExplicit);
 
 template <typename InputIterator, typename ForwardIterator, typename UnaryFunction, typename Predicate>
-ForwardIterator transform_if(my_tag, InputIterator, InputIterator, ForwardIterator result, UnaryFunction, Predicate)
+THRUST_HOST_DEVICE ForwardIterator
+transform_if(my_tag, InputIterator, InputIterator, ForwardIterator result, UnaryFunction, Predicate)
 {
   *result = 13;
   return result;
@@ -148,19 +165,32 @@ void TestTransformIfUnaryNoStencilDispatchImplicit()
 DECLARE_UNITTEST(TestTransformIfUnaryNoStencilDispatchImplicit);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnarySimple()
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnarySimple(void)
 {
   using T = typename Vector::value_type;
 
   typename Vector::iterator iter;
 
-  Vector input{1, -2, 3};
-  Vector stencil{1, 0, 1};
-  Vector output{1, 2, 3};
-  Vector result{-1, 2, -3};
+  Vector input(3);
+  Vector stencil(3);
+  Vector output(3);
+  Vector result(3);
+
+  input[0]   = 1;
+  input[1]   = -2;
+  input[2]   = 3;
+  output[0]  = 1;
+  output[1]  = 2;
+  output[2]  = 3;
+  stencil[0] = 1;
+  stencil[1] = 0;
+  stencil[2] = 1;
+  result[0]  = -1;
+  result[1]  = 2;
+  result[2]  = -3;
 
   iter = thrust::transform_if(
-    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::internal::identity{});
+    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
 
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(output, result);
@@ -172,7 +202,7 @@ template <typename InputIterator1,
           typename ForwardIterator,
           typename UnaryFunction,
           typename Predicate>
-ForwardIterator
+THRUST_HOST_DEVICE ForwardIterator
 transform_if(my_system& system, InputIterator1, InputIterator1, ForwardIterator result, UnaryFunction, Predicate)
 {
   system.validate_dispatch();
@@ -195,7 +225,8 @@ template <typename InputIterator1,
           typename ForwardIterator,
           typename UnaryFunction,
           typename Predicate>
-ForwardIterator transform_if(my_tag, InputIterator1, InputIterator1, ForwardIterator result, UnaryFunction, Predicate)
+THRUST_HOST_DEVICE ForwardIterator
+transform_if(my_tag, InputIterator1, InputIterator1, ForwardIterator result, UnaryFunction, Predicate)
 {
   *result = 13;
   return result;
@@ -213,19 +244,28 @@ void TestTransformIfUnaryDispatchImplicit()
 DECLARE_UNITTEST(TestTransformIfUnaryDispatchImplicit);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformBinarySimple()
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformBinarySimple(void)
 {
   using T = typename Vector::value_type;
 
   typename Vector::iterator iter;
 
-  // There is a strange gcc bug here where it believes we would write out of bounds.
+  // There is a strange gcc bug here where it belives we would write out of bounds.
   // It seems to go away if we add one more element that we leave untouched. Luckily 0 - 0 = 0 so all is fine.
   // Note that we still write the element, so it does not hide a functional thrust bug
-  Vector input1{1, -2, 3};
-  Vector input2{-4, 5, 6};
-  Vector output(3);
-  Vector result{5, -7, -3};
+  Vector input1(4);
+  Vector input2(4);
+  Vector output(4);
+  Vector result(4);
+  input1[0] = 1;
+  input1[1] = -2;
+  input1[2] = 3;
+  input2[0] = -4;
+  input2[1] = 5;
+  input2[2] = 6;
+  result[0] = 5;
+  result[1] = -7;
+  result[2] = -3;
 
   iter = thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::minus<T>());
 
@@ -235,7 +275,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformBinarySimple()
 DECLARE_VECTOR_UNITTEST(TestTransformBinarySimple);
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename UnaryFunction>
-OutputIterator
+THRUST_HOST_DEVICE OutputIterator
 transform(my_system& system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
 {
   system.validate_dispatch();
@@ -254,7 +294,8 @@ void TestTransformBinaryDispatchExplicit()
 DECLARE_UNITTEST(TestTransformBinaryDispatchExplicit);
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename UnaryFunction>
-OutputIterator transform(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
+THRUST_HOST_DEVICE OutputIterator
+transform(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
 {
   *result = 13;
   return result;
@@ -276,19 +317,35 @@ void TestTransformBinaryDispatchImplicit()
 DECLARE_UNITTEST(TestTransformBinaryDispatchImplicit);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfBinarySimple()
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfBinarySimple(void)
 {
   using T = typename Vector::value_type;
 
   typename Vector::iterator iter;
 
-  Vector input1{1, -2, 3};
-  Vector input2{-4, 5, 6};
-  Vector stencil{0, 1, 0};
-  Vector output{1, 2, 3};
-  Vector result{5, 2, -3};
+  Vector input1(3);
+  Vector input2(3);
+  Vector stencil(3);
+  Vector output(3);
+  Vector result(3);
 
-  ::internal::identity identity;
+  input1[0]  = 1;
+  input1[1]  = -2;
+  input1[2]  = 3;
+  input2[0]  = -4;
+  input2[1]  = 5;
+  input2[2]  = 6;
+  stencil[0] = 0;
+  stencil[1] = 1;
+  stencil[2] = 0;
+  output[0]  = 1;
+  output[1]  = 2;
+  output[2]  = 3;
+  result[0]  = 5;
+  result[1]  = 2;
+  result[2]  = -3;
+
+  thrust::identity<T> identity;
 
   iter = thrust::transform_if(
     input1.begin(),
@@ -310,7 +367,7 @@ template <typename InputIterator1,
           typename ForwardIterator,
           typename BinaryFunction,
           typename Predicate>
-ForwardIterator transform_if(
+THRUST_HOST_DEVICE ForwardIterator transform_if(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -341,7 +398,7 @@ template <typename InputIterator1,
           typename ForwardIterator,
           typename BinaryFunction,
           typename Predicate>
-ForwardIterator transform_if(
+THRUST_HOST_DEVICE ForwardIterator transform_if(
   my_tag,
   InputIterator1,
   InputIterator1,
@@ -666,7 +723,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfBinaryToDiscardIterator
 }
 DECLARE_VARIABLE_UNITTEST(TestTransformIfBinaryToDiscardIterator);
 
-#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
+#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || defined(__INTEL_COMPILER)
 template <typename T>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnaryCountingIterator()
 {
@@ -693,8 +750,8 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnaryCountingIterator()
   thrust::host_vector<T> h_result(n);
   thrust::device_vector<T> d_result(n);
 
-  thrust::transform(h_first, h_first + n, h_result.begin(), ::internal::identity{});
-  thrust::transform(d_first, d_first + n, d_result.begin(), ::internal::identity{});
+  thrust::transform(h_first, h_first + n, h_result.begin(), thrust::identity<T>());
+  thrust::transform(d_first, d_first + n, d_result.begin(), thrust::identity<T>());
 
   ASSERT_EQUAL(h_result, d_result);
 }
@@ -748,21 +805,46 @@ struct plus_mod3
 };
 
 template <typename Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformWithIndirection()
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformWithIndirection(void)
 {
   // add numbers modulo 3 with external lookup table
   using T = typename Vector::value_type;
 
-  Vector input1{0, 1, 2, 1, 2, 0, 1};
-  Vector input2{2, 2, 2, 0, 2, 1, 0};
+  Vector input1(7);
+  Vector input2(7);
   Vector output(7, 0);
+  input1[0] = 0;
+  input2[0] = 2;
+  input1[1] = 1;
+  input2[1] = 2;
+  input1[2] = 2;
+  input2[2] = 2;
+  input1[3] = 1;
+  input2[3] = 0;
+  input1[4] = 2;
+  input2[4] = 2;
+  input1[5] = 0;
+  input2[5] = 1;
+  input1[6] = 1;
+  input2[6] = 0;
 
-  Vector table{0, 1, 2, 0, 1, 2};
+  Vector table(6);
+  table[0] = 0;
+  table[1] = 1;
+  table[2] = 2;
+  table[3] = 0;
+  table[4] = 1;
+  table[5] = 2;
 
   thrust::transform(
     input1.begin(), input1.end(), input2.begin(), output.begin(), plus_mod3<T>(thrust::raw_pointer_cast(&table[0])));
 
-  Vector ref{2, 0, 1, 1, 1, 1, 1};
-  ASSERT_EQUAL(output, ref);
+  ASSERT_EQUAL(output[0], T(2));
+  ASSERT_EQUAL(output[1], T(0));
+  ASSERT_EQUAL(output[2], T(1));
+  ASSERT_EQUAL(output[3], T(1));
+  ASSERT_EQUAL(output[4], T(1));
+  ASSERT_EQUAL(output[5], T(1));
+  ASSERT_EQUAL(output[6], T(1));
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestTransformWithIndirection);

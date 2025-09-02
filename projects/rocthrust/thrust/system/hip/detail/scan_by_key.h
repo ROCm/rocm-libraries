@@ -29,16 +29,7 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
 #  include <thrust/detail/minmax.h>
 #  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
@@ -57,14 +48,13 @@ namespace hip_rocprim
 {
 namespace __scan_by_key
 {
-
 template <typename Derived,
           typename KeysInputIt,
           typename ValuesInputIt,
           typename ValuesOutputIt,
           typename BinaryFunction,
           typename KeyCompareFunction>
-THRUST_HOST_DEVICE auto invoke_inclusive_scan_by_key(
+THRUST_HIP_RUNTIME_FUNCTION auto invoke_inclusive_scan_by_key(
   execution_policy<Derived>& policy,
   void* temporary_storage,
   size_t& storage_size,
@@ -96,7 +86,7 @@ template <typename Derived,
           typename ValuesOutputIt,
           typename BinaryFunction,
           typename KeyCompareFunction>
-THRUST_HOST_DEVICE auto invoke_inclusive_scan_by_key(
+THRUST_HIP_RUNTIME_FUNCTION auto invoke_inclusive_scan_by_key(
   execution_policy<Derived>& policy,
   void* temporary_storage,
   size_t& storage_size,
@@ -122,7 +112,6 @@ THRUST_HOST_DEVICE auto invoke_inclusive_scan_by_key(
     debug_sync);
 }
 
-THRUST_EXEC_CHECK_DISABLE
 template <
   typename Derived,
   typename KeysInputIterator,
@@ -130,8 +119,8 @@ template <
   typename ValuesOutputIterator,
   typename KeyCompareFunction = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>,
   typename BinaryFunction     = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>>
-THRUST_HOST_DEVICE ValuesOutputIterator inclusive_scan_by_key(
-  thrust::hip_rocprim::execution_policy<Derived>& policy,
+THRUST_HIP_RUNTIME_FUNCTION ValuesOutputIterator inclusive_scan_by_key(
+  execution_policy<Derived>& policy,
   KeysInputIterator key_first,
   KeysInputIterator key_last,
   ValuesInputIterator value_first,
@@ -140,6 +129,7 @@ THRUST_HOST_DEVICE ValuesOutputIterator inclusive_scan_by_key(
   BinaryFunction scan_op)
 {
   size_t num_items    = static_cast<size_t>(thrust::distance(key_first, key_last));
+  size_t storage_size = 0;
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -148,50 +138,43 @@ THRUST_HOST_DEVICE ValuesOutputIterator inclusive_scan_by_key(
     return value_result;
   }
 
-  // Determine temporary storage requirements:
-  std::size_t storage_size = 0;
-  {
-    hip_rocprim::throw_on_error(
-      invoke_inclusive_scan_by_key(
-        policy,
-        nullptr,
-        storage_size,
-        key_first,
-        value_first,
-        value_result,
-        num_items,
-        scan_op,
-        key_compare_op,
-        stream,
-        debug_sync),
-      "scan_by_key failed on 1st step");
-  }
+  // Determine temporary device storage requirements.
+  hip_rocprim::throw_on_error(
+    invoke_inclusive_scan_by_key(
+      policy,
+      nullptr,
+      storage_size,
+      key_first,
+      value_first,
+      value_result,
+      num_items,
+      scan_op,
+      key_compare_op,
+      stream,
+      debug_sync),
+    "scan_by_key failed on 1st step");
 
-  // Run scan:
-  {
-    // Allocate temporary storage:
-    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{policy, storage_size};
-    void* ptr = static_cast<void*>(tmp.data().get());
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+  void* ptr = static_cast<void*>(tmp.data().get());
 
-    hip_rocprim::throw_on_error(
-      invoke_inclusive_scan_by_key(
-        policy,
-        ptr,
-        storage_size,
-        key_first,
-        value_first,
-        value_result,
-        num_items,
-        scan_op,
-        key_compare_op,
-        stream,
-        debug_sync),
-      "scan_by_key failed on 2nd step");
+  // Run scan.
+  hip_rocprim::throw_on_error(
+    invoke_inclusive_scan_by_key(
+      policy,
+      ptr,
+      storage_size,
+      key_first,
+      value_first,
+      value_result,
+      num_items,
+      scan_op,
+      key_compare_op,
+      stream,
+      debug_sync),
+    "scan_by_key failed on 2nd step");
 
-    thrust::hip_rocprim::throw_on_error(
-      thrust::hip_rocprim::synchronize_optional(policy), "inclusive_scan_by_key failed to synchronize");
-  }
-
+  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "inclusive_scan_by_key: failed to synchronize");
   return value_result + num_items;
 }
 
@@ -202,7 +185,7 @@ template <typename Derived,
           typename InitialValueType,
           typename BinaryFunction,
           typename KeyCompareFunction>
-THRUST_HOST_DEVICE auto invoke_exclusive_scan_by_key(
+THRUST_HIP_RUNTIME_FUNCTION auto invoke_exclusive_scan_by_key(
   execution_policy<Derived>& policy,
   void* temporary_storage,
   size_t& storage_size,
@@ -237,7 +220,7 @@ template <typename Derived,
           typename InitialValueType,
           typename BinaryFunction,
           typename KeyCompareFunction>
-THRUST_HOST_DEVICE auto invoke_exclusive_scan_by_key(
+THRUST_HIP_RUNTIME_FUNCTION auto invoke_exclusive_scan_by_key(
   execution_policy<Derived>& policy,
   void* temporary_storage,
   size_t& storage_size,
@@ -265,7 +248,6 @@ THRUST_HOST_DEVICE auto invoke_exclusive_scan_by_key(
     debug_sync);
 }
 
-THRUST_EXEC_CHECK_DISABLE
 template <
   typename Derived,
   typename KeysInputIterator,
@@ -274,8 +256,8 @@ template <
   typename InitialValueType,
   typename KeyCompareFunction = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>,
   typename BinaryFunction     = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>>
-THRUST_HOST_DEVICE ValuesOutputIterator exclusive_scan_by_key(
-  thrust::hip_rocprim::execution_policy<Derived>& policy,
+THRUST_HIP_RUNTIME_FUNCTION ValuesOutputIterator exclusive_scan_by_key(
+  execution_policy<Derived>& policy,
   KeysInputIterator key_first,
   KeysInputIterator key_last,
   ValuesInputIterator value_first,
@@ -285,62 +267,56 @@ THRUST_HOST_DEVICE ValuesOutputIterator exclusive_scan_by_key(
   BinaryFunction scan_op)
 {
   size_t num_items    = static_cast<size_t>(thrust::distance(key_first, key_last));
+  size_t storage_size = 0;
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
+
   if (num_items == 0)
   {
     return value_result;
   }
 
-  // Determine temporary storage requirements:
-  std::size_t storage_size = 0;
-  {
-    hip_rocprim::throw_on_error(
-      invoke_exclusive_scan_by_key(
-        policy,
-        nullptr,
-        storage_size,
-        key_first,
-        value_first,
-        value_result,
-        init,
-        num_items,
-        scan_op,
-        key_compare_op,
-        stream,
-        debug_sync),
-      "scan_by_key failed on 1st step");
-  }
+  // Determine temporary device storage requirements.
+  hip_rocprim::throw_on_error(
+    invoke_exclusive_scan_by_key(
+      policy,
+      nullptr,
+      storage_size,
+      key_first,
+      value_first,
+      value_result,
+      init,
+      num_items,
+      scan_op,
+      key_compare_op,
+      stream,
+      debug_sync),
+    "scan_by_key failed on 1st step");
 
-  // Run scan:
-  {
-    // Allocate temporary storage:
-    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{policy, storage_size};
-    void* ptr = static_cast<void*>(tmp.data().get());
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+  void* ptr = static_cast<void*>(tmp.data().get());
 
-    hip_rocprim::throw_on_error(
-      invoke_exclusive_scan_by_key(
-        policy,
-        ptr,
-        storage_size,
-        key_first,
-        value_first,
-        value_result,
-        init,
-        num_items,
-        scan_op,
-        key_compare_op,
-        stream,
-        debug_sync),
-      "scan_by_key failed on 2nd step");
+  // Run scan.
+  hip_rocprim::throw_on_error(
+    invoke_exclusive_scan_by_key(
+      policy,
+      ptr,
+      storage_size,
+      key_first,
+      value_first,
+      value_result,
+      init,
+      num_items,
+      scan_op,
+      key_compare_op,
+      stream,
+      debug_sync),
+    "scan_by_key failed on 2nd step");
 
-    thrust::hip_rocprim::throw_on_error(
-      thrust::hip_rocprim::synchronize_optional(policy), "exclusive_scan_by_key failed to synchronize");
-  }
-
+  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "exclusive_scan_by_key: failed to synchronize");
   return value_result + num_items;
 }
-
 } // namespace __scan_by_key
 
 //-------------------------
@@ -353,7 +329,7 @@ THRUST_HOST_DEVICE ValuesOutputIterator exclusive_scan_by_key(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class BinaryPred, class ScanOp>
-ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
+THRUST_HIP_FUNCTION ValOutputIt inclusive_scan_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt key_first,
   KeyInputIt key_last,
@@ -374,7 +350,7 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
         BinaryPred binary_pred,
         ScanOp scan_op)
     {
-      return thrust::hip_rocprim::__scan_by_key::inclusive_scan_by_key(
+      return __scan_by_key::inclusive_scan_by_key(
         policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
     }
 
@@ -400,7 +376,7 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class BinaryPred>
-ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
+THRUST_HIP_FUNCTION ValOutputIt inclusive_scan_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt key_first,
   KeyInputIt key_last,
@@ -413,7 +389,7 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
-ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
+THRUST_HIP_FUNCTION ValOutputIt inclusive_scan_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt key_first,
   KeyInputIt key_last,
@@ -430,7 +406,7 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init, class BinaryPred, class ScanOp>
-ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
+THRUST_HIP_FUNCTION ValOutputIt exclusive_scan_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt key_first,
   KeyInputIt key_last,
@@ -453,7 +429,7 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
         BinaryPred binary_pred,
         ScanOp scan_op)
     {
-      return thrust::hip_rocprim::__scan_by_key::exclusive_scan_by_key(
+      return __scan_by_key::exclusive_scan_by_key(
         policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
     }
 
@@ -480,7 +456,7 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init, class BinaryPred>
-ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
+THRUST_HIP_FUNCTION ValOutputIt exclusive_scan_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt key_first,
   KeyInputIt key_last,
@@ -490,11 +466,11 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
   BinaryPred binary_pred)
 {
   return hip_rocprim::exclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, init, binary_pred, thrust::plus<>());
+    policy, key_first, key_last, value_first, value_result, init, binary_pred, plus<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init>
-ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
+THRUST_HIP_FUNCTION ValOutputIt exclusive_scan_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt key_first,
   KeyInputIt key_last,
@@ -502,19 +478,18 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
   ValOutputIt value_result,
   Init init)
 {
-  return hip_rocprim::exclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, init, thrust::equal_to<>());
+  return hip_rocprim::exclusive_scan_by_key(policy, key_first, key_last, value_first, value_result, init, equal_to<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
-ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
+THRUST_HIP_FUNCTION ValOutputIt exclusive_scan_by_key(
   execution_policy<Derived>& policy,
   KeyInputIt key_first,
   KeyInputIt key_last,
   ValInputIt value_first,
   ValOutputIt value_result)
 {
-  using value_type = typename thrust::iterator_traits<ValInputIt>::value_type;
+  using value_type = typename iterator_traits<ValInputIt>::value_type;
   return hip_rocprim::exclusive_scan_by_key(policy, key_first, key_last, value_first, value_result, value_type{});
 }
 

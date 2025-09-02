@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2023 NVIDIA Corporation
  *  Modifications Copyright© 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,14 +18,14 @@
 #include <thrust/functional.h>
 #include <thrust/sort.h>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 template <typename T>
 struct greater_div_10
 {
-  THRUST_HOST_DEVICE bool operator()(const T& lhs, const T& rhs) const
+  __host__ __device__ bool operator()(const T& lhs, const T& rhs) const
   {
     return ((int) lhs) / 10 > ((int) rhs) / 10;
   }

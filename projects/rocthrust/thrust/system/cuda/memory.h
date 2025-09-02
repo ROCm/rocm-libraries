@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/memory.h>
 #include <thrust/mr/allocator.h>
@@ -81,16 +74,13 @@ inline _CCCL_HOST_DEVICE void free(pointer<void> ptr);
 template <typename T>
 using allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::cuda::memory_resource>;
 
-//! \p cuda::universal_allocator allocates managed memory that can be used by the \p cuda system and host systems.
+/*! \p cuda::universal_allocator allocates memory that can be used by the \p cuda
+ *  system and host systems.
+ */
 template <typename T>
 using universal_allocator =
   thrust::mr::stateless_resource_allocator<T, thrust::system::cuda::universal_memory_resource>;
 
-//! \p cuda::universal_host_pinned_allocator allocates pinned host memory that can be used by the \p cuda system and
-//! host systems.
-template <typename T>
-using universal_host_pinned_allocator =
-  thrust::mr::stateless_resource_allocator<T, thrust::system::cuda::universal_host_pinned_memory_resource>;
 } // namespace cuda_cub
 
 namespace system
@@ -101,7 +91,6 @@ using thrust::cuda_cub::allocator;
 using thrust::cuda_cub::free;
 using thrust::cuda_cub::malloc;
 using thrust::cuda_cub::universal_allocator;
-using thrust::cuda_cub::universal_host_pinned_allocator;
 } // namespace cuda
 } // namespace system
 
@@ -114,7 +103,6 @@ using thrust::cuda_cub::allocator;
 using thrust::cuda_cub::free;
 using thrust::cuda_cub::malloc;
 using thrust::cuda_cub::universal_allocator;
-using thrust::cuda_cub::universal_host_pinned_allocator;
 } // namespace cuda
 
 THRUST_NAMESPACE_END

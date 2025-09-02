@@ -29,22 +29,15 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/detail/type_traits/result_of_adaptable_function.h>
+#  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN
-
 namespace hip_rocprim
 {
 namespace __parallel_for
@@ -135,14 +128,13 @@ hipError_t THRUST_HIP_RUNTIME_FUNCTION parallel_for(Size num_items, F f, hipStre
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class F, class Size>
-void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Size count)
+void THRUST_HIP_FUNCTION parallel_for(execution_policy<Derived>& policy, F f, Size count)
 {
   if (count == 0)
   {
     return;
   }
 
-  // clang-format off
   // struct workaround is required for HIP-clang
   struct workaround
   {
@@ -151,11 +143,9 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
       hipStream_t stream = hip_rocprim::stream(policy);
       hipError_t status  = __parallel_for::parallel_for(count, f, stream);
       hip_rocprim::throw_on_error(status, "parallel_for failed");
-      status = hip_rocprim::synchronize_optional(policy);
-      hip_rocprim::throw_on_error(status, "parallel_for: failed to synchronize");
+      hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "parallel_for: failed to synchronize");
     }
 
-    // CDP sequential impl:
     THRUST_DEVICE static void seq(execution_policy<Derived>& policy, F f, Size count)
     {
       (void) policy;
@@ -165,7 +155,6 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
       }
     }
   };
-  // clang-format on
 
 #  if __THRUST_HAS_HIPRT__
   workaround::par(policy, f, count);
@@ -175,6 +164,5 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
 }
 
 } // namespace hip_rocprim
-
 THRUST_NAMESPACE_END
 #endif

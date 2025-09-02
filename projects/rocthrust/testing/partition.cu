@@ -16,7 +16,6 @@
  */
 
 #include <thrust/count.h>
-#include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -41,7 +40,7 @@ struct is_even
 using PartitionTypes = unittest::type_list<unittest::int8_t, unittest::int16_t, unittest::int32_t>;
 
 template <typename Vector>
-void TestPartitionSimple()
+void TestPartitionSimple(void)
 {
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
@@ -57,11 +56,21 @@ void TestPartitionSimple()
   }
 #endif
 
-  Vector data{1, 2, 1, 1, 2};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 1;
+  data[4] = 2;
 
   Iterator iter = thrust::partition(data.begin(), data.end(), is_even<T>());
 
-  Vector ref{2, 2, 1, 1, 1};
+  Vector ref(5);
+  ref[0] = 2;
+  ref[1] = 2;
+  ref[2] = 1;
+  ref[3] = 1;
+  ref[4] = 1;
 
   ASSERT_EQUAL(iter - data.begin(), 2);
   ASSERT_EQUAL(data, ref);
@@ -69,18 +78,33 @@ void TestPartitionSimple()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionSimple);
 
 template <typename Vector>
-void TestPartitionStencilSimple()
+void TestPartitionStencilSimple(void)
 {
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
-  Vector data{0, 1, 0, 0, 1};
+  Vector data(5);
+  data[0] = 0;
+  data[1] = 1;
+  data[2] = 0;
+  data[3] = 0;
+  data[4] = 1;
 
-  Vector stencil{1, 2, 1, 1, 2};
+  Vector stencil(5);
+  stencil[0] = 1;
+  stencil[1] = 2;
+  stencil[2] = 1;
+  stencil[3] = 1;
+  stencil[4] = 2;
 
   Iterator iter = thrust::partition(data.begin(), data.end(), stencil.begin(), is_even<T>());
 
-  Vector ref{1, 1, 0, 0, 0};
+  Vector ref(5);
+  ref[0] = 1;
+  ref[1] = 1;
+  ref[2] = 0;
+  ref[3] = 0;
+  ref[4] = 0;
 
   ASSERT_EQUAL(iter - data.begin(), 2);
   ASSERT_EQUAL(data, ref);
@@ -88,11 +112,16 @@ void TestPartitionStencilSimple()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionStencilSimple);
 
 template <typename Vector>
-void TestPartitionCopySimple()
+void TestPartitionCopySimple(void)
 {
   using T = typename Vector::value_type;
 
-  Vector data{1, 2, 1, 1, 2};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 1;
+  data[4] = 2;
 
   Vector true_results(2);
   Vector false_results(3);
@@ -100,9 +129,14 @@ void TestPartitionCopySimple()
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends =
     thrust::partition_copy(data.begin(), data.end(), true_results.begin(), false_results.begin(), is_even<T>());
 
-  Vector true_ref(2, 2);
+  Vector true_ref(2);
+  true_ref[0] = 2;
+  true_ref[1] = 2;
 
-  Vector false_ref(3, 1);
+  Vector false_ref(3);
+  false_ref[0] = 1;
+  false_ref[1] = 1;
+  false_ref[2] = 1;
 
   ASSERT_EQUAL(2, ends.first - true_results.begin());
   ASSERT_EQUAL(3, ends.second - false_results.begin());
@@ -112,13 +146,23 @@ void TestPartitionCopySimple()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionCopySimple);
 
 template <typename Vector>
-void TestPartitionCopyStencilSimple()
+void TestPartitionCopyStencilSimple(void)
 {
   using T = typename Vector::value_type;
 
-  Vector data{0, 1, 0, 0, 1};
+  Vector data(5);
+  data[0] = 0;
+  data[1] = 1;
+  data[2] = 0;
+  data[3] = 0;
+  data[4] = 1;
 
-  Vector stencil{1, 2, 1, 1, 2};
+  Vector stencil(5);
+  stencil[0] = 1;
+  stencil[1] = 2;
+  stencil[2] = 1;
+  stencil[3] = 1;
+  stencil[4] = 2;
 
   Vector true_results(2);
   Vector false_results(3);
@@ -126,9 +170,14 @@ void TestPartitionCopyStencilSimple()
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::partition_copy(
     data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), is_even<T>());
 
-  Vector true_ref(2, 1);
+  Vector true_ref(2);
+  true_ref[0] = 1;
+  true_ref[1] = 1;
 
-  Vector false_ref(3, 0);
+  Vector false_ref(3);
+  false_ref[0] = 0;
+  false_ref[1] = 0;
+  false_ref[2] = 0;
 
   ASSERT_EQUAL(2, ends.first - true_results.begin());
   ASSERT_EQUAL(3, ends.second - false_results.begin());
@@ -138,16 +187,26 @@ void TestPartitionCopyStencilSimple()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionCopyStencilSimple);
 
 template <typename Vector>
-void TestStablePartitionSimple()
+void TestStablePartitionSimple(void)
 {
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
-  Vector data{1, 2, 1, 3, 2};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 3;
+  data[4] = 2;
 
   Iterator iter = thrust::stable_partition(data.begin(), data.end(), is_even<T>());
 
-  Vector ref{2, 2, 1, 1, 3};
+  Vector ref(5);
+  ref[0] = 2;
+  ref[1] = 2;
+  ref[2] = 1;
+  ref[3] = 1;
+  ref[4] = 3;
 
   ASSERT_EQUAL(iter - data.begin(), 2);
   ASSERT_EQUAL(data, ref);
@@ -155,17 +214,33 @@ void TestStablePartitionSimple()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionSimple);
 
 template <typename Vector>
-void TestStablePartitionStencilSimple()
+void TestStablePartitionStencilSimple(void)
 {
+  using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
-  Vector data{1, 2, 1, 3, 2};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 3;
+  data[4] = 2;
 
-  Vector stencil{0, 1, 0, 0, 1};
+  Vector stencil(5);
+  stencil[0] = 0;
+  stencil[1] = 1;
+  stencil[2] = 0;
+  stencil[3] = 0;
+  stencil[4] = 1;
 
-  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
+  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
 
-  Vector ref{2, 2, 1, 1, 3};
+  Vector ref(5);
+  ref[0] = 2;
+  ref[1] = 2;
+  ref[2] = 1;
+  ref[3] = 1;
+  ref[4] = 3;
 
   ASSERT_EQUAL(iter - data.begin(), 2);
   ASSERT_EQUAL(data, ref);
@@ -173,11 +248,16 @@ void TestStablePartitionStencilSimple()
 DECLARE_VECTOR_UNITTEST(TestStablePartitionStencilSimple);
 
 template <typename Vector>
-void TestStablePartitionCopySimple()
+void TestStablePartitionCopySimple(void)
 {
   using T = typename Vector::value_type;
 
-  Vector data{1, 2, 1, 1, 2};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 1;
+  data[4] = 2;
 
   Vector true_results(2);
   Vector false_results(3);
@@ -185,9 +265,14 @@ void TestStablePartitionCopySimple()
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends =
     thrust::stable_partition_copy(data.begin(), data.end(), true_results.begin(), false_results.begin(), is_even<T>());
 
-  Vector true_ref(2, 2);
+  Vector true_ref(2);
+  true_ref[0] = 2;
+  true_ref[1] = 2;
 
-  Vector false_ref(3, 1);
+  Vector false_ref(3);
+  false_ref[0] = 1;
+  false_ref[1] = 1;
+  false_ref[2] = 1;
 
   ASSERT_EQUAL(2, ends.first - true_results.begin());
   ASSERT_EQUAL(3, ends.second - false_results.begin());
@@ -197,20 +282,38 @@ void TestStablePartitionCopySimple()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionCopySimple);
 
 template <typename Vector>
-void TestStablePartitionCopyStencilSimple()
+void TestStablePartitionCopyStencilSimple(void)
 {
-  Vector data{1, 2, 1, 1, 2};
-  Vector stencil{false, true, false, false, true};
+  using T = typename Vector::value_type;
+
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 2;
+  data[2] = 1;
+  data[3] = 1;
+  data[4] = 2;
+
+  Vector stencil(5);
+  stencil[0] = false;
+  stencil[1] = true;
+  stencil[2] = false;
+  stencil[3] = false;
+  stencil[4] = true;
 
   Vector true_results(2);
   Vector false_results(3);
 
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::stable_partition_copy(
-    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), ::internal::identity{});
+    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), thrust::identity<T>());
 
-  Vector true_ref(2, 2);
+  Vector true_ref(2);
+  true_ref[0] = 2;
+  true_ref[1] = 2;
 
-  Vector false_ref(3, 1);
+  Vector false_ref(3);
+  false_ref[0] = 1;
+  false_ref[1] = 1;
+  false_ref[2] = 1;
 
   ASSERT_EQUAL(2, ends.first - true_results.begin());
   ASSERT_EQUAL(3, ends.second - false_results.begin());
@@ -849,10 +952,21 @@ struct is_ordered
 };
 
 template <typename Vector>
-void TestPartitionZipIterator()
+void TestPartitionZipIterator(void)
 {
-  Vector data1{1, 2, 1, 1, 2};
-  Vector data2{2, 1, 2, 2, 1};
+  Vector data1(5);
+  Vector data2(5);
+
+  data1[0] = 1;
+  data2[0] = 2;
+  data1[1] = 2;
+  data2[1] = 1;
+  data1[2] = 1;
+  data2[2] = 2;
+  data1[3] = 1;
+  data2[3] = 2;
+  data1[4] = 2;
+  data2[4] = 1;
 
   using Iterator      = typename Vector::iterator;
   using IteratorTuple = thrust::tuple<Iterator, Iterator>;
@@ -863,8 +977,19 @@ void TestPartitionZipIterator()
 
   ZipIterator iter = thrust::partition(begin, end, is_ordered());
 
-  Vector ref1{1, 1, 1, 2, 2};
-  Vector ref2{2, 2, 2, 1, 1};
+  Vector ref1(5);
+  Vector ref2(5);
+
+  ref1[0] = 1;
+  ref2[0] = 2;
+  ref1[1] = 1;
+  ref2[1] = 2;
+  ref1[2] = 1;
+  ref2[2] = 2;
+  ref1[3] = 2;
+  ref2[3] = 1;
+  ref1[4] = 2;
+  ref2[4] = 1;
 
   ASSERT_EQUAL(iter - begin, 3);
   ASSERT_EQUAL(data1, ref1);
@@ -873,12 +998,28 @@ void TestPartitionZipIterator()
 DECLARE_VECTOR_UNITTEST(TestPartitionZipIterator);
 
 template <typename Vector>
-void TestPartitionStencilZipIterator()
+void TestPartitionStencilZipIterator(void)
 {
-  Vector data{1, 0, 1, 1, 0};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 0;
+  data[2] = 1;
+  data[3] = 1;
+  data[4] = 0;
 
-  Vector stencil1{1, 2, 1, 1, 2};
-  Vector stencil2{2, 1, 2, 2, 1};
+  Vector stencil1(5);
+  Vector stencil2(5);
+
+  stencil1[0] = 1;
+  stencil2[0] = 2;
+  stencil1[1] = 2;
+  stencil2[1] = 1;
+  stencil1[2] = 1;
+  stencil2[2] = 2;
+  stencil1[3] = 1;
+  stencil2[3] = 2;
+  stencil1[4] = 2;
+  stencil2[4] = 1;
 
   using Iterator      = typename Vector::iterator;
   using IteratorTuple = thrust::tuple<Iterator, Iterator>;
@@ -888,7 +1029,13 @@ void TestPartitionStencilZipIterator()
 
   Iterator iter = thrust::partition(data.begin(), data.end(), stencil_begin, is_ordered());
 
-  Vector ref{1, 1, 1, 0, 0};
+  Vector ref(5);
+
+  ref[0] = 1;
+  ref[1] = 1;
+  ref[2] = 1;
+  ref[3] = 0;
+  ref[4] = 0;
 
   ASSERT_EQUAL(iter - data.begin(), 3);
   ASSERT_EQUAL(data, ref);
@@ -896,10 +1043,21 @@ void TestPartitionStencilZipIterator()
 DECLARE_VECTOR_UNITTEST(TestPartitionStencilZipIterator);
 
 template <typename Vector>
-void TestStablePartitionZipIterator()
+void TestStablePartitionZipIterator(void)
 {
-  Vector data1{1, 2, 1, 1, 2};
-  Vector data2{2, 0, 3, 2, 1};
+  Vector data1(5);
+  Vector data2(5);
+
+  data1[0] = 1;
+  data2[0] = 2;
+  data1[1] = 2;
+  data2[1] = 0;
+  data1[2] = 1;
+  data2[2] = 3;
+  data1[3] = 1;
+  data2[3] = 2;
+  data1[4] = 2;
+  data2[4] = 1;
 
   using Iterator      = typename Vector::iterator;
   using IteratorTuple = thrust::tuple<Iterator, Iterator>;
@@ -910,8 +1068,19 @@ void TestStablePartitionZipIterator()
 
   ZipIterator iter = thrust::stable_partition(begin, end, is_ordered());
 
-  Vector ref1{1, 1, 1, 2, 2};
-  Vector ref2{2, 3, 2, 0, 1};
+  Vector ref1(5);
+  Vector ref2(5);
+
+  ref1[0] = 1;
+  ref2[0] = 2;
+  ref1[1] = 1;
+  ref2[1] = 3;
+  ref1[2] = 1;
+  ref2[2] = 2;
+  ref1[3] = 2;
+  ref2[3] = 0;
+  ref1[4] = 2;
+  ref2[4] = 1;
 
   ASSERT_EQUAL(data1, ref1);
   ASSERT_EQUAL(data2, ref2);
@@ -920,12 +1089,28 @@ void TestStablePartitionZipIterator()
 DECLARE_VECTOR_UNITTEST(TestStablePartitionZipIterator);
 
 template <typename Vector>
-void TestStablePartitionStencilZipIterator()
+void TestStablePartitionStencilZipIterator(void)
 {
-  Vector data{1, 0, 1, 1, 0};
+  Vector data(5);
+  data[0] = 1;
+  data[1] = 0;
+  data[2] = 1;
+  data[3] = 1;
+  data[4] = 0;
 
-  Vector stencil1{1, 2, 1, 1, 2};
-  Vector stencil2{2, 0, 3, 2, 1};
+  Vector stencil1(5);
+  Vector stencil2(5);
+
+  stencil1[0] = 1;
+  stencil2[0] = 2;
+  stencil1[1] = 2;
+  stencil2[1] = 0;
+  stencil1[2] = 1;
+  stencil2[2] = 3;
+  stencil1[3] = 1;
+  stencil2[3] = 2;
+  stencil1[4] = 2;
+  stencil2[4] = 1;
 
   using Iterator      = typename Vector::iterator;
   using IteratorTuple = thrust::tuple<Iterator, Iterator>;
@@ -935,7 +1120,13 @@ void TestStablePartitionStencilZipIterator()
 
   Iterator mid = thrust::stable_partition(data.begin(), data.end(), stencil_begin, is_ordered());
 
-  Vector ref{1, 1, 1, 0, 0};
+  Vector ref(5);
+
+  ref[0] = 1;
+  ref[1] = 1;
+  ref[2] = 1;
+  ref[3] = 0;
+  ref[4] = 0;
 
   ASSERT_EQUAL(ref, data);
   ASSERT_EQUAL(mid - data.begin(), 3);
@@ -943,7 +1134,7 @@ void TestStablePartitionStencilZipIterator()
 DECLARE_VECTOR_UNITTEST(TestStablePartitionStencilZipIterator);
 
 template <typename ForwardIterator, typename Predicate>
-ForwardIterator partition(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
+THRUST_HOST_DEVICE ForwardIterator partition(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -961,7 +1152,8 @@ void TestPartitionDispatchExplicit()
 DECLARE_UNITTEST(TestPartitionDispatchExplicit);
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
-ForwardIterator partition(my_system& system, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
+THRUST_HOST_DEVICE ForwardIterator
+partition(my_system& system, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -979,7 +1171,7 @@ void TestPartitionStencilDispatchExplicit()
 DECLARE_UNITTEST(TestPartitionStencilDispatchExplicit);
 
 template <typename ForwardIterator, typename Predicate>
-ForwardIterator partition(my_tag, ForwardIterator first, ForwardIterator, Predicate)
+THRUST_HOST_DEVICE ForwardIterator partition(my_tag, ForwardIterator first, ForwardIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -996,7 +1188,7 @@ void TestPartitionDispatchImplicit()
 DECLARE_UNITTEST(TestPartitionDispatchImplicit);
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
-ForwardIterator partition(my_tag, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
+THRUST_HOST_DEVICE ForwardIterator partition(my_tag, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -1014,7 +1206,7 @@ void TestPartitionStencilDispatchImplicit()
 DECLARE_UNITTEST(TestPartitionStencilDispatchImplicit);
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
   my_system& system, InputIterator, InputIterator, OutputIterator1 out_true, OutputIterator2 out_false, Predicate)
 {
   system.validate_dispatch();
@@ -1037,7 +1229,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -1062,7 +1254,7 @@ void TestPartitionCopyStencilDispatchExplicit()
 DECLARE_UNITTEST(TestPartitionCopyStencilDispatchExplicit);
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
   my_tag, InputIterator first, InputIterator, OutputIterator1 out_true, OutputIterator2 out_false, Predicate)
 {
   *first = 13;
@@ -1089,7 +1281,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
   my_tag,
   InputIterator1 first,
   InputIterator1,
@@ -1119,7 +1311,7 @@ void TestPartitionCopyStencilDispatchImplicit()
 DECLARE_UNITTEST(TestPartitionCopyStencilDispatchImplicit);
 
 template <typename ForwardIterator, typename Predicate>
-ForwardIterator stable_partition(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
+THRUST_HOST_DEVICE ForwardIterator stable_partition(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -1137,7 +1329,8 @@ void TestStablePartitionDispatchExplicit()
 DECLARE_UNITTEST(TestStablePartitionDispatchExplicit);
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
-ForwardIterator stable_partition(my_system& system, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
+THRUST_HOST_DEVICE ForwardIterator
+stable_partition(my_system& system, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -1155,7 +1348,7 @@ void TestStablePartitionStencilDispatchExplicit()
 DECLARE_UNITTEST(TestStablePartitionStencilDispatchExplicit);
 
 template <typename ForwardIterator, typename Predicate>
-ForwardIterator stable_partition(my_tag, ForwardIterator first, ForwardIterator, Predicate)
+THRUST_HOST_DEVICE ForwardIterator stable_partition(my_tag, ForwardIterator first, ForwardIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -1172,7 +1365,8 @@ void TestStablePartitionDispatchImplicit()
 DECLARE_UNITTEST(TestStablePartitionDispatchImplicit);
 
 template <typename ForwardIterator, typename InputIterator, typename Predicate>
-ForwardIterator stable_partition(my_tag, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
+THRUST_HOST_DEVICE ForwardIterator
+stable_partition(my_tag, ForwardIterator first, ForwardIterator, InputIterator, Predicate)
 {
   *first = 13;
   return first;
@@ -1190,7 +1384,7 @@ void TestStablePartitionStencilDispatchImplicit()
 DECLARE_UNITTEST(TestStablePartitionStencilDispatchImplicit);
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   my_system& system, InputIterator, InputIterator, OutputIterator1 out_true, OutputIterator2 out_false, Predicate)
 {
   system.validate_dispatch();
@@ -1213,7 +1407,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -1238,7 +1432,7 @@ void TestStablePartitionCopyStencilDispatchExplicit()
 DECLARE_UNITTEST(TestStablePartitionCopyStencilDispatchExplicit);
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   my_tag, InputIterator first, InputIterator, OutputIterator1 out_true, OutputIterator2 out_false, Predicate)
 {
   *first = 13;
@@ -1265,7 +1459,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   my_tag,
   InputIterator1 first,
   InputIterator1,

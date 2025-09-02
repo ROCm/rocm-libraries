@@ -18,56 +18,54 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#include <thrust/detail/numeric_traits.h>
-#include <thrust/detail/type_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
-
-#include _THRUST_STD_INCLUDE(cstddef)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include <thrust/detail/numeric_traits.h>
+#include <thrust/detail/type_traits.h>
+#include <cstddef>
 
 THRUST_NAMESPACE_BEGIN
 
 // forward declaration of counting_iterator
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
-class counting_iterator;
+  class counting_iterator;
 
 namespace detail
 {
 
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
-struct counting_iterator_base
+  struct counting_iterator_base
 {
-  using system = typename thrust::detail::eval_if<_THRUST_STD::is_same<System, use_default>::value,
-                                                  thrust::detail::identity_<thrust::any_system_tag>,
-                                                  thrust::detail::identity_<System>>::type;
+  using system = typename thrust::detail::eval_if<
+                  // use any_system_tag if we are given use_default
+                  thrust::detail::is_same<System,use_default>::value,
+                  thrust::detail::identity_<thrust::any_system_tag>,
+                  thrust::detail::identity_<System>
+                  >::type;
 
   using traversal = typename thrust::detail::ia_dflt_help<
-    Traversal,
-    thrust::detail::eval_if<thrust::detail::is_numeric<Incrementable>::value,
-                            thrust::detail::identity_<random_access_traversal_tag>,
-                            thrust::iterator_traversal<Incrementable>>>::type;
+                              Traversal,
+                              thrust::detail::eval_if<
+                                thrust::detail::is_numeric<Incrementable>::value,
+                                thrust::detail::identity_<random_access_traversal_tag>,
+                                thrust::iterator_traversal<Incrementable>
+                                >
+                              >::type;
 
   // unlike Boost, we explicitly use std::ptrdiff_t as the difference type
   // for floating point counting_iterators
   using difference = typename thrust::detail::ia_dflt_help<
     Difference,
-    thrust::detail::eval_if<thrust::detail::is_numeric<Incrementable>::value,
-                            thrust::detail::eval_if<::internal::is_integral<Incrementable>::value,
-                                                    thrust::detail::numeric_difference<Incrementable>,
-                                                    thrust::detail::identity_<_THRUST_STD::ptrdiff_t>>,
-                            thrust::iterator_difference<Incrementable>>>::type;
+    thrust::detail::eval_if<
+      thrust::detail::is_numeric<Incrementable>::value,
+        thrust::detail::eval_if<
+          thrust::detail::is_integral<Incrementable>::value,
+          thrust::detail::numeric_difference<Incrementable>,
+          thrust::detail::identity_<std::ptrdiff_t>
+        >,
+      thrust::iterator_difference<Incrementable>
+    >
+  >::type;
 
   // our implementation departs from Boost's in that counting_iterator::dereference
   // returns a copy of its counter, rather than a reference to it. returning a reference
@@ -83,47 +81,61 @@ struct counting_iterator_base
                              difference>;
 }; // end counting_iterator_base
 
-template <typename Difference, typename Incrementable1, typename Incrementable2>
-struct iterator_distance
+
+template<typename Difference, typename Incrementable1, typename Incrementable2>
+  struct iterator_distance
 {
-  THRUST_HOST_DEVICE static Difference distance(Incrementable1 x, Incrementable2 y)
+  THRUST_HOST_DEVICE
+  static Difference distance(Incrementable1 x, Incrementable2 y)
   {
     return y - x;
   }
 };
 
-template <typename Difference, typename Incrementable1, typename Incrementable2>
-struct number_distance
+
+template<typename Difference, typename Incrementable1, typename Incrementable2>
+  struct number_distance
 {
-  THRUST_HOST_DEVICE static Difference distance(Incrementable1 x, Incrementable2 y)
+  THRUST_HOST_DEVICE
+  static Difference distance(Incrementable1 x, Incrementable2 y)
   {
-    return static_cast<Difference>(numeric_distance(x, y));
+      return static_cast<Difference>(numeric_distance(x,y));
   }
 };
 
-template <typename Difference, typename Incrementable1, typename Incrementable2, typename Enable = void>
-struct counting_iterator_equal
+
+template<typename Difference, typename Incrementable1, typename Incrementable2, typename Enable = void>
+  struct counting_iterator_equal
 {
-  THRUST_HOST_DEVICE static bool equal(Incrementable1 x, Incrementable2 y)
+  THRUST_HOST_DEVICE
+  static bool equal(Incrementable1 x, Incrementable2 y)
   {
     return x == y;
   }
 };
 
+
 // specialization for floating point equality
-template <typename Difference, typename Incrementable1, typename Incrementable2>
-struct counting_iterator_equal<Difference,
-                               Incrementable1,
-                               Incrementable2,
-                               _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<Incrementable1>::value
-                                                        || _THRUST_STD::is_floating_point<Incrementable2>::value>>
+template<typename Difference, typename Incrementable1, typename Incrementable2>
+  struct counting_iterator_equal<
+    Difference,
+    Incrementable1,
+    Incrementable2,
+    typename thrust::detail::enable_if<
+      thrust::detail::is_floating_point<Incrementable1>::value ||
+      thrust::detail::is_floating_point<Incrementable2>::value
+    >::type
+  >
 {
-  THRUST_HOST_DEVICE static bool equal(Incrementable1 x, Incrementable2 y)
+  THRUST_HOST_DEVICE
+  static bool equal(Incrementable1 x, Incrementable2 y)
   {
     using d = number_distance<Difference, Incrementable1, Incrementable2>;
-    return d::distance(x, y) == 0;
+    return d::distance(x,y) == 0;
   }
 };
 
-} // namespace detail
+
+} // end detail
 THRUST_NAMESPACE_END
+

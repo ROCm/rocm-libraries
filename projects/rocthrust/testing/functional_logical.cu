@@ -26,7 +26,7 @@
 const size_t NUM_SAMPLES = 10000;
 
 template <class InputVector, class OutputVector, class Operator, class ReferenceOperator>
-void TestBinaryFunctional()
+void TestBinaryFunctional(void)
 {
   using InputType  = typename InputVector::value_type;
   using OutputType = typename OutputVector::value_type;
@@ -48,17 +48,11 @@ void TestBinaryFunctional()
 
 // XXX add bool to list
 // Instantiate a macro for all integer-like data types
-// clang-format off
-#define INSTANTIATE_INTEGER_TYPES(Macro, vector_type, operator_name)   \
-Macro(vector_type, operator_name, unittest::int8_t  )                  \
-Macro(vector_type, operator_name, unittest::uint8_t )                  \
-Macro(vector_type, operator_name, unittest::int16_t )                  \
-Macro(vector_type, operator_name, unittest::uint16_t)                  \
-Macro(vector_type, operator_name, unittest::int32_t )                  \
-Macro(vector_type, operator_name, unittest::uint32_t)                  \
-Macro(vector_type, operator_name, unittest::int64_t )                  \
-Macro(vector_type, operator_name, unittest::uint64_t)
-// clang-format on
+#define INSTANTIATE_INTEGER_TYPES(Macro, vector_type, operator_name)                                             \
+  Macro(vector_type, operator_name, unittest::int8_t) Macro(vector_type, operator_name, unittest::uint8_t)       \
+    Macro(vector_type, operator_name, unittest::int16_t) Macro(vector_type, operator_name, unittest::uint16_t)   \
+      Macro(vector_type, operator_name, unittest::int32_t) Macro(vector_type, operator_name, unittest::uint32_t) \
+        Macro(vector_type, operator_name, unittest::int64_t) Macro(vector_type, operator_name, unittest::uint64_t)
 
 // Instantiate a macro for all integer and floating point data types
 #define INSTANTIATE_ALL_TYPES(Macro, vector_type, operator_name) \
@@ -75,12 +69,12 @@ Macro(vector_type, operator_name, unittest::uint64_t)
 
 // op(T,T) -> bool
 #define DECLARE_BINARY_LOGICAL_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                      \
-  void Test##OperatorName##FunctionalHost()                                                          \
+  void Test##OperatorName##FunctionalHost(void)                                                      \
   {                                                                                                  \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_BINARY_LOGICAL_FUNCTIONAL_TEST, host_vector, operator_name);   \
   }                                                                                                  \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalHost);                                              \
-  void Test##OperatorName##FunctionalDevice()                                                        \
+  void Test##OperatorName##FunctionalDevice(void)                                                    \
   {                                                                                                  \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_BINARY_LOGICAL_FUNCTIONAL_TEST, device_vector, operator_name); \
   }                                                                                                  \

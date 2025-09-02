@@ -22,8 +22,9 @@
 #include <cmath>
 
 #include "bitwise_repro/bwr_utils.hpp"
-#include "test_param_fixtures.hpp"
+
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 using ReproducibilityTestParams =

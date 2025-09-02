@@ -17,8 +17,6 @@
 
 #include <thrust/detail/config.h>
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <async/exclusive_scan/mixin.h>
@@ -55,9 +53,4 @@ struct test_discard
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(test_discard, NumericTypes);
 
-#endif // C++17
-
-// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-THRUST_SUPPRESS_DEPRECATED_POP
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#endif // C++14

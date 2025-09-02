@@ -38,11 +38,17 @@ struct vector_like
 };
 
 template <class Vector>
-void TestVectorLowerBoundDescendingSimple()
+void TestVectorLowerBoundDescendingSimple(void)
 {
   using T = typename Vector::value_type;
 
-  Vector vec{8, 7, 5, 2, 0};
+  Vector vec(5);
+
+  vec[0] = 8;
+  vec[1] = 7;
+  vec[2] = 5;
+  vec[3] = 2;
+  vec[4] = 0;
 
   Vector input(10);
   thrust::sequence(input.begin(), input.end());
@@ -57,15 +63,29 @@ void TestVectorLowerBoundDescendingSimple()
 
   ASSERT_EQUAL_QUIET(integral_output.end(), output_end);
 
-  IntVector ref{4, 4, 3, 3, 3, 2, 2, 1, 0, 0};
-  ASSERT_EQUAL(ref, integral_output);
+  ASSERT_EQUAL(4, integral_output[0]);
+  ASSERT_EQUAL(4, integral_output[1]);
+  ASSERT_EQUAL(3, integral_output[2]);
+  ASSERT_EQUAL(3, integral_output[3]);
+  ASSERT_EQUAL(3, integral_output[4]);
+  ASSERT_EQUAL(2, integral_output[5]);
+  ASSERT_EQUAL(2, integral_output[6]);
+  ASSERT_EQUAL(1, integral_output[7]);
+  ASSERT_EQUAL(0, integral_output[8]);
+  ASSERT_EQUAL(0, integral_output[9]);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorLowerBoundDescendingSimple);
 
 template <class Vector>
-void TestVectorUpperBoundDescendingSimple()
+void TestVectorUpperBoundDescendingSimple(void)
 {
-  Vector vec{8, 7, 5, 2, 0};
+  Vector vec(5);
+
+  vec[0] = 8;
+  vec[1] = 7;
+  vec[2] = 5;
+  vec[3] = 2;
+  vec[4] = 0;
 
   Vector input(10);
   thrust::sequence(input.begin(), input.end());
@@ -81,15 +101,29 @@ void TestVectorUpperBoundDescendingSimple()
 
   ASSERT_EQUAL_QUIET(output_end, integral_output.end());
 
-  IntVector ref{5, 4, 4, 3, 3, 3, 2, 2, 1, 0};
-  ASSERT_EQUAL(ref, integral_output);
+  ASSERT_EQUAL(5, integral_output[0]);
+  ASSERT_EQUAL(4, integral_output[1]);
+  ASSERT_EQUAL(4, integral_output[2]);
+  ASSERT_EQUAL(3, integral_output[3]);
+  ASSERT_EQUAL(3, integral_output[4]);
+  ASSERT_EQUAL(3, integral_output[5]);
+  ASSERT_EQUAL(2, integral_output[6]);
+  ASSERT_EQUAL(2, integral_output[7]);
+  ASSERT_EQUAL(1, integral_output[8]);
+  ASSERT_EQUAL(0, integral_output[9]);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorUpperBoundDescendingSimple);
 
 template <class Vector>
-void TestVectorBinarySearchDescendingSimple()
+void TestVectorBinarySearchDescendingSimple(void)
 {
-  Vector vec{8, 7, 5, 2, 0};
+  Vector vec(5);
+
+  vec[0] = 8;
+  vec[1] = 7;
+  vec[2] = 5;
+  vec[3] = 2;
+  vec[4] = 0;
 
   Vector input(10);
   thrust::sequence(input.begin(), input.end());
@@ -106,8 +140,16 @@ void TestVectorBinarySearchDescendingSimple()
 
   ASSERT_EQUAL_QUIET(bool_output_end, bool_output.end());
 
-  BoolVector bool_ref{true, false, true, false, false, true, false, true, true, false};
-  ASSERT_EQUAL(bool_ref, bool_output);
+  ASSERT_EQUAL(true, bool_output[0]);
+  ASSERT_EQUAL(false, bool_output[1]);
+  ASSERT_EQUAL(true, bool_output[2]);
+  ASSERT_EQUAL(false, bool_output[3]);
+  ASSERT_EQUAL(false, bool_output[4]);
+  ASSERT_EQUAL(true, bool_output[5]);
+  ASSERT_EQUAL(false, bool_output[6]);
+  ASSERT_EQUAL(true, bool_output[7]);
+  ASSERT_EQUAL(true, bool_output[8]);
+  ASSERT_EQUAL(false, bool_output[9]);
 
   // test with integral output type
   IntVector integral_output(10, 2);
@@ -116,9 +158,16 @@ void TestVectorBinarySearchDescendingSimple()
 
   ASSERT_EQUAL_QUIET(int_output_end, integral_output.end());
 
-  IntVector int_ref{1, 0, 1, 0, 0, 1, 0, 1, 1, 0};
-
-  ASSERT_EQUAL(int_ref, integral_output);
+  ASSERT_EQUAL(1, integral_output[0]);
+  ASSERT_EQUAL(0, integral_output[1]);
+  ASSERT_EQUAL(1, integral_output[2]);
+  ASSERT_EQUAL(0, integral_output[3]);
+  ASSERT_EQUAL(0, integral_output[4]);
+  ASSERT_EQUAL(1, integral_output[5]);
+  ASSERT_EQUAL(0, integral_output[6]);
+  ASSERT_EQUAL(1, integral_output[7]);
+  ASSERT_EQUAL(1, integral_output[8]);
+  ASSERT_EQUAL(0, integral_output[9]);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorBinarySearchDescendingSimple);
 

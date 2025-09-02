@@ -7,20 +7,13 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/memory_algorithms.h>
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_deduction.h>
 
-#include _THRUST_STD_INCLUDE(utility)
+#include <utility>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -114,7 +107,7 @@ struct allocator_delete final
 
   void swap(allocator_delete& other) noexcept
   {
-    using _THRUST_STD::swap;
+    using std::swap;
     swap(alloc_, other.alloc_);
   }
 
@@ -216,7 +209,7 @@ struct array_allocator_delete final
 
   void swap(array_allocator_delete& other) noexcept
   {
-    using _THRUST_STD::swap;
+    using std::swap;
     swap(alloc_, other.alloc_);
     swap(count_, other.count_);
   }
