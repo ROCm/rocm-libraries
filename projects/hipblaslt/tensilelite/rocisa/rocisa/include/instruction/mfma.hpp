@@ -355,7 +355,8 @@ namespace rocisa
 
         std::string typeConvert(InstType iType) const
         {
-            return "f8f6f4";
+            constexpr size_t f4_t = 32;
+            return ((variant[0] < f4_t) && (variant[1] < f4_t)) ? "f8f6f4" : "f4";
         }
 
         std::vector<InstructionInput> getParams() const override
@@ -365,12 +366,16 @@ namespace rocisa
 
         std::string preStr() const override
         {
+            std::string variantStr = std::to_string(variant[0])
+                                     + "x" + std::to_string(variant[1])
+                                     + "x" + std::to_string(variant[2]);
             std::string blkStr = (block == 16) ? "16" : "";
-            return "v_wmma_scale" + blkStr + "_f32_16x16x128_f8f6f4";
+            return "v_wmma_scale" + blkStr + "_f32_" + variantStr + "_" + typeConvert(instType);
         }
 
         std::string getArgStr() const
         {
+            constexpr size_t f4_t = 32;
             std::string inputPermuteStr = "";
             switch(instType)
             {
@@ -393,8 +398,11 @@ namespace rocisa
                 inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
                 break;
             case InstType::INST_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+            {
+                bool useModifier = ((variant[0] < f4_t) && (variant[1] < f4_t));
+                inputPermuteStr = useModifier ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
                 break;
+            }
             default:
                 break;
             }

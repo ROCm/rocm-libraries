@@ -598,8 +598,10 @@ class LocalReadMFMA(LocalRead):
             UnrollStride = 1
 
         enableLDSTr = tP["enableLDSTr"]
-        matrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
-        numTilePerInst = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]) // matrixInstT
+        matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
+        matrixInstTO = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+        matrixInstTO = matrixInstT if ("MXS" in tc) else matrixInstTO
+        numTilePerInst = matrixInstT // matrixInstTO
         MIInputPerThUnroll = kernel["MIInputPerThread%s"%tc] // numTilePerInst
         numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
         numReadsPerVector = int((vectorWidth * tP["bpeDS"]) / (tileBlockWidth * bpr))
@@ -668,7 +670,7 @@ class LocalReadMFMA(LocalRead):
                 blocksPerTGroupSMFMA = 1 if isSparseTrack else 2
                 if writer.states.asmCaps["HasSWMMAC_gfx1250"] and not tP["isM"]: blocksPerTGroupSMFMA = 2
                 if blocksPerTGroupSMFMA > 1:
-                    threadGroups = kernel["MatrixInstK"] // kernel["MIInputPerThread"]
+                    threadGroups = kernel["WavefrontSize"] // matrixInstTO
                     elementsPerBlockSMFMA = MIInputPerThUnroll // blocksPerTGroupSMFMA  # need adjust if blocks > 1 and is sparse track.
                     blockStride = elementsPerBlockSMFMA * threadGroups
                     blockOffsetSMFMA = blockStride - elementsPerBlockSMFMA
@@ -689,7 +691,7 @@ class LocalReadMFMA(LocalRead):
 
                     for tIdx in range(numberMTilesPerWave):
                         for ti in range(0, numTilePerInst):
-                            constOffset = int((tP["localReadOffset"] + matrixInstT * ti + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                            constOffset = int((tP["localReadOffset"] + matrixInstTO * ti + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
                             for outerIdx in range(MIInputPerThUnroll//kernel["LocalReadVectorWidth"]):
                                 for innerIdx in range(kernel["LocalReadVectorWidth"]//vwTrLoad):
                                     paddedOffset = constOffset
@@ -1454,7 +1456,7 @@ class LocalReadMFMA(LocalRead):
                                                 or kernel["ProblemType"]["DataType"].is6bitFloat() or kernel["ProblemType"]["DataType"].isInt8()):
                                     if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                         incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                        incOffset += tiIdx * matrixInstT * vectorWidth * tileStride
+                                        incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
                                     else:
                                         vw = kernel["LocalReadVectorWidth"]
                                         incOffset = (rIdx // vw) * UnrollStride * vw
