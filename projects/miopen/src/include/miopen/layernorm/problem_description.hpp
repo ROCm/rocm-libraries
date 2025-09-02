@@ -308,12 +308,19 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
         f(self.GetWidth(), "in_w");
         f(self.normalized_dim, "normalized_dim");
         f(static_cast<uint64_t>(self.mode), "mode");
+
+        size_t stride = 1;
+        auto layout = self.xDesc.GetLayoutEnum();
+        if(self.normalized_dim > 1 && layout.has_value() && (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
+        {
+            stride = self.xDesc.GetLengths()[1]; // stride = C
+        }
+        f(stride, "stride");
     }
 
     template <class Self>
     static void Visit(Self&& self, std::function<void(std::string, std::string)> f)
     {
-        f(self.xDesc.GetLayout_str(), "layout");
         f(GetDataTypeName(self.xDesc.GetType()), "data_type");
     }
 

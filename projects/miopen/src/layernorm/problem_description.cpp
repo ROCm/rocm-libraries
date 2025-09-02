@@ -51,7 +51,7 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
         if(normalized_dim > 1 && layout.has_value() &&
            (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
         {
-            stride = xDesc.GetLengths()[1]; // stride = C
+            stride = dims[1]; // stride = C
         }
 
         for(size_t i = 0; i < normalized_dim; ++i)
