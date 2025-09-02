@@ -23,14 +23,11 @@
 #include <numeric>
 #include <vector>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(UniversalTests, NumericalTestsParams);
-
-namespace
-{
 
 // The managed_memory_pointer class should be identified as a
 // contiguous_iterator
@@ -55,8 +52,6 @@ struct some_object
 private:
   T m_data;
 };
-
-} // namespace
 
 TYPED_TEST(UniversalTests, TestUniversalAllocateUnique)
 {
@@ -161,37 +156,8 @@ TYPED_TEST(UniversalTests, TestUniversalThrustVector)
 
     ASSERT_EQ(host.size(), size);
     ASSERT_EQ(universal.size(), size);
-    for (unsigned int i = 0; i < size; ++i)
-    {
-      ASSERT_EQ(host[i], universal[i]);
-    }
-  }
-}
 
-// TODO(bgruber): merge test into previous when we have Catch2
-TYPED_TEST(UniversalTests, TestUniversalHostPinnedThrustVector)
-{
-  using T = typename TestFixture::input_type;
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  for (auto size : get_sizes())
-  {
-    SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-    thrust::host_vector<T> host(size);
-    thrust::universal_host_pinned_vector<T> universal(size);
-
-    // FIXME(bgruber): only the CUDA system uses a universal_ptr here. Other systems have a native pointer.
-    // static_assert(std::is_same<typename std::decay<decltype(universal)>::type::pointer,
-    // thrust::universal_ptr<T>>::value,
-    //              "Unexpected thrust::universal_vector pointer type.");
-
-    thrust::sequence(host.begin(), host.end(), 0);
-    thrust::sequence(universal.begin(), universal.end(), 0);
-
-    ASSERT_EQ(host.size(), size);
-    ASSERT_EQ(universal.size(), size);
-    for (unsigned int i = 0; i < size; ++i)
+    for (unsigned int i = 0; i < size; i++)
     {
       ASSERT_EQ(host[i], universal[i]);
     }
@@ -221,7 +187,8 @@ TYPED_TEST(UniversalTests, TestUniversalStdVector)
 
     ASSERT_EQ(host.size(), size);
     ASSERT_EQ(universal.size(), size);
-    for (unsigned int i = 0; i < size; ++i)
+
+    for (unsigned int i = 0; i < size; i++)
     {
       ASSERT_EQ(host[i], universal[i]);
     }

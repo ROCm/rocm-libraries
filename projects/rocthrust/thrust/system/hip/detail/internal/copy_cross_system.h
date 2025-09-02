@@ -27,26 +27,18 @@
  ******************************************************************************/
 #pragma once
 
-#include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 // XXX
 // this file must not be included on its own, ever,
 // but must be part of include in thrust/system/hip/detail/copy.h
 
+#include <thrust/detail/config.h>
 #include <thrust/system/hip/config.h>
 
 #include <thrust/advance.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/distance.h>
+#include <thrust/system/hip/detail/nv/target.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
@@ -54,10 +46,8 @@
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
 namespace __copy
 {
-
 template <class H, class D, class T, class Size>
 THRUST_HIP_HOST_FUNCTION void trivial_device_copy(
   thrust::cpp::execution_policy<H>&,
@@ -85,38 +75,36 @@ THRUST_HIP_HOST_FUNCTION void trivial_device_copy(
 }
 
 template <class System1, class System2, class InputIt, class Size, class OutputIt>
-OutputIt THRUST_HOST cross_system_copy_n(
+OutputIt THRUST_HOST /* WORKAROUND */ THRUST_DEVICE cross_system_copy_n(
   thrust::execution_policy<System1>& sys1,
   thrust::execution_policy<System2>& sys2,
   InputIt begin,
   Size n,
   OutputIt result,
   thrust::detail::true_type) // trivial copy
-
 {
-  using InputTy = typename iterator_traits<InputIt>::value_type;
-  if (n > 0)
-  {
-    trivial_device_copy(
-      derived_cast(sys1),
-      derived_cast(sys2),
-      reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
-      reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*begin)),
-      n);
-  }
-
-  return result + n;
+  // WORKAROUND
+  NV_IF_TARGET(
+    NV_IS_DEVICE,
+    (THRUST_UNUSED_VAR(sys1); THRUST_UNUSED_VAR(sys2); THRUST_UNUSED_VAR(n); THRUST_UNUSED_VAR(begin); return result;),
+    (using InputTy = typename iterator_traits<InputIt>::value_type; if (n > 0) {
+      trivial_device_copy(
+        derived_cast(sys1),
+        derived_cast(sys2),
+        reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
+        reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*begin)),
+        static_cast<size_t>(n));
+    } return result + n;));
 }
 
 // non-trivial H->D copy
 template <class H, class D, class InputIt, class Size, class OutputIt>
-OutputIt THRUST_HOST cross_system_copy_n(
+OutputIt THRUST_HIP_RUNTIME_FUNCTION cross_system_copy_n_hd_nt(
   thrust::cpp::execution_policy<H>& host_s,
   thrust::hip_rocprim::execution_policy<D>& device_s,
   InputIt first,
   Size num_items,
-  OutputIt result,
-  thrust::detail::false_type) // non-trivial copy
+  OutputIt result)
 {
   // get type of the input data
   using InputTy = typename thrust::iterator_value<InputIt>::type;
@@ -146,19 +134,62 @@ OutputIt THRUST_HOST cross_system_copy_n(
   return ret;
 }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-// non-trivial copy D->H, only supported with NVCC compiler
-// because copy ctor must have  __device__ annotations, which is nvcc-only
-// feature
-template <class D, class H, class InputIt, class Size, class OutputIt>
-OutputIt THRUST_HOST cross_system_copy_n(
-  thrust::hip_rocprim::execution_policy<D>& device_s,
+// non-trivial H->D copy
+template <class H, class D, class InputIt, class Size, class OutputIt>
+OutputIt THRUST_HIP_FUNCTION cross_system_copy_n(
   thrust::cpp::execution_policy<H>& host_s,
+  thrust::hip_rocprim::execution_policy<D>& device_s,
   InputIt first,
   Size num_items,
   OutputIt result,
   thrust::detail::false_type) // non-trivial copy
+{
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static OutputIt
+    par(thrust::cpp::execution_policy<H>& host_s,
+        thrust::hip_rocprim::execution_policy<D>& device_s,
+        InputIt first,
+        Size num_items,
+        OutputIt result)
+    {
+      return cross_system_copy_n_hd_nt(host_s, device_s, first, num_items, result);
+    }
 
+    THRUST_DEVICE static OutputIt
+    seq(thrust::cpp::execution_policy<H>& host_s,
+        thrust::hip_rocprim::execution_policy<D>& device_s,
+        InputIt first,
+        Size num_items,
+        OutputIt result)
+    {
+      THRUST_UNUSED_VAR(host_s);
+      THRUST_UNUSED_VAR(device_s);
+      THRUST_UNUSED_VAR(first);
+      THRUST_UNUSED_VAR(num_items);
+
+      return result;
+    }
+  };
+
+#if __THRUST_HAS_HIPRT__
+  return workaround::par(host_s, device_s, first, num_items, result);
+#else
+  return workaround::seq(host_s, device_s, first, num_items, result);
+#endif
+}
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
+// non-trivial copy
+template <class D, class H, class InputIt, class Size, class OutputIt>
+OutputIt THRUST_HIP_RUNTIME_FUNCTION cross_system_copy_n_dh_nt(
+  thrust::hip_rocprim::execution_policy<D>& device_s,
+  thrust::cpp::execution_policy<H>& host_s,
+  InputIt first,
+  Size num_items,
+  OutputIt result)
 {
   // get type of the input data
   using InputTy = typename thrust::iterator_value<InputIt>::type;
@@ -173,8 +204,7 @@ OutputIt THRUST_HOST cross_system_copy_n(
   thrust::detail::temporary_array<InputTy, H> temp(host_s, num_items);
 
   // trivial copy from device to host
-  hipError_t status;
-  status = hip_rocprim::trivial_copy_from_device(
+  hipError_t status = hip_rocprim::trivial_copy_from_device(
     temp.data().get(), d_in_ptr.data().get(), num_items, hip_rocprim::stream(device_s));
   hip_rocprim::throw_on_error(status, "__copy:: D->H: failed");
 
@@ -183,10 +213,59 @@ OutputIt THRUST_HOST cross_system_copy_n(
 
   return ret;
 }
+
+// non-trivial copy D->H, only supported with HIP-aware compiler
+template <class D, class H, class InputIt, class Size, class OutputIt>
+OutputIt THRUST_HIP_FUNCTION cross_system_copy_n(
+  thrust::hip_rocprim::execution_policy<D>& device_s,
+  thrust::cpp::execution_policy<H>& host_s,
+  InputIt first,
+  Size num_items,
+  OutputIt result,
+  thrust::detail::false_type) // non-trivial copy
+
+{
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static void
+    par(thrust::hip_rocprim::execution_policy<D>& device_s,
+        thrust::cpp::execution_policy<H>& host_s,
+        InputIt first,
+        Size num_items,
+        OutputIt& result)
+    {
+      result = cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
+    }
+
+    THRUST_DEVICE static void
+    seq(thrust::hip_rocprim::execution_policy<D>& device_s,
+        thrust::cpp::execution_policy<H>& host_s,
+        InputIt first,
+        Size num_items,
+        OutputIt& result)
+    {
+      THRUST_UNUSED_VAR(device_s);
+      THRUST_UNUSED_VAR(host_s);
+      THRUST_UNUSED_VAR(first);
+      THRUST_UNUSED_VAR(num_items);
+      THRUST_UNUSED_VAR(result);
+    }
+  };
+
+#  if __THRUST_HAS_HIPRT__
+  workaround::par(device_s, host_s, first, num_items, result);
+  return result;
+#  else
+  workaround::seq(device_s, host_s, first, num_items, result);
+  return result;
+#  endif
+}
 #endif
 
 template <class System1, class System2, class InputIt, class Size, class OutputIt>
-OutputIt THRUST_HOST cross_system_copy_n(cross_system<System1, System2> systems, InputIt begin, Size n, OutputIt result)
+OutputIt THRUST_HIP_FUNCTION
+cross_system_copy_n(cross_system<System1, System2> systems, InputIt begin, Size n, OutputIt result)
 {
   return cross_system_copy_n(
     derived_cast(systems.sys1),
@@ -198,13 +277,11 @@ OutputIt THRUST_HOST cross_system_copy_n(cross_system<System1, System2> systems,
 }
 
 template <class System1, class System2, class InputIterator, class OutputIterator>
-OutputIterator THRUST_HOST
+OutputIterator THRUST_HIP_FUNCTION
 cross_system_copy(cross_system<System1, System2> systems, InputIterator begin, InputIterator end, OutputIterator result)
 {
-  return cross_system_copy_n(systems, begin, thrust::distance(begin, end), result);
+  return cross_system_copy_n(systems, begin, static_cast<size_t>(thrust::distance(begin, end)), result);
 }
-
 } // namespace __copy
-
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END

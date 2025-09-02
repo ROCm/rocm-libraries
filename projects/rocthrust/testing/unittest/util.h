@@ -24,11 +24,6 @@
 #include <iostream>
 #include <string>
 #include <typeinfo>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-// Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-#  include <limits>
-#  include <type_traits>
-#endif
 
 #include <unittest/system.h>
 
@@ -36,7 +31,7 @@ namespace unittest
 {
 
 template <typename T>
-std::string type_name()
+std::string type_name(void)
 {
   return demangle(typeid(T).name());
 } // end type_name()
@@ -44,21 +39,19 @@ std::string type_name()
 // Use this with counting_iterator to avoid generating a range larger than we
 // can represent.
 template <typename T>
-typename THRUST_NS_QUALIFIER::detail::disable_if<_THRUST_STD::is_floating_point<T>::value, T>::type
+typename THRUST_NS_QUALIFIER::detail::disable_if<THRUST_NS_QUALIFIER::detail::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
   return static_cast<T>(
-    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(_THRUST_STD::numeric_limits<T>::max())));
+    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(THRUST_NS_QUALIFIER::numeric_limits<T>::max())));
 }
 
 // TODO: This probably won't work for `half`.
 template <typename T>
-typename _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<T>::value, T>
+typename THRUST_NS_QUALIFIER::detail::enable_if<THRUST_NS_QUALIFIER::detail::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), _THRUST_STD::numeric_limits<T>::max());
+  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), THRUST_NS_QUALIFIER::numeric_limits<T>::max());
 }
 
 } // namespace unittest

@@ -18,18 +18,9 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/raw_reference_cast.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
+#include <utility>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -40,12 +31,11 @@ struct wrapped_function
 {
   // mutable because Function::operator() might be const
   mutable Function m_f;
-
   THRUST_EXEC_CHECK_DISABLE
   template <typename... Ts>
-  inline THRUST_HOST_DEVICE Result operator()(Ts&&... args) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE Result operator()(Ts&&... args) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(_THRUST_STD::forward<Ts>(args))...));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(std::forward<Ts>(args))...));
   }
 }; // end wrapped_function
 } // namespace detail

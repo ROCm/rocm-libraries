@@ -18,8 +18,8 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/sort.h>
 
-#include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(ZipIteratorStableSortTests, UnsignedIntegerTestsParams);
@@ -39,18 +39,21 @@ TYPED_TEST(ZipIteratorStableSortTests, TestZipIteratorStableSort)
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      host_vector<T> h1 = get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-      host_vector<T> h2 = get_random_data<T>(
+      thrust::host_vector<T> h1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h2 = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
       device_vector<T> d1 = h1;
       device_vector<T> d2 = h2;
 
       // sort on host
-      stable_sort(make_zip_iterator(h1.begin(), h2.begin()), make_zip_iterator(h1.end(), h2.end()));
+      stable_sort(make_zip_iterator(make_tuple(h1.begin(), h2.begin())),
+                  make_zip_iterator(make_tuple(h1.end(), h2.end())));
 
       // sort on device
-      stable_sort(make_zip_iterator(d1.begin(), d2.begin()), make_zip_iterator(d1.end(), d2.end()));
+      stable_sort(make_zip_iterator(make_tuple(d1.begin(), d2.begin())),
+                  make_zip_iterator(make_tuple(d1.end(), d2.end())));
 
       ASSERT_EQ_QUIET(h1, d1);
       ASSERT_EQ_QUIET(h2, d2);

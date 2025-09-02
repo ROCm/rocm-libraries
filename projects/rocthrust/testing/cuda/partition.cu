@@ -26,7 +26,7 @@
 template <typename T>
 struct is_even
 {
-  _CCCL_HOST_DEVICE bool operator()(T x) const
+  THRUST_HOST_DEVICE bool operator()(T x) const
   {
     return ((int) x % 2) == 0;
   }
@@ -37,7 +37,7 @@ struct mod_n
 {
   T mod;
   bool negate;
-  _CCCL_HOST_DEVICE bool operator()(T x)
+  THRUST_HOST_DEVICE bool operator()(T x)
   {
     return (x % mod == 0) ? (!negate) : negate;
   }
@@ -47,7 +47,7 @@ template <typename T>
 struct multiply_n
 {
   T multiplier;
-  _CCCL_HOST_DEVICE T operator()(T x)
+  THRUST_HOST_DEVICE T operator()(T x)
   {
     return x * multiplier;
   }
@@ -694,12 +694,9 @@ void TestPartitionIfWithMagnitude(int magnitude)
 void TestPartitionIfWithLargeNumberOfItems()
 {
   TestPartitionIfWithMagnitude(30);
-  // These require 64-bit dispatches even when magnitude < 32.
-#  ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestPartitionIfWithMagnitude(31);
   TestPartitionIfWithMagnitude(32);
   TestPartitionIfWithMagnitude(33);
-#  endif
 }
 DECLARE_UNITTEST(TestPartitionIfWithLargeNumberOfItems);
 #endif

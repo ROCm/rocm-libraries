@@ -32,7 +32,7 @@ partition_point_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Pr
 template <typename T>
 struct is_even
 {
-  _CCCL_HOST_DEVICE bool operator()(T x) const
+  THRUST_HOST_DEVICE bool operator()(T x) const
   {
     return ((int) x % 2) == 0;
   }
@@ -88,11 +88,11 @@ void TestPartitionPointCudaStreams()
   cudaStream_t s;
   cudaStreamCreate(&s);
 
-  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(thrust::cuda::par.on(s), first, last, ::cuda::std::identity{}));
+  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(thrust::cuda::par.on(s), first, last, thrust::identity<T>()));
 
   last = v.begin() + 3;
   ref  = last;
-  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(thrust::cuda::par.on(s), first, last, ::cuda::std::identity{}));
+  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(thrust::cuda::par.on(s), first, last, thrust::identity<T>()));
 
   cudaStreamDestroy(s);
 }

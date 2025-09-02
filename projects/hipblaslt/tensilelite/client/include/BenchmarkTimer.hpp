@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -127,6 +127,7 @@ namespace TensileLite
             using double_millis = std::chrono::duration<double, std::milli>;
             using double_micros = std::chrono::duration<double, std::micro>;
             using double_nanos  = std::chrono::duration<double, std::nano>;
+            using prob_sol_map  = std::map<int, int>;
 
             double_millis m_timeInSolution;
             double_millis m_totalGPUTime;
@@ -135,6 +136,11 @@ namespace TensileLite
             float         m_skip_slow_solution_ratio;
             bool          m_skip_slow_solution;
             size_t        m_numSolutionSkip;
+            prob_sol_map  m_prob_sol_map;
+            bool          m_skiprun_from_map;
+            int           m_currProblemIdx;
+            int           m_currSolutionIdx;
+            int           m_probOnlyRunSolIdx;
         };
     } // namespace Client
 } // namespace TensileLite

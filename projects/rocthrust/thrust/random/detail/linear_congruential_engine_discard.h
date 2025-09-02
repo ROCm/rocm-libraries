@@ -18,14 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #include <thrust/random/detail/mod.h>
 
 #include <cstdint>
@@ -51,7 +43,7 @@ struct linear_congruential_engine_discard_implementation
 }; // end linear_congruential_engine_discard
 
 // specialize for small integers and c == 0
-// XXX figure out a robust implementation of this for any unsigned integer type later
+// XXX figure out a robust implemenation of this for any unsigned integer type later
 template <std::uint32_t a, std::uint32_t m>
 struct linear_congruential_engine_discard_implementation<std::uint32_t, a, 0, m>
 {

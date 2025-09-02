@@ -19,19 +19,12 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/raw_pointer_cast.h>
 #  include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/detail/adl/assign_value.h>
 #  include <thrust/system/hip/detail/cross_system.h>
 #  include <thrust/system/hip/detail/nv/target.h>
 
@@ -39,20 +32,16 @@ THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-namespace
-{
-
 template <typename DerivedPolicy, typename Pointer>
-inline THRUST_HOST_DEVICE typename thrust::iterator_value<Pointer>::type
-get_value_msvc2005_war(execution_policy<DerivedPolicy>& exec, Pointer ptr)
+typename thrust::iterator_value<Pointer>::type THRUST_HIP_FUNCTION
+get_value(execution_policy<DerivedPolicy>& exec, Pointer ptr)
 {
   using result_type = typename thrust::iterator_value<Pointer>::type;
 
-  // XXX war nvbugs/881631
-  struct war_nvbugs_881631
-  {
-    THRUST_HOST inline static result_type host_path(execution_policy<DerivedPolicy>& exec, Pointer ptr)
-    {
+  // WORKAROUND
+  NV_IF_TARGET(
+    NV_IS_HOST,
+    (
       // when called from host code, implement with assign_value
       // note that this requires a type with default constructor
       result_type result;
@@ -61,26 +50,12 @@ get_value_msvc2005_war(execution_policy<DerivedPolicy>& exec, Pointer ptr)
       cross_system<thrust::host_system_tag, DerivedPolicy> systems(host_tag, exec);
       assign_value(systems, &result, ptr);
 
-      return result;
-    }
+      return result;),
+    (THRUST_UNUSED_VAR(exec);
+     void (*fptr)(cross_system<thrust::host_system_tag, DerivedPolicy>&, result_type*, Pointer) = assign_value;
+     (void) fptr;
 
-    THRUST_DEVICE inline static result_type device_path(execution_policy<DerivedPolicy>&, Pointer ptr)
-    {
-      // when called from device code, just do simple deref
-      return *thrust::raw_pointer_cast(ptr);
-    }
-  };
-
-  NV_IF_TARGET(
-    NV_IS_HOST, (return war_nvbugs_881631::host_path(exec, ptr);), (return war_nvbugs_881631::device_path(exec, ptr);))
-} // end get_value_msvc2005_war()
-} // namespace
-
-template <typename DerivedPolicy, typename Pointer>
-inline THRUST_HOST_DEVICE typename thrust::iterator_value<Pointer>::type
-get_value(execution_policy<DerivedPolicy>& exec, Pointer ptr)
-{
-  return get_value_msvc2005_war(exec, ptr);
+     return *thrust::raw_pointer_cast(ptr);))
 } // end get_value()
 
 } // namespace hip_rocprim
