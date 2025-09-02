@@ -112,8 +112,8 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # Setup version
-rocm_setup_version(VERSION 4.1.0)
-set(hipsparse_SOVERSION 4.1.0)
+rocm_setup_version(VERSION 4.0.1)
+set(hipsparse_SOVERSION 4.0.1)
 
 # hipSPARSE library
 add_subdirectory(library)
@@ -188,7 +188,7 @@ endif()
 
 # Package specific CPACK vars
 if(NOT USE_CUDA)
-  set(ROCSPARSE_MINIMUM "4.1.0")
+  set(ROCSPARSE_MINIMUM "4.0.1")
   rocm_package_add_dependencies(SHARED_DEPENDS "rocsparse >= ${ROCSPARSE_MINIMUM}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocsparse-static-dev >= ${ROCSPARSE_MINIMUM}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocsparse-static-devel >= ${ROCSPARSE_MINIMUM}")
