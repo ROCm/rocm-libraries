@@ -45,11 +45,11 @@ cmake --install build
 > To speed up the build, add `--parallel`.
 > To debug the build, add `--verbose`.
 
-Since, by convention, the ROCm libraries installation path is `/opt/rocm`, additional cache variables are required at configure-time to utilize these paths.
+Since, by convention, the ROCm libraries installation path is `/opt/rocm`, it is recommended to set the toolchain file and install prefix when configuring.
 
 ```bash
 # configure
-cmake -B build -S . -D CMAKE_INSTALL_PREFIX=/opt/rocm -D CMAKE_PREFIX_PATH=/opt/rocm -D CMAKE_CXX_COMPILER=/opt/rocm/amdclang++
+cmake -B build -S . -D CMAKE_INSTALL_PREFIX=/opt/rocm -D CMAKE_TOOLCHAIN_FILE=./cmake/toolchains/linux-amdclang.cmake
 ```
 
 To simplify the configure and build commands for various build contexts, presets have been provided in [CMakePresets.json](../CMakePresets.json). For example, to issue a superbuild for all projects and targets:
@@ -70,14 +70,11 @@ cmake --preset rocroller
 cmake --build --preset default
 ```
 
-If you wish to have granular control over the build, use `-D ROCM_LIBRARIES_DISABLE_ALL=ON` and then selectively re-enable the desired projects and dependencies. For example to build rocroller without its preset:
+If you wish to have granular control over the build, use `-D ROCM_LIBS_ENABLE_COMPONENTS="list;of;components"` to selectively enable the desired projects and dependencies. For example to build rocroller without its preset:
 
 ```bash
 # configure
-cmake -B build -S .                   \
-    -D ROCM_LIBRARIES_DISABLE_ALL=ON  \
-    -D ENABLE_MXDATAGENERATOR=ON      \
-    -D ENABLE_ROCROLLER=ON
+cmake -B build -S . -D ROCM_LIBS_ENABLE_COMPONENTS="mxdatagenerator;rocroller"
 # build
 cmake --build build
 ```
