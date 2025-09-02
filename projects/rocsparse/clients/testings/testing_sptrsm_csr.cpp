@@ -187,7 +187,7 @@ void testing_sptrsm_csr_bad_arg(const Arguments& arg)
     }
 
     //
-    //
+    // Testing with a tiny example, and tests the different wrong calls.
     //
     {
         rocsparse_clients::dense_matrix_t<T>             x(4, 5);
