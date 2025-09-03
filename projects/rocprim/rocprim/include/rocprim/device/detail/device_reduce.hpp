@@ -63,10 +63,10 @@ auto reduce_with_initial(T output, T initial_value, BinaryFunction reduce_op) ->
 }
 
 template<
+    class ArchConfig,
     bool WithInitialValue,
     bool         FitLarger,
     unsigned int FitItems,
-    class Config,
     class ResultType,
     class InputIterator,
     class OutputIterator,
@@ -80,12 +80,12 @@ void block_reduce_kernel_impl(InputIterator input,
                               InitValueType initial_value,
                               BinaryFunction reduce_op)
 {
-    static constexpr reduce_config_params params = device_params<Config>();
+    static constexpr reduce_config_params params = ArchConfig::params;
 
-    constexpr unsigned int block_size = params.reduce_config.block_size;
+    constexpr unsigned int block_size = params.kernel_config.block_size;
     constexpr unsigned int items_per_thread
-        = FitLarger ? params.reduce_config.items_per_thread * FitItems
-                    : ceiling_div(params.reduce_config.items_per_thread, FitItems);
+        = FitLarger ? params.kernel_config.items_per_thread * FitItems
+                    : ceiling_div(params.kernel_config.items_per_thread, FitItems);
 
     using result_type = ResultType;
 

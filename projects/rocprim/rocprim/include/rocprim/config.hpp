@@ -140,7 +140,7 @@
 #endif
 
 // SPIR-V and unknown targets do not support 128-bit atomics.
-#if defined(ROCPRIM_TARGET_UKNOWN) || defined(ROCPRIM_TARGET_SPIRV)
+#if defined(ROCPRIM_TARGET_UNKNOWN) || defined(ROCPRIM_TARGET_SPIRV)
     #define ROCPRIM_MAX_ATOMIC_SIZE 8
 #else
     #define ROCPRIM_MAX_ATOMIC_SIZE 16
