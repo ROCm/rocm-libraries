@@ -86,6 +86,10 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
 
+"shared: origami":
+- changed-files:
+  - any-glob-to-any-file: 'shared/origami/**/*'
+
 documentation:
 - changed-files:
   - any-glob-to-any-file:
