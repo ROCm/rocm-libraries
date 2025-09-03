@@ -536,6 +536,7 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsValidPerformanceConfig(
 size_t
 ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
     case miopenHalf:
@@ -550,6 +551,7 @@ ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescriptio
     case miopenBFloat8_fnuz:
     case miopenDouble: break;
     }
+#endif
     return 0; // other types not applicable for this solver
 }
 

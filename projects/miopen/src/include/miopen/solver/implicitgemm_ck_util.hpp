@@ -51,7 +51,6 @@ struct ProblemDescription;
 } // namespace conv
 
 namespace solver {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 static constexpr int CkSplitkAutoDeduce = -1;
 
@@ -73,6 +72,8 @@ inline static bool NextCKSplitkValue(int& v)
     v *= 2;
     return false;
 }
+
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace conv {
 template <typename DataType>

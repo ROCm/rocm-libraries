@@ -472,6 +472,7 @@ template <typename DataType>
 size_t
 ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetAlphaBetaCase())
     {
     case BILINEAR:
@@ -484,11 +485,15 @@ ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(const ProblemDescript
         return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdWeightDefaultPtrs<DataType>,
                                            CKArgs<DataType>>(problem);
     }
+#else
+    return 0;
+#endif
 }
 
 size_t
 ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     switch(problem.GetInDataType())
     {
     case miopenHalf: return GetCKMaxWorkspaceSize<ck::half_t>(problem);
@@ -501,6 +506,7 @@ ConvHipImplicitGemm3DGroupWrwXdlops::GetCKMaxWorkspaceSize(const ProblemDescript
     case miopenBFloat8_fnuz:
     case miopenDouble: break;
     }
+#endif
     return 0; // other types not applicable for this solver
 }
 
