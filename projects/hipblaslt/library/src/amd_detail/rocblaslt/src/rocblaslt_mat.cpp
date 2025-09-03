@@ -678,7 +678,7 @@ rocblaslt_status
                                                        matmul_descr[i]->act0,
                                                        matmul_descr[i]->act1,
                                                        0,
-                                                       handle->Synchronizer,
+                                                       (char*)handle->Synchronizer+(409600*i*sizeof(int)),
                                                        swizzleA,
                                                        swizzleB});
     }
@@ -1345,7 +1345,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        handle->Synchronizer,
+                                        (char*)handle->Synchronizer+(409600*i*sizeof(int)),
                                         swizzleA,
                                         swizzleB});
     }

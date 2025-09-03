@@ -20,6 +20,7 @@
 // THE SOFTWARE.
 
 #include <iostream>
+#ifndef WIN32
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -48,9 +49,15 @@ __device__ hipfftDoubleComplex load_callback(hipfftDoubleComplex* input,
 }
 
 __device__ auto load_callback_dev = load_callback;
+#endif
 
 int main()
 {
+#ifdef WIN32
+    std::cout << "This sample is temporarily disabled on Windows" << std::endl;
+    return EXIT_SUCCESS;
+#else
+
     std::cout << "hipfft 1D double-precision complex-to-complex transform with callback\n";
 
     const int Nx        = 8;
@@ -156,4 +163,5 @@ int main()
         throw std::runtime_error("hipFree failed");
 
     return 0;
+#endif
 }

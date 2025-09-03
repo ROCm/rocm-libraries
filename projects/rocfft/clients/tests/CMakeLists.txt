@@ -101,8 +101,11 @@ add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
 
 # callback functions need to be built as relocatable device code
-target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
-target_link_options( rocfft-test PRIVATE -fgpu-rdc )
+# (causes failure at link stage on Windows)
+if (NOT WIN32)
+  target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
+  target_link_options( rocfft-test PRIVATE -fgpu-rdc )
+endif()
 
 find_package( Boost REQUIRED )
 set( Boost_DEBUG ON )
