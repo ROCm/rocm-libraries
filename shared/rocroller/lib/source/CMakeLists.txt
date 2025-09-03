@@ -63,8 +63,6 @@ add_subdirectory(KernelGraph)
 add_library(rocroller-no-rtti
     OBJECT
         "${CMAKE_CURRENT_SOURCE_DIR}/Utilities/ReadELF.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Assemblers/InProcessAssembler.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformations/FastDivision.cpp"
 )
 if(ROCROLLER_ENABLE_LLD)
     target_compile_definitions(rocroller-no-rtti PRIVATE ROCROLLER_USE_LLD)

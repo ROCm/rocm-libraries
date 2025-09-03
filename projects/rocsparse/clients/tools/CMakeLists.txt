@@ -37,6 +37,9 @@ foreach(app ${ROCSPARSEIO_TOOLS_SOURCES})
   # Internal common header
   target_include_directories(${app} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include> $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common>)
 
+  # Target link libraries
+  target_link_libraries(${app} PRIVATE hip::host)
+
   # Set tools output directory
   set_target_properties(${app} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 

@@ -8,7 +8,9 @@ Building and installing rocThrust on Linux with the install script
 
 You can use the ``install`` script to build and install rocThrust on Linux. You can also use `CMake <./rocThrust-install-with-cmake.html>`_ if you want more build and installation options. 
 
-The ``install`` script is located in the ``rocThrust`` root directory. To build and install rocThrust with the ``install`` script, run:
+:doc:`Clone the rocThrust project <./rocThrust-install-overview>`. The ``install`` script will be located in the ``rocthrust`` root directory. 
+
+To build and install rocThrust with the ``install`` script, run:
 
 .. code-block:: shell
 

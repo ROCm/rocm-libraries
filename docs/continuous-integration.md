@@ -27,37 +27,25 @@ The ROCm Azure Pipelines CI (also known as External CI) is a public-facing CI sy
 
 See the [Azure monorepo dashboard](https://dev.azure.com/ROCm-CI/ROCm-CI/_build?definitionScope=%5Cmonorepo) for a full list of pipelines running in the monorepo.
 
-For commits, the pipelines will run based on the conditions defined in the trigger files under [/.azuredevops](https://github.com/ROCm/rocm-libraries/tree/develop/.azuredevops).
+For commits to trunk, the pipelines will run based on the conditions defined in the trigger files under [/.azuredevops](https://github.com/ROCm/rocm-libraries/tree/develop/.azuredevops).
 
-For PRs, the [`Dispatch Azure CI`](https://github.com/ROCm/rocm-libraries/blob/develop/.github/workflows/azure-ci-dispatcher.yml) GitHub Action will be run, which will analyze a PR's contents and determine which pipelines to run. This action will report the final results of each Azure run it dispatches.
+For PRs targeting trunk, the [`Trigger Azure CI`](https://github.com/ROCm/rocm-libraries/blob/develop/.github/workflows/azure-ci-dispatcher.yml) GitHub Action will be run, which will analyze a PR's changed files and run CI for the appropriate components. The final CI status will be reflected in an `Azure CI Summary` check.
 
 ### PR Workflow <a id="az-workflow"></a>
 
 1. PR is submitted
-2. `Dispatch Azure CI` is run on the PR
+2. `Trigger Azure CI` action is run on the PR
     1. Analyzes the PR's contents, determines which pipelines to run
     2. Sends request(s) to Azure API to start runs
-3. Azure CI builds and tests the PR against latest public source
-4. `Dispatch Azure CI` waits until all runs are finished and reports their overall status
+    3. Creates a new `Azure CI Summary` check on the PR, which is a gating requirement
+3. Azure CI builds and tests the PR against latest public source code
+4. As runs finish, they will update `Azure CI Summary` with their status
+    - If all runs are passing, `Azure CI Summary` is marked as passing
+    - If any runs have failed, `Azure CI Summary` is marked as failing and the PR is blocked from merging
 
-URLs for individual Azure runs can be found in the logs of the `Dispatch Azure CI` action, under the `Wait for and report Azure CI` step.
+Clicking on the `Azure CI Summary` check on a PR will bring up information such as the individual runs triggered, the merge SHA used, and instructions on requesting CI reruns.
 
-### Interpreting Results <a id="az-results"></a>
-
-Any errors or warnings during a run will be highlighted on the run's main page on Azure, and clicking on those will bring you directly to the offending logs.
-
-Azure runs can have the following statuses: `Success`, `Failed`, or `Warning`. This corresponds to GitHub status checks as follows:
-
-| Azure Status | GitHub PR Status | Explanation |
-|-|-|-|
-| ✅ Success | ✅ Succeeded | The job was successful. |
-| ⚠️ Warning | ✅ Succeeded with issues | An allowed failure occurred and the job continued on without further issue. |
-| ❌ Failed | ❌ Failing | The job failed. |
-| Did not run | ⬛ Neutral | The job did not run, likely due to not fulfilling the trigger requirements. |
-
-Warnings can occur if a step fails but was marked as being allowed to fail, so a job will continue running in the event of a warning.
-
-In particular, steps are allowed to fail if they have the property `continueOnError: true` ([reference](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/tasks?view=azure-devops&tabs=yaml#task-control-options)).
+From a summary page, clicking on a run ID will bring you to the run's Azure page, where build and test logs can be found. Any errors or warnings will be prominently displayed on this page.
 
 ### Build and Test Coverage <a id="az-coverage"></a>
 
@@ -89,14 +77,48 @@ Azure CI runs for a component will trigger runs for downstream components (provi
 
 For example: a rocPRIM PR will trigger a rocPRIM job. If successful, it will then continue to run hipCUB and rocThrust jobs.
 
-Currently, the following downstream trigger paths are enabled:
+The following graph illustrates the inter-component dependencies within the mathlibs stack:
 
 ```mermaid
 graph TD;
-  rocPRIM-->hipCUB;
-  rocPRIM-->rocThrust;
-  rocRAND-->hipRAND;
+  subgraph ROCm/rocm-libraries
+    rocRAND
+    hipRAND
+    rocFFT
+    hipFFT
+    rocPRIM
+    hipCUB
+    rocThrust
+    hipBLAS-common
+    hipBLASLt
+    rocBLAS
+    rocSOLVER
+    rocSPARSE
+    hipBLAS
+    hipSOLVER
+    hipSPARSE
+    MIOpen
+    hipSPARSELt
+  end
+
+  rocRAND-->hipRAND
+  rocRAND-->MIOpen
+  hipRAND-->rocFFT
+  rocFFT-->hipFFT
+  rocPRIM-->hipCUB
+  rocPRIM-->rocThrust
+  rocPRIM-->rocSOLVER
+  rocPRIM-->rocSPARSE
   hipBLAS-common-->hipBLASLt
+  hipBLASLt-->rocBLAS
+  rocBLAS-->rocSOLVER
+  rocBLAS-->rocSPARSE
+  rocSOLVER-->hipBLAS
+  rocSOLVER-->hipSOLVER
+  rocSPARSE-->hipSOLVER
+  rocSPARSE-->hipSPARSE
+  hipBLAS-->MIOpen
+  hipSPARSE-->hipSPARSELt
 ```
 
 ## Math CI
