@@ -795,13 +795,13 @@ inline bool CKWrwRequireWorkspace(
 
 /// \todo move to a cpp file
 inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDescription& problem,
-                                                  size_t ck_ws_size = -1)
+                                                  size_t ck_ws_size = 0)
 {
     if(problem.IsLayoutNHWC())
     {
         if(problem.GetDirection() == ::miopen::conv::Direction::BackwardWeights)
         {
-            return (ck_ws_size == -1) ? GetCKAlphaBetaWorkspace(problem) : ck_ws_size;
+            return (ck_ws_size > 0) ? ck_ws_size : GetCKAlphaBetaWorkspace(problem);
         }
         return 0;
     }
@@ -814,7 +814,7 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
             {GetPackedSize(problem.GetIn()),
              GetPackedSize(problem.GetWeights()),
              GetPackedSize(problem.GetOut()),
-             (ck_ws_size == -1) ? GetCKAlphaBetaWorkspace(problem) : ck_ws_size});
+             (ck_ws_size > 0) ? ck_ws_size : GetCKAlphaBetaWorkspace(problem)});
         return wt.GetSize();
     }
 
