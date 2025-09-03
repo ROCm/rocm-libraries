@@ -46,6 +46,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -1012,7 +1013,8 @@ public:
           benchmark::State&   gbench_state,
           size_t              warmup_iterations,
           bool                cold,
-          bool                record_as_whole)
+          bool                record_as_whole,
+          std::string         iteration_times_out)
         : stream(stream)
         , size(size)
         , bytes(size)
@@ -1022,6 +1024,7 @@ public:
         , warmup_iterations(warmup_iterations)
         , cold(cold)
         , record_as_whole(record_as_whole)
+        , iteration_times_out(iteration_times_out)
         , events(record_as_whole ? 2 : batch_iterations * 2)
     {}
 
@@ -1156,6 +1159,12 @@ public:
         gbench_state.SetItemsProcessed(total_gbench_iterations * batch_iterations * actual_size);
 
         output_statistics();
+
+        // Write iteration times to JSON file if requested
+        if(!iteration_times_out.empty())
+        {
+            output_iteration_times();
+        }
     }
 
     hipStream_t       stream;
@@ -1229,9 +1238,152 @@ private:
         return times.size() >= 2 ? stddev / mean : 0.0;
     }
 
-    size_t warmup_iterations;
-    bool   cold;
-    bool   record_as_whole;
+    void output_iteration_times()
+    {
+        // Compose the key: benchmark name + "/manual_time"
+        std::string key = gbench_state.name();
+        // Escape double quotes and backslashes for JSON
+        std::string escaped_key;
+        for(char c : key)
+        {
+            if(c == '"' || c == '\\')
+                escaped_key += '\\';
+            escaped_key += c;
+        }
+        escaped_key += "/manual_time";
+
+        // Compose the value: array of times
+        std::ostringstream value_stream;
+        value_stream << "[";
+        for(size_t i = 0; i < times.size(); ++i)
+        {
+            if(i != 0)
+                value_stream << ",";
+            value_stream << times[i];
+        }
+        value_stream << "]";
+
+        // Try to append or create the JSON file
+        bool file_exists = false;
+        {
+            std::ifstream infile(iteration_times_out);
+            file_exists = infile.good();
+        }
+
+        std::string content;
+        if(file_exists)
+        {
+            content = update_iteration_times(escaped_key, value_stream);
+        }
+        else
+        {
+            // Create new file
+            content = "{\"" + escaped_key + "\":" + value_stream.str() + "}";
+        }
+
+        std::ofstream outfile(iteration_times_out, std::ios::trunc);
+        if(!outfile)
+        {
+            std::cerr << "Error: Failed to open file for writing: " << iteration_times_out
+                      << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+        outfile << content;
+        if(!outfile)
+        {
+            std::cerr << "Error: Failed to write to file: " << iteration_times_out << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+        outfile.close();
+    }
+
+    std::string update_iteration_times(const std::string&        escaped_key,
+                                       const std::ostringstream& value_stream)
+    {
+        std::string content;
+
+        // Read the existing file (assume valid JSON object)
+        std::ifstream infile(iteration_times_out);
+        if(!infile)
+        {
+            std::cerr << "Error: Failed to open file for reading: " << iteration_times_out
+                      << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+        content.assign((std::istreambuf_iterator<char>(infile)), std::istreambuf_iterator<char>());
+        if(infile.bad())
+        {
+            std::cerr << "Error: Failed to read from file: " << iteration_times_out << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+        infile.close();
+
+        // Remove trailing '}' and add comma if needed
+        if(!content.empty() && content.back() == '}')
+        {
+            content.pop_back();
+        }
+        else
+        {
+            // Malformed file, start fresh
+            content = "{";
+        }
+
+        // Find the key in the content
+        std::string key_str = "\"" + escaped_key + "\":[";
+        size_t      key_pos = content.find(key_str);
+        if(key_pos != std::string::npos)
+        {
+            // Find the end of the array for this key (the first ']' after key_pos)
+            size_t array_start = key_pos + key_str.size();
+            size_t array_end   = content.find(']', array_start);
+            if(array_end != std::string::npos)
+            {
+                // Replace the array with the new array
+                content.replace(array_start,
+                                array_end - array_start,
+                                value_stream.str().substr(1, value_stream.str().size() - 2));
+                // Remove everything after the replaced array (including the old ']')
+                content.erase(array_start + value_stream.str().size() - 2);
+                // Add closing bracket for the array
+                content += "]";
+            }
+            else
+            {
+                // Malformed, just replace from key_pos to next comma or end
+                size_t next_comma = content.find(',', key_pos);
+                if(next_comma != std::string::npos)
+                {
+                    content.replace(key_pos,
+                                    next_comma - key_pos,
+                                    "\"" + escaped_key + "\":" + value_stream.str());
+                }
+                else
+                {
+                    content.replace(key_pos,
+                                    std::string::npos,
+                                    "\"" + escaped_key + "\":" + value_stream.str());
+                }
+            }
+        }
+        else
+        {
+            // Key not found, add as new key
+            if(content.size() > 1)
+                content += ",";
+            content += "\"" + escaped_key + "\":" + value_stream.str();
+        }
+
+        // Add closing brace
+        content += "}";
+
+        return content;
+    }
+
+    size_t      warmup_iterations;
+    bool        cold;
+    bool        record_as_whole;
+    std::string iteration_times_out;
 
     std::vector<hipEvent_t> events;
     std::function<void()>   run_before_every_iteration_lambda       = nullptr;
@@ -1368,6 +1520,12 @@ private:
                                  "parallel_instances",
                                  1,
                                  "total parallel instances");
+
+        parser.set_optional<std::string>(
+            "iteration_times_out",
+            "iteration_times_out",
+            "",
+            "optional output path for a JSON file containing iteration times");
     }
 
     void parse(cli::Parser& parser)
@@ -1383,6 +1541,8 @@ private:
 
         cold            = !parser.get<bool>("hot");
         record_as_whole = parser.get<bool>("record_as_whole");
+
+        iteration_times_out = parser.get<std::string>("iteration_times_out");
 
         trials             = parser.get<int>("trials");
         parallel_instance  = parser.get<int>("parallel_instance");
@@ -1514,7 +1674,8 @@ private:
                      gbench_state,
                      warmup_iterations,
                      cold,
-                     record_as_whole);
+                     record_as_whole,
+                     iteration_times_out);
     }
 
     void apply_settings(benchmark::internal::Benchmark* b)
@@ -1562,6 +1723,7 @@ private:
     size_t       warmup_iterations;
     bool         cold;
     bool         record_as_whole;
+    std::string  iteration_times_out;
 
     int trials;
     int parallel_instance;
