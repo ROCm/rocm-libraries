@@ -29,6 +29,8 @@
 #include <miopen/db_path.hpp>
 #include <miopen/logger.hpp>
 
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+
 namespace miopen {
 namespace ai {
 namespace conv3d {
@@ -422,3 +424,5 @@ size_t Metadata3D::EncodeOutLayout(const std::string& layout) const
 } // namespace conv3d
 } // namespace ai
 } // namespace miopen
+
+#endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK

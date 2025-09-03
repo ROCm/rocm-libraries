@@ -44,6 +44,7 @@
 #include <mutex>
 #include <stdexcept>
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace miopen {
 namespace ai {
 namespace tuning {
@@ -548,3 +549,5 @@ ModelSelectBestCandidate(const std::string& arch,
 } // namespace tuning
 } // namespace ai
 } // namespace miopen
+
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
