@@ -17,6 +17,7 @@ option(ROCM_LIBS_SUPERBUILD "Enable superbuild mode" ON)
 set(ROCM_LIBS_ENABLE_COMPONENTS "all"
     CACHE STRING "Semicolon-separated list of components to build (default: 'all')"
 )
+
 set(SUPPORTED_COMPONENTS
     # shared
     mxdatagenerator
@@ -26,7 +27,6 @@ set(SUPPORTED_COMPONENTS
     rocprim
     rocrand
 )
-
 
 set(UNSUPPORTED_COMPONENTS
     # shared
