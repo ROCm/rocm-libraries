@@ -21,8 +21,16 @@ set(SUPPORTED_COMPONENTS
     # shared
     mxdatagenerator
     rocroller
-    tensile
     hipblas-common
+    # projects
+    rocprim
+    rocrand
+)
+
+
+set(UNSUPPORTED_COMPONENTS
+    # shared
+    tensile
     # projects
     composablekernel
     hipblas
@@ -36,8 +44,6 @@ set(SUPPORTED_COMPONENTS
     miopen
     rocblas
     rocfft
-    rocprim
-    rocrand
     rocsolver
     rocsparse
     rocthrust
@@ -60,10 +66,12 @@ endif()
 
 message(STATUS "Enabling components:")
 foreach(component ${ROCM_LIBS_ENABLE_COMPONENTS})
-    if(NOT component IN_LIST SUPPORTED_COMPONENTS)
-        message(FATAL_ERROR "Invalid component: ${component}")
+    if(component IN_LIST SUPPORTED_COMPONENTS)
+        message(STATUS "  ${component} (supported)")
+    elseif(component IN_LIST UNSUPPORTED_COMPONENTS)
+        message(STATUS "  ${component} (unsupported)")
     else()
-        message(STATUS "  ${component}")
+        message(FATAL_ERROR "Unknown component: ${component}.")
     endif()
 endforeach()
 
