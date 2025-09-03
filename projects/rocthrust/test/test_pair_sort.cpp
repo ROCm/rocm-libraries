@@ -19,8 +19,8 @@
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(PairSortTests, NumericalTestsParams);
@@ -28,7 +28,7 @@ TESTS_DEFINE(PairSortTests, NumericalTestsParams);
 struct make_pair_functor
 {
   template <typename T1, typename T2>
-  __host__ __device__ thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  THRUST_HOST_DEVICE thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
   {
     return thrust::make_pair(x, y);
   } // end operator()()
@@ -49,12 +49,11 @@ TYPED_TEST(PairSortTests, TestPairStableSortByKey)
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
+      // host arrays
       thrust::host_vector<T> h_p1 =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_p2 = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
-
       thrust::host_vector<P> h_pairs(size);
 
       thrust::host_vector<int> h_values(size);
@@ -74,7 +73,7 @@ TYPED_TEST(PairSortTests, TestPairStableSortByKey)
       thrust::stable_sort_by_key(d_pairs.begin(), d_pairs.end(), d_values.begin());
 
       ASSERT_EQ_QUIET(h_pairs, d_pairs);
-      ASSERT_EQ_QUIET(h_values, d_values);
+      ASSERT_EQ(h_values, d_values);
     }
   }
 }

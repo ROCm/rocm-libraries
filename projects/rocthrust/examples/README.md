@@ -5,3 +5,5 @@ norm example.
 
 These examples are also available online:
   https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocthrust/examples
+
+We also provide consistent and convenient development environments as [devcontainers](../../.devcontainers/README.md).
