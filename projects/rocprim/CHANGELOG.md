@@ -2,6 +2,13 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 4.0.2 for ROCm 7.0.2
+
+### Added
+
+* Atomic Ordered Block Id alternate implementation for lookback scan for optimal performance on MI3xx.
+* Added a new cmake option, `BUILD_OFFLOAD_COMPRESS`. When rocPRIM is build with this option enabled, the `--offload-compress` switch is passed to the compiler. This causes the compiler to compress the binary that it generates. Compression can be useful in cases where you are compiling for a large number of targets, since this often results in a large binary. Without compression, in some cases, the generated binary may become so large symbols are placed out of range, resulting in linking errors. The new `BUILD_OFFLOAD_COMPRESS` option is set to `ON` by default.
+
 ## rocPRIM 4.0.1 for ROCm 7.0.1
 
 ### Resolved issues
