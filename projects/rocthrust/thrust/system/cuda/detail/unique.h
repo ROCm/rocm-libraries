@@ -28,7 +28,15 @@
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 
 #  include <thrust/system/cuda/config.h>
 
@@ -36,6 +44,7 @@
 #  include <cub/util_math.cuh>
 
 #  include <thrust/advance.h>
+#  include <thrust/count.h>
 #  include <thrust/detail/minmax.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
@@ -162,7 +171,8 @@ struct Tuning<sm30, T>
 template <class ItemsIt, class ItemsOutputIt, class BinaryPred, class Size, class NumSelectedOutIt>
 struct UniqueAgent
 {
-  using item_type     = typename iterator_traits<ItemsIt>::value_type;
+  using item_type = typename iterator_traits<ItemsIt>::value_type;
+
   using ScanTileState = cub::ScanTileState<Size>;
 
   template <class Arch>
@@ -176,9 +186,8 @@ struct UniqueAgent
 
     using BlockDiscontinuityItems = cub::BlockDiscontinuity<item_type, PtxPlan::BLOCK_THREADS, 1, 1, Arch::ver>;
 
-    using TilePrefixCallback = cub::TilePrefixCallbackOp<Size, cub::Sum, ScanTileState, Arch::ver>;
-
-    using BlockScan = cub::BlockScan<Size, PtxPlan::BLOCK_THREADS, PtxPlan::SCAN_ALGORITHM, 1, 1, Arch::ver>;
+    using TilePrefixCallback = cub::TilePrefixCallbackOp<Size, ::cuda::std::plus<>, ScanTileState, Arch::ver>;
+    using BlockScan          = cub::BlockScan<Size, PtxPlan::BLOCK_THREADS, PtxPlan::SCAN_ALGORITHM, 1, 1, Arch::ver>;
 
     using shared_items_t = core::uninitialized_array<item_type, PtxPlan::ITEMS_PER_TILE>;
 
@@ -199,8 +208,7 @@ struct UniqueAgent
 
   using ptx_plan = typename core::specialize_plan_msvc10_war<PtxPlan>::type::type;
 
-  using ItemsLoadIt = typename ptx_plan::ItemsLoadIt;
-
+  using ItemsLoadIt             = typename ptx_plan::ItemsLoadIt;
   using BlockLoadItems          = typename ptx_plan::BlockLoadItems;
   using BlockDiscontinuityItems = typename ptx_plan::BlockDiscontinuityItems;
   using TilePrefixCallback      = typename ptx_plan::TilePrefixCallback;
@@ -345,7 +353,7 @@ struct UniqueAgent
       }
       else
       {
-        TilePrefixCallback prefix_cb(tile_state, temp_storage.scan_storage.prefix, cub::Sum(), tile_idx);
+        TilePrefixCallback prefix_cb(tile_state, temp_storage.scan_storage.prefix, ::cuda::std::plus<>{}, tile_idx);
         BlockScan(temp_storage.scan_storage.scan).ExclusiveSum(selection_flags, selection_idx, prefix_cb);
 
         num_selections        = prefix_cb.GetInclusivePrefix();
@@ -501,7 +509,7 @@ static cudaError_t THRUST_RUNTIME_FUNCTION doit_step(
   typename get_plan<unique_agent>::type unique_plan = unique_agent::get_plan(stream);
 
   int tile_size    = unique_plan.items_per_tile;
-  size_t num_tiles = cub::DivideAndRoundUp(num_items, tile_size);
+  size_t num_tiles = ::cuda::ceil_div(num_items, tile_size);
 
   size_t vshmem_size = core::vshmem_size(unique_plan.shared_memory_size, num_tiles);
 

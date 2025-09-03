@@ -18,7 +18,23 @@
 
 #include <thrust/detail/config.h>
 
-#include <type_traits>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/disjunction.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/negation.h)
+// clang-format on
+#else
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -27,16 +43,12 @@ THRUST_NAMESPACE_BEGIN
 //! \addtogroup type_traits Type Traits
 //! \{
 
-using std::conjunction;
-using std::disjunction;
-using std::negation;
-#if THRUST_CPP_DIALECT >= 2017
-using std::conjunction_v;
-using std::disjunction_v;
-using std::negation_v;
-#endif
-
-///////////////////////////////////////////////////////////////////////////////
+using _THRUST_STD::conjunction;
+using _THRUST_STD::conjunction_v;
+using _THRUST_STD::disjunction;
+using _THRUST_STD::disjunction_v;
+using _THRUST_STD::negation;
+using _THRUST_STD::negation_v;
 
 //! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
 //! whose value is <tt>(... && Bs)</tt>.
@@ -45,9 +57,8 @@ using std::negation_v;
 //! \see conjunction
 //! \see <a href="https://en.cppreference.com/w/cpp/types/conjunction"><tt>std::conjunction</tt></a>
 template <bool... Bs>
-using conjunction_value = conjunction<std::bool_constant<Bs>...>;
+using conjunction_value = conjunction<_THRUST_STD::bool_constant<Bs>...>;
 
-#if THRUST_CPP_DIALECT >= 2017
 //! \brief <tt>constexpr bool</tt> whose value is <tt>(... && Bs)</tt>.
 //!
 //! \see conjunction_value
@@ -55,7 +66,6 @@ using conjunction_value = conjunction<std::bool_constant<Bs>...>;
 //! \see <a href="https://en.cppreference.com/w/cpp/types/conjunction"><tt>std::conjunction</tt></a>
 template <bool... Bs>
 constexpr bool conjunction_value_v = conjunction_value<Bs...>::value;
-#endif
 
 //! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
 //! whose value is <tt>(... || Bs)</tt>.
@@ -64,9 +74,8 @@ constexpr bool conjunction_value_v = conjunction_value<Bs...>::value;
 //! \see disjunction
 //! \see <a href="https://en.cppreference.com/w/cpp/types/disjunction"><tt>std::disjunction</tt></a>
 template <bool... Bs>
-using disjunction_value = disjunction<std::bool_constant<Bs>...>;
+using disjunction_value = disjunction<_THRUST_STD::bool_constant<Bs>...>;
 
-#if THRUST_CPP_DIALECT >= 2017
 //! \brief <tt>constexpr bool</tt> whose value is <tt>(... || Bs)</tt>.
 //!
 //! \see disjunction_value
@@ -74,7 +83,7 @@ using disjunction_value = disjunction<std::bool_constant<Bs>...>;
 //! \see <a href="https://en.cppreference.com/w/cpp/types/disjunction"><tt>std::disjunction</tt></a>
 template <bool... Bs>
 constexpr bool disjunction_value_v = disjunction_value<Bs...>::value;
-#endif
+
 //! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
 //! whose value is <tt>!Bs</tt>.
 //!
@@ -82,18 +91,15 @@ constexpr bool disjunction_value_v = disjunction_value<Bs...>::value;
 //! \see negation
 //! \see <a href="https://en.cppreference.com/w/cpp/types/negation"><tt>std::negation</tt></a>
 template <bool B>
-using negation_value = std::bool_constant<!B>;
+using negation_value = _THRUST_STD::bool_constant<!B>;
 
-#if THRUST_CPP_DIALECT >= 2017
-//! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
-//! whose value is <tt>!Bs</tt>.
+//! \brief <tt>constexpr bool</tt> whose value is <tt>!Bs</tt>.
 //!
-//! \see negation_value_v
+//! \see negation_value
 //! \see negation
 //! \see <a href="https://en.cppreference.com/w/cpp/types/negation"><tt>std::negation</tt></a>
 template <bool B>
 constexpr bool negation_value_v = negation_value<B>::value;
-#endif
 
 //! \} // type traits
 //! \} // utility
