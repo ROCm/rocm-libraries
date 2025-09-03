@@ -1,5 +1,5 @@
 /******************************************************************************
-j * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,7 +28,15 @@ j * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 
 #  include <cub/device/device_merge.cuh>
 
@@ -54,12 +62,11 @@ merge(execution_policy<Derived>& policy,
       KeysIt2 keys2_end,
       ResultIt result_begin,
       CompareOp compare_op = {})
-
 {
   THRUST_CDP_DISPATCH(
     (using size_type         = typename iterator_traits<KeysIt1>::difference_type;
-     const auto num_keys1    = static_cast<size_type>(distance(keys1_begin, keys1_end));
-     const auto num_keys2    = static_cast<size_type>(distance(keys2_begin, keys2_end));
+     const auto num_keys1    = static_cast<size_type>(thrust::distance(keys1_begin, keys1_end));
+     const auto num_keys2    = static_cast<size_type>(thrust::distance(keys2_begin, keys2_end));
      const auto num_keys_out = num_keys1 + num_keys2;
      if (num_keys_out == 0) { return result_begin; }
 
@@ -218,7 +225,6 @@ pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE merge_by_key(
               items_out_begin,
               compare_op);));
 }
-
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
 #endif
