@@ -12,14 +12,10 @@ list(REMOVE_DUPLICATES archs)
 set(extop_cp_depends "")
 
 foreach(arch IN LISTS archs)
-    set(WAVEFRONT "-mwavefrontsize64")
-    if(arch MATCHES "^gfx1[12][0-9][0-9]$")
-        set(WAVEFRONT "-mno-wavefrontsize64")
-    endif()
     add_library(extop-obj-${arch} OBJECT)
     target_compile_options(extop-obj-${arch}
         PRIVATE
-            -Wno-unused-command-line-argument -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=${arch} ${WAVEFRONT} -c
+            -Wno-unused-command-line-argument -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=${arch} -mwavefrontsize64 -c
     )
     target_sources(extop-obj-${arch}
         PRIVATE
