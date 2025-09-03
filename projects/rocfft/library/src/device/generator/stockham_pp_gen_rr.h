@@ -59,17 +59,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         R.size = Expression{std::max(
             nregisters, compute_nregisters(pp_factors_prod, factors_pp, threads_per_transform_pp))};
-
-        // nregister must not be larger than max_factor_pp.
-        // If that were to be true,  work in the off-dimension
-        // in perform_partial_pass_step_1_2() would require to
-        // to be applied to (nregisters-max_factor_pp) elements
-        // in the off-dimension, but this data is not available
-        // in the LDS, and the number of additional elements
-        // would need to be at least a multiple of max_factor_pp.
-        if(nregisters > max_factor_pp)
-            throw std::runtime_error(
-                "StockhamPartialPassKernelRR: nregisters cannot be larger than max_factor_pp");
     }
 
     StockhamPartialPassParams params;
@@ -425,6 +414,32 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return work;
     }
 
+    StatementList apply_twiddle_pp_generator(unsigned int h,
+                                             unsigned int hr,
+                                             unsigned int width,
+                                             unsigned int dt,
+                                             Expression   guard,
+                                             unsigned int cumheight,
+                                             unsigned int firstFactor)
+    {
+        if(hr == 0)
+            hr = h;
+        StatementList work;
+        for(unsigned int w = 0; w < width; ++w)
+        {
+            auto tid  = thread + dt + h * threads_per_transform_pp;
+            auto tidx = thread_pp * Literal(length_pp)
+                        + (Parens{tid / cumheight} * (width * cumheight) + tid % cumheight
+                           + w * cumheight);
+            auto ridx = hr * width + w;
+
+            work += Assign(W, twiddles_pp[tidx]);
+            work += Assign(t, TwiddleMultiply(R[ridx], W));
+            work += Assign(R[ridx], t);
+        }
+        return work;
+    }
+
     Function generate_pp_device_function()
     {
         std::string function_name = "forward_partial_pass_length" + std::to_string(pp_factors_prod)
@@ -437,6 +452,10 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         if(pp_factors_prod == 1)
             return f;
 
+        unsigned int cumheight = 0;
+        unsigned int width     = 0;
+        float        height    = 0.0f;
+
         StatementList& body = f.body;
         body += Declaration{W};
         body += Declaration{t};
@@ -444,13 +463,13 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
         {
             // width is the butterfly width, Radix-n.
-            unsigned int width = factors_pp[npass];
+            width = factors_pp[npass];
             // height is how many butterflies per thread will do on average
-            float height = static_cast<float>(pp_factors_prod) / width / threads_per_transform_pp;
+            height = static_cast<float>(pp_factors_prod) / width / threads_per_transform_pp;
 
-            unsigned int cumheight = product(
-                factors_pp.begin(),
-                factors_pp.begin() + npass); // cumheight is irrelevant to the above height,
+            cumheight = product(factors_pp.begin(),
+                                factors_pp.begin()
+                                    + npass); // cumheight is irrelevant to the above height,
             // is used for twiddle multiplication and lds writing.
 
             body += LineBreak{};
@@ -521,15 +540,15 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             }
         }
 
-        // Add this as a generator?
         body += LineBreak{};
         body += CommentLines{"extra twiddle multiplication step for partial transform"};
-        for(unsigned int w = 0; w < pp_factors_prod; ++w)
-        {
-            body += Assign{W, twiddles_pp[thread_pp * Literal(length_pp) + w]};
-            body += Assign{t, TwiddleMultiply{R[w], W}};
-            body += Assign{R[w], t};
-        }
+        auto apply_twiddle_pp
+            = std::mem_fn(&StockhamPartialPassKernelRR::apply_twiddle_pp_generator);
+        body += add_work(
+            std::bind(apply_twiddle_pp, this, _1, _2, _3, _4, _5, cumheight, factors_pp.front()),
+            width,
+            height,
+            ThreadGuardMode::NO_GUARD);
 
         return f;
     }
