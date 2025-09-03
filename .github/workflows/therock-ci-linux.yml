@@ -66,12 +66,16 @@ jobs:
 
       - name: Fetch sources
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries
 
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
           pip freeze
+
+      - name: Patch rocm-libraries
+        run: |
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ${{ github.workspace }}
 
       - name: Configure Projects
         env:
