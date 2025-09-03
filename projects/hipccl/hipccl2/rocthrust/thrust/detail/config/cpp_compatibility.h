@@ -19,19 +19,30 @@
 
 // Internal config header that is only included through thrust/detail/config/config.h
 
-#include <thrust/detail/config/cpp_dialect.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <thrust/detail/config/cpp_dialect.h> // IWYU pragma: export
 
 #include <cstddef>
 
-#ifndef __has_cpp_attribute
-#  define __has_cpp_attribute(X) 0
-#endif
+#ifdef __has_cpp_attribute
+#  define THRUST_HAS_CPP_ATTRIBUTE(__x) __has_cpp_attribute(__x)
+#else // ^^^ __has_cpp_attribute ^^^ / vvv !__has_cpp_attribute vvv
+#  define THRUST_HAS_CPP_ATTRIBUTE(__x) 0
+#endif // !__has_cpp_attribute
 
-#if THRUST_CPP_DIALECT >= 2017 && __has_cpp_attribute(nodiscard)
+#if THRUST_HAS_CPP_ATTRIBUTE(nodiscard) \
+  || ((THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && THRUST_CPP_DIALECT >= 2017)
 #  define THRUST_NODISCARD [[nodiscard]]
-#else
+#else // ^^^ has nodiscard ^^^ / vvv no nodiscard vvv
 #  define THRUST_NODISCARD
-#endif
+#endif // no nodiscard
 
 // NVCC below 11.3 does not support nodiscard on friend operators
 // It always fails with clang
@@ -42,11 +53,13 @@
 #  define THRUST_NODISCARD_FRIEND THRUST_NODISCARD friend
 #endif
 
-#if THRUST_CPP_DIALECT >= 2017 && __cpp_if_constexpr
-#  define THRUST_IF_CONSTEXPR if constexpr
-#else
-#  define THRUST_IF_CONSTEXPR if
-#endif
+#if THRUST_CPP_DIALECT >= 2017 && defined(__cpp_if_constexpr)
+#  define THRUST_IF_CONSTEXPR      if constexpr
+#  define THRUST_ELSE_IF_CONSTEXPR else if constexpr
+#else // ^^^ C++17 ^^^ / vvv C++14 vvv
+#  define THRUST_IF_CONSTEXPR      if
+#  define THRUST_ELSE_IF_CONSTEXPR else if
+#endif // THRUST_CPP_DIALECT <= 2014
 
 // FIXME: Combine THRUST_INLINE_CONSTANT and
 // THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT into one macro when NVCC properly

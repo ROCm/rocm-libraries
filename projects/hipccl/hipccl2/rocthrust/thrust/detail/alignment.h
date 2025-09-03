@@ -1,5 +1,5 @@
 /*
- *  Copyright 2017 NVIDIA Corporation
+ *  Copyright 2024 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,131 +14,71 @@
  *  limitations under the License.
  */
 
-/*! \file alignment.h
- *  \brief Type-alignment utilities.
- */
+/// \file alignment.h
+/// \brief Type-alignment utilities.
 
 #pragma once
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/type_traits.h> // For `integral_constant`.
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include _THRUST_STD_INCLUDE(type_traits) // For `std::alignment_of`.
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#    include <cuda/cmath>
+#  else
+#    include <hip/cmath>
+#  endif
+#endif
 
 #include <cstddef> // For `std::size_t` and `std::max_align_t`.
-#include <type_traits> // For `std::alignment_of`.
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <rocprim/detail/various.hpp>
+#endif
 
 THRUST_NAMESPACE_BEGIN
-
 namespace detail
 {
-
 /// \p alignment_of provides the member constant `value` which is equal to the
 /// alignment requirement of the type `T`, as if obtained by a C++11 `alignof`
 /// expression.
 ///
 /// It is an implementation of C++11's \p std::alignment_of.
 template <typename T>
-using alignment_of = std::alignment_of<T>;
+using alignment_of = _THRUST_STD::alignment_of<T>;
 
 /// \p aligned_type provides the nested type `type`, which is a trivial
 /// type whose alignment requirement is a divisor of `Align`.
 ///
 /// The behavior is undefined if `Align` is not a power of 2.
 template <std::size_t Align>
-struct aligned_type;
-
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION >= 40800)
-// C++11 implementation, excluding GCC 4.7, which doesn't have `alignas`.
-template <std::size_t Align>
 struct aligned_type
 {
   struct alignas(Align) type
   {};
 };
-#elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) \
-  || ((THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION < 40600))
-// C++03 implementation for MSVC and GCC <= 4.5.
-//
-// We have to implement `aligned_type` with specializations for MSVC
-// and GCC 4.2.x and older because they require literals as arguments to
-// their alignment attribute.
 
-#  if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC)
-// MSVC implementation.
-#    define THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(X) \
-      template <>                                        \
-      struct aligned_type<X>                             \
-      {                                                  \
-        __declspec(align(X)) struct type                 \
-        {};                                              \
-      };                                                 \
-      /**/
-#  else
-// GCC <= 4.2 implementation.
-#    define THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(X) \
-      template <>                                        \
-      struct aligned_type<X>                             \
-      {                                                  \
-        struct type                                      \
-        {                                                \
-        } __attribute__((aligned(X)));                   \
-      };                                                 \
-      /**/
-#  endif
-
-THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(1);
-THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(2);
-THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(4);
-THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(8);
-THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(16);
-THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(32);
-THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(64);
-THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION(128);
-
-#  undef THRUST_DEFINE_ALIGNED_TYPE_SPECIALIZATION
-#else
-// C++03 implementation for GCC > 4.5, Clang, PGI, ICPC, and xlC.
-template <std::size_t Align>
-struct aligned_type
-{
-  struct type
-  {
-  } __attribute__((aligned(Align)));
-};
-#endif
-
-/// \p aligned_storage provides the nested type `type`, which is a trivial type
-/// suitable for use as uninitialized storage for any object whose size is at
-/// most `Len` bytes and whose alignment requirement is a divisor of `Align`.
+/// \p max_align_t is a trivial type whose alignment requirement is at least as
+/// strict (as large) as that of every scalar type.
 ///
 /// It is an implementation of C++11's \p std::max_align_t.
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION >= 40900)
-
-// GCC 4.7 and 4.8 don't have `std::max_align_t`.
-using max_align_t = std::max_align_t;
-#else
-union max_align_t
-{
-  // These cannot be private because C++03 POD types cannot have private
-  // data members.
-  char c;
-  short s;
-  int i;
-  long l;
-  float f;
-  double d;
-  long long ll;
-  long double ld;
-  void* p;
-};
-#endif
+using max_align_t = _THRUST_STD::max_align_t;
 
 /// \p aligned_reinterpret_cast `reinterpret_cast`s \p u of type \p U to `void*`
 /// and then `reinterpret_cast`s the result to \p T. The indirection through
 /// `void*` suppresses compiler warnings when the alignment requirement of \p *u
 /// is less than the alignment requirement of \p *t. The caller of
 /// \p aligned_reinterpret_cast is responsible for ensuring that the alignment
-/// requirements are actually satisified.
+/// requirements are actually satisfied.
 template <typename T, typename U>
 THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
 {
@@ -147,9 +87,15 @@ THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
 
 THRUST_HOST_DEVICE inline std::size_t aligned_storage_size(std::size_t n, std::size_t align)
 {
-  return ((n + align - 1) / align) * align;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  return ::cuda::ceil_div(n, align) * align;
+#  else
+  return ::hip::ceil_div(n, align) * align;
+#  endif
+#else
+  return ::rocprim::detail::ceiling_div(n, align) * align;
+#endif
 }
-
 } // end namespace detail
-
 THRUST_NAMESPACE_END

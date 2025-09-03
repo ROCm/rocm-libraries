@@ -9,6 +9,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/preprocessor.h>
 
 #include <type_traits>
@@ -52,7 +59,7 @@
 ///
 // Trailing return types seem to confuse Doxygen, and cause it to interpret
 // parts of the function's body as new function signatures.
-#if defined(THRUST_DOXYGEN)
+#if defined(THRUST_DOXYGEN_INVOKED)
 #  define THRUST_DECLTYPE_RETURNS(...) \
     {                                  \
       return (__VA_ARGS__);            \
@@ -74,7 +81,7 @@
 ///
 // Trailing return types seem to confuse Doxygen, and cause it to interpret
 // parts of the function's body as new function signatures.
-#if defined(THRUST_DOXYGEN)
+#if defined(THRUST_DOXYGEN_INVOKED)
 #  define THRUST_DECLTYPE_RETURNS(...) \
     {                                  \
       return (__VA_ARGS__);            \

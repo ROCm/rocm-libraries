@@ -629,21 +629,18 @@ public:
       }
     }
 
-    if (run.memory_result)
+    const benchmark::MemoryManager::Result memory_result = run.memory_result;
+    output_format("allocs_per_iter", run.allocs_per_iter);
+    output_format("max_bytes_used", memory_result.max_bytes_used);
+
+    if (memory_result.total_allocated_bytes != benchmark::MemoryManager::TombstoneValue)
     {
-      const benchmark::MemoryManager::Result memory_result = *run.memory_result;
-      output_format("allocs_per_iter", run.allocs_per_iter);
-      output_format("max_bytes_used", memory_result.max_bytes_used);
+      output_format("total_allocated_bytes", memory_result.total_allocated_bytes);
+    }
 
-      if (memory_result.total_allocated_bytes != benchmark::MemoryManager::TombstoneValue)
-      {
-        output_format("total_allocated_bytes", memory_result.total_allocated_bytes);
-      }
-
-      if (memory_result.net_heap_growth != benchmark::MemoryManager::TombstoneValue)
-      {
-        output_format("net_heap_growth", memory_result.net_heap_growth);
-      }
+    if (memory_result.net_heap_growth != benchmark::MemoryManager::TombstoneValue)
+    {
+      output_format("net_heap_growth", memory_result.net_heap_growth);
     }
 
     if (!run.report_label.empty())

@@ -32,12 +32,7 @@ void TestUninitializedCopyDevice(ExecutionPolicy exec)
 {
   using Vector = thrust::device_vector<int>;
 
-  Vector v1(5);
-  v1[0] = 0;
-  v1[1] = 1;
-  v1[2] = 2;
-  v1[3] = 3;
-  v1[4] = 4;
+  Vector v1{0, 1, 2, 3, 4};
 
   // copy to Vector
   Vector v2(5);
@@ -45,11 +40,8 @@ void TestUninitializedCopyDevice(ExecutionPolicy exec)
   cudaError_t const err = cudaDeviceSynchronize();
   ASSERT_EQUAL(cudaSuccess, err);
 
-  ASSERT_EQUAL(v2[0], 0);
-  ASSERT_EQUAL(v2[1], 1);
-  ASSERT_EQUAL(v2[2], 2);
-  ASSERT_EQUAL(v2[3], 3);
-  ASSERT_EQUAL(v2[4], 4);
+  Vector ref{0, 1, 2, 3, 4};
+  ASSERT_EQUAL(v2, ref);
 }
 
 void TestUninitializedCopyDeviceSeq()
@@ -69,12 +61,7 @@ void TestUninitializedCopyCudaStreams()
 {
   using Vector = thrust::device_vector<int>;
 
-  Vector v1(5);
-  v1[0] = 0;
-  v1[1] = 1;
-  v1[2] = 2;
-  v1[3] = 3;
-  v1[4] = 4;
+  Vector v1{0, 1, 2, 3, 4};
 
   // copy to Vector
   Vector v2(5);
@@ -85,12 +72,7 @@ void TestUninitializedCopyCudaStreams()
   thrust::uninitialized_copy(thrust::cuda::par.on(s), v1.begin(), v1.end(), v2.begin());
   cudaStreamSynchronize(s);
 
-  ASSERT_EQUAL(v2[0], 0);
-  ASSERT_EQUAL(v2[1], 1);
-  ASSERT_EQUAL(v2[2], 2);
-  ASSERT_EQUAL(v2[3], 3);
-  ASSERT_EQUAL(v2[4], 4);
-
+  ASSERT_EQUAL(v2, v1);
   cudaStreamDestroy(s);
 }
 DECLARE_UNITTEST(TestUninitializedCopyCudaStreams);
@@ -107,12 +89,7 @@ void TestUninitializedCopyNDevice(ExecutionPolicy exec)
 {
   using Vector = thrust::device_vector<int>;
 
-  Vector v1(5);
-  v1[0] = 0;
-  v1[1] = 1;
-  v1[2] = 2;
-  v1[3] = 3;
-  v1[4] = 4;
+  Vector v1{0, 1, 2, 3, 4};
 
   // copy to Vector
   Vector v2(5);
@@ -120,11 +97,7 @@ void TestUninitializedCopyNDevice(ExecutionPolicy exec)
   cudaError_t const err = cudaDeviceSynchronize();
   ASSERT_EQUAL(cudaSuccess, err);
 
-  ASSERT_EQUAL(v2[0], 0);
-  ASSERT_EQUAL(v2[1], 1);
-  ASSERT_EQUAL(v2[2], 2);
-  ASSERT_EQUAL(v2[3], 3);
-  ASSERT_EQUAL(v2[4], 4);
+  ASSERT_EQUAL(v2, v1);
 }
 
 void TestUninitializedCopyNDeviceSeq()
@@ -144,12 +117,7 @@ void TestUninitializedCopyNCudaStreams()
 {
   using Vector = thrust::device_vector<int>;
 
-  Vector v1(5);
-  v1[0] = 0;
-  v1[1] = 1;
-  v1[2] = 2;
-  v1[3] = 3;
-  v1[4] = 4;
+  Vector v1{0, 1, 2, 3, 4};
 
   // copy to Vector
   Vector v2(5);
@@ -159,12 +127,7 @@ void TestUninitializedCopyNCudaStreams()
 
   thrust::uninitialized_copy_n(thrust::cuda::par.on(s), v1.begin(), v1.size(), v2.begin());
   cudaStreamSynchronize(s);
-
-  ASSERT_EQUAL(v2[0], 0);
-  ASSERT_EQUAL(v2[1], 1);
-  ASSERT_EQUAL(v2[2], 2);
-  ASSERT_EQUAL(v2[3], 3);
-  ASSERT_EQUAL(v2[4], 4);
+  ASSERT_EQUAL(v2, v1);
 
   cudaStreamDestroy(s);
 }

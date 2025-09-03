@@ -23,7 +23,7 @@
 #include <unittest/unittest.h>
 
 template <typename InputIterator, typename UnaryFunction, typename OutputType, typename BinaryFunction>
-THRUST_HOST_DEVICE OutputType
+OutputType
 transform_reduce(my_system& system, InputIterator, InputIterator, UnaryFunction, OutputType init, BinaryFunction)
 {
   system.validate_dispatch();
@@ -42,8 +42,7 @@ void TestTransformReduceDispatchExplicit()
 DECLARE_UNITTEST(TestTransformReduceDispatchExplicit);
 
 template <typename InputIterator, typename UnaryFunction, typename OutputType, typename BinaryFunction>
-THRUST_HOST_DEVICE OutputType
-transform_reduce(my_tag, InputIterator first, InputIterator, UnaryFunction, OutputType init, BinaryFunction)
+OutputType transform_reduce(my_tag, InputIterator first, InputIterator, UnaryFunction, OutputType init, BinaryFunction)
 {
   *first = 13;
   return init;
@@ -60,14 +59,11 @@ void TestTransformReduceDispatchImplicit()
 DECLARE_UNITTEST(TestTransformReduceDispatchImplicit);
 
 template <class Vector>
-void TestTransformReduceSimple(void)
+void TestTransformReduceSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(3);
-  data[0] = 1;
-  data[1] = -2;
-  data[2] = 3;
+  Vector data{1, -2, 3};
 
   T init   = 10;
   T result = thrust::transform_reduce(data.begin(), data.end(), thrust::negate<T>(), init, thrust::plus<T>());
@@ -107,7 +103,7 @@ void TestTransformReduceFromConst(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestTransformReduceFromConst);
 
 template <class Vector>
-void TestTransformReduceCountingIterator(void)
+void TestTransformReduceCountingIterator()
 {
   using T     = typename Vector::value_type;
   using space = typename thrust::iterator_system<typename Vector::iterator>::type;

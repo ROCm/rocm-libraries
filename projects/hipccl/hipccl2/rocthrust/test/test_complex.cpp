@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2024 NVIDIA Corporation
  *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,12 +14,22 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
+#include <thrust/detail/config.h>
 
 #include <thrust/complex.h>
+#include <thrust/detail/type_traits.h>
+
+#include <complex>
+#include <iostream>
+#include <sstream>
 
 #include "test_imag_assertions.hpp"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 #define CHECK_CORRECT(stComplex, ttComplex, lreal, limag, rreal, rimag)                \
   do                                                                                   \
@@ -97,6 +107,227 @@ TYPED_TEST(ComplexTests, TestComplexConstructors)
   }
 }
 
+THRUST_DIAG_SUPPRESS_MSVC(4244) // conversion from 'const T1' to 'const T', possible loss of data
+
+/*
+   The following tests do not check for the numerical accuracy of the operations.
+   That is tested in a separate program (complex_accuracy.cpp) which requires mpfr,
+   and takes a lot of time to run.
+ */
+
+namespace
+{
+
+// Helper construction to create a double from float and
+// vice versa to test thrust::complex promoting operators.
+template <typename T>
+struct other_floating_point_type
+{};
+
+template <>
+struct other_floating_point_type<float>
+{
+  using type = double;
+};
+
+template <>
+struct other_floating_point_type<double>
+{
+  using type = float;
+};
+
+template <typename T>
+using other_floating_point_type_t = typename other_floating_point_type<T>::type;
+
+} // anonymous namespace
+
+TYPED_TEST(ComplexTests, TestComplexSizeAndAlignment)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  THRUST_STATIC_ASSERT(sizeof(thrust::complex<T>) == sizeof(T) * 2);
+  THRUST_STATIC_ASSERT(alignof(thrust::complex<T>) == alignof(T) * 2);
+
+  THRUST_STATIC_ASSERT(sizeof(thrust::complex<T const>) == sizeof(T) * 2);
+  THRUST_STATIC_ASSERT(alignof(thrust::complex<T const>) == alignof(T) * 2);
+}
+
+TYPED_TEST(ComplexTests, TestComplexConstructionAndAssignment)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::host_vector<T> data = random_samples<T>(2);
+
+  const T real = data[0];
+  const T imag = data[1];
+
+  {
+    const thrust::complex<T> construct_from_real_and_imag(real, imag);
+    ASSERT_EQ(real, construct_from_real_and_imag.real());
+    ASSERT_EQ(imag, construct_from_real_and_imag.imag());
+  }
+
+  {
+    const thrust::complex<T> construct_from_real(real);
+    ASSERT_EQ(real, construct_from_real.real());
+    ASSERT_EQ(T(), construct_from_real.imag());
+  }
+
+  {
+    const thrust::complex<T> expected(real, imag);
+    thrust::complex<T> construct_from_copy(expected);
+    ASSERT_EQ(expected.real(), construct_from_copy.real());
+    ASSERT_EQ(expected.imag(), construct_from_copy.imag());
+  }
+
+  {
+    thrust::complex<T> construct_from_move(thrust::complex<T>(real, imag));
+    ASSERT_EQ(real, construct_from_move.real());
+    ASSERT_EQ(imag, construct_from_move.imag());
+  }
+
+  {
+    thrust::complex<T> copy_assign{};
+    const thrust::complex<T> expected{real, imag};
+    copy_assign = expected;
+    ASSERT_EQ(expected.real(), copy_assign.real());
+    ASSERT_EQ(expected.imag(), copy_assign.imag());
+  }
+
+  {
+    thrust::complex<T> move_assign{};
+    const thrust::complex<T> expected{real, imag};
+    move_assign = thrust::complex<T>{real, imag};
+    ASSERT_EQ(expected.real(), move_assign.real());
+    ASSERT_EQ(expected.imag(), move_assign.imag());
+  }
+
+  {
+    thrust::complex<T> assign_from_lvalue_T{};
+    const thrust::complex<T> expected{real};
+    const T to_be_copied = real;
+    assign_from_lvalue_T = to_be_copied;
+    ASSERT_EQ(expected.real(), assign_from_lvalue_T.real());
+    ASSERT_EQ(expected.imag(), assign_from_lvalue_T.imag());
+  }
+
+  {
+    thrust::complex<T> assign_from_rvalue_T{};
+    const thrust::complex<T> expected{real};
+    assign_from_rvalue_T = T(real);
+    ASSERT_EQ(expected.real(), assign_from_rvalue_T.real());
+    ASSERT_EQ(expected.imag(), assign_from_rvalue_T.imag());
+  }
+
+  {
+    const std::complex<T> expected(real, imag);
+    const thrust::complex<T> copy_from_std(expected);
+    ASSERT_EQ(expected.real(), copy_from_std.real());
+    ASSERT_EQ(expected.imag(), copy_from_std.imag());
+  }
+
+  {
+    thrust::complex<T> assign_from_lvalue_std{};
+    const std::complex<T> expected(real, imag);
+    assign_from_lvalue_std = expected;
+    ASSERT_EQ(expected.real(), assign_from_lvalue_std.real());
+    ASSERT_EQ(expected.imag(), assign_from_lvalue_std.imag());
+  }
+
+  {
+    thrust::complex<T> assign_from_rvalue_std{};
+    assign_from_rvalue_std = std::complex<T>(real, imag);
+    ASSERT_EQ(real, assign_from_rvalue_std.real());
+    ASSERT_EQ(imag, assign_from_rvalue_std.imag());
+  }
+}
+
+TYPED_TEST(ComplexTests, TestComplexConstructionAndAssignmentWithPromoting)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using T0 = T;
+  using T1 = other_floating_point_type_t<T0>;
+
+  thrust::host_vector<T0> data = random_samples<T0>(2);
+
+  const T0 real_T0 = data[0];
+  const T0 imag_T0 = data[1];
+
+  const T1 real_T1 = static_cast<T1>(real_T0);
+  const T1 imag_T1 = static_cast<T1>(imag_T0);
+
+  {
+    const thrust::complex<T0> construct_from_real_and_imag(real_T1, imag_T1);
+    ASSERT_EQ(real_T0, construct_from_real_and_imag.real());
+    ASSERT_EQ(imag_T0, construct_from_real_and_imag.imag());
+  }
+
+  {
+    const thrust::complex<T0> construct_from_real(real_T1);
+    ASSERT_EQ(real_T0, construct_from_real.real());
+    ASSERT_EQ(T0(), construct_from_real.imag());
+  }
+
+  {
+    const thrust::complex<T1> expected(real_T1, imag_T1);
+    thrust::complex<T0> construct_from_copy(expected);
+    ASSERT_EQ(real_T0, construct_from_copy.real());
+    ASSERT_EQ(imag_T0, construct_from_copy.imag());
+  }
+
+  {
+    thrust::complex<T0> construct_from_move(thrust::complex<T1>(real_T1, imag_T1));
+    ASSERT_EQ(real_T0, construct_from_move.real());
+    ASSERT_EQ(imag_T0, construct_from_move.imag());
+  }
+
+  {
+    thrust::complex<T0> copy_assign{};
+    const thrust::complex<T1> expected{real_T1, imag_T1};
+    copy_assign = expected;
+    ASSERT_EQ(expected.real(), copy_assign.real());
+    ASSERT_EQ(expected.imag(), copy_assign.imag());
+  }
+
+  {
+    thrust::complex<T0> assign_from_lvalue_T{};
+    const thrust::complex<T1> expected{real_T1};
+    const T1 to_be_copied = real_T1;
+    assign_from_lvalue_T  = to_be_copied;
+    ASSERT_EQ(expected.real(), assign_from_lvalue_T.real());
+    ASSERT_EQ(expected.imag(), assign_from_lvalue_T.imag());
+  }
+
+  {
+    const std::complex<T1> expected(real_T1, imag_T1);
+    const thrust::complex<T0> copy_from_std(expected);
+    ASSERT_EQ(expected.real(), copy_from_std.real());
+    ASSERT_EQ(expected.imag(), copy_from_std.imag());
+  }
+
+  {
+    thrust::complex<T1> assign_from_lvalue_std{};
+    const std::complex<T0> expected(real_T1, imag_T1);
+    assign_from_lvalue_std = expected;
+    ASSERT_EQ(expected.real(), assign_from_lvalue_std.real());
+    ASSERT_EQ(expected.imag(), assign_from_lvalue_std.imag());
+  }
+
+  {
+    thrust::complex<T0> assign_from_rvalue_std{};
+    assign_from_rvalue_std = std::complex<T1>(real_T1, imag_T1);
+    ASSERT_EQ(real_T0, assign_from_rvalue_std.real());
+    ASSERT_EQ(imag_T1, assign_from_rvalue_std.imag());
+  }
+}
+
 TYPED_TEST(ComplexTests, TestComplexGetters)
 {
   using T = typename TestFixture::input_type;
@@ -132,44 +363,162 @@ TYPED_TEST(ComplexTests, TestComplexGetters)
   }
 }
 
+TYPED_TEST(ComplexTests, TestComplexComparisionOperators)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  {
+    thrust::host_vector<T> data = random_samples<T>(1);
+
+    const T a = data[0];
+    const T b = data[0] + T(1.0);
+
+    ASSERT_EQ(thrust::complex<T>(a, b) == thrust::complex<T>(a, b), true);
+    ASSERT_EQ(thrust::complex<T>(a, T()) == a, true);
+    ASSERT_EQ(a == thrust::complex<T>(a, T()), true);
+
+    ASSERT_EQ(thrust::complex<T>(a, b) == std::complex<T>(a, b), true);
+    ASSERT_EQ(std::complex<T>(a, b) == thrust::complex<T>(a, b), true);
+
+    ASSERT_EQ(thrust::complex<T>(a, b) != thrust::complex<T>(b, a), true);
+    ASSERT_EQ(thrust::complex<T>(a, T()) != b, true);
+    ASSERT_EQ(b != thrust::complex<T>(a, T()), true);
+
+    ASSERT_EQ(thrust::complex<T>(a, b) != a, true);
+    ASSERT_EQ(a != thrust::complex<T>(a, b), true);
+
+    ASSERT_EQ(thrust::complex<T>(a, b) != std::complex<T>(b, a), true);
+    ASSERT_EQ(std::complex<T>(a, b) != thrust::complex<T>(b, a), true);
+  }
+
+  // Testing comparison operators with promoted types.
+  // These tests don't use random numbers on purpose since `T0(x) == T1(x)` will
+  // not be true for all x.
+  {
+    using T0 = T;
+    using T1 = other_floating_point_type_t<T0>;
+
+    ASSERT_EQ(thrust::complex<T0>(1.0, 2.0) == thrust::complex<T1>(1.0, 2.0), true);
+    ASSERT_EQ(thrust::complex<T0>(1.0, T0()) == T1(1.0), true);
+    ASSERT_EQ(T1(1.0) == thrust::complex<T0>(1.0, 0.0), true);
+
+    ASSERT_EQ(thrust::complex<T0>(1.0, 2.0) == std::complex<T1>(1.0, 2.0), true);
+    ASSERT_EQ(std::complex<T0>(1.0, 2.0) == thrust::complex<T1>(1.0, 2.0), true);
+
+    ASSERT_EQ(thrust::complex<T0>(1.0, 2.0) != T1(1.0), true);
+    ASSERT_EQ(T1(1.0) != thrust::complex<T0>(1.0, 2.0), true);
+  }
+}
+
 TYPED_TEST(ComplexTests, TestComplexMemberOperators)
 {
   using T = typename TestFixture::input_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (auto seed : get_seeds())
   {
-    SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+    thrust::host_vector<T> data = random_samples<T>(5);
 
-    thrust::host_vector<T> data_a = get_random_data<T>(2, 10000, 10000, seed);
+    thrust::complex<T> a_thrust(data[0], data[1]);
+    const thrust::complex<T> b_thrust(data[2], data[3]);
 
-    thrust::host_vector<T> data_b = get_random_data<T>(2, 10000, 10000, seed + seed_value_addition);
+    std::complex<T> a_std(a_thrust);
+    const std::complex<T> b_std(b_thrust);
 
-    thrust::complex<T> a(data_a[0], data_a[1]);
-    thrust::complex<T> b(data_b[0], data_b[1]);
+    a_thrust += b_thrust;
+    a_std += b_std;
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
 
-    std::complex<T> c(a);
-    std::complex<T> d(b);
+    a_thrust -= b_thrust;
+    a_std -= b_std;
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
 
-    a += b;
-    c += d;
-    ASSERT_NEAR_COMPLEX(a, c);
+    a_thrust *= b_thrust;
+    a_std *= b_std;
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
 
-    a -= b;
-    c -= d;
-    ASSERT_NEAR_COMPLEX(a, c);
+    a_thrust /= b_thrust;
+    a_std /= b_std;
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
 
-    a *= b;
-    c *= d;
-    ASSERT_NEAR_COMPLEX(a, c);
+    // arithmetic operators with `double` and `float`
+    const T real = data[4];
 
-    a /= b;
-    c /= d;
-    ASSERT_NEAR_COMPLEX(a, c);
+    a_thrust += real;
+    a_std += std::complex<T>(real);
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust -= real;
+    a_std -= std::complex<T>(real);
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust *= real;
+    a_std *= std::complex<T>(real);
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust /= real;
+    a_std /= std::complex<T>(real);
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
 
     // casting operator
-    c = (std::complex<T>) a;
+    a_std = (std::complex<T>) a_thrust;
+    ASSERT_EQ(a_thrust.real(), a_std.real());
+    ASSERT_EQ(a_thrust.imag(), a_std.imag());
+  }
+
+  // Testing arithmetic member operators with promoted types.
+  {
+    using T0 = T;
+    using T1 = other_floating_point_type_t<T0>;
+
+    thrust::host_vector<T0> data = random_samples<T0>(5);
+
+    thrust::complex<T0> a_thrust(data[0], data[1]);
+    const thrust::complex<T1> b_thrust(data[2], data[3]);
+
+    std::complex<T1> a_std(data[0], data[1]);
+    const std::complex<T1> b_std(data[2], data[3]);
+
+    // The following tests require that thrust::complex and std::complex are `almost` equal.
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+    ASSERT_NEAR_COMPLEX(b_thrust, b_thrust);
+
+    a_thrust += b_thrust;
+    a_std += b_std;
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust -= b_thrust;
+    a_std -= b_std;
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust *= b_thrust;
+    a_std *= b_std;
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust /= b_thrust;
+    a_std /= b_std;
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    // Testing arithmetic member operators with another floating point type.
+    const T1 e = data[2];
+
+    a_thrust += e;
+    a_std += std::complex<T1>(e);
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust -= e;
+    a_std -= std::complex<T1>(e);
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust *= e;
+    a_std *= std::complex<T1>(e);
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
+
+    a_thrust /= e;
+    a_std /= std::complex<T1>(e);
+    ASSERT_NEAR_COMPLEX(a_thrust, a_std);
   }
 }
 
@@ -185,23 +534,24 @@ TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
 
     thrust::host_vector<T> data = get_random_data<T>(2, saturate_cast<T>(-100), saturate_cast<T>(100), seed);
 
-    thrust::complex<T> a(data[0], data[1]);
-    std::complex<T> b(a);
+    const thrust::complex<T> a(data[0], data[1]);
+    const std::complex<T> b(a);
 
     // Test the basic arithmetic functions against std
 
-    ASSERT_NEAR(abs(a), abs(b), T(0.01));
+    ASSERT_NEAR(thrust::abs(a), std::abs(b), T(0.01));
+    ASSERT_NEAR(thrust::arg(a), std::arg(b), T(0.01));
+    ASSERT_NEAR(thrust::norm(a), std::norm(b), T(0.01));
 
-    ASSERT_NEAR(arg(a), arg(b), T(0.01));
-
-    ASSERT_NEAR(norm(a), norm(b), T(0.01));
-
-    ASSERT_EQ(conj(a), conj(b));
+    ASSERT_EQ(thrust::conj(a), std::conj(b));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::conj(a))>::value, "");
 
     ASSERT_NEAR_COMPLEX(thrust::polar(data[0], data[1]), std::polar(data[0], data[1]));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::polar(data[0], data[1]))>::value, "");
 
     // random_samples does not seem to produce infinities so proj(z) == z
-    ASSERT_EQ(proj(a), a);
+    ASSERT_EQ(thrust::proj(a), a);
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::proj(a))>::value, "");
   }
 }
 
@@ -211,32 +561,60 @@ TYPED_TEST(ComplexTests, TestComplexBinaryArithmetic)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (auto seed : get_seeds())
   {
-    SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+    thrust::host_vector<T> data = random_samples<T>(5);
 
-    thrust::host_vector<T> data_a = get_random_data<T>(2, -10000, 10000, seed);
-
-    thrust::host_vector<T> data_b = get_random_data<T>(2, -10000, 10000, seed + seed_value_addition);
-
-    thrust::complex<T> a(data_a[0], data_a[1]);
-    thrust::complex<T> b(data_b[0], data_b[1]);
+    const thrust::complex<T> a(data[0], data[1]);
+    const thrust::complex<T> b(data[2], data[3]);
+    const T real = data[4];
 
     ASSERT_NEAR_COMPLEX(a * b, std::complex<T>(a) * std::complex<T>(b));
-    ASSERT_NEAR_COMPLEX(a * data_b[0], std::complex<T>(a) * data_b[0]);
-    ASSERT_NEAR_COMPLEX(data_a[0] * b, data_a[0] * std::complex<T>(b));
+    ASSERT_NEAR_COMPLEX(a * real, std::complex<T>(a) * real);
+    ASSERT_NEAR_COMPLEX(real * b, real * std::complex<T>(b));
 
     ASSERT_NEAR_COMPLEX(a / b, std::complex<T>(a) / std::complex<T>(b));
-    ASSERT_NEAR_COMPLEX(a / data_b[0], std::complex<T>(a) / data_b[0]);
-    ASSERT_NEAR_COMPLEX(data_a[0] / b, data_a[0] / std::complex<T>(b));
+    ASSERT_NEAR_COMPLEX(a / real, std::complex<T>(a) / real);
+    ASSERT_NEAR_COMPLEX(real / b, real / std::complex<T>(b));
 
     ASSERT_EQ(a + b, std::complex<T>(a) + std::complex<T>(b));
-    ASSERT_EQ(a + data_b[0], std::complex<T>(a) + data_b[0]);
-    ASSERT_EQ(data_a[0] + b, data_a[0] + std::complex<T>(b));
+    ASSERT_EQ(a + real, std::complex<T>(a) + real);
+    ASSERT_EQ(real + b, real + std::complex<T>(b));
 
     ASSERT_EQ(a - b, std::complex<T>(a) - std::complex<T>(b));
-    ASSERT_EQ(a - data_b[0], std::complex<T>(a) - data_b[0]);
-    ASSERT_EQ(data_a[0] - b, data_a[0] - std::complex<T>(b));
+    ASSERT_EQ(a - real, std::complex<T>(a) - real);
+    ASSERT_EQ(real - b, real - std::complex<T>(b));
+  }
+
+  // Testing binary arithmetic with promoted types.
+  {
+    using T0 = T;
+    using T1 = other_floating_point_type_t<T0>;
+
+    thrust::host_vector<T0> data = unittest::random_samples<T0>(5);
+
+    const thrust::complex<T0> a_thrust(data[0], data[1]);
+    const thrust::complex<T1> b_thrust(data[2], data[3]);
+    const thrust::complex<T0> a_std(data[0], data[1]);
+    const thrust::complex<T0> b_std(data[2], data[3]);
+
+    const T0 real_T0 = data[4];
+    const T1 real_T1 = static_cast<T1>(real_T0);
+
+    ASSERT_NEAR_COMPLEX(a_thrust * b_thrust, a_std * b_std);
+    ASSERT_NEAR_COMPLEX(a_thrust * real_T1, a_std * real_T0);
+    ASSERT_NEAR_COMPLEX(real_T0 * b_thrust, real_T0 * b_std);
+
+    ASSERT_NEAR_COMPLEX(a_thrust / b_thrust, a_std / b_std);
+    ASSERT_NEAR_COMPLEX(a_thrust / real_T1, a_std / real_T0);
+    ASSERT_NEAR_COMPLEX(real_T0 / b_thrust, real_T0 / b_std);
+
+    ASSERT_NEAR_COMPLEX(a_thrust + b_thrust, a_std + b_std);
+    ASSERT_NEAR_COMPLEX(a_thrust + real_T1, a_std + real_T0);
+    ASSERT_NEAR_COMPLEX(real_T0 + b_thrust, real_T0 + b_std);
+
+    ASSERT_NEAR_COMPLEX(a_thrust - b_thrust, a_std - b_std);
+    ASSERT_NEAR_COMPLEX(a_thrust - real_T1, a_std - real_T0);
+    ASSERT_NEAR_COMPLEX(real_T0 - b_thrust, real_T0 - b_std);
   }
 }
 
@@ -250,13 +628,13 @@ TYPED_TEST(ComplexTests, TestComplexUnaryArithmetic)
   {
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    thrust::host_vector<T> data_a =
+    thrust::host_vector<T> data =
       get_random_data<T>(2, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
-    thrust::complex<T> a(data_a[0], data_a[1]);
+    const thrust::complex<T> a(data[0], data[1]);
 
-    ASSERT_EQ(+a, +std::complex<T>(a));
-    ASSERT_EQ(-a, -std::complex<T>(a));
+    ASSERT_EQ(+a, a);
+    ASSERT_EQ(-a, a * (-1.0));
   }
 }
 
@@ -270,14 +648,17 @@ TYPED_TEST(ComplexTests, TestComplexExponentialFunctions)
   {
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    thrust::host_vector<T> data_a = get_random_data<T>(2, -100, 100, seed);
+    thrust::host_vector<T> data = get_random_data<T>(2, -100, 100, seed);
 
-    thrust::complex<T> a(data_a[0], data_a[1]);
-    std::complex<T> b(a);
+    const thrust::complex<T> a(data[0], data[1]);
+    const std::complex<T> b(a);
 
-    ASSERT_NEAR_COMPLEX(exp(a), exp(b));
-    ASSERT_NEAR_COMPLEX(log(a), log(b));
-    ASSERT_NEAR_COMPLEX(log10(a), log10(b));
+    ASSERT_NEAR_COMPLEX(thrust::exp(a), std::exp(b));
+    ASSERT_NEAR_COMPLEX(thrust::log(a), std::log(b));
+    ASSERT_NEAR_COMPLEX(thrust::log10(a), std::log10(b));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::exp(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::log(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::log10(a))>::value, "");
   }
 }
 
@@ -287,24 +668,61 @@ TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (auto seed : get_seeds())
   {
-    SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+    thrust::host_vector<T> data = random_samples<T>(4);
 
-    thrust::host_vector<T> data_a = get_random_data<T>(2, -100, 100, seed);
+    const thrust::complex<T> a_thrust(data[0], data[1]);
+    const thrust::complex<T> b_thrust(data[2], data[3]);
+    const std::complex<T> a_std(a_thrust);
+    const std::complex<T> b_std(b_thrust);
 
-    thrust::host_vector<T> data_b = get_random_data<T>(2, -100, 100, seed + seed_value_addition);
+    ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, b_thrust), std::pow(a_std, b_std));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust))>::value, "");
+    ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, b_thrust.real()), std::pow(a_std, b_std.real()));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value,
+                  "");
+    ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust.real(), b_thrust), std::pow(a_std.real(), b_std));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value,
+                  "");
 
-    thrust::complex<T> a(data_a[0], data_a[1]);
-    thrust::complex<T> b(data_b[0], data_b[1]);
-    std::complex<T> c(a);
-    std::complex<T> d(b);
+    ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, 4), std::pow(a_std, 4));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, 4))>::value, "");
 
-    ASSERT_NEAR_COMPLEX(pow(a, b), pow(c, d));
-    ASSERT_NEAR_COMPLEX(pow(a, b.real()), pow(c, d.real()));
-    ASSERT_NEAR_COMPLEX(pow(a.real(), b), pow(c.real(), d));
+    ASSERT_NEAR_COMPLEX(thrust::sqrt(a_thrust), std::sqrt(a_std));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::sqrt(a_thrust))>::value, "");
+  }
 
-    ASSERT_NEAR_COMPLEX(sqrt(a), sqrt(c));
+  // Test power functions with promoted types.
+  {
+    using T0       = T;
+    using T1       = other_floating_point_type_t<T0>;
+    using promoted = _THRUST_STD::common_type_t<T0, T1>;
+
+    thrust::host_vector<T0> data = random_samples<T0>(4);
+
+    const thrust::complex<T0> a_thrust(data[0], data[1]);
+    const thrust::complex<T1> b_thrust(data[2], data[3]);
+    const std::complex<T0> a_std(data[0], data[1]);
+    const std::complex<T0> b_std(data[2], data[3]);
+
+    ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, b_thrust), std::pow(a_std, b_std));
+    static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust))>::value,
+                  "");
+    ASSERT_NEAR_COMPLEX(thrust::pow(b_thrust, a_thrust), std::pow(b_std, a_std));
+    static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust))>::value,
+                  "");
+    ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, b_thrust.real()), std::pow(a_std, b_std.real()));
+    static_assert(
+      _THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value, "");
+    ASSERT_NEAR_COMPLEX(thrust::pow(b_thrust, a_thrust.real()), std::pow(b_std, a_std.real()));
+    static_assert(
+      _THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust.real()))>::value, "");
+    ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust.real(), b_thrust), std::pow(a_std.real(), b_std));
+    static_assert(
+      _THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value, "");
+    ASSERT_NEAR_COMPLEX(thrust::pow(b_thrust.real(), a_thrust), std::pow(b_std.real(), a_std));
+    static_assert(
+      _THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust.real(), a_thrust))>::value, "");
   }
 }
 
@@ -318,24 +736,38 @@ TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
   {
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    thrust::host_vector<T> data_a = get_random_data<T>(2, saturate_cast<T>(-1), saturate_cast<T>(1), seed);
+    thrust::host_vector<T> data = get_random_data<T>(2, saturate_cast<T>(-1), saturate_cast<T>(1), seed);
 
-    thrust::complex<T> a(data_a[0], data_a[1]);
-    std::complex<T> c(a);
+    const thrust::complex<T> a(data[0], data[1]);
+    const std::complex<T> c(a);
 
-    ASSERT_NEAR_COMPLEX(cos(a), cos(c));
-    ASSERT_NEAR_COMPLEX(sin(a), sin(c));
-    ASSERT_NEAR_COMPLEX(tan(a), tan(c));
-    ASSERT_NEAR_COMPLEX(cosh(a), cosh(c));
-    ASSERT_NEAR_COMPLEX(sinh(a), sinh(c));
-    ASSERT_NEAR_COMPLEX(tanh(a), tanh(c));
+    ASSERT_NEAR_COMPLEX(thrust::cos(a), std::cos(c));
+    ASSERT_NEAR_COMPLEX(thrust::sin(a), std::sin(c));
+    ASSERT_NEAR_COMPLEX(thrust::tan(a), std::tan(c));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::cos(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::sin(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::tan(a))>::value, "");
 
-    ASSERT_NEAR_COMPLEX(acos(a), acos(c));
-    ASSERT_NEAR_COMPLEX(asin(a), asin(c));
-    ASSERT_NEAR_COMPLEX(atan(a), atan(c));
-    ASSERT_NEAR_COMPLEX(acosh(a), acosh(c));
-    ASSERT_NEAR_COMPLEX(asinh(a), asinh(c));
-    ASSERT_NEAR_COMPLEX(atanh(a), atanh(c));
+    ASSERT_NEAR_COMPLEX(thrust::cosh(a), std::cosh(c));
+    ASSERT_NEAR_COMPLEX(thrust::sinh(a), std::sinh(c));
+    ASSERT_NEAR_COMPLEX(thrust::tanh(a), std::tanh(c));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::cosh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::sinh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::tanh(a))>::value, "");
+
+    ASSERT_NEAR_COMPLEX(thrust::acos(a), std::acos(c));
+    ASSERT_NEAR_COMPLEX(thrust::asin(a), std::asin(c));
+    ASSERT_NEAR_COMPLEX(thrust::atan(a), std::atan(c));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::acos(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::asin(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::atan(a))>::value, "");
+
+    ASSERT_NEAR_COMPLEX(thrust::acosh(a), std::acosh(c));
+    ASSERT_NEAR_COMPLEX(thrust::asinh(a), std::asinh(c));
+    ASSERT_NEAR_COMPLEX(thrust::atanh(a), std::atanh(c));
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::acosh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::asinh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::atanh(a))>::value, "");
   }
 }
 
@@ -349,15 +781,59 @@ TYPED_TEST(ComplexTests, TestComplexStreamOperators)
   {
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-    thrust::host_vector<T> data_a = get_random_data<T>(2, saturate_cast<T>(-1000), saturate_cast<T>(1000), seed);
+    thrust::host_vector<T> data = get_random_data<T>(2, saturate_cast<T>(-1000), saturate_cast<T>(1000), seed);
+    const thrust::complex<T> a(data[0], data[1]);
 
-    thrust::complex<T> a(data_a[0], data_a[1]);
     std::stringstream out;
     out << a;
     thrust::complex<T> b;
     out >> b;
     ASSERT_NEAR_COMPLEX(a, b);
   }
+}
+
+TYPED_TEST(ComplexTests, TestComplexStdComplexDeviceInterop)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::host_vector<T> data = random_samples<T>(6);
+  std::vector<std::complex<T>> vec(10);
+  vec[0] = std::complex<T>(data[0], data[1]);
+  vec[1] = std::complex<T>(data[2], data[3]);
+  vec[2] = std::complex<T>(data[4], data[5]);
+
+  thrust::device_vector<thrust::complex<T>> device_vec = vec;
+  ASSERT_EQ(vec[0].real(), thrust::complex<T>(device_vec[0]).real());
+  ASSERT_EQ(vec[0].imag(), thrust::complex<T>(device_vec[0]).imag());
+  ASSERT_EQ(vec[1].real(), thrust::complex<T>(device_vec[1]).real());
+  ASSERT_EQ(vec[1].imag(), thrust::complex<T>(device_vec[1]).imag());
+  ASSERT_EQ(vec[2].real(), thrust::complex<T>(device_vec[2]).real());
+  ASSERT_EQ(vec[2].imag(), thrust::complex<T>(device_vec[2]).imag());
+}
+
+namespace
+{
+
+template <typename T>
+struct user_complex
+{
+  THRUST_HOST_DEVICE user_complex(T, T) {}
+  THRUST_HOST_DEVICE user_complex(const thrust::complex<T>&) {}
+};
+
+} // anonymous namespace
+
+TYPED_TEST(ComplexTests, TestComplexExplicitConstruction)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  const thrust::complex<T> input(42.0, 1337.0);
+  const user_complex<T> result = thrust::exp(input);
+  (void) result;
 }
 
 TESTS_PAIRS_DEFINE(ComplexPairsTests, PairsTestsParams)
@@ -496,11 +972,11 @@ TYPED_TEST(ComplexPairsTests, TestCompoundPlusOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      using type = typename ::internal::promoted_numerical_type<T, U>::type;
       lhs        = std::complex<type>(lhs.real() + rhs.real(), lhs.imag() + rhs.imag());
     },
     [=](std::complex<T>& lhs, const U& rhs) {
-      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      using type = typename ::internal::promoted_numerical_type<T, U>::type;
       lhs        = std::complex<type>(lhs.real() + rhs, lhs.imag());
     },
     [=](thrust::complex<T>& lhs, const thrust::complex<U>& rhs) {
@@ -520,11 +996,11 @@ TYPED_TEST(ComplexPairsTests, TestCompoundMinusOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      using type = typename ::internal::promoted_numerical_type<T, U>::type;
       lhs        = std::complex<type>(lhs.real() - rhs.real(), lhs.imag() - rhs.imag());
     },
     [=](std::complex<T>& lhs, const U& rhs) {
-      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      using type = typename ::internal::promoted_numerical_type<T, U>::type;
       lhs        = std::complex<type>(lhs.real() - rhs, lhs.imag());
     },
     [=](thrust::complex<T>& lhs, const thrust::complex<U>& rhs) {
@@ -545,7 +1021,7 @@ TYPED_TEST(ComplexPairsTests, TestCompoundMultiplyOperator)
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
       // (a + bi)(c + di) = ac + i(ad + bc) - bd
-      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      using type = typename ::internal::promoted_numerical_type<T, U>::type;
 
       type a = static_cast<type>(lhs.real());
       type b = static_cast<type>(lhs.imag());
@@ -579,7 +1055,7 @@ TYPED_TEST(ComplexPairsTests, TestCompoundDivisionOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      using type = typename ::internal::promoted_numerical_type<T, U>::type;
 
       // (a + bi) / (c + di) = ((ac + bd) + (bc -ad)i) / (c^2 + d^2)
       type a = static_cast<type>(lhs.real());

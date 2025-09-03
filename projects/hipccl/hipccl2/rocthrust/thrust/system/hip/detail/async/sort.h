@@ -31,6 +31,15 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/detail/cpp_version_check.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
@@ -123,6 +132,7 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
     unique_eager_event>::type
 {
   auto const device_alloc = get_async_device_allocator(policy);
+
   unique_eager_event e;
 
   // Determine temporary device storage requirements.
@@ -151,7 +161,7 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
   // make this guarantee.
   auto const content_ptr = content.get();
 
-  void* const tmp_ptr = static_cast<void*>(thrust::raw_pointer_cast(content_ptr));
+  void* const tmp_ptr = static_cast<void*>(raw_pointer_cast(content_ptr));
 
   // Set up stream with dependencies.
 
@@ -167,12 +177,6 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
   {
     e = make_dependent_event(std::tuple_cat(
       std::make_tuple(std::move(content)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
-  }
-
-  if (n == 0)
-  {
-    e.ready();
-    return e;
   }
 
   // Run merge sort.
@@ -231,7 +235,15 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
   size_t tmp_size = 0;
   T* first_ptr    = raw_pointer_cast(&*first);
   thrust::hip_rocprim::throw_on_error(
-    invoke_radix_sort(nullptr, nullptr, tmp_size, first_ptr, static_cast<T*>(nullptr), n, comp),
+    invoke_radix_sort(
+      nullptr // Null stream, just for sizing.
+      ,
+      nullptr,
+      tmp_size,
+      first_ptr,
+      static_cast<T*>(nullptr),
+      n,
+      comp),
     "after radix sort sizing");
 
   // Allocate temporary storage.
@@ -245,9 +257,9 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
   // make this guarantee.
   auto const content_ptr = content.get();
 
-  T* keys_pointer = thrust::detail::aligned_reinterpret_cast<T*>(thrust::raw_pointer_cast(content_ptr));
+  T* keys_pointer = thrust::detail::aligned_reinterpret_cast<T*>(raw_pointer_cast(content_ptr));
 
-  void* const tmp_ptr = static_cast<void*>(thrust::raw_pointer_cast(content_ptr + keys_temp_storage));
+  void* const tmp_ptr = static_cast<void*>(raw_pointer_cast(content_ptr + keys_temp_storage));
 
   // Set up stream with dependencies.
 
@@ -265,13 +277,8 @@ auto async_stable_sort_n(execution_policy<DerivedPolicy>& policy, ForwardIt firs
       std::make_tuple(std::move(content)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
   }
 
-  if (n == 0)
-  {
-    e.ready();
-    return e;
-  }
-
   // Run radix sort.
+
   thrust::hip_rocprim::throw_on_error(
     invoke_radix_sort(e.stream().native_handle(), tmp_ptr, tmp_size, first_ptr, keys_pointer, n, comp),
     "after radix sort launch");
@@ -305,7 +312,7 @@ auto async_stable_sort(execution_policy<DerivedPolicy>& policy, ForwardIt first,
   // A GCC 5 bug requires an explicit trailing return type here, so stick with
   // THRUST_DECLTYPE_RETURNS for now.
   THRUST_DECLTYPE_RETURNS(
-    thrust::system::hip::detail::async_stable_sort_n(policy, first, thrust::distance(first, last), comp));
+    thrust::system::hip::detail::async_stable_sort_n(policy, first, thrust::distance(first, last), comp))
 
 } // namespace hip_rocprim
 
