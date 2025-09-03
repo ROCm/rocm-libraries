@@ -155,6 +155,11 @@ struct ProblemInterpreter
         return problem.IsDirectionForward() ? problem.GetInDataType() : problem.GetOutDataType();
     }
 
+    static auto GetWeightsDataType(const miopen::conv::ProblemDescription& problem)
+    {
+        return problem.GetWeightsDataType();
+    }
+
     static int GetFilterDepthZ(const miopen::conv::ProblemDescription& problem)
     {
         return problem.GetWeightsDepth();
@@ -191,6 +196,18 @@ struct ProblemInterpreter
     static auto GetAdjustedConvolutionStrideW(const miopen::conv::ProblemDescription& problem)
     {
         return GetOutputWidthWo(problem) > 1 ? problem.GetKernelStrideW() : 1;
+    }
+
+    // adjust conv_asm_stride_h to 1 if Hi is 1
+    static auto GetAdjustedConvolutionAsmStrideH(const miopen::conv::ProblemDescription& problem)
+    {
+        return GetInputHeightHi(problem) > 1 ? problem.GetKernelStrideH() : 1;
+    }
+
+    // adjust conv_asm_stride_w to 1 if Wi is 1
+    static auto GetAdjustedConvolutionAsmStrideW(const miopen::conv::ProblemDescription& problem)
+    {
+        return GetInputWidthWi(problem) > 1 ? problem.GetKernelStrideW() : 1;
     }
 
     // adjust conv_dilation_d to 1 if Z is 1
