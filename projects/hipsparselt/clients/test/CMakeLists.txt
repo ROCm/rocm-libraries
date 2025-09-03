@@ -29,9 +29,9 @@ target_link_libraries(
 hipsparselt_link_blas_libraries(hipsparselt-test)
 
 if(HIPSPARSELT_ENABLE_CUDA)
-  target_link_libraries(hipsparselt-test PRIVATE -llapack -lcblas)
+  target_link_libraries(hipsparselt-test PRIVATE -llapack)
 else()
-  target_link_libraries(hipsparselt-test PRIVATE lapack cblas)
+  target_link_libraries(hipsparselt-test PRIVATE lapack)
 endif()
 
 if(NOT WIN32)
