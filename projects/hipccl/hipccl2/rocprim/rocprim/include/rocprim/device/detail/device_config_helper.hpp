@@ -49,7 +49,7 @@ namespace detail
 /// \brief Default values are provided by \p merge_sort_block_sort_config_base.
 struct merge_sort_block_sort_config_params
 {
-    kernel_config_params block_sort_config = {0, 0};
+    kernel_config_params kernel_config = {0, 0};
 };
 
 // Necessary to construct a parameterized type of `merge_sort_block_sort_config_params`.
@@ -59,7 +59,7 @@ template<unsigned int                  BlockSize,
          rocprim::block_sort_algorithm Algo = block_sort_algorithm::stable_merge_sort>
 struct merge_sort_block_sort_config : rocprim::detail::merge_sort_block_sort_config_params
 {
-    using sort_config = kernel_config<BlockSize, ItemsPerThread>;
+    using sort_config = ::rocprim::kernel_config<BlockSize, ItemsPerThread>;
     constexpr merge_sort_block_sort_config()
         : rocprim::detail::merge_sort_block_sort_config_params{sort_config()} {};
 };
@@ -242,7 +242,7 @@ struct radix_sort_onesweep_config_base
 
 struct reduce_config_params
 {
-    kernel_config_params   reduce_config;
+    kernel_config_params   kernel_config;
     block_reduce_algorithm block_reduce_method;
 };
 
@@ -866,7 +866,7 @@ struct adjacent_difference_config_tag
 
 struct adjacent_difference_config_params
 {
-    kernel_config_params          adjacent_difference_kernel_config;
+    kernel_config_params          kernel_config;
     ::rocprim::block_load_method  block_load_method;
     ::rocprim::block_store_method block_store_method;
 };
