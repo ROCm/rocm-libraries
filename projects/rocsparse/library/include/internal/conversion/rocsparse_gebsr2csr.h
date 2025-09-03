@@ -95,62 +95,7 @@ extern "C" {
 *
 *  \par Example
 *  This example converts a general BSR matrix into an CSR matrix.
-*  \code{.c}
-*      //     1 4 0 0 0 0
-*      // A = 0 2 3 0 0 0
-*      //     5 0 0 7 8 0
-*      //     0 0 9 0 6 0
-*
-*      rocsparse_int mb   = 2;
-*      rocsparse_int nb   = 2;
-*      rocsparse_int row_block_dim = 2;
-*      rocsparse_int col_block_dim = 3;
-*      rocsparse_int m = Mb * row_block_dim;
-*      rocsparse_int n = Nb * col_block_dim;
-*
-*      bsr_row_ptr[mb+1]                 = {0, 1, 3};                                              // device memory
-*      bsr_col_ind[nnzb]                 = {0, 0, 1};                                              // device memory
-*      bsr_val[nnzb*block_dim*block_dim] = {1, 0, 4, 2, 0, 3, 5, 0, 0, 0, 0, 9, 7, 0, 8, 6, 0, 0}; // device memory
-*
-*      rocsparse_int nnzb = bsr_row_ptr[mb] - bsr_row_ptr[0];
-*
-*      // Create CSR arrays on device
-*      rocsparse_int* csr_row_ptr;
-*      rocsparse_int* csr_col_ind;
-*      float* csr_val;
-*      hipMalloc((void**)&csr_row_ptr, sizeof(rocsparse_int) * (m + 1));
-*      hipMalloc((void**)&csr_col_ind, sizeof(rocsparse_int) * nnzb * row_block_dim * col_block_dim);
-*      hipMalloc((void**)&csr_val, sizeof(float) * nnzb * row_block_dim * col_block_dim);
-*
-*      // Create rocsparse handle
-*      rocsparse_handle handle;
-*      rocsparse_create_handle(&handle);
-*
-*      rocsparse_mat_descr bsr_descr = nullptr;
-*      rocsparse_create_mat_descr(&bsr_descr);
-*
-*      rocsparse_mat_descr csr_descr = nullptr;
-*      rocsparse_create_mat_descr(&csr_descr);
-*
-*      rocsparse_set_mat_index_base(bsr_descr, rocsparse_index_base_zero);
-*      rocsparse_set_mat_index_base(csr_descr, rocsparse_index_base_zero);
-*
-*      // Format conversion
-*      rocsparse_sgebsr2csr(handle,
-*                         rocsparse_direction_column,
-*                         mb,
-*                         nb,
-*                         bsr_descr,
-*                         bsr_val,
-*                         bsr_row_ptr,
-*                         bsr_col_ind,
-*                         row_block_dim,
-*                         col_block_dim,
-*                         csr_descr,
-*                         csr_val,
-*                         csr_row_ptr,
-*                         csr_col_ind);
-*  \endcode
+*  \snippet example_rocsparse_gebsr2csr.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

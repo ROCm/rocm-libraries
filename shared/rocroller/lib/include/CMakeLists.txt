@@ -21,6 +21,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ExecutableKernel_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ExpressionTransformations.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_evaluate_detail.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_evaluate_detail_binary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelArguments.hpp"
@@ -33,6 +35,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor_impl.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Assemblers/Assembler.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Assemblers/Assembler_fwd.hpp"
@@ -123,6 +126,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Scale_Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_UInt8x4.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Utils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DistinctType.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/GPUArchitecture/GPUArchitecture.hpp"

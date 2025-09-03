@@ -99,6 +99,11 @@ namespace rocRoller
                 graph.control.setElement(dstIdx, std::move(dst));
             }
 
+            /**
+             *  @brief Delete kernel arguments that are never used in the kernel.
+             */
+            void deleteUnusedArguments(AssemblyKernelPtr                kernel,
+                                       ControlFlowArgumentTracer const& argTracer);
         }
     }
 }

@@ -5,6 +5,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/elementwise.hpp"
 #include "ck_tile/host/reference/reference_elementwise.hpp"
+#include "json_dump.hpp"
 
 auto create_args(int argc, char* argv[])
 {
@@ -15,7 +16,9 @@ auto create_args(int argc, char* argv[])
         .insert("v", "1", "cpu validation or not")
         .insert("prec", "fp16", "precision")
         .insert("warmup", "10", "cold iter")
-        .insert("repeat", "50", "hot iter");
+        .insert("repeat", "50", "hot iter")
+        .insert("json", "0", "0: No Json, 1: Dump Results in Json format")
+        .insert("jsonfile", "elementwise_unary.json", "json file name to dump results");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -38,7 +41,6 @@ bool run(const ck_tile::ArgParser& arg_parser)
 
     using XDataType             = DataType;
     using YDataType             = DataType;
-    using ComputeDataType       = float;
     using XElementwiseOperation = ck_tile::element_wise::UnarySquare;
 
     // 1. Initialize the input data on the host
@@ -64,7 +66,7 @@ bool run(const ck_tile::ArgParser& arg_parser)
                                              // will cover some part of blockTile)
     using WarpTile = ck_tile::sequence<64>;  // How many elements are covered by a warp
 
-    using Shape   = ck_tile::ElementWiseShape<BlockWarps, BlockTile, WarpTile, ComputeDataType>;
+    using Shape   = ck_tile::ElementWiseShape<BlockWarps, BlockTile, WarpTile, XDataType>;
     using Problem = ck_tile::ElementWisePipelineProblem<XDataType,
                                                         XDataType, // ComputeDataType is same as
                                                                    // XDataType in the unary case
@@ -100,17 +102,17 @@ bool run(const ck_tile::ArgParser& arg_parser)
     }
 
     // 4. Run the kernel
-    float ave_time = launch_kernel(ck_tile::stream_config{nullptr, true, 0, warmup, repeat},
-                                   ck_tile::make_kernel<kBlockSize, kBlockPerCu>(
-                                       Kernel{},
-                                       kGridSize,
-                                       kBlockSize,
-                                       0,
-                                       input_size,
-                                       ck_tile::make_tuple(N, 1), // Input Stride
-                                       ck_tile::make_tuple(N, 1), // Output Stride
-                                       input_tensors,
-                                       static_cast<YDataType*>(y_buf.GetDeviceBuffer())));
+    float ave_time = launch_kernel(
+        ck_tile::stream_config{nullptr, true, 0, warmup, repeat},
+        ck_tile::make_kernel<kBlockPerCu>(Kernel{},
+                                          kGridSize,
+                                          kBlockSize,
+                                          0,
+                                          input_size,
+                                          ck_tile::make_tuple(N, 1), // Input Stride
+                                          ck_tile::make_tuple(N, 1), // Output Stride
+                                          input_tensors,
+                                          static_cast<YDataType*>(y_buf.GetDeviceBuffer())));
 
     std::cout << "Average time: " << ave_time << " ms" << std::endl;
 
@@ -126,6 +128,18 @@ bool run(const ck_tile::ArgParser& arg_parser)
 
         pass = ck_tile::check_err(
             y_validation, y_host, "Elementwise Add Error: Incorrect results!", 0.01, 0.01);
+    }
+
+    if(arg_parser.get_int("json") == 1)
+    {
+        dump_elementwise_json_results(arg_parser.get_str("jsonfile"),
+                                      arg_parser.get_str("prec"),
+                                      kGridSize,
+                                      kBlockSize,
+                                      ave_time,
+                                      0,
+                                      0,
+                                      "elementwise_unary");
     }
 
     return pass;

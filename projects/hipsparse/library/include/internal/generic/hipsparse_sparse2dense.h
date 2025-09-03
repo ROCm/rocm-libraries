@@ -90,6 +90,7 @@ hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           
 *  <caption id="sparse2dense_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B
 *  <tr><td>HIP_R_16F
+*  <tr><td>HIP_R_16BF
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
 *  <tr><td>HIP_C_32F

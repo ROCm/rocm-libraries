@@ -75,9 +75,6 @@ add_rocsparse_example(example_gemvi.cpp)
 add_rocsparse_example(example_v2_spmv_csr.cpp)
 add_rocsparse_example(example_sptrsv.cpp)
 
-
-
-
 set_source_files_properties(
   example_spmv_coo.cpp
   PROPERTIES
@@ -95,7 +92,6 @@ set_source_files_properties(
   PROPERTIES
   COMPILE_FLAGS "-Wno-deprecated-declarations"
 )
-
 
 # Level 3
 add_rocsparse_example(example_bsrmm.cpp)
@@ -170,3 +166,11 @@ if(TARGET rocsparse)
     add_rocsparse_fortran_example(example_fortran_roti.f90)
   endif()
 endif()
+
+# Build documentation examples
+FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
+
+foreach(file ${DOCUMENTATION_EXAMPLES})
+    message(STATUS "Found .cpp file: ${file}")
+    add_rocsparse_example(${file})
+endforeach()

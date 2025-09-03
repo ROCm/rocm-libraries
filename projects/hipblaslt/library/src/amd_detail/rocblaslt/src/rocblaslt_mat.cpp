@@ -252,13 +252,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
     bool swizzleA = matA->order != HIPBLASLT_ORDER_COL && matA->order != HIPBLASLT_ORDER_ROW;
     bool swizzleB = matB->order != HIPBLASLT_ORDER_COL && matB->order != HIPBLASLT_ORDER_ROW;
 
-    if(swizzleA && matA->batch_stride == 0)
-    {
-        // If batch_stride has never been assigned for swizzle, set it to the default value
-        // Swizzle is TN: For MatA, ->m (leading Dim) is unrollDim, ->n is tileDim
-        setDefaultSwizzledBatchedStride(matA->order, matA->m, matA->n, matA->batch_stride);
-    }
-
     rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            A,
                                                            B,
@@ -685,7 +678,7 @@ rocblaslt_status
                                                        matmul_descr[i]->act0,
                                                        matmul_descr[i]->act1,
                                                        0,
-                                                       handle->Synchronizer,
+                                                       (char*)handle->Synchronizer+(409600*i*sizeof(int)),
                                                        swizzleA,
                                                        swizzleB});
     }
@@ -878,13 +871,6 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         = problemtype.order_a != HIPBLASLT_ORDER_COL && problemtype.order_a != HIPBLASLT_ORDER_ROW;
     bool swizzleB
         = problemtype.order_b != HIPBLASLT_ORDER_COL && problemtype.order_b != HIPBLASLT_ORDER_ROW;
-
-    if(swizzleA && batch_stride_a == 0)
-    {
-        // If batch_stride has never been assigned for swizzle, set it to the default value
-        // Swizzle is TN: For MatA, unrollDim is k (Leading Dim), tileDim is m
-        setDefaultSwizzledBatchedStride(problemtype.order_a, k, m, batch_stride_a);
-    }
 
     auto status = validateMatmulArgs(m,
                                      n,
@@ -1359,7 +1345,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        handle->Synchronizer,
+                                        (char*)handle->Synchronizer+(409600*i*sizeof(int)),
                                         swizzleA,
                                         swizzleB});
     }

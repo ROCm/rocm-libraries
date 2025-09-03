@@ -34,11 +34,7 @@ void TestTransformReduceDevice(ExecutionPolicy exec)
   using Vector = thrust::device_vector<int>;
   using T      = typename Vector::value_type;
 
-  Vector data(3);
-  data[0] = 1;
-  data[1] = -2;
-  data[2] = 3;
-
+  Vector data{1, -2, 3};
   T init = 10;
 
   thrust::device_vector<T> result(1);
@@ -69,11 +65,7 @@ void TestTransformReduceCudaStreams()
   using Vector = thrust::device_vector<int>;
   using T      = Vector::value_type;
 
-  Vector data(3);
-  data[0] = 1;
-  data[1] = -2;
-  data[2] = 3;
-
+  Vector data{1, -2, 3};
   T init = 10;
 
   cudaStream_t s;

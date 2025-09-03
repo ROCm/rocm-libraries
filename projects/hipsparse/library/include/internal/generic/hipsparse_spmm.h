@@ -269,10 +269,11 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmm_mixed">Mixed Precisions</caption>
-*  <tr><th>A / B     <th>C         <th>compute_type
-*  <tr><td>HIP_R_8I  <td>HIP_R_32I <td>HIP_R_32I
-*  <tr><td>HIP_R_8I  <td>HIP_R_32F <td>HIP_R_32F
-*  <tr><td>HIP_R_16F <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><th>A / B      <th>C         <th>compute_type
+*  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
+*  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
 *  </table>
 *
 *  \p hipsparseSpMM supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions 
@@ -434,7 +435,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *                            matC,
 *                            HIP_R_32F,
 *                            HIPSPARSE_MM_ALG_DEFAULT,
-*                            &buffer);
+*                            buffer);
 *
 *    // Perform operation
 *    hipsparseSpMM(handle,
@@ -447,7 +448,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *                 matC,
 *                 HIP_R_32F,
 *                 HIPSPARSE_MM_ALG_DEFAULT,
-*                 &buffer);
+*                 buffer);
 *
 *    // Copy device to host
 *    hipMemcpy(hC.data(), dC, sizeof(float) * nnz_C, hipMemcpyDeviceToHost);

@@ -1,490 +1,547 @@
-# ########################################################################
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.22...3.25.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24.4)
 
-# Build documentation
-option(BUILD_DOCS "Build documentation" OFF)
+option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-option(LEGACY_HIPBLAS_DIRECT "Use hipblas headers instead of hipblas-common." OFF )
+project(hipblaslt VERSION 1.1.0 LANGUAGES CXX C ASM)
 
-# This will add compile option: -std=c++17
-set(CMAKE_CXX_STANDARD 17 )
-# Without this line, it will add -std=gnu++17 instead, which may have issues.
-set(CMAKE_CXX_EXTENSIONS OFF )
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-enable_testing()
-
-# Consider removing this in the future
-# This should appear before the project command, because it does not use FORCE
-if(WIN32)
-  set(CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}/package" CACHE PATH "Install path prefix, prepended onto install directories")
+if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
+    set(HIPBLASLT_IS_SUBPROJECT FALSE)
 else()
-  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
+    set(HIPBLASLT_IS_SUBPROJECT TRUE)
 endif()
 
-if(NOT BUILD_CUDA)
-# Adding CMAKE_PREFIX_PATH, needed for static builds
-list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
-endif()
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-
-
-if( NOT DEFINED ENV{HIP_PATH})
-    set( HIP_PATH "/opt/rocm/hip" )
-else( )
-    set (HIP_PATH $ENV{HIP_PATH} )
-endif( )
-
-if (DEFINED ENV{ROCM_PATH})
-  set(rocm_bin "$ENV{ROCM_PATH}/bin")
-else()
-  set(rocm_bin "/opt/rocm/bin")
-endif()
-
-if (NOT DEFINED ENV{CXX} AND NOT CMAKE_CXX_COMPILER)
-  set(CMAKE_CXX_COMPILER "${rocm_bin}/amdclang++")
-endif()
-
-if (NOT DEFINED ENV{CC} AND NOT CMAKE_C_COMPILER)
-  set(CMAKE_C_COMPILER "${rocm_bin}/amdclang")
-endif()
-
-# TODO: move FC and CXX and CC compiler vars above to new toolchain-linux.cmake (Fortran for clients)
-if (NOT DEFINED ENV{FC} AND NOT CMAKE_Fortran_COMPILER)
-  set(CMAKE_Fortran_COMPILER "gfortran")
-endif()
-
-# hipBLASLt project
-project(hipblaslt LANGUAGES CXX ASM)
-
-# Dependencies
-include(cmake/Dependencies.cmake)
-
-# Append our library helper cmake path and the cmake path for hip (for convenience)
-# Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake  ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip ${HIP_PATH}/cmake )
-
-# Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified.")
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-endif()
-
-# Honor per-config flags in try_compile() source-file signature. cmake v3.7 and up
-if(POLICY CMP0066)
-  cmake_policy(SET CMP0066 NEW)
-endif()
-
-# Force library install path to lib (CentOS 7 defaults to lib64)
-set(CMAKE_INSTALL_LIBDIR "lib" CACHE INTERNAL "Installation directory for libraries" FORCE)
-
-
-# Build options
-option(BUILD_SHARED_LIBS "Build hipBLASLt as a shared library" ON)
-option(BUILD_CLIENTS_TESTS "Build tests (requires googletest)" OFF)
-option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks" OFF)
-option(BUILD_CLIENTS_SAMPLES "Build examples" OFF)
-option(BUILD_VERBOSE "Output additional build information" OFF)
-option(BUILD_CODE_COVERAGE "Build hipBLASLt with code coverage enabled" OFF)
-option(BUILD_ADDRESS_SANITIZER "Build hipBLASLt with address sanitizer enabled" OFF)
-# Find CUDA if the user wants a CUDA version.
-option(USE_CUDA "Look for CUDA and use that as a backend if found" OFF)
-# For lazy library loading
-option(Tensile_MERGE_FILES "Tensile to merge kernels and solutions files?" ON)
-option(Tensile_SEPARATE_ARCHITECTURES "Tensile to use GPU architecture specific files?" ON)
-option(Tensile_NO_LAZY_LIBRARY_LOADING "Diasble loading kernels on demand?" OFF)
-# For roctx
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+include(GenerateExportHeader)
 include(CMakeDependentOption)
-cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Enable roctx marker in hipBLASLt" ON "BUILD_SHARED_LIBS" OFF)
-# For rocRoller
-option(HIPBLASLT_USE_ROCROLLER "Build with the rocRoller library" ON)
 
-if(BUILD_ADDRESS_SANITIZER)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
-    add_link_options(-fuse-ld=lld)
-endif()
+include(dependencies)
+include(hipblaslt_python)
+include(hipblaslt_target_configure_sanitizers)
+include(tensilelite_supported_architectures)
 
-if(NOT BUILD_CUDA)
-    # Determine if CXX Compiler is amdclang
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        message(STATUS "Using amdclang to build for amdgpu backend")
-        if( CMAKE_CXX_COMPILER MATCHES ".*hipcc.*" )
-          message( STATUS "WARNING: hipcc compiler use is deprecated. Use amdclang++ directly." )
-        endif()
-        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_HCC_COMPAT_MODE__=1" )
-        if (CMAKE_BUILD_TYPE MATCHES "Debug" AND NOT WIN32)
-            set (CMAKE_CXX_FLAGS_DEBUG "-O0 ${CMAKE_CXX_FLAGS_DEBUG} -gsplit-dwarf -ggdb" )
-        endif()
-        if (CMAKE_BUILD_TYPE MATCHES "Release" AND NOT WIN32)
-            set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3" )
-        endif()
-    else()
-        message(FATAL_ERROR "'amdclang' compiler required to compile for ROCm software.")
-    endif()
-endif()
-
-if (LINK_BLIS)
-  include(cmake/findBLIS.cmake)
-endif()
-
-if (USE_CUDA)
-	find_package( CUDA REQUIRED )
-    # Hip headers required of all clients; clients use hip to allocate device memory
-    find_package( HIP MODULE REQUIRED )
-    list( APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include" )
-else()
-
-    if (NOT BUILD_ADDRESS_SANITIZER)
-      #Set the AMDGPU_TARGETS with backward compatiblity
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx908:xnack+;gfx908:xnack-;gfx90a:xnack+;gfx90a:xnack-;gfx942;gfx950;gfx1100;gfx1101;gfx1103;gfx1150;gfx1151;gfx1200;gfx1201"
-      )
-    else()
-      #build xnack-supported targets only
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
-      )
-    endif()
-
-    if (AMDGPU_TARGETS)
-        set(TMPAMDGPU_TARGETS "${AMDGPU_TARGETS}")
-        if(TMPAMDGPU_TARGETS STREQUAL "all" )
-            set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target" FORCE)
-        else()
-            set(AMDGPU_TARGETS "${TMPAMDGPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
-        endif()
-    else()
-        set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
-    endif()
-
-    message(STATUS "AMDGPU_TARGETS: ${AMDGPU_TARGETS}")
-
-    if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
-        find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
-    endif( )
-
-    # Add rocisa
-    add_subdirectory(tensilelite/rocisa)
-
-    option( Tensile_SKIP_BUILD "Skip building Tensile" OFF )
-
-    # we will have expanded "all" for tensile to ensure consistency as we have local rules
-    set( Tensile_ARCHITECTURE "${AMDGPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
-
-    set( Tensile_LOGIC "asm_full" CACHE STRING "Tensile to use which logic?")
-    set( Tensile_CODE_OBJECT_VERSION "4" CACHE STRING "Tensile code_object_version")
-    if(WIN32)
-      set( Tensile_COMPILER "clang++.exe" CACHE STRING "Tensile compiler")
-    else()
-      set( Tensile_COMPILER "amdclang++" CACHE STRING "Tensile compiler")
-    endif()
-    set( Tensile_LIBRARY_FORMAT "msgpack" CACHE STRING "Tensile library format")
-    set( Tensile_CPU_THREADS "" CACHE STRING "Number of threads for Tensile parallel build")
-
-    option( Tensile_MERGE_FILES "Tensile to merge kernels and solutions files?" ON )
-    option( Tensile_SHORT_FILENAMES "Tensile to use short file names? Use if compiler complains they're too long." OFF )
-    option( Tensile_PRINT_DEBUG "Tensile to print runtime debug info?" OFF )
-
-    if (NOT Tensile_BUILD_ID)
-      set(Tensile_BUILD_ID "sha1" CACHE STRING "Build ID Kind for Tensile" FORCE)
-    endif()
-
-    set( Tensile_TEST_LOCAL_PATH "" CACHE PATH "Use local Tensile directory instead of fetching a GitHub branch" )
-
-    set_property( CACHE Tensile_LOGIC PROPERTY STRINGS aldebaran asm_full asm_lite asm_miopen hip_lite other )
-    set_property( CACHE Tensile_CODE_OBJECT_VERSION PROPERTY STRINGS default V4 V5 )
-    set_property( CACHE Tensile_COMPILER PROPERTY STRINGS hcc hipcc)
-    set_property( CACHE Tensile_LIBRARY_FORMAT PROPERTY STRINGS msgpack yaml)
-
-    if(Tensile_LIBRARY_FORMAT MATCHES "yaml")
-      option(TENSILE_USE_LLVM      "Use LLVM for parsing config files." ON)
-      option(TENSILE_USE_MSGPACK   "Use msgpack for parsing config files." OFF)
-    else()
-      option(TENSILE_USE_LLVM      "Use LLVM for parsing config files." OFF)
-      option(TENSILE_USE_MSGPACK   "Use msgpack for parsing config files." ON)
-    endif()
-
-    if (WIN32)
-      set( Tensile_ROOT "${CMAKE_BINARY_DIR}/virtualenv/Lib/site-packages/Tensile" )
-    endif()
-
-    include(virtualenv)
-    if (Tensile_TEST_LOCAL_PATH)
-      virtualenv_install(${Tensile_TEST_LOCAL_PATH})
-      message (STATUS "using local Tensile from ${Tensile_TEST_LOCAL_PATH}, copied to ${Tensile_ROOT}")
-    else()
-      virtualenv_install(${CMAKE_SOURCE_DIR}/tensilelite)
-    endif()
-    message(STATUS "Adding ${VIRTUALENV_HOME_DIR} to CMAKE_PREFIX_PATH")
-    list(APPEND CMAKE_PREFIX_PATH ${VIRTUALENV_HOME_DIR})
-    if (TENSILE_VERSION)
-      find_package(Tensile ${TENSILE_VERSION} EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
-    else()
-      find_package(Tensile 5.0.0 EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
-    endif()
-
-    # setup hipblaslt defines used for both the library and clients
-    if(Tensile_SEPARATE_ARCHITECTURES)
-      list(APPEND TENSILE_DEFINES ROCBLAS_TENSILE_SEPARATE_ARCH=1)
-    else()
-      list(APPEND TENSILE_DEFINES ROCBLAS_TENSILE_SEPARATE_ARCH=0)
-    endif()
-    if(Tensile_NO_LAZY_LIBRARY_LOADING)
-      list(APPEND TENSILE_DEFINES ROCBLASLT_TENSILE_LAZY_LOAD=0)
-    else()
-      list(APPEND TENSILE_DEFINES ROCBLASLT_TENSILE_LAZY_LOAD=1)
-    endif()
-endif()
-
-cmake_host_system_information(RESULT OS_PLATFORM QUERY DISTRIB_ID)
-cmake_host_system_information(RESULT OS_INFO QUERY DISTRIB_INFO)
-
-if( ${OS_PLATFORM} STREQUAL "rhel")
-  if( ${OS_INFO_VERSION_ID} VERSION_LESS "9.5")
-    message(WARNING "RHEL version ${OS_INFO_VERSION_ID} too old, not building RocRoller")
-    set(HIPBLASLT_USE_ROCROLLER OFF)
-  endif()
-endif()
-
-if( LEGACY_HIPBLAS_DIRECT )
-  find_package( hipblas REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
-else()
-  find_package( hipblas-common REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
-endif()
-
-if(HIPBLASLT_ENABLE_MARKER)
-  find_library(rocTracer roctx64)
-  if(NOT rocTracer)
-    message(FATAL_ERROR "roctracer not found, but HIPBLASLT_ENABLE_MARKER is enabled")
-  endif()
-  add_definitions(-DHIPBLASLT_ENABLE_MARKER)
-  rocm_package_add_dependencies(DEPENDS "roctracer >= 1.0.0")
-endif()
-
-# Setup version
-set(VERSION_STRING "1.1.0")
-rocm_setup_version(VERSION ${VERSION_STRING})
+rocm_setup_version(VERSION ${PROJECT_VERSION})
 set(hipblaslt_SOVERSION 1.1)
 
-
-if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
-  set( BUILD_CLIENTS ON )
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(WIN32)
+      set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path prefix." FORCE)
+    else()
+      set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix." FORCE)
+    endif()
 endif()
 
-# FOR HANDLING ENABLE/DISABLE OPTIONAL BACKWARD COMPATIBILITY for FILE/FOLDER REORG
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS include
-  )
+option(HIPBLASLT_ENABLE_DEVICE "Build hipBLASLt device libraries." ON)
+option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
+option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
+option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
+option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
+option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
+
+option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
+option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
+option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
+option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
+
+if(HIPBLASLT_ENABLE_CLIENT)
+    option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
+    option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
+    # rocm-smi is not presently available on Windows so we do not require it.
+    cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
 endif()
 
-# hipBLASLt library
-add_subdirectory( library )
+if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
+    option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." OFF)
+    option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
+    option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
+    option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
+    option(HIPBLASLT_ENABLE_LLVM "Use OpenMP to improve performance." OFF)
+endif()
 
-# Trigger client builds if selected
-# Build clients of the library
-if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
-  if(NOT CLIENTS_OS)
+if(HIPBLASLT_ENABLE_HOST)
+    option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
+    option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
+    option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
+    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
+    cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
+    option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
+endif()
+
+set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Use link path for RPATH")
+
+mark_as_advanced(CMAKE_SKIP_BUILD_RPATH)
+mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
+mark_as_advanced(CMAKE_INSTALL_RPATH)
+mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
+
+set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
+
+if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
+    tensilelite_get_base_architectures(GPU_TARGETS)
+else()
+    tensilelite_validate_gpu_targets("${GPU_TARGETS}")
+endif()
+message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
+
+find_package(hip REQUIRED)
+if(HIPBLASLT_ENABLE_HOST)
+    if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
+        set(hipblas_target hipblas)
+    else()
+        set(hipblas_target hipblas-common)
+    endif()
+    if(NOT ROCM_LIBRARIES_SUPERBUILD) 
+        find_package(${hipblas_target} REQUIRED)
+    endif()
+    if(HIPBLASLT_ENABLE_MARKER)
+        find_library(rocTracer roctx64 REQUIRED)
+    else()
+        set(rocTracer)
+    endif()
+endif()
+
+if(HIPBLASLT_ENABLE_ROCM_SMI)
+    find_package(rocm_smi REQUIRED)
+else()
+    find_package(rocm_smi)
+endif()
+
+if(HIPBLASLT_ENABLE_CLIENT)
+    if(HIPBLASLT_ENABLE_BLIS)
+        find_package(BLIS REQUIRED)
+    else()
+        find_package(BLAS REQUIRED)
+        #find_package(cblas REQUIRED) # is this actually required
+    endif()
+    find_package(LAPACK REQUIRED)
+endif()
+
+if(HIPBLASLT_ENABLE_OPENMP)
+    find_package(OpenMP REQUIRED)
+endif()
+
+if(HIPBLASLT_ENABLE_LLVM)
+    find_package(LLVM REQUIRED)
+endif()
+
+if(HIPBLASLT_ENABLE_DEVICE)
+    if(HIPBLASLT_ENABLE_ASAN AND NOT WIN32)
+        set(ASAN_LIB_PATH "unset")
+        execute_process(
+            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
+            OUTPUT_VARIABLE ASAN_LIB_PATH
+        )
+        # If ASAN_LIB_PATH is libclang_rt.asan-x86_64.so
+        # rather than /path/to/libclang_rt.asan-x86_64.so then
+        # we failed to locate it and HAS_PARENT_PATH is false.
+        string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
+        cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
+        if(NOT result)
+            message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
+        endif()
+        # Disable a few asan options to get builds going but these should be addressed
+        set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
+    endif()
+endif()
+
+if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
+    set(HIPBLASLT_PYTHON_DEPS "rocisa")
+    set(hipblaslt_python_dev Development.Module)
+    hipblaslt_find_python("${hipblaslt_python_dev}")
+    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${asan_opts}")
+else()
+    hipblaslt_find_python("${hipblaslt_python_dev}")
+    set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
+endif()
+
+if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
+    if(HIPBLASLT_ENABLE_FETCH)
+        block(SCOPE_FOR VARIABLES)
+            #set(ROCROLLER_ENABLE_FETCH ON)
+            #set(ROCROLLER_BUILD_TESTING OFF)
+            #set(ROCROLLER_ENABLE_CLIENT OFF)
+            option(YAML_CPP_INSTALL "" ON)
+            set(BUILD_TESTING OFF)
+            set(BUILD_CLIENTS OFF)
+            #set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+            #set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            include(FetchContent)
+            FetchContent_Declare(
+                rocRoller
+                GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
+                GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
+            )
+            FetchContent_MakeAvailable(rocRoller)
+        endblock()
+    else()
+        find_package(rocroller REQUIRED)
+    endif()
+endif()
+
+if(HIPBLASLT_ENABLE_MSGPACK)
+    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
+    # Prefer 6.x (msgpack-cxx)
+    find_package(msgpack-cxx CONFIG)
+    if(msgpack-cxx_FOUND)
+        message(STATUS "Found msgpack-cxx (>=6.x)")
+        set(hipblaslt_msgpack_target "msgpack-cxx")
+    else()
+        # TODO: set minimum version requied for *-cxx library
+        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+        set(hipblaslt_msgpack_target "msgpackc-cxx")
+        message(STATUS "Found msgpack (<=5.x)")
+    endif()
+endif()
+
+add_subdirectory(tensilelite)
+
+if(HIPBLASLT_ENABLE_HOST)
+    if(HIPBLASLT_BUILD_SHARED_LIBS)
+        add_library(hipblaslt SHARED)
+    else()
+        add_library(hipblaslt STATIC)
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
+    endif()
+    if(HIPBLASLT_ENABLE_ROCROLLER)
+        target_link_libraries(hipblaslt PRIVATE roc::rocroller)
+        target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
+    endif()
+    if(HIPBLASLT_ENABLE_MSGPACK)
+        target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})
+    endif()
+    rocm_set_soversion(hipblaslt ${hipblaslt_SOVERSION})
+    add_library(roc::hipblaslt ALIAS hipblaslt)
+
+    target_link_libraries(hipblaslt
+        PUBLIC
+            roc::${hipblas_target}
+        PRIVATE
+            hip::device
+            tensilelite::tensilelite-host
+            ${CMAKE_DL_LIBS}
+            ${rocTracer}
+    )
+    
+    if(HIPBLASLT_ENABLE_ASAN)
+        hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
+    endif()
+
+    target_compile_features(hipblaslt PUBLIC cxx_std_17)
+    target_compile_definitions(hipblaslt
+        PUBLIC
+            ROCM_USE_FLOAT16
+            $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
+    )
+
+    if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
+        # This definition shows up in a public header
+        target_compile_definitions(hipblaslt PUBLIC LEGACY_HIPBLAS_DIRECT)
+    endif()
+
+    if(HIPBLASLT_ENABLE_LAZY_LOAD)
+        target_compile_definitions(hipblaslt PRIVATE ROCBLASLT_TENSILE_LAZY_LOAD)
+    endif()
+
+    if(HIPBLASLT_ENABLE_MARKER)
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER)
+    endif()
+
+    target_include_directories(hipblaslt
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
+    )
+
+    set_target_properties(hipblaslt
+        PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/library"
+    )
+    add_subdirectory(library)
+endif()
+
+if(HIPBLASLT_ENABLE_DEVICE)
+    add_subdirectory(device-library)
+endif()
+
+if(HIPBLASLT_ENABLE_CLIENT)
+    add_subdirectory(clients)
+endif()
+
+if(HIPBLASLT_ENABLE_HOST)
+    # work around code object stripping failure if using /usr/bin/strip
+    set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /opt/rocm/llvm/bin/llvm-strip") # need to generalize this
+    get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
+
+    install(
+        FILES ${hipblaslt_public_headers}
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt"
+        COMPONENT devel
+    )
+    # temporary workaround to avoid updating downstream components
+    # TODO: remove the follow file install once rocblas is updated
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-export.h"
+            "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT devel
+    )
+
+    rocm_install_targets(TARGETS hipblaslt)
+
+    rocm_export_targets(
+        TARGETS roc::hipblaslt
+        DEPENDS PACKAGE hip
+        DEPENDS PACKAGE ${hipblas_target}
+        NAMESPACE roc::
+    )
+
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
+        COPYONLY
+    )
+
+    if( LEGACY_HIPBLAS_DIRECT )
+        rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
+    else()
+        set(hipblas_common_minimum 1.0.0)
+        if(HIPBLASLT_BUILD_SHARED_LIBS)
+            rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
+            rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
+        else()
+            rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-dev >= ${hipblas_common_minimum}")
+            rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-devel >= ${hipblas_common_minimum}")
+        endif()
+    endif()
+endif()
+
+if(HIPBLASLT_ENABLE_DEVICE)
+    if(WIN32)
+        # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
+        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
+    else()
+        # Put files used at runtime adjacent to shared libraries ('.so') in
+        # lib/, separate from executables (no extension) in bin/.
+        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
+    endif()
+    rocm_install(
+        DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
+        DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
+        COMPONENT devel
+    )
+endif()
+
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+
+if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+    set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+endif()
+
+include(ROCMCreatePackage)
+include(ROCMClients)
+
+if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
     string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
     rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
-  endif()
-  message(STATUS "OS: ${CLIENTS_OS} ${CLIENTS_OS_VERSION}")
-  set(GFORTRAN_RPM "libgfortran4")
-  set(GFORTRAN_DEB "libgfortran4")
-  if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
-    if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
-      set(GFORTRAN_RPM "libgfortran")
-    endif()
-  elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-    set(GFORTRAN_DEB "libgfortran5")
-  elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
-    set(GFORTRAN_RPM "gfortran")
-  endif()
+endif()
 
-  set( BUILD_CLIENTS ON )
-  rocm_package_setup_component(clients)
-  rocm_package_setup_client_component(clients-common)
-  if(BUILD_CLIENTS_TESTS)
-    rocm_package_setup_client_component(
-      tests
-      DEPENDS
+if(HIPBLASLT_ENABLE_CLIENT)
+    rocm_install(
+        TARGETS
+            hipblaslt-bench
+            hipblaslt-api-overhead
+            hipblaslt-bench-groupedgemm-fixed-mk
+            hipblaslt-bench-extop-layernorm
+            hipblaslt-bench-extop-matrixtransform
+            hipblaslt-bench-extop-softmax
+            hipblaslt-bench-extop-amax
+            hipblaslt-sequence
+        COMPONENT benchmarks
+    )
+    rocm_install(
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/data/hipblaslt_common.yaml"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/data/hipblaslt_template.yaml"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
-  endif()
-  if(BUILD_CLIENTS_BENCHMARKS)
-    rocm_package_setup_client_component(
-      benchmarks
-      DEPENDS
+    )
+    rocm_install(
+        PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/hipblaslt_gentest.py"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
-  endif()
-  if(BUILD_CLIENTS_SAMPLES)
+    )
+    rocm_install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/clients/bench/sequence.yaml"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT benchmarks
+    )
+
+    if(HIPBLASLT_ENABLE_MARKER)
+        rocm_package_add_dependencies(DEPENDS "roctracer >= 1.0.0")
+    endif()
+
+    if(NOT CLIENTS_OS)
+        rocm_set_os_id(CLIENTS_OS)
+        string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
+        rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
+    endif()
+    
+    rocm_package_setup_component(clients)
+    rocm_package_setup_client_component(clients-common)
+    rocm_package_setup_client_component(benchmarks
+        DEPENDS
+        COMPONENT clients-common
+    )
+
+endif()
+
+if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
+    rocm_install(
+        TARGETS hipblaslt-test
+        COMPONENT tests
+    )
+    rocm_install(
+        FILES "${CMAKE_CURRENT_BINARY_DIR}/clients/hipblaslt_gtest.data"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT tests
+    )
+    rocm_package_setup_client_component(tests
+        DEPENDS
+        COMPONENT clients-common
+    )
+endif()
+
+if(HIPBLASLT_ENABLE_SAMPLES)
+    install(
+        TARGETS
+            sample_hipblaslt_gemm
+            sample_hipblaslt_gemm_ext
+            sample_hipblaslt_gemm_batched
+            sample_hipblaslt_gemm_batched_ext
+            sample_hipblaslt_gemm_tuning_splitk_ext
+            sample_hipblaslt_gemm_bias
+            sample_hipblaslt_gemm_bias_ext
+            sample_hipblaslt_gemm_get_all_algos
+            sample_hipblaslt_gemm_get_all_algos_ext
+            sample_hipblaslt_gemm_get_algo_by_index_ext
+            sample_hipblaslt_gemm_alphavec_ext
+            sample_hipblaslt_gemm_gelu_aux_bias
+            sample_hipblaslt_gemm_gelu_aux_bias_ext
+            sample_hipblaslt_gemm_amax
+            sample_hipblaslt_gemm_amax_ext
+            sample_hipblaslt_gemm_amax_with_scale
+            sample_hipblaslt_gemm_amax_with_scale_ext
+            sample_hipblaslt_gemm_bgradb
+            sample_hipblaslt_gemm_ext_bgradb
+            sample_hipblaslt_gemm_dgelu_bgrad
+            sample_hipblaslt_gemm_dgelu_bgrad_ext
+            sample_hipblaslt_gemm_is_tuned_ext
+            sample_hipblaslt_gemm_tuning_wgm_ext
+            sample_hipblaslt_gemm_with_scale_a_b
+            sample_hipblaslt_gemm_with_scale_a_b_ext
+            sample_hipblaslt_groupedgemm_ext
+            sample_hipblaslt_groupedgemm_fixed_mk_ext
+            sample_hipblaslt_groupedgemm_get_all_algos_ext
+            sample_hipblaslt_gemm_mix_precision
+            sample_hipblaslt_gemm_mix_precision_ext
+            sample_hipblaslt_gemm_mix_precision_with_amax_ext
+            sample_hipblaslt_gemm_attr_tciA_tciB
+            sample_hipblaslt_ext_op_layernorm
+            sample_hipblaslt_ext_op_amax
+            sample_hipblaslt_gemm_with_TF32
+            sample_hipblaslt_gemm_swizzle_a
+            sample_hipblaslt_gemm_bias_swizzle_a_ext
+            sample_hipblaslt_weight_swizzle_padding
+            sample_hipblaslt_gemm_swish_bias
+        RUNTIME
+        COMPONENT samples
+        DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt-samples"
+    )
+    install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/clients/samples"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/hipblaslt/samples
+        COMPONENT samples
+        FILES_MATCHING
+        PATTERN "*.cpp"
+        PATTERN "*.h"
+        PATTERN "CMakeLists.txt" EXCLUDE
+    )
     rocm_package_setup_client_component(samples)
-  endif()
-  add_subdirectory( clients )
-endif( )
-
-if( NOT BUILD_CUDA )
-  if( LEGACY_HIPBLAS_DIRECT )
-    rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
-  else()
-    set(hipblas_common_minimum 1.0.0)
-    if(BUILD_SHARED_LIBS)
-    rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
-    rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
-    else()
-      rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-dev >= ${hipblas_common_minimum}")
-      rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-devel >= ${hipblas_common_minimum}")
-    endif()
-  endif()
-endif( )
-
-# Build docs
-if(BUILD_DOCS)
-  add_subdirectory(docs)
 endif()
 
-# Package specific CPACK vars
-set( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" )
-set( CPACK_RPM_PACKAGE_LICENSE "MIT")
-
-if( NOT CPACK_PACKAGING_INSTALL_PREFIX )
-    set( CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" )
+if(ROCM_LIBRARIES_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
+    # rocm_create_package makes decisions on what type of package to produce
+    # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
+    # a dev package.
+    set(BUILD_SHARED_LIBS ${HIPBLASLT_BUILD_SHARED_LIBS})
+    set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
+    rocm_create_package(
+        NAME hipblaslt
+        DESCRIPTION "HIP library for GEMM operations with extended functionality"
+        MAINTAINER "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>"
+        LDCONFIG
+        LDCONFIG_DIR ${HIPBLASLT_CONFIG_DIR}
+    )
 endif()
 
-set( CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" "\${CPACK_PACKAGING_INSTALL_PREFIX}/lib" )
+if(HIPBLASLT_ENABLE_COVERAGE)
+    target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt PRIVATE -fprofile-instr-generate)
 
-# work around code object stripping failure if using /usr/bin/strip
-set( CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${rocm_bin}/../llvm/bin/llvm-strip")
+    target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt-clients-common PRIVATE -fprofile-instr-generate)
 
-# Give hipblaslt compiled for CUDA backend a different name
-if( NOT USE_CUDA )
-    set( package_name hipblaslt )
-else( )
-    set( package_name hipblaslt-alt )
-endif( )
+    target_compile_options(hipblaslt-bench PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt-bench PRIVATE -fprofile-instr-generate)
 
-set( HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file" )
+    target_compile_options(hipblaslt-test PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping -fvisibility=default)
+    target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
+    target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
 
-rocm_create_package(
-    NAME ${package_name}
-    DESCRIPTION "HIP library for GEMM operations with extended functionality"
-    MAINTAINER "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>"
-    LDCONFIG
-    LDCONFIG_DIR ${HIPBLASLT_CONFIG_DIR}
-)
-
-if(BUILD_CODE_COVERAGE)
-  # Force CMake to use ROCm's LLVM
-  set(LLVM_BIN_DIR /opt/rocm/llvm/bin)
-  find_package(LLVM REQUIRED CONFIG)
-  message(STATUS "LLVM found: ${LLVM_BIN_DIR}")
-
-  # Locate required LLVM tools (llvm-cov, llvm-profdata, etc.)
-  find_program(LLVM_PROFDATA_EXECUTABLE llvm-profdata HINTS ${LLVM_BIN_DIR} REQUIRED)
-  find_program(LLVM_COV_EXECUTABLE llvm-cov HINTS ${LLVM_BIN_DIR} REQUIRED)
-
-  # Use LLVM libraries and headers
-  find_package(LLVM REQUIRED CONFIG)
-
-  # Modern: Use target_* for compiler and linker flags
-  target_compile_options(hipblaslt PRIVATE
-    -fprofile-instr-generate
-    -fcoverage-mapping
-    -fvisibility=default
-  )
-
-  target_link_options(hipblaslt PUBLIC
-    -fprofile-instr-generate
-  )
-
-  target_include_directories(hipblaslt PRIVATE
-    ${LLVM_INCLUDE_DIRS}
-  )
-
-  target_link_directories(hipblaslt PRIVATE
-    ${LLVM_LIBRARY_DIRS}
-  )
-
-  # Print status message
-  message(STATUS "LLVM found at: ${LLVM_BIN_DIR}")
-  message(STATUS "llvm-profdata: ${LLVM_PROFDATA_EXECUTABLE}")
-  message(STATUS "llvm-cov: ${LLVM_COV_EXECUTABLE}")
-
-  add_custom_target(coverage
-    COMMAND ${CMAKE_COMMAND} -E env
-            LLVM_PROFILE_VERBOSE=1
-            LLVM_PROFILE_FILE=./hipblaslt-test_%m.profraw
-            ./clients/staging/hipblaslt-test
-            --output-on-failure
-    COMMAND ${CMAKE_COMMAND} -E env
-            LLVM_PROFILE_VERBOSE=1
-            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
-            ./clients/staging/sample_hipblaslt_ext_op_amax
-            --output-on-failure
-    COMMAND ${CMAKE_COMMAND} -E env
-            LLVM_PROFILE_VERBOSE=1
-            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
-            ./clients/staging/sample_hipblaslt_ext_op_layernorm
-            --output-on-failure
-    COMMAND ${CMAKE_COMMAND} -E env
-            LLVM_PROFILE_VERBOSE=1
-            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
-            ./clients/staging/sample_hipblaslt_weight_swizzle_padding
-            --output-on-failure
-    COMMAND ${CMAKE_COMMAND} -E env /bin/sh -c "${LLVM_PROFDATA_EXECUTABLE} merge -sparse ${CMAKE_BINARY_DIR}/*.profraw -o ${CMAKE_BINARY_DIR}/coverage_test.profdata"
-
-    COMMAND ${LLVM_COV_EXECUTABLE}
-            report
-            -object ./library/libhipblaslt-d.so.${hipblaslt_SOVERSION}
-            -instr-profile=./coverage_test.profdata
-            --ignore-filename-regex=.*/build/debug/.*
-    COMMAND ${LLVM_COV_EXECUTABLE}
-            show
-            -object ./library/libhipblaslt-d.so.${hipblaslt_SOVERSION}
-            -instr-profile=./coverage_test.profdata
-            -format=html -output-dir=coverage-report
-            --ignore-filename-regex=.*/build/debug/.*
-
-    COMMAND tox -c ../../tensilelite -v --workdir /tmp/.tensile-tox -e py3 -- ../../tensilelite/Tensile/Tests -m common --cov=../../tensilelite --cov-report=html
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-
-    VERBATIM
-  )
-
-  add_dependencies(coverage hipblaslt-test
-                            sample_hipblaslt_ext_op_amax
-                            sample_hipblaslt_ext_op_layernorm
-                            sample_hipblaslt_weight_swizzle_padding)
+    set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+    add_custom_target(
+        code_cov_tests
+        DEPENDS hipblaslt-test
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
+        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw"
+                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG
+                                        $<TARGET_FILE:hipblaslt-test>
+                                        --precompile=hipblaslt-test-precompile.db
+      )
+      find_program(
+        LLVM_PROFDATA
+        llvm-profdata
+        HINTS llvm/bin
+        REQUIRED
+      )
+      find_program(
+        LLVM_COV
+        llvm-cov
+        REQUIRED
+        HINTS llvm/bin
+      )
+      add_custom_target(
+        coverage
+        DEPENDS code_cov_tests
+        COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" -format=html -output-dir="${coverage_dir}"
+      )
 endif()

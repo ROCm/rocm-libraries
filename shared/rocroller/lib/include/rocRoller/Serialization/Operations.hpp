@@ -170,6 +170,27 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<Operations::SubTileTranspose, IO, Context>
+        {
+            using TOp = Operations::SubTileTranspose;
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, TOp& op, Context& ctx)
+            {
+                iot::mapRequired(io, "tag", op.m_tag);
+                iot::mapRequired(io, "input", op.m_input);
+                iot::mapRequired(io, "tileDimensions", op.m_tileDimensions);
+            }
+
+            static void mapping(IO& io, TOp& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<Operations::T_Load_Linear, IO, Context>
         {
             using TOp = Operations::T_Load_Linear;
@@ -416,6 +437,15 @@ namespace rocRoller
             static Operations::Operation call()
             {
                 return Operations::BlockScale(Operations::OperationTag(-1), 1);
+            }
+        };
+
+        template <>
+        struct DefaultConstruct<Operations::Operation, Operations::SubTileTranspose>
+        {
+            static Operations::Operation call()
+            {
+                return Operations::SubTileTranspose(Operations::OperationTag(-1), {});
             }
         };
 

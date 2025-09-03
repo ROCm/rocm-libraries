@@ -74,6 +74,9 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_size \p m or \p n or \p ld is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p A or \p nnz_per_columns or \p csc_val \p csc_col_ptr or \p csc_row_ind
 *              pointer is invalid.
+*
+*  \par Example
+*  \snippet example_rocsparse_dense2csc.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

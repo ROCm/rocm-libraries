@@ -29,17 +29,22 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <thrust/system/hip/config.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
-#  include <thrust/distance.h>
-#  include <thrust/iterator/counting_iterator.h>
-#  include <thrust/system/hip/detail/execution_policy.h>
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  include <thrust/detail/internal_functional.h>
 #  include <thrust/system/hip/detail/transform.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
+
 namespace __replace
 {
 template <class T>
@@ -83,25 +88,27 @@ struct new_value_if_f
     return pred(y) ? new_value : x;
   }
 }; // struct new_value_if_f
+
 } // namespace __replace
 
 template <class Derived, class Iterator, class T>
-void THRUST_HIP_FUNCTION
+void THRUST_HOST_DEVICE
 replace(execution_policy<Derived>& policy, Iterator first, Iterator last, T const& old_value, T const& new_value)
 {
   using thrust::placeholders::_1;
+
   hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>(new_value), _1 == old_value);
 }
 
 template <class Derived, class Iterator, class Predicate, class T>
-void THRUST_HIP_FUNCTION
+void THRUST_HOST_DEVICE
 replace_if(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate pred, T const& new_value)
 {
   hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>(new_value), pred);
 }
 
 template <class Derived, class Iterator, class StencilIt, class Predicate, class T>
-void THRUST_HIP_FUNCTION replace_if(
+void THRUST_HOST_DEVICE replace_if(
   execution_policy<Derived>& policy,
   Iterator first,
   Iterator last,
@@ -113,7 +120,7 @@ void THRUST_HIP_FUNCTION replace_if(
 }
 
 template <class Derived, class InputIt, class OutputIt, class Predicate, class T>
-OutputIt THRUST_HIP_FUNCTION replace_copy_if(
+OutputIt THRUST_HOST_DEVICE replace_copy_if(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -127,7 +134,7 @@ OutputIt THRUST_HIP_FUNCTION replace_copy_if(
 }
 
 template <class Derived, class InputIt, class StencilIt, class OutputIt, class Predicate, class T>
-OutputIt THRUST_HIP_FUNCTION replace_copy_if(
+OutputIt THRUST_HOST_DEVICE replace_copy_if(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -142,7 +149,7 @@ OutputIt THRUST_HIP_FUNCTION replace_copy_if(
 }
 
 template <class Derived, class InputIt, class OutputIt, class T>
-OutputIt THRUST_HIP_FUNCTION replace_copy(
+OutputIt THRUST_HOST_DEVICE replace_copy(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,

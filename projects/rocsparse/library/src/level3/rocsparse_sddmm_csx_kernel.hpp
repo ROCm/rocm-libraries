@@ -133,7 +133,7 @@ namespace rocsparse
 
                 if(local_thread_index == 0)
                 {
-                    csx_val[at] = csx_val[at] * beta + alpha * s[local_seq_index][0];
+                    csx_val[at] = beta * csx_val[at] + alpha * s[local_seq_index][0];
                 }
             }
         }
@@ -176,7 +176,7 @@ namespace rocsparse
 
                 if(local_thread_index == 0)
                 {
-                    csx_val[at] = csx_val[at] * beta + alpha * s[local_seq_index][0];
+                    csx_val[at] = beta * csx_val[at] + alpha * s[local_seq_index][0];
                 }
             }
         }

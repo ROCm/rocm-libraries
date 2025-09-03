@@ -3,6 +3,16 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.1.0 for ROCm 7.1
+
+### Added
+
+* Added a new CMake option `-DSQLITE_USE_SYSTEM_PACKAGE` to allow SQLite to be provided by the system.
+* Introduced `libhipcxx` as a soft depedency. When `liphipcxx` can be included, rocthrust, may use structs and methods defined in `libhipcxx`. This allows for a more complete behaviour parity with CCCL and mirrors CCCL's thrust own depedency on `libcudacxx`.
+
+### Known Issues
+* `event` test is failing on CI and local runs on MI300, MI250 and MI210.
+
 ## rocThrust 4.0.0 for ROCm 7.0
 
 ### Changed

@@ -111,7 +111,6 @@ include(ROCMInstallSymlinks)
 include(ROCMCheckTargetIds)
 include(ROCMUtilities)
 include(ROCMClients)
-include(ROCMHeaderWrapper)
 
 # For downloading and building required dependencies
 include(FetchContent)

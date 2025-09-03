@@ -35,6 +35,13 @@ class MPI_Comm_wrapper_t
 public:
     MPI_Comm_wrapper_t() = default;
 
+    static MPI_Comm_wrapper_t from_raw(MPI_Comm raw_comm)
+    {
+        MPI_Comm_wrapper_t wrap;
+        wrap.mpi_comm = raw_comm;
+        return wrap;
+    }
+
     // conversion to unwrapped communicator for passing to MPI APIs
     operator MPI_Comm() const
     {
@@ -107,10 +114,11 @@ public:
     {
         auto rcmpi = MPI_Type_contiguous(size_bytes, MPI_BYTE, &type);
         if(rcmpi != MPI_SUCCESS)
-            throw std::runtime_error("MPI_Type_contiguous failed: " + std::to_string(rcmpi));
+            throw std::runtime_error("MPI_Type_contiguous failed with code: "
+                                     + std::to_string(rcmpi));
         rcmpi = MPI_Type_commit(&type);
         if(rcmpi != MPI_SUCCESS)
-            throw std::runtime_error("MPI_Type_commit failed: " + std::to_string(rcmpi));
+            throw std::runtime_error("MPI_Type_commit failed with code: " + std::to_string(rcmpi));
     }
     ~MPI_Datatype_vector_wrapper_t()
     {
@@ -258,6 +266,55 @@ inline MPI_Datatype rocfft_type_to_mpi_type(rocfft_precision precision, rocfft_a
                                                 : type_to_mpi_type<double>();
     }
 }
+
+inline MPI_Comm_wrapper_t make_subcommunicator(MPI_Comm parent_comm, const std::vector<int>& ranks)
+{
+    if(ranks.empty())
+        return MPI_Comm_wrapper_t{};
+
+    MPI_Group parent_group = MPI_GROUP_NULL, sub_group = MPI_GROUP_NULL;
+    MPI_Comm  new_comm = MPI_COMM_NULL;
+
+    auto rcmpi = MPI_Comm_group(parent_comm, &parent_group);
+    if(rcmpi != MPI_SUCCESS)
+        throw std::runtime_error("MPI_Comm_group failed with code: " + std::to_string(rcmpi));
+
+    rcmpi = MPI_Group_incl(parent_group, static_cast<int>(ranks.size()), ranks.data(), &sub_group);
+    MPI_Group_free(&parent_group);
+    if(rcmpi != MPI_SUCCESS)
+    {
+        if(sub_group != MPI_GROUP_NULL)
+            MPI_Group_free(&sub_group);
+        throw std::runtime_error("MPI_Group_incl failed with code: " + std::to_string(rcmpi));
+    }
+
+    rcmpi = MPI_Comm_create(parent_comm, sub_group, &new_comm);
+    MPI_Group_free(&sub_group);
+    if(rcmpi != MPI_SUCCESS)
+        throw std::runtime_error("MPI_Comm_create failed with code: " + std::to_string(rcmpi));
+
+    if(new_comm == MPI_COMM_NULL)
+        return MPI_Comm_wrapper_t{};
+
+    return MPI_Comm_wrapper_t::from_raw(new_comm);
+}
+
+#else
+
+class MPI_Comm_wrapper_t
+{
+public:
+    MPI_Comm_wrapper_t() {}
+    static MPI_Comm_wrapper_t from_raw(int)
+    {
+        return MPI_Comm_wrapper_t{};
+    }
+    // allow conversion to bool (always false)
+    operator bool() const
+    {
+        return false;
+    }
+};
 
 #endif
 

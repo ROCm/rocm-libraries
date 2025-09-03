@@ -12,7 +12,7 @@ hipCUB documentation
 hipCUB is a thin, header-only wrapper library for `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_ and `CUB <https://docs.nvidia.com/cuda/cub/index.html>`_. It enables developers to port projects
 using the CUB library to the `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ layer and run on AMD hardware. To learn more, see :ref:`what-is-hipcub`
 
-The hipCUB repository is located at `https://github.com/ROCm/hipCUB <https://github.com/ROCm/hipCUB>`_.
+The hipCUB project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipcub.
 
 .. grid:: 2
 
