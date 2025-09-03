@@ -1018,6 +1018,7 @@ hipError_t is_sleep_scan_state_used(const hipStream_t stream, bool& use_sleep)
 template<typename LookbackScanState>
 constexpr bool is_lookback_kernel_runnable()
 {
+#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
     if(device_target_arch() == target_arch::gfx908)
     {
         // For gfx908 kernels with both version of lookback_scan_state can run: with and without
@@ -1026,6 +1027,9 @@ constexpr bool is_lookback_kernel_runnable()
     }
     // For other GPUs only a kernel without sleep can run
     return !LookbackScanState::use_sleep;
+#else
+    return true;
+#endif
 }
 
 template<typename T>

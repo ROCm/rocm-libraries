@@ -56,29 +56,37 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-template<typename Config,
+
+template<class Config,
          bool InPlace,
          bool Right,
          typename InputIt,
          typename OutputIt,
          typename BinaryFunction>
-void ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(
-    device_params<Config>()
-        .adjacent_difference_kernel_config
-        .block_size) adjacent_difference_kernel(const InputIt        input,
-                                          const OutputIt       output,
-                                          const std::size_t    size,
-                                          const BinaryFunction op,
-                                          const typename std::iterator_traits<InputIt>::value_type*
-                                                            previous_values,
-                                          const std::size_t starting_block)
+inline hipError_t launch_adjacent_difference(
+    detail::target_arch                                       arch,
+    const InputIt                                             input,
+    const OutputIt                                            output,
+    const std::size_t                                         size,
+    const BinaryFunction                                      op,
+    const typename std::iterator_traits<InputIt>::value_type* previous_values,
+    const std::size_t                                         starting_block,
+    dim3                                                      grid,
+    dim3                                                      block,
+    size_t                                                    shmem,
+    hipStream_t                                               stream)
 {
-    adjacent_difference_kernel_impl<Config, InPlace, Right>(input,
-                                                            output,
-                                                            size,
-                                                            op,
-                                                            previous_values,
-                                                            starting_block);
+    auto kernel = [=](auto arch_config)
+    {
+        adjacent_difference_kernel_impl<decltype(arch_config), InPlace, Right>(input,
+                                                                               output,
+                                                                               size,
+                                                                               op,
+                                                                               previous_values,
+                                                                               starting_block);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<typename Config,
@@ -111,12 +119,12 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
     }
 
     const detail::adjacent_difference_config_params params
-        = detail::dispatch_target_arch<config>(target_arch);
+        = detail::dispatch_target_arch<config, false>(target_arch);
 
-    const unsigned int block_size       = params.adjacent_difference_kernel_config.block_size;
-    const unsigned int items_per_thread = params.adjacent_difference_kernel_config.items_per_thread;
-    const unsigned int items_per_block  = block_size * items_per_thread;
-    const std::size_t  num_blocks       = ceiling_div(size, items_per_block);
+    const unsigned int block_size          = params.kernel_config.block_size;
+    const unsigned int items_per_thread    = params.kernel_config.items_per_thread;
+    const unsigned int items_per_block     = block_size * items_per_thread;
+    const std::size_t  num_blocks          = ceiling_div(size, items_per_block);
     const std::size_t  num_previous_values = InPlace && num_blocks >= 2 ? num_blocks - 1 : 0;
 
     value_type* previous_values;
@@ -160,7 +168,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
         }
     }
 
-    const unsigned int size_limit             = params.adjacent_difference_kernel_config.size_limit;
+    const unsigned int size_limit             = params.kernel_config.size_limit;
     const auto         number_of_blocks_limit = std::max(size_limit / items_per_block, 1u);
     const auto         aligned_size_limit     = number_of_blocks_limit * items_per_block;
 
@@ -195,17 +203,19 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 
             start = std::chrono::steady_clock::now();
         }
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(adjacent_difference_kernel<config, InPlace, Right>),
-                           dim3(current_blocks),
-                           dim3(block_size),
-                           0,
-                           stream,
-                           input + offset,
-                           output + offset,
-                           size,
-                           op,
-                           previous_values + starting_block,
-                           starting_block);
+
+        ROCPRIM_RETURN_ON_ERROR(
+            launch_adjacent_difference<config, InPlace, Right>(target_arch,
+                                                               input + offset,
+                                                               output + offset,
+                                                               size,
+                                                               op,
+                                                               previous_values + starting_block,
+                                                               starting_block,
+                                                               current_blocks,
+                                                               block_size,
+                                                               0,
+                                                               stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("adjacent_difference_kernel",
                                                     current_size,
                                                     start);
@@ -267,7 +277,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 ///
 /// // custom binary function
 /// auto binary_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a - b;
 ///     };
@@ -484,7 +494,7 @@ hipError_t adjacent_difference_inplace(void* const          temporary_storage,
 ///
 /// // custom binary function
 /// auto binary_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a - b;
 ///     };

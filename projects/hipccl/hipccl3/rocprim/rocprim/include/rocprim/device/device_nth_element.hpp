@@ -65,7 +65,7 @@ hipError_t
     {
         return result;
     }
-    const nth_element_config_params params = dispatch_target_arch<config>(target_arch);
+    const nth_element_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     constexpr unsigned int num_partitions        = 3;
     const unsigned int     num_buckets           = params.number_of_buckets;
@@ -141,7 +141,8 @@ hipError_t
         std::cout << "storage_size: " << storage_size << '\n';
     }
 
-    return nth_element_keys_impl<config, num_partitions>(keys,
+    return nth_element_keys_impl<config, num_partitions>(target_arch,
+                                                         keys,
                                                          keys_buffer,
                                                          tree,
                                                          nth,
