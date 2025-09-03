@@ -20,13 +20,43 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/unique.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+using IntegralTypes = ::testing::Types<
+  Params<char>,
+  Params<signed char>,
+  Params<unsigned char>,
+  Params<short>,
+  Params<unsigned short>,
+  Params<int>,
+  Params<unsigned int>,
+  Params<long>,
+  Params<unsigned long>,
+  Params<long long>,
+  Params<unsigned long long>>;
 
 TESTS_DEFINE(UniqueByKeyTests, FullTestsParams);
 
-TESTS_DEFINE(UniqueByKeyIntegralTests, IntegerTestsParams);
+TESTS_DEFINE(UniqueByKeyIntegralTests, IntegralTypes);
+
+template <typename ValueT>
+struct index_to_value_t
+{
+  template <typename IndexT>
+  THRUST_HOST_DEVICE THRUST_FORCEINLINE ValueT operator()(IndexT index)
+  {
+    if (static_cast<std::uint64_t>(index) == 4300000000ULL)
+    {
+      return static_cast<ValueT>(1);
+    }
+    else
+    {
+      return static_cast<ValueT>(0);
+    }
+  }
+};
 
 template <typename ForwardIterator1, typename ForwardIterator2>
 thrust::pair<ForwardIterator1, ForwardIterator2>
@@ -120,7 +150,7 @@ TEST(UniqueByKeyTests, TestUniqueByKeyCopyDispatchImplicit)
 template <typename T>
 struct is_equal_div_10_unique
 {
-  __host__ __device__ bool operator()(const T x, const T& y) const
+  THRUST_HOST_DEVICE bool operator()(const T x, const T& y) const
   {
     return ((int) x / 10) == ((int) y / 10);
   }
@@ -130,36 +160,19 @@ template <typename Vector>
 void initialize_keys(Vector& keys)
 {
   keys.resize(9);
-  keys[0] = 11;
-  keys[1] = 11;
-  keys[2] = 21;
-  keys[3] = 20;
-  keys[4] = 21;
-  keys[5] = 21;
-  keys[6] = 21;
-  keys[7] = 37;
-  keys[8] = 37;
+  keys = {11, 11, 21, 20, 21, 21, 21, 37, 37};
 }
 
 template <typename Vector>
 void initialize_values(Vector& values)
 {
   values.resize(9);
-  values[0] = 0;
-  values[1] = 1;
-  values[2] = 2;
-  values[3] = 3;
-  values[4] = 4;
-  values[5] = 5;
-  values[6] = 6;
-  values[7] = 7;
-  values[8] = 8;
+  values = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 }
 
 TYPED_TEST(UniqueByKeyTests, TestUniqueByKeySimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -173,43 +186,40 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueByKeySimple)
   initialize_keys(keys);
   initialize_values(values);
 
-  new_last = thrust::unique_by_key(Policy{}, keys.begin(), keys.end(), values.begin());
+  new_last = thrust::unique_by_key(keys.begin(), keys.end(), values.begin());
 
   ASSERT_EQ(new_last.first - keys.begin(), 5);
   ASSERT_EQ(new_last.second - values.begin(), 5);
-  ASSERT_EQ(keys[0], 11);
-  ASSERT_EQ(keys[1], 21);
-  ASSERT_EQ(keys[2], 20);
-  ASSERT_EQ(keys[3], 21);
-  ASSERT_EQ(keys[4], 37);
+  keys.resize(5);
+  values.resize(5);
+  Vector keys_ref{11, 21, 20, 21, 37};
+  ASSERT_EQ(keys, keys_ref);
 
-  ASSERT_EQ(values[0], 0);
-  ASSERT_EQ(values[1], 2);
-  ASSERT_EQ(values[2], 3);
-  ASSERT_EQ(values[3], 4);
-  ASSERT_EQ(values[4], 7);
+  Vector values_ref{0, 2, 3, 4, 7};
+  ASSERT_EQ(values, values_ref);
 
   // test BinaryPredicate
   initialize_keys(keys);
   initialize_values(values);
 
-  new_last = thrust::unique_by_key(Policy{}, keys.begin(), keys.end(), values.begin(), is_equal_div_10_unique<T>());
+  new_last = thrust::unique_by_key(keys.begin(), keys.end(), values.begin(), is_equal_div_10_unique<T>());
 
   ASSERT_EQ(new_last.first - keys.begin(), 3);
   ASSERT_EQ(new_last.second - values.begin(), 3);
-  ASSERT_EQ(keys[0], 11);
-  ASSERT_EQ(keys[1], 21);
-  ASSERT_EQ(keys[2], 37);
+  keys_ref.resize(3);
+  keys.resize(3);
+  keys_ref = {11, 21, 37};
+  ASSERT_EQ(keys, keys_ref);
 
-  ASSERT_EQ(values[0], 0);
-  ASSERT_EQ(values[1], 2);
-  ASSERT_EQ(values[2], 7);
+  values.resize(3);
+  values_ref.resize(3);
+  values_ref = {0, 2, 7};
+  ASSERT_EQ(values, values_ref);
 }
 
 TYPED_TEST(UniqueByKeyTests, TestUniqueCopyByKeySimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -226,45 +236,36 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueCopyByKeySimple)
   Vector output_keys(keys.size());
   Vector output_values(values.size());
 
-  new_last = thrust::unique_by_key_copy(
-    Policy{}, keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin());
+  new_last =
+    thrust::unique_by_key_copy(keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin());
 
   ASSERT_EQ(new_last.first - output_keys.begin(), 5);
   ASSERT_EQ(new_last.second - output_values.begin(), 5);
-  ASSERT_EQ(output_keys[0], 11);
-  ASSERT_EQ(output_keys[1], 21);
-  ASSERT_EQ(output_keys[2], 20);
-  ASSERT_EQ(output_keys[3], 21);
-  ASSERT_EQ(output_keys[4], 37);
+  output_keys.resize(5);
+  output_values.resize(5);
+  Vector keys_ref{11, 21, 20, 21, 37};
+  ASSERT_EQ(output_keys, keys_ref);
 
-  ASSERT_EQ(output_values[0], 0);
-  ASSERT_EQ(output_values[1], 2);
-  ASSERT_EQ(output_values[2], 3);
-  ASSERT_EQ(output_values[3], 4);
-  ASSERT_EQ(output_values[4], 7);
+  Vector values_ref{0, 2, 3, 4, 7};
+  ASSERT_EQ(output_values, values_ref);
 
   // test BinaryPredicate
   initialize_keys(keys);
   initialize_values(values);
 
   new_last = thrust::unique_by_key_copy(
-    Policy{},
-    keys.begin(),
-    keys.end(),
-    values.begin(),
-    output_keys.begin(),
-    output_values.begin(),
-    is_equal_div_10_unique<T>());
+    keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin(), is_equal_div_10_unique<T>());
 
   ASSERT_EQ(new_last.first - output_keys.begin(), 3);
   ASSERT_EQ(new_last.second - output_values.begin(), 3);
-  ASSERT_EQ(output_keys[0], 11);
-  ASSERT_EQ(output_keys[1], 21);
-  ASSERT_EQ(output_keys[2], 37);
+  output_keys.resize(3);
+  output_values.resize(3);
+  keys_ref = {11, 21, 37};
+  ASSERT_EQ(output_keys, keys_ref);
 
-  ASSERT_EQ(output_values[0], 0);
-  ASSERT_EQ(output_values[1], 2);
-  ASSERT_EQ(output_values[2], 7);
+  values_ref.resize(3);
+  values_ref = {0, 2, 7};
+  ASSERT_EQ(output_values, values_ref);
 }
 
 TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueByKey)
@@ -284,7 +285,6 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueByKey)
 
       thrust::host_vector<K> h_keys =
         get_random_data<K>(size, get_default_limits<K>::min(), get_default_limits<K>::max(), seed);
-
       thrust::host_vector<V> h_vals = get_random_data<V>(
         size, get_default_limits<V>::min(), get_default_limits<V>::max(), seed + seed_value_addition);
       thrust::device_vector<K> d_keys = h_keys;
@@ -334,7 +334,6 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKey)
 
       thrust::host_vector<K> h_keys =
         get_random_data<K>(size, get_default_limits<K>::min(), get_default_limits<K>::max(), seed);
-
       thrust::host_vector<V> h_vals = get_random_data<V>(
         size, get_default_limits<V>::min(), get_default_limits<V>::max(), seed + seed_value_addition);
       thrust::device_vector<K> d_keys = h_keys;
@@ -391,7 +390,6 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyToDiscardIterator)
 
       thrust::host_vector<K> h_keys =
         get_random_data<K>(size, get_default_limits<K>::min(), get_default_limits<K>::max(), seed);
-
       thrust::host_vector<V> h_vals = get_random_data<V>(
         size, get_default_limits<V>::min(), get_default_limits<V>::max(), seed + seed_value_addition);
       thrust::device_vector<K> d_keys = h_keys;
@@ -532,6 +530,71 @@ TEST(UniqueIntegralTests, TestUniqueDevice)
   }
 }
 
+// OpenMP has issues with these tests, NVIDIA/cccl#1715
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_OMP
+
+#  ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
+
+TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyLargeInput)
+{
+  using K          = typename TestFixture::input_type;
+  using type       = K;
+  using index_type = std::int64_t;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  const std::size_t num_items = 4400000000ULL;
+  thrust::host_vector<type> reference_keys{static_cast<type>(0), static_cast<type>(1), static_cast<type>(0)};
+  thrust::host_vector<index_type> reference_values{0, 4300000000ULL, 4300000001ULL};
+
+  auto keys_in   = thrust::make_transform_iterator(thrust::make_counting_iterator(0ULL), index_to_value_t<type>{});
+  auto values_in = thrust::make_counting_iterator(0ULL);
+  thrust::device_vector<type> keys_out(reference_keys.size());
+  thrust::device_vector<index_type> values_out(reference_values.size());
+
+  // Run test
+  const auto selected_aut_end =
+    thrust::unique_by_key_copy(keys_in, keys_in + num_items, values_in, keys_out.begin(), values_out.begin());
+
+  // Ensure that we created the correct output
+  auto const num_selected_out = thrust::distance(keys_out.begin(), selected_aut_end.first);
+  ASSERT_EQ(reference_keys.size(), static_cast<std::size_t>(num_selected_out));
+  ASSERT_EQ(num_selected_out, thrust::distance(values_out.begin(), selected_aut_end.second));
+  keys_out.resize(num_selected_out);
+  values_out.resize(num_selected_out);
+  ASSERT_EQ(reference_keys, keys_out);
+  ASSERT_EQ(reference_values, values_out);
+}
+
+TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyLargeOutCount)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  constexpr std::size_t num_items = 4400000000ULL;
+
+  auto keys_in   = thrust::make_counting_iterator(0ULL);
+  auto values_in = thrust::make_counting_iterator(0ULL);
+
+  // Run test
+  auto keys_out   = thrust::make_discard_iterator();
+  auto values_out = thrust::make_discard_iterator();
+  const auto selected_aut_end =
+    thrust::unique_by_key_copy(thrust::device, keys_in, keys_in + num_items, values_in, keys_out, values_out);
+
+  // Ensure that we created the correct output
+  auto const num_selected_out = thrust::distance(keys_out, selected_aut_end.first);
+  ASSERT_EQ(num_items, static_cast<std::size_t>(num_selected_out));
+  ASSERT_EQ(num_selected_out, thrust::distance(values_out, selected_aut_end.second));
+}
+
+#  endif // THRUST_FORCE_32_BIT_OFFSET_TYPE
+
+#endif // non-OpenMP backend
+
+// This test fails only on GCC 6
+#if !defined(__GNUC__) || __GNUC__ != 6
+
+// Based on GitHub issue: https://github.com/NVIDIA/cccl/issues/1956
 namespace
 {
 struct CompareFirst
@@ -549,9 +612,12 @@ struct Entry
 };
 } // namespace
 
-TEST(UniqueWithoutEqualityOperatorTests, TestUniqueByKey)
+TEST(UniqueWithoutEqualityOperatorTests, TestKeysWithoutEqualityOperator)
 {
-  using Key     = thrust::pair<std::int32_t, Entry>;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using Key = thrust::pair<std::int32_t, Entry>;
+
   const auto k1 = Key{1, {}};
   const auto k2 = Key{2, {}};
   const thrust::device_vector<Key> keys{k1, k1, k1, k2, k2};
@@ -581,3 +647,4 @@ TEST(UniqueWithoutEqualityOperatorTests, TestUniqueByKey)
   ASSERT_EQ(unique_data_h[1].a, 3);
   ASSERT_EQ(unique_data_h[1].b, 3);
 }
+#endif // !defined(__GNUC__) || __GNUC__ != 6

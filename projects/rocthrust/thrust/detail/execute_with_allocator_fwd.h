@@ -18,16 +18,30 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/execute_with_dependencies.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/type_traits.h>
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
+#  include <thrust/detail/execute_with_dependencies.h>
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
-template <typename Allocator, template <typename> class BaseSystem>
-struct execute_with_allocator : BaseSystem<execute_with_allocator<Allocator, BaseSystem>>
+THRUST_SUPPRESS_DEPRECATED_PUSH // because of execute_with_allocator_and_dependencies
+  template <typename Allocator, template <typename> class BaseSystem>
+  struct execute_with_allocator : BaseSystem<execute_with_allocator<Allocator, BaseSystem>>
 {
 private:
   using super_t = BaseSystem<execute_with_allocator<Allocator, BaseSystem>>;
@@ -45,52 +59,55 @@ public:
       : alloc(alloc_)
   {}
 
-  typename remove_reference<Allocator>::type& get_allocator()
+  THRUST_HOST_DEVICE _THRUST_STD::remove_reference_t<Allocator>& get_allocator()
   {
     return alloc;
   }
 
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
   template <typename... Dependencies>
-  THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
+  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   after(Dependencies&&... dependencies) const
   {
     return {alloc, capture_as_dependency(THRUST_FWD(dependencies))...};
   }
 
   template <typename... Dependencies>
-  THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
+  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   after(std::tuple<Dependencies...>& dependencies) const
   {
     return {alloc, capture_as_dependency(dependencies)};
   }
   template <typename... Dependencies>
-  THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
+  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   after(std::tuple<Dependencies...>&& dependencies) const
   {
     return {alloc, capture_as_dependency(std::move(dependencies))};
   }
 
   template <typename... Dependencies>
-  THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
+  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   rebind_after(Dependencies&&... dependencies) const
   {
     return {alloc, capture_as_dependency(THRUST_FWD(dependencies))...};
   }
 
   template <typename... Dependencies>
-  THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
+  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   rebind_after(std::tuple<Dependencies...>& dependencies) const
   {
     return {alloc, capture_as_dependency(dependencies)};
   }
   template <typename... Dependencies>
-  THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
+  THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   rebind_after(std::tuple<Dependencies...>&& dependencies) const
   {
     return {alloc, capture_as_dependency(std::move(dependencies))};
   }
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 };
 
+THRUST_SUPPRESS_DEPRECATED_POP
 } // namespace detail
 
 THRUST_NAMESPACE_END
