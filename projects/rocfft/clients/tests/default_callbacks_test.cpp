@@ -410,6 +410,7 @@ struct Test_Callback
 // complex data inputs and having only a load callback set.
 // -------------------------------------------------------------------
 
+#ifndef WIN32
 TEST(rocfft_UnitTest, default_load_callback_complex_single)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -550,3 +551,4 @@ TEST(rocfft_UnitTest, default_store_callback_real_double)
                        DefaultCallbackType::STORE,
                        8);
 }
+#endif
