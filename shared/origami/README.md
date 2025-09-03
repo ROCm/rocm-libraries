@@ -79,7 +79,7 @@ std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t> select_best_m
     size_t M,
     size_t N,
     size_t K,
-    Hardware &hardware,
+    hardware_t &hardware,
     const std::vector<std::tuple<size_t, size_t, size_t, size_t, size_t, size_t>> &MT_list,
     size_t element_size,
     double H_L2,
@@ -91,7 +91,7 @@ std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t> select_best_m
 
 **Quick Example:**
 ```cpp
-#include "Utils.hpp"
+#include "origami/utils.hpp"
 #include <iostream>
 #include <vector>
 #include <tuple>
@@ -108,7 +108,7 @@ int main() {
     size_t WGM = 6;
     
     // Instantiate your hardware object with appropriate parameters.
-    Hardware hardware;
+    hardware_t hardware;
     
     // Create a list of candidate macro-tile configurations.
     // Each tuple is structured as: (MT_M, MT_N, MT_K, MI_M, MI_N, MI_K).
