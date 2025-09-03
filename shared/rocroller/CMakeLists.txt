@@ -71,7 +71,7 @@ else()
     unset(CMAKE_CXX_CPPCHECK CACHE)
 endif()
 
-find_package(fmt QUIET)
+find_package(fmt REQUIRED)
 if(NOT fmt_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         set(FMT_SYSTEM_HEADERS ON)
