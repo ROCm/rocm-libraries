@@ -31,16 +31,15 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/reference_forward_declaration.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/adl/assign_value.h>
 #include <thrust/system/detail/adl/get_value.h>
 #include <thrust/system/detail/adl/iter_swap.h>
 #include <thrust/system/detail/generic/memory.h>
 #include <thrust/system/detail/generic/select_system.h>
-#include <thrust/type_traits/remove_cvref.h>
 
 #include <ostream>
-#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -61,7 +60,7 @@ private:
 
 public:
   using pointer    = Pointer;
-  using value_type = typename thrust::remove_cvref<Element>::type;
+  using value_type = ::internal::remove_cvref_t<Element>;
 
   reference(reference const&) = default;
 

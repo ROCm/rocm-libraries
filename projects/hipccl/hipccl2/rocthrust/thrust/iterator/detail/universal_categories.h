@@ -18,15 +18,23 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/iterator_categories.h>
 
-// XXX eliminate this file
-
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 // define these types without inheritance to avoid ambiguous conversion to base classes
 
-struct input_universal_iterator_tag
+// deprecated [Since 2.8]
+struct THRUST_DEPRECATED input_universal_iterator_tag
 {
   operator input_host_iterator_tag()
   {
@@ -39,7 +47,8 @@ struct input_universal_iterator_tag
   }
 };
 
-struct output_universal_iterator_tag
+// deprecated [Since 2.8]
+struct THRUST_DEPRECATED output_universal_iterator_tag
 {
   operator output_host_iterator_tag()
   {
@@ -52,7 +61,8 @@ struct output_universal_iterator_tag
   }
 };
 
-struct forward_universal_iterator_tag : input_universal_iterator_tag
+// deprecated [Since 2.8]
+struct THRUST_DEPRECATED forward_universal_iterator_tag : input_universal_iterator_tag
 {
   operator forward_host_iterator_tag()
   {
@@ -65,7 +75,8 @@ struct forward_universal_iterator_tag : input_universal_iterator_tag
   };
 };
 
-struct bidirectional_universal_iterator_tag : forward_universal_iterator_tag
+// deprecated [Since 2.8]
+struct THRUST_DEPRECATED bidirectional_universal_iterator_tag : forward_universal_iterator_tag
 {
   operator bidirectional_host_iterator_tag()
   {
@@ -88,7 +99,8 @@ struct one_degree_of_separation : T
 
 } // namespace detail
 
-struct random_access_universal_iterator_tag
+// deprecated [Since 2.8]
+struct THRUST_DEPRECATED random_access_universal_iterator_tag
 {
   // these conversions are all P0
   operator random_access_host_iterator_tag()
@@ -108,4 +120,6 @@ struct random_access_universal_iterator_tag
   }
 };
 
+THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC

@@ -50,8 +50,10 @@
 THRUST_NAMESPACE_BEGIN
 
 // define null_type for backwards compatibility
-struct null_type
+struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type
 {};
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 #ifndef THRUST_DOXYGEN_INVOKED
 
@@ -86,6 +88,8 @@ THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
 }
 
 #endif
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END
 
@@ -195,6 +199,7 @@ using _THRUST_STD::tie;
 THRUST_NAMESPACE_END
 
 _THRUST_STD_NAMESPACE_BEGIN
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 template <>
 struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type,
@@ -303,6 +308,7 @@ struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER:
     : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>>
 {};
 
+THRUST_SUPPRESS_DEPRECATED_POP
 _THRUST_STD_NAMESPACE_END
 
 #else
@@ -311,6 +317,8 @@ _THRUST_STD_NAMESPACE_END
 #  include <thrust/pair.h>
 
 THRUST_NAMESPACE_BEGIN
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 /*! \addtogroup utility
  *  \{
@@ -910,6 +918,8 @@ tie(T0& t0, T1& t1, T2& t2, T3& t3, T4& t4, T5& t5, T6& t6, T7& t7, T8& t8, T9& 
 /*! \} // utility
  */
 
+THRUST_SUPPRESS_DEPRECATED_POP
+
 THRUST_NAMESPACE_END
 
 _THRUST_STD_NAMESPACE_BEGIN
@@ -921,6 +931,8 @@ struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_size<std::tupl
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_element<Id, std::tuple<Ts...>>
 {};
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 template <>
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<
@@ -1044,6 +1056,8 @@ template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, 
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER::null_type>>
     : std::integral_constant<std::size_t, 9>
 {};
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 _THRUST_STD_NAMESPACE_END
 
