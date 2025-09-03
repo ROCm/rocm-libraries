@@ -18,12 +18,24 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/execute_with_allocator_fwd.h>
 #include <thrust/detail/integer_math.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/pair.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -34,7 +46,7 @@ template <typename T, typename Allocator, template <typename> class BaseSystem>
 THRUST_HOST thrust::pair<T*, std::ptrdiff_t>
 get_temporary_buffer(thrust::detail::execute_with_allocator<Allocator, BaseSystem>& system, std::ptrdiff_t n)
 {
-  using naked_allocator = typename thrust::detail::remove_reference<Allocator>::type;
+  using naked_allocator = _THRUST_STD::remove_reference_t<Allocator>;
   using alloc_traits    = typename thrust::detail::allocator_traits<naked_allocator>;
   using void_pointer    = typename alloc_traits::void_pointer;
   using size_type       = typename alloc_traits::size_type;
@@ -54,7 +66,7 @@ template <typename Pointer, typename Allocator, template <typename> class BaseSy
 THRUST_HOST void return_temporary_buffer(
   thrust::detail::execute_with_allocator<Allocator, BaseSystem>& system, Pointer p, std::ptrdiff_t n)
 {
-  using naked_allocator = typename thrust::detail::remove_reference<Allocator>::type;
+  using naked_allocator = _THRUST_STD::remove_reference_t<Allocator>;
   using alloc_traits    = typename thrust::detail::allocator_traits<naked_allocator>;
   using pointer         = typename alloc_traits::pointer;
   using size_type       = typename alloc_traits::size_type;
@@ -72,7 +84,7 @@ THRUST_HOST thrust::pair<T*, std::ptrdiff_t> get_temporary_buffer(
   thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system,
   std::ptrdiff_t n)
 {
-  using naked_allocator = typename thrust::detail::remove_reference<Allocator>::type;
+  using naked_allocator = _THRUST_STD::remove_reference_t<Allocator>;
   using alloc_traits    = typename thrust::detail::allocator_traits<naked_allocator>;
   using void_pointer    = typename alloc_traits::void_pointer;
   using size_type       = typename alloc_traits::size_type;
@@ -94,7 +106,7 @@ THRUST_HOST void return_temporary_buffer(
   Pointer p,
   std::ptrdiff_t n)
 {
-  using naked_allocator = typename thrust::detail::remove_reference<Allocator>::type;
+  using naked_allocator = _THRUST_STD::remove_reference_t<Allocator>;
   using alloc_traits    = typename thrust::detail::allocator_traits<naked_allocator>;
   using pointer         = typename alloc_traits::pointer;
   using size_type       = typename alloc_traits::size_type;

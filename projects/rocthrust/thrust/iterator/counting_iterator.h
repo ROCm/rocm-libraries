@@ -32,6 +32,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_categories.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -128,7 +135,14 @@ template <typename Incrementable,
           typename System     = use_default,
           typename Traversal  = use_default,
           typename Difference = use_default>
-class counting_iterator : public detail::counting_iterator_base<Incrementable, System, Traversal, Difference>::type
+#if !defined(THRUST_DOXYGEN_INVOKED)                    \
+  && (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC \
+      || (defined(__has_declspec_attribute) && __has_declspec_attribute(empty_bases)))
+class __declspec(empty_bases) counting_iterator
+#else
+class counting_iterator
+#endif
+    : public detail::counting_iterator_base<Incrementable, System, Traversal, Difference>::type
 {
   /*! \cond
    */

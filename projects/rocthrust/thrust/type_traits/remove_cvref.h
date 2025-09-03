@@ -23,11 +23,19 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2017
-#  if __has_include(<version>)
-#    include <version>
-#  endif
-#endif
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <thrust/detail/preprocessor.h>
+
+#if THRUST_HAS_INCLUDE(<version>)
+#  include <version>
+#endif // THRUST_HAS_INCLUDE(<version>)
 
 #include <type_traits>
 

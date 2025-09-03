@@ -29,6 +29,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
@@ -36,21 +44,29 @@
 #  include <thrust/functional.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/transform.h>
+#  include <thrust/system/hip/detail/util.h>
+#  include <thrust/type_traits/is_trivially_relocatable.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
+// Need a forward declaration here to work around a cyclic include, since "hip/detail/transform.h" includes this header
+template <class Derived, class InputIt, class OutputIt, class TransformOp>
+OutputIt THRUST_HIP_FUNCTION
+transform(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, TransformOp transform_op);
+
 namespace __copy
 {
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION device_to_device(
+OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
   execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, thrust::detail::true_type)
 {
   using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
   const auto n  = thrust::distance(first, last);
   if (n > 0)
   {
-    const hipError_t status = trivial_copy_device_to_device(
+    hipError_t status;
+    status = trivial_copy_device_to_device(
       policy,
       reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
       reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*first)),
@@ -62,7 +78,7 @@ OutputIt THRUST_HIP_FUNCTION device_to_device(
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION device_to_device(
+OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
   execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, thrust::detail::false_type)
 {
   using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
@@ -70,13 +86,14 @@ OutputIt THRUST_HIP_FUNCTION device_to_device(
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
+OutputIt THRUST_RUNTIME_FUNCTION
 device_to_device(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
   return device_to_device(
     policy, first, last, result, typename is_indirectly_trivially_relocatable_to<InputIt, OutputIt>::type());
 }
 } // namespace __copy
+
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 #endif

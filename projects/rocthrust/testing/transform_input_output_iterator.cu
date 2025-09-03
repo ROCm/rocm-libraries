@@ -24,8 +24,16 @@
 
 #include <unittest/unittest.h>
 
+// There is an unfortunate miscompilation of the gcc-13 vectorizer leading to OOB writes
+// Adding this attribute suffices that this miscompilation does not appear anymore
+#if defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 13
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
+#else // defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ < 13
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+#endif
+
 template <class Vector>
-void TestTransformInputOutputIterator(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformInputOutputIterator()
 {
   using T = typename Vector::value_type;
 
@@ -47,29 +55,21 @@ void TestTransformInputOutputIterator(void)
   // transform_iter writes squared value
   thrust::copy(input.begin(), input.end(), transform_iter);
 
-  Vector gold_squared(4);
-  gold_squared[0] = 1;
-  gold_squared[1] = 4;
-  gold_squared[2] = 9;
-  gold_squared[3] = 16;
+  Vector gold_squared{1, 4, 9, 16};
 
   ASSERT_EQUAL(squared, gold_squared);
 
   // negated value read from transform_iter
   thrust::copy_n(transform_iter, squared.size(), negated.begin());
 
-  Vector gold_negated(4);
-  gold_negated[0] = -1;
-  gold_negated[1] = -4;
-  gold_negated[2] = -9;
-  gold_negated[3] = -16;
+  Vector gold_negated{-1, -4, -9, -16};
 
   ASSERT_EQUAL(negated, gold_negated);
 }
 DECLARE_VECTOR_UNITTEST(TestTransformInputOutputIterator);
 
 template <class Vector>
-void TestMakeTransformInputOutputIterator(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMakeTransformInputOutputIterator()
 {
   using T = typename Vector::value_type;
 
@@ -88,24 +88,16 @@ void TestMakeTransformInputOutputIterator(void)
                  input.size(),
                  negated.begin());
 
-  Vector gold_negated(4);
-  gold_negated[0] = -1;
-  gold_negated[1] = -2;
-  gold_negated[2] = -3;
-  gold_negated[3] = -4;
+  Vector gold_negated{-1, -2, -3, -4};
 
   ASSERT_EQUAL(negated, gold_negated);
 
-  // squared value writen by transform iterator
+  // squared value written by transform iterator
   thrust::copy(negated.begin(),
                negated.end(),
                thrust::make_transform_input_output_iterator(squared.begin(), InputFunction(), OutputFunction()));
 
-  Vector gold_squared(4);
-  gold_squared[0] = 1;
-  gold_squared[1] = 4;
-  gold_squared[2] = 9;
-  gold_squared[3] = 16;
+  Vector gold_squared{1, 4, 9, 16};
 
   ASSERT_EQUAL(squared, gold_squared);
 }

@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -33,7 +40,7 @@ THRUST_NAMESPACE_BEGIN
  *  \{
  */
 
-/*! \p all_of determines whether all elements in a range satify a predicate.
+/*! \p all_of determines whether all elements in a range satisfy a predicate.
  *  Specifically, \p all_of returns \c true if <tt>pred(*i)</tt> is \c true
  *  for every iterator \c i in the range <tt>[first, last)</tt> and
  *  \c false otherwise.
@@ -77,7 +84,7 @@ all_of(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
        InputIterator last,
        Predicate pred);
 
-/*! \p all_of determines whether all elements in a range satify a predicate.
+/*! \p all_of determines whether all elements in a range satisfy a predicate.
  * Specifically, \p all_of returns \c true if <tt>pred(*i)</tt> is \c true
  * for every iterator \c i in the range <tt>[first, last)</tt> and
  * \c false otherwise.
@@ -112,7 +119,7 @@ all_of(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
 template <typename InputIterator, typename Predicate>
 bool all_of(InputIterator first, InputIterator last, Predicate pred);
 
-/*! \p any_of determines whether any element in a range satifies a predicate.
+/*! \p any_of determines whether any element in a range satisfies a predicate.
  *  Specifically, \p any_of returns \c true if <tt>pred(*i)</tt> is \c true
  *  for any iterator \c i in the range <tt>[first, last)</tt> and
  *  \c false otherwise.
@@ -157,7 +164,7 @@ any_of(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
        InputIterator last,
        Predicate pred);
 
-/*! \p any_of determines whether any element in a range satifies a predicate.
+/*! \p any_of determines whether any element in a range satisfies a predicate.
  * Specifically, \p any_of returns \c true if <tt>pred(*i)</tt> is \c true
  * for any iterator \c i in the range <tt>[first, last)</tt> and
  * \c false otherwise.
@@ -193,7 +200,7 @@ any_of(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
 template <typename InputIterator, typename Predicate>
 bool any_of(InputIterator first, InputIterator last, Predicate pred);
 
-/*! \p none_of determines whether no element in a range satifies a predicate.
+/*! \p none_of determines whether no element in a range satisfies a predicate.
  *  Specifically, \p none_of returns \c true if there is no iterator \c i in
  *  the range <tt>[first, last)</tt> such that <tt>pred(*i)</tt> is \c true,
  *  and \c false otherwise.
@@ -238,7 +245,7 @@ none_of(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
         InputIterator last,
         Predicate pred);
 
-/*! \p none_of determines whether no element in a range satifies a predicate.
+/*! \p none_of determines whether no element in a range satisfies a predicate.
  *  Specifically, \p none_of returns \c true if there is no iterator \c i in
  *  the range <tt>[first, last)</tt> such that <tt>pred(*i)</tt> is \c true,
  *  and \c false otherwise.
