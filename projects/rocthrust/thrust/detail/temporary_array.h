@@ -22,6 +22,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
@@ -40,6 +48,10 @@ THRUST_NAMESPACE_END
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/iterator/detail/tagged_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -100,11 +112,11 @@ public:
       , m_end(last)
   {}
 
-  iterator begin(void) const
+  iterator begin() const
   {
     return m_begin;
   }
-  iterator end(void) const
+  iterator end() const
   {
     return m_end;
   }
@@ -118,7 +130,7 @@ private:
 // note that the resulting iterator is explicitly tagged with ToSystem either way
 template <typename Iterator, typename FromSystem, typename ToSystem>
 struct move_to_system_base
-    : public eval_if<is_convertible<FromSystem, ToSystem>::value,
+    : public eval_if<_THRUST_STD::is_convertible<FromSystem, ToSystem>::value,
                      identity_<tagged_iterator_range<Iterator, ToSystem>>,
                      identity_<temporary_array<typename thrust::iterator_value<Iterator>::type, ToSystem>>>
 {};

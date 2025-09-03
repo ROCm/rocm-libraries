@@ -15,15 +15,12 @@
  *  limitations under the License.
  */
 
-#include <thrust/extrema.h>
 #include <thrust/functional.h>
-#include <thrust/iterator/discard_iterator.h>
-#include <thrust/iterator/retag.h>
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(SetUnionDescendingTests, FullTestsParams);
@@ -32,35 +29,19 @@ TESTS_DEFINE(SetUnionDescendingPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(SetUnionDescendingTests, TestSetUnionDescendingSimple)
 {
   using Vector   = typename TestFixture::input_type;
-  using Policy   = typename TestFixture::execution_policy;
-  using Iterator = typename Vector::iterator;
   using T        = typename Vector::value_type;
+  using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a(3), b(4);
+  Vector a{4, 2, 0}, b{4, 3, 3, 0};
 
-  a[0] = 4;
-  a[1] = 2;
-  a[2] = 0;
-  b[0] = 4;
-  b[1] = 3;
-  b[2] = 3;
-  b[3] = 0;
-
-  Vector ref(5);
-  ref[0] = 4;
-  ref[1] = 3;
-  ref[2] = 3;
-  ref[3] = 2;
-  ref[4] = 0;
-
+  Vector ref{4, 3, 3, 2, 0};
   Vector result(5);
 
-  Iterator end =
-    thrust::set_union(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+  Iterator end = thrust::set_union(a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
 
-  EXPECT_EQ(result.end(), end);
+  ASSERT_EQ_QUIET(result.end(), end);
   ASSERT_EQ(ref, result);
 }
 
@@ -80,7 +61,6 @@ TYPED_TEST(SetUnionDescendingPrimitiveTests, TestSetUnionDescending)
 
       thrust::host_vector<T> temp =
         get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
       thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
 
