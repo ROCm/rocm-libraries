@@ -108,7 +108,7 @@ void rocsparse_clients::configurable_event_listener::OnTestEnd(const testing::Te
         this->m_redirector.restore();
 
         // Check if test failed
-        //        if(test_info.result()->Failed())
+        if(test_info.result()->Failed())
         {
             const std::string content = this->m_redirector.get_stream().str();
 
