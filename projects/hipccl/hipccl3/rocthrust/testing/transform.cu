@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -98,7 +99,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnaryNoStencilSimple()
   Vector output{-1, -2, -3};
   Vector result{-1, 2, -3};
 
-  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
+  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::internal::identity{});
 
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(output, result);
@@ -159,7 +160,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnarySimple()
   Vector result{-1, 2, -3};
 
   iter = thrust::transform_if(
-    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
+    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::internal::identity{});
 
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(output, result);
@@ -287,7 +288,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfBinarySimple()
   Vector output{1, 2, 3};
   Vector result{5, 2, -3};
 
-  thrust::identity<T> identity;
+  ::internal::identity identity;
 
   iter = thrust::transform_if(
     input1.begin(),
@@ -692,8 +693,8 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnaryCountingIterator()
   thrust::host_vector<T> h_result(n);
   thrust::device_vector<T> d_result(n);
 
-  thrust::transform(h_first, h_first + n, h_result.begin(), thrust::identity<T>());
-  thrust::transform(d_first, d_first + n, d_result.begin(), thrust::identity<T>());
+  thrust::transform(h_first, h_first + n, h_result.begin(), ::internal::identity{});
+  thrust::transform(d_first, d_first + n, d_result.begin(), ::internal::identity{});
 
   ASSERT_EQUAL(h_result, d_result);
 }

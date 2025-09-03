@@ -44,6 +44,7 @@
 #include <thrust/system_error.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <utility>
 
@@ -249,7 +250,7 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
   return status;
 }
 
-inline void THRUST_HOST_DEVICE terminate()
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::terminate() instead") inline void THRUST_HOST_DEVICE terminate()
 {
   NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (abort();));
 }
@@ -282,7 +283,14 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
 
     NV_IF_TARGET(NV_IS_HOST,
                  (throw thrust::system_error(status, thrust::hip_category());),
-                 (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
+                 (THRUST_TEMP_DEVICE_CODE;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+                  _THRUST_STD::terminate();
+#else
+                  __builtin_trap();
+                  __builtin_unreachable();
+#endif
+                  ));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
@@ -316,23 +324,31 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
 
     NV_IF_TARGET(NV_IS_HOST,
                  (throw thrust::system_error(status, thrust::hip_category(), msg);),
-                 (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
+                 (THRUST_TEMP_DEVICE_CODE;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+                  _THRUST_STD::terminate();
+#else
+                  __builtin_trap();
+                  __builtin_unreachable();
+#endif
+                  ));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
 }
 
-// FIXME: Move the iterators elsewhere.
-
+// deprecated [Since 2.8]
 template <class ValueType, class InputIt, class UnaryOp>
-struct transform_input_iterator_t
+struct THRUST_DEPRECATED_BECAUSE("Use thrust::transform_iterator") transform_input_iterator_t
 {
-  using self_t            = transform_input_iterator_t;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using self_t = transform_input_iterator_t;
+  THRUST_SUPPRESS_DEPRECATED_POP
   using difference_type   = typename iterator_traits<InputIt>::difference_type;
   using value_type        = ValueType;
   using pointer           = void;
   using reference         = value_type;
-  using iterator_category = std::random_access_iterator_tag;
+  using iterator_category = _THRUST_STD::random_access_iterator_tag;
 
   InputIt input;
   mutable UnaryOp op;
@@ -431,15 +447,19 @@ struct transform_input_iterator_t
   }
 }; // struct transform_input_iterarot_t
 
+// deprecated [Since 2.8]
 template <class ValueType, class InputIt1, class InputIt2, class BinaryOp>
-struct transform_pair_of_input_iterators_t
+struct THRUST_DEPRECATED_BECAUSE("Use thrust::transform_iterator of a thrust::zip_iterator")
+  transform_pair_of_input_iterators_t
 {
-  using self_t            = transform_pair_of_input_iterators_t;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using self_t = transform_pair_of_input_iterators_t;
+  THRUST_SUPPRESS_DEPRECATED_POP
   using difference_type   = typename iterator_traits<InputIt1>::difference_type;
   using value_type        = ValueType;
   using pointer           = void;
   using reference         = value_type;
-  using iterator_category = std::random_access_iterator_tag;
+  using iterator_category = _THRUST_STD::random_access_iterator_tag;
 
   InputIt1 input1;
   InputIt2 input2;
@@ -561,15 +581,18 @@ struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::identity") identity
   }
 };
 
+// deprecated [Since 2.8]
 template <class T>
-struct counting_iterator_t
+struct THRUST_DEPRECATED_BECAUSE("Use thrust::counting_iterator") counting_iterator_t
 {
-  using self_t            = counting_iterator_t;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using self_t = counting_iterator_t;
+  THRUST_SUPPRESS_DEPRECATED_POP
   using difference_type   = T;
   using value_type        = T;
   using pointer           = void;
   using reference         = T;
-  using iterator_category = std::random_access_iterator_tag;
+  using iterator_category = _THRUST_STD::random_access_iterator_tag;
 
   T count;
 
