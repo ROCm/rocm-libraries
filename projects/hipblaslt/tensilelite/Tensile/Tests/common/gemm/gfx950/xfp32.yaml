@@ -57,6 +57,44 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128]
           - Exact: [128, 128, 1, 127]
           - Exact: [2048, 2048, 1, 256]
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 3, 2, 2]
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+          #- AssertSummationElementMultiple: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [1]
+        - ClusterLocalRead: [0, 1]
+        - ExpandPointerSwap: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        #- TransposeLDS: [1] #0,1
+        - StaggerU: [0]
+        - StreamK: [3]
+        - WorkGroupMapping: [6]
+        - DirectToLds: [1]
+        - UseSgprForGRO: [0]
+        - NonTemporalA: [4]
+        - NonTemporalC: [4]
+        - NonTemporalD: [4]
+        - NumElementsPerBatchStore: [16]
+        - WorkGroupMappingXCC: [8]
+        - StoreVectorWidth: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[1,67,517], [1,93,709],    [1], [1,76,865]]
 
   ########################################
   # F32X TN
@@ -93,6 +131,44 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128]
           - Exact: [128, 128, 1, 127]
           - Exact: [2048, 2048, 1, 256]
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 3, 2, 2]
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+          #- AssertSummationElementMultiple: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [1]
+        - ClusterLocalRead: [0, 1]
+        - ExpandPointerSwap: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        #- TransposeLDS: [1] #0,1
+        - StaggerU: [0]
+        - StreamK: [3]
+        - WorkGroupMapping: [6]
+        - DirectToLds: [1]
+        - UseSgprForGRO: [0]
+        - NonTemporalA: [4]
+        - NonTemporalC: [4]
+        - NonTemporalD: [4]
+        - NumElementsPerBatchStore: [16]
+        - WorkGroupMappingXCC: [8]
+        - StoreVectorWidth: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[1,67,517], [1,93,709],    [1], [1,76,865]]
 
   ########################################
   # F32X NN
@@ -163,8 +239,3 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128]
           - Exact: [128, 128, 1, 127]
           - Exact: [2048, 2048, 1, 256]
-
-LibraryLogic:
-    ScheduleName: "gfx950"
-    DeviceNames: ["Device 0049", "Device 0050"]
-    ArchitectureName: "gfx950"

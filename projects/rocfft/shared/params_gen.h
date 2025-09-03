@@ -58,6 +58,27 @@ inline double hash_prob(const int seed, const std::string& token)
     return roll;
 }
 
+template <typename T, std::enable_if_t<std::is_arithmetic_v<T>, bool> = true>
+std::vector<T> merge_and_sort_values(const std::vector<std::vector<T>>& set_of_vecs,
+                                     size_t max_num_elem = std::numeric_limits<size_t>::max())
+{
+    std::vector<T> merged;
+    for(const auto& vec : set_of_vecs)
+    {
+        std::copy(vec.begin(), vec.end(), std::back_inserter(merged));
+    }
+    std::sort(merged.begin(), merged.end());
+    auto last_unique = std::unique(merged.begin(), merged.end());
+    merged.erase(last_unique, merged.end());
+    std::ranlux24_base gen(random_seed);
+    while(merged.size() > max_num_elem)
+    {
+        // remove pseudo-randomly chosen elements
+        merged.erase(merged.begin() + (static_cast<size_t>(gen()) % merged.size()));
+    }
+    return merged;
+}
+
 // Given a vector of vector of lengths, generate all unique permutations.
 // Add an optional vector of ad-hoc lengths to the result.
 inline std::vector<std::vector<size_t>>
@@ -248,7 +269,8 @@ inline auto param_generator_base(const double                             base_p
                                  const std::vector<std::vector<size_t>>&  ooffset_range,
                                  const std::vector<fft_result_placement>& place_range,
                                  const bool                               planar        = true,
-                                 const bool                               run_callbacks = false)
+                                 const bool                               run_callbacks = false,
+                                 const fft_auto_allocation auto_alloc = fft_auto_allocation_default)
 {
     std::vector<fft_params> params;
 
@@ -300,6 +322,7 @@ inline auto param_generator_base(const double                             base_p
                                             param.otype          = std::get<3>(types);
                                             param.ioffset        = ioffset;
                                             param.ooffset        = ooffset;
+                                            param.auto_allocate  = auto_alloc;
 
                                             if(run_callbacks)
                                             {
@@ -369,8 +392,8 @@ inline auto param_generator(const double                             base_prob,
                             const std::vector<std::vector<size_t>>&  ooffset_range,
                             const std::vector<fft_result_placement>& place_range,
                             const bool                               planar,
-
-                            const bool run_callbacks = false)
+                            const bool                               run_callbacks = false,
+                            const fft_auto_allocation auto_alloc = fft_auto_allocation_default)
 {
     return param_generator_base(base_prob,
                                 trans_type_range,
@@ -383,9 +406,9 @@ inline auto param_generator(const double                             base_prob,
                                 ioffset_range,
                                 ooffset_range,
                                 place_range,
-
                                 planar,
-                                run_callbacks);
+                                run_callbacks,
+                                auto_alloc);
 }
 
 // Create an array of parameters to pass to gtest.  Only tests complex-type transforms
@@ -398,9 +421,10 @@ inline auto param_generator_complex(const double                             bas
                                     const std::vector<std::vector<size_t>>&  ioffset_range,
                                     const std::vector<std::vector<size_t>>&  ooffset_range,
                                     const std::vector<fft_result_placement>& place_range,
-
-                                    const bool planar,
-                                    const bool run_callbacks = false)
+                                    const bool                               planar,
+                                    const bool                               run_callbacks = false,
+                                    const fft_auto_allocation                auto_alloc
+                                    = fft_auto_allocation_default)
 {
     return param_generator_base(base_prob,
                                 trans_type_range_complex,
@@ -413,9 +437,9 @@ inline auto param_generator_complex(const double                             bas
                                 ioffset_range,
                                 ooffset_range,
                                 place_range,
-
                                 planar,
-                                run_callbacks);
+                                run_callbacks,
+                                auto_alloc);
 }
 
 // Create an array of parameters to pass to gtest.
@@ -428,9 +452,9 @@ inline auto param_generator_real(const double                             base_p
                                  const std::vector<std::vector<size_t>>&  ioffset_range,
                                  const std::vector<std::vector<size_t>>&  ooffset_range,
                                  const std::vector<fft_result_placement>& place_range,
-
-                                 const bool planar,
-                                 const bool run_callbacks = false)
+                                 const bool                               planar,
+                                 const bool                               run_callbacks = false,
+                                 const fft_auto_allocation auto_alloc = fft_auto_allocation_default)
 {
     return param_generator_base(base_prob,
                                 trans_type_range_real,
@@ -443,9 +467,9 @@ inline auto param_generator_real(const double                             base_p
                                 ioffset_range,
                                 ooffset_range,
                                 place_range,
-
                                 planar,
-                                run_callbacks);
+                                run_callbacks,
+                                auto_alloc);
 }
 
 template <class Tcontainer>
