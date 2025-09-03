@@ -70,10 +70,6 @@ jobs:
           git config --global core.longpaths true
           python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-math-libs
 
-      - name: Patch rocm-libraries
-        run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./
-
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
