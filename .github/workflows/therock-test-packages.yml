@@ -41,7 +41,7 @@ jobs:
         run: python ./build_tools/github_actions/fetch_test_configurations.py
 
   test_components:
-    name: 'Test ${{ matrix.components.job_name }}'
+    name: 'Test ${{ matrix.components.job_name }} on ${{ inputs.amdgpu_families }}'
     runs-on: ${{ inputs.test_runs_on }}
     container:
       image: ${{ inputs.platform == 'linux' && 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:405945a40deaff9db90b9839c0f41d4cba4a383c1a7459b28627047bf6302a26' || null }}
