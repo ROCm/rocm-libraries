@@ -41,6 +41,7 @@
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
+#  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/hip/detail/reduce.h>
 #  include <thrust/system/hip/detail/util.h>
 
@@ -53,7 +54,7 @@ typename iterator_traits<InputIt>::difference_type THRUST_HOST_DEVICE
 count_if(execution_policy<Derived>& policy, InputIt first, InputIt last, UnaryPred unary_pred)
 {
   using size_type       = typename iterator_traits<InputIt>::difference_type;
-  using flag_iterator_t = transform_input_iterator_t<size_type, InputIt, UnaryPred>;
+  using flag_iterator_t = transform_iterator<UnaryPred, InputIt, size_type, size_type>;
 
   return hip_rocprim::reduce_n(
     policy, flag_iterator_t(first, unary_pred), thrust::distance(first, last), size_type(0), plus<size_type>());
