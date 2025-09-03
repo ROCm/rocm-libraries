@@ -22,7 +22,13 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/malloc_and_free.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/pointer.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/raw_reference_cast.h>
@@ -32,13 +38,7 @@
 
 THRUST_NAMESPACE_BEGIN
 
-/*! \defgroup memory_management Memory Management
- *
- *  All Thrust functionalities related to memory allocation and deallocation.
- *
- */
-
-/** \addtogroup memory_management Memory Management
+/*! \addtogroup memory_management Memory Management
  *  \{
  */
 
@@ -97,7 +97,7 @@ template<typename Element, typename Tag, typename Reference = thrust::use_defaul
     THRUST_HOST_DEVICE
     explicit pointer(OtherElement *ptr);
 
-    /*! This contructor allows initialization from another pointer-like object.
+    /*! This constructor allows initialization from another pointer-like object.
      *
      *  \param other The \p OtherPointer to copy.
      *
@@ -138,6 +138,8 @@ template<typename Element, typename Tag, typename Reference = thrust::use_defaul
 };
 #endif
 
+#ifndef THRUST_DOXYGEN_INVOKED // Doxygen cannot handle both versions
+
 /*! This version of \p malloc allocates untyped uninitialized storage associated with a given system.
  *
  *  \param system The Thrust system with which to associate the storage.
@@ -147,7 +149,7 @@ template<typename Element, typename Tag, typename Reference = thrust::use_defaul
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *
- *  \pre \p DerivedPolicy must be publically derived from <tt>thrust::execution_policy<DerivedPolicy></tt>.
+ *  \pre \p DerivedPolicy must be publicly derived from <tt>thrust::execution_policy<DerivedPolicy></tt>.
  *
  *  The following code snippet demonstrates how to use \p malloc to allocate a range of memory
  *  associated with Thrust's device system.
@@ -174,20 +176,22 @@ template <typename DerivedPolicy>
 THRUST_HOST_DEVICE pointer<void, DerivedPolicy>
 malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& system, std::size_t n);
 
+#endif // THRUST_DOXYGEN_INVOKED
+
 /*! This version of \p malloc allocates typed uninitialized storage associated with a given system.
  *
  *  \param system The Thrust system with which to associate the storage.
- *  \param n The number of elements of type \c T which the storage should accomodate.
- *  \return If allocation succeeds, a pointer to an allocation large enough to accomodate \c n
+ *  \param n The number of elements of type \c T which the storage should accommodate.
+ *  \return If allocation succeeds, a pointer to an allocation large enough to accommodate \c n
  *          elements of type \c T; a null pointer otherwise.
  *          The pointer must be deallocated with \p thrust::free.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *
- *  \pre \p DerivedPolicy must be publically derived from <tt>thrust::execution_policy<DerivedPolicy></tt>.
+ *  \pre \p DerivedPolicy must be publicly derived from <tt>thrust::execution_policy<DerivedPolicy></tt>.
  *
  *  The following code snippet demonstrates how to use \p malloc to allocate a range of memory
- *  to accomodate integers associated with Thrust's device system.
+ *  to accommodate integers associated with Thrust's device system.
  *
  *  \code
  *  #include <thrust/memory.h>
@@ -212,8 +216,8 @@ THRUST_HOST_DEVICE pointer<T, DerivedPolicy>
 malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& system, std::size_t n);
 
 /*! \p get_temporary_buffer returns a pointer to storage associated with a given Thrust system sufficient to store up to
- *  \p n objects of type \c T. If not enough storage is available to accomodate \p n objects, an implementation may
- * return a smaller buffer. The number of objects the returned buffer can accomodate is also returned.
+ *  \p n objects of type \c T. If not enough storage is available to accommodate \p n objects, an implementation may
+ * return a smaller buffer. The number of objects the returned buffer can accommodate is also returned.
  *
  *  Thrust uses \p get_temporary_buffer internally when allocating temporary storage required by algorithm
  * implementations.
@@ -221,18 +225,18 @@ malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& system, std::
  *  The storage allocated with \p get_temporary_buffer must be returned to the system with \p return_temporary_buffer.
  *
  *  \param system The Thrust system with which to associate the storage.
- *  \param n The requested number of objects of type \c T the storage should accomodate.
+ *  \param n The requested number of objects of type \c T the storage should accommodate.
  *  \return A pair \c p such that <tt>p.first</tt> is a pointer to the allocated storage and <tt>p.second</tt> is the
- * number of contiguous objects of type \c T that the storage can accomodate. If no storage can be allocated,
+ * number of contiguous objects of type \c T that the storage can accommodate. If no storage can be allocated,
  * <tt>p.first</tt> if no storage can be obtained. The storage must be returned to the system using \p
  * return_temporary_buffer.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *
- *  \pre \p DerivedPolicy must be publically derived from <tt>thrust::execution_policy<DerivedPolicy></tt>.
+ *  \pre \p DerivedPolicy must be publicly derived from <tt>thrust::execution_policy<DerivedPolicy></tt>.
  *
  *  The following code snippet demonstrates how to use \p get_temporary_buffer to allocate a range of memory
- *  to accomodate integers associated with Thrust's device system.
+ *  to accommodate integers associated with Thrust's device system.
  *
  *  \code
  *  #include <thrust/memory.h>
@@ -377,7 +381,7 @@ THRUST_HOST_DEVICE typename detail::raw_reference<T>::type raw_reference_cast(T&
  *  If the argument is not a reference wrapper, the result is a reference to the argument.
  *
  *  \param ref The reference of interest.
- *  \return <tt>*raw_reference_cast(&ref)</tt>.
+ *  \return <tt>*raw_pointer_cast(&ref)</tt>.
  *  \note There are two versions of \p raw_reference_cast. One for <tt>const</tt> references,
  *        and one for non-<tt>const</tt>.
  *  \see raw_pointer_cast

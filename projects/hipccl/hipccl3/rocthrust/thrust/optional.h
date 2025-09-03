@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+///
 // optional - An implementation of std::optional with extensions
 // Written in 2017 by Sy Brand (@TartanLlama)
 //
@@ -34,9 +35,22 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/addressof.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/swap.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+// clang-format on
+#endif
 
 #define THRUST_OPTIONAL_VERSION_MAJOR 0
 #define THRUST_OPTIONAL_VERSION_MINOR 2
@@ -46,105 +60,12 @@
 #include <new>
 #include <type_traits>
 #include <utility>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER == 1900)
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER == 1900
 #  define THRUST_OPTIONAL_MSVC2015
-#endif
-
-#if (defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ <= 9 && !defined(__clang__))
-#  define THRUST_OPTIONAL_GCC49
-#endif
-
-#if (defined(__GNUC__) && __GNUC__ == 5 && __GNUC_MINOR__ <= 4 && !defined(__clang__))
-#  define THRUST_OPTIONAL_GCC54
-#endif
-
-#if (defined(__GNUC__) && __GNUC__ == 5 && __GNUC_MINOR__ <= 5 && !defined(__clang__))
-#  define THRUST_OPTIONAL_GCC55
-#endif
-
-#if (defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ <= 9 && !defined(__clang__))
-// GCC < 5 doesn't support overloading on const&& for member functions
-#  define THRUST_OPTIONAL_NO_CONSTRR
-
-// GCC < 5 doesn't support some standard C++11 type traits
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T) std::has_trivial_copy_constructor<T>::value
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T)    std::has_trivial_copy_assign<T>::value
-
-// GCC < 5 doesn't provide a way to emulate std::is_trivially_move_*,
-// so don't enable any optimizations that rely on them:
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T) false
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T)    false
-
-// This one will be different for GCC 5.7 if it's ever supported
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) std::is_trivially_destructible<T>::value
-
-// GCC 5 < v < 8 has a bug in is_trivially_copy_constructible which breaks std::vector
-// for non-copyable types
-#elif (defined(__GNUC__) && __GNUC__ < 8 && !defined(__clang__))
-#  ifndef THRUST_GCC_LESS_8_TRIVIALLY_COPY_CONSTRUCTIBLE_MUTEX
-#    define THRUST_GCC_LESS_8_TRIVIALLY_COPY_CONSTRUCTIBLE_MUTEX
-THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-template <class T>
-struct is_trivially_copy_constructible : std::is_trivially_copy_constructible<T>
-{};
-#    ifdef _GLIBCXX_VECTOR
-template <class T, class A>
-struct is_trivially_copy_constructible<std::vector<T, A>> : std::is_trivially_copy_constructible<T>
-{};
-#    endif
-} // namespace detail
-THRUST_NAMESPACE_END
-#  endif
-
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T) thrust::detail::is_trivially_copy_constructible<T>::value
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T)    std::is_trivially_copy_assignable<T>::value
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T) std::is_trivially_move_constructible<T>::value
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T)    std::is_trivially_move_assignable<T>::value
-#  define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T)       std::is_trivially_destructible<T>::value
-#else
-
-// To support clang + old libstdc++ without type traits, check for equivalent
-// clang built-ins and use them if present. See note above
-// is_trivially_copyable_impl in
-// thrust/type_traits/is_trivially_relocatable.h for more details.
-
-#  ifndef __has_feature
-#    define __has_feature(x) 0
-#  endif
-
-#  if defined(__GLIBCXX__) && __has_feature(is_trivially_constructible)
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T) __is_trivially_constructible(T, T const&)
-#  else
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T) std::is_trivially_copy_constructible<T>::value
-#  endif
-
-#  if defined(__GLIBCXX__) && __has_feature(is_trivially_assignable)
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T) __is_trivially_assignable(T&, T const&)
-#  else
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T) std::is_trivially_copy_assignable<T>::value
-#  endif
-
-#  if defined(__GLIBCXX__) && __has_feature(is_trivially_constructible)
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T) __is_trivially_constructible(T, T&&)
-#  else
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T) std::is_trivially_move_constructible<T>::value
-#  endif
-
-#  if defined(__GLIBCXX__) && __has_feature(is_trivially_assignable)
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T) __is_trivially_assignable(T&, T&&)
-#  else
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T) std::is_trivially_move_assignable<T>::value
-#  endif
-
-#  if defined(__GLIBCXX__) && __has_feature(is_trivially_destructible)
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) __is_trivially_destructible(T)
-#  else
-#    define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) std::is_trivially_destructible<T>::value
-#  endif
-
 #endif
 
 #if THRUST_CPP_DIALECT > 2011
@@ -250,6 +171,7 @@ struct is_const_or_const_ref<T const> : std::true_type
 #  endif
 
 // std::invoke from C++17
+// https://stackoverflow.com/questions/38288042/c11-14-invoke-workaround
 THRUST_EXEC_CHECK_DISABLE
 template <
   typename Fn,
@@ -297,7 +219,8 @@ using get_map_return = optional<fixup_void<invoke_result_t<F, U>>>;
 template <class F, class = void, class... U>
 struct returns_void_impl;
 template <class F, class... U>
-struct returns_void_impl<F, std::void_t<invoke_result_t<F, U...>>, U...> : std::is_void<invoke_result_t<F, U...>>
+struct returns_void_impl<F, _THRUST_STD::void_t<invoke_result_t<F, U...>>, U...>
+    : std::is_void<invoke_result_t<F, U...>>
 {};
 template <class F, class... U>
 using returns_void = returns_void_impl<F, void, U...>;
@@ -347,6 +270,7 @@ template <class T, class U = T>
 struct is_nothrow_swappable : std::true_type
 {};
 #else
+// https://stackoverflow.com/questions/26744589/what-is-a-proper-way-to-implement-is-swappable-to-test-for-the-swappable-concept
 namespace swap_adl_tests
 {
 // if swap ADL finds this then it would call std::swap otherwise (same
@@ -560,7 +484,7 @@ struct optional_operations_base : optional_storage_base<T>
 
 // This class manages conditionally having a trivial copy constructor
 // This specialization is for when T is trivially copy constructible
-template <class T, bool = THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T)>
+template <class T, bool = _THRUST_STD::is_trivially_copy_constructible<T>::value>
 struct optional_copy_base : optional_operations_base<T>
 {
   using optional_operations_base<T>::optional_operations_base;
@@ -595,7 +519,7 @@ struct optional_copy_base<T, false> : optional_operations_base<T>
   optional_copy_base& operator=(optional_copy_base&& rhs) = default;
 };
 
-template <class T, bool = THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T)>
+template <class T, bool = _THRUST_STD::is_trivially_move_constructible<T>::value>
 struct optional_move_base : optional_copy_base<T>
 {
   using optional_copy_base<T>::optional_copy_base;
@@ -630,8 +554,9 @@ struct optional_move_base<T, false> : optional_copy_base<T>
 
 // This class manages conditionally having a trivial copy assignment operator
 template <class T,
-          bool = THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T) && THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T)
-              && THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T)>
+          bool = _THRUST_STD::is_trivially_copy_assignable<T>::value
+              && _THRUST_STD::is_trivially_copy_constructible<T>::value
+              && _THRUST_STD::is_trivially_destructible<T>::value>
 struct optional_copy_assign_base : optional_move_base<T>
 {
   using optional_move_base<T>::optional_move_base;
@@ -660,8 +585,9 @@ struct optional_copy_assign_base<T, false> : optional_move_base<T>
 };
 
 template <class T,
-          bool = THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) && THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T)
-              && THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T)>
+          bool = _THRUST_STD::is_trivially_destructible<T>::value
+              && _THRUST_STD::is_trivially_move_constructible<T>::value
+              && _THRUST_STD::is_trivially_move_assignable<T>::value>
 struct optional_move_assign_base : optional_copy_assign_base<T>
 {
   using optional_copy_assign_base<T>::optional_copy_assign_base;
@@ -838,8 +764,8 @@ struct nullopt_t
 /// void foo (thrust::optional<int>);
 /// foo(thrust::nullopt); //pass an empty optional
 /// ```
-#if defined(__CUDA_ARCH__) && defined(_LIBCUDACXX_CONSTEXPR_GLOBAL)
-THRUST_DEVICE static _LIBCUDACXX_CONSTEXPR_GLOBAL
+#if defined(__CUDA_ARCH__) && defined(_CCCL_CONSTEXPR_GLOBAL)
+__device__ static _CCCL_CONSTEXPR_GLOBAL
 #elif defined(__HIP_DEVICE_COMPILE__)
 THRUST_DEVICE static constexpr
 #else
@@ -1653,7 +1579,11 @@ public:
     {
       if (rhs.has_value())
       {
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+        using _THRUST_STD::swap;
+#else
         using thrust::swap;
+#endif
         swap(**this, *rhs);
       }
       else
@@ -2081,7 +2011,7 @@ optional(T) -> optional<T>;
 #endif
 
 // Doxygen chokes on the trailing return types used below.
-#if !defined(THRUST_DOXYGEN)
+#if !defined(THRUST_DOXYGEN_INVOKED)
 /// \exclude
 namespace detail
 {
@@ -2139,7 +2069,7 @@ THRUST_HOST_DEVICE auto optional_map_impl(Opt&& opt, F&& f) -> optional<monostat
 }
 #  endif
 } // namespace detail
-#endif // !defined(THRUST_DOXYGEN)
+#endif // !defined(THRUST_DOXYGEN_INVOKED)
 
 /// Specialization for when `T` is a reference. `optional<T&>` acts similarly
 /// to a `T*`, but provides more operations and shows intent more clearly.
@@ -2921,7 +2851,7 @@ struct hash<THRUST_NS_QUALIFIER::optional<T>>
       return 0;
     }
 
-    return std::hash<THRUST_NS_QUALIFIER::detail::remove_const_t<T>>()(*o);
+    return std::hash<_THRUST_STD::remove_const_t<T>>()(*o);
   }
 };
 } // namespace std

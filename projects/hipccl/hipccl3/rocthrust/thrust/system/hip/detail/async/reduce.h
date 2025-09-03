@@ -33,6 +33,15 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/detail/cpp_version_check.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
@@ -42,6 +51,7 @@
 #  include <thrust/system/hip/detail/async/customization.h>
 #  include <thrust/system/hip/detail/reduce.h>
 #  include <thrust/system/hip/future.h>
+#  include <thrust/type_traits/remove_cvref.h>
 
 #  include <type_traits> // IWYU pragma: export
 
@@ -58,10 +68,11 @@ namespace detail
 {
 
 template <typename DerivedPolicy, typename ForwardIt, typename Size, typename T, typename BinaryOp>
-auto async_reduce_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, T init, BinaryOp op)
-  -> unique_eager_future<remove_cvref_t<T>>
+unique_eager_future<remove_cvref_t<T>>
+async_reduce_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, T init, BinaryOp op)
 {
-  using U                 = remove_cvref_t<T>;
+  using U = remove_cvref_t<T>;
+
   auto const device_alloc = get_async_device_allocator(policy);
 
   using pointer = typename thrust::detail::allocator_traits<decltype(device_alloc)>::template rebind_traits<U>::pointer;
@@ -93,12 +104,12 @@ auto async_reduce_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Si
   // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
   // make this guarantee.
   auto const content_ptr = content.get();
-  U* const ret_ptr       = thrust::detail::aligned_reinterpret_cast<T*>(raw_pointer_cast(content_ptr));
+  U* const ret_ptr       = thrust::detail::aligned_reinterpret_cast<U*>(raw_pointer_cast(content_ptr));
   void* const tmp_ptr    = static_cast<void*>(raw_pointer_cast(content_ptr + sizeof(U)));
 
   // Set up stream with dependencies.
 
-  hipStream_t user_raw_stream = thrust::hip_rocprim::stream(policy);
+  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
 
   if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
@@ -142,6 +153,7 @@ auto async_reduce(execution_policy<DerivedPolicy>& policy, ForwardIt first, Sent
   THRUST_RETURNS(thrust::system::hip::detail::async_reduce_n(policy, first, thrust::distance(first, last), init, op))
 
 } // namespace hip_rocprim
+
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace system
@@ -152,9 +164,8 @@ namespace detail
 {
 
 template <typename DerivedPolicy, typename ForwardIt, typename Size, typename OutputIt, typename T, typename BinaryOp>
-auto async_reduce_into_n(
+unique_eager_event async_reduce_into_n(
   execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt output, T init, BinaryOp op)
-  -> unique_eager_event
 {
   using U = remove_cvref_t<T>;
 

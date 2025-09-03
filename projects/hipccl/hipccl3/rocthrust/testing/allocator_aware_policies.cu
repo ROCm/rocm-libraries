@@ -16,21 +16,15 @@
  */
 
 #include <thrust/detail/seq.h>
-
-#include <unittest/unittest.h>
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <thrust/system/hip/detail/par.h>
-#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
-#  include <thrust/system/cuda/detail/par.h>
-#endif
-
 #include <thrust/system/cpp/detail/par.h>
+#include <thrust/system/hip/detail/par.h>
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <thrust/system/cuda/detail/par.h>
+#include <unittest/unittest.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
 #endif
 
 template <typename T>
@@ -72,7 +66,7 @@ struct TestAllocatorAttachment
   static void assert_correct(T)
   {
     ASSERT_EQUAL(
-      (thrust::detail::is_same<
+      (_THRUST_STD::is_same<
         T,
         typename PolicyInfo::template apply_base_second<thrust::detail::execute_with_allocator, Expected>::type>::value),
       true);
@@ -82,10 +76,10 @@ struct TestAllocatorAttachment
   static void assert_npa_correct(T)
   {
     ASSERT_EQUAL(
-      (thrust::detail::is_same<T,
-                               typename PolicyInfo::template apply_base_second<
-                                 thrust::detail::execute_with_allocator,
-                                 thrust::mr::allocator<thrust::detail::max_align_t, ExpectedResource>>::type>::value),
+      (_THRUST_STD::is_same<T,
+                            typename PolicyInfo::template apply_base_second<
+                              thrust::detail::execute_with_allocator,
+                              thrust::mr::allocator<thrust::detail::max_align_t, ExpectedResource>>::type>::value),
       true);
   }
 
@@ -129,23 +123,8 @@ using cpp_par_info    = policy_info<thrust::system::cpp::detail::par_t, thrust::
 using omp_par_info    = policy_info<thrust::system::omp::detail::par_t, thrust::system::omp::detail::execution_policy>;
 using tbb_par_info    = policy_info<thrust::system::tbb::detail::par_t, thrust::system::tbb::detail::execution_policy>;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using cuda_par_info = policy_info<thrust::system::cuda::detail::par_t, thrust::cuda_cub::execute_on_stream_base>;
-#endif
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 using hip_par_info = policy_info<thrust::system::hip::detail::par_t, thrust::hip_rocprim::execute_on_stream_base>;
-#endif
 
 SimpleUnitTest<TestAllocatorAttachment,
-               unittest::type_list<sequential_info,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                                   cuda_par_info,
-#endif
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-                                   hip_par_info,
-#endif
-                                   cpp_par_info,
-                                   omp_par_info,
-                                   tbb_par_info>>
+               unittest::type_list<sequential_info, hip_par_info, cpp_par_info, omp_par_info, tbb_par_info>>
   TestAllocatorAttachmentInstance;

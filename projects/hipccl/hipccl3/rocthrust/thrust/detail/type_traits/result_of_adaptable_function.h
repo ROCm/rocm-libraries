@@ -18,7 +18,20 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+// clang-format on
+#endif
 
 #include <type_traits>
 
@@ -44,12 +57,15 @@ public:
   using type = typename impl<Signature>::type;
 };
 
+// TODO(bgruber): remove this specialization eventually
 // specialization for invocations which define result_type
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename Functor, typename... ArgTypes>
-struct result_of_adaptable_function<Functor(ArgTypes...), std::void_t<typename Functor::result_type>>
+struct result_of_adaptable_function<Functor(ArgTypes...), _THRUST_STD::void_t<typename Functor::result_type>>
 {
   using type = typename Functor::result_type;
 };
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace detail
 THRUST_NAMESPACE_END

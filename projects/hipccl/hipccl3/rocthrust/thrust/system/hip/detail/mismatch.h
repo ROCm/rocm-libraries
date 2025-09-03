@@ -29,10 +29,19 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
+#  include <thrust/functional.h>
 #  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 
@@ -41,12 +50,12 @@ namespace hip_rocprim
 {
 
 template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
-pair<InputIt1, InputIt2> THRUST_HIP_FUNCTION
+pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred);
 
 template <class Derived, class InputIt1, class InputIt2>
-pair<InputIt1, InputIt2>
-  THRUST_HIP_FUNCTION mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2);
+pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
+mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2);
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
@@ -57,23 +66,23 @@ namespace hip_rocprim
 {
 
 template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
-pair<InputIt1, InputIt2> THRUST_HIP_FUNCTION
+pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred)
 {
   using transform_t = transform_pair_of_input_iterators_t<bool, InputIt1, InputIt2, BinaryPred>;
 
   transform_t transform_first = transform_t(first1, first2, binary_pred);
 
-  transform_t result =
-    hip_rocprim::find_if_not(policy, transform_first, transform_first + thrust::distance(first1, last1), identity());
+  transform_t result = hip_rocprim::find_if_not(
+    policy, transform_first, transform_first + thrust::distance(first1, last1), ::internal::identity{});
 
   return thrust::make_pair(first1 + thrust::distance(transform_first, result),
                            first2 + thrust::distance(transform_first, result));
 }
 
 template <class Derived, class InputIt1, class InputIt2>
-pair<InputIt1, InputIt2>
-  THRUST_HIP_FUNCTION mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
+pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
+mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
 {
   using InputType1 = typename thrust::iterator_value<InputIt1>::type;
   return hip_rocprim::mismatch(policy, first1, last1, first2, equal_to<InputType1>());

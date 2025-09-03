@@ -32,6 +32,15 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/detail/cpp_version_check.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
@@ -70,10 +79,6 @@ auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt first, Siz
   using T = typename iterator_traits<ForwardIt>::value_type;
 
   auto const device_alloc = get_async_device_allocator(select_device_system(from_exec, to_exec));
-
-  /*using pointer
-    = typename thrust::detail::allocator_traits<decltype(device_alloc)>::
-      template rebind_traits<void>::pointer;*/
 
   unique_eager_event e;
 
@@ -138,7 +143,7 @@ void async_copy_n_compile_failure_no_hip_to_non_contiguous_output()
 // TriviallyRelocatable value type
 // Device to host, host to device
 template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename OutputIt, typename Size>
-auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt first, Size n, OutputIt output) ->
+auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt /*first*/, Size /*n*/, OutputIt /*output*/) ->
   typename std::enable_if<conjunction<negation<is_contiguous_iterator<OutputIt>>,
                                       is_trivially_relocatable_to<typename iterator_traits<ForwardIt>::value_type,
                                                                   typename iterator_traits<OutputIt>::value_type>,
@@ -147,10 +152,6 @@ auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt first, Siz
                           unique_eager_event>::type
 {
   async_copy_n_compile_failure_no_hip_to_non_contiguous_output<OutputIt>();
-
-  THRUST_UNUSED_VAR(first);
-  THRUST_UNUSED_VAR(n);
-  THRUST_UNUSED_VAR(output);
 
   return {};
 }
@@ -294,7 +295,7 @@ void async_copy_n_compile_failure_non_trivially_relocatable_elements()
 // Non-TriviallyRelocatable value type
 // Host to device, device to host
 template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename OutputIt, typename Size>
-auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt first, Size n, OutputIt output) ->
+auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt /*first*/, Size /*n*/, OutputIt /*output*/) ->
   typename std::enable_if<
     conjunction<negation<is_trivially_relocatable_to<typename iterator_traits<ForwardIt>::value_type,
                                                      typename iterator_traits<OutputIt>::value_type>>,
@@ -303,10 +304,6 @@ auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt first, Siz
     unique_eager_event>::type
 {
   // TODO: We could do more here with hipHostRegister.
-
-  THRUST_UNUSED_VAR(first);
-  THRUST_UNUSED_VAR(n);
-  THRUST_UNUSED_VAR(output);
 
   async_copy_n_compile_failure_non_trivially_relocatable_elements<
     typename thrust::iterator_traits<ForwardIt>::value_type,

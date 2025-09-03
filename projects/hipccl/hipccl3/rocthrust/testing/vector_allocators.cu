@@ -22,6 +22,10 @@
 
 #include <unittest/unittest.h>
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <utility>
+#endif
+
 template <typename BaseAlloc, bool PropagateOnSwap>
 class stateful_allocator : public BaseAlloc
 {
@@ -269,14 +273,15 @@ void TestVectorAllocatorPropagateOnSwap()
 
   Vector v1(10, alloc1);
   Vector v2(17, alloc1);
-  thrust::swap(v1, v2);
+  using _THRUST_STD::swap;
+  swap(v1, v2);
 
   ASSERT_EQUAL(v1.size(), 17u);
   ASSERT_EQUAL(v2.size(), 10u);
 
   Vector v3(15, alloc1);
   Vector v4(31, alloc2);
-  ASSERT_THROWS(thrust::swap(v3, v4), thrust::detail::allocator_mismatch_on_swap);
+  ASSERT_THROWS(swap(v3, v4), thrust::detail::allocator_mismatch_on_swap);
 }
 
 void TestVectorAllocatorPropagateOnSwapHost()

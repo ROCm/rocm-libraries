@@ -95,19 +95,16 @@ void TestAdjacentDifferenceCudaStreams()
   cudaStream_t s;
   cudaStreamCreate(&s);
 
-  thrust::device_vector<int> input(3);
-  thrust::device_vector<int> output(3);
-  input[0] = 1;
-  input[1] = 4;
-  input[2] = 6;
+  thrust::device_vector<int> input{1, 4, 6};
+  thrust::device_vector<int> output(input.size());
 
   thrust::adjacent_difference(thrust::cuda::par.on(s), input.begin(), input.end(), output.begin());
 
   cudaStreamSynchronize(s);
 
-  ASSERT_EQUAL(output[0], 1);
-  ASSERT_EQUAL(output[1], 3);
-  ASSERT_EQUAL(output[2], 2);
+  thrust::device_vector<int> ref{1, 3, 2};
+
+  ASSERT_EQUAL(output, ref);
 
   cudaStreamDestroy(s);
 }
@@ -123,26 +120,26 @@ struct detect_wrong_difference
 
   bool* flag;
 
-  THRUST_HOST_DEVICE detect_wrong_difference operator++() const
+  _CCCL_HOST_DEVICE detect_wrong_difference operator++() const
   {
     return *this;
   }
-  THRUST_HOST_DEVICE detect_wrong_difference operator*() const
+  _CCCL_HOST_DEVICE detect_wrong_difference operator*() const
   {
     return *this;
   }
   template <typename Difference>
-  THRUST_HOST_DEVICE detect_wrong_difference operator+(Difference) const
+  _CCCL_HOST_DEVICE detect_wrong_difference operator+(Difference) const
   {
     return *this;
   }
   template <typename Index>
-  THRUST_HOST_DEVICE detect_wrong_difference operator[](Index) const
+  _CCCL_HOST_DEVICE detect_wrong_difference operator[](Index) const
   {
     return *this;
   }
 
-  THRUST_DEVICE void operator=(long long difference) const
+  _CCCL_DEVICE void operator=(long long difference) const
   {
     if (difference != 1)
     {
@@ -173,8 +170,10 @@ void TestAdjacentDifferenceWithBigIndexesHelper(int magnitude)
 void TestAdjacentDifferenceWithBigIndexes()
 {
   TestAdjacentDifferenceWithBigIndexesHelper(30);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestAdjacentDifferenceWithBigIndexesHelper(31);
   TestAdjacentDifferenceWithBigIndexesHelper(32);
   TestAdjacentDifferenceWithBigIndexesHelper(33);
+#endif
 }
 DECLARE_UNITTEST(TestAdjacentDifferenceWithBigIndexes);

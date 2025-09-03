@@ -18,25 +18,15 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/detail/seq.h>
-
-#include <unittest/unittest.h>
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <thrust/system/hip/detail/par.h>
-#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
-#  include <thrust/system/cuda/detail/par.h>
-#endif
-
 #include <thrust/system/cpp/detail/par.h>
+#include <thrust/system/hip/detail/par.h>
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#  include <thrust/system/hip/detail/par.h>
-#endif
+#include <unittest/unittest.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <thrust/system/cuda/detail/par.h>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
 #endif
 
 template <typename T>
@@ -76,7 +66,7 @@ struct TestDependencyAttachment
   static void assert_correct(T)
   {
     ASSERT_EQUAL(
-      (thrust::detail::is_same<
+      (_THRUST_STD::is_same<
         T,
         typename PolicyInfo::template apply_base_first<thrust::detail::execute_with_dependencies, Expected...>>::value),
       true);
@@ -86,7 +76,7 @@ struct TestDependencyAttachment
   static void assert_correct_with_allocator(T)
   {
     ASSERT_EQUAL(
-      (thrust::detail::is_same<
+      (_THRUST_STD::is_same<
         T,
         typename PolicyInfo::template apply_base_second<thrust::detail::execute_with_allocator_and_dependencies,
                                                         Allocator,
@@ -125,25 +115,14 @@ using cpp_par_info    = policy_info<thrust::system::cpp::detail::par_t, thrust::
 using omp_par_info    = policy_info<thrust::system::omp::detail::par_t, thrust::system::omp::detail::execution_policy>;
 using tbb_par_info    = policy_info<thrust::system::tbb::detail::par_t, thrust::system::tbb::detail::execution_policy>;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 using hip_par_info = policy_info<thrust::system::hip::detail::par_t, thrust::hip_rocprim::execute_on_stream_base>;
-#endif
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using cuda_par_info = policy_info<thrust::system::cuda::detail::par_t, thrust::cuda_cub::execute_on_stream_base>;
-#endif
 
 SimpleUnitTest<TestDependencyAttachment,
                unittest::type_list<
-// TODO: uncomment when dependencies are generalized to all backends
-// sequential_info,
-// cpp_par_info,
-// omp_par_info,
-// tbb_par_info,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                 cuda_par_info
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-                 hip_par_info
-#endif
-                 >>
+                 // TODO: uncomment when dependencies are generalized to all backends
+                 // sequential_info,
+                 // cpp_par_info,
+                 // omp_par_info,
+                 // tbb_par_info,
+                 hip_par_info>>
   TestDependencyAttachmentInstance;

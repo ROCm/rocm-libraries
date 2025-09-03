@@ -16,14 +16,14 @@
  */
 
 #include <thrust/binary_search.h>
-#include <thrust/iterator/counting_iterator.h>
+#include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(BinarySearchVectorTestsInKernel, NumericalTestsParams);
@@ -50,12 +50,7 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestLowerBound)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> d_input(5);
-  d_input[0] = 0;
-  d_input[1] = 2;
-  d_input[2] = 5;
-  d_input[3] = 7;
-  d_input[4] = 8;
+  thrust::device_vector<T> d_input{0, 2, 5, 7, 8};
 
   thrust::device_vector<ptrdiff_t> d_output(10);
 
@@ -70,16 +65,8 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestLowerBound)
     thrust::raw_pointer_cast(d_output.data()));
 
   thrust::host_vector<ptrdiff_t> output = d_output;
-  ASSERT_EQ(output[0], 0);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 2);
-  ASSERT_EQ(output[4], 2);
-  ASSERT_EQ(output[5], 2);
-  ASSERT_EQ(output[6], 3);
-  ASSERT_EQ(output[7], 3);
-  ASSERT_EQ(output[8], 4);
-  ASSERT_EQ(output[9], 5);
+  thrust::host_vector<ptrdiff_t> ref{0, 1, 1, 2, 2, 2, 3, 3, 4, 5};
+  ASSERT_EQ(output, ref);
 }
 
 template <class T>
@@ -95,12 +82,7 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestUpperBound)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> d_input(5);
-  d_input[0] = 0;
-  d_input[1] = 2;
-  d_input[2] = 5;
-  d_input[3] = 7;
-  d_input[4] = 8;
+  thrust::device_vector<T> d_input{0, 2, 5, 7, 8};
 
   thrust::device_vector<ptrdiff_t> d_output(10);
 
@@ -115,16 +97,8 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestUpperBound)
     thrust::raw_pointer_cast(d_output.data()));
 
   thrust::host_vector<ptrdiff_t> output = d_output;
-  ASSERT_EQ(output[0], 1);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 2);
-  ASSERT_EQ(output[3], 2);
-  ASSERT_EQ(output[4], 2);
-  ASSERT_EQ(output[5], 3);
-  ASSERT_EQ(output[6], 3);
-  ASSERT_EQ(output[7], 4);
-  ASSERT_EQ(output[8], 5);
-  ASSERT_EQ(output[9], 5);
+  thrust::host_vector<ptrdiff_t> ref{1, 1, 2, 2, 2, 3, 3, 4, 5, 5};
+  ASSERT_EQ(output, ref);
 }
 
 template <class T>
@@ -140,12 +114,7 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestBinarySearch)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> d_input(5);
-  d_input[0] = 0;
-  d_input[1] = 2;
-  d_input[2] = 5;
-  d_input[3] = 7;
-  d_input[4] = 8;
+  thrust::device_vector<T> d_input{0, 2, 5, 7, 8};
 
   thrust::device_vector<bool> d_output(10);
 
@@ -160,85 +129,68 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestBinarySearch)
     thrust::raw_pointer_cast(d_output.data()));
 
   thrust::host_vector<bool> output = d_output;
-  ASSERT_EQ(output[0], true);
-  ASSERT_EQ(output[1], false);
-  ASSERT_EQ(output[2], true);
-  ASSERT_EQ(output[3], false);
-  ASSERT_EQ(output[4], false);
-  ASSERT_EQ(output[5], true);
-  ASSERT_EQ(output[6], false);
-  ASSERT_EQ(output[7], true);
-  ASSERT_EQ(output[8], true);
-  ASSERT_EQ(output[9], false);
+  thrust::host_vector<bool> ref{true, false, true, false, false, true, false, true, true, false};
+  ASSERT_EQ(output, ref);
 }
 
 TESTS_DEFINE(BinarySearchVectorTests, FullTestsParams);
 TESTS_DEFINE(BinarySearchVectorIntegerTests, SignedIntegerTestsParams);
 
+//////////////////////
+// Vector Functions //
+//////////////////////
+
 // convert xxx_vector<T1> to xxx_vector<T2>
 template <class ExampleVector, typename NewType>
 struct vector_like
 {
-  using alloc     = typename ExampleVector::allocator_type;
-  using new_alloc = typename alloc::template rebind<NewType>::other;
-  using type      = thrust::detail::vector_base<NewType, new_alloc>;
+  using alloc        = typename ExampleVector::allocator_type;
+  using alloc_traits = typename thrust::detail::allocator_traits<alloc>;
+  using new_alloc    = typename alloc_traits::template rebind_alloc<NewType>;
+  using type         = thrust::detail::vector_base<NewType, new_alloc>;
 };
 
 TYPED_TEST(BinarySearchVectorTests, TestScalarLowerBoundSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector vec(5);
-
-  vec[0] = 0;
-  vec[1] = 2;
-  vec[2] = 5;
-  vec[3] = 7;
-  vec[4] = 8;
+  Vector vec{0, 2, 5, 7, 8};
 
   Vector input(10);
-  thrust::sequence(Policy{}, input.begin(), input.end());
+  thrust::sequence(input.begin(), input.end());
 
-  using IntVector = typename vector_like<Vector, int>::type;
+  using int_type  = typename Vector::difference_type;
+  using IntVector = typename vector_like<Vector, int_type>::type;
 
   // test with integral output type
   IntVector integral_output(10);
-  thrust::lower_bound(Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
+  thrust::lower_bound(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
 
   typename IntVector::iterator output_end =
-    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
+    thrust::lower_bound(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
 
   ASSERT_EQ((output_end - integral_output.begin()), 10);
 
-  ASSERT_EQ(integral_output[0], 0);
-  ASSERT_EQ(integral_output[1], 1);
-  ASSERT_EQ(integral_output[2], 1);
-  ASSERT_EQ(integral_output[3], 2);
-  ASSERT_EQ(integral_output[4], 2);
-  ASSERT_EQ(integral_output[5], 2);
-  ASSERT_EQ(integral_output[6], 3);
-  ASSERT_EQ(integral_output[7], 3);
-  ASSERT_EQ(integral_output[8], 4);
-  ASSERT_EQ(integral_output[9], 5);
+  IntVector ref{0, 1, 1, 2, 2, 2, 3, 3, 4, 5};
+  ASSERT_EQ(integral_output, ref);
 
-  //// test with iterator output type
-  // using IteratorVector = typename vector_like<Vector, typename Vector::iterator>::type;
-  // IteratorVector iterator_output(10);
-  // thrust::lower_bound(vec.begin(), vec.end(), input.begin(), input.end(), iterator_output.begin());
-
-  // ASSERT_EQ(iterator_output[0] - vec.begin(), 0);
-  // ASSERT_EQ(iterator_output[1] - vec.begin(), 1);
-  // ASSERT_EQ(iterator_output[2] - vec.begin(), 1);
-  // ASSERT_EQ(iterator_output[3] - vec.begin(), 2);
-  // ASSERT_EQ(iterator_output[4] - vec.begin(), 2);
-  // ASSERT_EQ(iterator_output[5] - vec.begin(), 2);
-  // ASSERT_EQ(iterator_output[6] - vec.begin(), 3);
-  // ASSERT_EQ(iterator_output[7] - vec.begin(), 3);
-  // ASSERT_EQ(iterator_output[8] - vec.begin(), 4);
-  // ASSERT_EQ(iterator_output[9] - vec.begin(), 5);
+  //    // test with iterator output type
+  //    using IteratorVector = typename vector_like<Vector, typename Vector::iterator>::type;
+  //    IteratorVector iterator_output(10);
+  //    thrust::lower_bound(vec.begin(), vec.end(), input.begin(), input.end(), iterator_output.begin());
+  //
+  //    ASSERT_EQ(iterator_output[0] - vec.begin(), 0);
+  //    ASSERT_EQ(iterator_output[1] - vec.begin(), 1);
+  //    ASSERT_EQ(iterator_output[2] - vec.begin(), 1);
+  //    ASSERT_EQ(iterator_output[3] - vec.begin(), 2);
+  //    ASSERT_EQ(iterator_output[4] - vec.begin(), 2);
+  //    ASSERT_EQ(iterator_output[5] - vec.begin(), 2);
+  //    ASSERT_EQ(iterator_output[6] - vec.begin(), 3);
+  //    ASSERT_EQ(iterator_output[7] - vec.begin(), 3);
+  //    ASSERT_EQ(iterator_output[8] - vec.begin(), 4);
+  //    ASSERT_EQ(iterator_output[9] - vec.begin(), 5);
 }
 
 template <typename ForwardIterator, typename InputIterator, typename OutputIterator>
@@ -287,56 +239,42 @@ TEST(BinarySearchVectorTests, TestVectorLowerBoundDispatchImplicit)
 TYPED_TEST(BinarySearchVectorTests, TestVectorUpperBoundSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector vec(5);
-
-  vec[0] = 0;
-  vec[1] = 2;
-  vec[2] = 5;
-  vec[3] = 7;
-  vec[4] = 8;
+  Vector vec{0, 2, 5, 7, 8};
 
   Vector input(10);
-  thrust::sequence(Policy{}, input.begin(), input.end());
+  thrust::sequence(input.begin(), input.end());
 
-  using IntVector = typename vector_like<Vector, int>::type;
+  using int_type  = typename Vector::difference_type;
+  using IntVector = typename vector_like<Vector, int_type>::type;
 
   // test with integral output type
   IntVector integral_output(10);
   typename IntVector::iterator output_end =
-    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
+    thrust::upper_bound(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
 
   ASSERT_EQ((output_end - integral_output.begin()), 10);
 
-  ASSERT_EQ(integral_output[0], 1);
-  ASSERT_EQ(integral_output[1], 1);
-  ASSERT_EQ(integral_output[2], 2);
-  ASSERT_EQ(integral_output[3], 2);
-  ASSERT_EQ(integral_output[4], 2);
-  ASSERT_EQ(integral_output[5], 3);
-  ASSERT_EQ(integral_output[6], 3);
-  ASSERT_EQ(integral_output[7], 4);
-  ASSERT_EQ(integral_output[8], 5);
-  ASSERT_EQ(integral_output[9], 5);
+  IntVector ref{1, 1, 2, 2, 2, 3, 3, 4, 5, 5};
+  ASSERT_EQ(integral_output, ref);
 
-  //// test with iterator output type
-  // using IteratorVector = typename vector_like<Vector, typename Vector::iterator>::type;
-  // IteratorVector iterator_output(10);
-  // thrust::upper_bound(vec.begin(), vec.end(), input.begin(), input.end(), iterator_output.begin());
-
-  // ASSERT_EQ(iterator_output[0] - vec.begin(), 1);
-  // ASSERT_EQ(iterator_output[1] - vec.begin(), 1);
-  // ASSERT_EQ(iterator_output[2] - vec.begin(), 2);
-  // ASSERT_EQ(iterator_output[3] - vec.begin(), 2);
-  // ASSERT_EQ(iterator_output[4] - vec.begin(), 2);
-  // ASSERT_EQ(iterator_output[5] - vec.begin(), 3);
-  // ASSERT_EQ(iterator_output[6] - vec.begin(), 3);
-  // ASSERT_EQ(iterator_output[7] - vec.begin(), 4);
-  // ASSERT_EQ(iterator_output[8] - vec.begin(), 5);
-  // ASSERT_EQ(iterator_output[9] - vec.begin(), 5);
+  //    // test with iterator output type
+  //    using IteratorVector = typename vector_like<Vector, typename Vector::iterator>::type;
+  //    IteratorVector iterator_output(10);
+  //    thrust::lower_bound(vec.begin(), vec.end(), input.begin(), input.end(), iterator_output.begin());
+  //
+  //    ASSERT_EQ(iterator_output[0] - vec.begin(), 1);
+  //    ASSERT_EQ(iterator_output[1] - vec.begin(), 1);
+  //    ASSERT_EQ(iterator_output[2] - vec.begin(), 2);
+  //    ASSERT_EQ(iterator_output[3] - vec.begin(), 2);
+  //    ASSERT_EQ(iterator_output[4] - vec.begin(), 2);
+  //    ASSERT_EQ(iterator_output[5] - vec.begin(), 3);
+  //    ASSERT_EQ(iterator_output[6] - vec.begin(), 3);
+  //    ASSERT_EQ(iterator_output[7] - vec.begin(), 4);
+  //    ASSERT_EQ(iterator_output[8] - vec.begin(), 5);
+  //    ASSERT_EQ(iterator_output[9] - vec.begin(), 5);
 }
 
 template <typename ForwardIterator, typename InputIterator, typename OutputIterator>
@@ -385,59 +323,37 @@ TEST(BinarySearchVectorTests, TestVectorUpperBoundDispatchImplicit)
 TYPED_TEST(BinarySearchVectorTests, TestVectorBinarySearchSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector vec(5);
-
-  vec[0] = 0;
-  vec[1] = 2;
-  vec[2] = 5;
-  vec[3] = 7;
-  vec[4] = 8;
+  Vector vec{0, 2, 5, 7, 8};
 
   Vector input(10);
-  thrust::sequence(Policy{}, input.begin(), input.end());
+  thrust::sequence(input.begin(), input.end());
 
   using BoolVector = typename vector_like<Vector, bool>::type;
-  using IntVector  = typename vector_like<Vector, int>::type;
+  using int_type   = typename Vector::difference_type;
+  using IntVector  = typename vector_like<Vector, int_type>::type;
 
   // test with boolean output type
   BoolVector bool_output(10);
   typename BoolVector::iterator bool_output_end =
-    thrust::binary_search(Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin());
+    thrust::binary_search(vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin());
 
   ASSERT_EQ((bool_output_end - bool_output.begin()), 10);
 
-  ASSERT_EQ(bool_output[0], true);
-  ASSERT_EQ(bool_output[1], false);
-  ASSERT_EQ(bool_output[2], true);
-  ASSERT_EQ(bool_output[3], false);
-  ASSERT_EQ(bool_output[4], false);
-  ASSERT_EQ(bool_output[5], true);
-  ASSERT_EQ(bool_output[6], false);
-  ASSERT_EQ(bool_output[7], true);
-  ASSERT_EQ(bool_output[8], true);
-  ASSERT_EQ(bool_output[9], false);
+  BoolVector bool_ref{true, false, true, false, false, true, false, true, true, false};
+  ASSERT_EQ(bool_output, bool_ref);
 
   // test with integral output type
   IntVector integral_output(10, 2);
   typename IntVector::iterator int_output_end =
-    thrust::binary_search(Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
+    thrust::binary_search(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
 
   ASSERT_EQ((int_output_end - integral_output.begin()), 10);
 
-  ASSERT_EQ(integral_output[0], 1);
-  ASSERT_EQ(integral_output[1], 0);
-  ASSERT_EQ(integral_output[2], 1);
-  ASSERT_EQ(integral_output[3], 0);
-  ASSERT_EQ(integral_output[4], 0);
-  ASSERT_EQ(integral_output[5], 1);
-  ASSERT_EQ(integral_output[6], 0);
-  ASSERT_EQ(integral_output[7], 1);
-  ASSERT_EQ(integral_output[8], 1);
-  ASSERT_EQ(integral_output[9], 0);
+  IntVector int_ref{1, 0, 1, 0, 0, 1, 0, 1, 1, 0};
+  ASSERT_EQ(integral_output, int_ref);
 }
 
 template <typename ForwardIterator, typename InputIterator, typename OutputIterator>
@@ -507,8 +423,9 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorLowerBound)
         2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
       thrust::device_vector<T> d_input = h_input;
 
-      thrust::host_vector<int> h_output(2 * size);
-      thrust::device_vector<int> d_output(2 * size);
+      using int_type = typename thrust::host_vector<T>::difference_type;
+      thrust::host_vector<int_type> h_output(2 * size);
+      thrust::device_vector<int_type> d_output(2 * size);
 
       thrust::lower_bound(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin());
       thrust::lower_bound(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin());
@@ -541,8 +458,9 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorUpperBound)
         2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
       thrust::device_vector<T> d_input = h_input;
 
-      thrust::host_vector<int> h_output(2 * size);
-      thrust::device_vector<int> d_output(2 * size);
+      using int_type = typename thrust::host_vector<T>::difference_type;
+      thrust::host_vector<int_type> h_output(2 * size);
+      thrust::device_vector<int_type> d_output(2 * size);
 
       thrust::upper_bound(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin());
       thrust::upper_bound(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin());
@@ -575,8 +493,9 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorBinarySearch)
         2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
       thrust::device_vector<T> d_input = h_input;
 
-      thrust::host_vector<int> h_output(2 * size);
-      thrust::device_vector<int> d_output(2 * size);
+      using int_type = typename thrust::host_vector<T>::difference_type;
+      thrust::host_vector<int_type> h_output(2 * size);
+      thrust::device_vector<int_type> d_output(2 * size);
 
       thrust::binary_search(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin());
       thrust::binary_search(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin());

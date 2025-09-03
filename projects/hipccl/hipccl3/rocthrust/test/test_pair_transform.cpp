@@ -21,14 +21,19 @@
 #include <thrust/tuple.h>
 
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 TESTS_DEFINE(PairTransformTests, NumericalTestsParams);
 
 struct make_pair_functor
 {
   template <typename T1, typename T2>
-  __host__ __device__ thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  THRUST_HOST_DEVICE thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
   {
     return thrust::make_pair(x, y);
   } // end operator()()
@@ -37,9 +42,12 @@ struct make_pair_functor
 struct add_pairs
 {
   template <typename Pair1, typename Pair2>
-  __host__ __device__ Pair1 operator()(const Pair1& x, const Pair2& y)
+  THRUST_HOST_DEVICE Pair1 operator()(const Pair1& x, const Pair2& y)
   {
-    return thrust::make_pair(x.first + y.first, x.second + y.second);
+    using T1 = typename _THRUST_STD::common_type<typename Pair1::first_type, typename Pair2::first_type>::type;
+    using T2 = typename _THRUST_STD::common_type<typename Pair1::second_type, typename Pair2::second_type>::type;
+
+    return thrust::make_pair(static_cast<T1>(x.first + y.first), static_cast<T2>(x.second + y.second));
   } // end operator()
 }; // end add_pairs
 
@@ -60,10 +68,8 @@ TYPED_TEST(PairTransformTests, TestPairTransform)
 
       thrust::host_vector<T> h_p1 =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_p2 = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
-
       thrust::host_vector<P> h_result(size);
 
       thrust::device_vector<T> d_p1 = h_p1;
@@ -75,14 +81,16 @@ TYPED_TEST(PairTransformTests, TestPairTransform)
 
       // zip up pairs on the device
       thrust::transform(d_p1.begin(), d_p1.end(), d_p2.begin(), d_result.begin(), make_pair_functor());
-      test_equality(h_result, d_result);
+
+      ASSERT_EQ_QUIET(h_result, d_result);
 
       // add pairs on the host
       thrust::transform(h_result.begin(), h_result.end(), h_result.begin(), h_result.begin(), add_pairs());
 
       // add pairs on the device
       thrust::transform(d_result.begin(), d_result.end(), d_result.begin(), d_result.begin(), add_pairs());
-      test_equality(h_result, d_result);
+
+      ASSERT_EQ_QUIET(h_result, d_result);
     }
   }
-}
+}; // end TestPairZip
