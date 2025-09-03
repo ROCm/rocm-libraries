@@ -47,8 +47,17 @@ static std::string rocblas_parse_yaml(const std::string& yaml)
         yaml_path = yaml;
     }
 
-    auto cmd = exepath + "rocblas_gentest.py --template " + exepath + "rocblas_template.yaml -o "
-               + tmp + " " + yaml_path;
+#ifdef WIN32
+    // Explicitly run via `python.exe`, without relying on the .py file being
+    // treated as an executable that should be run via the python interpreter.
+    std::string python_command_launcher = "python ";
+#else
+    // Rely on the shebang in the file, e.g. `#!/usr/bin/env python3`.
+    std::string python_command_launcher = "";
+#endif
+
+    auto cmd = python_command_launcher + exepath + "rocblas_gentest.py --template " + exepath
+               + "rocblas_template.yaml -o " + tmp + " " + yaml_path;
     rocblas_cerr << cmd << std::endl;
 
 #ifdef WIN32
