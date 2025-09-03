@@ -118,6 +118,12 @@ struct alignas(16) BufferResource
         desc_.d32[2] = num_records;
         // 32-bit buffer resource descriptor
         desc_.d32[3] = BUFFER_RESOURCE_3RD_DWORD;
+#if defined(__gfx1250__)
+        uint32_t tmp = desc_.d32[2] & 0x7F;
+        tmp = tmp << 25;
+        desc_.d32[2] = desc_.d32[2] >> 7;
+        desc_.d32[1] = desc_.d32[1] | tmp;
+#endif
     }
 
     INLINEDEVICE
