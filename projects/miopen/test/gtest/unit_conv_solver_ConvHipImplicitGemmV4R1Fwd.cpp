@@ -70,8 +70,10 @@ const auto& GetTestParams()
         p.SetTolerance(Gpu::gfx908, miopenHalf, 250.0f);
         p.SetTolerance(Gpu::gfx90A, miopenHalf, 250.0f);
         p.SetTolerance(Gpu::gfx94X, miopenHalf, 250.0f);
+        p.SetTolerance(Gpu::gfx950, miopenHalf, 250.0f);
         p.SetTolerance(Gpu::gfx908, miopenBFloat16, 30.0f);
         p.SetTolerance(Gpu::gfx90A, miopenBFloat16, 30.0f);
+        p.SetTolerance(Gpu::gfx950, miopenBFloat16, 30.0f);
         return p;
     }();
     return params;
