@@ -27,6 +27,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
+#include <algorithm>
 
 #include "TensorDataManipulation.hpp"
 #include "datatype_interface.hpp"
@@ -65,18 +66,18 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(hipblaslt_type2datatype<T>(), MiK, MiKv, PackK);
     auto tmpTensor = Tensor::create<T>({m, k});
-    memcpy(tmpTensor.template as<void>(), src, m * k * sizeof(T));
+    std::copy(src, src + m * k, static_cast<T*>(tmpTensor.template as<void>()));
 
     if(colMaj)
     {
         auto orgTensor = Tensor::create<T>({k, m});
-        memcpy(orgTensor.template as<void>(), src, m * k * sizeof(T));
+        std::copy(src, src + m * k, static_cast<T*>(orgTensor.template as<void>()));
         tmpTensor = permute(orgTensor, {1, 0});
     }
 
     tmpTensor.reshape({m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK});
     Tensor permuted = permute(tmpTensor, {0, 2, 3, 1, 4});
-    memcpy(dst, permuted.template as<void>(), m * k * sizeof(T));
+    std::copy(static_cast<const T*>(permuted.template as<void>()), static_cast<const T*>(permuted.template as<void>()) + m * k, dst);
 }
 
 void simpleGemm(hipblasLtHandle_t  handle,
@@ -132,12 +133,12 @@ int main()
 
     swizzleRunner.run([&swizzleRunner, &runner, m, n, k] {
         // copy inputs from first runner for comparison and validation
-        hipMemcpy(
-            swizzleRunner.d_a, runner.d_a, m * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToDevice);
-        hipMemcpy(
-            swizzleRunner.d_b, runner.d_b, n * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToDevice);
-        hipMemcpy(
-            swizzleRunner.d_c, runner.d_c, m * n * sizeof(hipblasLtHalf), hipMemcpyDeviceToDevice);
+        CHECK_HIP_ERROR(hipMemcpy(
+            swizzleRunner.d_a, runner.d_a, m * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(
+            swizzleRunner.d_b, runner.d_b, n * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(
+            swizzleRunner.d_c, runner.d_c, m * n * sizeof(hipblasLtHalf), hipMemcpyDeviceToDevice));
         /** This is an example with swizzle-A
          *  a = (k, m). lda = k
          *  b = (k, n). ldb = k
@@ -174,14 +175,14 @@ int main()
         std::vector<hipblaslt_f8_fnuz> cpuAF8(m * k, hipblaslt_f8_fnuz(0.f));
         std::vector<hipblaslt_f8_fnuz> cpuBF8(k * n, hipblaslt_f8_fnuz(0.f));
 
-        hipMemcpy(cpuAF16.data(),
+        CHECK_HIP_ERROR(hipMemcpy(cpuAF16.data(),
                   runner.d_a,
                   cpuAF16.size() * sizeof(hipblasLtHalf),
-                  hipMemcpyDeviceToHost);
-        hipMemcpy(cpuBF16.data(),
+                  hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(cpuBF16.data(),
                   runner.d_b,
                   cpuBF16.size() * sizeof(hipblasLtHalf),
-                  hipMemcpyDeviceToHost);
+                  hipMemcpyDeviceToHost));
 
         for(size_t i = 0; i < cpuAF16.size(); ++i)
         {
@@ -194,18 +195,18 @@ int main()
         }
 
         // copy inputs from first runner for comparison and validation
-        hipMemcpy(swizzleRunner_F8.d_a,
+        CHECK_HIP_ERROR(hipMemcpy(swizzleRunner_F8.d_a,
                   cpuAF8.data(),
                   m * k * sizeof(hipblaslt_f8_fnuz),
-                  hipMemcpyHostToDevice);
-        hipMemcpy(swizzleRunner_F8.d_b,
+                  hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(swizzleRunner_F8.d_b,
                   cpuBF8.data(),
                   n * k * sizeof(hipblaslt_f8_fnuz),
-                  hipMemcpyHostToDevice);
-        hipMemcpy(swizzleRunner_F8.d_c,
+                  hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(swizzleRunner_F8.d_c,
                   runner.d_c,
                   m * n * sizeof(hipblasLtHalf),
-                  hipMemcpyDeviceToDevice);
+                  hipMemcpyDeviceToDevice));
         /** This is an example with swizzle-A
          *  a = (k, m). lda = k
          *  b = (k, n). ldb = k
@@ -296,9 +297,9 @@ void simpleGemm(hipblasLtHandle_t  handle,
                 matA, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
             std::vector<hipblasLtHalf> src(m * k, 0);
             std::vector<hipblasLtHalf> dst(m * k, 0);
-            hipMemcpy(src.data(), d_a, m * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToHost);
+            CHECK_HIP_ERROR(hipMemcpy(src.data(), d_a, m * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToHost));
             swizzleTensor(dst.data(), src.data(), m, k, true);
-            hipMemcpy(d_a, dst.data(), m * k * sizeof(hipblasLtHalf), hipMemcpyHostToDevice);
+            CHECK_HIP_ERROR(hipMemcpy(d_a, dst.data(), m * k * sizeof(hipblasLtHalf), hipMemcpyHostToDevice));
         }
         else if(swizzleA && TiAB == HIP_R_8F_E4M3_FNUZ)
         {
@@ -311,9 +312,9 @@ void simpleGemm(hipblasLtHandle_t  handle,
                 hipMalloc(&src, m * k * sizeof(hipblaslt_f8_fnuz))); // Allocate memory on device
             CHECK_HIP_ERROR(
                 hipMalloc(&dst, m * k * sizeof(hipblaslt_f8_fnuz))); // Allocate memory on device
-            hipMemcpy(src, d_a, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyDeviceToHost);
+            CHECK_HIP_ERROR(hipMemcpy(src, d_a, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyDeviceToHost));
             swizzleTensor(dst, src, m, k, true);
-            hipMemcpy(d_a, dst, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyHostToDevice);
+            CHECK_HIP_ERROR(hipMemcpy(d_a, dst, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyHostToDevice));
         }
     }
     else
@@ -424,9 +425,9 @@ void simpleGemm(hipblasLtHandle_t  handle,
         }
 
         hipEvent_t start, stop;
-        hipEventCreate(&start);
-        hipEventCreate(&stop);
-        hipEventRecord(start, stream);
+        CHECK_HIP_ERROR(hipEventCreate(&start));
+        CHECK_HIP_ERROR(hipEventCreate(&stop));
+        CHECK_HIP_ERROR(hipEventRecord(start, stream));
 
         for(int i = 0; i < numRuns; ++i)
         {

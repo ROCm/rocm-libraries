@@ -18,7 +18,7 @@
 template <typename PrecType, ck_tile::index_t M_Warp_Tile>
 constexpr ck_tile::index_t get_k_warp_tile()
 {
-#if defined(__gfx950__)
+#if defined(CK_GFX950_SUPPORT)
     constexpr bool is_8bit_float =
         std::is_same_v<PrecType, ck_tile::fp8_t> || std::is_same_v<PrecType, ck_tile::bf8_t>;
     if constexpr(M_Warp_Tile == 32)
@@ -35,7 +35,7 @@ constexpr ck_tile::index_t get_k_warp_tile()
 template <typename PrecType, ck_tile::index_t M_Warp_Tile>
 constexpr ck_tile::index_t get_k_from_preshuffled_warp_tile()
 {
-#if defined(__gfx950__)
+#if defined(CK_GFX950_SUPPORT)
     if constexpr(M_Warp_Tile == 32)
         return sizeof(PrecType) == 2 ? 16 : 64;
     else
@@ -81,13 +81,12 @@ struct GemmConfigBase
     static constexpr bool TransposeC            = false;
     static constexpr bool UseStructuredSparsity = false;
 
-    static constexpr int kBlockPerCu                         = 1;
     static constexpr ck_tile::index_t TileParitionerGroupNum = 8;
     static constexpr ck_tile::index_t TileParitionerM01      = 4;
-    static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Intrawave;
-    static constexpr ck_tile::index_t NumWaveGroups = 1;
-    static constexpr bool PreshuffleQuant           = false;
-    static constexpr bool DoubleSmemBuffer          = false;
+    static constexpr auto Scheduler = ck_tile::GemmPipelineScheduler::Intrawave;
+
+    static constexpr bool PreshuffleQuant  = false;
+    static constexpr bool DoubleSmemBuffer = false;
 };
 
 template <typename PrecType>
@@ -104,6 +103,8 @@ struct GemmConfigDecode : public GemmConfigBase
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<PrecType, M_Warp_Tile>();
+
+    static constexpr int kBlockPerCu = 1;
 
     static constexpr auto Scheduler            = ck_tile::GemmPipelineScheduler::Default;
     static constexpr ck_tile::index_t Pipeline = CK_TILE_PIPELINE_DECODE;
@@ -144,6 +145,8 @@ struct GemmConfigPreshuffleQuant : public GemmConfigBase
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile =
         get_k_from_preshuffled_warp_tile<PrecType, M_Warp_Tile>();
+
+    static constexpr int kBlockPerCu = 1;
 
     static constexpr auto Scheduler            = ck_tile::GemmPipelineScheduler::Default;
     static constexpr ck_tile::index_t Pipeline = CK_TILE_PIPELINE_PRESHUFFLEQUANT;

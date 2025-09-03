@@ -54,3 +54,4 @@ if(BLIS_FOUND)
 endif()
 
 message(STATUS "Found BLIS: ${BLIS_LIB}")
+message(STATUS "Found BLIS: ${BLIS_INCLUDE_DIR}")
