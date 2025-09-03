@@ -236,8 +236,11 @@ endif()
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
   target_compile_options( hipfft-test PRIVATE -dc )
 else()
-  target_compile_options( hipfft-test PRIVATE -fgpu-rdc )
-  target_link_options( hipfft-test PRIVATE -fgpu-rdc )
+  # -fgpu-rdc causes failure at link stage on Windows
+  if (NOT WIN32)
+    target_compile_options( hipfft-test PRIVATE -fgpu-rdc )
+    target_link_options( hipfft-test PRIVATE -fgpu-rdc )
+  endif()
 endif()
 
 if(FFTW_MULTITHREAD)

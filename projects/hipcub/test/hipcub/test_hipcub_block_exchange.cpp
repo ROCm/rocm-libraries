@@ -22,9 +22,9 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_exchange.hpp"
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_exchange.hpp>
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
 
 template<class T, class U, unsigned int BlockSize, unsigned int ItemsPerThread>
 struct params
@@ -1102,8 +1102,7 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlockedOneParam)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using type        = typename TestFixture::params::type;
-    using output_type [[maybe_unused]] = typename TestFixture::params::output_type;
+    using type = typename TestFixture::params::type;
 
     constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
@@ -1195,8 +1194,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStripedOneParam)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using type        = typename TestFixture::params::type;
-    using output_type [[maybe_unused]] = typename TestFixture::params::output_type;
+    using type = typename TestFixture::params::type;
 
     constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
@@ -1843,7 +1841,6 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuardedNoOutputParam)
         device_input,
         device_ranks);
 
-    [[maybe_unused]] type* host_output = new type[size];
     HIP_CHECK(hipMemcpy(host_input, device_input, sizeof(type) * size, hipMemcpyDeviceToHost));
 
     for(size_t i = 0; i < size; i++)

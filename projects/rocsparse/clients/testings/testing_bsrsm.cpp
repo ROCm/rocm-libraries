@@ -242,6 +242,7 @@ void testing_bsrsm_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_bsrsm(const Arguments& arg)
 {
+    auto                      tol       = get_near_check_tol<T>(arg);
     rocsparse_int             m         = arg.M;
     rocsparse_int             nrhs      = arg.K;
     rocsparse_int             block_dim = arg.block_dim;
@@ -291,13 +292,13 @@ void testing_bsrsm(const Arguments& arg)
     // RHS matrix B
     host_dense_matrix<T> hB((trans_X == rocsparse_operation_none) ? m : nrhs,
                             (trans_X == rocsparse_operation_none) ? nrhs : m);
-    rocsparse_matrix_utils::init(hB);
+    rocsparse_matrix_utils::init(hB, arg.convert_to_int);
     device_dense_matrix<T> dB(hB);
 
     // Solution matrix X
     host_dense_matrix<T> hX_gold((trans_X == rocsparse_operation_none) ? m : nrhs,
                                  (trans_X == rocsparse_operation_none) ? nrhs : m);
-    rocsparse_matrix_utils::init(hX_gold);
+    rocsparse_matrix_utils::init(hX_gold, arg.convert_to_int);
     device_dense_matrix<T> dX(hX_gold);
 
     host_scalar<rocsparse_int> analysis_pivot_gold;
@@ -449,7 +450,7 @@ void testing_bsrsm(const Arguments& arg)
         // Check solution matrix if no pivot has been found
         if(*analysis_pivot_gold == -1 && *solve_pivot_gold == -1)
         {
-            hX_gold.near_check(dX);
+            hX_gold.near_check(dX, tol);
         }
 
         // DEVICE MODE
@@ -494,7 +495,7 @@ void testing_bsrsm(const Arguments& arg)
         // Check solution matrix if no pivot has been found
         if(*analysis_pivot_gold == -1 && *solve_pivot_gold == -1)
         {
-            hX_gold.near_check(dX);
+            hX_gold.near_check(dX, tol);
         }
     }
 
