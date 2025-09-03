@@ -26,8 +26,12 @@
 
 #include <unittest/unittest.h>
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
+
 template <typename Vector>
-void TestMergeByKeySimple(void)
+void TestMergeByKeySimple()
 {
   const Vector a_key{0, 2, 4}, a_val{13, 7, 42}, b_key{0, 3, 3, 4}, b_val{42, 42, 7, 13};
   Vector ref_key{0, 0, 2, 3, 3, 4, 4}, ref_val{13, 42, 7, 42, 7, 42, 13};
@@ -125,16 +129,17 @@ void TestMergeByKeyDispatchImplicit()
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (std::is_void<CompareOp>::value)
+  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
   {
     return thrust::merge_by_key(std::forward<Args>(args)...);
   }
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-    using C = std::conditional_t<std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
     return thrust::merge_by_key(std::forward<Args>(args)..., C{});
   }
+  __builtin_unreachable();
 }
 
 DECLARE_UNITTEST(TestMergeByKeyDispatchImplicit);
@@ -156,7 +161,7 @@ void TestMergeByKey(size_t n)
     const thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
     const thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
 
-    THRUST_IF_CONSTEXPR (std::is_void<CompareOp>::value)
+    THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
     {
       thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
       thrust::stable_sort(h_b_keys.begin(), h_b_keys.end());
@@ -164,7 +169,7 @@ void TestMergeByKey(size_t n)
     else
     {
       // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-      using C = std::conditional_t<std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+      using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
       thrust::stable_sort(h_a_keys.begin(), h_a_keys.end(), C{});
       thrust::stable_sort(h_b_keys.begin(), h_b_keys.end(), C{});
     }

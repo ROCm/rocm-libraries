@@ -95,7 +95,7 @@ void load_sobol_vectors_to_gpu(const unsigned int      dimensions,
 
     constexpr unsigned int vec_size = sizeof(T) * 8;
 
-    HIP_CHECK(get_sobol_directions<S>(&h_directions));
+    HIPRAND_CHECK(get_sobol_directions<S>(&h_directions));
 
     HIP_CHECK(hipMallocHelper(reinterpret_cast<void**>(direction_vectors),
                               sizeof(T) * dimensions * vec_size));
@@ -114,7 +114,7 @@ void load_scrambled_sobol_constants_and_vectors_to_gpu(const unsigned int      d
 
     const T* h_constants;
 
-    HIP_CHECK(get_sobol_constants(&h_constants));
+    HIPRAND_CHECK(get_sobol_constants(&h_constants));
 
     HIP_CHECK(
         hipMallocHelper(reinterpret_cast<void**>(scramble_constants), sizeof(T) * dimensions));
@@ -765,10 +765,10 @@ void hiprand_kernel_h_hiprand_mtgp_init_test()
     mtgp32_kernel_params_t* k;
     HIP_CHECK(hipMallocHelper((void**)&k, states_size * sizeof(mtgp32_kernel_params_t)));
 
-    HIP_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
+    HIPRAND_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
 
     unsigned long long seed = 0;
-    HIP_CHECK(
+    HIPRAND_CHECK(
         hiprandMakeMTGP32KernelState(states, mtgp32dc_params_fast_11213, k, states_size, seed));
 
     HIP_CHECK(hipFree(states));
@@ -997,10 +997,10 @@ void hiprand_kernel_h_hiprand_mtgp_test()
     mtgp32_kernel_params_t* k;
     HIP_CHECK(hipMallocHelper((void**)&k, states_size * sizeof(mtgp32_kernel_params_t)));
 
-    HIP_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
+    HIPRAND_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
 
     unsigned long long seed = 0;
-    HIP_CHECK(
+    HIPRAND_CHECK(
         hiprandMakeMTGP32KernelState(states, mtgp32dc_params_fast_11213, k, states_size, seed));
 
     const size_t  output_size = 8192;
@@ -1155,10 +1155,10 @@ void hiprand_kernel_h_hiprand_uniform_mtgp_test()
     mtgp32_kernel_params_t* k;
     HIP_CHECK(hipMallocHelper((void**)&k, states_size * sizeof(mtgp32_kernel_params_t)));
 
-    HIP_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
+    HIPRAND_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
 
     unsigned long long seed = 0;
-    HIP_CHECK(
+    HIPRAND_CHECK(
         hiprandMakeMTGP32KernelState(states, mtgp32dc_params_fast_11213, k, states_size, seed));
 
     const size_t output_size = 8192;
@@ -1328,10 +1328,10 @@ void hiprand_kernel_h_hiprand_normal_mtgp_test()
     mtgp32_kernel_params_t* k;
     HIP_CHECK(hipMallocHelper((void**)&k, states_size * sizeof(mtgp32_kernel_params_t)));
 
-    HIP_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
+    HIPRAND_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
 
     unsigned long long seed = 0;
-    HIP_CHECK(
+    HIPRAND_CHECK(
         hiprandMakeMTGP32KernelState(states, mtgp32dc_params_fast_11213, k, states_size, seed));
 
     const size_t output_size = 8192;
@@ -1522,10 +1522,10 @@ void hiprand_kernel_h_hiprand_log_normal_mtgp_test()
     mtgp32_kernel_params_t* k;
     HIP_CHECK(hipMallocHelper((void**)&k, states_size * sizeof(mtgp32_kernel_params_t)));
 
-    HIP_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
+    HIPRAND_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
 
     unsigned long long seed = 0;
-    HIP_CHECK(
+    HIPRAND_CHECK(
         hiprandMakeMTGP32KernelState(states, mtgp32dc_params_fast_11213, k, states_size, seed));
 
     const size_t output_size = 8192;
@@ -1829,10 +1829,10 @@ void hiprand_kernel_h_hiprand_poisson_mtgp_test(double lambda)
     mtgp32_kernel_params_t* k;
     HIP_CHECK(hipMallocHelper((void**)&k, states_size * sizeof(mtgp32_kernel_params_t)));
 
-    HIP_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
+    HIPRAND_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
 
     unsigned long long seed = 0;
-    HIP_CHECK(
+    HIPRAND_CHECK(
         hiprandMakeMTGP32KernelState(states, mtgp32dc_params_fast_11213, k, states_size, seed));
 
     const size_t  output_size = 8192;
@@ -1990,10 +1990,10 @@ void hiprand_kernel_h_hiprand_discrete_mtgp_test(double lambda)
     mtgp32_kernel_params_t* k;
     HIP_CHECK(hipMallocHelper((void**)&k, states_size * sizeof(mtgp32_kernel_params_t)));
 
-    HIP_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
+    HIPRAND_CHECK(hiprandMakeMTGP32Constants(mtgp32dc_params_fast_11213, k));
 
     unsigned long long seed = 0;
-    HIP_CHECK(
+    HIPRAND_CHECK(
         hiprandMakeMTGP32KernelState(states, mtgp32dc_params_fast_11213, k, states_size, seed));
 
     const size_t  output_size = 8192;

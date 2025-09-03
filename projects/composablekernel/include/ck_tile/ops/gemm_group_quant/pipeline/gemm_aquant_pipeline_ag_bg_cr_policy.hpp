@@ -28,7 +28,7 @@ struct GemmAQuantPipelineAgBgCrDefaultPolicy : public UniversalGemmPipelineAgBgC
         constexpr index_t KPerBlockAQ = KPerBlock / Problem::kQuantGroupSize;
 
         static_assert(std::is_same_v<AQLayout, ck_tile::tensor_layout::gemm::RowMajor>);
-        return GetAQGlobalVectorLoadSize<Problem, AQDataType, MPerBlock, KPerBlockAQ>();
+        return GetABQGlobalVectorLoadSize<Problem, AQDataType, MPerBlock, KPerBlockAQ>();
     }
 
     template <typename Problem>
@@ -50,36 +50,49 @@ struct GemmAQuantPipelineAgBgCrDefaultPolicy : public UniversalGemmPipelineAgBgC
                                                             WarpTile::at(I0),
                                                             WarpTile::at(I1),
                                                             WarpTile::at(I2),
-                                                            false>;
+                                                            Problem::TransposeC>;
 
         static_assert(std::is_same_v<AQLayout, tensor_layout::gemm::RowMajor>);
         if constexpr(PreshuffleQuant)
         {
-            using TileEncodingPattern =
-                TileDistributionEncodingPatternAQ<BlockGemmShape,
-                                                  WarpGemm,
-                                                  BlockSize,
-                                                  MPerBlock / WarpGemm::kM,
-                                                  ck_tile::integer_least_multiple(
-                                                      WarpGemm::kM * KPerBlockAQ, get_warp_size()),
-                                                  KPerBlockAQ,
-                                                  VecLoadSize,
-                                                  PreshuffleQuant>;
+            using TileEncodingPattern = tile_distribution_encoding_pattern_aq<
+                BlockGemmShape,
+                WarpGemm,
+                BlockSize,
+                MPerBlock / WarpGemm::kM,
+                ck_tile::integer_least_multiple(WarpGemm::kM * KPerBlockAQ, get_warp_size()),
+                KPerBlockAQ,
+                VecLoadSize,
+                PreshuffleQuant>;
 
-            return TileEncodingPattern::Make2DStaticTileDistribution();
+            return TileEncodingPattern::make_2d_static_tile_distribution();
         }
         else
         {
-            using TileEncodingPattern = TileDistributionEncodingPatternAQ<BlockGemmShape,
-                                                                          WarpGemm,
-                                                                          BlockSize,
-                                                                          MPerBlock,
-                                                                          KPerBlockAQ,
-                                                                          KPerBlockAQ,
-                                                                          VecLoadSize,
-                                                                          PreshuffleQuant>;
+            if constexpr(Problem::TransposeC)
+            {
+                using TileEncodingPatternTransposeC =
+                    tile_distribution_encoding_pattern_aq_transposed_c<BlockGemmShape,
+                                                                       WarpGemm,
+                                                                       BlockSize,
+                                                                       MPerBlock,
+                                                                       KPerBlockAQ,
+                                                                       VecLoadSize>;
+                return TileEncodingPatternTransposeC::make_2d_static_tile_distribution();
+            }
+            else
+            {
+                using TileEncodingPattern = tile_distribution_encoding_pattern_aq<BlockGemmShape,
+                                                                                  WarpGemm,
+                                                                                  BlockSize,
+                                                                                  MPerBlock,
+                                                                                  KPerBlockAQ,
+                                                                                  KPerBlockAQ,
+                                                                                  VecLoadSize,
+                                                                                  PreshuffleQuant>;
 
-            return TileEncodingPattern::Make2DStaticTileDistribution();
+                return TileEncodingPattern::make_2d_static_tile_distribution();
+            }
         }
     }
 
@@ -98,7 +111,7 @@ struct GemmAQuantPipelineAgBgCrDefaultPolicy : public UniversalGemmPipelineAgBgC
                                             WarpTile::at(I0),
                                             WarpTile::at(I1),
                                             WarpTile::at(I2),
-                                            false>;
+                                            Problem::TransposeC>;
         static_assert(std::is_same_v<typename Problem::ComputeDataType, fp8_t> ||
                       std::is_same_v<typename Problem::ComputeDataType, bf8_t>);
         static_assert(std::is_same_v<typename Problem::CDataType, float>);

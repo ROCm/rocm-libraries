@@ -144,7 +144,7 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(hipStream_t         stre
     }
 
     const rocprim::detail::batch_memcpy_config_params params
-        = rocprim::detail::dispatch_target_arch<config>(target_arch);
+        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
 
     const int32_t wlev_min_size = params.wlev_size_threshold;
     const int32_t blev_min_size = params.blev_size_threshold;

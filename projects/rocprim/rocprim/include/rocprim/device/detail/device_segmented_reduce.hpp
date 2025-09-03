@@ -21,8 +21,8 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_SEGMENTED_REDUCE_HPP_
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_SEGMENTED_REDUCE_HPP_
 
-#include <type_traits>
 #include <iterator>
+#include <type_traits>
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
@@ -41,7 +41,7 @@ namespace detail
 {
 
 template<
-    class Config,
+    class ArchConfig,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
@@ -58,17 +58,17 @@ void segmented_reduce(InputIterator input,
 {
     using offset_type = typename std::iterator_traits<OffsetIterator>::value_type;
 
-    static constexpr reduce_config_params params = device_params<Config>();
+    static constexpr reduce_config_params params = ArchConfig::params;
 
-    constexpr unsigned int block_size       = params.reduce_config.block_size;
-    constexpr unsigned int items_per_thread = params.reduce_config.items_per_thread;
+    constexpr unsigned int block_size       = params.kernel_config.block_size;
+    constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
     constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
     using reduce_type = ::rocprim::block_reduce<ResultType, block_size, params.block_reduce_method>;
 
     ROCPRIM_SHARED_MEMORY typename reduce_type::storage_type reduce_storage;
 
-    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_id    = ::rocprim::detail::block_thread_id<0>();
     const unsigned int segment_id = ::rocprim::detail::block_id<0>();
 
     const offset_type begin_offset = begin_offsets[segment_id];
@@ -84,7 +84,7 @@ void segmented_reduce(InputIterator input,
         return;
     }
 
-    ResultType result;
+    ResultType  result;
     offset_type block_offset = begin_offset;
     if(block_offset + static_cast<offset_type>(items_per_block) > end_offset)
     {
@@ -97,7 +97,7 @@ void segmented_reduce(InputIterator input,
         if(flat_id < valid_count)
         {
             offset_type offset = block_offset + flat_id;
-            result = input[offset];
+            result             = input[offset];
             offset += block_size;
             while(offset < end_offset)
             {
@@ -166,7 +166,7 @@ void segmented_reduce(InputIterator input,
     }
 }
 
-} // end of detail namespace
+} // namespace detail
 
 END_ROCPRIM_NAMESPACE
 

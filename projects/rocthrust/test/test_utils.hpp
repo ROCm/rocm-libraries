@@ -31,9 +31,12 @@
 #include <random>
 #include <type_traits>
 #include <vector>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+// Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
+#  include <limits>
+#endif
 
 #include "test_seed.hpp"
-#include "thrust/detail/tuple.inl"
 
 #define TEST_EVENT_WAIT(e) test_event_wait(e)
 
@@ -373,7 +376,7 @@ struct get_default_limits<T, std::enable_if_t<std::is_floating_point<T>::value>>
 
 template <class T>
 inline auto get_random_data(size_t size, T, T, seed_type seed) ->
-  typename std::enable_if<std::is_same<T, bool>::value, thrust::host_vector<T>>::type
+  typename std::enable_if_t<std::is_same_v<T, bool>, thrust::host_vector<T>>
 {
   std::random_device rd;
   std::default_random_engine gen(rd());
@@ -386,9 +389,48 @@ inline auto get_random_data(size_t size, T, T, seed_type seed) ->
   return data;
 }
 
+#if defined(_MSC_VER)
 template <class T>
 inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
-  typename std::enable_if<rocprim::is_integral<T>::value && !std::is_same<T, bool>::value, thrust::host_vector<T>>::type
+  typename std::enable_if_t<std::is_same_v<T, signed char> || (std::is_same_v<T, char> && std::is_signed_v<char>),
+                            thrust::host_vector<T>>
+{
+  std::random_device rd;
+  std::default_random_engine gen(rd());
+  gen.seed(seed);
+  std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+  thrust::host_vector<T> data(size);
+  std::generate(data.begin(), data.end(), [&]() {
+    return static_cast<T>(distribution(gen));
+  });
+  return data;
+}
+
+template <class T>
+inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
+  typename std::enable_if_t<std::is_same_v<T, unsigned char> || (std::is_same_v<T, char> && std::is_unsigned_v<char>),
+                            thrust::host_vector<T>>
+{
+  std::random_device rd;
+  std::default_random_engine gen(rd());
+  gen.seed(seed);
+  std::uniform_int_distribution<int> distribution(static_cast<unsigned int>(min), static_cast<unsigned int>(max));
+  thrust::host_vector<T> data(size);
+  std::generate(data.begin(), data.end(), [&]() {
+    return static_cast<T>(distribution(gen));
+  });
+  return data;
+}
+#endif
+
+template <class T>
+inline auto get_random_data(size_t size, T min, T max, seed_type seed) -> typename std::enable_if_t<
+  rocprim::is_integral<T>::value && !std::is_same_v<T, bool>
+#if defined(_MSC_VER)
+    && !std::is_same_v<T, signed char> && !std::is_same_v<T, unsigned char> && !std::is_same_v<T, char>
+#endif
+  ,
+  thrust::host_vector<T>>
 {
   std::random_device rd;
   std::default_random_engine gen(rd());
@@ -403,7 +445,7 @@ inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
 
 template <class T>
 inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
-  typename std::enable_if<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>::type
+  typename std::enable_if_t<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>
 {
   std::random_device rd;
   std::default_random_engine gen(rd());
@@ -415,38 +457,6 @@ inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
   });
   return data;
 }
-
-#if defined(_WIN32) && defined(__clang__)
-template <>
-inline thrust::host_vector<unsigned char>
-get_random_data(size_t size, unsigned char min, unsigned char max, seed_type seed_value)
-{
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  gen.seed(seed_value);
-  std::uniform_int_distribution<int> distribution(static_cast<unsigned int>(min), static_cast<unsigned int>(max));
-  thrust::host_vector<unsigned char> data(size);
-  std::generate(data.begin(), data.end(), [&]() {
-    return static_cast<unsigned char>(distribution(gen));
-  });
-  return data;
-}
-
-template <>
-inline thrust::host_vector<signed char>
-get_random_data(size_t size, signed char min, signed char max, seed_type seed_value)
-{
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  gen.seed(seed_value);
-  std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
-  thrust::host_vector<signed char> data(size);
-  std::generate(data.begin(), data.end(), [&]() {
-    return static_cast<signed char>(distribution(gen));
-  });
-  return data;
-}
-#endif
 
 template <class T>
 struct custom_compare_less
@@ -652,8 +662,7 @@ struct generate_random_integer<
 };
 
 template <typename T>
-struct generate_random_integer<T,
-                               typename thrust::detail::enable_if<thrust::detail::is_non_bool_integral<T>::value>::type>
+struct generate_random_integer<T, typename ::std::enable_if<thrust::detail::is_non_bool_integral<T>::value>::type>
 {
   T operator()(unsigned int i) const
   {
@@ -665,7 +674,7 @@ struct generate_random_integer<T,
 };
 
 template <typename T>
-struct generate_random_integer<T, typename thrust::detail::enable_if<thrust::detail::is_floating_point<T>::value>::type>
+struct generate_random_integer<T, typename ::std::enable_if<::std::is_floating_point<T>::value>::type>
 {
   T operator()(unsigned int i) const
   {
@@ -736,18 +745,21 @@ thrust::host_vector<T> random_samples(const size_t N)
 // Use this with counting_iterator to avoid generating a range larger than we
 // can represent.
 template <typename T>
-typename thrust::detail::disable_if<thrust::detail::is_floating_point<T>::value, T>::type
+typename THRUST_NS_QUALIFIER::detail::disable_if<_THRUST_STD::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  return thrust::min<std::size_t>(n, static_cast<std::size_t>(thrust::numeric_limits<T>::max()));
+  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
+  return static_cast<T>(
+    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(_THRUST_STD::numeric_limits<T>::max())));
 }
 
 // TODO: This probably won't work for `half`.
 template <typename T>
-typename thrust::detail::enable_if<thrust::detail::is_floating_point<T>::value, T>::type
+typename _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<T>::value, T>
 truncate_to_max_representable(std::size_t n)
 {
-  return thrust::min<T>(n, thrust::numeric_limits<T>::max());
+  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
+  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), _THRUST_STD::numeric_limits<T>::max());
 }
 
 enum threw_status
@@ -819,28 +831,31 @@ __host__ void test_future_value_retrieval(Future&& f, decltype(f.extract())& ret
   return_value = r2;
 }
 
+namespace
+{
 // Values of relative error for non-assotiative operations
 // (+, -, *) and type conversions for floats
 // They are doubled from 1 / (1 << mantissa_bits) as we compare in tests
 // the results of _two_ sequences of operations with different order
 // For all other operations (i.e. integer arithmetics) default 0 is used
 template <class T>
-static constexpr float precision = 0;
+constexpr float precision = 0;
 
 template <>
-static constexpr float precision<double> = 2.0f / (1ll << 52);
+constexpr float precision<double> = 2.0f / (1ll << 52);
 
 template <>
-static constexpr float precision<float> = 2.0f / (1ll << 23);
+constexpr float precision<float> = 2.0f / (1ll << 23);
 
 template <>
-static constexpr float precision<rocprim::half> = 2.0f / (1ll << 10);
+constexpr float precision<rocprim::half> = 2.0f / (1ll << 10);
 
 template <>
-static constexpr float precision<rocprim::bfloat16> = 2.0f / (1ll << 7);
+constexpr float precision<rocprim::bfloat16> = 2.0f / (1ll << 7);
 
 template <class T>
-static constexpr float precision<const T> = precision<T>;
+constexpr float precision<const T> = precision<T>;
+} // namespace
 
 template <class T, typename std::enable_if_t<std::is_floating_point<T>::value>* = nullptr>
 inline void test_equality(const T& hvalue, const T& dvalue, const size_t ops = 1)
@@ -916,3 +931,15 @@ void test_equality_pair_scan(const thrust::host_vector<Pair<X, Y>>& hvalue,
     test_equality(hvalue[i].second, hvalue_d[i].second, i);
   }
 }
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  define THRUST_DEVICE_BACKEND                 hip
+#  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim
+#  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) hip##name
+#elif defined(__NVCC__) || defined(_NVHPC_CUDA)                                \
+  || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
+  || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
+#  define THRUST_DEVICE_BACKEND                 cuda
+#  define THRUST_DEVICE_BACKEND_DETAIL          cuda_cub
+#  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) cuda##name
+#endif

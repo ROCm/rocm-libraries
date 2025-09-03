@@ -18,10 +18,21 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/tuple_transform.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 // the order of declarations and definitions in this file is totally goofy
 // this header defines raw_reference_cast, which has a few overloads towards the bottom of the file
@@ -47,32 +58,31 @@ struct is_unwrappable : is_wrapped_reference<T>
 // specialize is_unwrappable
 // a tuple is_unwrappable if any of its elements is_unwrappable
 template <typename... Ts>
-struct is_unwrappable<thrust::tuple<Ts...>> : or_<is_unwrappable<Ts>...>
+struct is_unwrappable<thrust::tuple<Ts...>> : _THRUST_STD::disjunction<is_unwrappable<Ts>...>
 {};
 
 // specialize is_unwrappable
 // a tuple_of_iterator_references is_unwrappable if any of its elements is_unwrappable
 template <typename... Ts>
-struct is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>> : or_<is_unwrappable<Ts>...>
+struct is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>>
+    : _THRUST_STD::disjunction<is_unwrappable<Ts>...>
 {};
 
 template <typename T, typename Result = void>
-struct enable_if_unwrappable : enable_if<is_unwrappable<T>::value, Result>
+struct enable_if_unwrappable : _THRUST_STD::enable_if<is_unwrappable<T>::value, Result>
 {};
 
 namespace raw_reference_detail
 {
 
 template <typename T, typename Enable = void>
-struct raw_reference_impl : add_reference<T>
+struct raw_reference_impl : _THRUST_STD::add_lvalue_reference<T>
 {};
 
 template <typename T>
-struct raw_reference_impl<
-  T,
-  typename thrust::detail::enable_if<is_wrapped_reference<typename remove_cv<T>::type>::value>::type>
+struct raw_reference_impl<T, _THRUST_STD::enable_if_t<is_wrapped_reference<_THRUST_STD::remove_cv_t<T>>::value>>
 {
-  using type = typename add_reference<typename pointer_element<typename T::pointer>::type>::type;
+  using type = _THRUST_STD::add_lvalue_reference_t<typename pointer_element<typename T::pointer>::type>;
 };
 
 } // namespace raw_reference_detail
@@ -99,7 +109,7 @@ namespace raw_reference_detail
 // wrapped references are unwrapped using raw_reference, otherwise, return T
 template <typename T>
 struct raw_reference_tuple_helper
-    : eval_if<is_unwrappable<typename remove_cv<T>::type>::value, raw_reference<T>, identity_<T>>
+    : eval_if<is_unwrappable<_THRUST_STD::remove_cv_t<T>>::value, raw_reference<T>, identity_<T>>
 {};
 
 // recurse on tuples
@@ -131,7 +141,7 @@ private:
 public:
   using type = typename eval_if<is_unwrappable<tuple_type>::value,
                                 raw_reference_detail::raw_reference_tuple_helper<tuple_type>,
-                                add_reference<tuple_type>>::type;
+                                _THRUST_STD::add_lvalue_reference<tuple_type>>::type;
 };
 
 template <typename... Ts>
@@ -179,7 +189,7 @@ struct raw_reference_caster
   template <typename... Ts>
   THRUST_HOST_DEVICE typename detail::raw_reference<thrust::detail::tuple_of_iterator_references<Ts...>>::type
   operator()(thrust::detail::tuple_of_iterator_references<Ts...> t,
-             typename enable_if<is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>>::value>::type* = 0)
+             _THRUST_STD::enable_if_t<is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>>::value>* = 0)
   {
     return thrust::raw_reference_cast(t);
   }
