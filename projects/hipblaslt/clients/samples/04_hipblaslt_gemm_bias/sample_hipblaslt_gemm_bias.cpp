@@ -1,3 +1,10 @@
+/*******************************************************************************
+ *
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ *******************************************************************************/
+
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
