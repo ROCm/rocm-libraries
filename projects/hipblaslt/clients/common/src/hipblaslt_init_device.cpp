@@ -31,6 +31,8 @@
 #include "hipblaslt_test.hpp"
 #include <hipblaslt/hipblaslt.h>
 
+#include <Tensile/Debug.hpp>
+
 template <typename T, typename F>
 __global__ void fill_kernel(T* A, size_t size, size_t offset, F f)
 {
@@ -126,6 +128,12 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            size_t                   stride,
                            size_t                   batch_count)
 {
+    if(TensileLite::Debug::Instance().skipKernelLaunch())
+    {
+        std::cout << "DEBUG: Skip execution of kernel for matrix initialization" << std::endl;
+        return;
+    }
+
     if(is_nan)
     {
         std::array<T, 100> rand_nans;
