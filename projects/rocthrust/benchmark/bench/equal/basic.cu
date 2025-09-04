@@ -1,24 +1,6 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Benchmark utils
 #include "../../bench_utils/bench_utils.hpp"
@@ -32,7 +14,8 @@
 #include <benchmark/benchmark.h>
 
 // STL
-#include <cstdlib>
+#include <algorithm>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -41,10 +24,12 @@ struct basic
   template <typename T, typename Policy>
   float64_t run(thrust::device_vector<T>& a, thrust::device_vector<T>& b, Policy policy)
   {
+    bench_utils::do_not_optimize(thrust::equal(policy, a.begin(), a.end(), b.begin()));
+
     bench_utils::gpu_timer d_timer;
 
     d_timer.start(0);
-    thrust::equal(policy, a.begin(), a.end(), b.begin());
+    bench_utils::do_not_optimize(thrust::equal(policy, a.begin(), a.end(), b.begin()));
     d_timer.stop(0);
 
     return d_timer.get_duration();
@@ -113,7 +98,12 @@ void add_benchmarks(
   const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
 {
   std::vector<benchmark::internal::Benchmark*> bs = {
-    BENCHMARK_TYPE(int8_t), BENCHMARK_TYPE(int16_t), BENCHMARK_TYPE(int32_t), BENCHMARK_TYPE(int64_t)};
+    BENCHMARK_TYPE(int8_t),
+    BENCHMARK_TYPE(int16_t),
+    BENCHMARK_TYPE(int32_t),
+    BENCHMARK_TYPE(uint32_t),
+    BENCHMARK_TYPE(int64_t),
+    BENCHMARK_TYPE(uint64_t)};
 
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
