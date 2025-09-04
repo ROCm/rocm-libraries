@@ -37,6 +37,31 @@
 
 namespace rocRoller::KernelGraph::MemoryTracer
 {
+    struct Summary
+    {
+        static constexpr bool echoBanks = false;
+
+        struct Banks
+        {
+            uint   bankIndex;
+            size_t workitemsAccessed;
+            bool   imbalanced;
+        };
+        struct Access
+        {
+            int                           ldsTag;
+            std::vector<Banks>            accessedBanks;
+            std::vector<std::vector<int>> banksToWorkitems;
+        };
+
+        std::map<int, Access> accesses;
+        std::set<int>         imbalancedTags;
+
+        std::string toString() const;
+    };
+
+    std::ostream& operator<<(std::ostream& stream, Summary const& summary);
+
     /**
      * LDS bank model
      */
@@ -78,4 +103,13 @@ namespace rocRoller::KernelGraph::MemoryTracer
     };
 
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel);
+
+    /**
+     * @brief Trace memory accesses in a kernel graph and analyze LDS bank conflicts
+     * 
+     * @param original The original kernel graph to analyze
+     * @param invocation The kernel invocation parameters
+     * @return Summary of LDS bank access patterns and conflicts
+     */
+    Summary memoryTrace(KernelGraph const& original, KernelInvocation const& invocation);
 }

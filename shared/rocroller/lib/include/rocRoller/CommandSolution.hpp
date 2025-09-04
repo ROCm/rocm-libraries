@@ -37,7 +37,7 @@
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension_fwd.hpp>
 #include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
-#include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
+#include <rocRoller/KernelGraph/Transforms/LDSBankModel.hpp>
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>

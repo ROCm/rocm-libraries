@@ -649,7 +649,7 @@ namespace rocRoller
     {
         auto [_, inv] = prepKernel(args);
 
-        return KernelGraph::memoryTrace(*m_kernelGraph, inv);
+        return KernelGraph::MemoryTracer::memoryTrace(*m_kernelGraph, inv);
     }
 
     void CommandKernel::loadKernelFromAssembly(const std::string& fileName,

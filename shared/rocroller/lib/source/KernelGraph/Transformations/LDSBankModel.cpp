@@ -26,8 +26,11 @@
 
 #include <fmt/format.h>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/LDSBankModel.hpp>
+#include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
 #include <sstream>
 
 namespace rocRoller::KernelGraph::MemoryTracer
@@ -150,5 +153,61 @@ namespace rocRoller::KernelGraph::MemoryTracer
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)
     {
         return stream << ldsBankModel.toString();
+    }
+
+    std::string Summary::toString() const
+    {
+        std::stringstream ss;
+        for(auto const& [tag, access] : this->accesses)
+        {
+            auto const& [ldsTag, accessedBanks, banksToWorkitems] = access;
+            ss << fmt::format("Operation tag {} accesses LDS {}:\n", tag, ldsTag);
+            for(auto const& [bankIndex, workitemsAccessed, imbalanced] : accessedBanks)
+            {
+                ss << fmt::format("  Bank {}: {} workitems {}\n",
+                                  bankIndex,
+                                  workitemsAccessed,
+                                  imbalanced ? "(imbalanced)" : "");
+            }
+            if constexpr(echoBanks)
+            {
+                for(size_t bankIndex = 0; bankIndex < banksToWorkitems.size(); ++bankIndex)
+                {
+                    ss << fmt::format("  Bank {:2d}: ", bankIndex);
+                    for(auto workitem : banksToWorkitems[bankIndex])
+                    {
+                        ss << fmt::format("{:2d} ", workitem);
+                    }
+                    ss << '\n';
+                }
+            }
+        }
+        ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
+        return ss.str();
+    }
+
+    std::ostream& operator<<(std::ostream& stream, Summary const& summary)
+    {
+        return stream << summary.toString();
+    }
+
+    Summary memoryTrace(KernelGraph const& original, KernelInvocation const& invocation)
+    {
+        Log::info("MemoryTracer::memoryTrace()");
+
+        auto graph  = original;
+        auto tracer = MemoryTracer(graph);
+        tracer.trace();
+
+        Log::info("MemoryTracer::LDSBankModel()");
+        // 64KiB bank model: 4 bytes per bank entry, 32 banks, 512 entries per bank
+        auto model = LDSBankModel(4, 32, 512);
+
+        // For LDS, just simulate using 1 workgroup
+        auto workgroups            = 1;
+        auto workitemsPerWorkgroup = product(invocation.workgroupSize);
+        tracer.simulateLaunch(model, workgroups, workitemsPerWorkgroup);
+
+        return model.summary();
     }
 }

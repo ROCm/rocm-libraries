@@ -92,7 +92,7 @@ namespace MemoryTracerTest
 
         KernelInvocation inv{.workgroupSize = {256, 1, 1}};
 
-        auto summary = memoryTrace(kgraph, inv);
+        auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
         std::cout << summary << std::endl;
 
         // All visited nodes only access 4 banks in this graph
