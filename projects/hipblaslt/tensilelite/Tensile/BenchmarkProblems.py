@@ -201,8 +201,7 @@ def writeBenchmarkFiles(
         debugConfig: DebugConfig,
         deviceId: int,
         gfxName: str,
-        isaInfoMap: Dict[IsaVersion, IsaInfo],
-        probSolMap: dict
+        isaInfoMap: Dict[IsaVersion, IsaInfo]
     ):
     """Write all the files needed for a given benchmarking step"""
 
@@ -298,11 +297,11 @@ def writeBenchmarkFiles(
         idealProblemSizes = ProblemSizes(problemType, idealSizes)
         writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                           factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                          newLibrary, codeObjectFiles, True, deviceId, gfxName, probSolMap=probSolMap)
+                          newLibrary, codeObjectFiles, True, deviceId, gfxName)
     else:
         writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                           factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                          newLibrary, codeObjectFiles, False, deviceId, gfxName, probSolMap=probSolMap)
+                          newLibrary, codeObjectFiles, False, deviceId, gfxName)
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
@@ -314,7 +313,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
                          debugConfig: DebugConfig, deviceId: int,
-                         gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict
+                         gfxName: str, isaInfoMap: Dict[str, IsaInfo]
     ):
     """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config"""
     benchmarkTestFails = 0
@@ -429,7 +428,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                     benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                     benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
+                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap)
             # ^ this mutates solutions
 
             # write cache data
@@ -464,7 +463,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
                                  stepBaseDir, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId, probSolMap=probSolMap)
+                                 outFile, deviceId)
 
         # I think the size portion of this yaml could be removed,
         # but for now it's needed, so we update it even in the cache case
@@ -504,8 +503,7 @@ def main(
     debugConfig: DebugConfig,
     deviceId: int,
     gfxName: str,
-    isaInfoMap: Dict[str, IsaInfo],
-    probSolMap: dict
+    isaInfoMap: Dict[str, IsaInfo]
 ):
     """Entry point for the "BenchmarkProblems" section of a Tensile config yaml"""
     getClientExecutablePath()
@@ -558,8 +556,7 @@ def main(
                             debugConfig,
                             deviceId,
                             gfxName,
-                            isaInfoMap,
-                            probSolMap
+                            isaInfoMap
                         )
                 totalTestFails += benchmarkErrors
 
