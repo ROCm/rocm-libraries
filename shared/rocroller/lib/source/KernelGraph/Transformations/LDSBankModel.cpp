@@ -152,6 +152,43 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
+    uint LDSBankModel::getThreadsPerClock(const MemoryOpLDS& memoryOp,
+                                          uint               dwords,
+                                          GPUArchitectureGFX gfx)
+    {
+        // GFX950 read optimizations
+        if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == Direction::Load)
+        {
+            switch(dwords)
+            {
+            case 1:
+                return 32;
+            case 2:
+                return 32; // GFX950: b64 read at full rate
+            case 3:
+                return 8;
+            case 4:
+                return 16; // GFX950: b128 read faster
+            }
+        }
+        else
+        {
+            // Standard rates
+            switch(dwords)
+            {
+            case 1:
+                return 32;
+            case 2:
+                return 16;
+            case 3:
+            case 4:
+                return 8;
+            }
+        }
+
+        Throw<FatalError>("Unsupported dword count: ", dwords);
+    }
+
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)
     {
         return stream << ldsBankModel.toString();
