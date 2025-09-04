@@ -342,7 +342,6 @@ namespace llvm
             static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {
                 float floatVal = value;
-                // This seems to be a bug: it should pass in floatVal
                 ScalarTraits<float>::output(floatVal, ctx, out);
             }
 
