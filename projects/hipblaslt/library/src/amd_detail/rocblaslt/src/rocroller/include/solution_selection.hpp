@@ -31,6 +31,33 @@
 #include "rocroller_host_internal.hpp"
 
 /**
+ * @brief WorkGroupTileSize
+ *
+ * The size of a tile that will be executed by a work group.
+ *
+ */
+struct WorkGroupTileSize
+{
+    int m;
+    int n;
+    int k;
+};
+
+/**
+ * @brief MachineInstructionSize
+ *
+ * The machine instruction that will be used for matrix multiplication operations
+ *
+ */
+struct MachineInstructionSize
+{
+    int m = -1;
+    int n = -1;
+    int k = -1;
+    int b = -1;
+};
+
+/**
  * @brief SolutionIndex Parameters
  *
  * All of the parameters that are used to generated a unique solution index.
@@ -49,6 +76,24 @@ int parametersToIndex(const SolutionIndexParameters& params);
 SolutionIndexParameters indexToParameters(int index);
 
 size_t maxNumberSolutions();
+
+constexpr MachineInstructionSize pickMI(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt) {
+    if (typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16) {
+        return {32, 32, 8, 1};
+    } else if (typeA == rocRoller::DataType::Float) {
+        return {32, 32, 2, 1};
+    } else {
+        if ((typeA == rocRoller::DataType::FP6 || typeA == rocRoller::DataType::BF6 ||
+             typeB == rocRoller::DataType::FP6 || typeB == rocRoller::DataType::BF6) &&
+            ((wgt.m == 256 && wgt.n == 64) || (wgt.m == 64 && wgt.n == 256))) {
+            return {32, 32, 64, 1};
+        } else if (wgt.k % 128 == 0) {
+            return {16, 16, 128, 1};
+        } else {
+            return {32, 32, 64, 1};
+        }
+    }
+}
 
 /**
  * @brief Choose the SolutionIndexParameters to use for a given problem

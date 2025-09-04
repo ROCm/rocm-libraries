@@ -1,3 +1,29 @@
+/* ************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
 #include "rocroller_host.hpp"
 #include "rocroller_host_internal.hpp"
 #include "solution_selection.hpp"
@@ -11,55 +37,6 @@ const int MAX_BITS_PREFETCH_IN_FLIGHT  = 4;
 const int REQUIRED_MULTIPLE_M_N        = 16;
 const int REQUIRED_MULTIPLE_K          = 32;
 const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
-
-/**
- * Convert a solution index back into SolutionIndexParameters
- */
-int parametersToIndex(const SolutionIndexParameters& params)
-{
-    int          result = params.workgroupTile.k / REQUIRED_MULTIPLE_K;
-    unsigned int pos    = MAX_BITS_WORKGROUPTILE_K;
-    result |= ((params.workgroupTile.n / REQUIRED_MULTIPLE_M_N) << pos);
-    pos += MAX_BITS_WORKGROUPTILE_N;
-    result |= ((params.workgroupTile.m / REQUIRED_MULTIPLE_M_N) << pos);
-    pos += MAX_BITS_WORKGROUPTILE_M;
-    result |= (params.prefetchInFlight << pos);
-    pos += MAX_BITS_PREFETCH_IN_FLIGHT;
-    result |= ((params.workgroupMapping ? 1 : 0) << pos);
-
-    // Set top bit indicating it is a rocRoller index
-    result |= (1 << 31);
-    return result;
-}
-
-inline unsigned int mask(unsigned int numBits)
-{
-    return (1 << numBits) - 1;
-}
-
-/**
- * Convert a solution index back into SolutionIndexParameters
- */
-SolutionIndexParameters indexToParameters(int index)
-{
-    SolutionIndexParameters result;
-    unsigned int            pos = 0;
-
-    result.workgroupTile.k
-        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_K)) * REQUIRED_MULTIPLE_K;
-    pos += MAX_BITS_WORKGROUPTILE_K;
-    result.workgroupTile.n
-        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_N)) * REQUIRED_MULTIPLE_M_N;
-    pos += MAX_BITS_WORKGROUPTILE_N;
-    result.workgroupTile.m
-        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_M)) * REQUIRED_MULTIPLE_M_N;
-    pos += MAX_BITS_WORKGROUPTILE_M;
-    result.prefetchInFlight = (index >> pos) & mask(MAX_BITS_PREFETCH_IN_FLIGHT);
-    pos += MAX_BITS_PREFETCH_IN_FLIGHT;
-    result.workgroupMapping = (index >> pos) & 1;
-
-    return result;
-}
 
 /**
  **************************************************************************************************
@@ -274,4 +251,53 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     }
 
     return params;
+}
+
+/**
+ * Convert a solution index back into SolutionIndexParameters
+ */
+int parametersToIndex(const SolutionIndexParameters& params)
+{
+    int          result = params.workgroupTile.k / REQUIRED_MULTIPLE_K;
+    unsigned int pos    = MAX_BITS_WORKGROUPTILE_K;
+    result |= ((params.workgroupTile.n / REQUIRED_MULTIPLE_M_N) << pos);
+    pos += MAX_BITS_WORKGROUPTILE_N;
+    result |= ((params.workgroupTile.m / REQUIRED_MULTIPLE_M_N) << pos);
+    pos += MAX_BITS_WORKGROUPTILE_M;
+    result |= (params.prefetchInFlight << pos);
+    pos += MAX_BITS_PREFETCH_IN_FLIGHT;
+    result |= ((params.workgroupMapping ? 1 : 0) << pos);
+
+    // Set top bit indicating it is a rocRoller index
+    result |= (1 << 31);
+    return result;
+}
+
+inline unsigned int mask(unsigned int numBits)
+{
+    return (1 << numBits) - 1;
+}
+
+/**
+ * Convert a solution index back into SolutionIndexParameters
+ */
+SolutionIndexParameters indexToParameters(int index)
+{
+    SolutionIndexParameters result;
+    unsigned int            pos = 0;
+
+    result.workgroupTile.k
+        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_K)) * REQUIRED_MULTIPLE_K;
+    pos += MAX_BITS_WORKGROUPTILE_K;
+    result.workgroupTile.n
+        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_N)) * REQUIRED_MULTIPLE_M_N;
+    pos += MAX_BITS_WORKGROUPTILE_N;
+    result.workgroupTile.m
+        = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_M)) * REQUIRED_MULTIPLE_M_N;
+    pos += MAX_BITS_WORKGROUPTILE_M;
+    result.prefetchInFlight = (index >> pos) & mask(MAX_BITS_PREFETCH_IN_FLIGHT);
+    pos += MAX_BITS_PREFETCH_IN_FLIGHT;
+    result.workgroupMapping = (index >> pos) & 1;
+
+    return result;
 }

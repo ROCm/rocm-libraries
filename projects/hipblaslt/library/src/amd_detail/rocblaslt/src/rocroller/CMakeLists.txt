@@ -5,7 +5,9 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     add_library(hipblaslt-rocroller OBJECT)
     target_sources(hipblaslt-rocroller
         PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/gemm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/parameter_selection.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/runtime_args_selection.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_host.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/solution_selection.cpp"
     )
