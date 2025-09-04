@@ -28,8 +28,8 @@
 
 #include "config_types.hpp"
 
-#include "../config.hpp"
 #include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
@@ -45,80 +45,97 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<bool         WithInitialValue,
+template<class Config,
+         bool         WithInitialValue,
          bool         FitLarger,
          unsigned int FitItems,
-         class Config,
          class ResultType,
          class InputIterator,
          class OutputIterator,
          class InitValueType,
          class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().reduce_config.block_size) void
-    block_reduce_kernel(InputIterator  input,
-                        const size_t   size,
-                        OutputIterator output,
-                        InitValueType  initial_value,
-                        BinaryFunction reduce_op)
+inline hipError_t launch_block_reduce(detail::target_arch arch,
+                                      InputIterator       input,
+                                      const size_t        size,
+                                      OutputIterator      output,
+                                      InitValueType       initial_value,
+                                      BinaryFunction      reduce_op,
+                                      dim3                grid,
+                                      dim3                block,
+                                      size_t              shmem,
+                                      hipStream_t         stream)
 {
-    block_reduce_kernel_impl<WithInitialValue, FitLarger, FitItems, Config, ResultType>(
-        input,
-        size,
-        output,
-        initial_value,
-        reduce_op);
+    auto kernel = [=](auto arch_config)
+    {
+        block_reduce_kernel_impl<decltype(arch_config),
+                                 WithInitialValue,
+                                 FitLarger,
+                                 FitItems,
+                                 ResultType>(input, size, output, initial_value, reduce_op);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
-    if(debug_synchronous) \
-    { \
-        std::cout << name << "(" << size << ")"; \
-        auto _error = hipStreamSynchronize(stream); \
-        if(_error != hipSuccess) return _error; \
-        auto _end = std::chrono::steady_clock::now(); \
-        auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-        std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
+#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start)                                           \
+    if(debug_synchronous)                                                                    \
+    {                                                                                        \
+        std::cout << name << "(" << size << ")";                                             \
+        auto _error = hipStreamSynchronize(stream);                                          \
+        if(_error != hipSuccess)                                                             \
+            return _error;                                                                   \
+        auto _end = std::chrono::steady_clock::now();                                        \
+        auto _d   = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
+        std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
     }
 
-#define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                       \
-    do                                                                                    \
-    {                                                                                     \
-        if(debug_synchronous)                                                             \
-        {                                                                                 \
-            start = std::chrono::steady_clock::now();                                     \
-        }                                                                                 \
-                                                                                          \
-        block_reduce_kernel<WithInitialValue, fit_larger, fit_items, config, result_type> \
-            <<<dim3(1), dim3(block_size), 0, stream>>>(input,                             \
-                                                       size,                              \
-                                                       output,                            \
-                                                       initial_value,                     \
-                                                       reduce_op);                        \
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);  \
-    }                                                                                     \
+#define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                            \
+    do                                                                                         \
+    {                                                                                          \
+        detail::target_arch target_arch;                                                       \
+        hipError_t          result = detail::host_target_arch(stream, target_arch);            \
+        if(result != hipSuccess)                                                               \
+        {                                                                                      \
+            return result;                                                                     \
+        }                                                                                      \
+        if(debug_synchronous)                                                                  \
+        {                                                                                      \
+            start = std::chrono::steady_clock::now();                                          \
+        }                                                                                      \
+                                                                                               \
+        ROCPRIM_RETURN_ON_ERROR(                                                               \
+            launch_block_reduce<config, WithInitialValue, fit_larger, fit_items, result_type>( \
+                target_arch,                                                                   \
+                input,                                                                         \
+                size,                                                                          \
+                output,                                                                        \
+                initial_value,                                                                 \
+                reduce_op,                                                                     \
+                dim3(1),                                                                       \
+                dim3(block_size),                                                              \
+                0,                                                                             \
+                stream));                                                                      \
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);       \
+    }                                                                                          \
     while(0)
 
-
-template<
-    bool WithInitialValue, // true when inital_value should be used in reduction
-    class Config,
-    class InputIterator,
-    class OutputIterator,
-    class InitValueType,
-    class BinaryFunction
->
-inline
-hipError_t reduce_impl(void * temporary_storage,
-                       size_t& storage_size,
-                       InputIterator input,
-                       OutputIterator output,
-                       const InitValueType initial_value,
-                       const size_t size,
-                       BinaryFunction reduce_op,
-                       const hipStream_t stream,
-                       bool debug_synchronous)
+template<bool WithInitialValue, // true when inital_value should be used in reduction
+         class Config,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction>
+inline hipError_t reduce_impl(void*               temporary_storage,
+                              size_t&             storage_size,
+                              InputIterator       input,
+                              OutputIterator      output,
+                              const InitValueType initial_value,
+                              const size_t        size,
+                              BinaryFunction      reduce_op,
+                              const hipStream_t   stream,
+                              bool                debug_synchronous)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
     using config = wrapped_reduce_config<Config, result_type>;
@@ -126,10 +143,10 @@ hipError_t reduce_impl(void * temporary_storage,
     detail::target_arch target_arch;
     ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
 
-    const reduce_config_params params = dispatch_target_arch<config>(target_arch);
+    const reduce_config_params params = dispatch_target_arch<config, false>(target_arch);
 
-    const unsigned int block_size       = params.reduce_config.block_size;
-    const unsigned int items_per_thread = params.reduce_config.items_per_thread;
+    const unsigned int block_size       = params.kernel_config.block_size;
+    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
     const auto         items_per_block  = block_size * items_per_thread;
 
     const size_t number_of_blocks  = (size + items_per_block - 1) / items_per_block;
@@ -170,7 +187,7 @@ hipError_t reduce_impl(void * temporary_storage,
     // Start point for time measurements
     std::chrono::steady_clock::time_point start;
 
-    const auto size_limit             = params.reduce_config.size_limit;
+    const auto size_limit             = params.kernel_config.size_limit;
     const auto number_of_blocks_limit = ::rocprim::max<size_t>(size_limit / items_per_block, 1);
 
     if(debug_synchronous)
@@ -199,13 +216,22 @@ hipError_t reduce_impl(void * temporary_storage,
             {
                 start = std::chrono::steady_clock::now();
             }
-            block_reduce_kernel<false, true, 1, config, result_type>
-                <<<dim3(current_blocks), dim3(block_size), 0, stream>>>(
-                    input + offset,
-                    current_size,
-                    block_prefixes + i * number_of_blocks_limit,
-                    initial_value,
-                    reduce_op);
+            const hipError_t error = launch_block_reduce<config, false, true, 1, result_type>(
+                target_arch,
+                input + offset,
+                current_size,
+                block_prefixes + i * number_of_blocks_limit,
+                initial_value,
+                reduce_op,
+                dim3(current_blocks),
+                dim3(block_size),
+                0,
+                stream);
+
+            if(error != hipSuccess)
+            {
+                return error;
+            }
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", current_size, start);
         }
 
@@ -306,7 +332,7 @@ hipError_t reduce_impl(void * temporary_storage,
 /// * By default, the input type is used for accumulation. A custom type
 /// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `reduce_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator random-access iterator type of the output range. Must meet the
@@ -346,7 +372,7 @@ hipError_t reduce_impl(void * temporary_storage,
 ///
 /// // custom reduce function
 /// auto min_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };
@@ -382,7 +408,7 @@ hipError_t reduce_impl(void * temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// auto min_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };
@@ -394,7 +420,7 @@ hipError_t reduce_impl(void * temporary_storage,
 ///
 /// // Use a transform iterator to specifiy a custom accumulator type
 /// auto input_iterator = rocprim::make_transform_iterator(
-///     input, [] __device__ (T in) { return static_cast<int>(in); });
+///     input, [] (T in) { return static_cast<int>(in); });
 ///
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
@@ -455,7 +481,7 @@ inline hipError_t reduce(void*               temporary_storage,
 /// * By default, the input type is used for accumulation. A custom type
 /// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
-/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `reduce_config`.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `kernel_config`.
 /// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator random-access iterator type of the output range. Must meet the
@@ -526,7 +552,7 @@ inline hipError_t reduce(void*               temporary_storage,
 ///
 /// // Use a transform iterator to specifiy a custom accumulator type
 /// auto input_iterator = rocprim::make_transform_iterator(
-///     input, [] __device__ (T in) { return static_cast<int>(in); });
+///     input, [] (T in) { return static_cast<int>(in); });
 ///
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;

@@ -52,7 +52,7 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 4>
+    : transform_config<512, 2>
 {};
 
 // Based on value_type = float
@@ -91,7 +91,7 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 4>
+    : transform_config<512, 2>
 {};
 
 // Based on value_type = int
@@ -111,7 +111,7 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<256, 1>
+    : transform_config<1024, 1>
 {};
 
 // Based on value_type = int8_t
@@ -179,7 +179,7 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<256, 16>
+    : transform_config<64, 1>
 {};
 
 // Based on value_type = short
@@ -685,7 +685,7 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : transform_config<256, 1>
+    : transform_config<512, 1>
 {};
 
 // Based on value_type = int64_t
@@ -695,7 +695,7 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<256, 2>
+    : transform_config<512, 2>
 {};
 
 // Based on value_type = int
@@ -705,7 +705,7 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<256, 4>
+    : transform_config<512, 4>
 {};
 
 // Based on value_type = short
@@ -725,6 +725,16 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 1))>> : transform_config<1024, 8>
+{};
+
+// Based on value_type = rocprim::int128_t
+template<class value_type>
+struct default_transform_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
+    : transform_config<64, 1>
 {};
 
 } // end namespace detail

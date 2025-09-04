@@ -2673,6 +2673,84 @@ MIOPEN_EXPORT miopenStatus_t miopenLayerNormForward(miopenHandle_t handle,
                                                     const miopenTensorDescriptor_t rstdDesc,
                                                     void* rstd);
 
+/*! @brief Helper function to query the minimum workspace size required by the layernorm backward
+ * call
+ *
+ * @param handle                   MIOpen Handle (input)
+ * @param mode                     LayerNorm mode (input)
+ * @param dyDesc                   Tensor descriptor for data input tensor dy (input)
+ * @param xDesc                    Tensor descriptor for data input tensor x (input)
+ * @param weightDesc               Tensor descriptor for data input tensor weight (input)
+ * @param meanDesc                 Tensor descriptor for data input tensor mean (input)
+ * @param rstdDesc                 Tensor descriptor for data input tensor rstd (input)
+ * @param normalized_dim           Nomalized dimensions in the input array (input)
+ * @param dxDesc                   Tensor descriptor for output data tensor dx (input)
+ * @param dwDesc                   Tensor descriptor for output data tensor dw (input)
+ * @param dbDesc                   Tensor descriptor for output data tensor db (input)
+ * @param sizeInBytes              Pointer to data to return the minimum workspace size
+ * @return                         miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t
+miopenGetLayerNormBackwardWorkspaceSize(miopenHandle_t handle,
+                                        miopenNormMode_t mode,
+                                        const miopenTensorDescriptor_t dyDesc,
+                                        const miopenTensorDescriptor_t xDesc,
+                                        const miopenTensorDescriptor_t weightDesc,
+                                        const miopenTensorDescriptor_t meanDesc,
+                                        const miopenTensorDescriptor_t rstdDesc,
+                                        const int32_t normalized_dim,
+                                        const miopenTensorDescriptor_t dxDesc,
+                                        const miopenTensorDescriptor_t dwDesc,
+                                        const miopenTensorDescriptor_t dbDesc,
+                                        size_t* sizeInBytes);
+
+/*! @brief Execute a layernorm backward layer
+ *
+ * @param handle                   MIOpen handle (input)
+ * @param mode                     LayerNorm mode (input)
+ * @param workspace                Address of the allocated workspace data (input)
+ * @param workspaceSizeInBytes     Size in bytes of the allocated workspace data (input)
+ * @param dyDesc                   Tensor descriptor for data input tensor dy (input)
+ * @param dy                       Data tensor dy (input)
+ * @param xDesc                    Tensor descriptor for input data tensor x (input)
+ * @param x                        Data tensor x (input)
+ * @param weightDesc               Tensor descriptor for data input tensor weight (input)
+ * @param weight                   Data tensor weight (input)
+ * @param meanDesc                 Tensor descriptor for input data tensor mean (input)
+ * @param mean                     Data tensor mean (input)
+ * @param rstdDesc                 Tensor descriptor for input data tensor rstd (input)
+ * @param rstd                     Data tensor rstd (input)
+ * @param normalized_dim           Nomalized dimensions in the input array (input)
+ * @param dxDesc                   Tensor descriptor for output data tensor dx (input)
+ * @param dx                       Data tensor dx (output)
+ * @param dwDesc                   Tensor descriptor for output data tensor dw (input)
+ * @param dw                       Data tensor dw (output)
+ * @param dbDesc                   Tensor descriptor for output data tensor db (input)
+ * @param db                       Data tensor db (output)
+ * @return                         miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenLayerNormBackward(miopenHandle_t handle,
+                                                     miopenNormMode_t mode,
+                                                     void* workspace,
+                                                     size_t workspaceSizeInBytes,
+                                                     const miopenTensorDescriptor_t dyDesc,
+                                                     const void* dy,
+                                                     const miopenTensorDescriptor_t xDesc,
+                                                     const void* x,
+                                                     const miopenTensorDescriptor_t weightDesc,
+                                                     const void* weight,
+                                                     const miopenTensorDescriptor_t meanDesc,
+                                                     const void* mean,
+                                                     const miopenTensorDescriptor_t rstdDesc,
+                                                     const void* rstd,
+                                                     const int32_t normalized_dim,
+                                                     const miopenTensorDescriptor_t dxDesc,
+                                                     void* dx,
+                                                     const miopenTensorDescriptor_t dwDesc,
+                                                     void* dw,
+                                                     const miopenTensorDescriptor_t dbDesc,
+                                                     void* db);
+
 /** @} */
 // CLOSEOUT LAYERNORM DOXYGEN GROUP
 #endif
@@ -8436,6 +8514,49 @@ MIOPEN_EXPORT miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
 /** @} */
 // CLOSEOUT LossFunction DOXYGEN GROUP
 #endif // MIOPEN_BETA_API
+
+/*! @ingroup handle
+ * @enum miopenTuningPolicy_t
+ * Tuning policy for MIOpen Find-related calls.
+ * Supports only the following policies of MIOpenFindEnforce:
+ * 1. None: Do not enforce anything.
+ * 2. DbUpdate: Tune and update the database.
+ * 3. Search: Search the database first; if no record is found, tune but do not update the database.
+ * 4. SearchDbUpdate: Combination of Search and DbUpdate.
+ * 5. DbClean: Remove existing entry, do not tune.
+ * Note: MIOpenFindEnforce has additional features that are not supported by TuningPolicy.
+ * Note: TuningPolicy has higher priority over MIOPEN_FIND_ENFORCE.
+ */
+typedef enum
+{
+    miopenTuningPolicyNone     = 1, /* do not enforce anything */
+    miopenTuningPolicyDbUpdate = 2, /* tune and update the db  */
+    miopenTuningPolicySearch =
+        3, /* search db first, if record not found tune but do not update the db */
+    miopenTuningPolicySearchDbUpdate = 4, /* combination of Search and DbUpdate */
+    miopenTuningPolicyDbClean        = 5, /* remove existing entry, do not tune */
+} miopenTuningPolicy_t;
+
+/*! @ingroup handle
+ * @brief Update tuning policy for a specific handle. API alternative for MIOPEN_FIND_ENFORCE
+ * environment variable.
+ *
+ * @param [in] handle              MIOpen Handle to update
+ * @param [in] newValue            New tuning policy value. Default value is miopenTuningPolicyNone
+ * @return                         miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle,
+                                                   miopenTuningPolicy_t newValue);
+
+/*! @ingroup handle
+ * @brief Get tuning policy from a handle.
+ *
+ * @param [in] handle              MIOpen Handle to fetch value from
+ * @param [in] value               Would be set to the current tuning policy value. Must not be null
+ * @return                         miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle,
+                                                   miopenTuningPolicy_t* value);
 
 #ifdef __cplusplus
 }

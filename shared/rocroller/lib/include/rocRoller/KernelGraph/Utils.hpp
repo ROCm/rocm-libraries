@@ -692,7 +692,15 @@ namespace rocRoller
         */
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
 
+        /**
+         * Returns all of the nodes that contain `control` with a body
+         * relationship in order from the root of the graph
+         */
         std::deque<int> controlStack(int control, KernelGraph const& graph);
+        /**
+         * Returns all of the nodes that contain `control` with a body
+         * relationship in order from the root of the graph
+         */
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
 
         /**

@@ -151,7 +151,7 @@ install_packages( )
   fi
 
   # wget and openssl are needed for cmake
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.16.8); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
     if $update_cmake == true; then
       library_dependencies_ubuntu+=("wget" "libssl-dev")
       library_dependencies_centos_rhel+=("wget" "openssl-devel")
@@ -457,25 +457,27 @@ fc="gfortran"
 # #################################################
 if [[ "${install_dependencies}" == true ]]; then
   CMAKE_VERSION=$(${cmake_executable} --version | grep -oP '(?<=version )[^ ]*')
+  CMAKE_MIN_VERSION="3.24.4"
 
   install_packages
 
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.16.8); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
       if $update_cmake == true; then
         pushd .
         printf "\033[32mBuilding \033[33mcmake\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
-        CMAKE_REPO="https://github.com/Kitware/CMake/releases/download/v3.16.8/"
+        CMAKE_REPO="https://github.com/Kitware/CMake/releases/download"
+        CMAKE_TARGZ="cmake-${CMAKE_MIN_VERSION}.tar.gz"
         mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-        wget -nv ${CMAKE_REPO}/cmake-3.16.8.tar.gz
-        tar -xvf cmake-3.16.8.tar.gz
-        rm cmake-3.16.8.tar.gz
-        cd cmake-3.16.8
+        wget -nv ${CMAKE_REPO}/v${CMAKE_MIN_VERSION}/${CMAKE_TARGZ}
+        tar -xvf ${CMAKE_TARGZ}
+        rm ${CMAKE_TARGZ}
+        cd cmake-${CMAKE_MIN_VERSION}
         ./bootstrap --no-system-curl --parallel=16
         make -j16
         elevate_if_not_root make install
         popd
       else
-          echo "rocBLAS requires CMake version >= 3.16.8 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version 3.16.8 will be installed to /usr/local"
+          echo "rocBLAS requires CMake version >= ${CMAKE_MIN_VERSION} and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_MIN_VERSION} will be installed to /usr/local"
           exit 2
       fi
   fi

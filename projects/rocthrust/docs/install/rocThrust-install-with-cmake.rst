@@ -17,7 +17,7 @@ Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` depending on the co
     CXX=amdclang++
     CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
 
-Create the ``build`` directory inside the ``rocThrust`` directory, then change directory to the ``build`` directory:
+After :doc:`cloning the project <./rocThrust-install-overview>`, create the ``build`` directory under the ``rocthrust`` root directory, then change directory to the ``build`` directory:
 
 .. code:: shell
 
@@ -32,8 +32,8 @@ Generate the rocThrust makefile using the ``cmake`` command:
 
 The available build options are:
 
-* ``BUILD_BENCHMARK``. Set this to ``ON`` to build benchmark tests. Off by default.
-* ``BUILD_EXAMPLES``. Set this to ``ON`` to build rocThrust examples. Off by default.
+* ``BUILD_BENCHMARK``. Set this to ``ON`` to build rocThrust benchmarks. Off by default.
+* ``BUILD_EXAMPLE``. Set this to ``ON`` to build rocThrust examples. Off by default.
 * ``BUILD_TEST``. Set to ``ON`` to enable rocThrust tests. Off by default.
 * ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default. 
 * ``DISABLE_WERROR``. Set this to ``OFF`` to pass ``-Werror`` to the compiler. On by default.

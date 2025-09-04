@@ -28,28 +28,26 @@
 # - creates executables for running benchmarking
 # - installs TensileConfig.cmake so one call find_package(Tensile)
 ################################################################################
+from pathlib import Path
 from setuptools import setup
 
-def readRequirementsFromTxt():
-  requirements = []
-  with open("requirements.txt") as req_file:
-    for line in req_file.read().splitlines():
-      if not line.strip().startswith("#"):
-        requirements.append(line)
-  return requirements
+def read_requirements_from_txt():
+  requirements_file = Path(__file__).parent / "requirements.txt"
+  with open(requirements_file, "r") as file:
+    return [line for line in file.read().splitlines() if not line.strip().startswith("#")]
 
-def readVersionFromInit():
+def read_version_from_init():
     import Tensile
     return Tensile.__version__
 
 setup(
   name="Tensile",
-  version=readVersionFromInit(),
+  version=read_version_from_init(),
   description="An auto-tuning tool for GEMMs and higher-dimensional tensor contractions on GPUs.",
   url="https://github.com/RadeonOpenCompute/Tensile",
   author="Advanced Micro Devices",
   license="MIT",
-  install_requires=readRequirementsFromTxt(),
+  install_requires=read_requirements_from_txt(),
   python_requires='>=3.5',
   packages=["Tensile", "rocisa"],
   package_data={ "Tensile": ["Tensile/cmake/*"] },
@@ -58,7 +56,6 @@ setup(
   entry_points={"console_scripts": [
     # user runs a benchmark
     "Tensile = Tensile.Tensile:main",
-    "tensileBenchmarkLibraryClient = Tensile.TensileBenchmarkLibraryClient:main",
     # CMake calls this to create Tensile.lib
     "TensileCreateLibrary = Tensile.TensileCreateLibrary:TensileCreateLibrary",
 
