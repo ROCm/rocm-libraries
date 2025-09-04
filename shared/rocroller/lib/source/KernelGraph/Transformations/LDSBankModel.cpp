@@ -44,7 +44,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     bool LDSBankModel::filter(MemoryEventExpression event)
     {
-        return event.direction == Direction::LDSLoad || event.direction == Direction::LDSStore;
+        // Check if the memory operation is for LDS
+        return std::holds_alternative<MemoryOpLDS>(event.memoryOp);
     }
 
     void LDSBankModel::simulate(MemoryEventSimulated event)
@@ -55,14 +56,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
         auto ldsAddressInBytes = event.byteOffset;
         auto bankIndex         = (ldsAddressInBytes / m_entryWidthInBytes) % m_numBanks;
 
-        auto ldsTag
-            = event.direction == Direction::LDSStore ? event.destinationTag : event.sourceTag;
+        // Get the LDS operation and check if it's a store
+        const auto& ldsOp = std::get<MemoryOpLDS>(event.memoryOp);
+        auto ldsTag = ldsOp.direction == Direction::Store ? event.destinationTag : event.sourceTag;
 
         MemoryInstruction instruction{
-            event.direction, 1, DataType::UInt32, {static_cast<uint32_t>(ldsAddressInBytes)}};
+            event.memoryOp, 1, DataType::UInt32, {static_cast<uint32_t>(ldsAddressInBytes)}};
 
         m_bankAccesses[event.operationTag].push_back(LDSBankAccess{
-            event.operationTag, ldsTag, event.direction, event.workItem, bankIndex, {instruction}});
+            event.operationTag, ldsTag, ldsOp.direction, event.workItem, bankIndex, {instruction}});
     }
 
     Summary LDSBankModel::summary() const

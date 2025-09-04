@@ -273,7 +273,7 @@ namespace rocRoller::KernelGraph
                     tracer.m_events.push_back({tag,
                                                ldsTag,
                                                tileTag,
-                                               Direction::LDSLoad,
+                                               MemoryOpLDS{Direction::Load},
                                                index * Expression::literal(numBits),
                                                numBytes});
                 }

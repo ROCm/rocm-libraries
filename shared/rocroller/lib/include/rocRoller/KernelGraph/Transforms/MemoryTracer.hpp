@@ -34,6 +34,7 @@
 #include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 #include <set>
+#include <variant>
 
 namespace rocRoller
 {
@@ -49,17 +50,27 @@ namespace rocRoller
             namespace Expression = rocRoller::Expression;
             using ExpressionPtr  = Expression::ExpressionPtr;
 
-            enum Direction
+            enum class Direction
             {
-                GlobalLoad,
-                GlobalStore,
-                LDSLoad,
-                LDSStore
+                Load,
+                Store
             };
+
+            struct MemoryOpGlobal
+            {
+                Direction direction;
+            };
+
+            struct MemoryOpLDS
+            {
+                Direction direction;
+            };
+
+            using MemoryOp = std::variant<MemoryOpGlobal, MemoryOpLDS>;
 
             struct MemoryInstruction
             {
-                Direction             direction;
+                MemoryOp              memoryOp;
                 int                   dwords; // 1 for b32, 2 for b64, 3 for b96, 4 for b128
                 DataType              dataType;
                 std::vector<uint32_t> addresses; // LDS/Global addresses accessed
@@ -76,7 +87,7 @@ namespace rocRoller
                 int           operationTag; //< Operation tag
                 int           sourceTag; //< Source coordinate tag
                 int           destinationTag; //< Destination coordinate tag
-                Direction     direction; //< Memory access type
+                MemoryOp      memoryOp; //< Memory operation type
                 ExpressionPtr index; //< Index expression
                 uint          bytesRequested; //< Number of bytes requested
             };
@@ -97,15 +108,14 @@ namespace rocRoller
              */
             struct MemoryEventSimulated
             {
-                int operationTag; //< Operation tag
-                int sourceTag; //< Source coordinate tag
-                int destinationTag; //< Destination coordinate tag
-                Direction
-                     direction; //< Memory access type: GlobalLoad, GlobalStore, LDSLoad, LDSStore
-                uint byteOffset; //< Buffer offset in bytes
-                uint bytesRequested; //< Number of bytes requested
-                uint workGroup; //< Workgroup index
-                uint workItem; //<Workitem index
+                int      operationTag; //< Operation tag
+                int      sourceTag; //< Source coordinate tag
+                int      destinationTag; //< Destination coordinate tag
+                MemoryOp memoryOp; //< Memory operation type
+                uint     byteOffset; //< Buffer offset in bytes
+                uint     bytesRequested; //< Number of bytes requested
+                uint     workGroup; //< Workgroup index
+                uint     workItem; //<Workitem index
 
                 // XXX Consider adding SMEM vs VMEM, ie, if VMEM, this has a Workitem dependency
                 //
@@ -176,7 +186,7 @@ namespace rocRoller
                                 auto simulated = MemoryEventSimulated{event.operationTag,
                                                                       event.sourceTag,
                                                                       event.destinationTag,
-                                                                      event.direction,
+                                                                      event.memoryOp,
                                                                       static_cast<uint>(offset),
                                                                       event.bytesRequested,
                                                                       wg,
