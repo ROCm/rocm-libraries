@@ -831,6 +831,7 @@ namespace GEMMDriverTest
                     "failures/",
                     -1};
 
+                res.ok                = false;
                 auto writeOnFailLimit = Settings::getInstance()->get(WriteOnFail);
                 if(!res.ok && writeOnFailLimit > 0)
                 {
@@ -868,7 +869,7 @@ namespace GEMMDriverTest
 
                         Log::info("Values file written to: {} (file {} of {} allowed)",
                                   valuesFilePath.string(),
-                                  existingFileCount++,
+                                  existingFileCount + 1,
                                   writeOnFailLimit);
 
                         valuesFile << fmt::format("RNorm is {} (acceptable {}, iteration {})",
@@ -922,7 +923,6 @@ namespace GEMMDriverTest
                         logMatrixFloats("A", hostA, K, M);
                         logMatrixFloats("B", hostB, N, K);
                         logMatrixFloats("C", hostC, M, N);
-                        logMatrixFloats("D", d_result, M, N);
 
                         const auto logBytes = [&valuesFile](const auto& name, const auto& vector) {
                             valuesFile << name << std::endl;
@@ -937,8 +937,8 @@ namespace GEMMDriverTest
                         logBytes("ScaleA", hostScaleA);
                         logBytes("ScaleB", hostScaleB);
 
-                        logMatrixFloats("Host Result", h_result, M, N);
                         logMatrixFloats("Device Result", d_result, M, N);
+                        logMatrixFloats("Host Result", h_result, M, N);
                     }
                 }
                 EXPECT_TRUE(res.ok) << res.message();
