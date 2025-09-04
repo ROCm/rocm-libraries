@@ -831,7 +831,6 @@ namespace GEMMDriverTest
                     "failures/",
                     -1};
 
-                res.ok                = false;
                 auto writeOnFailLimit = Settings::getInstance()->get(WriteOnFail);
                 if(!res.ok && writeOnFailLimit > 0)
                 {
