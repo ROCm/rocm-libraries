@@ -651,19 +651,6 @@ namespace rocRoller::KernelGraph
                             setWorkitem(0, wi);
 
                             // Might want to cache these
-
-                            std::cout << fmt::format(
-                                "Event operationTag {}, sourceTag {}, destinationTag {}, "
-                                "direction {}, index {}, bytesRequested {}, wg {}, wi {}",
-                                event.operationTag,
-                                event.sourceTag,
-                                event.destinationTag,
-                                toString(event.direction),
-                                toString(event.index),
-                                event.bytesRequested,
-                                wg,
-                                wi) << std::endl;
-
                             auto offsetValue = Expression::evaluate(event.index, runtimeArguments);
                             auto offset = std::visit([](auto x) { return (size_t)x; }, offsetValue);
                             auto simulated = MemoryEventSimulated{event.operationTag,
