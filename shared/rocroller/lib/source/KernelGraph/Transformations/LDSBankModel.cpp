@@ -156,7 +156,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                           uint               dwords,
                                           GPUArchitectureGFX gfx)
     {
-        // GFX950 read optimizations
         if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == Direction::Load)
         {
             switch(dwords)
@@ -164,16 +163,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
             case 1:
                 return 32;
             case 2:
-                return 32; // GFX950: b64 read at full rate
+                return 32;
             case 3:
                 return 8;
             case 4:
-                return 16; // GFX950: b128 read faster
+                return 16;
             }
         }
         else
         {
-            // Standard rates
             switch(dwords)
             {
             case 1:

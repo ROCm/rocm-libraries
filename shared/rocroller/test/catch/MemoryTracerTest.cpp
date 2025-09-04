@@ -29,6 +29,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
+#include <rocRoller/KernelGraph/Transforms/LDSBankModel.hpp>
 #include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
 
 #include <common/CommonGraphs.hpp>
@@ -99,6 +100,49 @@ namespace MemoryTracerTest
         for(const auto& [tag, access] : summary.accesses)
         {
             CHECK(access.accessedBanks.size() == 4);
+        }
+    }
+
+    TEST_CASE("LDS threads per clock", "[kernel-graph]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        SECTION("GFX950 read operations")
+        {
+            auto ldsRead = MemoryOpLDS{Direction::Load};
+
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 1, GPUArchitectureGFX::GFX950) == 32);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 2, GPUArchitectureGFX::GFX950) == 32);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 3, GPUArchitectureGFX::GFX950) == 8);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 4, GPUArchitectureGFX::GFX950) == 16);
+        }
+
+        SECTION("GFX950 write operations")
+        {
+            auto ldsWrite = MemoryOpLDS{Direction::Store};
+
+            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 1, GPUArchitectureGFX::GFX950) == 32);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 2, GPUArchitectureGFX::GFX950) == 16);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 4, GPUArchitectureGFX::GFX950) == 8);
+        }
+
+        SECTION("Non-GFX950 operations")
+        {
+            auto ldsRead = MemoryOpLDS{Direction::Load};
+
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 1, GPUArchitectureGFX::GFX942) == 32);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 2, GPUArchitectureGFX::GFX942) == 16);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 4, GPUArchitectureGFX::GFX942) == 8);
+        }
+
+        SECTION("Invalid dword count")
+        {
+            auto ldsRead = MemoryOpLDS{Direction::Load};
+
+            CHECK_THROWS_AS(
+                LDSBankModel::getThreadsPerClock(ldsRead, 5, GPUArchitectureGFX::GFX950),
+                FatalError);
         }
     }
 }
