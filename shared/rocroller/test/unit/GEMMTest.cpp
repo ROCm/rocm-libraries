@@ -832,7 +832,6 @@ namespace GEMMDriverTest
                     -1};
 
                 auto writeOnFailLimit = Settings::getInstance()->get(WriteOnFail);
-                res.ok                = false;
                 if(!res.ok && writeOnFailLimit > 0)
                 {
                     auto writeOnFailDir = Settings::getInstance()->get(WriteOnFailDir);
