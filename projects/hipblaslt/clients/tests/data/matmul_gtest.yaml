@@ -2189,7 +2189,7 @@ Tests:
   requested_solution_num: 3
   gpu_arch: '950'
 
-- name: matmul_relu_clamp_useE_bias_bf16_f16
+- name: matmul_relu_clamp_useE_bias
   category: pre_checkin
   function:
     matmul:
@@ -2200,17 +2200,18 @@ Tests:
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]
-  transA: [N, T]
-  transB: [N, T]
+  transA_transB: *transA_transB_range
   alpha: 1
   beta: [ 0.0, 2.0 ]
   use_e: 1
   activation_type: [relu, clamp]
+  activation_arg1: -1.5
+  activation_arg2: 1.5
   bias_vector: 1
   bias_type: f32_r
-  bias_source: b
   scaleAlpha_vector: 1
-  unit_check: 1
+  norm_check: 1
+  unit_check: 0
   gpu_arch: '942'
 
 ...
