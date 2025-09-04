@@ -142,6 +142,8 @@ namespace rocRoller
                 template <typename Model>
                 void simulateLaunch(Model& model, uint numWorkgroups, uint numWorkitems)
                 {
+                    // TODO: revisit -> have the memory model generate a list of MemoryEventSimulated
+                    // that the model can consume?
                     // TODO: move this to _impl.hpp
                     auto rawArguments = m_arguments.dataVector();
                     auto runtimeArguments
