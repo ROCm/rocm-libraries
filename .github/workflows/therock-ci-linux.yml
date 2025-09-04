@@ -36,7 +36,8 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: 666a4f2c7207145c8c8d25c62880f91f1cba7315
+          # TODO: update
+          ref: users/geomin12/monorepo-patches
       
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -67,7 +68,7 @@ jobs:
 
       - name: Fetch sources
         run: |
-          ./build_tools/fetch_sources.py --jobs 12
+          ./build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries
 
       - name: Install python deps
         run: |
@@ -76,7 +77,7 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./build_tools/patch_rocm_libraries.py --repo ./monorepo
+          python ./build_tools/patch_rocm_libraries.py --repo ./monorepo --apply-to-monorepo
 
       - name: Configure Projects
         env:
