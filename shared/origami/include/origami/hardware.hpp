@@ -411,6 +411,14 @@ namespace origami
             {
                 throw std::runtime_error(hipGetErrorString(e));
             }
+            if(hardware_t::is_debug_enabled())
+            {
+                std::cout << "=== Device " << deviceId << " Properties ===" << std::endl;
+                std::cout << "Device Name: " << prop.name << std::endl;
+                std::cout << "Architecture: " << prop.gcnArchName << std::endl;
+                std::cout << "Compute Units: " << prop.multiProcessorCount << std::endl;
+                std::cout << "=========================" << std::endl;
+            }
             return get_hardware_for_properties(prop);
         }
 
