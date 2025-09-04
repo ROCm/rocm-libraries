@@ -294,23 +294,22 @@ namespace rocsparse
             {
             case rocsparse_spmm_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_buffer_size(
-                    handle,
-                    trans_A,
-                    csrmm_alg,
-                    m,
-                    n,
-                    k,
-                    mat_A->nnz,
-                    mat_A->descr,
-                    alpha_type,
-                    mat_A->data_type,
-                    mat_A->const_val_data,
-                    mat_A->row_type,
-                    mat_A->const_row_data,
-                    mat_A->col_type,
-                    mat_A->const_col_data,
-                    buffer_size));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_buffer_size(handle,
+                                                                       trans_A,
+                                                                       csrmm_alg,
+                                                                       m,
+                                                                       n,
+                                                                       k,
+                                                                       mat_A->nnz,
+                                                                       mat_A->descr,
+                                                                       alpha_type,
+                                                                       mat_A->data_type,
+                                                                       mat_A->const_val_data,
+                                                                       mat_A->row_type,
+                                                                       mat_A->const_row_data,
+                                                                       mat_A->col_type,
+                                                                       mat_A->const_col_data,
+                                                                       buffer_size));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_preprocess:
