@@ -1669,6 +1669,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             case HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
                 epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT;
                 break;
+            case HIPBLASLT_EPILOGUE_DGELU:
+            case HIPBLASLT_EPILOGUE_DGELU_BGRAD:
+                // DGELU_AUX and DGELU_AUX_BGRAD already use E
+                break;
             default:
                 hipblaslt_cerr << "The activation type " << epilogue[i]
                                << " does not support '--use_e'.\n";
