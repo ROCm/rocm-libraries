@@ -48,6 +48,7 @@ namespace TensileLite
             Int32,
             BFloat16,
             Int8,
+            Int4,
             Int64,
             XFloat32,
             Float8_fnuz,
@@ -92,6 +93,8 @@ namespace TensileLite
                 return 16;
             case DataType::Int8:
                 return 8;
+            case DataType::Int4:
+                return 4;
             case DataType::Int64:
                 return 64;
             case DataType::XFloat32:
@@ -145,6 +148,8 @@ namespace TensileLite
                 return "BFloat16";
             case DataType::Int8:
                 return "Int8";
+            case DataType::Int4:
+                return "Int4";
             case DataType::Int64:
                 return "Int64";
             case DataType::XFloat32:
@@ -195,6 +200,8 @@ namespace TensileLite
                 return DataType::BFloat16;
             if (s == "i8")
                 return DataType::Int8;
+            if (s == "i4")
+                return DataType::Int4;
             if (s == "xf32")
                 return DataType::XFloat32;
             if (s == "f8")
@@ -287,6 +294,8 @@ namespace TensileLite
                 gfx90a,
                 gfx942,
                 gfx950,
+                gfx1201,
+                gfx1100,
                 Count
             };
 
@@ -295,7 +304,9 @@ namespace TensileLite
                 static const std::unordered_map<std::string, Architecture> strToEnumMap
                     = {{"gfx90a", Architecture::gfx90a},
                        {"gfx942", Architecture::gfx942},
-                       {"gfx950", Architecture::gfx950}};
+                       {"gfx950", Architecture::gfx950},
+                       {"gfx1201", Architecture::gfx1201},
+                       {"gfx1100", Architecture::gfx1100}};
 
                 auto it = strToEnumMap.find(str);
                 if(it != strToEnumMap.end())

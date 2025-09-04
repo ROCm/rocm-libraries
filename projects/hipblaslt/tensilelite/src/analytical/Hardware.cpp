@@ -40,7 +40,13 @@ namespace TensileLite
                     8, 17, 1.21875121875121875122 * 6, 4, 4, 1.5e-2, 1.5)},
                {Hardware::Architecture::gfx950,
                 Hardware::ArchitectureConstants(
-                    8, 17, 1.21875121875121875122 * 7, 6, 4, 0.008, 1.5)}};
+                    8, 17, 1.21875121875121875122 * 7, 6, 4, 0.008, 1.5)},
+               {Hardware::Architecture::gfx1201,
+                Hardware::ArchitectureConstants(
+                    1, 5.74, 1.21875121875121875122 * 2.41, 0.464, 2, 0.17, 1.5)},
+               {Hardware::Architecture::gfx1100,
+                Hardware::ArchitectureConstants(
+                    1, 7.12, 1.21875121875121875122 * 3.48, 0.732, 2, 0.11, 1.5)}};
 
         // Schema : (MI_M, MI_N, MI_K, DataType)
         const std::unordered_map<Hardware::Architecture,
@@ -196,6 +202,46 @@ namespace TensileLite
                     // DOT2
                     {MatrixInstruction( 1,  1,  64, DataType::Half), 16}, // V_DOT2_F32_F16
                     {MatrixInstruction( 1,  1,  64, DataType::BFloat16), 16}, // V_DOT2_F32_BF16
+                }},
+               {Hardware::Architecture::gfx1201,
+                {
+                    // F16
+                    {MatrixInstruction(16, 16, 16, DataType::Half), 16}, // v_wmma_f16_16x16x16_f16/v_wmma_f32_16x16x16_f16
+                    {MatrixInstruction(16, 16, 32, DataType::Half), 16}, // v_swmmac_f16_16x16x32_f16/v_swmmac_f32_16x16x32_f16
+                    // BF16
+                    {MatrixInstruction(16, 16, 16, DataType::BFloat16), 16}, // v_wmma_bf16_16x16x16_bf16/v_wmma_f32_16x16x16_bf16
+                    {MatrixInstruction(16, 16, 32, DataType::BFloat16), 16}, // v_swmmac_bf16_16x16x32_bf16/v_swmmac_f32_16x16x32_bf16
+                    // F8
+                    {MatrixInstruction(16, 16, 16, DataType::Float8), 8}, // v_wmma_f32_16x16x16_fp8_fp8
+                    {MatrixInstruction(16, 16, 32, DataType::Float8), 8}, // v_swmmac_f32_16x16x32_fp8_fp8
+                    // F8B8
+                    {MatrixInstruction(16, 16, 16, DataType::Float8BFloat8), 8}, // v_wmma_f32_16x16x16_fp8_bf8
+                    {MatrixInstruction(16, 16, 32, DataType::Float8BFloat8), 8}, // v_swmmac_f32_16x16x32_fp8_bf8
+                    // B8F8
+                    {MatrixInstruction(16, 16, 16, DataType::BFloat8Float8), 8}, // v_wmma_f32_16x16x16_bf8_fp8
+                    {MatrixInstruction(16, 16, 32, DataType::BFloat8Float8), 8}, // v_swmmac_f32_16x16x32_bf8_fp8
+                    // B8
+                    {MatrixInstruction(16, 16, 16, DataType::BFloat8), 8}, // v_wmma_f32_16x16x16_bf8_bf8
+                    {MatrixInstruction(16, 16, 32, DataType::BFloat8), 8}, // v_swmmac_f32_16x16x32_bf8_bf8
+                    // I8
+                    {MatrixInstruction(16, 16, 16, DataType::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+                    {MatrixInstruction(16, 16, 32, DataType::Int8), 8}, // v_swmmac_i32_16x16x32_iu8
+                    // I4
+                    {MatrixInstruction(16, 16, 16, DataType::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+                    {MatrixInstruction(16, 16, 32, DataType::Int4), 8}, // v_wmma_i32_16x16x32_iu4
+                    {MatrixInstruction(16, 16, 32, DataType::Int4), 8}, // v_swmmac_i32_16x16x32_iu4
+                    {MatrixInstruction(16, 16, 64, DataType::Int4), 8}, // v_swmmac_i32_16x16x64_iu4
+                }},
+               {Hardware::Architecture::gfx1100,
+                {
+                    // F16
+                    {MatrixInstruction(16, 16, 16, DataType::Half), 16}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+                    // BF16
+                    {MatrixInstruction(16, 16, 16, DataType::BFloat16), 16}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+                    // I8
+                    {MatrixInstruction(16, 16, 16, DataType::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+                    // I4
+                    {MatrixInstruction(16, 16, 16, DataType::Int4), 8}, // v_wmma_i32_16x16x16_iu4
                 }}};
 
     } // namespace analytical
