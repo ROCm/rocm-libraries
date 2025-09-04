@@ -409,11 +409,9 @@ namespace origami
             hipError_t      e = hipGetDeviceProperties(&prop, deviceId);
             if(e)
             {
-                std::cout << "=== Device " << deviceId << " Properties ===" << std::endl;
-                std::cout << "Device Name: " << prop.name << std::endl;
-                std::cout << "Architecture: " << prop.gcnArchName << std::endl;
-                std::cout << "Compute Units: " << prop.multiProcessorCount << std::endl;
-                std::cout << "=========================" << std::endl;
+                std::cerr << "Failed to get properties for device " << deviceId << " " << prop.name << " : " 
+                          << hipGetErrorString(e) << std::endl;
+                std::cerr << "HIP error code: " << e << std::endl;
                 throw std::runtime_error(hipGetErrorString(e));
             }
             if(hardware_t::is_debug_enabled())
