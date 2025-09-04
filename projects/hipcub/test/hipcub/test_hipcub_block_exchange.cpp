@@ -935,7 +935,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuarded)
         device_output,
         device_ranks);
 
-    type* host_output = new type[size];
+    [[maybe_unused]] type* host_output = new type[size];
     HIP_CHECK(hipMemcpy(host_output, device_output, sizeof(type) * size, hipMemcpyDeviceToHost));
 
     for(size_t i = 0; i < size; i++)

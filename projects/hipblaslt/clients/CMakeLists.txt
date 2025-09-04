@@ -17,7 +17,7 @@ target_include_directories(hipblaslt-clients-common
 add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
-    target_link_libraries(hipblaslt-clients-common PRIVATE BLIS::BLIS)
+    target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
 else()
     target_link_libraries(hipblaslt-clients-common PUBLIC ${BLAS_LIBRARIES})
 endif()
@@ -31,7 +31,7 @@ target_link_libraries(hipblaslt-clients-common
 )
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
-    if(NOT ROCM_LIBRARIES_SUPERBUILD)
+    if(NOT ROCM_LIBS_SUPERBUILD)
         if(HIPBLASLT_ENABLE_FETCH)
             FetchContent_Declare(
                 mxDataGenerator
