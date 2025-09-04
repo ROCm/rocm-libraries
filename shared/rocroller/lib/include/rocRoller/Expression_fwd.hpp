@@ -56,7 +56,7 @@ namespace rocRoller
         struct ShiftL;
         struct LogicalShiftR;
         struct ArithmeticShiftR;
-        struct BitFieldCombine;
+        struct BitfieldCombine;
         struct BitwiseNegate;
         struct BitwiseAnd;
         struct BitwiseOr;
@@ -112,7 +112,7 @@ namespace rocRoller
             LogicalShiftR,
             ArithmeticShiftR,
 
-            BitFieldCombine,
+            BitfieldCombine,
             BitwiseAnd,
             BitwiseOr,
             BitwiseXor,

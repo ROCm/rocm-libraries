@@ -472,7 +472,7 @@ namespace rocRoller
                 return std::make_shared<Expression>(Expr({lhs, rhs, expr.comment}));
             }
 
-            ExpressionPtr operator()(BitFieldCombine const& expr) const
+            ExpressionPtr operator()(BitfieldCombine const& expr) const
             {
                 auto cpy = expr;
                 if(expr.lhs)

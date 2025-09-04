@@ -456,11 +456,11 @@ namespace rocRoller
                 return tree;
             }
 
-            ExpressionTree operator()(BitFieldCombine const& expr) const
+            ExpressionTree operator()(BitfieldCombine const& expr) const
             {
                 AssertFatal(
                     false,
-                    "BitFieldCombine should be lowered to shift and bitwise AND/OR epxressions");
+                    "BitfieldCombine should be lowered to shift and bitwise AND/OR epxressions");
                 return {};
             }
 

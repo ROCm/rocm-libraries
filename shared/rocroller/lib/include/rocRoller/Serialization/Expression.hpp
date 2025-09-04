@@ -117,12 +117,12 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
-        struct MappingTraits<Expression::BitFieldCombine, IO, Context>
+        struct MappingTraits<Expression::BitfieldCombine, IO, Context>
         {
             static const bool flow = true;
             using iot              = IOTraits<IO>;
 
-            static void mapping(IO& io, Expression::BitFieldCombine& exp, Context& ctx)
+            static void mapping(IO& io, Expression::BitfieldCombine& exp, Context& ctx)
             {
                 iot::mapRequired(io, "lhs", exp.lhs, ctx);
                 iot::mapRequired(io, "rhs", exp.rhs, ctx);
@@ -132,12 +132,12 @@ namespace rocRoller
                 iot::mapRequired(io, "width", exp.width);
 
                 if(exp.srcIsZero.has_value())
-                    iot::mapOptional(io, "srcIsZero", exp.srcIsZero.value());
+                    iot::mapRequired(io, "srcIsZero", exp.srcIsZero.value());
                 if(exp.dstIsZero.has_value())
-                    iot::mapOptional(io, "dstIsZero", exp.dstIsZero.value());
+                    iot::mapRequired(io, "dstIsZero", exp.dstIsZero.value());
             }
 
-            static void mapping(IO& io, Expression::BitFieldCombine& val)
+            static void mapping(IO& io, Expression::BitfieldCombine& val)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 

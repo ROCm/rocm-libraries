@@ -447,7 +447,49 @@ namespace rocRoller
 
     struct Raw32 : public DistinctType<uint32_t, Raw32>
     {
+        Raw32() = default;
+
+        template <typename T>
+        requires std::is_arithmetic_v<T> Raw32(T t)
+            : DistinctType<uint32_t, Raw32>(t)
+        {
+        }
+
+        friend std::ostream& operator<<(std::ostream& os, const Raw32& obj);
+
+        Raw32 operator~() const
+        {
+            return Raw32(~value);
+        }
+
+        bool operator!() const
+        {
+            return value == 0u;
+        }
+
+        template <std::integral T>
+        explicit operator T() const
+        {
+            return static_cast<T>(value);
+        }
+
+        template <typename T>
+        bool operator==(T const& other) const
+        {
+            if constexpr(std::is_same_v<T, Raw32>)
+                return other.value == value;
+            else if constexpr(std::is_arithmetic_v<T>)
+                return other == value;
+            else
+                return false;
+        }
     };
+
+    inline std::ostream& operator<<(std::ostream& os, const Raw32& obj)
+    {
+        os << static_cast<uint32_t>(obj);
+        return os;
+    }
 
     struct Bool32 : public DistinctType<uint32_t, Bool32>
     {

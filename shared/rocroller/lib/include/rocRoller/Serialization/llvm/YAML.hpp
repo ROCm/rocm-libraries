@@ -342,7 +342,8 @@ namespace llvm
             static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {
                 float floatVal = value;
-                ScalarTraits<float>::output(value, ctx, out);
+                // This seems to be a bug: it should pass in floatVal
+                ScalarTraits<float>::output(floatValue, ctx, out);
             }
 
             static StringRef input(StringRef scalar, void* ctx, T& value)
@@ -361,6 +362,32 @@ namespace llvm
                 return ScalarTraits<float>::mustQuote(ref);
             }
         };
+
+        template <>
+        struct ScalarTraits<Raw32>
+        {
+            static void output(const Raw32& value, void* ctx, llvm::raw_ostream& out)
+            {
+                auto outputVal = static_cast<uint32_t>(value);
+                ScalarTraits<float>::output(outputVal, ctx, out);
+            }
+
+            static StringRef input(StringRef scalar, void* ctx, Raw32& value)
+            {
+                uint32_t inputVal = 0u;
+
+                auto rv = ScalarTraits<uint32_t>::input(scalar, ctx, inputVal);
+
+                value = Raw32(inputVal);
+
+                return rv;
+            }
+
+            static QuotingType mustQuote(StringRef ref)
+            {
+                return ScalarTraits<std::string>::mustQuote(ref);
+            }
+        }
 
         template <rocRoller::Serialization::CHasScalarTraits Scalar>
         struct ScalarTraits<Scalar>

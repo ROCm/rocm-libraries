@@ -30,16 +30,13 @@ namespace rocRoller
 {
     namespace Expression
     {
-        struct LowerBitFieldCombineExpressionVisitor
+        struct LowerBitfieldCombineExpressionVisitor
         {
             template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.arg)
-                {
-                    cpy.arg = call(expr.arg);
-                }
+                cpy.arg  = call(expr.arg);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -47,40 +44,19 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.rhs)
-                {
-                    cpy.rhs = call(expr.rhs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.rhs  = call(expr.rhs);
                 return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
             {
                 ScaledMatrixMultiply cpy = expr;
-                if(expr.matA)
-                {
-                    cpy.matA = call(expr.matA);
-                }
-                if(expr.matB)
-                {
-                    cpy.matB = call(expr.matB);
-                }
-                if(expr.matC)
-                {
-                    cpy.matC = call(expr.matC);
-                }
-                if(expr.scaleA)
-                {
-                    cpy.scaleA = call(expr.scaleA);
-                }
-                if(expr.scaleB)
-                {
-                    cpy.scaleB = call(expr.scaleB);
-                }
+                cpy.matA                 = call(expr.matA);
+                cpy.matB                 = call(expr.matB);
+                cpy.matC                 = call(expr.matC);
+                cpy.scaleA               = call(expr.scaleA);
+                cpy.scaleB               = call(expr.scaleB);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -88,33 +64,23 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.r1hs)
-                {
-                    cpy.r1hs = call(expr.r1hs);
-                }
-                if(expr.r2hs)
-                {
-                    cpy.r2hs = call(expr.r2hs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
                 return std::make_shared<Expression>(cpy);
             }
 
-            ExpressionPtr operator()(BitFieldCombine const& expr) const
+            ExpressionPtr operator()(BitfieldCombine const& expr) const
             {
                 auto lhs = expr.lhs;
+                lhs      = call(expr.lhs);
                 if(lhs)
                 {
-                    lhs = call(expr.lhs);
-
                     AssertFatal(resultVariableType(lhs).getElementSize() <= 4u,
-                                "Currently BitFieldCombine only supports: src size <= 1 dword");
+                                "Currently BitfieldCombine only supports: src size <= 1 dword");
                     AssertFatal(resultVariableType(lhs).getElementSize() * 8u
                                     > expr.srcOffset + expr.width,
-                                "BitField exceeds the number of bits of source, source size "
+                                "Bitfield exceeds the number of bits of source, source size "
                                 "(bytes), offset, width = ",
                                 ShowValue(resultVariableType(lhs).getElementSize()),
                                 ShowValue(expr.srcOffset),
@@ -122,15 +88,14 @@ namespace rocRoller
                 }
 
                 auto rhs = expr.rhs;
+                rhs      = call(expr.rhs);
                 if(rhs)
                 {
-                    rhs = call(expr.rhs);
-
                     AssertFatal(resultVariableType(rhs).getElementSize() == 4u,
-                                "Currently BitFieldCombine only supports: dst size = 1 dword");
+                                "Currently BitfieldCombine only supports: dst size = 1 dword");
                     AssertFatal(resultVariableType(rhs).getElementSize() * 8u
                                     > expr.dstOffset + expr.width,
-                                "BitField exceeds the number of bits of destination, destination "
+                                "Bitfield exceeds the number of bits of destination, destination "
                                 "size (bytes), offset, width = ",
                                 ShowValue(resultVariableType(rhs).getElementSize()),
                                 ShowValue(expr.dstOffset),
@@ -140,15 +105,15 @@ namespace rocRoller
                 auto const srcIsZero = expr.srcIsZero && expr.srcIsZero.value();
                 if(not srcIsZero)
                 {
-                    auto srcMask = literal(((1u << expr.width) - 1u) << expr.srcOffset);
-                    lhs          = (srcMask & lhs); // Extract bits
+                    rocRoller::Raw32 srcMask(((1u << expr.width) - 1u) << expr.srcOffset);
+                    lhs = (literal(srcMask) & lhs); // Extract bits
                 }
 
                 auto const dstIsZero = expr.dstIsZero && expr.dstIsZero.value();
                 if(not dstIsZero)
                 {
-                    auto dstMask = literal(((1u << expr.width) - 1u) << expr.dstOffset);
-                    rhs          = (~dstMask & rhs); // Clear bits
+                    rocRoller::Raw32 dstMask(~(((1u << expr.width) - 1u) << expr.dstOffset));
+                    rhs = (literal(dstMask) & rhs); // Clear bits
                 }
 
                 if(expr.dstOffset > expr.srcOffset)
@@ -177,17 +142,17 @@ namespace rocRoller
         };
 
         /**
-         * Replace a BitFieldCombine expression with:
+         * Replace a BitfieldCombine expression with:
          *
-         *   srcMask = ((1 << width) - 1) << srcOffset
-         *   dstMask = ((1 << width) - 1) << dstOffset
-         *   dst = shift((srcMask & src), abs(srcOffset-dstOffset)) | (~dstMask & dst)
+         *   srcMask =   ((1 << width) - 1) << srcOffset
+         *   dstMask = ~(((1 << width) - 1) << dstOffset)
+         *   dst = shift((srcMask & src), abs(srcOffset-dstOffset)) | (dstMask & dst)
          *
          *   Note: src=lhs, dst=rhs
          */
-        ExpressionPtr lowerBitFieldCombine(ExpressionPtr expr)
+        ExpressionPtr lowerBitfieldCombine(ExpressionPtr expr)
         {
-            auto visitor = LowerBitFieldCombineExpressionVisitor();
+            auto visitor = LowerBitfieldCombineExpressionVisitor();
             return visitor.call(expr);
         }
 

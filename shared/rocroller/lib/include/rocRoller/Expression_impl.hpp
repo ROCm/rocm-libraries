@@ -299,6 +299,8 @@ namespace rocRoller
                 return literal<float>(value);
             case DataType::Double:
                 return literal<double>(value);
+            case DataType::Raw32:
+                return literal<Raw32>(value);
             default:
                 Throw<FatalError>(
                     "Unsupported datatype ", v.dataType, " provided to Expression::literal");
@@ -341,7 +343,7 @@ namespace rocRoller
         EXPRESSION_INFO(LogicalShiftR);
         EXPRESSION_INFO(ArithmeticShiftR);
 
-        EXPRESSION_INFO(BitFieldCombine);
+        EXPRESSION_INFO(BitfieldCombine);
         EXPRESSION_INFO(BitwiseNegate);
         EXPRESSION_INFO(BitwiseAnd);
         EXPRESSION_INFO(BitwiseOr);

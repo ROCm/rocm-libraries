@@ -948,7 +948,7 @@ TEST_CASE("LowerUnsignedArithmeticShiftR ExpressionTransformation works",
     }
 }
 
-TEST_CASE("BitFieldCombine epxression and lowering", "[expression][expression-transformation]")
+TEST_CASE("BitfieldCombine epxression and lowering", "[expression][expression-transformation]")
 {
     using namespace rocRoller;
 
@@ -975,47 +975,49 @@ TEST_CASE("BitFieldCombine epxression and lowering", "[expression][expression-tr
     SECTION("Lowering Basic")
     {
         auto bfc = std::make_shared<Expression::Expression>(
-            Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width));
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width});
 
         auto expected
-            = logicalShiftR((Expression::literal(((1u << width) - 1u) << srcOffset) & srcExpr),
-                            offsetDiff)
-              | (~Expression::literal(((1u << width) - 1u) << dstOffset) & dstExpr);
+            = logicalShiftR(
+                  (Expression::literal(Raw32(((1u << width) - 1u) << srcOffset)) & srcExpr),
+                  offsetDiff)
+              | (Expression::literal(Raw32(~(((1u << width) - 1u) << dstOffset))) & dstExpr);
 
-        CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
 
     SECTION("Lowering with srcIsZero")
     {
         auto bfc = std::make_shared<Expression::Expression>(
-            Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width, true));
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width, true});
 
-        auto expected = logicalShiftR(srcExpr, offsetDiff)
-                        | (~Expression::literal(((1u << width) - 1u) << dstOffset) & dstExpr);
+        auto expected
+            = logicalShiftR(srcExpr, offsetDiff)
+              | (Expression::literal(Raw32(~(((1u << width) - 1u) << dstOffset))) & dstExpr);
 
-        CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
 
     SECTION("Lowering with dstIsZero")
     {
-        auto bfc = std::make_shared<Expression::Expression>(Expression::BitFieldCombine(
-            srcExpr, dstExpr, srcOffset, dstOffset, width, std::nullopt, true));
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            srcExpr, dstExpr, "", srcOffset, dstOffset, width, std::nullopt, true});
 
-        auto expected
-            = logicalShiftR((Expression::literal(((1u << width) - 1u) << srcOffset) & srcExpr),
-                            offsetDiff)
-              | dstExpr;
+        auto expected = logicalShiftR((Expression::literal(Raw32(((1u << width) - 1u) << srcOffset))
+                                       & srcExpr),
+                                      offsetDiff)
+                        | dstExpr;
 
-        CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
 
     SECTION("Lowering with srcIsZero & dstIsZero")
     {
-        auto bfc = std::make_shared<Expression::Expression>(
-            Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width, true, true));
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            srcExpr, dstExpr, "", srcOffset, dstOffset, width, true, true});
 
         auto expected = logicalShiftR(srcExpr, offsetDiff) | dstExpr;
 
-        CHECK_THAT(lowerBitFieldCombine(bfc), IdenticalTo(expected));
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
 }

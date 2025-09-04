@@ -202,13 +202,13 @@ namespace rocRoller
         ExpressionPtr lowerBitfieldValues(ExpressionPtr expr);
 
         /**
-         * @brief Attempt to replace a BitFieldCombine expr with
+         * @brief Attempt to replace a BitfieldCombine expr with
      *        a composite expression consisting of shift and
      *        bitwise AND/OR
          *
          * @param expr Input expression
          * @return ExpressionPtr Transformed expression
          */
-        ExpressionPtr lowerBitFieldCombine(ExpressionPtr expr);
+        ExpressionPtr lowerBitfieldCombine(ExpressionPtr expr);
     }
 }

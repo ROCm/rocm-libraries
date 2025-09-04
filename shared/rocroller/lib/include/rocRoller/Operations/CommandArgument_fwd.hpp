@@ -71,7 +71,8 @@ namespace rocRoller
         BF6*,
         FP4*,
         E8M0,
-        E8M0*>;
+        E8M0*,
+        rocRoller::Raw32>;
 
     template <typename T>
     concept CCommandArgumentValue = requires(T& val)

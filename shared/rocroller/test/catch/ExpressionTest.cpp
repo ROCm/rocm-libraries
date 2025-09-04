@@ -2544,7 +2544,7 @@ namespace ExpressionTest
         }
     }
 
-    TEST_CASE("Code gen for BitFieldCombine", "[expression][codegen]")
+    TEST_CASE("Code gen for BitfieldCombine", "[expression][codegen]")
     {
         auto context = TestContext::ForDefaultTarget();
 
@@ -2568,7 +2568,7 @@ namespace ExpressionTest
         SECTION("Lowering Basic")
         {
             auto bfc = std::make_shared<Expression::Expression>(
-                Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width));
+                Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width});
 
             Register::ValuePtr dest;
             context.get()->schedule(Expression::generate(dest, bfc, context.get()));
@@ -2587,14 +2587,14 @@ namespace ExpressionTest
 
         SECTION("Lowering with srcIsZero")
         {
-            auto bfc = std::make_shared<Expression::Expression>(
-                Expression::BitFieldCombine(srcExpr, dstExpr, srcOffset, dstOffset, width, true));
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, true});
 
             Register::ValuePtr dest;
             context.get()->schedule(Expression::generate(dest, bfc, context.get()));
 
             std::string expected = R"(
-                v_ashrrev_i32 v2, 6, v0
+                v_lshrrev_b32 v2, 6, v0
                 v_and_b32 v3, 4294965263, v1
                 v_or_b32 v4, v2, v3
             )";
@@ -2604,8 +2604,8 @@ namespace ExpressionTest
 
         SECTION("Lowering with dstIsZero")
         {
-            auto bfc = std::make_shared<Expression::Expression>(Expression::BitFieldCombine(
-                srcExpr, dstExpr, srcOffset, dstOffset, width, std::nullopt, true));
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, std::nullopt, true});
 
             Register::ValuePtr dest;
             context.get()->schedule(Expression::generate(dest, bfc, context.get()));
@@ -2621,14 +2621,14 @@ namespace ExpressionTest
 
         SECTION("Lowering with srcIsZero & dstIsZero")
         {
-            auto bfc = std::make_shared<Expression::Expression>(Expression::BitFieldCombine(
-                srcExpr, dstExpr, srcOffset, dstOffset, width, true, true));
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, true, true});
 
             Register::ValuePtr dest;
             context.get()->schedule(Expression::generate(dest, bfc, context.get()));
 
             std::string expected = R"(
-                v_ashrrev_i32 v2, 6, v0
+                v_lshrrev_b32 v2, 6, v0
                 v_or_b32 v3, v2, v1
             )";
 

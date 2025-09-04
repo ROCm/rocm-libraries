@@ -262,51 +262,16 @@ namespace rocRoller
             constexpr static inline int                 Complexity = 1;
         };
 
-        struct BitFieldCombine final : Binary
+        struct BitfieldCombine final : Binary
         {
-            BitFieldCombine() = default;
-
-            explicit BitFieldCombine(ExpressionPtr       src /* lhs */,
-                                     ExpressionPtr       dst /* rhs */,
-                                     unsigned            srcOffset,
-                                     unsigned            dstOffset,
-                                     unsigned            width,
-                                     std::optional<bool> srcIsZero = std::nullopt,
-                                     std::optional<bool> dstIsZero = std::nullopt,
-                                     std::string         comment   = "")
-                : Binary{src, dst, comment}
-                , srcOffset(srcOffset)
-                , dstOffset(dstOffset)
-                , width(width)
-                , srcIsZero(srcIsZero)
-                , dstIsZero(dstIsZero)
-            {
-            }
-
-            BitFieldCombine(BitFieldCombine const& other)
-                : Binary{other.lhs, other.rhs, other.comment}
-            {
-                copyParams(other);
-            }
-
-            BitFieldCombine& copyParams(const BitFieldCombine& other)
-            {
-                srcOffset = other.srcOffset;
-                dstOffset = other.dstOffset;
-                width     = other.width;
-                srcIsZero = other.srcIsZero;
-                dstIsZero = other.dstIsZero;
-                return *this;
-            }
-
-            unsigned srcOffset;
-            unsigned dstOffset;
-            unsigned width;
+            unsigned srcOffset = 0u;
+            unsigned dstOffset = 0u;
+            unsigned width     = 0u;
 
             // if srcIsZero sets to true, that means bits outside [srcOffset:srcOffset+width-1] are 0
-            std::optional<bool> srcIsZero;
+            std::optional<bool> srcIsZero = std::nullopt;
             // if dstIsZero sets to true, that means bits [dstOffset:dstOffset+width-1] are 0
-            std::optional<bool> dstIsZero;
+            std::optional<bool> dstIsZero = std::nullopt;
 
             constexpr static inline auto                Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes     EvalTimes{EvaluationTime::Count};
