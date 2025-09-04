@@ -301,6 +301,12 @@ namespace rocRoller::KernelGraph
         std::vector<Connection> getCoordinateConnections(int coordinate) const;
 
         /**
+         * @brief Get the subdimension of the coordinate that is
+         * connected to the control operation
+         */
+        int getConnectionSubdimension(int control, int coordinate) const;
+
+        /**
          * @brief Emit DOT representation of connections.
          *
          * Currently, addLabels will use the hash id for any connections which makes this representation

@@ -148,59 +148,44 @@ namespace rocRoller
             auto [target, direction] = getOperationTarget(opTag, *m_graph, isDirect2LDS);
             auto [required, path]    = findRequiredCoordinates(target, direction, *m_graph);
 
+            auto unrolls = filterCoordinates<Unroll>(required, *m_graph);
+            if(unrolls.size() == 0)
+                return nullptr;
+
             ExpressionPtr result = Expression::literal(0u);
 
-            auto const                       maxSubDim = 3;
-            std::vector<std::pair<int, int>> unrollCoords(maxSubDim, {-1, -1});
-
-            auto isTypeAndSubDimension = [](auto ctype) {
-                return (std::holds_alternative<Connections::TypeAndSubDimension>(ctype));
+            auto getUnrollStrideCoordinate = [this](int opTag, int subdimension) {
+                for(auto const& c : m_graph->mapper.getConnections(opTag))
+                {
+                    if(std::holds_alternative<Connections::UnrollStride>(c.connection))
+                    {
+                        auto curConnection = std::get<Connections::UnrollStride>(c.connection);
+                        auto unrollDim     = curConnection.unrollDimension;
+                        if(unrollDim != subdimension)
+                            continue;
+                        return c.coordinate;
+                    }
+                }
+                return -1;
             };
 
-            auto isUnrollStride = [](auto ctype) {
-                return (std::holds_alternative<Connections::UnrollStride>(ctype));
-            };
-
-            for(auto const& c : m_graph->mapper.getConnections(opTag))
+            for(auto const& unroll : unrolls)
             {
-                if(isTypeAndSubDimension(c.connection))
+                auto const subDimension = m_graph->mapper.getConnectionSubdimension(opTag, unroll);
+                auto       strideTag    = getUnrollStrideCoordinate(opTag, subDimension);
+                if(strideTag != -1)
                 {
-                    auto maybeUnroll = m_graph->coordinates.get<Unroll>(c.coordinate);
-                    if(!maybeUnroll)
-                        continue;
+                    auto [strideExpr, strideAttrs]
+                        = m_context->registerTagManager()->getExpression(strideTag);
 
-                    auto curConnection = std::get<Connections::TypeAndSubDimension>(c.connection);
-                    auto subdim        = curConnection.subdimension;
-                    AssertFatal(subdim < maxSubDim, ShowValue(subdim));
-                    unrollCoords[subdim].first = c.coordinate;
+                    Log::debug("  unroll coord {} value: {}",
+                               unroll,
+                               toString(coords.getCoordinate(unroll)));
+                    Log::debug("  stride coord {} expr: {}", strideTag, toString(strideExpr));
+                    result = result + coords.getCoordinate(unroll) * strideExpr;
                 }
-                else if(isUnrollStride(c.connection))
-                {
-                    auto curConnection = std::get<Connections::UnrollStride>(c.connection);
-                    auto subdim        = curConnection.unrollDimension;
-                    AssertFatal(subdim < maxSubDim, ShowValue(subdim));
-                    unrollCoords[subdim].second = c.coordinate;
-                }
-                else
-                    continue;
             }
 
-            for(auto const& unrollStride : unrollCoords)
-            {
-                auto [unrollTag, strideTag] = unrollStride;
-                if(unrollTag == -1 || strideTag == -1)
-                    continue;
-
-                auto [strideExpr, strideAttrs]
-                    = m_context->registerTagManager()->getExpression(strideTag);
-
-                Log::debug("  unroll coord {} value: {}",
-                           unrollTag,
-                           toString(coords.getCoordinate(unrollTag)));
-                Log::debug("  stride coord {} expr: {}", strideTag, toString(strideExpr));
-
-                result = result + coords.getCoordinate(unrollTag) * strideExpr;
-            }
             return result;
         }
 

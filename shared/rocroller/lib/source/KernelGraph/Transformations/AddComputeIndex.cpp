@@ -423,28 +423,24 @@ namespace rocRoller::KernelGraph
     {
         auto [target, direction] = getOperationTarget(candidate, kgraph, isDirect2LDS);
         auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
+        auto unrolls             = filterCoordinates<Unroll>(required, kgraph);
 
-        for(auto const& c : kgraph.mapper.getConnections(candidate))
+        for(auto const& unroll : unrolls)
         {
-            if(std::holds_alternative<Connections::TypeAndSubDimension>(c.connection))
             {
-                auto curConnection = std::get<Connections::TypeAndSubDimension>(c.connection);
-                auto maybeUnroll   = kgraph.coordinates.get<Unroll>(c.coordinate);
 
-                if(maybeUnroll)
                 {
-                    auto const subDimension = curConnection.subdimension;
+                    auto const subDimension
+                        = kgraph.mapper.getConnectionSubdimension(candidate, unroll);
                     // Find the neighbour of the Unroll that:
                     // 1. is in the load/store coordinate transform path
                     // 2. has a Stride edge connected to it
                     std::optional<int> maybeStrideTag;
                     std::vector<int>   neighbourNodes;
                     if(direction == Graph::Direction::Downstream)
-                        neighbourNodes
-                            = kgraph.coordinates.parentNodes(c.coordinate).to<std::vector>();
+                        neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
                     else
-                        neighbourNodes
-                            = kgraph.coordinates.childNodes(c.coordinate).to<std::vector>();
+                        neighbourNodes = kgraph.coordinates.childNodes(unroll).to<std::vector>();
 
                     for(auto neighbourNode : neighbourNodes)
                     {

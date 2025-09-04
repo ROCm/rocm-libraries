@@ -120,6 +120,36 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    int ControlToCoordinateMapper::getConnectionSubdimension(int control, int coordinate) const
+    {
+        auto iter = m_map.find(control);
+        if(iter != m_map.end())
+        {
+            for(auto const& [conn, coord] : iter->second)
+            {
+                if(coord == coordinate)
+                {
+                    if(std::holds_alternative<Connections::TypeAndSubDimension>(conn))
+                    {
+                        auto curConnection = std::get<Connections::TypeAndSubDimension>(conn);
+                        return curConnection.subdimension;
+                    }
+                    else if(std::holds_alternative<Connections::UnrollStride>(conn))
+                    {
+                        auto curConnection = std::get<Connections::UnrollStride>(conn);
+                        return curConnection.unrollDimension;
+                    }
+                    else
+                    {
+                        return -1;
+                    }
+                }
+                // rv.push_back({control, coord, conn});
+            }
+        }
+        return -1;
+    }
+
     void ControlToCoordinateMapper::purge(int control)
     {
         auto iter = m_map.find(control);
