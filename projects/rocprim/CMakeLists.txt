@@ -206,9 +206,11 @@ endif()
 
 # Tests
 if(BUILD_TEST)
-  # If building tests from installed libs, we need to make sure the versions match
   if(USE_SYSTEM_LIB)
-    find_package(rocprim ${PROJECT_VERSION} REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+    find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+    if (NOT ${rocprim_VERSION} VERSION_EQUAL ${VERSION_STRING})
+      message(WARNING "The installed rocprim version, ${rocprim_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+    endif()
   endif()
 
   if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
