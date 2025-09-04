@@ -11,6 +11,13 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added `projects/hipcub/hipcub/include/hipcub/backend/rocprim/util_mdspan.hpp` to support `::hipcub::extents`.
 * Added `::hipcub::ForEachInExtents` API.
 
+* hipCUB and its dependency rocPRIM have been moved into the new rocm-libraries "monorepo" repository (https://github.com/ROCm/rocm-libraries). This repository contains a number of ROCm libraries that are frequently used together.
+  * The repository migration requires a few changes to the way that hipCUB fetches library dependencies.
+  * CMake build option `ROCPRIM_FETCH_METHOD` may be set to one of the following:
+    * `PACKAGE` - (default) searches for a preinstalled packaged version of the dependency. If it is not found, the build will fall back using option `DOWNLOAD`, below.
+    * `DOWNLOAD` - downloads the dependency from the rocm-libraries repository. If git >= 2.25 is present, this option uses a sparse checkout that avoids downloading more than it needs to. If not, the whole monorepo is downloaded (this may take some time).
+    * `MONOREPO` - this options is intended to be used if you are building hipCUB from within a copy of the rocm-libraries repository that you have cloned (and therefore already contains rocPRIM). When selected, the build will try find the dependency in the local repository tree. If it cannot be found, the build will attempt to use git to perform a sparse-checkout of rocPRIM. If that also fails, it will fall back to using the `DOWNLOAD` option described above.
+    
 ### Removed
 
 * Removed `TexRefInputIterator`, which was removed from CUB after CCCL's 2.6.0 release. This API should have already been removed, but somehow it remained and was not tested.
@@ -29,6 +36,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Changed `cmake_minimum_required` from `3.16` to `3.18`, in order to support `CUDA_STANDARD 17` as a valid value.
 * Add support for large num_items `DeviceScan`, `DevicePartition` and `Reduce::{ArgMin, ArgMax}`.
 * Added tests for large num_items.
+* The previous dependency-related build option `DEPENDENCIES_FORCE_DOWNLOAD` has been renamed `EXTERNAL_DEPS_FORCE_DOWNLOAD` to differentiate it from the new rocPRIM dependency option described above. It's behaviour remains the same - it forces non-ROCm dependencies (Google Benchmark and Google Test) to be downloaded instead of searching for existing installed packages. This option defaults to `OFF`.
 
 ## hipCUB-4.0.0 for ROCm 7.0
 
