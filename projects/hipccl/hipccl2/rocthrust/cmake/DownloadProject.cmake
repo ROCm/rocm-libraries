@@ -96,6 +96,7 @@ function(download_project)
         SOURCE_DIR
         BINARY_DIR
         BUILD_PROJECT
+        STATUS_MSG
     )
     set(multiValueArgs "")
 
@@ -106,7 +107,10 @@ function(download_project)
         set(OUTPUT_QUIET "OUTPUT_QUIET")
     else()
         unset(OUTPUT_QUIET)
-        message(STATUS "Downloading/updating ${DL_ARGS_PROJ}")
+        if (NOT DEFINED DL_ARGS_STATUS_MSG)
+            set(DL_ARGS_STATUS_MSG "Downloading/updating")
+        endif()
+        message(STATUS "${DL_ARGS_STATUS_MSG} ${DL_ARGS_PROJ}")
     endif()
 
     # Set up where we will put our temporary CMakeLists.txt file and also
@@ -161,6 +165,8 @@ function(download_project)
     endif()
     execute_process(COMMAND ${CMAKE_COMMAND} --build .
                     RESULT_VARIABLE result
+                    OUTPUT_VARIABLE output
+                    ERROR_VARIABLE error
                     ${OUTPUT_QUIET}
                     WORKING_DIRECTORY "${DL_ARGS_DOWNLOAD_DIR}"
     )
