@@ -26,8 +26,8 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_radix_sort.hpp"
-#include "hipcub/util_type.hpp"
+#include <hipcub/device/device_radix_sort.hpp>
+#include <hipcub/util_type.hpp>
 
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"

@@ -11,6 +11,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/addressof.h>
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/memory_wrapper.h>
@@ -20,6 +27,9 @@
 
 #include <new>
 #include <utility>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -34,8 +44,8 @@ THRUST_HOST_DEVICE void destroy_at(T* location) noexcept
 template <typename Allocator, typename T>
 THRUST_HOST_DEVICE void destroy_at(Allocator const& alloc, T* location) noexcept
 {
-  using traits = typename detail::allocator_traits<typename detail::remove_cv<
-    typename detail::remove_reference<Allocator>::type>::type>::template rebind_traits<T>::other;
+  using traits = typename detail::allocator_traits<
+    _THRUST_STD::remove_cv_t<_THRUST_STD::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -57,8 +67,8 @@ template <typename Allocator, typename ForwardIt>
 THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, ForwardIt last) noexcept
 {
   using T      = typename iterator_traits<ForwardIt>::value_type;
-  using traits = typename detail::allocator_traits<typename detail::remove_cv<
-    typename detail::remove_reference<Allocator>::type>::type>::template rebind_traits<T>::other;
+  using traits = typename detail::allocator_traits<
+    _THRUST_STD::remove_cv_t<_THRUST_STD::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -85,8 +95,8 @@ template <typename Allocator, typename ForwardIt, typename Size>
 THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n) noexcept
 {
   using T      = typename iterator_traits<ForwardIt>::value_type;
-  using traits = typename detail::allocator_traits<typename detail::remove_cv<
-    typename detail::remove_reference<Allocator>::type>::type>::template rebind_traits<T>::other;
+  using traits = typename detail::allocator_traits<
+    _THRUST_STD::remove_cv_t<_THRUST_STD::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -104,6 +114,7 @@ THRUST_HOST_DEVICE void uninitialized_construct(ForwardIt first, ForwardIt last,
   using T = typename iterator_traits<ForwardIt>::value_type;
 
   ForwardIt current = first;
+
   // No exceptions in CUDA.
   NV_IF_TARGET(
     NV_IS_HOST,
@@ -130,6 +141,7 @@ void uninitialized_construct_with_allocator(Allocator const& alloc, ForwardIt fi
   typename traits::allocator_type alloc_T(alloc);
 
   ForwardIt current = first;
+
   // No exceptions in CUDA.
   NV_IF_TARGET(
     NV_IS_HOST,
@@ -152,6 +164,7 @@ void uninitialized_construct_n(ForwardIt first, Size n, Args const&... args)
   using T = typename iterator_traits<ForwardIt>::value_type;
 
   ForwardIt current = first;
+
   // No exceptions in CUDA.
   NV_IF_TARGET(
     NV_IS_HOST,
@@ -178,6 +191,7 @@ void uninitialized_construct_n_with_allocator(Allocator const& alloc, ForwardIt 
   typename traits::allocator_type alloc_T(alloc);
 
   ForwardIt current = first;
+
   // No exceptions in CUDA.
   NV_IF_TARGET(
     NV_IS_HOST,

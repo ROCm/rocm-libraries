@@ -69,7 +69,7 @@ thrust::host_vector<int> random_vector(size_t N)
   return vec;
 }
 
-int main(void)
+int main()
 {
   size_t N = 20;
 
@@ -96,7 +96,7 @@ int main(void)
   // Note: keys have not been modified
   // Note: permutation now maps unsorted keys to sorted order
 
-  // permute the key arrays by the final permuation
+  // permute the key arrays by the final permutation
   apply_permutation(lower, permutation);
   apply_permutation(middle, permutation);
   apply_permutation(upper, permutation);
