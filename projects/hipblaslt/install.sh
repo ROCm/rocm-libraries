@@ -170,12 +170,12 @@ install_packages( )
   local library_dependencies_sles=( "gcc-fortran" "make" "gcc-c++" "libcxxtools9" "rpm-build" )
   local library_dependencies_mariner=( "gfortran" "make" "rpm-build" )
 
-  local client_dependencies_ubuntu=( "python3" "python3-yaml")
-  local client_dependencies_centos=( "python36" "python3-pip" )
-  local client_dependencies_centos8=( "python39" "python3-virtualenv" )
-  local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" )
-  local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" )
-  local client_dependencies_mariner=( "python3" "python3-yaml" )
+  local client_dependencies_ubuntu=( "python3" "python3-yaml" "libopenblas-dev")
+  local client_dependencies_centos=( "python36" "python3-pip" "epel-release" "openblas-devel --enablerepo=crb")
+  local client_dependencies_centos8=( "python39" "python3-virtualenv" "epel-release" "openblas-devel --enablerepo=crb")
+  local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" "openblas-devel")
+  local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" "openblas-devel")
+  local client_dependencies_mariner=( "python3" "python3-yaml" "openblas-devel")
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
     library_dependencies_ubuntu+=("libmsgpack-dev")
@@ -320,7 +320,7 @@ install_msgpack_from_source( )
       pushd .
       mkdir -p ${build_dir}/deps
       cd ${build_dir}/deps
-      git clone -b cpp-3.0.1 https://github.com/msgpack/msgpack-c.git --depth 1
+      git clone -b cpp-3.1.0 https://github.com/msgpack/msgpack-c.git --depth 1
       cd msgpack-c
       git fetch --unshallow
       CXX=${cxx} CC=${cc} ${cmake_executable} -DMSGPACK_BUILD_TESTS=OFF -DMSGPACK_BUILD_EXAMPLES=OFF .
@@ -681,11 +681,11 @@ if [[ "${install_dependencies}" == true ]]; then
       ;;
   esac
 
-  # The following builds googletest & lapack from source, installs into cmake default /usr/local
+  # The following builds googletest from source, installs into cmake default /usr/local
   pushd .
     printf "\033[32mBuilding \033[33mgoogletest\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} ${root_path}/deps
+    ${cmake_executable} -DBUILD_LAPACK=OFF ${root_path}/deps
     make -j$(nproc)
     elevate_if_not_root make install
   popd
@@ -764,7 +764,7 @@ pushd .
     tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_DEVICE=OFF"
   else
     if [[ -n "${tensile_logic}" ]]; then
-      tensile_opt="${tensile_opt} -D{HIPBLASLT_LIBLOGIC_PATH}=${tensile_logic}"
+      tensile_opt="${tensile_opt} -D{TENSILELITE_LIBLOGIC_PATH}=${tensile_logic}"
     fi
     # tensile_opt="${tensile_opt} -DTensile_CODE_OBJECT_VERSION=${tensile_cov}"
     if [[ ${tensile_threads} != $(nproc) ]]; then

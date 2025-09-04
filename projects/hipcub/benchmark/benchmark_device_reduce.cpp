@@ -21,9 +21,10 @@
 // SOFTWARE.
 
 #include "common_benchmark_header.hpp"
+#include "hipcub/config.hpp"
 
 // HIP API
-#include "hipcub/device/device_reduce.hpp"
+#include <hipcub/device/device_reduce.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;
@@ -118,8 +119,10 @@ struct Benchmark<T, hipcub::ArgMin>
 
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         hipError_t (*ptr_to_argmin)(void*, size_t&, T*, KeyValue*, int, hipStream_t)
-            = &hipcub::DeviceReduce::ArgMin;
+        = &hipcub::DeviceReduce::ArgMin;
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
         run_benchmark<T, KeyValue>(state, size, stream, ptr_to_argmin);
     }
 };

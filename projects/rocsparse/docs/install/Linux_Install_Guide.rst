@@ -9,6 +9,7 @@ Installing and building rocSPARSE for Linux
 ********************************************************************
 
 This topic describes how to install or build rocSPARSE on Linux by using prebuilt packages or building from source.
+For information on installing and building rocSPARSE on Microsoft Windows, see :doc:`rocSPARSE for Windows <./Windows_Install_Guide>`.
 
 Prerequisites
 =============

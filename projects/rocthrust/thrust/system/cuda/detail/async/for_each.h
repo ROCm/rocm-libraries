@@ -32,22 +32,31 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if _CCCL_STD_VER >= 2017
 
-#  ifdef _CCCL_CUDA_COMPILER
+#  if _CCCL_HAS_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
+
+#    include <cub/device/device_for.cuh>
 
 #    include <thrust/distance.h>
 #    include <thrust/iterator/iterator_traits.h>
 #    include <thrust/system/cuda/detail/async/customization.h>
-#    include <thrust/system/cuda/detail/parallel_for.h>
 #    include <thrust/system/cuda/future.h>
 
 #    include <type_traits>
 
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace system
@@ -99,8 +108,7 @@ unique_eager_event async_for_each_n(execution_policy<DerivedPolicy>& policy, For
   async_for_each_fn<ForwardIt, UnaryFunction> wrapped(std::move(first), std::move(func));
 
   thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::__parallel_for::parallel_for(n, std::move(wrapped), e.stream().native_handle()),
-    "after for_each launch");
+    cub::DeviceFor::Bulk(n, std::move(wrapped), e.stream().native_handle()), "after for_each launch");
 
   return e;
 }
@@ -120,6 +128,7 @@ auto async_for_each(execution_policy<DerivedPolicy>& policy, ForwardIt first, Se
 
 } // namespace cuda_cub
 
+_CCCL_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // _CCCL_CUDA_COMPILER
