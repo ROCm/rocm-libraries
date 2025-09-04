@@ -118,7 +118,13 @@ install_yum_packages( )
   for package in "${package_dependencies[@]}"; do
     if [[ $(yum list installed ${package} &> /dev/null; echo $? ) -ne 0 ]]; then
       printf "\033[32mInstalling \033[33m${package}\033[32m from distro package manager\033[0m\n"
-      elevate_if_not_root yum -y --nogpgcheck install ${package}
+      if [[ ${package} == "openblas-devel" ]]; then
+        extra_opts="--enablerepo=crb"
+      else
+        extra_opts=""
+      fi
+
+      elevate_if_not_root yum -y --nogpgcheck install ${package} ${extra_opts}
     fi
   done
 }
@@ -171,8 +177,8 @@ install_packages( )
   local library_dependencies_mariner=( "gfortran" "make" "rpm-build" )
 
   local client_dependencies_ubuntu=( "python3" "python3-yaml" "libopenblas-dev")
-  local client_dependencies_centos=( "python36" "python3-pip" "epel-release" "openblas-devel --enablerepo=crb")
-  local client_dependencies_centos8=( "python39" "python3-virtualenv" "epel-release" "openblas-devel --enablerepo=crb")
+  local client_dependencies_centos=( "python36" "python3-pip" "epel-release" "openblas-devel")
+  local client_dependencies_centos8=( "python39" "python3-virtualenv" "epel-release" "openblas-devel")
   local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" "openblas-devel")
   local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" "openblas-devel")
   local client_dependencies_mariner=( "python3" "python3-yaml" "openblas-devel")
