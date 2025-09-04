@@ -32,6 +32,7 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <sstream>
+#include <unordered_map>
 
 namespace rocRoller::KernelGraph::MemoryTracer
 {
@@ -185,6 +186,34 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
 
         Throw<FatalError>("Unsupported dword count: ", dwords);
+    }
+
+    uint LDSBankModel::calculateBankConflicts(const std::vector<uint32_t>& addresses,
+                                              uint                         entryWidthInBytes,
+                                              uint                         numBanks)
+    {
+        if(addresses.empty())
+            return 0;
+
+        std::unordered_map<uint, uint> bankCount;
+        for(auto address : addresses)
+        {
+            auto bankIndex = (address / entryWidthInBytes) % numBanks;
+            bankCount[bankIndex]++;
+        }
+
+        uint maxConflicts = 0;
+        for(const auto& [bank, count] : bankCount)
+        {
+            maxConflicts = std::max(maxConflicts, count);
+        }
+
+        return maxConflicts;
+    }
+
+    uint LDSBankModel::calculateBankConflicts(const std::vector<uint32_t>& addresses) const
+    {
+        return calculateBankConflicts(addresses, m_entryWidthInBytes, m_numBanks);
     }
 
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)

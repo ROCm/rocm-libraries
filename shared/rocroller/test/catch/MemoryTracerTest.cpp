@@ -38,7 +38,7 @@
 
 namespace MemoryTracerTest
 {
-    TEST_CASE("LDS bank conflicts", "[kernel-graph]")
+    TEST_CASE("LDS bank conflicts", "[kernel-graph][lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph;
@@ -103,7 +103,7 @@ namespace MemoryTracerTest
         }
     }
 
-    TEST_CASE("LDS threads per clock", "[kernel-graph]")
+    TEST_CASE("LDS threads per clock", "[kernel-graph][lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
@@ -143,6 +143,53 @@ namespace MemoryTracerTest
             CHECK_THROWS_AS(
                 LDSBankModel::getThreadsPerClock(ldsRead, 5, GPUArchitectureGFX::GFX950),
                 FatalError);
+        }
+    }
+
+    TEST_CASE("LDS bank conflict calculation", "[kernel-graph][lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        SECTION("Empty addresses")
+        {
+            std::vector<uint32_t> addresses;
+            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 32) == 0);
+        }
+
+        SECTION("No conflicts - all different banks")
+        {
+            // Each address maps to a different bank: 0, 4, 8, 12 => banks 0, 1, 2, 3
+            std::vector<uint32_t> addresses = {0, 4, 8, 12};
+            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 32) == 1);
+        }
+
+        SECTION("Full conflicts - all same bank")
+        {
+            // All addresses map to bank 0: 0, 128, 256, 384
+            // (0/4)%32=0, (128/4)%32=0, (256/4)%32=0, (384/4)%32=0
+            std::vector<uint32_t> addresses = {0, 128, 256, 384};
+            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 32) == 4);
+        }
+
+        SECTION("Partial conflicts")
+        {
+            // Bank 0: 0, 128 (2 addresses)
+            // Bank 1: 4 (1 address)
+            // Bank 2: 8 (1 address)
+            std::vector<uint32_t> addresses = {0, 4, 8, 128};
+            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 32) == 2);
+        }
+
+        SECTION("Different bank configurations")
+        {
+            // Test with 16 banks instead of 32
+            std::vector<uint32_t> addresses = {0, 64, 128}; // All map to bank 0
+            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 16) == 3);
+
+            // Test with different entry width (8 bytes)
+            addresses = {0, 256, 512}; // All map to bank 0
+            CHECK(LDSBankModel::calculateBankConflicts(addresses, 8, 32) == 3);
         }
     }
 }
