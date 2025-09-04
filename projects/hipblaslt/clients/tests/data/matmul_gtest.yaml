@@ -2189,7 +2189,7 @@ Tests:
   requested_solution_num: 3
   gpu_arch: '950'
 
-- name: matmul_relu_clamp_useE_bias
+- name: matmul_relu_clamp_useE
   category: pre_checkin
   function:
     matmul:
@@ -2208,7 +2208,7 @@ Tests:
   activation_type: [relu, clamp]
   activation_arg1: -1.5
   activation_arg2: 1.5
-  bias_vector: 1
+  bias_vector: [0, 1]
   bias_type: f32_r
   scaleAlpha_vector: 1
   norm_check: 1
