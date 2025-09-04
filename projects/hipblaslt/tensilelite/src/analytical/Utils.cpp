@@ -331,16 +331,16 @@ namespace TensileLite
                             << " due to LDS capacity\n";
             }
         }
-
-        if(valid_results.empty())
-        {
-            throw std::runtime_error("No valid macro-tile sizes found.");
-        }
     
         //Remove empty indices
         valid_results.erase(std::remove(valid_results.begin(), valid_results.end(), ResultTuple{}),
             valid_results.end());
 
+        if(valid_results.empty())
+        {
+            throw std::runtime_error("No valid macro-tile sizes found.");
+        }
+        
         // 1) Sort results by ascending latency.
         std::sort(valid_results.begin(), valid_results.end(), [](auto const& a, auto const& b) {
             return std::get<0>(a) < std::get<0>(b);
