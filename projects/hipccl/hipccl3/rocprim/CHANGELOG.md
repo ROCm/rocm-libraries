@@ -15,6 +15,12 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Changed tests to support `ptr-to-const` output in `/test/rocprim/test_device_batch_memcpy.cpp`.
 
+### Optimizations
+
+* Improved performance of many algorithms, by updating their tuned configs.
+  * 891 specializations have been improved.
+  * 399 specializations have been added.
+
 ### Upcoming changes
 
 * Deprecated the `->` operator for the `zip_iterator`.
