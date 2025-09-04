@@ -208,11 +208,15 @@ if(CODE_COVERAGE)
 endif()
   
 # Tests
-
-# If building tests from installed libs, we need to make sure the versions match
 if(BUILD_TEST AND USE_SYSTEM_LIB)
-  find_package(rocprim ${PROJECT_VERSION} REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
-  find_package(rocthrust ${PROJECT_VERSION} REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
+  find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+  if (NOT ${rocprim_VERSION} VERSION_EQUAL ${VERSION_STRING})
+    message(WARNING "The installed rocprim version, ${rocprim_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+  endif()
+  find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
+  if (NOT ${rocthrust_VERSION} VERSION_EQUAL ${VERSION_STRING})
+    message(WARNING "The installed rocthrust version, ${rocthrust_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+  endif()
 endif()
 
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
