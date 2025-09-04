@@ -347,6 +347,7 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
         } while(!NextCKSplitkValue<1, 128>(split_k));
     }
 
+    MIOPEN_LOG_I("Max workspace size reported by CK: " << max_workspace_size);
     return max_workspace_size;
 }
 
@@ -1138,6 +1139,14 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         return {miopenStatusInvalidValue};
     }
 
+    if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>) {
+        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value());
+        _ck_buff_des.emplace(ck_ws_size, 0);
+        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
+    } else {
+        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
+    }
+
     auto [_input1_tr_inst, _input2_tr_inst, _output_tr_inst, _output_init_tr_inst] =
         internal::MakeTaggedTransposeInstances<CKArgsType>(
             result, ctx, problem, ck_args, input1_op, input2_op, output_op, _ck_buff_des);
@@ -1244,8 +1253,6 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             output_tr_inst.ConvertTo(handle, kernels, conv_tensors);
         };
     };
-
-    result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
 #endif
     return result;
 }
@@ -1282,8 +1289,9 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
         ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         miopenAlphaBetaCase_t alpha_beta_case = problem.GetAlphaBetaCase();
-        [[maybe_unused]] bool should_allocated_wrw_buffer =
-            ShouldAllocateWorkSpaceBufferForWRW(problem);
+        auto ck_args = CKArgsType{problem};
+        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
+        [[maybe_unused]] bool should_allocated_wrw_buffer = ck_ws_size > 0;
 
         result.invoker_factory = [kernel_id                   = kernel_id,
                                   split_k                     = split_k,
@@ -1344,7 +1352,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 }
             };
         };
-        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
+        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
 #endif
         return result;
     }
