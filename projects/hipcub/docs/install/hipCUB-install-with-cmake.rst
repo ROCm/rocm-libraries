@@ -8,7 +8,7 @@
 Building and installing hipCUB with CMake
 ********************************************************************
 
-You can build and install hipCUB with CMake on AMD and NVIDIA GPUs on Windows or Linux.
+You can build and install hipCUB with CMake on Windows or Linux.
 
 Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc``, and set ``CMAKE_CXX_COMPILER`` to the compiler's absolute path. For example: 
 

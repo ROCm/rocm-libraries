@@ -22,9 +22,8 @@ The hipCUB project is located in https://github.com/ROCm/rocm-libraries/tree/dev
     * :doc:`Installing on Windows <install/hipCUB-install-on-Windows>`
     * :doc:`Installing on Linux and Windows with CMake <install/hipCUB-install-with-cmake>`
 
-  .. grid-item-card:: API Reference
+  .. grid-item-card:: Reference
 
-    * :ref:`data-type-support`
     * :doc:`API library <../doxygen/html/index>`
    
 To contribute to the documentation refer to
