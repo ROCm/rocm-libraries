@@ -189,11 +189,16 @@ if(NOT SKIP_LIBRARY)
 
       include(virtualenv)
 
+      set(ROCBLAS_TENSILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/tensile" CACHE PATH "Path to monorepo Tensile directory")
+
       if (Tensile_TEST_LOCAL_PATH)
         virtualenv_install(${Tensile_TEST_LOCAL_PATH})
         message (STATUS "using local Tensile from ${Tensile_TEST_LOCAL_PATH}, copied to ${Tensile_ROOT}")
+      elseif (IS_DIRECTORY ${ROCBLAS_TENSILE_DIR})
+        virtualenv_install(${ROCBLAS_TENSILE_DIR})
+        message (STATUS "using local path to shared Tensile from ${ROCBLAS_TENSILE_DIR}, copied to ${Tensile_ROOT}")
       else()
-        # Use the virtual-env setup and download package from specified repo:
+        # Use the virtual-env setup and download package from legacy repo, requires tensile tag file creation or tensile_tag cache variable
         set( tensile_fork "ROCm" CACHE STRING "Tensile fork to use" )
         file (STRINGS "tensile_tag.txt" read_tensile_tag)
         set( tensile_tag ${read_tensile_tag} CACHE STRING "Tensile tag to download" )
