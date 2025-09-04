@@ -26,6 +26,7 @@
 
 #pragma once
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
@@ -34,6 +35,72 @@ namespace rocRoller
     {
         namespace MemoryTracer
         {
+            namespace Expression = rocRoller::Expression;
+            using ExpressionPtr  = Expression::ExpressionPtr;
+
+            enum Direction
+            {
+                GlobalLoad,
+                GlobalStore,
+                LDSLoad,
+                LDSStore
+            };
+
+            struct MemoryInstruction
+            {
+                Direction             direction;
+                int                   dwords; // 1 for b32, 2 for b64, 3 for b96, 4 for b128
+                DataType              dataType;
+                std::vector<uint32_t> addresses; // LDS/Global addresses accessed
+            };
+
+            /**
+             * @brief Memory event expression.
+             *
+             * This structure roughly corresponds to memory instruction
+             * that the code-generator will emit.
+             */
+            struct MemoryEventExpression
+            {
+                int           operationTag; //< Operation tag
+                int           sourceTag; //< Source coordinate tag
+                int           destinationTag; //< Destination coordinate tag
+                Direction     direction; //< Memory access type
+                ExpressionPtr index; //< Index expression
+                uint          bytesRequested; //< Number of bytes requested
+            };
+
+            /**
+             * @brief Memory event simulated.
+             *
+             * This is a "blown up" version of `MemoryEventExpression`.
+             *
+             * Note that each `MemoryEventExpression` has an index
+             * expression that may contain `Workgroup` and/or `Workitem`
+             * coordinates.
+             *
+             * The `MemoryTracer` will evaluate the index expression in
+             * `MemoryEventSimulated` for a collection of `Workgroup` and
+             * `Workitem` values and create a "blown up" version of the
+             * memory event that contains the actual byte offset.
+             */
+            struct MemoryEventSimulated
+            {
+                int operationTag; //< Operation tag
+                int sourceTag; //< Source coordinate tag
+                int destinationTag; //< Destination coordinate tag
+                Direction
+                     direction; //< Memory access type: GlobalLoad, GlobalStore, LDSLoad, LDSStore
+                uint byteOffset; //< Buffer offset in bytes
+                uint bytesRequested; //< Number of bytes requested
+                uint workGroup; //< Workgroup index
+                uint workItem; //<Workitem index
+
+                // XXX Consider adding SMEM vs VMEM, ie, if VMEM, this has a Workitem dependency
+                //
+                // If VMEM, possibly remove workItem and just keep a stride?
+            };
+
             struct Summary
             {
                 static constexpr bool echoBanks = false;

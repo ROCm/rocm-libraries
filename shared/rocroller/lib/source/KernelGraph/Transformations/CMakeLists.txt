@@ -24,6 +24,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/InlineIncrements.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InlineInits.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraph_loop.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LDSBankModel.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LoadPacked.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LoopOverTileNumbers.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerLinear.cpp"
