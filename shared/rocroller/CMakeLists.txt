@@ -127,6 +127,10 @@ else()
     set(msgpack_libs msgpackc-cxx)
 endif()
 
+<<<<<<< HEAD
+=======
+find_package(Boost REQUIRED) # is 1.74.0 required?
+>>>>>>> 1a1f5ddd33 (Drop boost version requirement)
 find_package(hip REQUIRED)
 find_package(amd_comgr REQUIRED)
 if(ROCROLLER_ENABLE_LLVM)
