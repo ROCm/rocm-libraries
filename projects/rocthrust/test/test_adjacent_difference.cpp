@@ -16,14 +16,14 @@
  */
 
 #include <thrust/adjacent_difference.h>
+#include <thrust/device_free.h>
+#include <thrust/device_malloc.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 TESTS_DEFINE(AdjacentDifferenceTests, FullTestsParams);
 TESTS_DEFINE(AdjacentDifferenceVariableTests, NumericalTestsParams);
@@ -31,40 +31,32 @@ TESTS_DEFINE(AdjacentDifferenceVariableTests, NumericalTestsParams);
 TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector input(3);
-  Vector output(3);
-  input[0] = 1;
-  input[1] = 4;
-  input[2] = 6;
-
+  Vector input{1, 4, 6, 7};
+  Vector output(4);
   typename Vector::iterator result;
 
-  result = thrust::adjacent_difference(Policy{}, input.begin(), input.end(), output.begin());
+  result = thrust::adjacent_difference(input.begin(), input.end(), output.begin());
 
-  ASSERT_EQ(result - output.begin(), 3);
-  ASSERT_EQ(output[0], T(1));
-  ASSERT_EQ(output[1], T(3));
-  ASSERT_EQ(output[2], T(2));
+  ASSERT_EQ(result - output.begin(), 4);
+  Vector ref{1, 3, 2, 1};
+  ASSERT_EQ(output, ref);
 
-  result = thrust::adjacent_difference(Policy{}, input.begin(), input.end(), output.begin(), thrust::plus<T>());
+  result = thrust::adjacent_difference(input.begin(), input.end(), output.begin(), thrust::plus<T>());
 
-  ASSERT_EQ(result - output.begin(), 3);
-  ASSERT_EQ(output[0], T(1));
-  ASSERT_EQ(output[1], T(5));
-  ASSERT_EQ(output[2], T(10));
+  ASSERT_EQ(result - output.begin(), 4);
+  ref = {1, 5, 10, 13};
+  ASSERT_EQ(output, ref);
 
   // test in-place operation, result and first are permitted to be the same
-  result = thrust::adjacent_difference(Policy{}, input.begin(), input.end(), input.begin());
+  result = thrust::adjacent_difference(input.begin(), input.end(), input.begin());
 
-  ASSERT_EQ(result - input.begin(), 3);
-  ASSERT_EQ(input[0], T(1));
-  ASSERT_EQ(input[1], T(3));
-  ASSERT_EQ(input[2], T(2));
+  ASSERT_EQ(result - input.begin(), 4);
+  ref = {1, 3, 2, 1};
+  ASSERT_EQ(input, ref);
 }
 
 TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifference)
@@ -94,25 +86,25 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifference)
       h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin());
       d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin());
 
-      ASSERT_EQ(h_result - h_output.begin(), size);
-      ASSERT_EQ(d_result - d_output.begin(), size);
-      ASSERT_EQ_QUIET(h_output, d_output);
+      ASSERT_EQ(std::size_t(h_result - h_output.begin()), size);
+      ASSERT_EQ(std::size_t(d_result - d_output.begin()), size);
+      ASSERT_EQ(h_output, d_output);
 
       h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
       d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
 
-      ASSERT_EQ(h_result - h_output.begin(), size);
-      ASSERT_EQ(d_result - d_output.begin(), size);
-      ASSERT_EQ_QUIET(h_output, d_output);
+      ASSERT_EQ(std::size_t(h_result - h_output.begin()), size);
+      ASSERT_EQ(std::size_t(d_result - d_output.begin()), size);
+      ASSERT_EQ(h_output, d_output);
 
       // in-place operation
       h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_input.begin(), thrust::plus<T>());
       d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_input.begin(), thrust::plus<T>());
 
-      ASSERT_EQ(h_result - h_input.begin(), size);
-      ASSERT_EQ(d_result - d_input.begin(), size);
-      ASSERT_EQ_QUIET(h_input, h_output); // computed previously
-      ASSERT_EQ_QUIET(d_input, d_output); // computed previously
+      ASSERT_EQ(std::size_t(h_result - h_input.begin()), size);
+      ASSERT_EQ(std::size_t(d_result - d_input.begin()), size);
+      ASSERT_EQ(h_input, h_output); // computed previously
+      ASSERT_EQ(d_input, d_output); // computed previously
     }
   }
 }
@@ -148,10 +140,10 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifferenceInPlaceWithRel
       h_result = thrust::adjacent_difference(h_input.cbegin(), h_input.cend(), h_input.begin(), thrust::plus<T>());
       d_result = thrust::adjacent_difference(d_input.cbegin(), d_input.cend(), d_input.begin(), thrust::plus<T>());
 
-      ASSERT_EQ(h_result - h_input.begin(), size);
-      ASSERT_EQ(d_result - d_input.begin(), size);
-      ASSERT_EQ_QUIET(h_output, h_input); // reference computed previously
-      ASSERT_EQ_QUIET(d_output, d_input); // reference computed previously
+      ASSERT_EQ(std::size_t(h_result - h_input.begin()), size);
+      ASSERT_EQ(std::size_t(d_result - d_input.begin()), size);
+      ASSERT_EQ(h_output, h_input); // reference computed previously
+      ASSERT_EQ(d_output, d_input); // reference computed previously
     }
   }
 }
@@ -174,13 +166,12 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifferenceDiscardIterato
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_input = h_input;
 
-      thrust::discard_iterator<> h_result;
-      thrust::discard_iterator<> d_result;
+      thrust::discard_iterator<> h_result =
+        thrust::adjacent_difference(h_input.begin(), h_input.end(), thrust::make_discard_iterator());
+      thrust::discard_iterator<> d_result =
+        thrust::adjacent_difference(d_input.begin(), d_input.end(), thrust::make_discard_iterator());
 
-      h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), thrust::make_discard_iterator());
-      d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), thrust::make_discard_iterator());
-
-      thrust::discard_iterator<> reference(static_cast<std::ptrdiff_t>(size));
+      thrust::discard_iterator<> reference(size);
 
       ASSERT_EQ_QUIET(reference, h_result);
       ASSERT_EQ_QUIET(reference, d_result);
@@ -259,5 +250,3 @@ TEST(AdjacentDifferenceTests, TestAdjacentDifferenceDevice)
     }
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

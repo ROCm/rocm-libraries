@@ -4345,12 +4345,12 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Alik_Bjlk_S_MX_B_UserArgs_MT256x192x32_MI16WjtdTFKxJRvp2QENX4hEFETLpZBd2pZ27wBywIjLBiA=
+    BaseName: Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT2Uxufxb4dXB9SKyzpsjjXhZu_BE0fs9lqqxP2YcU8caw=
     BufferLoad: true
     BufferStore: true
     CUCount: null
     CUOccupancy: -1
-    ClusterLocalRead: false
+    ClusterLocalRead: 0
     CodeObjectVersion: '4'
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -4358,7 +4358,7 @@
     DepthU: 32
     DirectToLds: true
     DirectToLdsA: true
-    DirectToLdsB: true
+    DirectToLdsB: false
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
@@ -4387,7 +4387,7 @@
       SupportUserGSU: false, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_S_MX_B_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTL1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB3072_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB3_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
+    KernelNameMin: Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA1_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB3072_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB3_ONLL1_PGR2_PLR0_PKA1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
     LDSTrInst: false
     LSCA: 32
     LSCB: 64
@@ -4423,7 +4423,7 @@
     LocalSplitUReuseLDS: 1
     LocalWritePerMfma: -1
     LocalWriteUseSgprA: true
-    LocalWriteUseSgprB: true
+    LocalWriteUseSgprB: false
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
@@ -4456,7 +4456,7 @@
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
-    NoLdsWriteCode: true
+    NoLdsWriteCode: false
     NoReject: false
     NoTailLoop: false
     NonDTLTailLoopA: false
@@ -4486,14 +4486,14 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 1
+    PrefetchLocalRead: 0
     PreloadKernArgs: true
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 20
-    SolutionNameMin: Cijk_Alik_Bjlk_S_MX_B_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTL1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB3072_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB3_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM6_WGMXCC8_WGMXCCG304
-    SourceSwap: true
+    SolutionNameMin: Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA1_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB3072_LBSPPM0_LPA8_LPB0_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB3_ONLL1_PGR2_PLR0_PKA1_SIA3_SS0_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM32_WGMXCC1_WGMXCCGn1
+    SourceSwap: 0
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -4523,6 +4523,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
+    UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: true
     UseInstOffsetForGRO: 0
@@ -4539,7 +4540,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 6
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
     _DepthU: 32
