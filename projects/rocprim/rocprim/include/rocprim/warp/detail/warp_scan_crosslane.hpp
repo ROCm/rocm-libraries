@@ -41,7 +41,10 @@ private:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void dispatch(F&& f)
     {
-        if SPIRV_CONSTEXPR(ROCPRIM_HAS_DPP() && UseDPP)
+        // We use a dispatch here because when we target SPIR-V, we have to know after
+        // compiling SPIR-V whether DPP is available. Therefore, this check cannot
+        // be done at the C++ constexpr-level.
+        if ROCPRIM_SPIRV_CONSTEXPR(ROCPRIM_HAS_DPP() && UseDPP)
         {
             if constexpr(UseDPP)
             {

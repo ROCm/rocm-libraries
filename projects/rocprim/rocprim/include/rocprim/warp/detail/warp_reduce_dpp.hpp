@@ -74,7 +74,7 @@ public:
             output = reduce_op(warp_move_dpp<T, 0x128>(output), output);
         }
 
-        if SPIRV_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
+        if ROCPRIM_SPIRV_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
         {
             if(VirtualWaveSize > 16)
             {

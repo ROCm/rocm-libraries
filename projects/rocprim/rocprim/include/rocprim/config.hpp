@@ -147,9 +147,9 @@
 #endif
 
 #if defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
-    #define SPIRV_CONSTEXPR
+    #define ROCPRIM_SPIRV_CONSTEXPR
 #else
-    #define SPIRV_CONSTEXPR constexpr
+    #define ROCPRIM_SPIRV_CONSTEXPR constexpr
 #endif
 
 // DPP is supported only after Volcanic Islands (GFX8+)

@@ -76,7 +76,7 @@ public:
                 output = scan_op(t, output);
         }
 
-        if SPIRV_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
+        if ROCPRIM_SPIRV_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
         {
             if(VirtualWaveSize > 16)
             {
