@@ -919,8 +919,8 @@ namespace GEMMDriverTest
                         };
 
                         valuesFile << "Values as floats:\n";
-                        logMatrixFloats("A", hostA, K, M);
-                        logMatrixFloats("B", hostB, N, K);
+                        logMatrixFloats("A", hostA, M, K);
+                        logMatrixFloats("B", hostB, K, N);
                         logMatrixFloats("C", hostC, M, N);
 
                         const auto logBytes = [&valuesFile](const auto& name, const auto& vector) {
