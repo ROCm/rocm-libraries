@@ -77,7 +77,7 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./build_tools/patch_rocm_libraries.py --repo ./monorepo --apply-to-monorepo
+          python ./build_tools/patch_rocm_libraries.py --repo ./monorepo --projects rocm-libraries --apply-to-monorepo
 
       - name: Configure Projects
         env:
