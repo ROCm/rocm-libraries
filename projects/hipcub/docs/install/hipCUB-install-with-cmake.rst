@@ -36,7 +36,7 @@ The available build options are:
 * ``BUILD_BENCHMARK``. Set this to ``ON`` to build benchmark tests. Off by default.
 * ``BUILD_TEST``. Set this to ``ON`` to build tests. Off by default. 
 * ``DEPENDENCIES_FORCE_DOWNLOAD``. Set this to ``ON`` to download the dependencies regardless of whether or not they are already installed. Off by default.
-``BUILD_OFFLOAD_COMPRESS``. Set this to ``OFF`` to prevent the ``--offload-compress`` switch from being passed to the compiler and compressing the binary. On by default.
+* ``BUILD_OFFLOAD_COMPRESS``. Set this to ``OFF`` to prevent the ``--offload-compress`` switch from being passed to the compiler and compressing the binary. On by default.
 
 Build hipCUB using the generated make file:
 

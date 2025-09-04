@@ -2,8 +2,7 @@
 # These comments will also be removed.
 root: index
 subtrees:
-  - entries:
-    - file: what-is-hipcub
+
   - caption: Installation
     entries:
     - file: install/hipCUB-prerequisites
