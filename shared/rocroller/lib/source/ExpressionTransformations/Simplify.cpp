@@ -475,14 +475,8 @@ namespace rocRoller
             ExpressionPtr operator()(BitfieldCombine const& expr) const
             {
                 auto cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.rhs)
-                {
-                    cpy.rhs = call(expr.rhs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.rhs  = call(expr.rhs);
 
                 return std::make_shared<Expression>(cpy);
             }
