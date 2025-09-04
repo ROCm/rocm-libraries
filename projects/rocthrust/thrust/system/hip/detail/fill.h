@@ -29,38 +29,63 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <thrust/system/hip/config.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/distance.h>
-#  include <thrust/iterator/counting_iterator.h>
-#  include <thrust/system/hip/detail/execution_policy.h>
-#  include <thrust/system/hip/detail/transform.h>
+#  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
+namespace __fill
+{
+
+// fill functor
+template <class Iterator, class T>
+struct functor
+{
+  Iterator it;
+  T value;
+
+  THRUST_HIP_FUNCTION
+  functor(Iterator it, T value)
+      : it(it)
+      , value(value)
+  {}
+
+  template <class Size>
+  THRUST_HIP_DEVICE_FUNCTION void operator()(Size idx)
+  {
+    it[idx] = value;
+  }
+}; // struct functor
+
+} // namespace __fill
+
 template <class Derived, class OutputIterator, class Size, class T>
-OutputIterator THRUST_HIP_FUNCTION
+OutputIterator THRUST_HOST_DEVICE
 fill_n(execution_policy<Derived>& policy, OutputIterator first, Size count, const T& value)
 {
-  return hip_rocprim::transform(
-    policy,
-    thrust::make_counting_iterator<Size>(0),
-    thrust::make_counting_iterator<Size>(count),
-    first,
-    [value] THRUST_HOST_DEVICE(Size) {
-      return value;
-    });
+  hip_rocprim::parallel_for(policy, __fill::functor<OutputIterator, T>(first, value), count);
+
+  return first + count;
 } // func fill_n
 
 template <class Derived, class ForwardIterator, class T>
-void THRUST_HIP_FUNCTION
+void THRUST_HOST_DEVICE
 fill(execution_policy<Derived>& policy, ForwardIterator first, ForwardIterator last, const T& value)
 {
   hip_rocprim::fill_n(policy, first, thrust::distance(first, last), value);
-} // func filll
+} // func fill
 
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END

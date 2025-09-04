@@ -19,8 +19,8 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(SetIntersectionByKeyDescendingTests, FullTestsParams);
@@ -29,37 +29,18 @@ TESTS_DEFINE(SetIntersectionByKeyDescendingPrimitiveTests, NumericalTestsParams)
 TYPED_TEST(SetIntersectionByKeyDescendingTests, TestSetIntersectionByKeyDescendingSimple)
 {
   using Vector   = typename TestFixture::input_type;
-  using Policy   = typename TestFixture::execution_policy;
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a_key(3), b_key(4);
-  Vector a_val(3), b_val(4);
+  Vector a_key{4, 2, 0}, b_key{4, 3, 3, 0};
+  Vector a_val(3, 0);
 
-  a_key[0] = 4;
-  a_key[1] = 2;
-  a_key[2] = 0;
-  a_val[0] = 0;
-  a_val[1] = 0;
-  a_val[2] = 0;
-
-  b_key[0] = 4;
-  b_key[1] = 3;
-  b_key[2] = 3;
-  b_key[3] = 0;
-
-  Vector ref_key(2), ref_val(2);
-  ref_key[0] = 4;
-  ref_key[1] = 0;
-  ref_val[0] = 0;
-  ref_val[1] = 0;
-
+  Vector ref_key{4, 0}, ref_val{0, 0};
   Vector result_key(2), result_val(2);
 
   thrust::pair<Iterator, Iterator> end = thrust::set_intersection_by_key(
-    Policy{},
     a_key.begin(),
     a_key.end(),
     b_key.begin(),
@@ -69,8 +50,8 @@ TYPED_TEST(SetIntersectionByKeyDescendingTests, TestSetIntersectionByKeyDescendi
     result_val.begin(),
     thrust::greater<T>());
 
-  EXPECT_EQ(result_key.end(), end.first);
-  EXPECT_EQ(result_val.end(), end.second);
+  ASSERT_EQ_QUIET(result_key.end(), end.first);
+  ASSERT_EQ_QUIET(result_val.end(), end.second);
   ASSERT_EQ(ref_key, result_key);
   ASSERT_EQ(ref_val, result_val);
 }
@@ -91,7 +72,6 @@ TYPED_TEST(SetIntersectionByKeyDescendingPrimitiveTests, TestSetIntersectionByKe
 
       thrust::host_vector<T> temp =
         get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + size);
       thrust::host_vector<T> h_b_key(temp.begin() + size, temp.end());
 
@@ -137,9 +117,8 @@ TYPED_TEST(SetIntersectionByKeyDescendingPrimitiveTests, TestSetIntersectionByKe
       d_result_key.erase(d_end.first, d_result_key.end());
       d_result_val.erase(d_end.second, d_result_val.end());
 
-      thrust::host_vector<T> d_result_key_H(d_result_key), d_result_val_H(d_result_val);
-      ASSERT_EQ(h_result_key, d_result_key_H);
-      ASSERT_EQ(h_result_val, d_result_val_H);
+      ASSERT_EQ(h_result_key, d_result_key);
+      ASSERT_EQ(h_result_val, d_result_val);
     }
   }
 }

@@ -6,7 +6,7 @@ set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory 
 set(TENSILELITE_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
 set(TENSILELITE_LIBRARY_FORMAT "" CACHE STRING "Format of master solution library files (msgpack or yaml).")
 set(TENSILELITE_ASM_DEBUG "" CACHE STRING "Keep debug information for built code objects.")
-set(TEN SILE LITE_LOGIC_FILTER "" CACHE STRING "Cutomsized logic filter, default is *, i.e. all logics.")
+set(TENSILELITE_LOGIC_FILTER "" CACHE STRING "Cutomsized logic filter, default is *, i.e. all logics.")
 set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object files.")
 set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
 

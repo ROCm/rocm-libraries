@@ -23,7 +23,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/util_device.hpp"
+#include <hipcub/util_device.hpp>
 
 template<class T>
 __global__

@@ -33,7 +33,7 @@ option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 # Find CUDA if the user wants a CUDA version.
 option(BUILD_CUDA "Look for CUDA and use that as a backend if found" OFF)
-option(BUILD_USE_LOCAL_TENSILE "Build hipSparseLt with local tensilelite" ON)
+option(BUILD_USE_LOCAL_TENSILE "Build hipSparseLt with local tensilelite" OFF)
 include(CMakeDependentOption)
 cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Enable roctx marker in hipSPARSELt" ON "BUILD_SHARED_LIBS" OFF)
 

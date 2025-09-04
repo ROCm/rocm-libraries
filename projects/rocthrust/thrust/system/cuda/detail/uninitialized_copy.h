@@ -28,7 +28,15 @@
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 #  include <thrust/distance.h>
 #  include <thrust/system/cuda/detail/execution_policy.h>
 #  include <thrust/system/cuda/detail/parallel_for.h>
@@ -65,7 +73,7 @@ struct functor
     InputType const& in = raw_reference_cast(input[idx]);
     OutputType& out     = raw_reference_cast(output[idx]);
 
-#  if defined(__CUDA__) && defined(__clang__)
+#  if _CCCL_CUDA_COMPILER(CLANG)
     // XXX unsafe, but clang is seemngly unable to call in-place new
     out = in;
 #  else

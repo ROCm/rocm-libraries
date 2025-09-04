@@ -31,31 +31,26 @@ struct is_even
 };
 
 template <typename Vector>
-void TestPartitionPointSimple(void)
+void TestPartitionPointSimple()
 {
-  using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
-  Vector v(4);
-  v[0] = 1;
-  v[1] = 1;
-  v[2] = 1;
-  v[3] = 0;
+  Vector v{1, 1, 1, 0};
 
   Iterator first = v.begin();
 
   Iterator last = v.begin() + 4;
   Iterator ref  = first + 3;
-  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, thrust::identity<T>()));
+  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
 
   last = v.begin() + 3;
   ref  = last;
-  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, thrust::identity<T>()));
+  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
 }
 DECLARE_VECTOR_UNITTEST(TestPartitionPointSimple);
 
 template <class Vector>
-void TestPartitionPoint(void)
+void TestPartitionPoint()
 {
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
@@ -71,7 +66,7 @@ void TestPartitionPoint(void)
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionPoint);
 
 template <typename ForwardIterator, typename Predicate>
-THRUST_HOST_DEVICE ForwardIterator partition_point(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
+ForwardIterator partition_point(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
 {
   system.validate_dispatch();
   return first;
@@ -89,7 +84,7 @@ void TestPartitionPointDispatchExplicit()
 DECLARE_UNITTEST(TestPartitionPointDispatchExplicit);
 
 template <typename ForwardIterator, typename Predicate>
-THRUST_HOST_DEVICE ForwardIterator partition_point(my_tag, ForwardIterator first, ForwardIterator, Predicate)
+ForwardIterator partition_point(my_tag, ForwardIterator first, ForwardIterator, Predicate)
 {
   *first = 13;
   return first;
