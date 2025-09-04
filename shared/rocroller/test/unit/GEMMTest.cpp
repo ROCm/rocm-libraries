@@ -832,6 +832,7 @@ namespace GEMMDriverTest
                     -1};
 
                 auto writeOnFailLimit = Settings::getInstance()->get(WriteOnFail);
+                res.ok                = false;
                 if(!res.ok && writeOnFailLimit > 0)
                 {
                     auto writeOnFailDir = Settings::getInstance()->get(WriteOnFailDir);
@@ -863,7 +864,7 @@ namespace GEMMDriverTest
                         if(!valuesFile.is_open())
                         {
                             Log::error("Failed to open output files for writing");
-                            break;
+                            continue;
                         }
 
                         Log::info("Values file written to: {} (file {} of {} allowed)",
