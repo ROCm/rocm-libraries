@@ -300,6 +300,7 @@ add_rocprim_test_parallel("rocprim.device_radix_sort" test_device_radix_sort.cpp
 add_rocprim_test("rocprim.device_reduce_by_key" test_device_reduce_by_key.cpp)
 add_rocprim_test("rocprim.device_reduce" test_device_reduce.cpp)
 add_rocprim_test("rocprim.device_run_length_encode" test_device_run_length_encode.cpp)
+add_rocprim_test("rocprim.device_scan_by_key" test_device_scan_by_key.cpp)
 add_rocprim_test("rocprim.device_scan" test_device_scan.cpp)
 add_rocprim_test("rocprim.device_search" test_device_search.cpp)
 add_rocprim_test_parallel("rocprim.device_segmented_radix_sort" test_device_segmented_radix_sort.cpp.in)
@@ -407,6 +408,9 @@ if(NOT WIN32)
   #  * there are symbols in the rocprim namespace but not in the inline namespace with the
   #    corresponding rocPRIM version;
   #  * any kernels are visible (usually they have "kernel" in their names).
+
+  # The current compiler ignores `__attribute__((__visibility__("hidden")))` for executables,
+  # but not for libraries, so we remove the `|kernel` from the regex in rocprim.linking_symbols.
   string(REPLACE ";" " " NM_ARGS_STR "${NM_ARGS}")
   add_test(
     NAME "rocprim.linking_lib1_symbols"
@@ -418,7 +422,7 @@ if(NOT WIN32)
   )
   add_test(
     NAME "rocprim.linking_symbols"
-    COMMAND sh -c "${CMAKE_NM} ${NM_ARGS_STR} $<TARGET_FILE:test_linking> | grep -c -P \"(rocprim::(?!ROCPRIM_${rocprim_VERSION_NUMBER}_NS))|kernel\""
+    COMMAND sh -c "${CMAKE_NM} ${NM_ARGS_STR} $<TARGET_FILE:test_linking> | grep -c -P \"(rocprim::(?!ROCPRIM_${rocprim_VERSION_NUMBER}_NS))\""
   )
   set_tests_properties(
     "rocprim.linking_lib1_symbols"

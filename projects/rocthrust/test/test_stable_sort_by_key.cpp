@@ -19,8 +19,8 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(StableSortByKeyTests, UnsignedIntegerTestsParams);
@@ -66,7 +66,7 @@ TEST(StableSortByKeyTests, TestStableSortByKeyDispatchImplicit)
 template <typename T>
 struct less_div_10
 {
-  __host__ __device__ bool operator()(const T& lhs, const T& rhs) const
+  THRUST_HOST_DEVICE bool operator()(const T& lhs, const T& rhs) const
   {
     return ((int) lhs) / 10 < ((int) rhs) / 10;
   }
@@ -77,46 +77,14 @@ void InitializeSimpleStableKeyValueSortTest(
   Vector& unsorted_keys, Vector& unsorted_values, Vector& sorted_keys, Vector& sorted_values)
 {
   unsorted_keys.resize(9);
+  unsorted_keys = {25, 14, 35, 16, 26, 34, 36, 24, 15};
   unsorted_values.resize(9);
-  unsorted_keys[0]   = 25;
-  unsorted_values[0] = 0;
-  unsorted_keys[1]   = 14;
-  unsorted_values[1] = 1;
-  unsorted_keys[2]   = 35;
-  unsorted_values[2] = 2;
-  unsorted_keys[3]   = 16;
-  unsorted_values[3] = 3;
-  unsorted_keys[4]   = 26;
-  unsorted_values[4] = 4;
-  unsorted_keys[5]   = 34;
-  unsorted_values[5] = 5;
-  unsorted_keys[6]   = 36;
-  unsorted_values[6] = 6;
-  unsorted_keys[7]   = 24;
-  unsorted_values[7] = 7;
-  unsorted_keys[8]   = 15;
-  unsorted_values[8] = 8;
+  unsorted_values = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 
   sorted_keys.resize(9);
+  sorted_keys = {14, 16, 15, 25, 26, 24, 35, 34, 36};
   sorted_values.resize(9);
-  sorted_keys[0]   = 14;
-  sorted_values[0] = 1;
-  sorted_keys[1]   = 16;
-  sorted_values[1] = 3;
-  sorted_keys[2]   = 15;
-  sorted_values[2] = 8;
-  sorted_keys[3]   = 25;
-  sorted_values[3] = 0;
-  sorted_keys[4]   = 26;
-  sorted_values[4] = 4;
-  sorted_keys[5]   = 24;
-  sorted_values[5] = 7;
-  sorted_keys[6]   = 35;
-  sorted_values[6] = 2;
-  sorted_keys[7]   = 34;
-  sorted_values[7] = 5;
-  sorted_keys[8]   = 36;
-  sorted_values[8] = 6;
+  sorted_values = {1, 3, 8, 0, 4, 7, 2, 5, 6};
 }
 
 TYPED_TEST(StableSortByKeyVectorTests, TestStableSortByKeySimple)
@@ -165,6 +133,30 @@ TYPED_TEST(StableSortByKeyVectorPrimitiveTests, TestStableSortByKey)
       ASSERT_EQ(h_keys, d_keys);
       ASSERT_EQ(h_values, d_values);
     }
+  }
+}
+
+TYPED_TEST(StableSortByKeyTests, TestStableSortByKeySemantics)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    thrust::host_vector<T> h_keys   = random_integers<T>(size);
+    thrust::device_vector<T> d_keys = h_keys;
+
+    thrust::host_vector<T> h_values   = random_integers<T>(size);
+    thrust::device_vector<T> d_values = h_values;
+
+    thrust::stable_sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), less_div_10<T>());
+    thrust::stable_sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), less_div_10<T>());
+
+    ASSERT_EQ(h_keys, d_keys);
+    ASSERT_EQ(h_values, d_values);
   }
 }
 

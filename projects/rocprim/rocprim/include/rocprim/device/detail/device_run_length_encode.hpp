@@ -817,7 +817,7 @@ public:
     }
 };
 
-template<typename Config,
+template<typename ArchConfig,
          typename OffsetCountPairType,
          typename InputIterator,
          typename OffsetsOutputIterator,
@@ -837,7 +837,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<typename Config,
+template<typename ArchConfig,
          typename OffsetCountPairType,
          typename InputIterator,
          typename OffsetsOutputIterator,
@@ -854,7 +854,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             const size_t              size)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr non_trivial_runs_config_params params     = device_params<Config>();
+    static constexpr non_trivial_runs_config_params params     = ArchConfig::params;
     static constexpr unsigned int                   block_size = params.kernel_config.block_size;
     static constexpr unsigned int         items_per_thread  = params.kernel_config.items_per_thread;
     static constexpr block_load_method    load_input_method = params.load_input_method;

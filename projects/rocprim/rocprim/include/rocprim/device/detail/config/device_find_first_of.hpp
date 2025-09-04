@@ -227,7 +227,7 @@ struct default_find_first_of_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<64, 13>
+    : find_first_of_config<64, 16>
 {};
 
 // Based on value_type = int8_t
@@ -323,7 +323,7 @@ template<class value_type>
 struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx90a),
                                     value_type,
                                     std::enable_if_t<((sizeof(value_type) <= 1))>>
-    : find_first_of_config<512, 1>
+    : find_first_of_config<256, 10>
 {};
 
 // Based on value_type = rocprim::int128_t
@@ -394,7 +394,7 @@ struct default_find_first_of_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : find_first_of_config<1024, 6>
+    : find_first_of_config<1024, 7>
 {};
 
 // Based on value_type = int
@@ -412,7 +412,7 @@ struct default_find_first_of_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : find_first_of_config<512, 15>
+    : find_first_of_config<1024, 9>
 {};
 
 // Based on value_type = int8_t
@@ -421,6 +421,15 @@ struct default_find_first_of_config<static_cast<unsigned int>(target_arch::gfx94
                                     value_type,
                                     std::enable_if_t<((sizeof(value_type) <= 1))>>
     : find_first_of_config<1024, 11>
+{};
+
+// Based on value_type = rocprim::int128_t
+template<class value_type>
+struct default_find_first_of_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<((sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
+    : find_first_of_config<256, 3>
 {};
 
 } // end namespace detail
