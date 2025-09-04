@@ -9,6 +9,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added `get_sreg_lanemask_lt`, `get_sreg_lanemask_le`, `get_sreg_lanemask_gt` and `get_sreg_lanemask_ge`.
 * Added `rocprim::transform_output_iterator` and `rocprim::make_transform_output_iterator`.
 * Added experimental support for SPIR-V, to use the correct tuned config for part of the appliable algorithms.
+* Added a new cmake option, `BUILD_OFFLOAD_COMPRESS`. When rocPRIM is build with this option enabled, the `--offload-compress` switch is passed to the compiler. This causes the compiler to compress the binary that it generates. Compression can be useful in cases where you are compiling for a large number of targets, since this often results in a large binary. Without compression, in some cases, the generated binary may become so large symbols are placed out of range, resulting in linking errors. The new `BUILD_OFFLOAD_COMPRESS` option is set to `ON` by default.
 
 ### Changed
 
