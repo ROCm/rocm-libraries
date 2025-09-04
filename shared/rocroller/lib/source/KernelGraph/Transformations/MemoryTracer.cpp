@@ -580,44 +580,7 @@ namespace rocRoller::KernelGraph
 
             void operator()(int tag, LoadLinear const& op, Transformer coords) {}
 
-            void operator()(int tag, LoadTiled const& load, Transformer coords)
-            {
-                return; // Untested
-
-                auto [userTag, user] = m_graph.getDimension<User>(tag);
-                auto [tileTag, tile] = m_graph.getDimension<MacroTile>(tag);
-
-                if(tile.memoryType != MemoryType::VGPR)
-                    return;
-
-                // This seems wrong?
-                auto numBytes
-                    = DataTypeInfo::Get(load.varType.getDereferencedType()).elementBits / 8u;
-
-                auto m = tile.sizes[0];
-                auto n = tile.sizes[1];
-
-                auto elemX = m_graph.mapper.get<ElementNumber>(tag, 0);
-                auto elemY = m_graph.mapper.get<ElementNumber>(tag, 1);
-
-                for(auto i = 0; i < m; ++i)
-                {
-                    coords.setCoordinate(elemX, Expression::literal(i));
-                    for(auto j = 0; j < n; ++j)
-                    {
-                        coords.setCoordinate(elemY, Expression::literal(j));
-
-                        auto index = coords.reverse({userTag})[0];
-
-                        m_events.push_back({tag,
-                                            userTag,
-                                            tileTag,
-                                            Direction::GlobalLoad,
-                                            index * Expression::literal(numBytes),
-                                            numBytes});
-                    }
-                }
-            }
+            void operator()(int tag, LoadTiled const& load, Transformer coords) {}
 
             void operator()(int tag, LoadVGPR const& load, Transformer coords) {}
 
