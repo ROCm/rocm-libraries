@@ -15,17 +15,22 @@
  *  limitations under the License.
  */
 
-#include <thrust/device_vector.h>
 #include <thrust/functional.h>
-#include <thrust/host_vector.h>
+#include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/iterator/transform_iterator.h>
 #include <thrust/merge.h>
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 template <class Input, class CompareFunction = thrust::less<Input>>
 struct ParamsMerge
@@ -75,7 +80,6 @@ TEST(MergeByKeyTests, UsingHip)
 TYPED_TEST(MergeByKeyTests, MergeByKeySimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -85,7 +89,6 @@ TYPED_TEST(MergeByKeyTests, MergeByKeySimple)
   Vector result_key(7), result_val(7);
 
   const auto ends = thrust::merge_by_key(
-    Policy{},
     a_key.begin(),
     a_key.end(),
     b_key.begin(),
@@ -95,8 +98,8 @@ TYPED_TEST(MergeByKeyTests, MergeByKeySimple)
     result_key.begin(),
     result_val.begin());
 
-  EXPECT_EQ(result_key.end(), ends.first);
-  EXPECT_EQ(result_val.end(), ends.second);
+  ASSERT_EQ_QUIET(result_key.end(), ends.first);
+  ASSERT_EQ_QUIET(result_val.end(), ends.second);
   ASSERT_EQ(ref_key, result_key);
   ASSERT_EQ(ref_val, result_val);
 }
@@ -122,7 +125,7 @@ thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
   return thrust::make_pair(keys_result, values_result);
 }
 
-TEST(MergeByKeyTests, MergeByKeyDispatchExplicit)
+TEST(MergeByKeyTests, TestMergeByKeyDispatchExplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -156,7 +159,7 @@ thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
   return thrust::make_pair(keys_result, values_result);
 }
 
-TEST(MergeByKeyTests, MergeByKeyDispatchImplicit)
+TEST(MergeByKeyTests, TestMergeByKeyDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -178,19 +181,21 @@ TEST(MergeByKeyTests, MergeByKeyDispatchImplicit)
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (std::is_void<CompareOp>::value)
+  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
   {
     return thrust::merge_by_key(std::forward<Args>(args)...);
   }
   else
   {
-    using C = std::conditional_t<std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+    // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
+    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
     return thrust::merge_by_key(std::forward<Args>(args)..., C{});
   }
+  __builtin_unreachable();
 }
 
 // ascending and descending
-TYPED_TEST(MergeByKeyTestsClass, TestMergeByKeyWithRandomData)
+TYPED_TEST(MergeByKeyTestsClass, TestMergeByKey)
 {
   using T                = typename TestFixture::input_type;
   using compare_function = typename TestFixture::compare_function;
@@ -205,30 +210,32 @@ TYPED_TEST(MergeByKeyTestsClass, TestMergeByKeyWithRandomData)
     {
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      thrust::host_vector<T> random_keys = get_random_data<unsigned short int>(size, 0, 255, seed);
-      thrust::host_vector<T> random_vals =
-        get_random_data<unsigned short int>(size, 0, 255, seed + seed_value_addition);
+      const auto random_keys =
+        get_random_data<int8_t>(size, get_default_limits<int8_t>::min(), get_default_limits<int8_t>::max(), seed);
+      const auto random_vals = get_random_data<int8_t>(
+        size, get_default_limits<int8_t>::min(), get_default_limits<int8_t>::max(), seed + seed_value_addition);
 
-      size_t denominators[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
-
+      const size_t denominators[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
       for (const auto& denom : denominators)
       {
-        size_t size_a = size / denom;
+        const size_t size_a = size / denom;
 
         thrust::host_vector<T> h_a_keys(random_keys.begin(), random_keys.begin() + size_a);
         thrust::host_vector<T> h_b_keys(random_keys.begin() + size_a, random_keys.end());
 
-        thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
-        thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
+        const thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
+        const thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
 
-        THRUST_IF_CONSTEXPR (std::is_void<compare_function>::value)
+        THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<compare_function>::value)
         {
           thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
           thrust::stable_sort(h_b_keys.begin(), h_b_keys.end());
         }
         else
         {
-          using C = std::conditional_t<std::is_void<compare_function>::value, thrust::less<T>, compare_function>;
+          // TODO(bgruber): remove next line in C++17 and pass compare_function{} directly to stable_sort
+          using C =
+            _THRUST_STD::conditional_t<_THRUST_STD::is_void<compare_function>::value, thrust::less<T>, compare_function>;
           thrust::stable_sort(h_a_keys.begin(), h_a_keys.end(), C{});
           thrust::stable_sort(h_b_keys.begin(), h_b_keys.end(), C{});
         }
@@ -254,6 +261,7 @@ TYPED_TEST(MergeByKeyTestsClass, TestMergeByKeyWithRandomData)
           h_b_vals.begin(),
           h_result_keys.begin(),
           h_result_vals.begin());
+
         h_result_keys.erase(h_end.first, h_result_keys.end());
         h_result_vals.erase(h_end.second, h_result_vals.end());
 
@@ -269,11 +277,8 @@ TYPED_TEST(MergeByKeyTestsClass, TestMergeByKeyWithRandomData)
         d_result_keys.erase(d_end.first, d_result_keys.end());
         d_result_vals.erase(d_end.second, d_result_vals.end());
 
-        thrust::host_vector<T> d_result_keys_h = d_result_keys;
-        thrust::host_vector<T> d_result_vals_h = d_result_vals;
-
-        ASSERT_EQ(h_result_keys, d_result_keys_h);
-        ASSERT_EQ(h_result_vals, d_result_vals_h);
+        ASSERT_EQ(h_result_keys, d_result_keys);
+        ASSERT_EQ(h_result_vals, d_result_vals);
         ASSERT_TRUE(h_end.first == h_result_keys.end());
         ASSERT_TRUE(h_end.second == h_result_vals.end());
         ASSERT_TRUE(d_end.first == d_result_keys.end());
@@ -283,7 +288,7 @@ TYPED_TEST(MergeByKeyTestsClass, TestMergeByKeyWithRandomData)
   }
 }
 
-TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyToDiscardIterator)
+TYPED_TEST(PrimitiveMergeByKeyTests, TestMergeByKeyToDiscardIterator)
 {
   using T = typename TestFixture::input_type;
 
@@ -337,14 +342,79 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyToDiscardIterator)
         thrust::make_discard_iterator(),
         thrust::make_discard_iterator());
 
-      thrust::discard_iterator<> reference(2 * size);
+      const thrust::discard_iterator<> reference(2 * size);
 
-      ASSERT_EQ(reference, h_result.first);
-      ASSERT_EQ(reference, h_result.second);
-      ASSERT_EQ(reference, d_result.first);
-      ASSERT_EQ(reference, d_result.second);
+      ASSERT_EQ_QUIET(reference, h_result.first);
+      ASSERT_EQ_QUIET(reference, h_result.second);
+      ASSERT_EQ_QUIET(reference, d_result.first);
+      ASSERT_EQ_QUIET(reference, d_result.second);
     }
   }
+}
+
+struct def_level_fn
+{
+  THRUST_DEVICE std::uint32_t operator()(int i) const
+  {
+    return static_cast<uint32_t>(i + 10);
+  }
+};
+
+struct offset_transform
+{
+  THRUST_DEVICE int operator()(int i) const
+  {
+    return i + 1;
+  }
+};
+
+// Tests the use of thrust::merge_by_key similar to cuDF in
+// https://github.com/rapidsai/cudf/blob/branch-24.08/cpp/src/lists/dremel.cu#L413
+TEST(MergeByKeyTests, TestMergeByKeyFromCuDFDremel)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  // TODO(bgruber): I have no idea what this code is actually computing, but I tried to replicate the types/iterators
+  constexpr std::ptrdiff_t empties_size = 123;
+  constexpr int max_vals_size           = 225;
+  constexpr int level                   = 4;
+  constexpr int curr_rep_values_size    = 0;
+
+  thrust::device_vector<int> empties(empties_size, 42);
+  thrust::device_vector<int> empties_idx(empties_size, 13);
+
+  thrust::device_vector<std::uint8_t> temp_rep_vals(max_vals_size);
+  thrust::device_vector<std::uint8_t> temp_def_vals(max_vals_size);
+  thrust::device_vector<std::uint8_t> rep_level(max_vals_size);
+  thrust::device_vector<std::uint8_t> def_level(max_vals_size);
+
+  auto offset_transformer  = offset_transform{};
+  auto transformed_empties = thrust::make_transform_iterator(empties.begin(), offset_transformer);
+
+  auto input_parent_rep_it = thrust::make_constant_iterator(level);
+  auto input_parent_def_it = thrust::make_transform_iterator(empties_idx.begin(), def_level_fn{});
+  auto input_parent_zip_it = thrust::make_zip_iterator(input_parent_rep_it, input_parent_def_it);
+  auto input_child_zip_it  = thrust::make_zip_iterator(temp_rep_vals.begin(), temp_def_vals.begin());
+  auto output_zip_it       = thrust::make_zip_iterator(rep_level.begin(), def_level.begin());
+
+  thrust::merge_by_key(
+    transformed_empties,
+    transformed_empties + empties_size,
+    thrust::make_counting_iterator(0),
+    thrust::make_counting_iterator(curr_rep_values_size),
+    input_parent_zip_it,
+    input_child_zip_it,
+    thrust::make_discard_iterator(),
+    output_zip_it);
+
+  thrust::device_vector<std::uint8_t> reference_rep_level(max_vals_size);
+  thrust::fill(reference_rep_level.begin(), reference_rep_level.begin() + empties_size, level);
+
+  thrust::device_vector<std::uint8_t> reference_def_level(max_vals_size);
+  thrust::fill(reference_def_level.begin(), reference_def_level.begin() + empties_size, 13 + 10);
+
+  ASSERT_EQ(reference_rep_level, rep_level);
+  ASSERT_EQ(reference_def_level, def_level);
 }
 
 template <class T>
@@ -413,7 +483,6 @@ TEST(MergeByKeyTests, TestMergeByKeyDevice)
       thrust::host_vector<T> h_values_result(h_values_a.size() + h_values_b.size());
       thrust::device_vector<T> d_values_result(d_values_a.size() + d_values_b.size());
 
-      typename thrust::host_vector<T>::iterator h_end;
       typename thrust::device_vector<T>::iterator d_end;
 
       thrust::merge_by_key(

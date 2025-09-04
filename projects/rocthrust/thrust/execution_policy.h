@@ -23,6 +23,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execute_with_allocator.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/seq.h>
@@ -109,7 +116,7 @@ using device_t = thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::detail::par_t
  *    thrust::for_each(exec, data, data + 4, ignore_argument());
  *
  *    // can't dispatch thrust::transform because no overload exists for my_policy:
- *    //thrust::transform(exec, data, data, + 4, data, thrust::identity<int>()); // error!
+ *    //thrust::transform(exec, data, data, + 4, data, ::internal::identity{}); // error!
  *
  *    return 0;
  *  }
@@ -169,7 +176,7 @@ struct execution_policy : thrust::detail::execution_policy_base<DerivedPolicy>
  *    thrust::for_each(exec, data, data + 4, ignore_argument());
  *
  *    // dispatch thrust::transform whose behavior our policy inherits
- *    thrust::transform(exec, data, data, + 4, data, thrust::identity<int>());
+ *    thrust::transform(exec, data, data, + 4, data, ::internal::identity{});
  *
  *    return 0;
  *  }
@@ -228,7 +235,7 @@ struct host_execution_policy : thrust::system::__THRUST_HOST_SYSTEM_NAMESPACE::e
  *    thrust::for_each(exec, data, data + 4, ignore_argument());
  *
  *    // dispatch thrust::transform whose behavior our policy inherits
- *    thrust::transform(exec, data, data, + 4, data, thrust::identity<int>());
+ *    thrust::transform(exec, data, data, + 4, data, ::internal::identity{});
  *
  *    return 0;
  *  }
@@ -265,7 +272,7 @@ struct device_execution_policy : thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPAC
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -312,7 +319,7 @@ static const detail::host_t host;
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -351,7 +358,7 @@ THRUST_INLINE_CONSTANT detail::device_t device;
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
