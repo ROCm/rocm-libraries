@@ -76,13 +76,13 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ${{ github.workspace }} --projects rocm-libraries --apply-to-monorepo
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --projects rocm-libraries --apply-to-monorepo
 
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=./monorepo ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=./ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
