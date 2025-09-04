@@ -70,7 +70,7 @@ public:
     {
         return problem.GetDirection() == miopen::layernorm::Direction::Forward ? 16 : 64;
     };
-    static constexpr auto max_local_size = 1024;
+    static constexpr auto max_local_size = 256;
 };
 
 struct LayernormBase : NormalizationTunableSolver<PerformanceConfigLayernorm>
