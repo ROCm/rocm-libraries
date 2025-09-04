@@ -263,11 +263,6 @@ namespace MixedArithmeticTest
                 {
                     Throw<FatalError>("Pointer value present in arithmetic test.");
                 }
-                else if constexpr(std::is_same_v<CurType,
-                                                 rocRoller::Raw32> and std::floating_point<NewType>)
-                {
-                    Throw<FatalError>("Cannot cast Raw32 to floating point type");
-                }
                 else
                 {
                     return static_cast<NewType>(v);

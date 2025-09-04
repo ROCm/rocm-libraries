@@ -449,9 +449,15 @@ namespace rocRoller
     {
         Raw32() = default;
 
-        template <typename T>
-        requires std::is_arithmetic_v<T> Raw32(T t)
+        template <std::integral T>
+        Raw32(T t)
             : DistinctType<uint32_t, Raw32>(t)
+        {
+        }
+
+        template <std::floating_point T>
+        Raw32(T t)
+            : DistinctType<uint32_t, Raw32>(std::bit_cast<uint32_t>(static_cast<float>(t)))
         {
         }
 
@@ -473,13 +479,21 @@ namespace rocRoller
             return static_cast<T>(value);
         }
 
+        template <std::floating_point T>
+        explicit operator T() const
+        {
+            return static_cast<T>(std::bit_cast<float>(value));
+        }
+
         template <typename T>
         bool operator==(T const& other) const
         {
             if constexpr(std::is_same_v<T, Raw32>)
                 return other.value == value;
-            else if constexpr(std::is_arithmetic_v<T>)
+            else if constexpr(std::integral<T>)
                 return other == value;
+            else if constexpr(std::floating_point<T>)
+                return static_cast<float>(other) == std::bit_cast<float>(value);
             else
                 return false;
         }
