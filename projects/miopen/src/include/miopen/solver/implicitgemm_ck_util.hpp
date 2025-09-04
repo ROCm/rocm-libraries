@@ -1140,7 +1140,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     }
 
     if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>) {
-        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value());
+        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
         _ck_buff_des.emplace(ck_ws_size, 0);
         result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
     } else {
