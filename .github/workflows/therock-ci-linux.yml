@@ -76,7 +76,7 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --projects rocm-libraries --apply-to-monorepo
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects rocm-libraries 
 
       - name: Configure Projects
         env:
