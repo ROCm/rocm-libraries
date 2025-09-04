@@ -275,7 +275,7 @@ based on the input types and the target architecture from the stream used.
 [CUB](https://github.com/NVlabs/cub). You can use it to port projects that use the CUB library to the
 [HIP](https://github.com/ROCm/HIP) layer and run them on AMD hardware. In the
 [ROCm](https://rocm.docs.amd.com/en/latest/) environment, hipCUB uses the rocPRIM library as a
-backend; on CUDA platforms, it uses CUB as a backend.
+backend.
 
 ## Building the documentation locally
 
