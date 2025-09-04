@@ -10,8 +10,7 @@ hipCUB is a thin wrapper library on top of
 [ROCm](https://rocm.docs.amd.com/en/latest/) software).
 
 In the [ROCm](https://rocm.docs.amd.com/en/latest/)
-environment, hipCUB uses the rocPRIM library as the backend. On CUDA platforms, it uses CUB as the
-backend.
+environment, hipCUB uses the rocPRIM library as the backend.
 
 ## Requirements
 
@@ -24,11 +23,6 @@ backend.
   * The [rocPRIM](https://github.com/ROCm/rocm-libraries) library
     * Automatically downloaded and built by the CMake script
     * Requires CMake 3.16.9 or later
-* For NVIDIA GPUs:
-  * CUDA Toolkit
-  * CCCL library (>= 2.8.2)
-    * Automatically downloaded and built by the CMake script
-    * Requires CMake 3.18 or later
 * Python 3.6 or higher (for HIP on Windows only; this is only required for install scripts)
 * Visual Studio 2019 with Clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
@@ -88,12 +82,6 @@ mkdir build; cd build
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
 #
 [CXX=hipcc] cmake ../. # or cmake-gui ../.
-
-# To configure hipCUB for Nvidia platforms, 'CXX=<path-to-nvcc>', `CXX=nvcc` or omitting the flag
-# entirely before 'cmake' is sufficient
-[CXX=nvcc] cmake -DBUILD_TEST=ON ../. # or cmake-gui ../.
-# or
-cmake -DBUILD_TEST=ON ../. # or cmake-gui ../.
 # or to build benchmarks
 cmake -DBUILD_BENCHMARK=ON ../.
 
@@ -150,8 +138,6 @@ find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/hipcub")
 
 ...
 # On ROCm: includes hipCUB headers and roc::rocprim_hip target
-# On CUDA: includes only hipCUB headers, user has to include CUB directory
-target_link_libraries(<your_target> hip::hipcub)
 ```
 
 Include only the main header file:
