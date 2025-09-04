@@ -68,9 +68,9 @@ class RotatingBuffer
 {
 public:
     RotatingBuffer(const std::vector<T>& hostData, size_t rotatingBufferSizeBytes)
-        : numElems(hostData.size()),
-          rotatingBufferElems(rotatingBufferSizeBytes > 0 ? rotatingBufferSizeBytes / sizeof(T) : 0),
-          currentOffset(0)
+        : m_numElems(hostData.size()),
+          m_rotatingBufferElems(rotatingBufferSizeBytes > 0 ? rotatingBufferSizeBytes / sizeof(T) : 0),
+          m_currentOffset(0)
     {
         if(hostData.empty())
         {
@@ -80,62 +80,62 @@ public:
         // If rotatingBufferSize == 0, disable rotation
         if(rotatingBufferSizeBytes == 0)
         {
-            buffer = make_shared_device<T>(numElems, T{});
-            hipMemcpy(buffer.get(), hostData.data(), numElems * sizeof(T), hipMemcpyHostToDevice);
+            m_buffer = make_shared_device<T>(m_numElems, T{});
+            hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice);
             return;
         }
 
-        if(rotatingBufferElems == 0)
+        if(m_rotatingBufferElems == 0)
         {
             Throw<FatalError>("RotatingBuffer: rotatingBufferSizeBytes too small for element size");
         }
 
-        if(numElems >= rotatingBufferElems)
+        if(m_numElems >= m_rotatingBufferElems)
         {
-            buffer = make_shared_device<T>(numElems, T{});
-            hipMemcpy(buffer.get(), hostData.data(), numElems * sizeof(T), hipMemcpyHostToDevice);
+            m_buffer = make_shared_device<T>(m_numElems, T{});
+            hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice);
         }
         else
         {
-            buffer = make_shared_device<T>(rotatingBufferElems, T{});
-            size_t numCopies = rotatingBufferElems / numElems;
+            m_buffer = make_shared_device<T>(m_rotatingBufferElems, T{});
+            size_t numCopies = m_rotatingBufferElems / m_numElems;
             for(size_t r = 0; r < numCopies; ++r)
             {
-                T* dst = buffer.get() + r * numElems;
-                hipMemcpy(dst, hostData.data(), numElems * sizeof(T), hipMemcpyHostToDevice);
+                T* dst = m_buffer.get() + r * m_numElems;
+                hipMemcpy(dst, hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice);
             }
         }
     }
 
     std::span<T> next()
     {
-        if(rotatingBufferElems == 0)
+        if(m_rotatingBufferElems == 0)
         {
-            currentOffset = 0;
-            return std::span<T>(buffer.get(), numElems);
+            m_currentOffset = 0;
+            return std::span<T>(m_buffer.get(), m_numElems);
         }
 
-        if(numElems < rotatingBufferElems)
+        if(m_numElems < m_rotatingBufferElems)
         {
-            currentOffset = (currentOffset + numElems) % rotatingBufferElems;
+            m_currentOffset = (m_currentOffset + m_numElems) % m_rotatingBufferElems;
         }
         else
         {
-            currentOffset = 0; // always return base
+            m_currentOffset = 0; // always return base
         }
-        if(currentOffset + numElems > (numElems < rotatingBufferElems ? rotatingBufferElems : numElems))
+        if(m_currentOffset + m_numElems > (m_numElems < m_rotatingBufferElems ? m_rotatingBufferElems : m_numElems))
         {
             Throw<FatalError>("RotatingBuffer::next: computed offset out of bounds");
         }
 
-        return std::span<T>(buffer.get() + currentOffset, numElems);
+        return std::span<T>(m_buffer.get() + m_currentOffset, m_numElems);
     }
 
 private:
-    size_t numElems;                // number of elements in one matrix
-    size_t rotatingBufferElems;     // rotating buffer size, in elements (0 means rotation is disabled)
-    size_t currentOffset;
-    std::shared_ptr<T> buffer;
+    size_t m_numElems;                // number of elements in one matrix
+    size_t m_rotatingBufferElems;     // rotating buffer size, in elements (0 means rotation is disabled)
+    size_t m_currentOffset;
+    std::shared_ptr<T> m_buffer;
 };
 
 namespace rocRoller::Client::GEMMClient
