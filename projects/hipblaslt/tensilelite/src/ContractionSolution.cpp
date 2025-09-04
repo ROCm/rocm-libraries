@@ -633,7 +633,8 @@ namespace TensileLite
         size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
         size_t startStrideAB = problemType.useInitialStridesAB ? 0 : 1;
 
-        if(gsu > 1 && sizeMapping.globalAccumulation && sizeMapping.streamK == 0)
+        // Pass wsStride if it's not in MBSK mode
+        if(gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0)
         {
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
             for(size_t i = startStrideCD; i < d.dimensions(); i++)
