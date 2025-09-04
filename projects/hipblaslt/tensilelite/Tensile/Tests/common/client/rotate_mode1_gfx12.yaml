@@ -21,7 +21,7 @@ GlobalParameters:
   MaxWorkspaceSize: 33554432
   MaxFileName: 256
   KernelTime: True
-  RotatingBufferSize: 512
+  RotatingBufferSize: 256
   RotatingMode: 1
 
 BenchmarkProblems:
