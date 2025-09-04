@@ -19,8 +19,8 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(SetSymmetricDifferenceDescendingTests, FullTestsParams);
@@ -29,37 +29,20 @@ TESTS_DEFINE(SetSymmetricDifferenceDescendingPrimitiveTests, NumericalTestsParam
 TYPED_TEST(SetSymmetricDifferenceDescendingTests, TestSetSymmetricDifferenceDescendingSimple)
 {
   using Vector   = typename TestFixture::input_type;
-  using Policy   = typename TestFixture::execution_policy;
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a(4), b(5);
+  Vector a{6, 4, 2, 0}, b{7, 4, 3, 3, 0};
 
-  a[0] = 6;
-  a[1] = 4;
-  a[2] = 2;
-  a[3] = 0;
-  b[0] = 7;
-  b[1] = 4;
-  b[2] = 3;
-  b[3] = 3;
-  b[4] = 0;
-
-  Vector ref(5);
-  ref[0] = 7;
-  ref[1] = 6;
-  ref[2] = 3;
-  ref[3] = 3;
-  ref[4] = 2;
-
+  Vector ref{7, 6, 3, 3, 2};
   Vector result(5);
 
-  Iterator end = thrust::set_symmetric_difference(
-    Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+  Iterator end =
+    thrust::set_symmetric_difference(a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
 
-  EXPECT_EQ(result.end(), end);
+  ASSERT_EQ_QUIET(result.end(), end);
   ASSERT_EQ(ref, result);
 }
 
@@ -79,7 +62,6 @@ TYPED_TEST(SetSymmetricDifferenceDescendingPrimitiveTests, TestSetSymmetricDiffe
 
       thrust::host_vector<T> temp =
         get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
       thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
 

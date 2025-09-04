@@ -153,13 +153,6 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     float* gpuInput{};
     float* gpuOutput{};
 
-    int             deviceId;
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDevice(&deviceId));
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(gpu_arch_match(deviceProperties.gcnArchName, "1[12]\\d{2}"))
-        return;
-
     auto err          = hipMalloc(&gpuInput, m * n * sizeof(float));
     err               = hipMalloc(&gpuOutput, m * n * sizeof(float));
     err               = hipMemcpyHtoD(gpuInput, input.data(), m * n * sizeof(float));
@@ -202,13 +195,6 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     float* gpuInput{};
     float* gpuGamma{};
     float* gpuBeta{};
-
-    int             deviceId;
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDevice(&deviceId));
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(gpu_arch_match(deviceProperties.gcnArchName, "1[12]\\d{2}"))
-        return;
 
     auto err = hipMalloc(&gpuOutput, m * n * sizeof(float));
     err      = hipMalloc(&gpuMean, m * sizeof(float));
@@ -313,12 +299,6 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
 TEST_P(ExtOpAMaxTest, amaxSuccess)
 {
     AMaxTestData    testdata = GetParam();
-    int             deviceId;
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDevice(&deviceId));
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(gpu_arch_match(deviceProperties.gcnArchName, "1[12]\\d{2}"))
-        return;
 
     if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F)
     {
