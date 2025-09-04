@@ -92,6 +92,14 @@ namespace rocRoller::KernelGraph
             LDSStore
         };
 
+        struct MemoryInstruction
+        {
+            Direction             direction;
+            int                   dwords; // 1 for b32, 2 for b64, 3 for b96, 4 for b128
+            DataType              dataType;
+            std::vector<uint32_t> addresses; // LDS/Global addresses accessed
+        };
+
         /**
          * @brief Memory event expression.
          *
@@ -211,11 +219,12 @@ namespace rocRoller::KernelGraph
         {
             struct LDSBankAccess
             {
-                int       operationTag;
-                int       ldsTag;
-                Direction direction;
-                uint      workitem;
-                uint      bankIndex;
+                int                            operationTag;
+                int                            ldsTag;
+                Direction                      direction;
+                uint                           workitem;
+                uint                           bankIndex;
+                std::vector<MemoryInstruction> instructions;
             };
 
             /**
@@ -239,18 +248,26 @@ namespace rocRoller::KernelGraph
 
             void simulate(MemoryEventSimulated event)
             {
-                for(int i = 0; i < event.bytesRequested; i += m_entryWidthInBytes)
-                {
-                    auto ldsAddressInBytes = event.byteOffset + i;
-                    auto bankIndex         = (ldsAddressInBytes / m_entryWidthInBytes) % m_numBanks;
+                AssertFatal(event.bytesRequested == 4,
+                            "MemoryTracer currently only supports 4-byte accesses");
 
-                    auto ldsTag = event.direction == Direction::LDSStore ? event.destinationTag
-                                                                         : event.sourceTag;
+                auto ldsAddressInBytes = event.byteOffset;
+                auto bankIndex         = (ldsAddressInBytes / m_entryWidthInBytes) % m_numBanks;
 
-                    // XXX When we break this down by instruction, need to add to LDSBankAccess struct
-                    m_bankAccesses[event.operationTag].push_back(LDSBankAccess{
-                        event.operationTag, ldsTag, event.direction, event.workItem, bankIndex});
-                }
+                auto ldsTag = event.direction == Direction::LDSStore ? event.destinationTag
+                                                                     : event.sourceTag;
+
+                MemoryInstruction instruction{event.direction,
+                                              1,
+                                              DataType::UInt32,
+                                              {static_cast<uint32_t>(ldsAddressInBytes)}};
+
+                m_bankAccesses[event.operationTag].push_back(LDSBankAccess{event.operationTag,
+                                                                           ldsTag,
+                                                                           event.direction,
+                                                                           event.workItem,
+                                                                           bankIndex,
+                                                                           {instruction}});
             }
 
             Summary summary() const
