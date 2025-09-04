@@ -154,19 +154,6 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     if(MIOPEN_TEST_GFX115X)
-        #<inline asm>:17:20: error: not a valid operand.
-        add_gtest_negative_filter("*BNBWDSmall2D_FP32*")
-        add_gtest_negative_filter("*BNBWDLarge*D*") 
-        add_gtest_negative_filter("*BNOCLBWDLargeFusedActivation2D*") 
-        add_gtest_negative_filter("*BNFWDTrain*D*")
-        add_gtest_negative_filter("*BNBWDSerialRun3D*")
-        add_gtest_negative_filter("*GPU_BNOCLFWDTrainLarge*_BFP16*")
-        add_gtest_negative_filter("*GPU_BNOCLFWDTrainLargeFusedActivation2D_BFP16*")
-        add_gtest_negative_filter("*GPU_BNOCLFWDTrainSerialRun3D_BFP16*")
-        add_gtest_negative_filter("*GPU_BNOCLBWDLarge2D_BFP16*")
-        add_gtest_negative_filter("*GPU_BNOCLBWDLarge3D_BFP16*")
-        add_gtest_negative_filter("*GPU_BNOCLBWDSerialRun3D_BFP16*")
-
 #GPU_TestMhaFind20_FP32
         add_gtest_negative_filter("*GPU_*MHA*")
         add_gtest_negative_filter("*GPU_*_Mha*")
