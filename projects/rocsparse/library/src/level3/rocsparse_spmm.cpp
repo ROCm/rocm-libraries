@@ -303,7 +303,7 @@ namespace rocsparse
                     k,
                     mat_A->nnz,
                     mat_A->descr,
-                    alpha_type, // Double check if I really need to pass compute type to buffer size
+                    alpha_type,
                     mat_A->data_type,
                     mat_A->const_val_data,
                     mat_A->row_type,
