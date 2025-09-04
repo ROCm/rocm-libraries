@@ -979,6 +979,46 @@ using common_type_t = typename common_type<Ts...>::type;
 
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
+namespace detail
+{
+
+template<typename T, typename = void>
+struct is_fixed_size_random_access_range : ::std::false_type
+{};
+
+template<typename T, size_t N>
+struct is_fixed_size_random_access_range<T[N], void> : ::std::true_type
+{};
+
+template<typename T>
+struct is_fixed_size_random_access_range<T, void_t<decltype(std::declval<T&>()[0])>>
+    : ::std::true_type
+{};
+
+// TODO: for is_fixed_size_random_access_range we also need to support array span and extents after we can use libhipcxx.
+template<typename T>
+using is_fixed_size_random_access_range_t = typename is_fixed_size_random_access_range<T>::type;
+
+template<typename T, typename = void>
+struct static_size
+{
+    static_assert(false, "static_size not supported for this type");
+};
+
+template<typename T, size_t N>
+struct static_size<T[N], void> : ::std::integral_constant<int, N>
+{};
+
+template<typename T>
+[[nodiscard]]
+__host__ __device__ __forceinline__
+constexpr size_t static_size_v()
+{
+    return static_size<T>::value;
+}
+
+} // namespace detail
+
 END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
