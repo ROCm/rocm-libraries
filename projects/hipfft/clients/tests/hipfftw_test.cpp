@@ -73,6 +73,11 @@ namespace
         static const size_t io_byte_size_limit = get_io_byte_size_limit();
         return io_byte_size_limit;
     }
+    // for readability of template specializations
+    constexpr bool valid_value          = true;
+    constexpr int  min_unsupported_rank = 4;
+
+    constexpr ptrdiff_t upper_bound_elementary_stride = 8;
 
     std::ranlux24_base& get_pseudo_rng()
     {
@@ -116,9 +121,9 @@ namespace
         hipfftw_internal_exception::flow_redirection> = R"(Redirecting execution flow)";
 
     // randomizers
-    // Note: albeit not supported, ranks > 3 are "valid" rank argument
+    // Note: albeit not supported, ranks > 3 are "valid" arguments
     // --> limiting rank value to max of 10 by default to avoid ridiculously long
-    // lengths possibly created in automated parameter generations;
+    // lengths/batches possibly created in automated parameter generations;
     template <bool validity_flag,
               int  min_rank          = validity_flag ? 1 : std::numeric_limits<int>::lowest(),
               int  max_rank          = validity_flag ? 10 : 0,
@@ -137,28 +142,35 @@ namespace
         }
         return ret;
     }
-    template <bool validity_flag, typename type_to_consider_for_validity>
+
+    template <bool strictly_positive_values, typename type_to_consider_for_validity>
     std::vector<ptrdiff_t>
-        get_random_lengths(int       desired_rank,
-                           ptrdiff_t max_abs_len
-                           = std::numeric_limits<type_to_consider_for_validity>::max(),
-                           ptrdiff_t min_abs_len = 0)
+        get_random_vector(int       desired_rank,
+                          ptrdiff_t max_abs_val
+                          = std::numeric_limits<type_to_consider_for_validity>::max(),
+                          ptrdiff_t min_abs_val = 0)
     {
         std::vector<ptrdiff_t> ret;
-        // cannot generate lengths for invalid ranks --> return empty lengths in that case
+        // cannot generate vectors for invalid ranks --> return an empty vector in that case
         if(!rank_is_valid_for_hipfftw(desired_rank))
             return ret;
-        if(min_abs_len < 0 || min_abs_len > max_abs_len)
-            throw std::invalid_argument("invalid bounds used for get_random_lengths");
+        if(min_abs_val < 0 || min_abs_val > max_abs_val)
+            throw std::invalid_argument("invalid bounds used for get_random_vector");
+        if constexpr(strictly_positive_values)
+        {
+            if(max_abs_val < 1)
+                throw std::runtime_error(
+                    "invalid bounds for generating a vector of strictly positive values");
+        }
         // generate values that are all representable as integers
         auto&                                    pseudo_rng = get_pseudo_rng();
-        std::uniform_int_distribution<ptrdiff_t> length_rng(min_abs_len, max_abs_len);
+        std::uniform_int_distribution<ptrdiff_t> val_rng(min_abs_val, max_abs_val);
         // setter lambda
-        auto set_random_len = [&]() {
+        auto set_random_values = [&]() {
             for(auto& l : ret)
             {
-                const ptrdiff_t val = length_rng(pseudo_rng);
-                if constexpr(validity_flag)
+                const ptrdiff_t val = val_rng(pseudo_rng);
+                if constexpr(strictly_positive_values)
                     l = val;
                 else
                 {
@@ -171,10 +183,14 @@ namespace
         };
 
         ret.resize(desired_rank);
-        set_random_len();
-        while(lengths_are_valid_for_hipfftw_as<type_to_consider_for_validity>(ret, desired_rank)
-              != validity_flag)
-            set_random_len();
+        set_random_values();
+        constexpr type_to_consider_for_validity min_valid_val = 1;
+        while(vector_has_valid_values_as<type_to_consider_for_validity>(
+                  ret, desired_rank, min_valid_val)
+              != strictly_positive_values)
+        {
+            set_random_values();
+        }
 
         return ret;
     }
@@ -213,46 +229,67 @@ namespace
             tmp = flags_rng(get_pseudo_rng());
         return tmp;
     }
-    size_t get_random_idx(size_t upper_bound)
+
+    size_t get_random_idx(size_t excluded_max)
     {
-        if(upper_bound == 0)
-            throw std::invalid_argument("upper_bound must be strictly positive for get_random_idx");
-        std::uniform_int_distribution<size_t> idx_rng(0, upper_bound - 1);
+        if(excluded_max == 0)
+            throw std::invalid_argument("excluded_max must be larger than 0 for get_random_idx");
+        std::uniform_int_distribution<size_t> idx_rng(0, excluded_max - 1);
         return idx_rng(get_pseudo_rng());
     }
+    template <typename T>
+    T get_random_element_in(const std::vector<T>& element_list)
+    {
+        return element_list[get_random_idx(element_list.size())];
+    }
 
-    // calculates the threshold value X such that the number of relevant elements
-    // is no greater (resp. larger) than num_elems, if all elements of lengths are
-    // all no greater (resp. larger) than X, and lengths.size() == rank [using bisection]
-    ptrdiff_t get_len_threshold(size_t num_elems, int rank, bool is_real_inplace)
+    // calculates the threshold value X such that the byte size of I/O data sets is no greater
+    // than max_byte_size, if all elements of lengths are no greater than X, and if
+    // lengths.size() == rank [using bisection]
+    template <fft_precision prec>
+    ptrdiff_t
+        get_default_layout_len_threshold_for_max_byte_size(size_t max_byte_size,
+                                                           int    rank,
+                                                           bool   real_dft,
+                                                           const std::vector<ptrdiff_t>& batches
+                                                           = std::vector<ptrdiff_t>(1, 1))
     {
         if(rank < 1)
-            throw std::invalid_argument("invalid rank used in get_len_threshold");
-        if(num_elems == 0)
+            throw std::invalid_argument(
+                "invalid rank used in get_default_layout_len_threshold_for_max_byte_size");
+        if(batches.empty() || !vector_has_valid_values_as<ptrdiff_t>(batches, batches.size(), 1))
+            throw std::invalid_argument(
+                "invalid batches used in get_default_layout_len_threshold_for_max_byte_size");
+        if(max_byte_size == 0)
             return 1;
-        constexpr ptrdiff_t X_max = std::numeric_limits<ptrdiff_t>::max();
+        const size_t        total_nbatch = product(batches.begin(), batches.end());
+        constexpr ptrdiff_t X_max        = std::numeric_limits<ptrdiff_t>::max();
         // we need to find X in [0, X_max] s.t.
-        // largest_idx(X) <= num_elems && largest_idx(X + 1) > num_elems
-        auto largest_idx = [&](ptrdiff_t X) {
-            size_t ret = rank > 1 && is_real_inplace ? 2 * (X / 2 + 1) : X;
+        // byte_size(X) <= max_byte_size && byte_size(X + 1) > max_byte_size
+        auto byte_size = [&](ptrdiff_t X) {
+            // for real DFT, default layout's largest memory footprint are in the complex domain
+            size_t ret = real_dft ? (X / 2 + 1) : X;
             for(auto i = 1; i < rank; i++)
                 ret *= X;
+            ret *= total_nbatch * sizeof(hipfftw_complex_t<prec>);
             return ret;
         };
         // initialization
-        ptrdiff_t X_down
-            = rank == 1 ? static_cast<ptrdiff_t>(num_elems)
-                        : static_cast<ptrdiff_t>(std::floor(std::pow(num_elems, 1.0 / rank)));
-        ptrdiff_t diff = 1;
-        ptrdiff_t X_up = X_down;
-        while(largest_idx(X_up) <= num_elems && X_up < X_max)
+        ptrdiff_t X_down = static_cast<ptrdiff_t>(std::floor(std::pow(
+            max_byte_size
+                / (total_nbatch
+                   * (real_dft ? sizeof(hipfftw_real_t<prec>) : sizeof(hipfftw_complex_t<prec>))),
+            1.0 / rank)));
+        ptrdiff_t diff   = 1;
+        ptrdiff_t X_up   = X_down;
+        while(byte_size(X_up) <= max_byte_size && X_up < X_max)
         {
             X_down = X_up;
             X_up   = X_up <= X_max - diff ? X_up + diff : X_max;
             diff *= 2;
         }
         diff = 1;
-        while(largest_idx(X_down) > num_elems && X_down > 0)
+        while(byte_size(X_down) > max_byte_size && X_down > 0)
         {
             X_up   = X_down;
             X_down = X_down >= diff ? X_down - diff : 0;
@@ -262,20 +299,12 @@ namespace
         while(X_up - X_down > 1)
         {
             const auto tmp = (X_up + X_down) / 2;
-            if(largest_idx(tmp) <= num_elems)
+            if(byte_size(tmp) <= max_byte_size)
                 X_down = tmp;
             else
                 X_up = tmp;
         }
         return X_down;
-    }
-
-    template <fft_precision prec>
-    size_t max_num_elems_for_data_size(size_t data_byte_size, fft_transform_type dft_kind)
-    {
-        return data_byte_size
-               / (is_real(dft_kind) ? sizeof(hipfftw_real_t<prec>)
-                                    : sizeof(hipfftw_complex_t<prec>));
     }
 
     // exception for hip runtime error(s) specifically
@@ -910,7 +939,7 @@ namespace
             }
             if(!io_allocation_is_allowed)
             {
-                // do not tolerate allow SetUp to allocate
+                // do not allow SetUp to allocate
                 bool ret = creation_io_is_null.first
                            && (creation_placement() == fft_placement_inplace
                                || creation_io_is_null.second);
@@ -971,6 +1000,7 @@ namespace
                 // plan cannot be created
                 if(valid_args_for_plan_creation)
                     return hipfftw_internal_exception::unsupported_args;
+
                 // plan cannot be created and arguments were invalid...
                 // We may however have a mixed bag of some invalid and other unsupported args.
                 // In such cases, the specific exception to expect would be ill-defined
@@ -1031,166 +1061,586 @@ namespace
         }
     };
 
-    template <fft_precision prec>
-    std::vector<hipfftw_input_validation_params<prec>> params_for_testing_input_validation_params()
+    std::vector<int> arg_validation_runtime_rank_range()
     {
-        // constexpr used for readability of template specialization values below
-        constexpr bool valid_value          = true;
-        constexpr int  min_unsupported_rank = 4;
-        // broad scope of hipfftw_helpers structs configured with (zero or possibly
-        // many) invalid/unsupported parameter value(s)
-        std::vector<hipfftw_helper<prec>> helper_scope;
+        std::vector<int> ret = {
+            get_random_rank<!valid_value>(), // invalid
+            get_random_rank<valid_value, min_unsupported_rank>(), // valid but unsupported
+            get_random_rank<valid_value, 1, min_unsupported_rank - 1>() // valid and supported
+        };
+        return ret;
+    }
+
+    template <typename validation_t = int,
+              std::enable_if_t<
+                  std::is_same_v<validation_t, int> || std::is_same_v<validation_t, ptrdiff_t>,
+                  bool> = true>
+    std::vector<std::vector<ptrdiff_t>>
+        arg_validation_strictly_positive_vec_range(int vec_size, ptrdiff_t max_value)
+    {
+        std::vector<std::vector<ptrdiff_t>> ret;
+        if(vec_size < 1)
+            return ret;
+        if(max_value < 1)
+            throw std::invalid_argument("invalid max_val in arg_validation_strictly_positive_vec");
+        // always add valid values
+        ret.emplace_back(get_random_vector<valid_value, validation_t>(vec_size, max_value));
+        // invalid integer values (most likely nonzero)
+        ret.emplace_back(get_random_vector<!valid_value, validation_t>(vec_size, max_value));
+        // invalid integer values due to some zero(es)
+        auto tmp = get_random_vector<valid_value, validation_t>(vec_size, max_value);
+        tmp[get_random_idx(tmp.size())] = 0;
+        ret.emplace_back(tmp);
+        return ret;
+    }
+
+    struct valid_values_cannot_be_created : std::runtime_error
+    {
+        valid_values_cannot_be_created()
+            : std::runtime_error::runtime_error("")
+        {
+        }
+    };
+
+    std::vector<std::vector<ptrdiff_t>>
+        arg_validation_lengths_range_many_dft(const std::vector<ptrdiff_t>& fwd_domain_nembed,
+                                              bool                          is_real_inplace)
+    {
+        std::vector<std::vector<ptrdiff_t>> ret;
+        if(fwd_domain_nembed.empty())
+        {
+            ret.emplace_back(std::vector<ptrdiff_t>());
+            return ret;
+        }
+
+        auto get_random_lengths = [&](bool make_valid_lengths) {
+            std::vector<ptrdiff_t> random_lengths(fwd_domain_nembed.size());
+            for(size_t dim_idx = 0; dim_idx < random_lengths.size(); dim_idx++)
+            {
+                auto max_len = std::abs(fwd_domain_nembed[dim_idx]);
+                if(is_real_inplace && dim_idx == random_lengths.size() - 1)
+                {
+                    max_len = 2 * ((max_len - 1) / 2);
+                }
+                if(make_valid_lengths)
+                {
+                    if(max_len < 1)
+                        throw valid_values_cannot_be_created();
+                    std::uniform_int_distribution<ptrdiff_t> len_rng(1, max_len);
+                    random_lengths[dim_idx] = len_rng(get_pseudo_rng());
+                }
+                else
+                {
+                    std::uniform_int_distribution<ptrdiff_t> len_rng(-max_length_for_hipfftw_test,
+                                                                     max_length_for_hipfftw_test);
+                    random_lengths[dim_idx] = len_rng(get_pseudo_rng());
+                    while(0 < random_lengths[dim_idx] && random_lengths[dim_idx] <= max_len)
+                    {
+                        random_lengths[dim_idx] = len_rng(get_pseudo_rng());
+                    }
+                }
+            }
+            return random_lengths;
+        };
+
+        ret.emplace_back(get_random_lengths(!valid_value));
+        try
+        {
+            ret.emplace_back(get_random_lengths(valid_value));
+        }
+        catch(const valid_values_cannot_be_created& e)
+        {
+        }
+        catch(...)
+        { // unexpected exception, escalate
+            throw;
+        }
+        return ret;
+    }
+
+    std::vector<std::vector<ptrdiff_t>> arg_validation_bwd_domain_nembed_range_many_dft(
+        ptrdiff_t                     max_nembed,
+        const std::vector<ptrdiff_t>& fwd_domain_nembed,
+        const std::vector<ptrdiff_t>& lengths,
+        fft_transform_type            dft_kind,
+        fft_result_placement          placement)
+    {
+        std::vector<std::vector<ptrdiff_t>> ret;
+        if(fwd_domain_nembed.empty())
+        {
+            ret.emplace_back(std::vector<ptrdiff_t>());
+            return ret;
+        }
+
+        if(fwd_domain_nembed.size() != lengths.size())
+            throw std::invalid_argument("fwd_domain_nembed.size() == lengths.size() required by "
+                                        "arg_validation_bwd_domain_nembed_range_many_dft");
+        if(max_nembed <= 0)
+            throw std::invalid_argument(
+                "max_nembed > 0 required by arg_validation_bwd_domain_nembed_range_many_dft");
+
+        // generate random nembed values with "validity" w.r.t. to lengths constraints
+        auto get_random_bwd_domain_nembed = [&](bool make_valid_bwd_domain_nembed) {
+            std::vector<ptrdiff_t> random_bwd_domain_nembed(fwd_domain_nembed.size());
+            for(size_t dim_idx = 0; dim_idx < random_bwd_domain_nembed.size(); dim_idx++)
+            {
+                const ptrdiff_t min_valid_value
+                    = is_real(dft_kind) && dim_idx == random_bwd_domain_nembed.size() - 1
+                          ? lengths[dim_idx] / 2 + 1
+                          : lengths[dim_idx];
+                if(make_valid_bwd_domain_nembed)
+                {
+                    if(min_valid_value > max_nembed)
+                        throw valid_values_cannot_be_created();
+                    std::uniform_int_distribution<ptrdiff_t> nembed_rng(min_valid_value,
+                                                                        max_nembed);
+                    random_bwd_domain_nembed[dim_idx] = nembed_rng(get_pseudo_rng());
+                }
+                else
+                {
+                    std::uniform_int_distribution<ptrdiff_t> nembed_rng(-max_nembed,
+                                                                        min_valid_value - 1);
+                    random_bwd_domain_nembed[dim_idx] = nembed_rng(get_pseudo_rng());
+                }
+            }
+            return random_bwd_domain_nembed;
+        };
+
+        ret.emplace_back(get_random_bwd_domain_nembed(!valid_value));
+        try
+        {
+            ret.emplace_back(get_random_bwd_domain_nembed(valid_value));
+        }
+        catch(const valid_values_cannot_be_created& e)
+        {
+        }
+        catch(...)
+        { // unexpected exception, escalate
+            throw;
+        }
+        if(placement == fft_placement_inplace)
+        {
+            auto tmp = fwd_domain_nembed;
+            if(is_real(dft_kind))
+                tmp.back() = tmp.back() / 2 + 1;
+            ret.emplace_back(tmp);
+        }
+
+        return ret;
+    }
+
+    std::vector<int> arg_validation_sign_range(fft_transform_type test_dft_type)
+    {
+        std::vector<int> ret = {get_random_sign<valid_value>(test_dft_type)};
+        if(is_complex(test_dft_type))
+            ret.push_back(get_random_sign<!valid_value>(test_dft_type));
+        return ret;
+    }
+
+    std::vector<unsigned> arg_validation_flags_range(fft_transform_type test_dft_type,
+                                                     int                test_rank)
+    {
+        // FFTW_ESTIMATE is always supported
+        std::vector<unsigned> ret = {FFTW_ESTIMATE};
+        // some invalid flags
+        ret.push_back(get_random_flags<!valid_value>());
+        // unsupported FFTW_WISDOM_ONLY
+        ret.push_back(FFTW_WISDOM_ONLY | get_random_flags<valid_value>());
+        if(test_dft_type == fft_transform_type_real_inverse && test_rank > 1)
+        {
+            // unsupported FFTW_PRESERVE_INPUT for multi-dimensional c2r
+            ret.push_back(FFTW_PRESERVE_INPUT | get_random_flags<valid_value>());
+        }
+        return ret;
+    }
+
+    template <fft_precision prec>
+    std::vector<hipfftw_helper<prec>> test_scope_for_arg_validation_of_plan_dft_nd()
+    {
+        std::vector<hipfftw_helper<prec>> ret;
         for(auto dft_kind : trans_type_range_full)
         {
-            std::vector<int> rank_range = {1, 2, 3};
-            rank_range.push_back(get_random_rank<!valid_value>());
-            rank_range.push_back(get_random_rank<valid_value, min_unsupported_rank>());
-            for(auto rank : rank_range)
+            // cannot do anything but rank 1, 2, 3 with PLAN_DFT_ND
+            for(auto rank : {1, 2, 3})
             {
                 for(auto placement : place_range)
                 {
-                    std::vector<std::vector<ptrdiff_t>> range_of_lengths;
-                    // most creation funcs take lengths as pointers
-                    // --> test for empty lengths (re-interpreted as a nullptr
-                    // arg by hipfftw_helper)
-                    range_of_lengths.emplace_back(std::vector<ptrdiff_t>());
-                    if(rank > 0)
+                    const ptrdiff_t max_len
+                        = std::min(static_cast<ptrdiff_t>(max_length_for_hipfftw_test),
+                                   get_default_layout_len_threshold_for_max_byte_size<prec>(
+                                       max_byte_size_for_hipfftw_tests(), rank, is_real(dft_kind)));
+                    for(const auto& lengths :
+                        arg_validation_strictly_positive_vec_range(rank, max_len))
                     {
-                        const bool is_real_inplace
-                            = is_real(dft_kind) && placement == fft_placement_inplace;
-                        const ptrdiff_t allocatable_len_threshold = std::min(
-                            get_len_threshold(max_num_elems_for_data_size<prec>(
-                                                  max_byte_size_for_hipfftw_tests(), dft_kind),
-                                              rank,
-                                              is_real_inplace),
-                            static_cast<ptrdiff_t>(max_length_for_hipfftw_test));
-                        const auto valid_int_lengths
-                            = get_random_lengths<valid_value, int>(rank, allocatable_len_threshold);
-                        // always add valid integer lengths for valid ranks
-                        range_of_lengths.emplace_back(valid_int_lengths);
-                        // invalid integer lengths (most likely nonzero)
-                        const auto invalid_int_lengths = get_random_lengths<!valid_value, int>(
-                            rank, allocatable_len_threshold);
-                        range_of_lengths.emplace_back(invalid_int_lengths);
-                        // invalid integer lengths (some zero)
-                        auto invalid_int_lengths_due_to_some_zero = valid_int_lengths;
-                        invalid_int_lengths_due_to_some_zero[get_random_idx(rank)] = 0;
-                        range_of_lengths.emplace_back(invalid_int_lengths_due_to_some_zero);
-                        if(rank > 1 && rank < min_unsupported_rank)
+                        for(auto sign : arg_validation_sign_range(dft_kind))
                         {
-                            // no support for layouts that trigger an int overflow for any relevant
-                            // element index (unless GURU64 creation functions are used)
-                            const auto min_overflowing_len = get_len_threshold(
-                                std::numeric_limits<int>::max(), rank, is_real_inplace);
-                            const auto unsupported_int_lengths
-                                = get_random_lengths<valid_value, int>(
-                                    rank, std::numeric_limits<int>::max(), min_overflowing_len + 1);
-                            range_of_lengths.emplace_back(unsupported_int_lengths);
-                        }
-                    }
-                    for(const auto& lengths : range_of_lengths)
-                    {
-                        std::vector<int> sign_range = {get_random_sign<valid_value>(dft_kind)};
-                        if(is_complex(dft_kind))
-                            sign_range.push_back(get_random_sign<!valid_value>(dft_kind));
-                        for(auto sign : sign_range)
-                        {
-                            // FFTW_ESTIMATE is always supported
-                            std::vector<unsigned> flags_range = {FFTW_ESTIMATE};
-                            // some invalid flags
-                            flags_range.push_back(get_random_flags<!valid_value>());
-                            // unsupported FFTW_WISDOM_ONLY
-                            flags_range.push_back(FFTW_WISDOM_ONLY
-                                                  | get_random_flags<valid_value>());
-                            // unsupported FFTW_PRESERVE_INPUT for multi-dimensional c2r
-                            flags_range.push_back(FFTW_PRESERVE_INPUT
-                                                  | get_random_flags<valid_value>());
-                            for(auto flags : flags_range)
+                            for(auto flags : arg_validation_flags_range(dft_kind, rank))
                             {
                                 hipfftw_helper<prec> helper_to_add;
                                 helper_to_add.set_creation_args(
                                     dft_kind, rank, lengths, placement, sign, flags);
-                                helper_scope.emplace_back(helper_to_add);
+                                ret.emplace_back(helper_to_add);
                             }
                         }
                     }
                 }
             }
         }
+        return ret;
+    }
+
+    template <fft_precision prec>
+    std::vector<hipfftw_helper<prec>> test_scope_for_arg_validation_of_plan_dft()
+    {
+        std::vector<hipfftw_helper<prec>> ret;
+        for(auto dft_kind : trans_type_range_full)
+        {
+            for(auto rank : arg_validation_runtime_rank_range())
+            {
+                for(auto placement : place_range)
+                {
+                    ptrdiff_t max_len = max_length_for_hipfftw_test;
+                    if(rank_is_valid_for_hipfftw(rank))
+                    {
+                        max_len = std::min(
+                            max_len,
+                            get_default_layout_len_threshold_for_max_byte_size<prec>(
+                                max_byte_size_for_hipfftw_tests(), rank, is_real(dft_kind)));
+                    }
+                    std::vector<std::vector<ptrdiff_t>> range_of_lengths
+                        = arg_validation_strictly_positive_vec_range(rank, max_len);
+                    // --> test for empty lengths, too (re-interpreted as a nullptr argument by hipfftw_helper)
+                    range_of_lengths.emplace_back(std::vector<ptrdiff_t>());
+                    for(const auto& lengths : range_of_lengths)
+                    {
+                        for(auto sign : arg_validation_sign_range(dft_kind))
+                        {
+                            for(auto flags : arg_validation_flags_range(dft_kind, rank))
+                            {
+                                hipfftw_helper<prec> helper_to_add;
+                                helper_to_add.set_creation_args(
+                                    dft_kind, rank, lengths, placement, sign, flags);
+                                ret.emplace_back(helper_to_add);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return ret;
+    }
+
+    template <fft_precision prec>
+    std::vector<hipfftw_helper<prec>> test_scope_for_arg_validation_of_plan_many_dft()
+    {
+        std::vector<hipfftw_helper<prec>> ret;
+        constexpr int batch_rank = 1; // nothing else possible via the *_many_dft* apis
+
+        auto get_random_elementary_stride = [](bool valid_stride) {
+            static std::uniform_int_distribution<ptrdiff_t> stride_rng(
+                -upper_bound_elementary_stride, upper_bound_elementary_stride);
+            auto ret = stride_rng(get_pseudo_rng());
+            while((ret > 0) == valid_stride)
+                ret = stride_rng(get_pseudo_rng());
+            return ret;
+        };
+        auto get_random_dist = []() {
+            static std::uniform_int_distribution<ptrdiff_t> dist_rng(
+                -max_byte_size_for_hipfftw_tests()
+                    / (max_nbatch_for_hipfftw_test * sizeof(hipfftw_complex_t<prec>)),
+                max_byte_size_for_hipfftw_tests()
+                    / (max_nbatch_for_hipfftw_test * sizeof(hipfftw_complex_t<prec>)));
+            return dist_rng(get_pseudo_rng());
+        };
+
+        auto compute_strides
+            = [](const std::vector<ptrdiff_t>& nembed, ptrdiff_t elementary_stride) {
+                  std::vector<ptrdiff_t> ret(nembed.size());
+                  if(nembed.size() > 0)
+                  {
+                      ret.back() = elementary_stride;
+                      for(auto dim_idx = nembed.size() - 1; dim_idx-- > 0;)
+                          ret[dim_idx] = ret[dim_idx + 1] * nembed[dim_idx + 1];
+                  }
+                  return ret;
+              };
+
+        // istrides, ostrides, idist, odist
+        for(auto dft_kind : trans_type_range_full)
+        {
+            for(auto rank : arg_validation_runtime_rank_range())
+            {
+                for(const auto& batches : arg_validation_strictly_positive_vec_range(
+                        batch_rank, max_nbatch_for_hipfftw_test))
+                {
+                    std::vector<ptrdiff_t> idist(batches.size());
+                    std::vector<ptrdiff_t> odist(batches.size());
+                    for(auto placement : place_range)
+                    {
+                        const bool is_real_ip
+                            = is_real(dft_kind) && placement == fft_placement_inplace;
+                        ptrdiff_t max_nembed = max_length_for_hipfftw_test;
+                        if(rank_is_valid_for_hipfftw(rank)
+                           && vector_has_valid_values_as<ptrdiff_t>(batches, batch_rank, 1))
+                        {
+                            max_nembed
+                                = std::min(max_nembed,
+                                           get_default_layout_len_threshold_for_max_byte_size<prec>(
+                                               max_byte_size_for_hipfftw_tests()
+                                                   / upper_bound_elementary_stride,
+                                               rank,
+                                               is_real(dft_kind),
+                                               batches));
+                        }
+                        auto fwd_domain_nembed_range
+                            = arg_validation_strictly_positive_vec_range(rank, max_nembed);
+                        if(is_real_ip && rank_is_valid_for_hipfftw(rank))
+                        {
+                            // make the last entry of the valid fwd_domain_nembed in range even
+                            // so that bwd_domain_nembed can be calculated
+                            for(auto& tmp : fwd_domain_nembed_range)
+                            {
+                                if(vector_has_valid_values_as<int>(tmp, rank, 1)
+                                   && tmp.back() % 2 == 1)
+                                    tmp.back()--;
+                            }
+                        }
+                        // --> test for empty lengths/strides, too
+                        fwd_domain_nembed_range.emplace_back(std::vector<ptrdiff_t>());
+                        for(const auto& fwd_domain_nembed : fwd_domain_nembed_range)
+                        {
+                            for(const auto& lengths : arg_validation_lengths_range_many_dft(
+                                    fwd_domain_nembed, is_real_ip))
+                            {
+                                for(const auto& bwd_domain_nembed :
+                                    arg_validation_bwd_domain_nembed_range_many_dft(
+                                        max_nembed,
+                                        fwd_domain_nembed,
+                                        lengths,
+                                        dft_kind,
+                                        placement))
+                                {
+                                    for(auto istride : {get_random_elementary_stride(!valid_value),
+                                                        get_random_elementary_stride(valid_value)})
+                                    {
+                                        std::vector<ptrdiff_t> ostride_range
+                                            = {get_random_elementary_stride(!valid_value),
+                                               get_random_elementary_stride(valid_value)};
+                                        if(placement == fft_placement_inplace && istride > 0
+                                           && std::find(ostride_range.begin(),
+                                                        ostride_range.end(),
+                                                        istride)
+                                                  == ostride_range.end())
+                                        {
+                                            ostride_range.push_back(istride);
+                                        }
+                                        for(auto ostride : ostride_range)
+                                        {
+                                            const auto& inembed = is_fwd(dft_kind)
+                                                                      ? fwd_domain_nembed
+                                                                      : bwd_domain_nembed;
+                                            const auto& onembed = is_fwd(dft_kind)
+                                                                      ? bwd_domain_nembed
+                                                                      : fwd_domain_nembed;
+
+                                            const auto istrides = compute_strides(inembed, istride);
+                                            const auto ostrides = compute_strides(onembed, ostride);
+                                            if(batches.size() == 1 && !lengths.empty())
+                                            {
+                                                idist[0] = istrides.front() * inembed.front();
+                                                odist[0] = ostrides.front() * onembed.front();
+                                            }
+                                            else
+                                            {
+                                                for(auto& tmp : idist)
+                                                    tmp = get_random_dist();
+                                                for(auto& tmp : odist)
+                                                    tmp = get_random_dist();
+                                            }
+
+                                            for(auto sign : arg_validation_sign_range(dft_kind))
+                                            {
+                                                for(auto flags :
+                                                    arg_validation_flags_range(dft_kind, rank))
+                                                {
+                                                    hipfftw_helper<prec> helper_to_add;
+                                                    helper_to_add.set_creation_args(dft_kind,
+                                                                                    rank,
+                                                                                    lengths,
+                                                                                    placement,
+                                                                                    sign,
+                                                                                    flags,
+                                                                                    istrides,
+                                                                                    ostrides,
+                                                                                    batch_rank,
+                                                                                    batches,
+                                                                                    idist,
+                                                                                    odist);
+                                                    ret.emplace_back(helper_to_add);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return ret;
+    }
+
+    // broad scope of hipfftw_helpers structs compatible with using a specific
+    // plan creation function and configured with (zero or possibly many)
+    // invalid/unsupported parameter value(s)
+    template <fft_precision prec>
+    std::vector<hipfftw_helper<prec>>
+        test_scope_for_arg_validation_of(hipfftw_plan_creation_func creation_func)
+    {
+        switch(creation_func)
+        {
+        case hipfftw_plan_creation_func::PLAN_DFT_ND:
+            return test_scope_for_arg_validation_of_plan_dft_nd<prec>();
+        case hipfftw_plan_creation_func::PLAN_DFT:
+            return test_scope_for_arg_validation_of_plan_dft<prec>();
+        case hipfftw_plan_creation_func::PLAN_MANY:
+            return test_scope_for_arg_validation_of_plan_many_dft<prec>();
+        case hipfftw_plan_creation_func::PLAN_GURU:
+        case hipfftw_plan_creation_func::PLAN_GURU64:
+            throw std::runtime_error("PLAN_GURU, and PLAN_GURU64 are not implemented yet "
+                                     "for test_scope_for_arg_validation_of");
+        default:
+            throw std::invalid_argument(
+                "creation_func unknown to test_scope_for_arg_validation_of");
+        }
+    }
+
+    template <fft_precision prec>
+    std::vector<hipfftw_plan_execution_func>
+        arg_validation_exec_func_range(const hipfftw_helper<prec>& test_helper)
+    {
+        const static std::vector<hipfftw_plan_execution_func> possible_exec_functions
+            = {hipfftw_plan_execution_func::EXECUTE,
+               hipfftw_plan_execution_func::EXECUTE_DFT,
+               hipfftw_plan_execution_func::EXECUTE_DFT_R2C,
+               hipfftw_plan_execution_func::EXECUTE_DFT_C2R};
+        std::vector<hipfftw_plan_execution_func> ret;
+        for(auto can_be_used : {true, false})
+        {
+            auto to_add = get_random_element_in(possible_exec_functions);
+            while(test_helper.can_use_execution_option(to_add) != can_be_used)
+            {
+                to_add = get_random_element_in(possible_exec_functions);
+            }
+            ret.push_back(to_add);
+        }
+        return ret;
+    }
+
+    template <fft_precision prec>
+    std::vector<hipfftw_execution_io_args>
+        arg_validation_exec_io_flags_range(const hipfftw_helper<prec>& test_helper)
+    {
+        auto create_possible_io_flags = []() {
+            std::vector<hipfftw_execution_io_args> ret;
+            for(std::underlying_type_t<hipfftw_execution_io_args> tmp
+                = hipfftw_execution_io_args::use_creation_io;
+                tmp < hipfftw_execution_io_args::clean_new_io;
+                tmp++)
+            {
+                ret.push_back(static_cast<hipfftw_execution_io_args>(tmp));
+            }
+            return ret;
+        };
+        const static auto possible_exec_io_flags = create_possible_io_flags();
+        // always add clean new io in range, to guarantee one testable combo
+        return {hipfftw_execution_io_args::clean_new_io,
+                get_random_element_in(possible_exec_io_flags)};
+    }
+
+    template <fft_precision prec>
+    std::vector<hipfftw_input_validation_params<prec>> params_for_testing_input_validation_params()
+    {
         // create a full-scope map containing all the generated test parameters; the map keys
-        // capture the hipfftw's function name that the tests would target
+        // capture the hipfftw's function name that the test targets
         // --> ease for guaranteeing coverage even with low test probability in the end
         std::map<std::string, std::vector<hipfftw_input_validation_params<prec>>> full_scope_tests;
         hipfftw_input_validation_params<prec>                                     test_to_add;
 
-        for(const auto& helper : helper_scope)
-        {
-            // do not allocate for the lengths designed to trigger an overflow
-            // (allocation sizes would be ridiculously large)
-            const bool test_may_allocate = helper.has_valid_rank() && helper.has_valid_lengths()
-                                           && helper.get_data_byte_size(fft_io::fft_io_in)
-                                                  <= max_byte_size_for_hipfftw_tests()
-                                           && helper.get_data_byte_size(fft_io::fft_io_out)
-                                                  <= max_byte_size_for_hipfftw_tests();
-            for(auto creation : hipfftw_plan_creation_func_candidates)
+        auto allow_io_allocation = [](const hipfftw_helper<prec>& test_helper) {
+            try
             {
-                for(auto execution : {hipfftw_plan_execution_func::EXECUTE,
-                                      hipfftw_plan_execution_func::EXECUTE_DFT,
-                                      hipfftw_plan_execution_func::EXECUTE_DFT_R2C,
-                                      hipfftw_plan_execution_func::EXECUTE_DFT_C2R})
+                return test_helper.get_data_byte_size(fft_io::fft_io_in)
+                           <= max_byte_size_for_hipfftw_tests()
+                       && test_helper.get_data_byte_size(fft_io::fft_io_out)
+                              <= max_byte_size_for_hipfftw_tests();
+            }
+            catch(const hipfftw_helper_num_elements_calc_exception& e)
+            {
+                // some helper parameters are such that the data_byte size simply cannot be calculated
+                return false;
+            }
+            catch(...)
+            {
+                // unanticipated exception: escalate it
+                throw;
+            }
+        };
+
+        const std::vector<std::pair<bool, bool>> possible_creation_io_is_null_inplace
+            = {{false, false}, {true, true}};
+        const std::vector<std::pair<bool, bool>> possible_creation_io_is_null_notinplace
+            = {{false, false}, {true, false}, {false, true}};
+
+        for(auto creation_func : {hipfftw_plan_creation_func::PLAN_DFT_ND,
+                                  hipfftw_plan_creation_func::PLAN_DFT,
+                                  hipfftw_plan_creation_func::PLAN_MANY})
+        {
+            for(const auto& helper : test_scope_for_arg_validation_of<prec>(creation_func))
+            {
+                const std::vector<std::pair<bool, bool>>& possible_creation_io_is_null
+                    = helper.get_placement() == fft_placement_inplace
+                          ? possible_creation_io_is_null_inplace
+                          : possible_creation_io_is_null_notinplace;
+                for(auto exec_func : arg_validation_exec_func_range(helper))
                 {
-                    // full range considered for creation_io_is_null and execution_io
-                    // parameters: some might be ruled out later on because they can't
-                    // be tested (e.g., "not_inplace" required yet using nullptr for
-                    // creation input and output would be nonsensical)
-                    const std::vector<std::pair<bool, bool>> creation_io_is_null_range
-                        = {{false, false}, {true, false}, {false, true}, {true, true}};
-                    for(auto set_creation_io_as_null : creation_io_is_null_range)
+                    for(auto exec_io_flags : arg_validation_exec_io_flags_range(helper))
                     {
-                        for(std::underlying_type_t<hipfftw_execution_io_args> exec_io
-                            = hipfftw_execution_io_args::use_creation_io;
-                            exec_io <= hipfftw_execution_io_args::clean_new_io;
-                            exec_io++)
+                        test_to_add.creation_options = creation_func;
+                        test_to_add.execution_option = exec_func;
+                        test_to_add.creation_io_is_null
+                            = get_random_element_in(possible_creation_io_is_null);
+                        test_to_add.execution_io = exec_io_flags;
+                        test_to_add.plan_helper  = helper;
+                        // skip params if they can't/shouldn't be tested anyways
+                        if(!test_to_add.can_be_tested(allow_io_allocation(helper)))
+                            continue;
+                        // tests expect a failure at execution at least
+                        if(test_to_add.expected_internal_exception_for(hipfftw_step::plan_execution)
+                           == hipfftw_internal_exception::none)
+                            continue;
+                        std::string map_key;
+                        if(test_to_add.expected_internal_exception_for(hipfftw_step::plan_creation)
+                               == hipfftw_internal_exception::invalid_args
+                           || test_to_add.expected_internal_exception_for(
+                                  hipfftw_step::plan_creation)
+                                  == hipfftw_internal_exception::unsupported_args)
                         {
-                            test_to_add.creation_options    = creation;
-                            test_to_add.execution_option    = execution;
-                            test_to_add.creation_io_is_null = set_creation_io_as_null;
-                            test_to_add.execution_io
-                                = static_cast<hipfftw_execution_io_args>(exec_io);
-                            test_to_add.plan_helper = helper;
-                            // skip params if they can't/shouldn't be tested anyways
-                            if(!test_to_add.can_be_tested(test_may_allocate))
-                                continue;
-                            // tests expect a failure at execution at least
-                            if(test_to_add.expected_internal_exception_for(
-                                   hipfftw_step::plan_execution)
-                               == hipfftw_internal_exception::none)
-                                continue;
-                            if(test_to_add.expected_internal_exception_for(
-                                   hipfftw_step::plan_creation)
-                                   == hipfftw_internal_exception::invalid_args
-                               || test_to_add.expected_internal_exception_for(
-                                      hipfftw_step::plan_creation)
-                                      == hipfftw_internal_exception::unsupported_args)
-                            {
-                                insert_into_unique_sorted_params(
-                                    full_scope_tests[hipfftw_creation_options_to_string(
-                                        creation, helper.get_dft_kind(), helper.get_rank())],
-                                    test_to_add);
-                            }
-                            else
-                            {
-                                insert_into_unique_sorted_params(
-                                    full_scope_tests[hipfftw_execution_option_to_string(execution)],
-                                    test_to_add);
-                            }
+                            map_key = hipfftw_creation_options_to_string(
+                                creation_func, helper.get_dft_kind(), helper.get_rank());
                         }
+                        else
+                        {
+                            map_key = hipfftw_execution_option_to_string(exec_func);
+                        }
+                        insert_into_unique_sorted_params(full_scope_tests[map_key], test_to_add);
                     }
                 }
             }
         }
         std::vector<hipfftw_input_validation_params<prec>> ret;
-        for(auto pair : full_scope_tests)
+        for(auto& pair : full_scope_tests)
         {
             const auto& targeted_func  = pair.first;
             auto&       targeted_tests = pair.second;
@@ -1238,14 +1688,22 @@ namespace
             // get_data_byte_size requires valid ranks and lengths to be calculated (of course)
             // --> make sure the I/O data sizes are not zero for test consistency w.r.t. testing
             // for nullptr data args I/O
-            const size_t input_data_size
-                = params.plan_helper.has_valid_rank() && params.plan_helper.has_valid_lengths()
-                      ? params.plan_helper.get_data_byte_size(fft_io_in)
-                      : sizeof(hipfftw_complex_t<prec>);
-            const size_t output_data_size
-                = params.plan_helper.has_valid_rank() && params.plan_helper.has_valid_lengths()
-                      ? params.plan_helper.get_data_byte_size(fft_io_out)
-                      : sizeof(hipfftw_complex_t<prec>);
+            auto compute_io_size = [&](fft_io io) {
+                try
+                {
+                    return params.plan_helper.get_data_byte_size(io);
+                }
+                catch(const hipfftw_helper_num_elements_calc_exception& e)
+                {
+                    return sizeof(hipfftw_complex_t<prec>); // some nonzero value
+                }
+                catch(...)
+                {
+                    throw;
+                }
+            };
+            const size_t input_data_size  = compute_io_size(fft_io::fft_io_in);
+            const size_t output_data_size = compute_io_size(fft_io::fft_io_out);
 
             if(params.creation_io_is_null.first)
                 plan_creation_input.free();
@@ -1562,7 +2020,7 @@ namespace
         }
         size_t get_nbatch() const
         {
-            return plan_helper.template get_nbatch_as<size_t>(fft_io::fft_io_in);
+            return plan_helper.template get_nbatch_as<size_t>();
         }
         std::vector<size_t> get_contiguous_istride() const
         {
@@ -2045,32 +2503,28 @@ namespace
         std::vector<hipfftw_functional_validation_params<prec>> full_list;
         hipfftw_functional_validation_params<prec>              to_add;
         std::uniform_int_distribution<int>                      coin_toss(0, 1);
-        // for readability of template specialization values below
-        constexpr bool valid_value        = true;
-        const auto&    possible_mem_types = get_possible_data_mem_types();
+        const auto& possible_mem_types = get_possible_data_mem_types();
         while(full_list.size() < desired_full_suite_size)
         {
-            to_add.execution_io = coin_toss(get_pseudo_rng()) == 0
-                                      ? hipfftw_execution_io_args::use_creation_io
-                                      : hipfftw_execution_io_args::clean_new_io;
-            const auto dft_kind
-                = trans_type_range_full[get_random_idx(trans_type_range_full.size())];
-            const auto rank            = get_random_rank<valid_value, 1, 3>();
-            const auto placement       = place_range[get_random_idx(place_range.size())];
+            to_add.execution_io  = coin_toss(get_pseudo_rng()) == 0
+                                       ? hipfftw_execution_io_args::use_creation_io
+                                       : hipfftw_execution_io_args::clean_new_io;
+            const auto dft_kind  = get_random_element_in(trans_type_range_full);
+            const auto rank      = get_random_rank<valid_value, 1, 3>();
+            const auto placement = get_random_element_in(place_range);
+            const auto batches
+                = get_random_vector<valid_value, int>(1, max_nbatch_for_hipfftw_test);
             const bool is_real_inplace = is_real(dft_kind) && placement == fft_placement_inplace;
-            const ptrdiff_t len_threshold
-                = std::min(get_len_threshold(max_num_elems_for_data_size<prec>(
-                                                 max_byte_size_for_hipfftw_tests(), dft_kind),
-                                             rank,
-                                             is_real_inplace),
+            const ptrdiff_t max_len
+                = std::min(get_default_layout_len_threshold_for_max_byte_size<prec>(
+                               max_byte_size_for_hipfftw_tests(), rank, is_real_inplace, batches),
                            static_cast<ptrdiff_t>(max_length_for_hipfftw_test));
-            to_add.plan_helper.set_creation_args(
-                dft_kind,
-                rank,
-                get_random_lengths<valid_value, int>(rank, len_threshold),
-                placement,
-                is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
-                FFTW_ESTIMATE);
+            to_add.plan_helper.set_creation_args(dft_kind,
+                                                 rank,
+                                                 get_random_vector<valid_value, int>(rank, max_len),
+                                                 placement,
+                                                 is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
+                                                 FFTW_ESTIMATE);
             for(auto step : {hipfftw_step::plan_creation, hipfftw_step::plan_execution})
             {
                 if(step == hipfftw_step::plan_execution
@@ -2096,8 +2550,7 @@ namespace
                     }
                     else
                     {
-                        to_add.mem_type[key]
-                            = possible_mem_types[get_random_idx(possible_mem_types.size())];
+                        to_add.mem_type[key] = get_random_element_in(possible_mem_types);
                     }
                 }
             }

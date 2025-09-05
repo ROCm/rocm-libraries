@@ -38,6 +38,7 @@ extern double real_prob_factor;
 extern double complex_planar_prob_factor;
 extern double callback_prob_factor;
 extern size_t max_length_for_hipfftw_test;
+extern size_t max_nbatch_for_hipfftw_test;
 extern size_t max_io_gb_for_hipfftw_test;
 
 extern double half_epsilon;
