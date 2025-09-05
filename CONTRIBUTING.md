@@ -28,6 +28,57 @@ This uses Git’s partial clone feature (`--filter=blob:none`) to reduce how muc
 With the source tree as of June 19th, 2025, the clone command lasted 4 seconds in one test run.
 The checkout command of the two projects lasted less than 90 seconds.
 
+## Working with the Superbuild
+
+To issue a full ROCm libraries superbuild for all projects and targets:
+
+```bash
+# configure
+cmake -B build -S .
+# build
+cmake --build build
+# install
+cmake --install build
+```
+
+> [!HINT]
+> To speed up the build, add `--parallel`.
+> To debug the build, add `--verbose`.
+
+Since, by convention, the ROCm libraries installation path is `/opt/rocm`, it is recommended to set the toolchain file and install prefix when configuring.
+
+```bash
+# configure
+cmake -B build -S . -D CMAKE_INSTALL_PREFIX=/opt/rocm -D CMAKE_TOOLCHAIN_FILE=./cmake/toolchains/linux-amdclang.cmake
+```
+
+To simplify the configure and build commands for various build contexts, presets have been provided in [CMakePresets.json](../CMakePresets.json). For example, to issue a superbuild for all projects and targets:
+
+```bash
+# configure
+cmake --preset opt-rocm:all
+# build
+cmake --build --preset default
+```
+
+Or, to build only [rocroller](https://github.com/ROCm/rocm-libraries/tree/develop/shared/rocroller):
+
+```bash
+# configure
+cmake --preset rocroller
+# build
+cmake --build --preset default
+```
+
+If you wish to have granular control over the build, use `-D ROCM_LIBS_ENABLE_COMPONENTS="list;of;components"` to selectively enable the desired projects and dependencies. For example to build rocroller without its preset:
+
+```bash
+# configure
+cmake -B build -S . -D ROCM_LIBS_ENABLE_COMPONENTS="mxdatagenerator;rocroller"
+# build
+cmake --build build
+```
+
 ## Working on Multiple Projects
 
 If your work involves changing projects or introducing new projects, you can update your sparse-checkout environment:

@@ -29,14 +29,25 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/advance.h>
 #  include <thrust/detail/alignment.h>
+#  include <thrust/detail/function.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/iterator/transform_iterator.h>
+#  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
@@ -47,23 +58,22 @@
 #  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
-
 // XXX declare generic copy_if interface
 // to avoid circular dependency from thrust/copy.h
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename Predicate>
-OutputIterator THRUST_HOST_DEVICE
-copy_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
-        InputIterator first,
-        InputIterator last,
-        OutputIterator result,
-        Predicate pred);
+THRUST_HOST_DEVICE OutputIterator copy_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  Predicate pred);
 
 template <typename DerivedPolicy,
           typename InputIterator1,
           typename InputIterator2,
           typename OutputIterator,
           typename Predicate>
-OutputIterator THRUST_HOST_DEVICE copy_if(
+THRUST_HOST_DEVICE OutputIterator copy_if(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 first,
   InputIterator1 last,
@@ -73,8 +83,10 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
 
 namespace hip_rocprim
 {
+
 namespace __copy_if
 {
+
 template <unsigned int ItemsPerThread, typename InputIt, typename BoolIt, typename IntIt, typename OutputIt>
 ROCPRIM_KERNEL void copy_if_kernel(InputIt first, BoolIt flagsFirst, IntIt posFirst, const size_t size, OutputIt output)
 {
@@ -94,7 +106,7 @@ ROCPRIM_KERNEL void copy_if_kernel(InputIt first, BoolIt flagsFirst, IntIt posFi
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
-THRUST_HIP_RUNTIME_FUNCTION auto
+THRUST_RUNTIME_FUNCTION auto
 copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
   -> std::enable_if_t<sizeof(typename std::iterator_traits<InputIt>::value_type) < 512, OutputIt>
 {
@@ -154,7 +166,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
-THRUST_HIP_RUNTIME_FUNCTION auto
+THRUST_RUNTIME_FUNCTION auto
 copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
   -> std::enable_if_t<!(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
 {
@@ -194,7 +206,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
 }
 
 template <typename Derived, typename InputIt, typename StencilIt, typename OutputIt, typename Predicate>
-THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
+THRUST_RUNTIME_FUNCTION OutputIt copy_if(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -205,7 +217,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
   using namespace thrust::system::hip_rocprim::temp_storage;
   using size_type = typename iterator_traits<InputIt>::difference_type;
 
-  size_type num_items       = thrust::distance(first, last);
+  size_type num_items       = static_cast<size_type>(thrust::distance(first, last));
   size_t temp_storage_bytes = 0;
   hipStream_t stream        = hip_rocprim::stream(policy);
   bool debug_sync           = THRUST_HIP_DEBUG_SYNC_FLAG;
@@ -217,7 +229,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
 
   auto flags = thrust::make_transform_iterator(stencil, predicate);
 
-  // Determine temporary device storage requirements.
+  // Query temporary storage requirements
   hip_rocprim::throw_on_error(
     rocprim::select(
       nullptr, temp_storage_bytes, first, flags, output, static_cast<size_type*>(nullptr), num_items, stream, debug_sync),
@@ -231,7 +243,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
   auto l_part =
     make_linear_partition(make_partition(&temp_stor, temp_storage_bytes), ptr_aligned_array(&d_num_selected_out, 1));
 
-  // Calculate storage_size including alignment
+  // Allocate temporary storage.
   hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
   // Allocate temporary storage.
@@ -255,9 +267,9 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
 //-------------------------
 // Thrust API entry points
 //-------------------------
-
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIterator, class OutputIterator, class Predicate>
-OutputIterator THRUST_HIP_FUNCTION copy_if(
+OutputIterator THRUST_HOST_DEVICE copy_if(
   execution_policy<Derived>& policy, InputIterator first, InputIterator last, OutputIterator result, Predicate pred)
 {
   // struct workaround is required for HIP-clang
@@ -280,11 +292,11 @@ OutputIterator THRUST_HIP_FUNCTION copy_if(
 #  else
   return workaround::seq(policy, first, last, result, pred);
 #  endif
-
 } // func copy_if
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIterator, class StencilIterator, class OutputIterator, class Predicate>
-OutputIterator THRUST_HIP_FUNCTION copy_if(
+OutputIterator THRUST_HOST_DEVICE copy_if(
   execution_policy<Derived>& policy,
   InputIterator first,
   InputIterator last,

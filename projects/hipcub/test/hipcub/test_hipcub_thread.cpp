@@ -481,7 +481,8 @@ void thread_reduce_kernel(Type* const device_input, Type* device_output)
 {
     size_t input_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
     size_t output_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
-    device_output[output_index] = hipcub::internal::ThreadReduce<Length>(&device_input[input_index], sum_op());
+    device_output[output_index]
+        = hipcub::ThreadReduce<Length>(&device_input[input_index], sum_op());
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Reduction)

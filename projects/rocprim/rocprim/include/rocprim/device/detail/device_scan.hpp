@@ -100,10 +100,10 @@ auto single_scan_block_scan(T (&input)[ItemsPerThread],
     }
 }
 
-template<lookback_scan_determinism Determinism,
+template<class ArchConfig,
+         lookback_scan_determinism Determinism,
          bool                      Exclusive,
          bool UseInitialValue,
-         class Config,
          class InputIterator,
          class OutputIterator,
          class BinaryFunction,
@@ -125,10 +125,10 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto lookback_scan_kernel_impl(InputIterator
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<lookback_scan_determinism Determinism,
+template<class ArchConfig,
+         lookback_scan_determinism Determinism,
          bool                      Exclusive,
          bool UseInitialValue,
-         class Config,
          class InputIterator,
          class OutputIterator,
          class BinaryFunction,
@@ -150,7 +150,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
 {
     static_assert(std::is_same<AccType, typename LookbackScanState::value_type>::value,
                   "value_type of LookbackScanState must be result_type");
-    static constexpr scan_config_params params = device_params<Config>();
+    static constexpr scan_config_params params = ArchConfig::params;
 
     constexpr auto         block_size       = params.kernel_config.block_size;
     constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
