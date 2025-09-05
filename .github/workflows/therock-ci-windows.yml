@@ -41,7 +41,8 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 666a4f2c7207145c8c8d25c62880f91f1cba7315
+          # TODO: update
+          ref: users/geomin12/external-temp-patches
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -54,7 +55,7 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects rocm-libraries 
+          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects external-rocm-libraries 
 
       - name: Install requirements
         run: |
