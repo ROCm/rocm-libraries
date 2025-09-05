@@ -63,6 +63,31 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     std::ostream& operator<<(std::ostream& stream, Summary const& summary);
 
+    struct DetailedSummary
+    {
+        struct ThreadGroupConflict
+        {
+            uint                                  threadGroupIndex;
+            std::vector<uint>                     workitemIds;
+            uint                                  maxConflictDegree;
+            std::map<uint, std::vector<uint32_t>> bankToAddresses;
+        };
+
+        struct OperationDetail
+        {
+            std::vector<MemoryInstruction>   instructions;
+            std::vector<ThreadGroupConflict> conflictsPerClock;
+            uint                             threadsPerClock;
+            GPUArchitectureGFX               gfx;
+        };
+
+        std::map<int, OperationDetail> operationDetails;
+
+        std::string toString() const;
+    };
+
+    std::ostream& operator<<(std::ostream& stream, DetailedSummary const& detailedSummary);
+
     /**
      * LDS bank model
      */
@@ -92,6 +117,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
         void simulate(MemoryEventSimulated event);
 
         Summary summary() const;
+
+        DetailedSummary detailedSummary(GPUArchitectureGFX gfx) const;
 
         std::string toString() const;
 

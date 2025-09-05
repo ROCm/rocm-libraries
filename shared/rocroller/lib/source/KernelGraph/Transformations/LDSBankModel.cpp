@@ -26,6 +26,7 @@
 
 #include <fmt/format.h>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/LDSBankModel.hpp>
 #include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
@@ -216,6 +217,90 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return calculateBankConflicts(addresses, m_entryWidthInBytes, m_numBanks);
     }
 
+    DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
+    {
+        DetailedSummary detailedSummary;
+
+        for(auto const& [operationTag, accesses] : m_bankAccesses)
+        {
+            DetailedSummary::OperationDetail detail;
+
+            // Collect all unique memory instructions for this operation
+            std::unordered_set<uint32_t> uniqueAddresses;
+            for(auto const& access : accesses)
+            {
+                for(auto const& instruction : access.instructions)
+                {
+                    for(auto addr : instruction.addresses)
+                    {
+                        uniqueAddresses.insert(addr);
+                    }
+                }
+            }
+
+            // Determine the memory operation and data size
+            if(!accesses.empty() && !accesses[0].instructions.empty())
+            {
+                const auto& firstInstruction = accesses[0].instructions[0];
+                detail.instructions          = accesses[0].instructions;
+
+                // Get threads per clock based on operation type
+                if(std::holds_alternative<MemoryOpLDS>(firstInstruction.memoryOp))
+                {
+                    const auto& ldsOp = std::get<MemoryOpLDS>(firstInstruction.memoryOp);
+                    detail.threadsPerClock
+                        = getThreadsPerClock(ldsOp, firstInstruction.dwords, gfx);
+                    detail.gfx = gfx;
+                }
+            }
+
+            // Group workitems by thread groups
+            std::map<uint, std::vector<uint>>     threadGroups;
+            std::map<uint, std::vector<uint32_t>> threadGroupAddresses;
+
+            for(auto const& access : accesses)
+            {
+                uint groupIndex = access.workitem / detail.threadsPerClock;
+                threadGroups[groupIndex].push_back(access.workitem);
+
+                for(auto const& instruction : access.instructions)
+                {
+                    for(auto addr : instruction.addresses)
+                    {
+                        threadGroupAddresses[groupIndex].push_back(addr);
+                    }
+                }
+            }
+
+            // Calculate conflicts for each thread group
+            for(auto const& [groupIndex, workitems] : threadGroups)
+            {
+                DetailedSummary::ThreadGroupConflict conflict;
+                conflict.threadGroupIndex = groupIndex;
+                conflict.workitemIds      = workitems;
+
+                // Calculate bank mapping for this thread group
+                std::map<uint, std::vector<uint32_t>> bankToAddr;
+                for(auto addr : threadGroupAddresses[groupIndex])
+                {
+                    uint bankIndex = (addr / m_entryWidthInBytes) % m_numBanks;
+                    bankToAddr[bankIndex].push_back(addr);
+                }
+                conflict.bankToAddresses = bankToAddr;
+
+                // Use calculateBankConflicts to find max conflict degree
+                conflict.maxConflictDegree
+                    = calculateBankConflicts(threadGroupAddresses[groupIndex]);
+
+                detail.conflictsPerClock.push_back(conflict);
+            }
+
+            detailedSummary.operationDetails[operationTag] = detail;
+        }
+
+        return detailedSummary;
+    }
+
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)
     {
         return stream << ldsBankModel.toString();
@@ -250,6 +335,81 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
         ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
         return ss.str();
+    }
+
+    std::string DetailedSummary::toString() const
+    {
+        std::stringstream ss;
+
+        for(auto const& [operationTag, detail] : operationDetails)
+        {
+            ss << fmt::format("Operation tag {}:\n", operationTag);
+
+            // Print instructions
+            for(size_t i = 0; i < detail.instructions.size(); ++i)
+            {
+                const auto& instruction = detail.instructions[i];
+                const auto& memOp       = instruction.memoryOp;
+
+                ss << fmt::format("\tInstruction {}: ", i);
+
+                if(std::holds_alternative<MemoryOpLDS>(memOp))
+                {
+                    const auto& ldsOp = std::get<MemoryOpLDS>(memOp);
+                    ss << fmt::format("LDS {} ({} dwords, {} threads/clock on {})\n",
+                                      ldsOp.direction == Direction::Load ? "Load" : "Store",
+                                      instruction.dwords,
+                                      detail.threadsPerClock,
+                                      rocRoller::toString(detail.gfx));
+                }
+                else
+                {
+                    ss << "Non-LDS operation\n";
+                }
+            }
+
+            // Print thread group conflicts
+            for(const auto& conflict : detail.conflictsPerClock)
+            {
+                ss << fmt::format("\t\tThread group {} (workitems: ", conflict.threadGroupIndex);
+
+                // Print workitem IDs
+                for(size_t i = 0; i < conflict.workitemIds.size(); ++i)
+                {
+                    if(i > 0)
+                        ss << ", ";
+                    ss << conflict.workitemIds[i];
+                }
+                ss << fmt::format(") - Max conflict degree: {}\n", conflict.maxConflictDegree);
+
+                // Print bank conflicts details
+                for(const auto& [bankIndex, addresses] : conflict.bankToAddresses)
+                {
+                    ss << fmt::format("\t\t\tBank {}: {} addresses [", bankIndex, addresses.size());
+
+                    // Print first few addresses
+                    size_t numToPrint = std::min(addresses.size(), size_t(16));
+                    for(size_t i = 0; i < numToPrint; ++i)
+                    {
+                        if(i > 0)
+                            ss << ", ";
+                        ss << fmt::format("{}", addresses[i]);
+                    }
+                    if(addresses.size() > 16)
+                    {
+                        ss << ", ...";
+                    }
+                    ss << "]\n";
+                }
+            }
+        }
+
+        return ss.str();
+    }
+
+    std::ostream& operator<<(std::ostream& stream, DetailedSummary const& detailedSummary)
+    {
+        return stream << detailedSummary.toString();
     }
 
     std::ostream& operator<<(std::ostream& stream, Summary const& summary)
