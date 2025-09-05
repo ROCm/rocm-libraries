@@ -58,7 +58,6 @@ TEST_CASE("LoadPacked", "[kernel-graph]")
         std::make_shared<LowerTile>(params, context.get()),
         std::make_shared<AddComputeIndex>(),
         std::make_shared<UpdateWavefrontParameters>(params),
-        std::make_shared<AssignComputeIndex>(context.get()),
     };
 
     for(auto const& xform : transforms)

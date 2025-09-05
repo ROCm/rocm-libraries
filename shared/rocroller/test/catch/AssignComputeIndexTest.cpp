@@ -35,7 +35,7 @@
 
 #include <common/CommonGraphs.hpp>
 
-TEST_CASE("AssignComputeIndex", "[kernel-graph][assign-ci]")
+TEST_CASE("AssignComputeIndex", "[kernel-graph]")
 {
     using namespace rocRoller;
     using namespace KernelGraph;
