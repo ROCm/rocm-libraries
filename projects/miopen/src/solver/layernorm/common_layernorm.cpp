@@ -23,7 +23,7 @@ PerformanceConfigLayernorm LayernormBase::GetDefaultPerformanceConfig(
 {
     PerformanceConfigLayernorm config;
     config.HeuristicInit(problem);
-    config.local_size = PerformanceConfigLayernorm::default_local_size(problem);
+    config.local_size = PerformanceConfigLayernorm::default_local_size;
     MIOPEN_LOG_I(config.ToString());
     return config;
 }

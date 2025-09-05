@@ -66,10 +66,7 @@ struct PerformanceConfigLayernorm : PerfConfigBase<PerformanceConfigLayernorm>
     bool operator==(const PerformanceConfigLayernorm& other) const;
 
 public:
-    static constexpr auto default_local_size(const miopen::layernorm::ProblemDescription& problem)
-    {
-        return problem.GetDirection() == miopen::layernorm::Direction::Forward ? 16 : 64;
-    };
+    static constexpr auto default_local_size = 256;
     static constexpr auto max_local_size = 256;
 };
 
