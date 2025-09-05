@@ -227,15 +227,9 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             hr = h;
         StatementList work;
 
-        auto dt_h_tpt_pp = dt + h * threads_per_transform_pp;
         for(unsigned int w = 0; w < width; ++w)
         {
-            Expression tid{""};
-            if(dt_h_tpt_pp == 0)
-                tid = thread;
-            else
-                tid = Parens{thread + dt_h_tpt_pp};
-
+            const auto tid = Parens{thread + dt + h * threads_per_transform_pp};
             work += Assign(
                 R[hr * width + w],
                 lds_complex[offset_lds + (tid + w * pp_factors_prod / width) * stride_lds]);
@@ -301,33 +295,13 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             hr = h;
         StatementList work;
 
-        auto dt_h_tpt_pp = dt + h * threads_per_transform_pp;
         for(unsigned int w = 0; w < width; ++w)
         {
-            Expression tid{""};
-            if(dt_h_tpt_pp == 0)
-                tid = thread;
-            else
-                tid = Parens{thread + dt_h_tpt_pp};
-
-            Expression idx{""};
-            Expression tid_div_cumheigth{""};
-            Expression tid_mod_cumheigth{""};
-            if(cumheight == 1)
-            {
-                tid_div_cumheigth = tid;
-                idx               = offset_lds
-                      + (tid_div_cumheigth * (width * cumheight) + w * cumheight) * stride_lds;
-            }
-            else
-            {
-                tid_div_cumheigth = Parens{tid / cumheight};
-                tid_mod_cumheigth = tid % cumheight;
-                idx               = offset_lds
-                      + (tid_div_cumheigth * (width * cumheight) + tid_mod_cumheigth
-                         + w * cumheight)
-                            * stride_lds;
-            }
+            const auto tid = thread + dt + h * threads_per_transform_pp;
+            const auto idx = offset_lds
+                             + (Parens{tid / cumheight} * (width * cumheight) + tid % cumheight
+                                + w * cumheight)
+                                   * stride_lds;
 
             work += Assign(lds_complex[idx], R[hr * width + w]);
         }
@@ -453,32 +427,10 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
         for(unsigned int w = 0; w < width; ++w)
         {
-            auto dt_h_tpt_pp = dt + h * threads_per_transform_pp;
-
-            Expression tid{""};
-            if(dt_h_tpt_pp == 0)
-                tid = thread;
-            else
-                tid = Parens{thread + dt_h_tpt_pp};
-
-            Expression tidx{""};
-            Expression tid_div_cumheigth{""};
-            Expression tid_mod_cumheigth{""};
-            if(cumheight == 1)
-            {
-                tid_div_cumheigth = tid;
-                tidx              = thread_pp * Literal(length_pp)
-                       + (tid_div_cumheigth * (width * cumheight) + w * cumheight);
-            }
-            else
-            {
-                tid_div_cumheigth = Parens{tid / cumheight};
-                tid_mod_cumheigth = tid % cumheight;
-                tidx              = thread_pp * Literal(length_pp)
-                       + (tid_div_cumheigth * (width * cumheight)
-                          + (tid_mod_cumheigth + w * cumheight));
-            }
-
+            auto tid  = thread + dt + h * threads_per_transform_pp;
+            auto tidx = thread_pp * Literal(length_pp)
+                        + (Parens{tid / cumheight} * (width * cumheight) + tid % cumheight
+                           + w * cumheight);
             auto ridx = hr * width + w;
 
             work += Assign(W, twiddles_pp[tidx]);
