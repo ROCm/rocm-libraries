@@ -31,6 +31,7 @@
 #define HIPCUB_ROCPRIM_GRID_GRID_BARRIER_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include "../../../thread/thread_load.hpp"
 
@@ -43,11 +44,13 @@ BEGIN_HIPCUB_NAMESPACE
  * @{
  */
 
-
 /**
  * \brief GridBarrier implements a software global barrier among thread blocks within a hip grid
+ * 
+ * deprecated [Since rocm 7.1.0]
+ * 
  */
-class GridBarrier
+class HIPCUB_DEPRECATED_BECAUSE("Use the APIs from cooperative groups instead") GridBarrier
 {
 protected :
     using SyncFlag = unsigned int;
@@ -122,14 +125,18 @@ public:
     }
 };
 
-
 /**
  * \brief GridBarrierLifetime extends GridBarrier to provide lifetime management of the temporary device storage needed for cooperation.
  *
  * Uses RAII for lifetime, i.e., device resources are reclaimed when
  * the destructor is called.
+ * 
+ * deprecated [Since rocm 7.1.0]
+ * 
  */
-class GridBarrierLifetime : public GridBarrier
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+class HIPCUB_DEPRECATED_BECAUSE("Use the APIs from cooperative groups instead") GridBarrierLifetime
+    : public GridBarrier
 {
 protected:
 
@@ -196,7 +203,7 @@ public:
         return retval;
     }
 };
-
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_ROCPRIM_GRID_GRID_BARRIER_HPP_

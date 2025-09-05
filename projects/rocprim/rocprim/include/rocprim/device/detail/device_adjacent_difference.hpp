@@ -165,7 +165,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto select_previous_values_iterator(T* /*previous
     return input;
 }
 
-template <typename Config,
+template <typename ArchConfig,
           bool InPlace,
           bool Right,
           typename InputIt,
@@ -182,11 +182,10 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void adjacent_difference_kernel_impl(
     using input_type  = typename std::iterator_traits<InputIt>::value_type;
     using output_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
-    static constexpr adjacent_difference_config_params params = device_params<Config>();
+    static constexpr adjacent_difference_config_params params = ArchConfig::params;
 
-    static constexpr unsigned int block_size = params.adjacent_difference_kernel_config.block_size;
-    static constexpr unsigned int items_per_thread
-        = params.adjacent_difference_kernel_config.items_per_thread;
+    static constexpr unsigned int block_size       = params.kernel_config.block_size;
+    static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
     static constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
     using block_load_type

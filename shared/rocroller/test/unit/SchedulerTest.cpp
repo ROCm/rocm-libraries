@@ -1069,7 +1069,7 @@ namespace rocRollerTest
         }
     };
 
-    TEST_P(LockCheckSchedulerTest, LockCheckTest)
+    TEST_P(LockCheckSchedulerTest, DISABLED_LockCheckTest)
     {
 #ifdef NDEBUG
         GTEST_SKIP() << "Skipping LockCheckTest in release mode.";

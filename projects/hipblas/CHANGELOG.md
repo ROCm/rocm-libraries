@@ -3,6 +3,13 @@
 Documentation for hipBLAS is available at
 [https://rocm.docs.amd.com/projects/hipBLAS/en/latest/](https://rocm.docs.amd.com/projects/hipBLAS/en/latest/).
 
+## (Unreleased) hipBLAS 3.1.0
+
+### Added
+
+* `--clients-only` build option to only build clients against a prebuilt library
+* gfx1103, gfx1150, gfx1151, gfx1200, and gfx1201 support to clients
+
 ## (Unreleased) hipBLAS 3.0.0
 
 ### Added

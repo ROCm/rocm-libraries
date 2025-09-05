@@ -2062,7 +2062,7 @@ namespace
                     using MSL
                         = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
                     m_library = std::dynamic_pointer_cast<MSL>(lib);
-                    if(!m_library->initLibraryMapping(tensileLibPath))
+                    if(!m_library->initLibraryMapping(tensileLibPath.string()))
                     {
                         std::cerr << "\nrocblaslt error: Could not initialize Tensile library "
                                      "mapping"
@@ -3286,7 +3286,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(
-            handle, prob, requestedAlgoCount, heuristicResultsArray, returnAlgoCount);
+            handle, prob, requestedAlgoCount, heuristicResultsArray, maxWorkSpaceBytes, returnAlgoCount);
 #endif
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;

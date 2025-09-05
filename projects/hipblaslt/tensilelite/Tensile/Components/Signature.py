@@ -212,9 +212,10 @@ class SignatureDefault(Signature):
             signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 12
             if kernel["StreamK"] >= 2: # Two-tile SK
-                signature.addArg("skGridAndTiles",                 SVK.SIG_VALUE, "u32")
+                signature.addArg("skGrid",                         SVK.SIG_VALUE, "u32")
+                signature.addArg("skTiles",                        SVK.SIG_VALUE, "u32")
                 signature.addArg("skExtraIters",                   SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.gemmArgumentSize += 8
+                userArgumentsInfo.gemmArgumentSize += 12
                 # "dpTilesPerWG"
 
         if kernel["ProblemType"]["UseScaleAB"]:

@@ -4,6 +4,19 @@
 
 cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
 
+# --------------------------------------
+# Update these variables at release time
+#
+# Set the library version
+set(VERSION_STRING "4.1.0")
+# Set the minimum required rocPRIM version
+set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+# Set the minimum required rocRAND version
+set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
+# Set download branch for dependencies rocPRIM and rocRAND
+set(ROCM_DEP_RELEASE_BRANCH "release/rocm-rel-7.1" CACHE STRING "Download branch for ROCm dependencies")
+# --------------------------------------
+
 # Install prefix
 if(WIN32)
   set(CMAKE_INSTALL_PREFIX ${PROJECT_BINARY_DIR}/package CACHE PATH "Install path prefix, prepended onto install directories")
@@ -43,15 +56,11 @@ option(BUILD_TEST "Build tests" OFF)
 option(CODE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
-option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_EXAMPLE "Build example" OFF)
 option(BUILD_BENCHMARK "Build benchmark" OFF)
-option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
-cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARK OFF)
-option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
-#Set the header wrapper OFF by default.
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
+option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -110,12 +119,32 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
 endif()
+
+# Set up options for obtaining dependencies rocPRIM and rocRAND.
+# PACKAGE: Search for an install package that contains the dependency.
+# MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
+# DOWNLOAD: Download the dependency from the monorepo.
+set(FETCH_METHOD_OPTIONS "PACKAGE" "MONOREPO" "DOWNLOAD")
+
+set(ROCPRIM_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocPRIM dependency")
+set(ROCRAND_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocRAND dependency")
+
+# This function checks to see if the fetch method variable it's passed is defined, and contains a valid value.
+# If it does not contain a valid value, it issues a fatal failure with an error message.
+function(check_fetch_method method)
+  if (DEFINED ${method} AND NOT ${${method}} IN_LIST FETCH_METHOD_OPTIONS)
+    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${FETCH_METHOD_OPTIONS}.")
+  endif()
+endfunction()
+
+check_fetch_method(ROCPRIM_FETCH_METHOD)
+check_fetch_method(ROCRAND_FETCH_METHOD)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
@@ -161,9 +190,9 @@ if(BUILD_ADDRESS_SANITIZER)
   list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
 endif()
-  
+
 # Setup VERSION
-rocm_setup_version(VERSION "4.0.0")
+rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
   
 # Thrust (with HIP backend)
@@ -194,7 +223,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 # Examples
-if(BUILD_EXAMPLES)
+if(BUILD_EXAMPLE)
   add_subdirectory(examples)
 endif()
 
@@ -203,18 +232,6 @@ if(BUILD_BENCHMARK)
   add_subdirectory(benchmark)
 endif()
 
-#Create header wrapper for backward compatibility
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/thrust
-    PATTERNS "*.h" "*.inl" "*.cuh" "*.hpp"
-    HEADER_LOCATION include/thrust
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS rocthrust/${CMAKE_INSTALL_INCLUDEDIR}/thrust
-    OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
-  )
-endif( )
-  
 set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
 set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 

@@ -28,6 +28,7 @@
 
 #include "../config.hpp"
 #include "../types/key_value_pair.hpp"
+#include "detail/common.hpp"
 
 /// \addtogroup iteratormodule
 /// @{
@@ -66,7 +67,7 @@ public:
     using reference = const value_type&;
     /// \brief A pointer type of the type iterated over (\p value_type).
     /// It's `const` since arg_index_iterator is a read-only iterator.
-    using pointer = const value_type*;
+    using pointer = const detail::proxy_pointer<InputValueType>;
     /// A type used for identify distance between iterators.
     using difference_type = Difference;
     /// The category of the iterator.
@@ -122,7 +123,7 @@ public:
     ROCPRIM_HOST_DEVICE inline
     pointer operator->() const
     {
-        return &(*(*this));
+        return pointer(*iterator_);
     }
 
     ROCPRIM_HOST_DEVICE inline

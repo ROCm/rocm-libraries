@@ -43,7 +43,7 @@ option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
 option(ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF "Use the pregenerates GPU architecture definition YAML file(s) in the repository." ON)
 set(ROCROLLER_MRISAS_DIR "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitectureGenerator/amd-mrisa" CACHE STRING "Path to directory containing MRISA XML files.")
-set(MXDATAGENERATOR_GIT_TAG "3ac153eec4c1a1e0da7546abc9c0c4f54e180f43" CACHE STRING "mxDataGenerator tag/commit hash to checkout")
+set(MXDATAGENERATOR_GIT_TAG "31407efa7938fd70ea9b28e08a4d53e398415f8b" CACHE STRING "mxDataGenerator tag/commit hash to checkout")
 set(MXDATAGENERATOR_GIT_URL "https://github.com/ROCm/mxDataGenerator.git" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
 
 if(ROCROLLER_ENABLE_TEST_DISCOVERY)

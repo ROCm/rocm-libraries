@@ -26,6 +26,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/pair.h>
 #include <thrust/random/uniform_real_distribution.h>
 
@@ -146,7 +153,9 @@ private:
 template <typename RealType>
 struct normal_distribution_base
 {
-#if ((defined(_CCCL_CUDA_COMPILER) && !defined(_NVHPC_CUDA)) || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP))
+#if (defined(__NVCC__) || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
+     || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC)                                         \
+  || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
   using type = normal_distribution_nvcc<RealType>;
 #else
   using type = normal_distribution_portable<RealType>;

@@ -560,7 +560,7 @@ namespace rocRoller
             Register::Type regType;
             VariableType   varType;
 
-            bool operator==(DataFlowTag const&) const = default;
+            auto operator<=>(DataFlowTag const&) const = default;
         };
 
         /**
@@ -570,7 +570,10 @@ namespace rocRoller
         {
             int slot;
 
-            bool operator==(PositionalArgument const&) const = default;
+            Register::Type regType;
+            VariableType   varType;
+
+            auto operator<=>(PositionalArgument const&) const = default;
         };
 
         ExpressionPtr operator+(ExpressionPtr a, ExpressionPtr b);
@@ -593,6 +596,11 @@ namespace rocRoller
         ExpressionPtr logicalNot(ExpressionPtr a);
 
         ExpressionPtr multiplyHigh(ExpressionPtr a, ExpressionPtr b);
+
+        ExpressionPtr multiplyAdd(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c);
+        ExpressionPtr addShiftL(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c);
+        ExpressionPtr shiftLAdd(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c);
+        ExpressionPtr conditional(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c);
 
         // arithmeticShiftR is the same as >>
         ExpressionPtr arithmeticShiftR(ExpressionPtr a, ExpressionPtr b);
@@ -627,6 +635,9 @@ namespace rocRoller
          */
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value, VariableType v);
+
+        ExpressionPtr dataFlowTag(int tag, Register::Type t, VariableType v);
+        ExpressionPtr positionalArgument(int slot, Register::Type t, VariableType v);
 
         template <typename T>
         concept CValue = CIsAnyOf<T,
