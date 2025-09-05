@@ -8243,12 +8243,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # kernel argument buffer address needs 2 sgprs
       # Workgroup ID x, y, z need 3 sgprs
       numWorkgroupIDSgpr = kernel["ProblemType"]["NumIndicesC"]
-      self.states.numSgprPreload = 16 - self.states.rpga - kernel["ProblemType"]["NumIndicesC"]
+      self.states.numSgprPreload = self.states.archCaps["MaxSgprPreload"] - self.states.rpga - kernel["ProblemType"]["NumIndicesC"]
 
       # Safe guard for preload arguments
       while(1):
         tmpSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
-        if tmpSgpr >= 16:
+        if tmpSgpr >= self.states.archCaps["MaxSgprPreload"]:
           self.sgprPool.checkIn(tmpSgpr)
           break
         self.states.preloadGuard.append(tmpSgpr)

@@ -2121,83 +2121,82 @@ class KernelWriterAssembly(KernelWriter):
       ########################################
       # Common parameters
       sgprArgType = self.sgprPool.checkOut(1, preventOverflow=False)
-      commonArgs = Module("load arguments")
-      commonArgs.addComment1("Load num of Gemms")
-      commonArgs.add(self.argLoader.loadKernArg(sgprNumsOfGemm, "KernArgAddress", 0, dword=1))
-
       sgprPackedArgs = self.sgprPool.checkOut(1, preventOverflow=False)
-      # Load combined internal arguments
-      commonArgs.addComment1("Load packed kernel args (StaggerU/GSU)")
-      commonArgs.add(self.argLoader.loadKernArg(sgprPackedArgs, "KernArgAddress", 4, dword=1))
-      commonArgs.addComment1("Load WGM data")
-      commonArgs.add(self.argLoader.loadKernArg("WGM", "KernArgAddress", 8, dword=1))
       tmpSgprNumWorkGroups = self.sgprPool.checkOut(1, preventOverflow=False)
-      commonArgs.addComment1("Load num of WGs")
-      commonArgs.add(self.argLoader.loadKernArg(tmpSgprNumWorkGroups, "KernArgAddress", 12, dword=1))
       ########################################
       # kernel args parameters
       load = self.states.numSgprToLoad
       sgprStart = self.sgprs["SizesFree"]
 
-      ########################################
-      # load ws/ user args
-      hbmArgs = Module("load HBM arguments")
-      hbmArgs.addComment1("Load address of kernel arguments")
-      hbmArgs.add(self.argLoader.loadKernArg("KernArgAddress", "KernArgAddress", self.states.userArgsInfo.commonArgsSize, dword=2))
+      if self.states.numSgprPreload == 0 or self.states.archCaps["SgprPreloadPad"]:
+        commonArgs = Module("load arguments")
+        commonArgs.addComment1("Load num of Gemms")
+        commonArgs.add(self.argLoader.loadKernArg(sgprNumsOfGemm, "KernArgAddress", 0, dword=1))
+        # Load combined internal arguments
+        commonArgs.addComment1("Load packed kernel args (StaggerU/GSU)")
+        commonArgs.add(self.argLoader.loadKernArg(sgprPackedArgs, "KernArgAddress", 4, dword=1))
+        commonArgs.addComment1("Load WGM data")
+        commonArgs.add(self.argLoader.loadKernArg("WGM", "KernArgAddress", 8, dword=1))
+        commonArgs.addComment1("Load num of WGs")
+        commonArgs.add(self.argLoader.loadKernArg(tmpSgprNumWorkGroups, "KernArgAddress", 12, dword=1))
+        
+        ########################################
+        # load ws/ user args
+        hbmArgs = Module("load HBM arguments")
+        hbmArgs.addComment1("Load address of kernel arguments")
+        hbmArgs.add(self.argLoader.loadKernArg("KernArgAddress", "KernArgAddress", self.states.userArgsInfo.commonArgsSize, dword=2))
 
-      moduleArgs.addModuleAsFlatItems(deepcopy(commonArgs))
-      moduleArgs.add(SWaitCnt(kmcnt=0, comment="load args"))
-      moduleArgs.add(SLShiftRightB32(dst=sgpr(sgprArgType), shiftHex=hex(30), src=sgpr(sgprNumsOfGemm), comment="Get arg type"))
-      moduleArgs.add(SAndB32(dst=sgpr(sgprNumsOfGemm), src0=hex(0x3FFFFFFF), src1=sgpr(sgprNumsOfGemm), comment="Get nums of gemm"))
+        moduleArgs.addModuleAsFlatItems(deepcopy(commonArgs))
+        moduleArgs.add(SWaitCnt(kmcnt=0, comment="load args"))
+        moduleArgs.add(SLShiftRightB32(dst=sgpr(sgprArgType), shiftHex=hex(30), src=sgpr(sgprNumsOfGemm), comment="Get arg type"))
+        moduleArgs.add(SAndB32(dst=sgpr(sgprNumsOfGemm), src0=hex(0x3FFFFFFF), src1=sgpr(sgprNumsOfGemm), comment="Get nums of gemm"))
+        if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
+          extReadEpilogueLabeltmp    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
+          moduleArgs.addComment0("Check if custom structure pointer is null")
+          if kernel["ProblemType"]["SupportUserArgs"]:
+            moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=2, comment="ArgType == 2 ?"))
+            moduleArgs.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
+          moduleArgs.addComment1("Grouped Gemm: Load address of external kernel arguments")
+          moduleArgs.add(self.argLoader.loadKernArg("AddressTD", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+16), dword=2))
+          moduleArgs.add(self.argLoader.loadKernArg("Synchronizer", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+8), dword=2))
+          moduleArgs.add(extReadEpilogueLabeltmp)
 
-      if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
-        extReadEpilogueLabeltmp    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
-        moduleArgs.addComment0("Check if custom structure pointer is null")
-        if kernel["ProblemType"]["SupportUserArgs"]:
-          moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=2, comment="ArgType == 2 ?"))
-          moduleArgs.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
-        moduleArgs.addComment1("Grouped Gemm: Load address of external kernel arguments")
-        moduleArgs.add(self.argLoader.loadKernArg("AddressTD", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+16), dword=2))
-        moduleArgs.add(self.argLoader.loadKernArg("Synchronizer", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+8), dword=2))
-        moduleArgs.add(extReadEpilogueLabeltmp)
+        #moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
+        labelHBM = Label("HBMArgs", comment="")
+        labelLoadEnd = Label("LoadArgsEnd", comment="")
+        # Routing General Batched GEMM to Strided Batched GEMM path
+        Bypass_ArgType3_to_ArgType0_Instance1 = Label("Bypass_ArgType3_to_ArgType0_Instance1", comment="")
+        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(3), comment="Is kernel argType == 3")) 
+        moduleArgs.add(SCBranchSCC1(labelName=Bypass_ArgType3_to_ArgType0_Instance1.getLabelName()))     
+        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))      
+        moduleArgs.add(SCBranchSCC0(labelName=labelHBM.getLabelName()))
+        moduleArgs.add(Bypass_ArgType3_to_ArgType0_Instance1)
+        moduleArgs.add(SAddU32(dst=sgpr("KernArgAddress"), src0=sgpr("KernArgAddress"), src1=hex(self.states.userArgsInfo.commonArgsSize), comment="Shift common args"))
+        moduleArgs.add(SAddCU32(dst=sgpr("KernArgAddress+1"), src0=sgpr("KernArgAddress+1"), src1=0))
+        moduleArgs.addModuleAsFlatItems(self.getKernelArgLoadModule(kernel, sgprStart, load, 0))
+        if self.states.numSgprPreload > 0:
+          moduleArgs.add(SWaitCnt(kmcnt=0, comment="preload"))
+        moduleArgs.add(SBranch(labelName=labelLoadEnd.getLabelName()))
+        moduleArgs.add(labelHBM)
+        moduleArgs.addModuleAsFlatItems(deepcopy(hbmArgs))
+        moduleArgs.add(SWaitCnt(kmcnt=0, comment="wait for args to load"))
+        moduleArgs.add(labelLoadEnd)
 
-      #moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
-      labelHBM = Label("HBMArgs", comment="")
-      labelLoadEnd = Label("LoadArgsEnd", comment="")
-      # Routing General Batched GEMM to Strided Batched GEMM path
-      Bypass_ArgType3_to_ArgType0_Instance1 = Label("Bypass_ArgType3_to_ArgType0_Instance1", comment="")
-      moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(3), comment="Is kernel argType == 3")) 
-      moduleArgs.add(SCBranchSCC1(labelName=Bypass_ArgType3_to_ArgType0_Instance1.getLabelName()))     
-      moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))      
-      moduleArgs.add(SCBranchSCC0(labelName=labelHBM.getLabelName()))
-      moduleArgs.add(Bypass_ArgType3_to_ArgType0_Instance1)
-      moduleArgs.add(SAddU32(dst=sgpr("KernArgAddress"), src0=sgpr("KernArgAddress"), src1=hex(self.states.userArgsInfo.commonArgsSize), comment="Shift common args"))
-      moduleArgs.add(SAddCU32(dst=sgpr("KernArgAddress+1"), src0=sgpr("KernArgAddress+1"), src1=0))
-      moduleArgs.addModuleAsFlatItems(self.getKernelArgLoadModule(kernel, sgprStart, load, 0))
       if self.states.numSgprPreload > 0:
-        moduleArgs.add(SWaitCnt(kmcnt=0, comment="preload"))
-      moduleArgs.add(SBranch(labelName=labelLoadEnd.getLabelName()))
-      moduleArgs.add(labelHBM)
-      moduleArgs.addModuleAsFlatItems(deepcopy(hbmArgs))
-      moduleArgs.add(SWaitCnt(kmcnt=0, comment="wait for args to load"))
-      moduleArgs.add(labelLoadEnd)
-
-      if self.states.numSgprPreload > 0:
-        common_kern_entry  = Label(label="common_kernel_entry", comment="for both preload/non-preload common code")
-
-
-        #For groupgemm, the preload happened prior to this stage
-        moduleArgs.add(SBranch(common_kern_entry.getLabelName())) # jump to common path
-        total_inst_dwords = 0
-        for inst in moduleArgs.items():
-          if isinstance(inst, (BranchInstruction, SWaitCnt, CommonInstruction)):
-            total_inst_dwords = total_inst_dwords + 1
-          elif isinstance(inst, (SMemLoadInstruction)):
-            total_inst_dwords = total_inst_dwords + 2
-        assert total_inst_dwords <= 64
-        moduleArgs.addComment1("pad %u snops to satisfy 0x100 code size for Preload Backward Compatibility Prologue" % (64 - total_inst_dwords))
-        for i in range(64 - total_inst_dwords):
-          moduleArgs.add(SNop(waitState=0, comment=""))
+        if self.states.archCaps["SgprPreloadPad"]:
+          common_kern_entry  = Label(label="common_kernel_entry", comment="for both preload/non-preload common code")
+          #For groupgemm, the preload happened prior to this stage
+          moduleArgs.add(SBranch(common_kern_entry.getLabelName())) # jump to common path
+          total_inst_dwords = 0
+          for inst in moduleArgs.items():
+            if isinstance(inst, (BranchInstruction, SWaitCnt, CommonInstruction)):
+              total_inst_dwords = total_inst_dwords + 1
+            elif isinstance(inst, (SMemLoadInstruction)):
+              total_inst_dwords = total_inst_dwords + 2
+          assert total_inst_dwords <= 64
+          moduleArgs.addComment1("pad %u snops to satisfy 0x100 code size for Preload Backward Compatibility Prologue" % (64 - total_inst_dwords))
+          for i in range(64 - total_inst_dwords):
+            moduleArgs.add(SNop(waitState=0, comment=""))
         moduleArgs.add(Label("Preload_Offset_Start", ""))
         # Common args preload
         preloadSgprStartIdx = self.states.rpga
@@ -2247,7 +2246,8 @@ class KernelWriterAssembly(KernelWriter):
         moduleArgs.add(SMovB32(dst=sgpr("WGM"), src=sgpr(preloadSgprStartIdx+2), comment="Preload internal args2"))
         moduleArgs.add(SMovB32(dst=sgpr(tmpSgprNumWorkGroups), src=sgpr(preloadSgprStartIdx+3), comment="Load num of WGs"))
         # add common kern entry label
-        moduleRegInit.add(common_kern_entry)
+        if self.states.archCaps["SgprPreloadPad"]:
+          moduleRegInit.add(common_kern_entry)
         for i in range(kernel["ProblemType"]["NumIndicesC"]):
           moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0+%u"%i), src=sgpr(preloadSgprStartIdx+self.states.numSgprPreload+i), \
                       comment="restore workgroup id"))
