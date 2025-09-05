@@ -80,8 +80,8 @@ public:
         // If rotatingBufferSize == 0, disable rotation
         if(rotatingBufferSizeBytes == 0)
         {
-            m_buffer = make_shared_device<T>(m_numElems, T{});
-            hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice);
+            m_buffer = make_shared_device<T>(m_numElems);
+            HIP_CHECK(hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
             return;
         }
 
@@ -92,17 +92,17 @@ public:
 
         if(m_numElems >= m_rotatingBufferElems)
         {
-            m_buffer = make_shared_device<T>(m_numElems, T{});
+            m_buffer = make_shared_device<T>(m_numElems);
             hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice);
         }
         else
         {
-            m_buffer = make_shared_device<T>(m_rotatingBufferElems, T{});
+            m_buffer = make_shared_device<T>(m_rotatingBufferElems);
             size_t numCopies = m_rotatingBufferElems / m_numElems;
             for(size_t r = 0; r < numCopies; ++r)
             {
                 T* dst = m_buffer.get() + r * m_numElems;
-                hipMemcpy(dst, hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice);
+                HIP_CHECK(hipMemcpy(dst, hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
             }
         }
     }
@@ -425,15 +425,19 @@ namespace rocRoller::Client::GEMMClient
         result.runParams       = runParams;
         result.benchmarkParams = benchmarkParams;
 
+        auto spanA = rotatingA.next();
+        auto spanB = rotatingB.next();
+        auto spanC = rotatingC.next();
+        
         // Benchmark runs
         for(int outer = 0; outer < benchmarkParams.numOuter; ++outer)
         {
             // Warmup runs
             for(int i = 0; i < benchmarkParams.numWarmUp; ++i)
             {
-                commandArgs.setArgument(aTag, ArgumentType::Value, rotatingA.next().data());
-                commandArgs.setArgument(bTag, ArgumentType::Value, rotatingB.next().data());
-                commandArgs.setArgument(cTag, ArgumentType::Value, rotatingC.next().data());
+                commandArgs.setArgument(aTag, ArgumentType::Value, static_cast<int>(spanA.size()), spanA.data());
+                commandArgs.setArgument(bTag, ArgumentType::Value, static_cast<int>(spanB.size()), spanB.data());
+                commandArgs.setArgument(cTag, ArgumentType::Value, static_cast<int>(spanC.size()), spanC.data());
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs);
             }
@@ -441,9 +445,9 @@ namespace rocRoller::Client::GEMMClient
             HIP_TIMER(t_kernel, "GEMM", benchmarkParams.numInner);
             for(int inner = 0; inner < benchmarkParams.numInner; ++inner)
             {
-                commandArgs.setArgument(aTag, ArgumentType::Value, rotatingA.next().data());
-                commandArgs.setArgument(bTag, ArgumentType::Value, rotatingB.next().data());
-                commandArgs.setArgument(cTag, ArgumentType::Value, rotatingC.next().data());
+                commandArgs.setArgument(aTag, ArgumentType::Value, static_cast<int>(spanA.size()), spanA.data());
+                commandArgs.setArgument(bTag, ArgumentType::Value, static_cast<int>(spanB.size()), spanB.data());
+                commandArgs.setArgument(cTag, ArgumentType::Value, static_cast<int>(spanC.size()), spanC.data());
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
