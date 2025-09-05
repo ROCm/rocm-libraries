@@ -43,8 +43,13 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
     PRIVATE
       GTest::gtest
       GTest::gtest_main
-      hipcub
   )
+
+  if(USE_SYSTEM_LIB)
+    target_link_libraries(${TEST_TARGET} PRIVATE hip::hipcub)
+  else()
+    target_link_libraries(${TEST_TARGET} PRIVATE hipcub)
+  endif()
 
   if(HIP_COMPILER STREQUAL "nvcc")
     # For test/hipcub, std::exclusive_scan is used, which is a c++ 17 feature
