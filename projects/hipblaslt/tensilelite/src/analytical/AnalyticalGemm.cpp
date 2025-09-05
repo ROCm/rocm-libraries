@@ -86,10 +86,10 @@ namespace TensileLite
             size_t numWGs, numActiveCUs, numWaves, splitFactor;
             if(split) // if it is given
             {
+                split = std::max(split, 1.0);
                 numWGs       = numMTs * split;
                 numActiveCUs = numWGs < hardware.N_CU ? numWGs : hardware.N_CU;
                 numWaves     = safe_ceil_div(numWGs, hardware.N_CU);
-                // numWaves     = safe_ceil_div(numMTs, hardware.N_CU);
                 splitFactor  = split;
             }
             else // as what StreamK predicts
@@ -1022,20 +1022,6 @@ namespace TensileLite
             if(heuristics)
             {
                 // Penalize tiles that lead to edge waste
-                // if(batch > 9)
-                // {
-                //     const size_t Mp = safe_ceil_div(M, MT_M) * MT_M;
-                //     const size_t Np = safe_ceil_div(N, MT_N) * MT_N;
-                //     const size_t Kp = safe_ceil_div(K, MT_K) * MT_K;
-    
-                //     // // Core utilization and penalty
-                //     double util = (double)(M * N * K) / (Mp * Np * Kp);
-                //     const size_t tiles   = safe_ceil_div(M, MT_M) * safe_ceil_div(N, MT_N);
-                //     double penalty_core = std::pow(1.0 / util, 1.5) * std::pow(tiles, 1.5) * std::log10((double)batch);
-                //     total_latency = total_latency * std::max(penalty_core, 1.0);
-                // }
-
-
                 const size_t numMT_M = safe_ceil_div(M, MT_M);
                 const size_t numMT_N = safe_ceil_div(N, MT_N);
                 const double waste = static_cast<double>(numMT_M * MT_M * numMT_N * MT_N) / (M * N);
@@ -1047,22 +1033,6 @@ namespace TensileLite
                 // There is no case where a kernel with MT_K > K wins unless K < MI_K.                
                 if(K < MT_K)
                     total_latency = total_latency * (MT_K - K);
-
-                // double edgeWaste_m = 1.0 - static_cast<double>(M % MT_M) / MT_M;
-                // double edgeWaste_n = 1.0 - static_cast<double>(N % MT_N) / MT_N;
-                // // Emprically, we need to have a better fit for smaller sizes. That is, it is
-                // // more important to not have edge waste when the size is small. Hence, we normalize
-                // // edge waste by the number of tiles in each direction.
-                // // Note: one might argue that batch is not factored in here. It is intentional!
-                // double numMT_M = safe_ceil_div(M, MT_M);
-                // double numMT_N = safe_ceil_div(N, MT_N);
-                // edgeWaste_m /= numMT_M;
-                // edgeWaste_n /= numMT_N;
-                // // Note: So far, 0 <= edgeWaste_m < 1 / numMT_M.
-                // // Then, we compute penalty using the geometric mean.
-                // double weight = 1.0 - sqrt(edgeWaste_m * edgeWaste_n);
-                // // Note: 0 < weight <= 1
-                // total_latency = total_latency * weight;
 
                 // Bias Model towards at least one dim being power of 2
                 bool MT_M_is_power_two = (MT_M > 0) && (MT_M & (MT_M - 1)) == 0;
@@ -1098,7 +1068,7 @@ namespace TensileLite
                 }
 
                 // Bias toward not splitting for small K values
-                if(K * batch < 2048 && splittingFactor > 1)
+                if(K < 2048 && splittingFactor > 1)
                 {
                     total_latency = total_latency * splittingFactor;
                 }
