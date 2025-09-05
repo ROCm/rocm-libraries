@@ -308,8 +308,10 @@ namespace TensileLite
             size_t tie_breaker_threshold = tf32_emu ? 5 : 10;
             for(const auto& res : valid_results)
             {
-                // If it's "essentially" (within 5 diff) the same as best_latency, include it
-                if(std::fabs(std::get<0>(res) - best_latency) < tie_breaker_threshold)
+                double diff = static_cast<double>(std::fabs(std::get<0>(res) - best_latency));
+                diff /= best_latency;
+                // If it's within 1%, include it.
+                if(diff < 0.01)
                     num_the_same++;
                 else
                     break; // Once we pass best_latency, we can stop.
@@ -407,15 +409,16 @@ namespace TensileLite
 
                 // Compute L2 hit rate for this WGM
                 double current_hit = estimate_l2_hit(hardware,
-                                                     static_cast<int>(M),
-                                                     static_cast<int>(N),
-                                                     static_cast<int>(K),
-                                                     static_cast<int>(batch),
-                                                     static_cast<int>(MT_M),
-                                                     static_cast<int>(MT_N),
-                                                     static_cast<int>(MT_K),
+                                                     M,
+                                                     N,
+                                                     K,
+                                                     batch,
+                                                     MT_M,
+                                                     MT_N,
+                                                     MT_K,
+                                                     element_size,
                                                      static_cast<int>(candidate_wgm),
-                                                     element_size);
+                                                     1 /* splittingFactor */);
 
                 valid_results.emplace_back(current_hit, candidate_wgm);
             }

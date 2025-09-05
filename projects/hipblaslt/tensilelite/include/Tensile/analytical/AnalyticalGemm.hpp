@@ -111,7 +111,8 @@ namespace TensileLite
                                size_t          MT_N,
                                size_t          MT_K,
                                size_t          element_size,
-                               int             WGM);
+                               int             WGM,
+                               size_t          splittingFactor);
 
         // Estimates the mall hit-rate
         double estimate_mall_hit(const Hardware& hardware,
