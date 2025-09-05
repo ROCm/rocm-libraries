@@ -94,6 +94,67 @@ int32_t mloMultiMarginLossForwardRunHost(const miopenTensorDescriptor_t iDesc,
     return ret;
 }
 
+template <typename Tgpu, typename Tcheck>
+int32_t mloMultiMarginLossForwardRunHost2(const miopenTensorDescriptor_t iDesc,
+                                          const miopenTensorDescriptor_t tDesc,
+                                          const miopenTensorDescriptor_t wDesc,
+                                          const miopenTensorDescriptor_t oDesc,
+                                          const long p,
+                                          const float margin,
+                                          const miopenLossReductionMode_t reduction_mode,
+                                          const Tgpu* input,
+                                          const uint64_t* target,
+                                          const Tgpu* weight,
+                                          Tcheck* ref_output)
+{
+    auto I_tv = miopen::get_inner_expanded_tv<2>(miopen::deref(iDesc));
+    auto T_tv = miopen::get_inner_expanded_tv<1>(miopen::deref(tDesc));
+    auto W_tv = miopen::get_inner_expanded_tv<1>(miopen::deref(wDesc));
+    auto O_tv = miopen::get_inner_expanded_tv<1>(miopen::deref(oDesc));
+    auto N = I_tv.size[0], C = I_tv.size[1];
+
+    int32_t ret                  = miopenStatusSuccess;
+    std::atomic<double> sum_loss = 0;
+
+    par_ford(N)([&](size_t n) {
+        double loss = 0;
+        uint64_t y  = target[T_tv.get_tensor_view_idx({n})];
+        if(y < C)
+        {
+            for(size_t c = 0; c < C; c++)
+            {
+                if(y != c)
+                {
+                    double t = margin -
+                               static_cast<double>(input[I_tv.get_tensor_view_idx({n, y})]) +
+                               static_cast<double>(input[I_tv.get_tensor_view_idx({n, c})]);
+                    if(t >= 0)
+                    {
+                        if(p == 2)
+                            t = t * t;
+                        t = weight[W_tv.get_tensor_view_idx({y})] * t;
+                        loss += t / C;
+                    }
+                }
+            }
+            if(reduction_mode != MIOPEN_LOSS_REDUCTION_NONE)
+            {
+                sum_loss += loss;
+            }
+            else
+            {
+                ref_output[O_tv.get_tensor_view_idx({n})] = static_cast<Tcheck>(loss);
+            }
+        }
+    });
+
+    if(reduction_mode == MIOPEN_LOSS_REDUCTION_MEAN)
+        ref_output[0] = static_cast<Tcheck>(sum_loss / N);
+    else if(reduction_mode == MIOPEN_LOSS_REDUCTION_SUM)
+        ref_output[0] = static_cast<Tcheck>(sum_loss);
+    return ret;
+}
+
 template <typename Tgpu, typename Tref>
 class MultiMarginLossDriver : public Driver
 {
@@ -410,20 +471,48 @@ int MultiMarginLossDriver<Tgpu, Tref>::RunForwardGPU()
     return miopenStatusSuccess;
 }
 
+#include <chrono>
+
 template <typename Tgpu, typename Tref>
 int MultiMarginLossDriver<Tgpu, Tref>::RunForwardCPU()
 {
-    return mloMultiMarginLossForwardRunHost(iDesc,
-                                            tDesc,
-                                            wDesc,
-                                            oDesc,
-                                            p,
-                                            margin,
-                                            reduction_mode,
-                                            I.data(),
-                                            T.data(),
-                                            W.data(),
-                                            Ohost.data());
+    auto start                                    = std::chrono::steady_clock::now();
+    int32_t s                                     = mloMultiMarginLossForwardRunHost(iDesc,
+                                                 tDesc,
+                                                 wDesc,
+                                                 oDesc,
+                                                 p,
+                                                 margin,
+                                                 reduction_mode,
+                                                 I.data(),
+                                                 T.data(),
+                                                 W.data(),
+                                                 Ohost.data());
+    auto end                                      = std::chrono::steady_clock::now();
+    std::chrono::duration<float, std::milli> diff = end - start;
+
+    auto start1                                    = std::chrono::steady_clock::now();
+    int32_t s1                                     = mloMultiMarginLossForwardRunHost2(iDesc,
+                                                   tDesc,
+                                                   wDesc,
+                                                   oDesc,
+                                                   p,
+                                                   margin,
+                                                   reduction_mode,
+                                                   I.data(),
+                                                   T.data(),
+                                                   W.data(),
+                                                   Ohost.data());
+    auto end1                                      = std::chrono::steady_clock::now();
+    std::chrono::duration<float, std::milli> diff1 = end1 - start1;
+
+    std::cout << "FWD OLD TIME: " << diff << std::endl << "FWD NEW TIME: " << diff1 << std::endl;
+
+    std::ofstream f("multimarginloss.txt", std::ios::app);
+    f << diff.count() << "\t" << diff1.count() << std::endl;
+    f.close();
+
+    return s;
 }
 
 template <typename Tgpu, typename Tref>
