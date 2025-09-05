@@ -35,6 +35,12 @@
 #include "lib_macros.hpp"
 #include "libcommon.hpp"
 
+#if defined(__GFX9__)
+__device__ static constexpr int WarpSize = 64;
+#else
+__device__ static constexpr int WarpSize = 32;
+#endif
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 /*
