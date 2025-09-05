@@ -25,6 +25,11 @@ trigger:
     include:
     - CMakeLists.txt
     - cmake
+    - shared/mxdatagenerator
+    - shared/rocroller
+    - projects/hipblas-common
+    - projects/rocprim
+    - projects/rocrand
     exclude:
     - .githooks
     - .github
@@ -42,6 +47,11 @@ pr:
     include:
     - CMakeLists.txt
     - cmake
+    - shared/mxdatagenerator
+    - shared/rocroller
+    - projects/hipblas-common
+    - projects/rocprim
+    - projects/rocrand
     exclude:
     - .githooks
     - .github

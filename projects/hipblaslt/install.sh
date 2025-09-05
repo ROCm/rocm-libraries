@@ -844,9 +844,10 @@ pushd .
       -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
       -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
       -DROCM_DISABLE_LDCONFIG=ON \
+      -DCMAKE_INSTALL_LIBDIR="lib" \
       -DROCM_PATH="${rocm_path}" ${root_path}
   else
-    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DROCM_PATH="${rocm_path}" ${root_path}
+    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
   fi
   check_exit_code "$?"
 
