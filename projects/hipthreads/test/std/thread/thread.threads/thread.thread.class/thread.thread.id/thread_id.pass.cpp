@@ -9,7 +9,7 @@
 // UNSUPPORTED: no-threads
 
 // ADDITIONAL_COMPILE_FLAGS: -DTEST_USE_GPU_THREADS
-// gpulib doesn't yet have support hashing thread IDs
+// hipthreads doesn't yet have support hashing thread IDs
 // XFAIL: *
 
 // <thread>
