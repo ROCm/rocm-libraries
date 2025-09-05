@@ -86,7 +86,7 @@ namespace TensileLite
             size_t numWGs, numActiveCUs, numWaves, splitFactor;
             if(split) // if it is given
             {
-                split = std::max(split, 1.0);
+                split        = split > 1 ? split : 1;
                 numWGs       = numMTs * split;
                 numActiveCUs = numWGs < hardware.N_CU ? numWGs : hardware.N_CU;
                 numWaves     = safe_ceil_div(numWGs, hardware.N_CU);
@@ -513,8 +513,6 @@ namespace TensileLite
             int grid_m = static_cast<int>(safe_ceil_div(M, MT_M));
             int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
 
-            // int num_cus = (numActiveCUs / splittingFactor);
-
             // mem2 tile dimensions
             int mall_m = grid_m * grid_n / WGM;         // M dimension of mem2 tile
             int mall_n = std::min(WGM, grid_n); // N dimension of mem2 tile
@@ -821,7 +819,8 @@ namespace TensileLite
             // long num_iter = static_cast<long>(((K + MT_K - 1) / MT_K)) - 1;
             // num_iter      = std::ceil(num_iter / splittingFactor);
             // num_iter      = std::max(num_iter, 1L);
-            long num_iter = static_cast<long>(safe_ceil_div(K, MT_K * splittingFactor)) - 1;
+            long splittedK = static_cast<long>(safe_ceil_div(K, splittingFactor));
+            long num_iter = static_cast<long>(safe_ceil_div(splittedK, MT_K)) - 1;
 
             // 7) Total tile latency
             double L_tile_total = (L_tile_single * num_iter)
