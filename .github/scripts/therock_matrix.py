@@ -2,17 +2,15 @@
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
 subtree_to_project_map = {
-    "projects/rocprim": "prim",
-    "projects/rocthrust": "prim",
+    "projects/hipblas": "blas",
+    "projects/hipblas-common": "blas",
+    "projects/hipblaslt": "blas",
     "projects/hipcub": "prim",
-    "projects/rocrand": "rand",
-    "projects/hiprand": "rand",
-    "projects/hiprand": "rand",
     "projects/hiprand": "rand",
     "projects/rocblas": "blas",
-    "projects/hipblaslt": "blas",
-    "projects/hipblas": "blas",
-    "projects/hipblas-common": "blas"
+    "projects/rocrand": "rand",
+    "projects/rocprim": "prim",
+    "projects/rocthrust": "prim"
 }
 
 project_map = {

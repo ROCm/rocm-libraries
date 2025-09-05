@@ -31,7 +31,7 @@ jobs:
       AMDGPU_FAMILIES: "gfx94X-dcgpu"
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
-    steps:      
+    steps:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         
