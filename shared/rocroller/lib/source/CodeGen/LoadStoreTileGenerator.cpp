@@ -172,18 +172,21 @@ namespace rocRoller
             for(auto const& unroll : unrolls)
             {
                 auto const subDimension = m_graph->mapper.getConnectionSubdimension(opTag, unroll);
-                auto       strideTag    = getUnrollStrideCoordinate(opTag, subDimension);
-                if(strideTag != -1)
-                {
-                    auto [strideExpr, strideAttrs]
-                        = m_context->registerTagManager()->getExpression(strideTag);
 
-                    Log::debug("  unroll coord {} value: {}",
-                               unroll,
-                               toString(coords.getCoordinate(unroll)));
-                    Log::debug("  stride coord {} expr: {}", strideTag, toString(strideExpr));
-                    result = result + coords.getCoordinate(unroll) * strideExpr;
-                }
+                if(subDimension == -1)
+                    continue;
+
+                auto strideTag = getUnrollStrideCoordinate(opTag, subDimension);
+                if(strideTag == -1)
+                    continue;
+
+                auto [strideExpr, strideAttrs]
+                    = m_context->registerTagManager()->getExpression(strideTag);
+
+                Log::debug(
+                    "  unroll coord {} value: {}", unroll, toString(coords.getCoordinate(unroll)));
+                Log::debug("  stride coord {} expr: {}", strideTag, toString(strideExpr));
+                result = result + coords.getCoordinate(unroll) * strideExpr;
             }
 
             return result;
