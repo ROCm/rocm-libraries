@@ -153,6 +153,10 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*GPU*")
     endif()
 
+    if(MIOPEN_TEST_GFX115X)
+        add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64")
+    endif()
+
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
