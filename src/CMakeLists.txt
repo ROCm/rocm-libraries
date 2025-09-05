@@ -19,25 +19,24 @@ if (WIN32)
   set (CMAKE_CXX_CREATE_STATIC_LIBRARY "<CMAKE_AR> /out:<TARGET> <LINK_FLAGS> <OBJECTS>")
 endif()
 
-# Generate static lib libGpuThreads.a
-add_library(GpuThreads STATIC gpu/thread.cxx)
-target_include_directories(GpuThreads PRIVATE ${CMAKE_SOURCE_DIR}/inc)
+# Generate static lib libhipthreads.a
+add_library(hipthreads STATIC gpu/thread.cxx)
+target_include_directories(hipthreads PRIVATE ${CMAKE_SOURCE_DIR}/inc)
 
-target_compile_options(GpuThreads PRIVATE "-Werror" "-Wall" "-Wextra" "-Wshadow" "-Wnull-dereference" "-Wold-style-cast" "-Wzero-as-null-pointer-constant" "-Wfloat-equal" "-Wdouble-promotion")
-target_compile_options(GpuThreads PRIVATE "-save-temps=obj" "-O2" "-fgpu-rdc")
-target_link_libraries(GpuThreads PRIVATE "-fgpu-rdc")
+target_compile_options(hipthreads PRIVATE "-Werror" "-Wall" "-Wextra" "-Wshadow" "-Wnull-dereference" "-Wold-style-cast" "-Wzero-as-null-pointer-constant" "-Wfloat-equal" "-Wdouble-promotion")
+target_compile_options(hipthreads PRIVATE "-save-temps=obj" "-O2" "-fgpu-rdc")
+target_link_libraries(hipthreads PRIVATE "-fgpu-rdc")
 
 # needed to get intellisense to stop complaining about the co-ordinate built-ins not being defined
-target_compile_definitions(GpuThreads PUBLIC __HIP__)
+target_compile_definitions(hipthreads PUBLIC __HIP__)
 
 
-# target_link_libraries(GpuThreads PRIVATE libhipcxx::libhipcxx)
-#TODO: define an install target, and a GpuThreadsConfig.cmake so find_package can be used
+# target_link_libraries(hipthreads PRIVATE libhipcxx::libhipcxx)
 
 
-# add_custom_command(TARGET GpuThreads POST_BUILD
-#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/GpuThreads.dir/gpu/thread-host-x86_64-unknown-linux-gnu.bc
+# add_custom_command(TARGET hipthreads POST_BUILD
+#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hipthreads.dir/gpu/thread-host-x86_64-unknown-linux-gnu.bc
 # )
-# add_custom_command(TARGET GpuThreads POST_BUILD
-#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/GpuThreads.dir/gpu/thread-hip-amdgcn-amd-amdhsa-gfx1100.bc
+# add_custom_command(TARGET hipthreads POST_BUILD
+#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hipthreads.dir/gpu/thread-hip-amdgcn-amd-amdhsa-gfx1100.bc
 # )

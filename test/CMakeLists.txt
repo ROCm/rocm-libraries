@@ -35,9 +35,9 @@ endforeach(testFileName)
 
 # For windows, Change in a way to pass lib details
 if (WIN32)
-  target_link_libraries(gpu_thread_mutex_test PRIVATE -lGpuThreads -L${CMAKE_BINARY_DIR})
-  target_link_libraries(gpu_thread_condvar_test PRIVATE -lGpuThreads -L${CMAKE_BINARY_DIR})
+  target_link_libraries(gpu_thread_mutex_test PRIVATE -lhipthreads -L${CMAKE_BINARY_DIR})
+  target_link_libraries(gpu_thread_condvar_test PRIVATE -lhipthreads -L${CMAKE_BINARY_DIR})
 else()
-  target_link_libraries(gpu_thread_mutex_test PRIVATE GpuThreads)
-  target_link_libraries(gpu_thread_condvar_test PRIVATE GpuThreads)
+  target_link_libraries(gpu_thread_mutex_test PRIVATE hipthreads)
+  target_link_libraries(gpu_thread_condvar_test PRIVATE hipthreads)
 endif()

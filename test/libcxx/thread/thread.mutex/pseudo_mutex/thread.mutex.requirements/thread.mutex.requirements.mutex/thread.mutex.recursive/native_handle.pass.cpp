@@ -10,7 +10,7 @@
 
 // XFAIL: windows
 
-// gpulib currently doesn't provide an equivalent to recursive_mutex
+// hipthreads currently doesn't provide an equivalent to recursive_mutex
 // XFAIL: *
 
 // <mutex>

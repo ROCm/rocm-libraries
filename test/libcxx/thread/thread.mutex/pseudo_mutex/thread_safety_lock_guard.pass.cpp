@@ -10,7 +10,7 @@
 // the processing goes awry preventing the definition of the types.
 // XFAIL: msvc
 
-// gpulib doesn't provide an equivalent to std::scoped_lock yet
+// hipthreads doesn't provide an equivalent to std::scoped_lock yet
 // XFAIL: *
 
 // UNSUPPORTED: no-threads

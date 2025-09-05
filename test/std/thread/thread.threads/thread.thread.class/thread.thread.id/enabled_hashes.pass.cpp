@@ -9,7 +9,7 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03
 
-// gpulib doesn't yet have support hashing thread IDs
+// hipthreads doesn't yet have support hashing thread IDs
 // XFAIL: *
 
 // <thread>

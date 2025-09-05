@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(GpuLib)
+project(hipthreads)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -47,29 +47,29 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/inc/gpu/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gpu
 )
 
-install(TARGETS GpuThreads
-    EXPORT GpuLibTargets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/gpulib
+install(TARGETS hipthreads
+    EXPORT hipthreadsTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/hipthreads
 )
 
-set(CMAKECONFIG_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/GpuLib)
+set(CMAKECONFIG_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/hipthreads)
 
-install(EXPORT GpuLibTargets
-    FILE GpuLibTargets.cmake
-    NAMESPACE GpuLib::
+install(EXPORT hipthreadsTargets
+    FILE hipthreadsTargets.cmake
+    NAMESPACE hipthreads::
     DESTINATION ${CMAKECONFIG_INSTALL_DIR}
 )
 
 configure_package_config_file(
-    "cmake/GpuLibConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/GpuLibConfig.cmake"
+    "cmake/hipthreadsConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipthreadsConfig.cmake"
     INSTALL_DESTINATION ${CMAKECONFIG_INSTALL_DIR}
 )
 
 install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/GpuLibConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipthreadsConfig.cmake"
     DESTINATION ${CMAKECONFIG_INSTALL_DIR}
 )
 
 # TEMP: until libhipcxx resolves this
-target_compile_definitions(GpuThreads PUBLIC _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE)
+target_compile_definitions(hipthreads PUBLIC _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE)
