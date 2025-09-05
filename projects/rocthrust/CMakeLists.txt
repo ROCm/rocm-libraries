@@ -209,10 +209,9 @@ endif()
   
 # Tests
 if(BUILD_TEST AND USE_SYSTEM_LIB)
+  # Ideally we should also check the compatibility of the installed rocprim version - unfortunately
+  # there is no good way to know the matching rocprim version from a given rocthrust version
   find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
-  if (NOT ${rocprim_VERSION} VERSION_EQUAL ${VERSION_STRING})
-    message(WARNING "The installed rocprim version, ${rocprim_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
-  endif()
   find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
   if (NOT ${rocthrust_VERSION} VERSION_EQUAL ${VERSION_STRING})
     message(WARNING "The installed rocthrust version, ${rocthrust_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
