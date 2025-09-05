@@ -171,8 +171,8 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
             option(YAML_CPP_INSTALL "" ON)
             set(BUILD_TESTING OFF)
             set(BUILD_CLIENTS OFF)
-            #set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
-            #set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
             include(FetchContent)
             FetchContent_Declare(
                 rocRoller
