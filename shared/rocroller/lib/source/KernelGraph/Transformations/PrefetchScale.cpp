@@ -292,11 +292,131 @@ namespace rocRoller
             insertInLoopCopies(graph, inLoopCopies);
         }
 
+        void prefetchScaleLoadsPerUnroll(KernelGraph& graph, ContextPtr context)
+        {
+            auto root = graph.control.roots().only().value();
+
+            // all loads that follow the root
+            auto loads
+                = filter(graph.control.isElemType<LoadTiled>(), graph.control.depthFirstVisit(root))
+                      .to<std::vector>();
+
+            // sort the loads
+            // this brings the first load in the sequence to the front
+            std::sort(loads.begin(),
+                      loads.end(),
+                      TopologicalCompare(std::make_shared<KernelGraph>(graph)));
+
+            auto colouring = colourByUnrollValue(graph);
+
+            std::vector<int>                prefetchPosition;
+            std::optional<int>              unrollKVal;
+            std::optional<int>              numInFlight;
+            std::map<int, std::vector<int>> nextIterPrefetch;
+            auto                            isInsideLoop = false;
+
+            for(auto const loadTag : loads)
+            {
+                auto macTileTag = graph.mapper.get<MacroTile>(loadTag);
+                auto macTile    = graph.coordinates.getNode<MacroTile>(macTileTag);
+
+                // identify swizzle scale loads
+                if(macTile.memoryType == MemoryType::WAVE_SWIZZLE)
+                {
+                    if(!numInFlight.has_value())
+                        numInFlight = prefetchPosition.size();
+
+                    std::cout << numInFlight.value() << std::endl;
+
+                    // the swizzle scale loads must be inside the loop K
+                    auto maybeForLoop = findContainingOperation<ForLoopOp>(loadTag, graph);
+                    AssertFatal(maybeForLoop.has_value());
+
+                    auto unrollMap  = colouring.operationColour.at(loadTag);
+                    auto unrollKDim = graph.mapper.get<Unroll>(loadTag, 2);
+                    auto subiter    = unrollMap.at(unrollKDim);
+                    std::cout << macTile.memoryType << " " << subiter << std::endl;
+
+                    auto topOp = getTopSetCoordinate(graph, loadTag);
+                    replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
+                    nextIterPrefetch[subiter].push_back(topOp);
+
+                    if(subiter < numInFlight.value())
+                    {
+                        auto               prefetchTopOp  = duplicateChain(graph, {topOp});
+                        std::optional<int> maybeOperation = prefetchTopOp;
+                        while(maybeOperation)
+                        {
+                            auto operationTag = maybeOperation.value();
+
+                            if(isOperation<LoadTiled>(graph.control.getElement(operationTag)))
+                                break;
+
+                            auto maybeSetCoordinate
+                                = graph.control.get<SetCoordinate>(operationTag);
+                            AssertFatal(maybeSetCoordinate.has_value());
+                            auto unroll = graph.mapper.get<Unroll>(operationTag);
+                            AssertFatal(unroll > 0,
+                                        "SetCoordinate is not connected to the Unroll dimension");
+
+                            if(unroll == unrollKDim)
+                            {
+                                int  unrollKSize = getUnrollSize(graph, unroll);
+                                auto valueExpr   = maybeSetCoordinate.value().value;
+                                AssertFatal(evaluationTimes(
+                                                valueExpr)[Expression::EvaluationTime::Translate],
+                                            "SetCoordinate::value should be a literal.");
+                                auto value = getUnsignedInt(evaluate(valueExpr));
+                                auto newOp
+                                    = SetCoordinate(Expression::literal(value + unrollKSize));
+                                graph.control.setElement(operationTag, newOp);
+                                nextIterPrefetch[value + unrollKSize].push_back(prefetchTopOp);
+                                break;
+                            }
+                            maybeOperation
+                                = only(graph.control.getOutputNodeIndices<Body>(operationTag));
+                        }
+                    }
+                }
+                else
+                {
+                    auto maybeForLoop = findContainingOperation<ForLoopOp>(loadTag, graph);
+                    // entered the loop
+                    if(maybeForLoop.has_value())
+                        isInsideLoop = true;
+                    // exited the loop
+                    if(isInsideLoop && !maybeForLoop.has_value())
+                        break;
+
+                    auto unrollMap  = colouring.operationColour.at(loadTag);
+                    auto unrollKDim = graph.mapper.get<Unroll>(loadTag, 2);
+                    if(!unrollKVal.has_value() || unrollKVal.value() != unrollMap.at(unrollKDim))
+                    {
+                        unrollKVal = unrollMap.at(unrollKDim);
+                        auto topOp = getTopSetCoordinate(graph, loadTag);
+                        prefetchPosition.push_back(topOp);
+                    }
+                }
+            }
+
+            for(auto const [subiter, prefetchNodes] : nextIterPrefetch)
+            {
+                auto preNOP = graph.control.addElement(NOP());
+                auto prev   = preNOP;
+                for(auto const next : prefetchNodes)
+                {
+                    graph.control.addElement(Sequence(), {prev}, {next});
+                    prev = next;
+                }
+                insertBefore(graph, prefetchPosition[subiter], preNOP, prev);
+            }
+        }
+
         KernelGraph PrefetchScale::apply(KernelGraph const& original)
         {
             auto newGraph = original;
 
-            prefetchScaleLoads(newGraph, m_context);
+            prefetchScaleLoadsPerUnroll(newGraph, m_context);
 
             return newGraph;
         }
