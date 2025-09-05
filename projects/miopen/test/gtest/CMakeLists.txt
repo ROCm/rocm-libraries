@@ -153,31 +153,11 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*GPU*")
     endif()
 
-    if(MIOPEN_TEST_GFX115X)
-#GPU_TestMhaFind20_FP32
-        add_gtest_negative_filter("*GPU_*MHA*")
-        add_gtest_negative_filter("*GPU_*_Mha*")
-        add_gtest_negative_filter("*GPU_MhaForward*")
-        add_gtest_negative_filter("*GPU_MhaBackward*")
-        add_gtest_negative_filter("*GPU_MhaBwdGraph*")
-        add_gtest_negative_filter("*GPU_TestMhaFind20_FP32*")
-        add_gtest_negative_filter("*GPU_MhaFwdGraph_FP32*")
-
-        # Non standard squashed operation supported only for 3d tensors and for the specific configuration" thrown in the test body
-        add_gtest_negative_filter("*GPU_TernaryTensorOps*")
-
-        # /opt/rocm-7.1.0/include/rocrand/rocrand_common.h:170:69: error: expected class name
-        # 170 | struct has_data<T, decltype(std::declval<T>().data, void())> : std::true_type
-        add_gtest_negative_filter("*GPU_Dropout*")
-        add_gtest_negative_filter("*GPU_Softmax_FP32*")
-
-    endif()
-
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
 
-    message(STATUS "TEST_FILTER ${MIOPEN_GTEST_FILTER}")
+    message(STATUS "MIOPEN_GTEST_FILTER ${MIOPEN_GTEST_FILTER}")
 
     foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
       add_test(NAME ${TEST_NAME}_shard${i}
