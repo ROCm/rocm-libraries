@@ -62,6 +62,139 @@ namespace GEMMDriverTest
     template <typename T>
     concept isF6F4 = std::is_same_v<T, FP6> || std::is_same_v<T, BF6> || std::is_same_v<T, FP4>;
 
+    void writeGEMMFailureDetails(const ComparisonResult&     res,
+                                 const std::string&          kernelName,
+                                 int                         iteration,
+                                 size_t                      M,
+                                 size_t                      N,
+                                 size_t                      K,
+                                 const auto&                 d_result,
+                                 const auto&                 h_result,
+                                 const auto&                 hostA,
+                                 const auto&                 hostB,
+                                 const auto&                 hostC,
+                                 const std::vector<uint8_t>& hostScaleA,
+                                 const std::vector<uint8_t>& hostScaleB)
+    {
+        static const SettingsOption<int> WriteOnFail{
+            "ROCROLLER_WRITE_ON_FAIL",
+            "Write input/output matrices to file when GEMM tests fail (0 = disabled, >0 = "
+            "max "
+            "files)",
+            0,
+            -1};
+
+        static const SettingsOption<std::string> WriteOnFailDir{
+            "ROCROLLER_WRITE_ON_FAIL_DIR", "Directory to write GEMM failures to", "failures/", -1};
+
+        auto writeOnFailLimit = Settings::getInstance()->get(WriteOnFail);
+        if(writeOnFailLimit <= 0)
+        {
+            return;
+        }
+
+        auto                  writeOnFailDir = Settings::getInstance()->get(WriteOnFailDir);
+        std::filesystem::path base
+            = std::filesystem::absolute(std::filesystem::path(writeOnFailDir));
+        if(!std::filesystem::exists(base))
+        {
+            std::filesystem::create_directories(base);
+        }
+
+        int existingFileCount = 0;
+        for(const auto& entry : std::filesystem::directory_iterator(base))
+        {
+            if(entry.is_regular_file())
+            {
+                existingFileCount++;
+            }
+        }
+
+        if(existingFileCount < writeOnFailLimit)
+        {
+            std::filesystem::path valuesFilePath
+                = base / fmt::format("{}_iter_{}.txt", kernelName, iteration);
+
+            std::ofstream valuesFile(valuesFilePath);
+
+            if(!valuesFile.is_open())
+            {
+                Log::error("Failed to open output files for writing");
+                return;
+            }
+
+            Log::info("Values file written to: {} (file {} of {} allowed)",
+                      valuesFilePath.string(),
+                      existingFileCount + 1,
+                      writeOnFailLimit);
+
+            valuesFile << fmt::format("RNorm is {} (acceptable {}, iteration {})",
+                                      res.relativeNormL2,
+                                      res.acceptableError.relativeL2Tolerance,
+                                      iteration)
+                       << std::endl;
+
+            valuesFile << "Diffs:\n";
+            for(size_t i = 0; i < M; i++)
+            {
+                for(size_t j = 0; j < N; j++)
+                {
+                    auto a = d_result[i * N + j];
+                    auto b = h_result[i * N + j];
+                    if((a - b) * (a - b) / (b * b) > res.acceptableError.relativeL2Tolerance)
+                    {
+                        valuesFile << std::setw(8) << i << std::setw(8) << j //
+                                   << std::setw(16) << std::scientific << a //
+                                   << std::setw(16) << std::scientific << b //
+                                   << std::setw(16) << std::scientific << a - b //
+                                   << std::endl;
+                    }
+                }
+            }
+
+            const auto logMatrixFloats
+                = [&valuesFile](const auto& name, const auto& matrix, const auto I, const auto J) {
+                      const auto floatMatrix = unpackToFloat(matrix);
+                      AssertFatal(floatMatrix.size() == I * J,
+                                  ShowValue(floatMatrix.size()),
+                                  ShowValue(I),
+                                  ShowValue(J));
+                      valuesFile << name << "\n";
+                      for(size_t i = 0; i < I; i++)
+                      {
+                          for(size_t j = 0; j < J; j++)
+                          {
+                              auto v = floatMatrix[i * J + j];
+                              valuesFile << std::setw(16) << std::scientific << v << " ";
+                          }
+                          valuesFile << std::endl;
+                      }
+                      valuesFile << std::endl;
+                  };
+
+            valuesFile << "Values as floats:\n";
+            logMatrixFloats("A", hostA, M, K);
+            logMatrixFloats("B", hostB, K, N);
+            logMatrixFloats("C", hostC, M, N);
+
+            const auto logBytes = [&valuesFile](const auto& name, const auto& vector) {
+                valuesFile << name << std::endl;
+                for(const auto& v : vector)
+                {
+                    valuesFile << +v << std::endl;
+                }
+                valuesFile << std::endl;
+            };
+
+            valuesFile << "Scales:\n";
+            logBytes("ScaleA", hostScaleA);
+            logBytes("ScaleB", hostScaleB);
+
+            logMatrixFloats("Device Result", d_result, M, N);
+            logMatrixFloats("Host Result", h_result, M, N);
+        }
+    }
+
     template <typename... Ts>
     class BaseGEMMContextFixture
         : public BaseGPUContextFixture,
@@ -817,128 +950,21 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                static const SettingsOption<int> WriteOnFail{
-                    "ROCROLLER_WRITE_ON_FAIL",
-                    "Write input/output matrices to file when GEMM tests fail (0 = disabled, >0 = "
-                    "max "
-                    "files)",
-                    0,
-                    -1};
-
-                static const SettingsOption<std::string> WriteOnFailDir{
-                    "ROCROLLER_WRITE_ON_FAIL_DIR",
-                    "Directory to write GEMM failures to",
-                    "failures/",
-                    -1};
-
-                auto writeOnFailLimit = Settings::getInstance()->get(WriteOnFail);
-                if(!res.ok && writeOnFailLimit > 0)
+                if(!res.ok)
                 {
-                    auto writeOnFailDir = Settings::getInstance()->get(WriteOnFailDir);
-                    std::filesystem::path base
-                        = std::filesystem::absolute(std::filesystem::path(writeOnFailDir));
-                    if(!std::filesystem::exists(base))
-                    {
-                        std::filesystem::create_directories(base);
-                    }
-
-                    int existingFileCount = 0;
-                    for(const auto& entry : std::filesystem::directory_iterator(base))
-                    {
-                        if(entry.is_regular_file())
-                        {
-                            existingFileCount++;
-                        }
-                    }
-
-                    if(existingFileCount < writeOnFailLimit)
-                    {
-                        std::filesystem::path valuesFilePath
-                            = base
-                              / fmt::format(
-                                  "{}_iter_{}.txt", commandKernel.getKernelName(), iteration);
-
-                        std::ofstream valuesFile(valuesFilePath);
-
-                        if(!valuesFile.is_open())
-                        {
-                            Log::error("Failed to open output files for writing");
-                            continue;
-                        }
-
-                        Log::info("Values file written to: {} (file {} of {} allowed)",
-                                  valuesFilePath.string(),
-                                  existingFileCount + 1,
-                                  writeOnFailLimit);
-
-                        valuesFile << fmt::format("RNorm is {} (acceptable {}, iteration {})",
-                                                  res.relativeNormL2,
-                                                  res.acceptableError.relativeL2Tolerance,
-                                                  iteration)
-                                   << std::endl;
-
-                        valuesFile << "Diffs:\n";
-                        for(size_t i = 0; i < M; i++)
-                        {
-                            for(size_t j = 0; j < N; j++)
-                            {
-                                auto a = d_result[i * N + j];
-                                auto b = h_result[i * N + j];
-                                if((a - b) * (a - b) / (b * b)
-                                   > res.acceptableError.relativeL2Tolerance)
-                                {
-                                    valuesFile << std::setw(8) << i << std::setw(8) << j //
-                                               << std::setw(16) << std::scientific << a //
-                                               << std::setw(16) << std::scientific << b //
-                                               << std::setw(16) << std::scientific << a - b //
-                                               << std::endl;
-                                }
-                            }
-                        }
-
-                        const auto logMatrixFloats = [&valuesFile](const auto& name,
-                                                                   const auto& matrix,
-                                                                   const auto  I,
-                                                                   const auto  J) {
-                            const auto floatMatrix = unpackToFloat(matrix);
-                            AssertFatal(floatMatrix.size() == I * J,
-                                        ShowValue(floatMatrix.size()),
-                                        ShowValue(I),
-                                        ShowValue(J));
-                            valuesFile << name << "\n";
-                            for(size_t i = 0; i < I; i++)
-                            {
-                                for(size_t j = 0; j < J; j++)
-                                {
-                                    auto v = floatMatrix[i * J + j];
-                                    valuesFile << std::setw(16) << std::scientific << v << " ";
-                                }
-                                valuesFile << std::endl;
-                            }
-                            valuesFile << std::endl;
-                        };
-
-                        valuesFile << "Values as floats:\n";
-                        logMatrixFloats("A", hostA, M, K);
-                        logMatrixFloats("B", hostB, K, N);
-                        logMatrixFloats("C", hostC, M, N);
-
-                        const auto logBytes = [&valuesFile](const auto& name, const auto& vector) {
-                            valuesFile << name << std::endl;
-                            for(const auto& v : vector)
-                            {
-                                valuesFile << +v << std::endl;
-                            }
-                            valuesFile << std::endl;
-                        };
-
-                        valuesFile << "Scales:\n";
-                        logBytes("ScaleA", hostScaleA);
-                        logBytes("ScaleB", hostScaleB);
-
-                        logMatrixFloats("Device Result", d_result, M, N);
-                        logMatrixFloats("Host Result", h_result, M, N);
-                    }
+                    writeGEMMFailureDetails(res,
+                                            commandKernel.getKernelName(),
+                                            iteration,
+                                            M,
+                                            N,
+                                            K,
+                                            d_result,
+                                            h_result,
+                                            hostA,
+                                            hostB,
+                                            hostC,
+                                            hostScaleA,
+                                            hostScaleB);
                 }
                 EXPECT_TRUE(res.ok) << res.message();
             }
