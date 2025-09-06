@@ -29,7 +29,9 @@
 #include <boost/filesystem.hpp>
 
 #include <Tensile/ContractionLibrary.hpp>
+#ifdef TENSILE_YAML
 #include <Tensile/llvm/YAML.hpp>
+#endif
 #include <TestUtils.hpp>
 
 #include "TestData.hpp"
@@ -187,4 +189,4 @@ std::vector<RangeLibraryTest::ParamType> GetRangeLibraryParams()
     return rv;
 }
 
-INSTANTIATE_TEST_SUITE_P(LLVM, RangeLibraryTest, ::testing::ValuesIn(GetRangeLibraryParams()));
+INSTANTIATE_TEST_SUITE_P(RangeLibraryTest, RangeLibraryTest, ::testing::ValuesIn(GetRangeLibraryParams()));
