@@ -193,6 +193,14 @@ endif()
 # Tests
 if(BUILD_TEST)
   if(USE_SYSTEM_LIB)
+    # On ROCm hipCUB requires rocPRIM
+    if(HIP_COMPILER STREQUAL "clang")
+      find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/rocprim")
+      # Unfortunately there is no good way to fully check the compatibility so only check the required minimum version
+      if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
+        message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+      endif()
+    endif()
     find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/hipcub")
     if (NOT ${hipcub_VERSION} VERSION_EQUAL ${VERSION_STRING})
       message(WARNING "The installed hipcub version, ${hipcub_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
