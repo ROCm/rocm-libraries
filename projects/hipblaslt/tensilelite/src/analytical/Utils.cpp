@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <Tensile/analytical/Utils.hpp>
-// #include "Utils.hpp"
 
 #include <algorithm>
 #include <chrono> // For timing
@@ -73,7 +72,7 @@ namespace TensileLite
             };
             // 2) Sort the results in descending order of arithmetic intensity
             //    (highest arithmetic intensity first).
-            std::sort(top_results.begin(),
+            std::stable_sort(top_results.begin(),
                       top_results.begin() + num_to_sort,
                       [&](const ResultTuple& a, const ResultTuple& b) {
                           double ai_a = computeArithmeticIntensity(a);
@@ -124,7 +123,7 @@ namespace TensileLite
             //    - If still a tie, compare dimensionPriority[2]
             //    - If they're all equal, consider them tied
             std::vector<ResultTuple> sorted = top_results; // copy
-            std::sort(
+            std::stable_sort(
                 sorted.begin(), sorted.end(), [&](const ResultTuple& a, const ResultTuple& b) {
                     for(char d : dimPriority)
                     {
@@ -230,7 +229,7 @@ namespace TensileLite
                                                              double   H_L2,
                                                              bool     debug,
                                                              bool     print,
-                                                             size_t   WGM)
+                                                             size_t   defaultWGM)
         {
             std::vector<ResultTuple> valid_results;
             valid_results.reserve(MT_list.size());
@@ -247,6 +246,7 @@ namespace TensileLite
                 size_t MI_N      = std::get<4>(mt);
                 size_t MI_K      = std::get<5>(mt);
                 size_t occupancy = std::get<6>(mt);
+                size_t WGM       = std::get<7>(mt);
 
                 if(debug)
                 {
@@ -280,7 +280,7 @@ namespace TensileLite
                                                                  debug);
 
                     valid_results.emplace_back(
-                        Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy);
+                        Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy, WGM);
                 }
                 else if(debug)
                 {
@@ -295,7 +295,7 @@ namespace TensileLite
             }
 
             // 1) Sort results by ascending latency.
-            std::sort(valid_results.begin(), valid_results.end(), [](auto const& a, auto const& b) {
+            std::stable_sort(valid_results.begin(), valid_results.end(), [](auto const& a, auto const& b) {
                 return std::get<0>(a) < std::get<0>(b);
             });
 
@@ -471,7 +471,7 @@ namespace TensileLite
             }
 
             // Sort results by precise_latency (ascending order)
-            std::sort(tie_breaker_results.begin(), tie_breaker_results.end());
+            std::stable_sort(tie_breaker_results.begin(), tie_breaker_results.end());
 
             return tie_breaker_results;
         }
@@ -552,7 +552,7 @@ namespace TensileLite
             }
 
             // Sort results by Total_latency, from worst (largest latency) to best (smallest latency)
-            std::sort(
+            std::stable_sort(
                 results.begin(), results.end(), [](const ResultTuple& a, const ResultTuple& b) {
                     return std::get<0>(a) > std::get<0>(b);
                 });
@@ -597,7 +597,7 @@ namespace TensileLite
                     }
 
                     // Now sort the tie_breaker_scores based on score
-                    std::sort(tie_breaker_scores.begin(),
+                    std::stable_sort(tie_breaker_scores.begin(),
                               tie_breaker_scores.end(),
                               [](const std::pair<double, size_t>& a,
                                  const std::pair<double, size_t>& b) { return a.first > b.first; });

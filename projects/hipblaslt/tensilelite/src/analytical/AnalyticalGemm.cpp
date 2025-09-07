@@ -435,6 +435,9 @@ namespace TensileLite
 
             // Distribute CUs per XCD
             int cu_per_xcd = safe_ceil_div(grid_m * grid_n, hardware.NUM_XCD);
+            // Modify cu_per_xcd to only take into account the CUs that might share same K-tiles
+            // This is to factor in the effect of splitting on L2
+            cu_per_xcd /= splittingFactor;
 
             // N dimension of mem1 tile is divided by whichever is smaller between WGM and grid
             int l2_n = std::min(WGM, grid_n);
@@ -474,8 +477,8 @@ namespace TensileLite
             }
 
             // Total reads considering repeated usage
-            long long l2_A_reads = static_cast<long long>(l2_m) * l2_n * MT_M * MT_K * splittingFactor;
-            long long l2_B_reads = static_cast<long long>(l2_n) * l2_m * MT_N * MT_K * splittingFactor;
+            long long l2_A_reads = static_cast<long long>(l2_m) * l2_n * MT_M * MT_K;
+            long long l2_B_reads = static_cast<long long>(l2_n) * l2_m * MT_N * MT_K;
 
             long long total_reads         = std::max(l2_A_reads + l2_B_reads, 1LL);
             long long total_uncached_read = l2_A_uncached_reads + l2_B_uncached_reads;
@@ -492,6 +495,12 @@ namespace TensileLite
                           << "cu_per_xcd:  " << cu_per_xcd << "\n"
                           << "l2_m: " << l2_m << ", l2_n: " << l2_n << ", l2_hit: " << l2_hit
                           << "\n";
+            }
+
+            if(Hardware::is_debug_enabled())
+            {
+                hardware.log_debug("L2Tile_M)", l2_m);
+                hardware.log_debug("L2Tile_N)", l2_n);
             }
 
             return l2_hit;
@@ -544,6 +553,12 @@ namespace TensileLite
 
             double mall_hit = static_cast<double>(cached_reads) / static_cast<double>(total_reads);
 
+            if(Hardware::is_debug_enabled())
+            {
+                hardware.log_debug("MallTile_M)", mall_m);
+                hardware.log_debug("MallTile_N)", mall_n);
+            }
+
             return mall_hit;
         }
 
@@ -572,7 +587,7 @@ namespace TensileLite
 
             // 2) Estimate mall hit-rate
             double H_mem2
-                = estimate_mall_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, /*WGM = */1, numActiveCUs, splittingFactor);
+                = estimate_mall_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, WGM, numActiveCUs, splittingFactor);
 
             // 3) Total loads are loads from A and loads from B
             size_t Ld_A_value  = compute_A_loads(MT_M, MT_K, debug);
@@ -616,8 +631,8 @@ namespace TensileLite
             if(numActiveCUs < hardware.N_CU)
             {
                 double min_load
-                    = static_cast<double>(M * MT_K * safe_ceil_div(element_size_A, 8)
-                                          + N * MT_K * safe_ceil_div(element_size_B, 8));
+                    = static_cast<double>(M * MT_K * splittingFactor * safe_ceil_div(element_size_A, 8)
+                                          + N * MT_K * splittingFactor  * safe_ceil_div(element_size_B, 8));
                 Ld_MEM  = std::max(Ld_MEM, min_load) * batch;
                 Ld_mem2 = std::max(Ld_mem2, min_load) * batch;
             }
@@ -693,12 +708,11 @@ namespace TensileLite
                 hardware.log_debug("H_mem1 (mem1 hit ratio)", H_mem1);
                 hardware.log_debug("H_mem2 (mem2 hit ratio)", H_mem2);
                 hardware.log_debug("Total Load (bytes)", total_Ld);
-                hardware.log_debug("Ld_mem1 (bytes)", Ld_mem2);
                 hardware.log_debug("Ld_mem2 (bytes)", Ld_mem2);
                 hardware.log_debug("Ld_MEM (bytes)", Ld_MEM);
                 hardware.log_debug("L_mem_mem1 (cycles)", L_mem_mem1);
                 hardware.log_debug("L_mem_mem2 (cycles)", L_mem_mem2);
-                hardware.log_debug("L_mem_MEM (cycles, incl. latency)", L_mem_MEM);
+                hardware.log_debug("L_mem_MEM (cycles)", L_mem_MEM);
             }
 
             return L_mem;
@@ -729,7 +743,7 @@ namespace TensileLite
                                     size_t          numActiveCUs,
                                     size_t          splittingFactor,
                                     bool            debug)
-        {
+        {            
             // 1) Compute per-tile latencies
             double L_compute = compute_mt_compute_latency(hardware,
                                                           M,
@@ -786,10 +800,19 @@ namespace TensileLite
             // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N tiles to coherent memory
             if(splittingFactor > 1)
             {
-                size_t n_partials              = splittingFactor - 1;
-                double partial_readwrite_bytes = (2 * numActiveCUs
-                                                  * MT_M * MT_N * safe_ceil_div(element_size_out, 8)
-                                                  * n_partials);
+                size_t n_partials         = splittingFactor - 1;
+
+                // Only the reduction CU reads from all splits.
+                double partial_read_bytes = n_partials * 
+                                            MT_M * MT_N *       
+                                            safe_ceil_div(element_size_out, 8);
+
+                // All CUs write (once for each partial, and once by the reduction CU for the output.)
+                double partial_write_bytes = numActiveCUs
+                                            * MT_M * MT_N * safe_ceil_div(element_size_out, 8);
+
+                double partial_readwrite_bytes = partial_read_bytes + partial_write_bytes;
+
                 double L_reduce = partial_readwrite_bytes / (hardware.mem3_perf_ratio);
                 L_epilogue += L_reduce * 1;
             }
@@ -834,13 +857,10 @@ namespace TensileLite
                 hardware.log_debug("L_compute", L_compute);
                 hardware.log_debug("L_mem", L_mem);
                 hardware.log_debug("L_cvt", L_cvt);
-                hardware.log_debug("num_iter", num_iter);
-                hardware.log_debug("L_cvt", L_cvt);
-                hardware.log_debug("L_prologue", L_prologue);
-                hardware.log_debug("L_epilogue", L_epilogue);
-                hardware.log_debug("L_tile_total", L_tile_total);
                 hardware.log_debug("L_tile_single", L_tile_single);
                 hardware.log_debug("num_iter", num_iter);
+                hardware.log_debug("L_prologue", L_prologue);
+                hardware.log_debug("L_epilogue", L_epilogue);
                 hardware.log_debug("L_tile_total", L_tile_total);
             }
 
