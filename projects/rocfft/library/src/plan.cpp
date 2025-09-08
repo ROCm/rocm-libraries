@@ -767,6 +767,7 @@ std::string rocfft_bench_command(rocfft_plan plan)
     params.otype          = fft_array_type_from_rocfft_array_type(plan->desc.outArrayType);
     params.idist          = plan->desc.inDist;
     params.odist          = plan->desc.outDist;
+    params.scale_factor   = plan->desc.storeOps.scale_factor;
 
     for(auto idx = plan->lengths.size(); idx-- > 0; )
     {
