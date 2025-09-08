@@ -69,6 +69,14 @@ void ext_inst(nb::module_ m)
           nb::arg("positiveLabelStr"),
           nb::arg("posNeg")  = 0,
           nb::arg("comment") = "");
+    m.def("SCLongBranchVccnz",
+          &rocisa::SCLongBranchVccnz,
+          nb::arg("label"),
+          nb::arg("tmpSgprRes"),
+          nb::arg("noBranchLabelStr"),
+          nb::arg("positiveLabelStr"),
+          nb::arg("posNeg")  = 0,
+          nb::arg("comment") = "");
     m.def("SMulInt64to32",
           &rocisa::SMulInt64to32,
           nb::arg("dst0"),
