@@ -78,13 +78,13 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
 
         add_test(
             NAME origami_python_test
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/python/origami_test.py"
+            COMMAND "${Python3_EXECUTABLE}" "origami_test.py"
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
         )
         
         add_test(
             NAME origami_python_grid_test  
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/python/origami_grid_test.py"
+            COMMAND "${Python3_EXECUTABLE}" "origami_grid_test.py"
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
         )
 
