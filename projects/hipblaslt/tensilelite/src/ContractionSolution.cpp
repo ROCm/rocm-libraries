@@ -709,7 +709,7 @@ namespace TensileLite
             auto     totalIters   = tiles * itersPerTile;
             args.template append<uint32_t>("itersPerTile", itersPerTile);
             args.template append<uint32_t>("totalIters", totalIters);
-            
+
             if(sizeMapping.streamK == 1) // Basic SK
             {
                 uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);

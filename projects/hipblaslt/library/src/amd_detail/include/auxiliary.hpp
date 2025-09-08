@@ -151,7 +151,7 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
 HIPBLASLT_EXPORT
 constexpr const char* hipblas_computetype_to_string(hipblasComputeType_t type)
 {
-    return 
+    return
         type == HIPBLAS_COMPUTE_16F ? "f16_r" :
         type == HIPBLAS_COMPUTE_32F ? "f32_r" :
         type == HIPBLAS_COMPUTE_32F_FAST_TF32 ? "xf32_r" :

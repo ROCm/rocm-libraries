@@ -321,7 +321,7 @@ inline std::map<std::string, int>
             rv["MaxVscnt"] = 63;
         }
     }
-    
+
     if(rv["SeparateLGKMcnt"])
     {
         // s_wait_dscnt accept 16 bits immediate, but only use the lowest 6 bits are used, can't use tryAssembler

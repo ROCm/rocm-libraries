@@ -289,7 +289,7 @@ namespace TensileLite
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
                                                  Hardware const& hardware) const;
 
-        size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;                                         
+        size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
         size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles) const;
         size_t partialTileSize(size_t skGrid) const;
