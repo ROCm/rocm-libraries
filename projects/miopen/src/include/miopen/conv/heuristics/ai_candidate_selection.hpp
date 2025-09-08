@@ -30,6 +30,7 @@
 #include <memory>
 #include <optional>
 #include <map>
+#include <miopen/config.hpp>
 
 namespace miopen {
 namespace ai {

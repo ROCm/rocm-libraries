@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-
+#include <miopen/config.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 
 #include <miopen/db_path.hpp>

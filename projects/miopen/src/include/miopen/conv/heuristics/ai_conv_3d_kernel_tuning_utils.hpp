@@ -28,6 +28,7 @@
 
 #include <vector>
 #include <string>
+#include <miopen/config.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
