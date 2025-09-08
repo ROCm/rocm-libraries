@@ -13,17 +13,22 @@ include(FetchContent)
 include(CMakeDependentOption)
 include(rocroller_target_configure_sanitizers)
 
-FetchContent_Declare(
-    ROCmCMakeBuildTools
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG rocm-6.3.0
-    SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
-)
-FetchContent_MakeAvailable(ROCmCMakeBuildTools)
-list(
-    APPEND CMAKE_MODULE_PATH
-    ${rocmcmakebuildtools_SOURCE_DIR}/share/rocmcmakebuildtools/cmake
-)
+find_package(ROCmCMakeBuildTools QUIET CONFIG)
+
+if(NOT ROCmCMakeBuildTools_FOUND)
+    FetchContent_Declare(
+        ROCmCMakeBuildTools
+        GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
+        GIT_TAG rocm-6.3.0
+        SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
+    )
+    FetchContent_MakeAvailable(ROCmCMakeBuildTools)
+    list(
+        APPEND CMAKE_MODULE_PATH
+        ${rocmcmakebuildtools_SOURCE_DIR}/share/rocmcmakebuildtools/cmake
+    )
+endif()
+
 include(ROCMInstallTargets)
 
 option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
