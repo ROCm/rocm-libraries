@@ -18,18 +18,26 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_deduction.h>
-#include <thrust/type_traits/remove_cvref.h>
+#include <thrust/detail/type_traits.h>
 
 #include <tuple>
 #include <type_traits>
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
 
-struct capture_as_dependency_fn
+struct THRUST_DEPRECATED capture_as_dependency_fn
 {
   template <typename Dependency>
   auto operator()(Dependency&& dependency) const THRUST_DECLTYPE_RETURNS(capture_as_dependency(THRUST_FWD(dependency)))
@@ -37,19 +45,21 @@ struct capture_as_dependency_fn
 
 // Default implementation: universal forwarding.
 template <typename Dependency>
-auto capture_as_dependency(Dependency&& dependency) THRUST_DECLTYPE_RETURNS(THRUST_FWD(dependency))
+THRUST_DEPRECATED auto capture_as_dependency(Dependency&& dependency) THRUST_DECLTYPE_RETURNS(THRUST_FWD(dependency))
 
-  template <typename... Dependencies>
-  auto capture_as_dependency(std::tuple<Dependencies...>& dependencies)
+  THRUST_SUPPRESS_DEPRECATED_PUSH template <typename... Dependencies>
+  THRUST_DEPRECATED auto capture_as_dependency(std::tuple<Dependencies...>& dependencies)
     THRUST_DECLTYPE_RETURNS(tuple_for_each(THRUST_FWD(dependencies), capture_as_dependency_fn{}))
+      THRUST_SUPPRESS_DEPRECATED_POP
 
-      template <template <typename> class BaseSystem, typename... Dependencies>
-      struct execute_with_dependencies : BaseSystem<execute_with_dependencies<BaseSystem, Dependencies...>>
+  template <template <typename> class BaseSystem, typename... Dependencies>
+  struct THRUST_DEPRECATED execute_with_dependencies
+    : BaseSystem<execute_with_dependencies<BaseSystem, Dependencies...>>
 {
 private:
   using super_t = BaseSystem<execute_with_dependencies<BaseSystem, Dependencies...>>;
 
-  std::tuple<remove_cvref_t<Dependencies>...> dependencies;
+  std::tuple<::internal::remove_cvref_t<Dependencies>...> dependencies;
 
 public:
   THRUST_HOST execute_with_dependencies(super_t const& super, Dependencies&&... deps)
@@ -79,7 +89,7 @@ public:
       : dependencies(std::move(deps))
   {}
 
-  std::tuple<remove_cvref_t<Dependencies>...> THRUST_HOST extract_dependencies()
+  std::tuple<::internal::remove_cvref_t<Dependencies>...> THRUST_HOST extract_dependencies()
   {
     return std::move(dependencies);
   }
@@ -108,13 +118,13 @@ public:
 };
 
 template <typename Allocator, template <typename> class BaseSystem, typename... Dependencies>
-struct execute_with_allocator_and_dependencies
+struct THRUST_DEPRECATED execute_with_allocator_and_dependencies
     : BaseSystem<execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>>
 {
 private:
   using super_t = BaseSystem<execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>>;
 
-  std::tuple<remove_cvref_t<Dependencies>...> dependencies;
+  std::tuple<::internal::remove_cvref_t<Dependencies>...> dependencies;
   Allocator alloc;
 
 public:
@@ -145,7 +155,7 @@ public:
       , alloc(a)
   {}
 
-  std::tuple<remove_cvref_t<Dependencies>...> THRUST_HOST extract_dependencies()
+  std::tuple<::internal::remove_cvref_t<Dependencies>...> THRUST_HOST extract_dependencies()
   {
     return std::move(dependencies);
   }
@@ -179,37 +189,38 @@ public:
 };
 
 template <template <typename> class BaseSystem, typename... Dependencies>
-THRUST_HOST std::tuple<remove_cvref_t<Dependencies>...>
+THRUST_DEPRECATED THRUST_HOST std::tuple<::internal::remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>&& system)
 {
   return std::move(system).extract_dependencies();
 }
 template <template <typename> class BaseSystem, typename... Dependencies>
-THRUST_HOST std::tuple<remove_cvref_t<Dependencies>...>
+THRUST_DEPRECATED THRUST_HOST std::tuple<::internal::remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>& system)
 {
   return std::move(system).extract_dependencies();
 }
 
 template <typename Allocator, template <typename> class BaseSystem, typename... Dependencies>
-THRUST_HOST std::tuple<remove_cvref_t<Dependencies>...> extract_dependencies(
+THRUST_DEPRECATED THRUST_HOST std::tuple<::internal::remove_cvref_t<Dependencies>...> extract_dependencies(
   thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>&& system)
 {
   return std::move(system).extract_dependencies();
 }
 template <typename Allocator, template <typename> class BaseSystem, typename... Dependencies>
-THRUST_HOST std::tuple<remove_cvref_t<Dependencies>...> extract_dependencies(
+THRUST_DEPRECATED THRUST_HOST std::tuple<::internal::remove_cvref_t<Dependencies>...> extract_dependencies(
   thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system)
 {
   return std::move(system).extract_dependencies();
 }
 
 template <typename System>
-THRUST_HOST std::tuple<> extract_dependencies(System&&)
+THRUST_DEPRECATED THRUST_HOST std::tuple<> extract_dependencies(System&&)
 {
   return std::tuple<>{};
 }
 
 } // namespace detail
 
+THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END

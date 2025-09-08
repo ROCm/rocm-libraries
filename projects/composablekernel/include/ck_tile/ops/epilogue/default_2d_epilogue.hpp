@@ -25,6 +25,7 @@ struct Default2DEpilogueProblem
     static constexpr bool kPadN                            = kPadN_;
     static constexpr bool UseRawStore                      = UseRawStore_;
     static constexpr memory_operation_enum MemoryOperation = MemoryOperation_;
+    static constexpr index_t NumDTensor                    = 0;
 };
 
 template <typename ADataType_,
@@ -56,8 +57,8 @@ struct DefaultGemm2DEpilogueProblem : public Default2DEpilogueProblem<AccDataTyp
     using BDataType                        = remove_cvref_t<BDataType_>;
     using CLayout                          = remove_cvref_t<CLayout_>;
     using DsDataType                       = remove_cvref_t<DsDataType_>;
-    using DsLayout                         = remove_cvref_t<DsLayout_>;
     using CDElementwise                    = remove_cvref_t<CDElementwise_>;
+    using DsLayout                         = remove_cvref_t<DsLayout_>;
     static constexpr index_t kMPerBlock    = kM_;
     static constexpr index_t kNPerBlock    = kN_;
     static constexpr index_t kMPerXdl      = kMPerXdl_;
@@ -77,7 +78,6 @@ struct Default2DEpilogue
     using Problem                     = remove_cvref_t<Problem_>;
     using AccDataType                 = remove_cvref_t<typename Problem::AccDataType>;
     using ODataType                   = remove_cvref_t<typename Problem::ODataType>;
-    using CDElementwise               = remove_cvref_t<typename Problem::CDElementwise>;
     static constexpr bool kPadM       = Problem::kPadM;
     static constexpr bool kPadN       = Problem::kPadN;
     static constexpr bool UseRawStore = Problem::UseRawStore;
@@ -91,7 +91,7 @@ struct Default2DEpilogue
     CK_TILE_DEVICE auto operator()(ODramWindowTmp& o_dram_window_tmp,
                                    const OAccTile& o_acc_tile,
                                    const DsDramWindows& ds_dram_windows,
-                                   void* = nullptr)
+                                   void* = nullptr) const
     {
         const auto storeOrUpdateTile = [&](const auto& o_tile) {
             // TODO: this is ugly
@@ -120,7 +120,7 @@ struct Default2DEpilogue
             }
         };
 
-        if constexpr(Problem::NumDTensor >= 1)
+        if constexpr(!std::is_same_v<DsDramWindows, std::nullptr_t> && Problem::NumDTensor >= 1)
         {
             using elementwise_result_t = decltype(load_tile(
                 make_tile_window(ds_dram_windows[number<0>{}].get_bottom_tensor_view(),
