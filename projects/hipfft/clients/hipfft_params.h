@@ -1233,7 +1233,7 @@ private:
             // the plan wasn't created first
             const size_t num_values_to_check
                 = plan == INVALID_PLAN_HANDLE ? 1 : worksize_estimate.size();
-            for(auto idx = 0; ret == HIPFFT_SUCCESS && idx < num_values_to_check; idx++)
+            for(size_t idx = 0; ret == HIPFFT_SUCCESS && idx < num_values_to_check; idx++)
             {
                 ret = worksize_estimate[idx] != absurd_init_worksize_estimate
                           ? HIPFFT_SUCCESS
