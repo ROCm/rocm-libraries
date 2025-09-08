@@ -59,3 +59,4 @@ For a full description of this rocSOLVER routine, see the API documentation for 
 
 .. literalinclude:: ../../clients/samples/example_batched.c
     :language: c
+

@@ -266,3 +266,4 @@ hipsolverDn<type>gesvdaStridedBatched()
 .. doxygenfunction:: hipsolverDnDgesvdaStridedBatched
    :outline:
 .. doxygenfunction:: hipsolverDnSgesvdaStridedBatched
+

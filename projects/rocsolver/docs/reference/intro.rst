@@ -233,3 +233,4 @@ Refactorization and direct solvers
     :header: "Function", "single", "double", "single complex", "double complex"
 
     :ref:`rocsolver_csrrf_solve <rfsolve>`, x, x, ,
+

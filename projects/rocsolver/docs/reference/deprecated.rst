@@ -139,3 +139,4 @@ rocsolver_get_matrix()
 .. doxygenfunction:: rocsolver_get_matrix
 .. deprecated:: 3.5
    Use :c:func:`rocblas_get_matrix`.
+

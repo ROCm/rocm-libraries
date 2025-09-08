@@ -13,3 +13,6 @@ A = read_csr( 'ptrA','indA','valA', dir);
 [T,Q] = print_prob( A, dir );
 
 end
+
+
+

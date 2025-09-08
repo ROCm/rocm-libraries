@@ -170,3 +170,4 @@ hipsolverXsyevjGetResidual()
 hipsolverXsyevjGetSweeps()
 ---------------------------------
 .. doxygenfunction:: hipsolverXsyevjGetSweeps
+

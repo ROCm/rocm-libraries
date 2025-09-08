@@ -62,3 +62,4 @@ See :ref:`hipsolverDeterministicMode_t <deterministicMode_t>`.
 hipsolverDnFunction_t
 ---------------------
 .. doxygenenum:: hipsolverDnFunction_t
+

@@ -501,3 +501,4 @@ hipsolver<type>gesvd()
 .. doxygenfunction:: hipsolverDgesvd
    :outline:
 .. doxygenfunction:: hipsolverSgesvd
+

@@ -46,3 +46,4 @@ Stream manipulation
 hipsolverSpSetStream()
 ---------------------------------
 .. doxygenfunction:: hipsolverSpSetStream
+
