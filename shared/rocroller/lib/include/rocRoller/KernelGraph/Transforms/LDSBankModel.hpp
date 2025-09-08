@@ -136,24 +136,24 @@ namespace rocRoller::KernelGraph::MemoryTracer
             getThreadsPerClock(const MemoryOpLDS& memoryOp, uint dwords, GPUArchitectureGFX gfx);
 
         /**
-         * @brief Calculate the degree of bank conflicts from a vector of addresses
+         * @brief Create a mapping from bank indices to addresses
          * 
          * @param addresses Vector of LDS addresses
          * @param entryWidthInBytes Width of each bank entry in bytes
          * @param numBanks Number of banks in the LDS
-         * @return Maximum number of addresses that map to the same bank
+         * @return Map from bank index to vector of addresses that map to that bank
          */
-        static uint calculateBankConflicts(const std::vector<uint32_t>& addresses,
-                                           uint                         entryWidthInBytes,
-                                           uint                         numBanks);
+        static std::map<uint, std::vector<uint32_t>> makeBankMapping(
+            const std::vector<uint32_t>& addresses, uint entryWidthInBytes, uint numBanks);
 
         /**
-         * @brief Calculate the degree of bank conflicts using this model's configuration
+         * @brief Calculate the degree of bank conflicts from a bank mapping
          * 
-         * @param addresses Vector of LDS addresses
+         * @param bankMapping Map from bank index to vector of addresses
          * @return Maximum number of addresses that map to the same bank
          */
-        uint calculateBankConflicts(const std::vector<uint32_t>& addresses) const;
+        static uint
+            calculateBankConflicts(const std::map<uint, std::vector<uint32_t>>& bankMapping);
 
     private:
         uint m_entryWidthInBytes;

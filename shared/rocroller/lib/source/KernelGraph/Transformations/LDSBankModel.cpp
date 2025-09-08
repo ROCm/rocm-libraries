@@ -189,32 +189,30 @@ namespace rocRoller::KernelGraph::MemoryTracer
         Throw<FatalError>("Unsupported dword count: ", dwords);
     }
 
-    uint LDSBankModel::calculateBankConflicts(const std::vector<uint32_t>& addresses,
-                                              uint                         entryWidthInBytes,
-                                              uint                         numBanks)
+    std::map<uint, std::vector<uint32_t>> LDSBankModel::makeBankMapping(
+        const std::vector<uint32_t>& addresses, uint entryWidthInBytes, uint numBanks)
     {
-        if(addresses.empty())
-            return 0;
-
-        std::unordered_map<uint, uint> bankCount;
+        std::map<uint, std::vector<uint32_t>> bankMapping;
         for(auto address : addresses)
         {
             auto bankIndex = (address / entryWidthInBytes) % numBanks;
-            bankCount[bankIndex]++;
+            bankMapping[bankIndex].push_back(address);
         }
-
-        uint maxConflicts = 0;
-        for(const auto& [bank, count] : bankCount)
-        {
-            maxConflicts = std::max(maxConflicts, count);
-        }
-
-        return maxConflicts;
+        return bankMapping;
     }
 
-    uint LDSBankModel::calculateBankConflicts(const std::vector<uint32_t>& addresses) const
+    uint LDSBankModel::calculateBankConflicts(
+        const std::map<uint, std::vector<uint32_t>>& bankMapping)
     {
-        return calculateBankConflicts(addresses, m_entryWidthInBytes, m_numBanks);
+        if(bankMapping.empty())
+            return 0;
+
+        uint maxConflicts = 0;
+        for(const auto& [bank, addresses] : bankMapping)
+        {
+            maxConflicts = std::max(maxConflicts, static_cast<uint>(addresses.size()));
+        }
+        return maxConflicts;
     }
 
     DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
@@ -226,20 +224,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         {
             DetailedSummary::OperationDetail detail;
 
-            // Collect all unique memory instructions for this operation
-            std::unordered_set<uint32_t> uniqueAddresses;
-            for(auto const& access : accesses)
-            {
-                for(auto const& instruction : access.instructions)
-                {
-                    for(auto addr : instruction.addresses)
-                    {
-                        uniqueAddresses.insert(addr);
-                    }
-                }
-            }
-
-            // Determine the memory operation and data size
             if(!accesses.empty() && !accesses[0].instructions.empty())
             {
                 const auto& firstInstruction = accesses[0].instructions[0];
@@ -279,16 +263,10 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 conflict.threadGroupIndex = groupIndex;
                 conflict.workitemIds      = workitems;
 
-                // Calculate bank mapping for this thread group
-                std::map<uint, std::vector<uint32_t>> bankToAddr;
-                for(auto addr : threadGroupAddresses[groupIndex])
-                {
-                    uint bankIndex = (addr / m_entryWidthInBytes) % m_numBanks;
-                    bankToAddr[bankIndex].push_back(addr);
-                }
-                conflict.bankToAddresses = bankToAddr;
-                conflict.maxConflictDegree
-                    = calculateBankConflicts(threadGroupAddresses[groupIndex]);
+                conflict.bankToAddresses = makeBankMapping(
+                    threadGroupAddresses[groupIndex], m_entryWidthInBytes, m_numBanks);
+
+                conflict.maxConflictDegree = calculateBankConflicts(conflict.bankToAddresses);
 
                 detail.conflictsPerClock.push_back(conflict);
             }

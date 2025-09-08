@@ -163,7 +163,7 @@ namespace MemoryTracerTest
         }
     }
 
-    TEST_CASE("LDS bank conflict calculation", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS bank mapping and conflict calculation", "[kernel-graph][lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
@@ -171,22 +171,28 @@ namespace MemoryTracerTest
         SECTION("Empty addresses")
         {
             std::vector<uint32_t> addresses;
-            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 32) == 0);
+            auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
+            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 0);
         }
 
         SECTION("No conflicts - all different banks")
         {
             // Each address maps to a different bank: 0, 4, 8, 12 => banks 0, 1, 2, 3
-            std::vector<uint32_t> addresses = {0, 4, 8, 12};
-            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 32) == 1);
+            std::vector<uint32_t> addresses   = {0, 4, 8, 12};
+            auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
+            CHECK(bankMapping.size() == 4); // 4 different banks
+            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 1);
         }
 
         SECTION("Full conflicts - all same bank")
         {
             // All addresses map to bank 0: 0, 128, 256, 384
             // (0/4)%32=0, (128/4)%32=0, (256/4)%32=0, (384/4)%32=0
-            std::vector<uint32_t> addresses = {0, 128, 256, 384};
-            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 32) == 4);
+            std::vector<uint32_t> addresses   = {0, 128, 256, 384};
+            auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
+            CHECK(bankMapping.size() == 1); // Only bank 0
+            CHECK(bankMapping.at(0).size() == 4); // All 4 addresses in bank 0
+            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 4);
         }
 
         SECTION("Partial conflicts")
@@ -194,19 +200,56 @@ namespace MemoryTracerTest
             // Bank 0: 0, 128 (2 addresses)
             // Bank 1: 4 (1 address)
             // Bank 2: 8 (1 address)
-            std::vector<uint32_t> addresses = {0, 4, 8, 128};
-            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 32) == 2);
+            std::vector<uint32_t> addresses   = {0, 4, 8, 128};
+            auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
+            CHECK(bankMapping.size() == 3); // 3 different banks
+            CHECK(bankMapping.at(0).size() == 2); // Bank 0 has 2 addresses
+            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 2);
         }
 
         SECTION("Different bank configurations")
         {
             // Test with 16 banks instead of 32
-            std::vector<uint32_t> addresses = {0, 64, 128}; // All map to bank 0
-            CHECK(LDSBankModel::calculateBankConflicts(addresses, 4, 16) == 3);
+            std::vector<uint32_t> addresses   = {0, 64, 128}; // All map to bank 0
+            auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 16);
+            CHECK(bankMapping.size() == 1); // Only bank 0
+            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 3);
 
             // Test with different entry width (8 bytes)
-            addresses = {0, 256, 512}; // All map to bank 0
-            CHECK(LDSBankModel::calculateBankConflicts(addresses, 8, 32) == 3);
+            addresses   = {0, 256, 512}; // All map to bank 0
+            bankMapping = LDSBankModel::makeBankMapping(addresses, 8, 32);
+            CHECK(bankMapping.size() == 1); // Only bank 0
+            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 3);
+        }
+
+        SECTION("Verify bank mapping contents")
+        {
+            std::vector<uint32_t> addresses = {0, 4, 8, 128, 132, 136};
+            // Bank 0: 0, 128
+            // Bank 1: 4, 132
+            // Bank 2: 8, 136
+            auto bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
+
+            // Check bank 0
+            CHECK(bankMapping.at(0).size() == 2);
+            CHECK(std::find(bankMapping.at(0).begin(), bankMapping.at(0).end(), 0)
+                  != bankMapping.at(0).end());
+            CHECK(std::find(bankMapping.at(0).begin(), bankMapping.at(0).end(), 128)
+                  != bankMapping.at(0).end());
+
+            // Check bank 1
+            CHECK(bankMapping.at(1).size() == 2);
+            CHECK(std::find(bankMapping.at(1).begin(), bankMapping.at(1).end(), 4)
+                  != bankMapping.at(1).end());
+            CHECK(std::find(bankMapping.at(1).begin(), bankMapping.at(1).end(), 132)
+                  != bankMapping.at(1).end());
+
+            // Check bank 2
+            CHECK(bankMapping.at(2).size() == 2);
+            CHECK(std::find(bankMapping.at(2).begin(), bankMapping.at(2).end(), 8)
+                  != bankMapping.at(2).end());
+            CHECK(std::find(bankMapping.at(2).begin(), bankMapping.at(2).end(), 136)
+                  != bankMapping.at(2).end());
         }
     }
 
