@@ -54,6 +54,7 @@ int LayoutStringToCode(const std::string& layout)
 }
 
 // Helper: Extract 3D convolution features
+MIOPEN_INTERNALS_EXPORT
 std::map<std::string, float>
 GetFeatures3D(const ProblemDescription& problem, int /*max_cu*/, const std::string& /*arch*/)
 {
@@ -127,6 +128,7 @@ GetFeatures3D(const ProblemDescription& problem, int /*max_cu*/, const std::stri
     return features;
 }
 // Helper: Tokenize kernel string
+MIOPEN_INTERNALS_EXPORT
 std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
 {
     std::vector<std::string> tokens;
@@ -169,6 +171,7 @@ std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
 }
 
 // Helper: Fill indexes and kernels from valid_kernels
+MIOPEN_INTERNALS_EXPORT
 void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
                           std::vector<int>& indexes,
                           std::vector<std::vector<std::string>>& kernels)
@@ -187,6 +190,7 @@ void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
 // TODO: new CK functionality will use -1 for autodeduction, so we could add -1 to the list.
 // Note that the current models have not been trained with -1 in mind, so it may not work as
 // expected.
+MIOPEN_INTERNALS_EXPORT
 std::vector<int> GenerateSplitK(int max_split_k)
 {
     std::vector<int> split_ks;
@@ -258,6 +262,7 @@ bool RunParameterPredictionModel(
 }
 
 // Explicit template instantiations for common types
+MIOPEN_INTERNALS_EXPORT
 template bool RunParameterPredictionModel<float>(
     const ExecutionContext&,
     const ProblemDescription&,
@@ -267,6 +272,8 @@ template bool RunParameterPredictionModel<float>(
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
+
+MIOPEN_INTERNALS_EXPORT
 template bool RunParameterPredictionModel<int8_t>(
     const ExecutionContext&,
     const ProblemDescription&,
@@ -277,6 +284,8 @@ template bool RunParameterPredictionModel<int8_t>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
 #if MIOPEN_USE_COMPOSABLEKERNEL
+
+MIOPEN_INTERNALS_EXPORT
 template bool RunParameterPredictionModel<ck::half_t>(
     const ExecutionContext&,
     const ProblemDescription&,
@@ -286,6 +295,8 @@ template bool RunParameterPredictionModel<ck::half_t>(
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
+
+MIOPEN_INTERNALS_EXPORT
 template bool RunParameterPredictionModel<ck::bhalf_t>(
     const ExecutionContext&,
     const ProblemDescription&,

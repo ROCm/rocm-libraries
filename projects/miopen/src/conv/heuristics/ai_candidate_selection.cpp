@@ -52,6 +52,7 @@ namespace candidate_selection {
 
 // --- CandidateSelectionMetadata ---------------------------------------------
 
+MIOPEN_INTERNALS_EXPORT
 CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
                                                        const std::string& solver)
 {
@@ -141,6 +142,7 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
     }
 }
 
+MIOPEN_INTERNALS_EXPORT
 size_t CandidateSelectionMetadata::GetInputParamIndex(const std::string& name) const
 {
     auto it = input_param_indices_.find(name);
@@ -149,6 +151,7 @@ size_t CandidateSelectionMetadata::GetInputParamIndex(const std::string& name) c
     return it->second;
 }
 
+MIOPEN_INTERNALS_EXPORT
 size_t CandidateSelectionMetadata::GetOutputParamIndex(const std::string& name) const
 {
     auto it = output_param_indices_.find(name);
@@ -157,6 +160,7 @@ size_t CandidateSelectionMetadata::GetOutputParamIndex(const std::string& name) 
     return it->second;
 }
 
+MIOPEN_INTERNALS_EXPORT
 std::optional<std::string>
 CandidateSelectionMetadata::GetInputConstant(const std::string& name) const
 {
@@ -166,6 +170,7 @@ CandidateSelectionMetadata::GetInputConstant(const std::string& name) const
     return std::nullopt;
 }
 
+MIOPEN_INTERNALS_EXPORT
 std::optional<std::string>
 CandidateSelectionMetadata::GetOutputConstant(const std::string& name) const
 {
@@ -175,6 +180,7 @@ CandidateSelectionMetadata::GetOutputConstant(const std::string& name) const
     return std::nullopt;
 }
 
+MIOPEN_INTERNALS_EXPORT
 std::vector<size_t> CandidateSelectionMetadata::GetConstantInputIndices() const
 {
     std::vector<size_t> indices;
@@ -188,6 +194,7 @@ std::vector<size_t> CandidateSelectionMetadata::GetConstantInputIndices() const
     return indices;
 }
 
+MIOPEN_INTERNALS_EXPORT
 std::vector<size_t> CandidateSelectionMetadata::GetConstantOutputIndices() const
 {
     std::vector<size_t> indices;
@@ -201,6 +208,7 @@ std::vector<size_t> CandidateSelectionMetadata::GetConstantOutputIndices() const
     return indices;
 }
 
+MIOPEN_INTERNALS_EXPORT
 std::map<std::string, std::string>
 CandidateSelectionMetadata::GetKernelStrMapping(const std::string& kernel_name) const
 {
@@ -214,6 +222,8 @@ CandidateSelectionMetadata::GetKernelStrMapping(const std::string& kernel_name) 
         MIOPEN_THROW("Kernel string mapping not found for kernel: " + kernel_name);
     }
 }
+
+MIOPEN_INTERNALS_EXPORT
 const std::map<std::string, std::map<std::string, int>>&
 CandidateSelectionMetadata::sequence_encodings() const
 {
@@ -221,6 +231,7 @@ CandidateSelectionMetadata::sequence_encodings() const
 }
 float CandidateSelectionMetadata::GetMissingValueToken() const { return missing_value_token_; }
 
+MIOPEN_INTERNALS_EXPORT
 const std::vector<int>& CandidateSelectionMetadata::GetSplitKValues() const
 {
     return split_k_values_;
@@ -228,13 +239,16 @@ const std::vector<int>& CandidateSelectionMetadata::GetSplitKValues() const
 
 // --- CandidateSelectionModel ------------------------------------------------
 
+MIOPEN_INTERNALS_EXPORT
 CandidateSelectionModel::CandidateSelectionModel(const std::string& arch, const std::string& solver)
     : metadata_(arch, solver), arch_(arch), solver_(solver)
 {
 }
 
+MIOPEN_INTERNALS_EXPORT
 CandidateSelectionModel::~CandidateSelectionModel() = default;
 
+MIOPEN_INTERNALS_EXPORT
 std::vector<float>
 CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>& features) const
 {
@@ -263,12 +277,14 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
     return EncodeInputFeaturesWithFdeep(filtered_features, arch_, solver_);
 }
 
+MIOPEN_INTERNALS_EXPORT
 std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     const std::vector<std::vector<float>>& encoded_candidates) const
 {
     return EncodeKernelConfigsWithFdeep(encoded_candidates, arch_, solver_);
 }
 
+MIOPEN_INTERNALS_EXPORT
 int CandidateSelectionModel::SelectBestCandidateIdx(
     const std::vector<float>& encoded_features,
     const std::vector<std::vector<float>>& encoded_configs) const
@@ -300,6 +316,7 @@ int CandidateSelectionModel::SelectBestCandidateIdx(
 // --- Factory and Helper Functions -------------------------------------------
 
 // Helper: Expand kernel params with split_k and keep mapping
+MIOPEN_INTERNALS_EXPORT
 std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
 ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
                              const std::vector<int>& indexes,
@@ -320,6 +337,7 @@ ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernel
     return {expanded, mapping};
 }
 
+MIOPEN_INTERNALS_EXPORT
 const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arch,
                                                           const std::string& solver)
 {
@@ -346,6 +364,8 @@ const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arc
         }
     }
 }
+
+MIOPEN_INTERNALS_EXPORT
 std::vector<std::vector<float>>
 EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
                    const CandidateSelectionMetadata& metadata)
@@ -468,6 +488,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
     return encoded_candidates;
 }
 
+MIOPEN_INTERNALS_EXPORT
 CandidateSelectionResult
 ModelSelectBestCandidate(const std::string& arch,
                          const std::string& solver,

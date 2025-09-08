@@ -259,6 +259,7 @@ Metadata3D::LoadOutLayoutEncodings(const std::string& arch)
 }
 
 // Constructor - loads all data immediately with error handling
+MIOPEN_INTERNALS_EXPORT
 Metadata3D::Metadata3D(const std::string& arch)
     : arch_name(arch),
       is_valid(false), // Initialize to false, will be set to true if all loads succeed
@@ -334,6 +335,7 @@ Metadata3D::Metadata3D(const std::string& arch)
 }
 
 // Encoding methods with safe error handling
+MIOPEN_INTERNALS_EXPORT
 size_t Metadata3D::EncodeDirection(miopen::conv::Direction dir) const
 {
     if(!is_valid)
@@ -355,6 +357,7 @@ size_t Metadata3D::EncodeDirection(miopen::conv::Direction dir) const
     }
 }
 
+MIOPEN_INTERNALS_EXPORT
 size_t Metadata3D::EncodePrecision(miopenDataType_t data_type) const
 {
     if(!is_valid)
@@ -381,6 +384,7 @@ size_t Metadata3D::EncodePrecision(miopenDataType_t data_type) const
     }
 }
 
+MIOPEN_INTERNALS_EXPORT
 size_t Metadata3D::EncodeLayout(const std::string& layout) const
 {
     if(!is_valid)
@@ -394,6 +398,7 @@ size_t Metadata3D::EncodeLayout(const std::string& layout) const
     return 0;
 }
 
+MIOPEN_INTERNALS_EXPORT
 size_t Metadata3D::EncodeInLayout(const std::string& layout) const
 {
     if(!is_valid)
@@ -403,6 +408,7 @@ size_t Metadata3D::EncodeInLayout(const std::string& layout) const
     return (it != in_layout_encodings.end()) ? it->second : 0;
 }
 
+MIOPEN_INTERNALS_EXPORT
 size_t Metadata3D::EncodeFilLayout(const std::string& layout) const
 {
     if(!is_valid)
@@ -412,6 +418,7 @@ size_t Metadata3D::EncodeFilLayout(const std::string& layout) const
     return (it != fil_layout_encodings.end()) ? it->second : 0;
 }
 
+MIOPEN_INTERNALS_EXPORT
 size_t Metadata3D::EncodeOutLayout(const std::string& layout) const
 {
     if(!is_valid)
