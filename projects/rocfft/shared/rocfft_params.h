@@ -164,7 +164,6 @@ inline fft_array_type fft_array_type_from_rocfft_array_type(const rocfft_array_t
     return fft_array_type_unset;
 }
 
-
 inline rocfft_transform_type rocfft_transform_type_from_fftparams(const fft_transform_type val)
 {
     switch(val)
@@ -182,8 +181,8 @@ inline rocfft_transform_type rocfft_transform_type_from_fftparams(const fft_tran
     }
 }
 
-inline fft_transform_type fft_transform_type_from_rocfft_transform_type(
-    const rocfft_transform_type val)
+inline fft_transform_type
+    fft_transform_type_from_rocfft_transform_type(const rocfft_transform_type val)
 {
     switch(val)
     {

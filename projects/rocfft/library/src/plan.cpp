@@ -23,9 +23,9 @@
 #include "../../shared/array_predicate.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
-#include "../../shared/rocfft_params.h"
 #include "../../shared/precision_type.h"
 #include "../../shared/ptrdiff.h"
+#include "../../shared/rocfft_params.h"
 #include "assignment_policy.h"
 #include "enum_printer.h"
 #include "function_pool.h"
@@ -769,7 +769,7 @@ std::string rocfft_bench_command(rocfft_plan plan)
     params.odist          = plan->desc.outDist;
     params.scale_factor   = plan->desc.storeOps.scale_factor;
 
-    for(auto idx = plan->lengths.size(); idx-- > 0; )
+    for(auto idx = plan->lengths.size(); idx-- > 0;)
     {
         params.length.push_back(plan->lengths[idx]);
     }
@@ -827,7 +827,7 @@ std::string rocfft_bench_command(rocfft_plan plan)
                 = plan->desc.outFields[fidx].bricks[bidx].location.device;
         }
     }
-    
+
     std::stringstream bench;
     bench << "rocfft-bench --token ";
     bench << params.token();
