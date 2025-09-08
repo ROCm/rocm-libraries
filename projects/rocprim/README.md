@@ -55,6 +55,7 @@ You can build and install rocPRIM on Linux or Windows.
   #     If you want to detect failures on a per GFX IP basis, setting it to some set of ips will create
   #     separate tests with the ip name embedded into the test name. Building for all, but selecting
   #     tests only of a specific architecture is possible for eg: ctest -R gfx803|gfx900
+  #   USE_SYSTEM_LIB - OFF by default. Setting this flag to ON will build tests from the installed ROCm libs provided by the system. This only takes effect when BUILD_TEST is ON.
   #
   # ! IMPORTANT !
   # Set C++ compiler to HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
