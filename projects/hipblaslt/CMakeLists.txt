@@ -237,7 +237,7 @@ if(HIPBLASLT_ENABLE_HOST)
     target_compile_features(hipblaslt PUBLIC cxx_std_17)
     target_compile_definitions(hipblaslt
         PUBLIC
-            ROCM_USE_FLOAT16
+            $<BUILD_INTERFACE:ROCM_USE_FLOAT16>
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
 

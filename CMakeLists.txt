@@ -22,8 +22,8 @@ set(SUPPORTED_COMPONENTS
     # shared
     mxdatagenerator
     rocroller
-    hipblas-common
     # projects
+    hipblas-common
     rocprim
     rocrand
 )
@@ -79,7 +79,7 @@ endforeach()
 if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT mxdatagenerator
-        PATH_PREFIX shared
+        PREFIX_PATH shared
         EXPECT_TARGET roc::mxDataGenerator
     )
 endif()
@@ -87,7 +87,7 @@ endif()
 if("hipblas-common" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT hipblas-common
-        PATH_PREFIX projects
+        PREFIX_PATH projects
         EXPECT_TARGET roc::hipblas-common
     )
 endif()
@@ -97,7 +97,7 @@ if("rocroller" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     set(ROCROLLER_ENABLE_FETCH ON)
     add_subdirectory_with_message(
         COMPONENT rocroller
-        PATH_PREFIX shared
+        PREFIX_PATH shared
         EXPECT_TARGET roc::rocroller
     )
 endif()
@@ -105,7 +105,7 @@ endif()
 if("rocprim" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT rocprim
-        PATH_PREFIX projects
+        PREFIX_PATH projects
         EXPECT_TARGET rocprim
     )
 endif()
@@ -113,7 +113,7 @@ endif()
 if("rocrand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT rocrand
-        PATH_PREFIX projects
+        PREFIX_PATH projects
         EXPECT_TARGET rocrand
     )
 endif()

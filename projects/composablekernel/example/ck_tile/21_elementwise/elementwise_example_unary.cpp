@@ -4,7 +4,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/elementwise.hpp"
 #include "ck_tile/host/reference/reference_elementwise.hpp"
-#include "json_dump.hpp"
+#include "ck_tile/utility/json_dump.hpp"
 #include "elementwise_common.hpp"
 
 auto create_args(int argc, char* argv[])
@@ -158,7 +158,14 @@ bool filter_then_run(const ck_tile::ArgParser& arg_parser)
     bool pass = true;
 
     if constexpr(std::is_same_v<XElementwiseOperation, ck_tile::element_wise::UnarySquare> &&
-                 std::is_same_v<XDataType, ck_tile::bf16_t>)
+                 (std::is_same_v<XDataType, ck_tile::bf16_t> ||
+                  std::is_same_v<YDataType, ck_tile::bf16_t>))
+    {
+        throw_unsupported();
+    }
+    else if constexpr(std::is_same_v<XElementwiseOperation, ck_tile::element_wise::UnaryConvert> &&
+                      (std::is_same_v<XDataType, ck_tile::bf16_t> ||
+                       std::is_same_v<YDataType, ck_tile::bf16_t>))
     {
         throw_unsupported();
     }
