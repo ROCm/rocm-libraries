@@ -69,6 +69,18 @@ def main():
     if args.print:
         hardware.print()
 
+    reduction = origami.select_streamk_reduction(
+        args.m,
+        args.n,
+        args.k,
+        args.batch,
+        args.mt_m,
+        args.mt_n,
+        args.mt_k,
+        hardware,
+        args.dynamic_grid_version
+    )
+
     winner_grid = origami.select_streamk_grid(
         args.m,
         args.n,
@@ -91,9 +103,11 @@ def main():
         origami.datatype_to_bits(origami.string_to_datatype(args.type_acc)) // 8,
         args.occupancy,
         hardware,
-        args.dynamic_grid_version
+        args.dynamic_grid_version,
+        reduction
     )
 
+    print(f"Best reduction algo : {reduction}")
     print(f"Best grid : {winner_grid}")
 
     return 0

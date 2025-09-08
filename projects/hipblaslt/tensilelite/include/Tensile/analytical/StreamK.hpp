@@ -41,7 +41,14 @@ namespace TensileLite
                 Tree,
                 Parallel,
                 // AtomicReduction,
+                Count,
+                None = Count
             };
+
+            inline ReductionType intToReductionType(int rt)
+            {
+                return (ReductionType)rt;
+            }
 
             size_t get_streamk_workspace(
                 size_t x,
