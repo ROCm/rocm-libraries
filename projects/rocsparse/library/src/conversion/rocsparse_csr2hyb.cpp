@@ -390,6 +390,7 @@ try
                                                           hyb,
                                                           user_ell_width,
                                                           partition_type));
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -423,6 +424,7 @@ try
                                                           hyb,
                                                           user_ell_width,
                                                           partition_type));
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -456,6 +458,7 @@ try
                                                           hyb,
                                                           user_ell_width,
                                                           partition_type));
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -489,6 +492,7 @@ try
                                                           hyb,
                                                           user_ell_width,
                                                           partition_type));
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
