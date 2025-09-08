@@ -31,7 +31,7 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
                       MUBUFModifiers, SMEMModifiers, EXEC, VCC, RegisterContainer, \
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer
-from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1, \
+from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
                         SMulInt64to32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
@@ -13680,6 +13680,24 @@ class KernelWriterAssembly(KernelWriter):
     else:
       with self.allocTmpSgpr(3) as tmpSgprInfo:
         return SCLongBranchScc1(label, tmpSgprInfo, \
+          self.labels.getUniqueNamePrefix("NoBranch"), \
+          self.labels.getUniqueNamePrefix("Positive"),
+          posNeg, comment)
+      
+##############################################################################
+  # longBranchVccnz - 32 bit offset
+  # Conditional branch to label when VCC != 0
+  # Use when erroring out "invalid operand due to label > SIMM16"
+  ##############################################################################
+  def longBranchVccnz(self, label: Label, posNeg: int=0, tmpSgprInfo: Optional[ContinuousRegister]=None, comment=""):
+    if tmpSgprInfo:
+      return SCLongBranchVccnz(label, tmpSgprInfo, \
+        self.labels.getUniqueNamePrefix("NoBranch"), \
+        self.labels.getUniqueNamePrefix("Positive"),
+        posNeg, comment)
+    else:
+      with self.allocTmpSgpr(3) as tmpSgprInfo:
+        return SCLongBranchVccnz(label, tmpSgprInfo, \
           self.labels.getUniqueNamePrefix("NoBranch"), \
           self.labels.getUniqueNamePrefix("Positive"),
           posNeg, comment)
