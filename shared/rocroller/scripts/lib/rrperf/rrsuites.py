@@ -1454,7 +1454,7 @@ def fp8_target_d2lds_mi32x32x64_pf2x1():
 
 
 def fp8_target_d2lds_mi32x32x64_pf2x1_wgm():
-    yield from add_wgm((0, 2), fp8_target_d2lds_mi32x32x64_pf2x1())
+    yield from add_wgm((0, 4), fp8_target_d2lds_mi32x32x64_pf2x1())
 
 
 def fp8_target_d2lds_mi32x32x64_pf4x1():
@@ -1619,7 +1619,7 @@ def fp8_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm():
 
 def fp8_kernels_no_wgm():
     # yield from fp8_target() # out of VGPR
-    yield from fp8_target_d2lds_mi32x32x64_pf2x1()
+    yield from fp8_target_d2lds_mi32x32x64_pf2x1() # wgm (0, 4) is best
     # yield from fp8_target_d2lds_mi32x32x64_pf4x1() # Not enough LDS
     # yield from fp8_target_d2lds_mi16x16x128_pf4x1() # Not enough LDS
     # yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1() # Not enough LDS
@@ -1627,9 +1627,9 @@ def fp8_kernels_no_wgm():
 
 def fp8_kernels_wgm():
     yield from fp8_target_d2lds_mi32x32x64_pf2x1_wgm()
-    yield from fp8_target_d2lds_mi32x32x64_pf4x1_wgm()
-    yield from fp8_target_d2lds_mi16x16x128_pf4x1_wgm()
-    yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
+    # yield from fp8_target_d2lds_mi32x32x64_pf4x1_wgm()
+    # yield from fp8_target_d2lds_mi16x16x128_pf4x1_wgm()
+    # yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
 def fp8_16x16x128_scale_options():
@@ -1644,7 +1644,7 @@ def fp8_32x32x64_scale_options():
 
 def fp8_kernels():
     yield from fp8_kernels_no_wgm()
-    # yield from fp8_kernels_wgm()
+    yield from fp8_kernels_wgm()
     # yield from fp8_16x16x128_scale_options()
     # yield from fp8_32x32x64_scale_options()
 
@@ -1653,7 +1653,7 @@ def fp8_target_sweep_wgms():
     for wgm_dim in [0, 1]:
         for wgm_value in range(1, 50):
             yield from add_wgm(
-                (wgm_dim, wgm_value), fp8_no_scale_target_d2lds_mi16x16x128_pf4x1()
+                (wgm_dim, wgm_value), fp8_target_d2lds_mi32x32x64_pf2x1()
             )
 
 
