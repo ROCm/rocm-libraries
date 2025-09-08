@@ -50,7 +50,7 @@ For example, substituting this identity into the DFT equation, the DFT can then 
 Chirp
 +++++
 
-Bluestein's algorithm is frequently used to compute the DFT, but it can also be used to compute the more general z-transform. This transform is similar to the DFT equation with the difference that the term :math:`e^{-\frac{2\pi \jmath}{N}}` is replaced by :math:`z`, where :math:`z` is an arbitrary complex number. 
+Bluestein's algorithm is frequently used to compute the DFT, but it can also be used to compute the more general z-transform. This transform is similar to the DFT equation with the difference that the term :math:`e^{-\frac{2\pi \jmath}{N}}` is replaced by :math:`z`, where :math:`z` is an arbitrary complex number.
 
 Let :math:`\mathbf{c} = \begin{bmatrix} c_0 & \cdots & c_{N-1} \end{bmatrix}` denote an :math:`N` length sequence of the form
 
@@ -83,7 +83,7 @@ From the convolution theorem it is known that, under suitable conditions, the co
 
 .. math::
 
-   \left(\mathbf{a} \ast \mathbf{b} \right) = \mathcal{F}^{-1}\left\{ \mathcal{F}\left\{ \mathbf{a} \right\} \cdot \mathcal{F}\left\{ \mathbf{b} \right\} \right\}. 
+   \left(\mathbf{a} \ast \mathbf{b} \right) = \mathcal{F}^{-1}\left\{ \mathcal{F}\left\{ \mathbf{a} \right\} \cdot \mathcal{F}\left\{ \mathbf{b} \right\} \right\}.
 
 Note, however, that Bluestein's DFT equation in terms of the convolution sum cannot be used to directly evaluate the DFT equation under the values of :math:`M`, :math:`a_m` and :math:`b_m` provided.
 
@@ -101,7 +101,7 @@ and the sequences :math:`\mathbf{a}` and :math:`\mathbf{b}` are zero-padded as f
 
 .. math::
 
-   a_m = \begin{cases} x_n / c_n& \text{for $n = 0, \ \ldots, \ N-1$},\\ 0 & \text{otherwise} \end{cases} 
+   a_m = \begin{cases} x_n / c_n& \text{for $n = 0, \ \ldots, \ N-1$},\\ 0 & \text{otherwise} \end{cases}
 
 and
 
@@ -121,7 +121,7 @@ Based on the two conditions for the sequences :math:`\mathbf{a}` and :math:`\mat
 
    X_k = b_k^{-1} \mathcal{F}^{-1}\left\{ \mathcal{F}\left\{ \mathbf{a} \right\} \cdot \mathcal{F}\left\{ \mathbf{b} \right\} \right\}, \qquad k = 0, \ \ldots, \ N-1.
 
-There are quite a few operations involved in this computation. More specifically, computation of the chirp sequence, two :math:`N`-length plus one :math:`M`-length point-wise multiplications, zero-padding of two :math:`M`-length sequences, and two forward DFTs of length :math:`M` plus an inverse DFT also of length :math:`M`. 
+There are quite a few operations involved in this computation. More specifically, computation of the chirp sequence, two :math:`N`-length plus one :math:`M`-length point-wise multiplications, zero-padding of two :math:`M`-length sequences, and two forward DFTs of length :math:`M` plus an inverse DFT also of length :math:`M`.
 
 The main reason for using Bluestein's algorithm is that it applies for the DFT computation of any input length :math:`N`, including prime lengths. When a fast Fourier transform (FFT) algorithm is used to compute the DFT, such as Stockham or Cooley-Tukey, it provides optimized length support via a given radix or combination of radices, e.g., :math:`N = 2, \ 3, \ 5, \ 25 \times 2, \ 16 \times 9`, and so on. Considering that the DFTs via Bluestein can be carried out with any length satisfying :math:`M \geq 2N-1`, a suitably chosen value of :math:`M` can be used to compute the convolution via an FFT with existing radix support. However, it should be mentioned that the Bluestein DFT computation is much slower than directly computing the DFT equation via an FFT with a supported length, even though both computations posses the same complexity of :math:`O(N \log N)`.
 
@@ -143,7 +143,7 @@ Device Kernel Configuration
 
 Important factors to consider for an efficient implementation of Bluestein's algorithm are (1) the length of the DFT to be performed, (2) the size of available shared memory for the compute device at hand, and (3) the latency for launching device kernels. For instance, when the DFT length is small, all the operations in Bluestein's algorithm may be performed in a single device kernel, if data can fit into shared memory. This minimizes kernel launching overhead and provides the best performance.
 
-In the case where the DFT length is large, and the entire data does not fit into shared memory, a hierarchical approach is used where the large FFT is decomposed into smaller FFT device kernels that fit into shared memory for improved performance. In this large length DFT scenario it is important to minimize the number of device kernels in the implementation to reduce kernel launch overhead. 
+In the case where the DFT length is large, and the entire data does not fit into shared memory, a hierarchical approach is used where the large FFT is decomposed into smaller FFT device kernels that fit into shared memory for improved performance. In this large length DFT scenario it is important to minimize the number of device kernels in the implementation to reduce kernel launch overhead.
 
 The default implementation for Bluestein's algorithm when applied to large length DFTs is illustrated in the diagram below.
 
@@ -151,7 +151,7 @@ The default implementation for Bluestein's algorithm when applied to large lengt
 
    Default device kernel configuration for Bluestein's algorithm and large length DFTs
 
-As can be seen from the diagram, Bluestein's algorithm is performed with (at least) six kernels in a single device stream. The chirp sequence is computed in a single chirp kernel, and the sequence is re-utilized at later stages via a temporary device buffer. The two forward DFTs are joined together in one fft device node. This is possible because the padded sequences :math:`\mathbf{a}` and :math:`\mathbf{b}` are contiguous in the temporary device buffer used in the implementation, thus allowing for a single fft node to perform the two fft operations. The inverse FFT operation requires a separate ifft device node. Similarly, the three point-wise multiplications are carried out with separate kernels, pad\_mul, fft\_mul, and res\_mul. 
+As can be seen from the diagram, Bluestein's algorithm is performed with (at least) six kernels in a single device stream. The chirp sequence is computed in a single chirp kernel, and the sequence is re-utilized at later stages via a temporary device buffer. The two forward DFTs are joined together in one fft device node. This is possible because the padded sequences :math:`\mathbf{a}` and :math:`\mathbf{b}` are contiguous in the temporary device buffer used in the implementation, thus allowing for a single fft node to perform the two fft operations. The inverse FFT operation requires a separate ifft device node. Similarly, the three point-wise multiplications are carried out with separate kernels, pad\_mul, fft\_mul, and res\_mul.
 
 Note that the fft (or ifft) nodes are usually split into at least two device kernels for large length DFTs. For example, a large 1D input data vector is viewed as a matrix (with same number of elements as the large vector), and the first FFT device kernel operates on rows of the data matrix while the second device kernel operates on the columns of the data matrix. In this scenario, a total of 8 device kernels are used to perform Bluestein's algorithm.
 
@@ -184,7 +184,7 @@ Based upon the three design principles above, an optimized implementation of Blu
 
 As can be seen from the diagram, the implementation of Bluestein's algorithm is similar to the fast convolution implementation. The main difference between the two implementations is that the forward/inverse DFT stages have additional fused operations in them. Compared to the default Bluestein implementation, at least three device nodes are used in the optimization. When using the row/column FFT decomposition for large lengths, this brings to a total of 6 device kernels in the optimization, a significant reduction in the number of kernels compared to the default configuration.
 
-The read operation of the first DFT stage is fused with chirp + point-wise multiplication + padding. The read operation of the second DFT stage is fused with the chirp + padding. Similarly, the point-wise multiplication of the two forward DFTs is fused with the read operation of the inverse DFT node, and the chirp + point-wise multiplication is fused with its write operation. Since the chirp sequence is computed at the plan level, the chirp operations are performed by simply loading the computed chirp table into device registers. 
+The read operation of the first DFT stage is fused with chirp + point-wise multiplication + padding. The read operation of the second DFT stage is fused with the chirp + padding. Similarly, the point-wise multiplication of the two forward DFTs is fused with the read operation of the inverse DFT node, and the chirp + point-wise multiplication is fused with its write operation. Since the chirp sequence is computed at the plan level, the chirp operations are performed by simply loading the computed chirp table into device registers.
 
 Parallelization of the first two FFT nodes can be employed in the optimized implementation, however, preliminary tests have shown that little performance is gained by executing the two nodes simultaneously. The main reason for this is due to the fact that a synchronization step is required after the two forward DFT stages. This is denoted by the thin solid rectangle in the diagram. Another factor is that the amount of computation performed on the second FFT node is usually much smaller than the first FFT node. A typical use case of the rocFFT library is to perform batched FFTs. In this scenario, the amount of computation in the two forward FFT nodes is unbalanced since multiple FFTs are performed on the first node while only a single FFT is performed on the second node. This unbalance between the independent nodes makes the benefits of parallelization less pronounced.
 
@@ -198,4 +198,3 @@ The information contained herein is for informational purposes only, and is subj
 AMD is a trademark of Advanced Micro Devices, Inc. Other product names used in this publication are for identification purposes only and may be trademarks of their respective companies.
 
 Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-

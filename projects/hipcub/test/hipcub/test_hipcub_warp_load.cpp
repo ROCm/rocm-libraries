@@ -222,7 +222,7 @@ TYPED_TEST(HipcubWarpLoadTest, WarpLoad)
     {
         expected = stripe_vector(input, warp_size, items_per_thread);
     }
-    
+
     ASSERT_EQ(expected, output);
 }
 
@@ -270,11 +270,11 @@ TYPED_TEST(HipcubWarpLoadTest, WarpLoadGuarded)
         auto segment_end = std::next(expected.begin(), (warp_idx + 1) * warp_size * items_per_thread);
         std::fill(std::next(segment_begin, valid_items), segment_end, oob_default);
     }
-    
+
     if (algorithm == ::hipcub::WarpLoadAlgorithm::WARP_LOAD_STRIPED)
     {
         expected = stripe_vector(expected, warp_size, items_per_thread);
     }
-    
+
     ASSERT_EQ(expected, output);
 }

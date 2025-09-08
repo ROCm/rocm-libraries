@@ -85,7 +85,7 @@ TYPED_TEST(rocrand_cpp_basic_tests, move_construction)
     float actual;
     HIP_CHECK(hipMemcpy(&actual, d_data, sizeof(actual), hipMemcpyDeviceToHost));
     ASSERT_EQ(expected, actual);
-    
+
     HIP_CHECK(hipFree(d_data));
 }
 
@@ -121,6 +121,6 @@ TYPED_TEST(rocrand_cpp_basic_tests, move_assignment)
     float actual;
     HIP_CHECK(hipMemcpy(&actual, d_data, sizeof(actual), hipMemcpyDeviceToHost));
     ASSERT_EQ(expected, actual);
-    
+
     HIP_CHECK(hipFree(d_data));
 }

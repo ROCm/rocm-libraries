@@ -23,7 +23,7 @@
 """
 This Python script is intended for the creation of autotuned configurations
 for the supported rocPRIM algorithms based on benchmark results. The script
-does not update the configurations automatically, the user is responsible for 
+does not update the configurations automatically, the user is responsible for
 installation and the correctness of the files
 """
 
@@ -102,7 +102,7 @@ class FallbackCase:
     is_floating_point: bool
 
 def translate_settings_to_cpp_metaprogramming(
-        fallback_configuration: List[Tuple[SelectionType, FallbackCase]], 
+        fallback_configuration: List[Tuple[SelectionType, FallbackCase]],
         const_configuration: List[SelectionConst]) -> str:
     """
     Translates a list of named fallback configuration entries to C++ metaprogramming idioms.
@@ -163,8 +163,8 @@ class BenchmarksOfArchitecture:
         and the values on the instantiated types. If an instanced type is not present for a selection type
         a None object will be assigned as value.
 
-        The created key can be used to access the specific benchmark results for a given combination of instantiated 
-        selection types in the benchmarks member variable   
+        The created key can be used to access the specific benchmark results for a given combination of instantiated
+        selection types in the benchmarks member variable
         """
         Instance = collections.namedtuple(typename='Instance', field_names=[cfg_param.name for cfg_param in self.config_selection_params])
         return Instance(**{field : instanced_types[field] if field in instanced_types.keys() else EMPTY_TYPENAME for field in Instance._fields})
@@ -183,7 +183,7 @@ class BenchmarksOfArchitecture:
     def __get_best_benchmark(self, instance_key) -> Dict[str, str]:
         """
         Returns the best performing benchmark from a list of benchmarks.
-        For now, use the items per second as metric. in case the benchmark with the 
+        For now, use the items per second as metric. in case the benchmark with the
         given configuration is not present None is returned
         """
         if instance_key in self.benchmarks.keys():
@@ -203,9 +203,9 @@ class BenchmarksOfArchitecture:
         return output
 
     def __add_fallback_to_output(
-            self, 
-            output, 
-            fallback_configuration: List[Tuple[SelectionType, FallbackCase]], 
+            self,
+            output,
+            fallback_configuration: List[Tuple[SelectionType, FallbackCase]],
             const_configurations: List[SelectionConst]):
         """
         searches for specific fallback configuration in benchmark results and adds it to the output
@@ -388,16 +388,16 @@ The generated configuration file contains configs for two cases:
   benchmark results of similar types (fallback case).
 
 config_selection_params is a list of parameters (types, constants) that are used to select a configuration.
-The fallback file will be used to generate the fallback cases. If there are two types, one of these will only select 
-on the size of the type (defined by the config selection parameters), limiting the number of fallback cases. 
+The fallback file will be used to generate the fallback cases. If there are two types, one of these will only select
+on the size of the type (defined by the config selection parameters), limiting the number of fallback cases.
 
-If the type is optional, additional fallback configurations will be generated that match the case when the optional 
-selection type passed by the user is rocprim::empty_type. The config_selection_params should specify at least 
+If the type is optional, additional fallback configurations will be generated that match the case when the optional
+selection type passed by the user is rocprim::empty_type. The config_selection_params should specify at least
 one non-optional type. The optional type should not be the first type.
 
 The 'name' fields should correspond to a named capturing group in the regex field of the benchmark,
 these names should be valid C++ identifiers. The matched values in the name field of
-the benchmark should also be valid C++ typenames. This is required as these names will be in the 
+the benchmark should also be valid C++ typenames. This is required as these names will be in the
 generated C++ code.
 """
 
@@ -821,7 +821,7 @@ class BenchmarkDataManager:
         """
         Enriches the benchmark the data in single_benchmark with the information stored in the actual name of the particular benchmark run
 
-        This information contains the different settings the benchmark has been executed with which will be used to create the customized 
+        This information contains the different settings the benchmark has been executed with which will be used to create the customized
         configuration case.
         """
         # google benchmark may postfix the JSON name: extract the '{...}' substring

@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
                         help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
     parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default=default_gpus, #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
-                        help='Set GPU architectures, e.g. all, gfx1101, gfx1151, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')                        
+                        help='Set GPU architectures, e.g. all, gfx1101, gfx1151, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')
     parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
                         help='Verbose build (default: False)')
     parser.add_argument('--no-offload-compress', required=False, default=False, action='store_true', help='Do not apply offload compression (deafult: False)')
@@ -75,12 +75,12 @@ def delete_dir(dir_path) :
         linux_path = pathlib.Path(dir_path).absolute()
         #print( linux_path )
         run_cmd( "rm" , f"-rf {linux_path}")
-        
+
 def cmake_path(os_path):
     if OS_info["ID"] == "windows":
         return os_path.replace("\\", "/")
     else:
-        return os.path.realpath(os_path)        
+        return os.path.realpath(os_path)
 
 def config_cmd():
     global args
@@ -166,7 +166,7 @@ def config_cmd():
         cmake_options.append( f"-DBUILD_OFFLOAD_COMPRESS=OFF" )
 
     cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
-    
+
     if args.cmake_dargs:
         for i in args.cmake_dargs:
           cmake_options.append( f"-D{i}" )

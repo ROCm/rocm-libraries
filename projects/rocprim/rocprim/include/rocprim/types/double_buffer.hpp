@@ -42,7 +42,7 @@ class double_buffer
 
 public:
 
-    /// \brief Constructs an empty double buffer object, initializing the 
+    /// \brief Constructs an empty double buffer object, initializing the
     /// buffer pointers to nullptr.
     ROCPRIM_HOST_DEVICE inline
     double_buffer()

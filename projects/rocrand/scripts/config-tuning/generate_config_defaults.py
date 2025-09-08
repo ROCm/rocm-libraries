@@ -20,7 +20,7 @@ def load_default_configs_json(in_dir: str) -> dict:
         if 'SOBOL' in generator_name:
             return 'QUASI'
         return 'PSEUDO'
-    
+
     def get_rocrand_rng_type(generator_name: str) -> str:
         return "ROCRAND_RNG_" + generator_type(generator_name) + "_" + generator_name
 

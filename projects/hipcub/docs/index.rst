@@ -27,7 +27,7 @@ The hipCUB project is located in https://github.com/ROCm/rocm-libraries/tree/dev
 
     * :ref:`data-type-support`
     * :doc:`API library <../doxygen/html/index>`
-   
+
 To contribute to the documentation refer to
 `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

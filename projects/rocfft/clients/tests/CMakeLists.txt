@@ -71,7 +71,7 @@ set( rocfft-test_source
   rocfft_accuracy_test.cpp
   bitwise_repro/bitwise_repro_test.cpp
   accuracy_test.cpp
-  accuracy_test_1D.cpp	
+  accuracy_test_1D.cpp
   accuracy_test_2D.cpp
   accuracy_test_3D.cpp
   accuracy_test_adhoc.cpp
@@ -209,7 +209,7 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
      set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
   endif()
-  list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )	
+  list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )
 
   set_target_properties( rocfft-test PROPERTIES
      BUILD_RPATH "{$BUILD_RPATH}"
@@ -227,7 +227,7 @@ if( BUILD_GTEST OR NOT GTEST_FOUND )
   add_dependencies( rocfft-test gtest )
   list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
   list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
-else()  
+else()
   list( APPEND rocfft-test_include_dirs $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
   list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
 endif()
@@ -322,12 +322,12 @@ endif()
 string( CONCAT TESTS_OUT_DIR "${PROJECT_BINARY_DIR}" ${TESTS_OUT_DIR} )
 
 set_target_properties(rocfft-test
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
+                      PROPERTIES
+                      RUNTIME_OUTPUT_DIRECTORY
                       ${TESTS_OUT_DIR})
 set_target_properties(rtc_helper_crash
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
+                      PROPERTIES
+                      RUNTIME_OUTPUT_DIRECTORY
                       ${TESTS_OUT_DIR})
 
 
@@ -378,7 +378,7 @@ if( ROCFFT_MPI_ENABLE )
 
   if ( ROCFFT_CRAY_MPI_ENABLE )
     target_link_libraries( ${worker}
-      OpenMP::OpenMP_CXX 
+      OpenMP::OpenMP_CXX
       hip::hiprand
       hip::device
       MPI::MPI_CXX
@@ -391,19 +391,19 @@ if( ROCFFT_MPI_ENABLE )
 	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
     target_link_libraries( ${worker}
-      OpenMP::OpenMP_CXX 
+      OpenMP::OpenMP_CXX
       hip::hiprand
       hip::device
       MPI::MPI_CXX
       ${FFTW_LIBRARIES}
-    )    
+    )
     endif()
     set_target_properties(${worker}
-                          PROPERTIES 
-                          RUNTIME_OUTPUT_DIRECTORY 
+                          PROPERTIES
+                          RUNTIME_OUTPUT_DIRECTORY
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
-    
+
   endforeach()
 
   # link normal MPI worker against rocFFT

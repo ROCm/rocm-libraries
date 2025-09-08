@@ -23,7 +23,7 @@ See the contributing guide `CONTRIBUTING.md <https://github.com/ROCm/rocPRIM/blo
 General rules
 =============
 
-Code should be modular, and when possible broader scoped to facilitate reuse. If there is no adverse effect on performance, extract common functionality. The different hierarchies of the API are not only for the user, algorithm implementations use these endpoints as well. For instance, device-level algorithms typically use the block-level algorithms for loading and storing data. 
+Code should be modular, and when possible broader scoped to facilitate reuse. If there is no adverse effect on performance, extract common functionality. The different hierarchies of the API are not only for the user, algorithm implementations use these endpoints as well. For instance, device-level algorithms typically use the block-level algorithms for loading and storing data.
 
 It should be clear from function template parameters whether they are tuning options that do not affect behavior, or are algorithmic parameters that change behavior. For instance, tuning options may be block size, items per thread, or the block-level scan method (``block_scan_algorithm``). An algorithmic parameter could be whether a scan has an initial value, or whether a reduction is inclusive or exclusive. An example of an enumeration that violates this rule is ``block_load_method``, where the different members make different orders of the elements.
 
@@ -39,13 +39,13 @@ One of the most complex parts of rocPRIM is the mechanism that allows for the us
 Default and user-specified configuration
 ----------------------------------------
 
-As explained in :ref:`tuning`, device-level algorithms may be configured by accepting a tuning config. It may be provided by the caller, or defaulted to ``default_config``, which selects a suitable default configuration. 
+As explained in :ref:`tuning`, device-level algorithms may be configured by accepting a tuning config. It may be provided by the caller, or defaulted to ``default_config``, which selects a suitable default configuration.
 
 The number of threads in a block (the "block size") is a quintessential configuration parameter for kernels. It needs to be known at the host side to launch the kernel and at the device side at compile-time for the generation of algorithmic functions. HIP code is compiled in multiple passes, one pass for the host and one pass for each targeted device architecture. When a kernel is launched on the host, the HIP runtime selects the binary based on the device associated with the HIP stream. Since the configuration, and thus the block size, depends on this device architecture, rocPRIM must have a similar mechanism to infer the architecture of the device based on the the HIP stream.
 
 To facilitate a dispatching mechanism supporting the above requirements, several standardized structures need to be defined for each algorithm, which is outlined in this section. These structures depend on a generalized dispatching mechanism.
 
-The algorithm's configuration struct is defined in ``rocprim/device/detail/device_config_helper.hpp``. The reason for putting all configurations in one file is to make the configuration templates simpler (generating configurations is explained :ref:`tuning`). The tuning config has the name ``ALGO_config``, and no members (unless for backward-compatibility reasons), only template parameters. 
+The algorithm's configuration struct is defined in ``rocprim/device/detail/device_config_helper.hpp``. The reason for putting all configurations in one file is to make the configuration templates simpler (generating configurations is explained :ref:`tuning`). The tuning config has the name ``ALGO_config``, and no members (unless for backward-compatibility reasons), only template parameters.
 
 The config struct derives from a non-public parameter struct holding the actual parameters. This separation between structs is done to facilitate change without breaking public API.
 
@@ -56,7 +56,7 @@ The config struct derives from a non-public parameter struct holding the actual 
 
     struct ALGO_config_params
     {
-        unsigned int BlockSize; 
+        unsigned int BlockSize;
         unsigned int ItemsPerThread;
     };
 

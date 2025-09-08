@@ -44,29 +44,29 @@
 #endif
 
 #if   HIPCUB_TEST_TYPE_SLICE == 0
-    INSTANTIATE(params<int,       int, SortMethod::SortAscending,         0,      100>) 
-    INSTANTIATE(params<int,       int, SortMethod::SortDescending,        0,      100>) 
-    INSTANTIATE(params<int,       int, SortMethod::StableSortAscending,   0,      100>) 
-    INSTANTIATE(params<int,       int, SortMethod::StableSortDescending,  0,      100>) 
+    INSTANTIATE(params<int,       int, SortMethod::SortAscending,         0,      100>)
+    INSTANTIATE(params<int,       int, SortMethod::SortDescending,        0,      100>)
+    INSTANTIATE(params<int,       int, SortMethod::StableSortAscending,   0,      100>)
+    INSTANTIATE(params<int,       int, SortMethod::StableSortDescending,  0,      100>)
 
-    INSTANTIATE(params<unsigned,  int, SortMethod::SortAscending,         10,     312>) 
-    INSTANTIATE(params<unsigned,  int, SortMethod::SortDescending,        10,     312>) 
-    INSTANTIATE(params<unsigned,  int, SortMethod::StableSortAscending,   10,     312>) 
-    INSTANTIATE(params<unsigned,  int, SortMethod::StableSortDescending,  10,     312>) 
+    INSTANTIATE(params<unsigned,  int, SortMethod::SortAscending,         10,     312>)
+    INSTANTIATE(params<unsigned,  int, SortMethod::SortDescending,        10,     312>)
+    INSTANTIATE(params<unsigned,  int, SortMethod::StableSortAscending,   10,     312>)
+    INSTANTIATE(params<unsigned,  int, SortMethod::StableSortDescending,  10,     312>)
 
-    INSTANTIATE(params<char,      int, SortMethod::SortAscending,         1,      1239>) 
-    INSTANTIATE(params<char,      int, SortMethod::SortDescending,        1,      1239>) 
+    INSTANTIATE(params<char,      int, SortMethod::SortAscending,         1,      1239>)
+    INSTANTIATE(params<char,      int, SortMethod::SortDescending,        1,      1239>)
 #elif HIPCUB_TEST_TYPE_SLICE == 1
-    INSTANTIATE(params<char,      int, SortMethod::StableSortAscending,   1,      1239>) 
-    INSTANTIATE(params<char,      int, SortMethod::StableSortDescending,  1,      1239>) 
+    INSTANTIATE(params<char,      int, SortMethod::StableSortAscending,   1,      1239>)
+    INSTANTIATE(params<char,      int, SortMethod::StableSortDescending,  1,      1239>)
 
-    INSTANTIATE(params<float,     int, SortMethod::SortAscending,         0,      322>) 
-    INSTANTIATE(params<float,     int, SortMethod::SortDescending,        0,      322>) 
-    INSTANTIATE(params<float,     int, SortMethod::StableSortAscending,   0,      322>) 
-    INSTANTIATE(params<float,     int, SortMethod::StableSortDescending,  0,      322>) 
+    INSTANTIATE(params<float,     int, SortMethod::SortAscending,         0,      322>)
+    INSTANTIATE(params<float,     int, SortMethod::SortDescending,        0,      322>)
+    INSTANTIATE(params<float,     int, SortMethod::StableSortAscending,   0,      322>)
+    INSTANTIATE(params<float,     int, SortMethod::StableSortDescending,  0,      322>)
 
-    INSTANTIATE(params<double,    int, SortMethod::SortAscending,         321,    555>) 
-    INSTANTIATE(params<double,    int, SortMethod::SortDescending,        321,    555>) 
-    INSTANTIATE(params<double,    int, SortMethod::StableSortAscending,   321,    555>) 
-    INSTANTIATE(params<double,    int, SortMethod::StableSortDescending,  321,    555>) 
+    INSTANTIATE(params<double,    int, SortMethod::SortAscending,         321,    555>)
+    INSTANTIATE(params<double,    int, SortMethod::SortDescending,        321,    555>)
+    INSTANTIATE(params<double,    int, SortMethod::StableSortAscending,   321,    555>)
+    INSTANTIATE(params<double,    int, SortMethod::StableSortDescending,  321,    555>)
 #endif

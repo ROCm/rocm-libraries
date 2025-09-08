@@ -53,7 +53,7 @@ function(add_rocrand_benchmark benchmark_src legacy)
     # for now adding in all .dll as dependency chain is not cmake based on win32
     file( GLOB third_party_dlls
     LIST_DIRECTORIES ON
-    CONFIGURE_DEPENDS 
+    CONFIGURE_DEPENDS
     ${HIP_DIR}/bin/*.dll
     ${CMAKE_SOURCE_DIR}/rtest.*
     )

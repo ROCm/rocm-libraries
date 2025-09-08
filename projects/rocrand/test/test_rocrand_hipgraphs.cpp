@@ -43,7 +43,7 @@ void test_float(std::function<rocrand_status(rocrand_generator, float*, size_t, 
         generate_fn(generator, data, 1, mean, stddev)
     );
     gHelper.createAndLaunchGraph(stream);
-    gHelper.resetGraphHelper(stream); 
+    gHelper.resetGraphHelper(stream);
 
     // Any alignment
     ROCRAND_CHECK(
@@ -108,7 +108,7 @@ TEST_P(rocrand_hipgraph_generate_tests, uniform_float_test)
     hipStream_t stream = 0;
     HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     rocrand_set_stream(generator, stream);
-    
+
     test_utils::GraphHelper gHelper;
     gHelper.startStreamCapture(stream);
 

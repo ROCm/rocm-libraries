@@ -1,22 +1,22 @@
 .. meta::
-  :description: rocPRIM operations 
+  :description: rocPRIM operations
   :keywords: rocPRIM, ROCm, API, documentation, operations
 
 ********************************************************************
 Types of rocPRIM operations
 ********************************************************************
 
-A rocPRIM operation is a computation over a sequence of elements. 
+A rocPRIM operation is a computation over a sequence of elements.
 
-The elements of the sequence can be of any type and belong to any class. Template specialization optimizes the computations over data types. 
+The elements of the sequence can be of any type and belong to any class. Template specialization optimizes the computations over data types.
 
-The :doc:`scope <./rocPRIM-scope>` of an operation determines whether an operation is running at the thread, warp, block, or grid level. 
+The :doc:`scope <./rocPRIM-scope>` of an operation determines whether an operation is running at the thread, warp, block, or grid level.
 
 The following tables provide a summary of the different types of operations and what they do.
 
 
 
-+------------------------+---------------------------+-----------------------------------------------+ 
++------------------------+---------------------------+-----------------------------------------------+
 | Type                   | Operation                 | Description                                   |
 +========================+===========================+===============================================+
 | Basic                  |Transform                  |Transform operations are device-level          |
@@ -29,7 +29,7 @@ The following tables provide a summary of the different types of operations and 
 |                        |                           |sequence that satisfy a condition set by a     |
 |                        |                           |selection mask or a predicate function.        |
 |                        +---------------------------+-----------------------------------------------+
-|                        |Unique                     |Unique operations are device-level operations  | 
+|                        |Unique                     |Unique operations are device-level operations  |
 |                        |                           |that return only the first element from a      |
 |                        |                           |group of similar consecutive elements.         |
 |                        +---------------------------+-----------------------------------------------+
@@ -132,7 +132,7 @@ The following tables provide a summary of the different types of operations and 
 |                        +---------------------------+-----------------------------------------------+
 |                        |Run length decode          |Run length decode operations are block-level   |
 |                        |                           |operations that decode run length encoded      |
-|                        |                           |arrays of items.                               | 
+|                        |                           |arrays of items.                               |
 |                        +---------------------------+-----------------------------------------------+
 |                        |Kernel config              |Kernel config constructs are device-level      |
 |                        |                           |constructs that set the grid and block         |

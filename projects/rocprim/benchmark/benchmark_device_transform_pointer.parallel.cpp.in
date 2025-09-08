@@ -29,9 +29,9 @@
 
 namespace {
     auto unused = benchmark_utils::executor::queue_autotune(
-        device_transform_benchmark_generator< 
+        device_transform_benchmark_generator<
         @DataType@,
-        true, 
+        true,
         @BlockSize@,
         @LoadType@>::create);
 }

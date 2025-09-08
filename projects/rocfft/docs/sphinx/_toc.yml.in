@@ -6,22 +6,22 @@ subtrees:
   - file: what-is-rocfft
     title: What is rocFFT?
 
-- caption: Install 
+- caption: Install
   entries:
   - file: install/building-installing-rocfft
-    title: Installation guide 
+    title: Installation guide
 
-- caption: Conceptual 
+- caption: Conceptual
   entries:
   - file: conceptual/fft-computation
-    title: FFT computation 
+    title: FFT computation
 
 - caption: How to
   entries:
   - file: how-to/working-with-rocfft
     title: Work with rocFFT
   - file: how-to/real-data
-    title: Use real data 
+    title: Use real data
   - file: how-to/load-store-callbacks
     title: Load and store callbacks
   - file: how-to/runtime-compilation
@@ -34,7 +34,7 @@ subtrees:
 - caption: Samples
   entries:
   - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft/clients/samples
-    title: GitHub client examples 
+    title: GitHub client examples
 
 - caption: API reference
   entries:

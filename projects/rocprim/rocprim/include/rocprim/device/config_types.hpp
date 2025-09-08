@@ -179,7 +179,7 @@ enum class target_arch : unsigned int
 
 /**
  * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`
- * 
+ *
  * \param lhs the string to compare against
  * \param rhs the string to compare with
  * \param n length of the substring of `rhs` to chceck
@@ -282,10 +282,10 @@ constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_a
 
 /**
  * \brief Get the current architecture in device compilation.
- * 
+ *
  * This function will always return `unknown` when called from the host, host could should instead
  * call host_target_arch to query the current device from the HIP API.
- * 
+ *
  * \return target_arch the architecture currently being compiled for on the device.
  */
 constexpr target_arch device_target_arch()

@@ -279,7 +279,7 @@ struct merge_kernel_impl_
                ValuesOutputIterator values_output,
                const size_t input1_size,
                const size_t input2_size,
-               BinaryFunction compare_function, 
+               BinaryFunction compare_function,
                storage_type&           storage)
     {
         using key_type1   = typename std::iterator_traits<KeysInputIterator1>::value_type;

@@ -1,7 +1,7 @@
 .. meta::
   :description: Programming guide for rocRAND
   :keywords: rocRAND, ROCm, API, documentation, programming, generator types
-  
+
 .. _programmers-guide:
 
 *******************************************************************
@@ -69,7 +69,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_PSEUDO_BEST``      The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
     ``ROCRAND_ORDERING_PSEUDO_DEFAULT``   The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
@@ -82,7 +82,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_PSEUDO_BEST``      The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
     ``ROCRAND_ORDERING_PSEUDO_DEFAULT``   The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
@@ -94,7 +94,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_PSEUDO_BEST``      The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
     ``ROCRAND_ORDERING_PSEUDO_DEFAULT``   The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
@@ -106,7 +106,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_PSEUDO_BEST``      The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
     ``ROCRAND_ORDERING_PSEUDO_DEFAULT``   The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
@@ -118,7 +118,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_PSEUDO_BEST``      The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
     ``ROCRAND_ORDERING_PSEUDO_DEFAULT``   The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
@@ -129,7 +129,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_PSEUDO_BEST``      The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
     ``ROCRAND_ORDERING_PSEUDO_DEFAULT``   The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
@@ -141,7 +141,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_PSEUDO_BEST``      The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
     ``ROCRAND_ORDERING_PSEUDO_DEFAULT``   The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
@@ -153,7 +153,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_PSEUDO_BEST``      The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
     ``ROCRAND_ORDERING_PSEUDO_DEFAULT``   The same as ``ROCRAND_ORDERING_PSEUDO_LEGACY``.
@@ -165,7 +165,7 @@ All supported orderings for all generators are listed below:
     :widths: auto
 
     ====================================  ====================================================================================================================
-    Ordering                            
+    Ordering
     ====================================  ====================================================================================================================
     ``ROCRAND_ORDERING_QUASI_DEFAULT``    The (scrambled) 32- and 64-bit sobol quasi-random number generators generated the result from :math:`d` dimensions by flattening them into the output. The result at offset :math:`n` in memory is generated from offset :math:`n\;\mathrm{mod}\; d` in dimension :math:`\lfloor n / d \rfloor`, where :math:`d` is the generator's number of dimensions.
     ====================================  ====================================================================================================================

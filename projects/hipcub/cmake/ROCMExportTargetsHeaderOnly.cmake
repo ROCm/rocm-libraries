@@ -144,5 +144,3 @@ function(rocm_export_targets_header_only)
         ${CONFIG_PACKAGE_INSTALL_DIR})
 
 endfunction()
-
-

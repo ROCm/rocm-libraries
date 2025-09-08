@@ -97,7 +97,7 @@ namespace detail
         using value_type = T;
     };
 
-    template <class T, typename Iter> 
+    template <class T, typename Iter>
     struct input_value_traits<::rocprim::future_value<T, Iter>>
     {
         using value_type    = T;

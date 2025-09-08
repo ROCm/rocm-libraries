@@ -8,4 +8,3 @@
     <run name="all_tests">{CTEST_FILTER}</run>
   </test>
 </testset>
-

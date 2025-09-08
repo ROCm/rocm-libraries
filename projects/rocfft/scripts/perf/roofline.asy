@@ -132,7 +132,7 @@ for(int n = 0; n < testlist.length; ++n)
     int dataidx = 0;
 
     real[] nvals = new real[];
-    
+
     bool moretoread = true;
     file fin = input(filename);
     while(moretoread) {
@@ -141,7 +141,7 @@ for(int n = 0; n < testlist.length; ++n)
             moretoread = false;
             break;
         }
-        
+
         int N = fin;
         if (N > 0) {
             xmax = max(a,xmax);
@@ -152,9 +152,9 @@ for(int n = 0; n < testlist.length; ++n)
             maxai = max(ai, maxai);
             x[n].push(ai);
             nvals.push(a);
-            
+
             data[n][dataidx] = new real[N];
-            
+
             real vals[] = new real[N];
             for(int i = 0; i < N; ++i) {
                 vals[i] = fin;
@@ -173,7 +173,7 @@ for(int n = 0; n < testlist.length; ++n)
             ++dataidx;
         }
     }
-   
+
     pen p = Pen(n);
     if(n == 2)
         p = darkgreen;
@@ -190,11 +190,11 @@ for(int n = 0; n < testlist.length; ++n)
     }
     errorbars(z, dp, dm, p);
 
-    if(n == 1) 
+    if(n == 1)
         p += dashed;
-    if(n == 2) 
+    if(n == 2)
         p += Dotted;
-    
+
     guide g = scale(0.5mm) * unitcircle;
     marker mark = marker(g, Draw(p + solid));
 
@@ -206,8 +206,8 @@ for(int n = 0; n < testlist.length; ++n)
         if(y[n][i] <= 0.0)
 	    drawme[i] = false;
     }
-    
-    draw(graph(x[n], y[n], drawme), p,  
+
+    draw(graph(x[n], y[n], drawme), p,
          myleg ? legends[n] : texify(filename), mark);
     for(int i = 0; i < nvals.length; ++i) {
         if (i%4 == 0)
@@ -254,6 +254,3 @@ yaxis(ylabel,LeftRight, LeftTicks, ymax = max(floatgflops,doublegflops));
 
 if(dolegend)
     attach(legend(),point(plain.E),(20*plain.E)  );
-
-
-

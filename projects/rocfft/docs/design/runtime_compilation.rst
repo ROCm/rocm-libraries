@@ -420,4 +420,3 @@ be trademarks of their respective companies.
 
 Copyright (c) 2022 - 2024 Advanced Micro Devices, Inc. All rights
 reserved.
-

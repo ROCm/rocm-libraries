@@ -42,7 +42,7 @@ else()
     endif()
   endif()
 endif()
-  
+
 # Either rocfft or cufft is required
 if(NOT BUILD_WITH_LIB STREQUAL "CUDA")
   if( HIPFFT_MPI_ENABLE )

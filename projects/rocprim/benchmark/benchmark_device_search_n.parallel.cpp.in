@@ -29,8 +29,8 @@
 
 namespace {
     auto unused = benchmark_utils::executor::queue_autotune(
-        device_search_n_benchmark_generator< 
-        @InputType@, 
+        device_search_n_benchmark_generator<
+        @InputType@,
         @BlockSize@,
         @ItemsPerThread@,
         @Threshold@>::create);

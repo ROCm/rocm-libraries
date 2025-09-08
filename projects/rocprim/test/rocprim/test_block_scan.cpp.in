@@ -61,8 +61,8 @@ struct RocprimBlockScanInputArrayTests;
 #endif
 
 #if !_CLANGD
-    // When using clangd, the '.cpp.in' file is already included 
-    // in the header. To prevent recursive includes, the header is 
+    // When using clangd, the '.cpp.in' file is already included
+    // in the header. To prevent recursive includes, the header is
     // not supposed to be added.
     #include "test_block_scan.hpp"
 #endif

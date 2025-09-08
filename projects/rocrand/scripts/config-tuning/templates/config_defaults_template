@@ -40,4 +40,3 @@ struct generator_config_defaults<{{ generator_enum }}, T>
 } // end namespace rocrand_impl::host
 
 #endif // ROCRAND_RNG_CONFIG_CONFIG_DEFAULTS_HPP_
-

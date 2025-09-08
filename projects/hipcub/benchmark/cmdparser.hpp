@@ -191,7 +191,7 @@ namespace cli {
 
             return std::stoull(elements[0]);
         }
-		
+
         static long parse(const std::vector<std::string>& elements, const long&) {
             if (elements.size() != 1)
                 throw std::bad_cast();

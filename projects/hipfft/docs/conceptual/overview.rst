@@ -57,7 +57,7 @@ To use hipFFT, follow this step-by-step process:
 #. Destroy the plan
 
    After you are done with the plan, destroy it to free the associated resources:
-     
+
    .. code-block:: cpp
 
       hipfftDestroy(plan);
@@ -295,23 +295,23 @@ Here's an example of a 2D single-precision real-to-complex transform using the h
 Overlapping input data
 ======================
 
-There are signal processing tasks, such as sliding window FFTs, 
-where overlapping data can improve computational efficiency. 
-Care must be taken to ensure proper memory management and alignment when using 
-overlapping input layouts.  
+There are signal processing tasks, such as sliding window FFTs,
+where overlapping data can improve computational efficiency.
+Care must be taken to ensure proper memory management and alignment when using
+overlapping input layouts.
 
-The following example demonstrates the use of overlapping input data by configuring 
-the ``inembed``, ``istride``, and ``idist`` parameters in the :cpp:func:`hipfftMakePlanMany` 
-function. Set these parameters to create a memory layout where portions of 
-the input data are reused across multiple FFT batches: 
+The following example demonstrates the use of overlapping input data by configuring
+the ``inembed``, ``istride``, and ``idist`` parameters in the :cpp:func:`hipfftMakePlanMany`
+function. Set these parameters to create a memory layout where portions of
+the input data are reused across multiple FFT batches:
 
-*  ``inembed`` specifies the physical layout of the input data in memory, with 
+*  ``inembed`` specifies the physical layout of the input data in memory, with
    extra padding to accommodate overlapping rows (for example, ``2240``).
 
 *  ``istride`` ensures continuous reading of data within each row (if set to ``1``).
 
-*  ``idist`` defines the distance between the starting points of consecutive batches 
-   (for example, ``432``), which is smaller than the total memory implied by 
+*  ``idist`` defines the distance between the starting points of consecutive batches
+   (for example, ``432``), which is smaller than the total memory implied by
    ``xformSz`` and ``inembed``.
 
 
@@ -447,21 +447,21 @@ The following concepts and API calls are used:
 
 *  ``hipStreamCreate``: Creates a stream for managing GPU work concurrently. This enables execution of the multi-GPU plan
    in parallel on multiple GPUs. For more details, see :doc:`HIP <hip:index>`.
-  
+
 *  :cpp:func:`hipfftXtSetGPUs`: Assigns the GPUs (in this case, two GPUs) to the hipFFT plan,
    enabling multi-GPU computation for the FFT.
-  
+
 *  :cpp:func:`hipfftMakePlan2d`: Creates a 2D FFT plan for the specified input/output size (``Nx``, ``Ny``), specifying
    the transform type (complex-to-complex in this case).
-  
+
 *  :cpp:func:`hipfftXtMalloc`: Allocates memory on the GPUs for storing the FFT input and output data.
-  
+
 *  :cpp:func:`hipfftXtMemcpy`: Copies data between the host and GPU memory, supporting both host-to-device and
    device-to-host operations.
-  
+
 *  :cpp:func:`hipfftXtExecDescriptor`: Executes the FFT operation based on the input descriptor ``desc``,
    which holds the input data and transform configuration.
-  
+
 *  :cpp:func:`hipfftXtFree`: Frees the memory allocated for the input/output descriptors after the computation is completed.
 
 For detailed API usage, see :ref:`hipfft-api-usage`.

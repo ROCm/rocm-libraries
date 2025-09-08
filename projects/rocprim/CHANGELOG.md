@@ -67,7 +67,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Renamed `type_traits_interface.hpp` to `type_traits.hpp`, rename the original `type_traits.hpp` to `type_traits_functions.hpp`.
 * The default scan accumulator types for device-level scan algorithms have changed. This is a breaking change.
 The previous default accumulator types could lead to situations in which unexpected overflow occured, such as
-when the input or inital type was smaller than the output type. 
+when the input or inital type was smaller than the output type.
   * This is a complete list of affected functions and how their default accumulator types are changing:
     * `rocprim::inclusive_scan`
       * Previous default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
@@ -85,7 +85,7 @@ when the input or inital type was smaller than the output type.
 * A new version of `rocprim::thread_load` and `rocprim::thread_store` replace the deprecated `rocprim::thread_load` and `rocprim::thread_store` functions. The versions avoid inline assembly where possible, and don't hinder the optimizer as much as a result.
 * Renamed `rocprim::load_cs` to `rocprim::load_nontemporal` and `rocprim::store_cs` to `rocprim::store_nontemporal` to express the intent of these load and store methods better.
 * All kernels now have hidden symbol visibility. All symbols now have inline namespaces that include the library version, for example, `rocprim::ROCPRIM_300400_NS::symbol` instead of `rocPRIM::symbol`, letting the user link multiple libraries built with different versions of rocPRIM.
-    
+
 ### Upcoming changes
 
 * `rocprim::invoke_result_binary_op` and `rocprim::invoke_result_binary_op_t` are deprecated. Use `rocprim::accumulator_t` now.
@@ -117,7 +117,7 @@ when the input or inital type was smaller than the output type.
   * `ROCPRIM_WAVEFRONT_SIZE`
     * Use `rocprim::arch::wavefront::min_size()` or `rocprim::arch::wavefront::max_size()` instead.
   * `__AMDGCN_WAVEFRONT_SIZE`
-    * This was a fallback define for the compiler's removed symbol, having the same name. 
+    * This was a fallback define for the compiler's removed symbol, having the same name.
 * This release removes support for custom builds on gfx940 and gfx941.
 
 ### Resolved issues
@@ -144,11 +144,11 @@ when the input or inital type was smaller than the output type.
     * For run-time constants, this is replaced with `rocprim::arch::wavefront::size().`
   * `rocprim::warp_size()`
   * `ROCPRIM_WAVEFRONT_SIZE`
-  
-* The default scan accumulator types for device-level scan algorithms will be changed in an upcoming release, resulting in a breaking change. Previously, the default accumulator type was set to the input type for the inclusive scans and to the initial value type for the exclusive scans. This could lead to unexpected overflow if the input or initial type was smaller than the output type when the accumulator type was't explicitly set using the `AccType` template parameter. The new default accumulator types will be set to the type that results when the input or initial value type is applied to the scan operator.  
+
+* The default scan accumulator types for device-level scan algorithms will be changed in an upcoming release, resulting in a breaking change. Previously, the default accumulator type was set to the input type for the inclusive scans and to the initial value type for the exclusive scans. This could lead to unexpected overflow if the input or initial type was smaller than the output type when the accumulator type was't explicitly set using the `AccType` template parameter. The new default accumulator types will be set to the type that results when the input or initial value type is applied to the scan operator.
 
     The following is the complete list of affected functions and how their default accumulator types are changing:
-    
+
     * `rocprim::inclusive_scan`
         * current default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
         * future default: `class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>`
@@ -672,5 +672,3 @@ when the input or inital type was smaller than the output type.
 
 * Switched to HIP-Clang as the default compiler
 * CMake searches for rocPRIM locally first; if t's not found, CMake downloads it from GitHub
-
-

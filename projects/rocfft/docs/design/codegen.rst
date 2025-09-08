@@ -335,5 +335,3 @@ names used in this publication are for identification purposes only
 and may be trademarks of their respective companies.
 
 Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
-
-

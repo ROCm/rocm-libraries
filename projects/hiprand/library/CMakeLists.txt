@@ -69,7 +69,7 @@ set_target_properties(hiprand
 
 rocm_install(
     TARGETS hiprand
-    INCLUDE 
+    INCLUDE
         "${PROJECT_SOURCE_DIR}/library/include"
         "${PROJECT_BINARY_DIR}/library/include"
     EXPORT hiprand-targets
@@ -110,7 +110,7 @@ if (WIN32)
     install (TARGETS hiprand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
     if (BUILD_TEST)
 	    add_custom_command(
-		    TARGET hiprand 
+		    TARGET hiprand
 		    POST_BUILD
 		    COMMAND ${CMAKE_COMMAND} -E copy
 			    $<TARGET_FILE:hiprand>
@@ -119,13 +119,13 @@ if (WIN32)
     endif()
     if (BUILD_BENCHMARK)
 	    add_custom_command(
-		    TARGET hiprand 
+		    TARGET hiprand
 		    POST_BUILD
 		    COMMAND ${CMAKE_COMMAND} -E copy
 			    $<TARGET_FILE:hiprand>
 			    ${PROJECT_BINARY_DIR}/benchmark/$<TARGET_FILE_NAME:hiprand>
 	    )
-    endif()	
+    endif()
 endif()
 
 # Fortran wrappers for hipRAND

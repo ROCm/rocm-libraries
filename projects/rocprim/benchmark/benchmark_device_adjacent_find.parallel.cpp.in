@@ -29,7 +29,7 @@
 
 namespace {
     auto unused = benchmark_utils::executor::queue_autotune(
-        device_adjacent_find_benchmark_generator< 
-        @InputType@, 
+        device_adjacent_find_benchmark_generator<
+        @InputType@,
         @BlockSize@>::create);
 }

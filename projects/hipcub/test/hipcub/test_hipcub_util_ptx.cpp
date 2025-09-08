@@ -883,7 +883,7 @@ void test_all_warp_sizes(std::integer_sequence<unsigned int, LogicalWarpSizes...
 
     // Call the test with each logical warp size in the range [1, 64]
     auto statuses = std::vector<TestStatus>();
-    const auto ignore = 
+    const auto ignore =
         {(test_warp_size<LogicalWarpSizes + 1>(statuses, d_statuses, static_cast<unsigned int>(device_warp_size)), 0)...};
     static_cast<void>(ignore);
 

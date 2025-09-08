@@ -1,7 +1,7 @@
 .. meta::
   :description: rocRAND Python API reference
   :keywords: rocRAND, ROCm, API, documentation, Python
-  
+
 .. _python-api:
 
 ====================

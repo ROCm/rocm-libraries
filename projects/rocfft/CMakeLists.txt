@@ -171,7 +171,7 @@ set(AMDGPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if AMDGPU
 rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
 # Don't force, users should be able to override GPU_TARGETS at the command line if desired
 set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
-  
+
 # HIP is required - library and clients use HIP to access the device
 find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
 find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )

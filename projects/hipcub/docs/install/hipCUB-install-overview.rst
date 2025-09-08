@@ -1,9 +1,9 @@
 .. meta::
-  :description: hipCUB installation overview 
+  :description: hipCUB installation overview
   :keywords: install, hipCUB, AMD, ROCm, installation, overview, general
 
 *********************************
-hipCUB installation overview 
+hipCUB installation overview
 *********************************
 
 The hipCUB source code is available from the `ROCm libraries GitHub Repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipcub>`_. Use sparse checkout when cloning the hipCUB project:
@@ -26,7 +26,7 @@ hipCUB can be built and installed with |rmake|_ on Windows, or `CMake <./hipCUB-
 .. |install| replace:: ``install``
 .. _install: ./rocThrust-install-script.html
 
-.. |rmake| replace:: ``rmake.py`` 
+.. |rmake| replace:: ``rmake.py``
 .. _rmake: ./hipCUB-install-on-Windows.html
 
 CMake provides the most flexibility in building and installing hipCUB.

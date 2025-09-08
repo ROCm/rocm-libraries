@@ -17,7 +17,3 @@ default_scan_config_base<value_type>::type { };
 // Based on {{ based_on_type }}
 template<class value_type> struct default_scan_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), value_type, {{ fallback_selection_criteria }}> :
 {%- endmacro %}
-
-  
-
-

@@ -8,7 +8,7 @@
 Design Documents
 ********************************************************************
 
-The Design Documents contain proposals for features of the rocFFT library. They are intended as development proposals for engineering and contributors to the Open Source library. 
+The Design Documents contain proposals for features of the rocFFT library. They are intended as development proposals for engineering and contributors to the Open Source library.
 
 The current proposals include the following:
 

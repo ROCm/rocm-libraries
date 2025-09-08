@@ -11,7 +11,7 @@ Installing and building hipRAND
 To install hipRAND, choose between the following two methods:
 
 -   :ref:`Using prebuilt packages from the ROCm repositories <prebuilt-packages>`
--   :ref:`Building from source <build-from-source>`   
+-   :ref:`Building from source <build-from-source>`
 
 .. _prebuilt-packages:
 
@@ -196,7 +196,7 @@ The hipRAND Python API Wrapper requires the following dependencies:
 * NumPy (This is installed automatically as a dependency, if necessary.)
 
 .. note::
-    
+
    If hipRAND is built from source but is either not installed or installed in a
    non-standard directory, then set the ``ROCRAND_PATH`` or ``HIPRAND_PATH`` environment variable to the
    path containing ``libhiprand.so`` as shown below:

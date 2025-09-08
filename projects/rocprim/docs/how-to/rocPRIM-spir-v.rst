@@ -32,17 +32,17 @@ For example, with cmake:
 .. note::
 
     rocPRIM does not support mixed compilation targets. No other target can be set when ``--offload-arch=amdgcnspirv`` is used.
-    
+
     Setting ``ROCPRIM_EXPERIMENTAL_SPIRV`` will disable all config dispatching.
 
 
 When targeting SPIR-V, the hardware wavefront size (also known as warp size) is not known
-at compile time. 
+at compile time.
 
 Because the hardware wavefront size is not known at compilation-time, rocPRIM will add implicit dispatching where it is needed. This provides a way for the same SPIR-V code to work hardware wavefront sizes of both 32 and 64.
 
-Adding SPIR-V wavefront dependent dispatching to an existing warp or block level algorithm can 
-be done using the APIs in ``rocprim::arch::wavefront``. 
+Adding SPIR-V wavefront dependent dispatching to an existing warp or block level algorithm can
+be done using the APIs in ``rocprim::arch::wavefront``.
 
 For example, given the following:
 
@@ -65,7 +65,7 @@ The wavefront size can be found using ``rocprim::arch::wavefront::get_target()``
 .. code:: cpp
 
     template<
-        typename T, 
+        typename T,
         rocprim::arch::wavefront::target TargetWaveSize = rocprim::arch::wavefront::get_target()
     >
     class my_alg
@@ -97,13 +97,13 @@ The wavefront size can be found using ``rocprim::arch::wavefront::get_target()``
     };
 
     .. note::
-    
+
         Developers who are modifying the rocPRIM code base can use ``rocprim::detail::dispatch_wave_size``. This function also manages exposed ``storage_type``- types to handle and map shared memory. Variadic templates are used to capture all signatures for a given member function.
 
         Developers who are only intending to use the rocPRIM library should not use ``dispatch_wave_size``.
 
 
-``rocprim::arch::wavefront::get_target()`` will resolve to ``target::dynamic`` and be handled through  partial specialization. A downside of this implementation is that more shared memory is allocated than is used. 
+``rocprim::arch::wavefront::get_target()`` will resolve to ``target::dynamic`` and be handled through  partial specialization. A downside of this implementation is that more shared memory is allocated than is used.
 
 An algorithm that runs on a device with wavefront size 32 will have a different shared memory footprint than one that runs on a device with wavefront size 64. Using the dispatcher will then result in suboptimal occupancy.
 

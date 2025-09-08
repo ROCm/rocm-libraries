@@ -22,7 +22,7 @@ def runCI =
     buildProject(prj, formatCheck, nodes.dockerArray, null, null, null, staticAnalysis)
 }
 
-ci: { 
+ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
     properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * 7')])]))

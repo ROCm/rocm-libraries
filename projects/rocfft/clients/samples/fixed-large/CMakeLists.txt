@@ -83,8 +83,8 @@ foreach( sample ${sample_list} )
   string( CONCAT FIXED_LARGE_OUT_DIR "${PROJECT_BINARY_DIR}" ${FIXED_LARGE_OUT_DIR} )
 
   set_target_properties(${sample}
-                        PROPERTIES 
-                        RUNTIME_OUTPUT_DIRECTORY 
+                        PROPERTIES
+                        RUNTIME_OUTPUT_DIRECTORY
                         ${FIXED_LARGE_OUT_DIR})
 
   if( CUDA_FOUND )

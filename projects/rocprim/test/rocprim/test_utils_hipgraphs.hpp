@@ -28,7 +28,7 @@
 
 // Helper functions for testing with hipGraph stream capture.
 // Note: graphs will not work on the default stream.
-    
+
 namespace test_utils
 {
     class GraphHelper{
@@ -44,7 +44,7 @@ namespace test_utils
             inline void endStreamCapture(hipStream_t & stream){
                 HIP_CHECK(hipStreamEndCapture(stream, &graph));
             }
-            
+
             inline void createGraph(){
                 HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
             }
@@ -57,9 +57,9 @@ namespace test_utils
             }
 
             inline void createAndLaunchGraph(hipStream_t & stream, const bool launchGraph=true, const bool sync=true){
-                
+
                 endStreamCapture(stream);
-                
+
                 HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
 
                 // Optionally launch the graph

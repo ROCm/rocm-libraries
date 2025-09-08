@@ -89,4 +89,3 @@ else()
     NAMESPACE hip::
   )
 endif()
-

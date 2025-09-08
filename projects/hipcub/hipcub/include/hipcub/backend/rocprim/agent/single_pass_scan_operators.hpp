@@ -204,14 +204,14 @@ enum class MemoryOrder
 
 /**
  * \brief Tile status, which consists of a scan status and a prefix value packed together.
- * 
+ *
  * \par Overview
  * - rocPRIM has its own implementation of the decoupled look-back, and therefore hipCUB exposes
  * this API exclusively for compatibility. That is, it is not internally used by any algorithm.
  * - Beware that some member variables may not be present and some member methods may not behave
  * as expected yet, as not all of rocPRIM's internal implementation of the decoupled look-back
  * is accesible from hipCUB.
- * 
+ *
  * \tparam T           Type of the values scanned.
  * \tparam SINGLE_WORD Whether the scan status and value type fit into one machine word that can
  * be loaded/stored using single atomic instructions.
@@ -325,7 +325,7 @@ public:
 
 /**
  * \brief (Block) Scan prefix functor for retrieving the current tile prefix.
- * 
+ *
  * \par Overview
  * - rocPRIM has its own implementation of the decoupled look-back, and therefore hipCUB exposes
  * this API exclusively for compatibility. That is, it is not internally used by any algorithm.

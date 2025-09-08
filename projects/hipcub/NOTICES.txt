@@ -2,7 +2,7 @@ Notices and Licenses file
 _________________________
 
 
-AMD copyrighted code (MIT) 
+AMD copyrighted code (MIT)
 Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -24,7 +24,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-crascit-downloadproject v-u (MIT) 
+crascit-downloadproject v-u (MIT)
 Copyright (c) 2015 Crascit
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -46,7 +46,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-Dependencies on nvlabs-cub v1.8 (BSD3) 
+Dependencies on nvlabs-cub v1.8 (BSD3)
 Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
 Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
 Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
@@ -74,7 +74,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-ROCmSoftwarePlatform-rocPRIM v1.0.0 (MIT) 
+ROCmSoftwarePlatform-rocPRIM v1.0.0 (MIT)
 Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

@@ -39,4 +39,3 @@ Change directory to the ``build`` directory, and run ``cmake``:
     cmake ../.
 
 The Visual Studio projects and solutions will be created in the ``build`` directory.
-  

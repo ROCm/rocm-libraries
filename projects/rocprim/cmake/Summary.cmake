@@ -104,6 +104,5 @@ function(print_configuration_summary)
   if(UNAME_EXECUTABLE)
     message(STATUS "  Unix name             : ${LINUX_KERNEL_DETAILS}")
   endif()
-  
-endfunction()
 
+endfunction()

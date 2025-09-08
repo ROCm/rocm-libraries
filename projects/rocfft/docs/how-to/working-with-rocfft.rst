@@ -64,21 +64,21 @@ Example
    #include "hip/hip_runtime_api.h"
    #include "hip/hip_vector_types.h"
    #include "rocfft/rocfft.h"
-   
+
    int main()
    {
            // rocFFT gpu compute
            // ========================================
-  
+
            rocfft_setup();
 
            size_t N = 16;
            size_t Nbytes = N * sizeof(float2);
-   
+
            // Create HIP device buffer
            float2 *x;
            hipMalloc(&x, Nbytes);
-   
+
            // Initialize data
            std::vector<float2> cx(N);
            for (size_t i = 0; i < N; i++)
@@ -86,10 +86,10 @@ Example
                    cx[i].x = 1;
                    cx[i].y = -1;
            }
-   
+
            //  Copy data to device
            hipMemcpy(x, cx.data(), Nbytes, hipMemcpyHostToDevice);
-   
+
            // Create rocFFT plan
            rocfft_plan plan = nullptr;
            size_t length = N;
@@ -108,10 +108,10 @@ Example
 		   hipMalloc(&work_buf, work_buf_size);
 		   rocfft_execution_info_set_work_buffer(info, work_buf, work_buf_size);
            }
-   
+
            // Execute plan
            rocfft_execute(plan, (void**) &x, nullptr, info);
-   
+
            // Wait for execution to finish
            hipDeviceSynchronize();
 
@@ -124,20 +124,20 @@ Example
 
            // Destroy plan
            rocfft_plan_destroy(plan);
-   
+
            // Copy result back to host
            std::vector<float2> y(N);
            hipMemcpy(y.data(), x, Nbytes, hipMemcpyDeviceToHost);
-   
+
            // Print results
            for (size_t i = 0; i < N; i++)
            {
                    std::cout << y[i].x << ", " << y[i].y << std::endl;
            }
-   
+
            // Free device buffer
            hipFree(x);
-   
+
            rocfft_cleanup();
 
            return 0;
@@ -163,7 +163,7 @@ following information:
 * The floating-point precision of the data
 * Whether the transform is in-place or not in-place
 * The format (array type) of the input/output buffer
-* The layout of data in the input/output buffer 
+* The layout of data in the input/output buffer
 * The scaling factor to apply to the output of the transform
 
 A rocFFT plan does not include the following parameters:
@@ -184,7 +184,7 @@ memory regions on the device, it expects you to manage the work buffers. The siz
 :cpp:func:`rocfft_execution_info_set_work_buffer`. The `GitHub repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft/clients/samples>`_
 provide some samples and examples.
 
-Transform and array types 
+Transform and array types
 =========================
 
 There are two main types of FFTs in the library:
@@ -194,13 +194,13 @@ There are two main types of FFTs in the library:
 
   *  Planar format: The real and imaginary components are kept in two separate arrays:
 
-     * Buffer 1: ``RRRRR...`` 
+     * Buffer 1: ``RRRRR...``
      * Buffer 2: ``IIIII...``
 
-  *  Interleaved format: The real and imaginary components are stored as contiguous pairs in the same array: 
+  *  Interleaved format: The real and imaginary components are stored as contiguous pairs in the same array:
 
      * Buffer: ``RIRIRIRIRIRI...``
-  
+
 * **Real FFT**: Transformation of real data. For transforms involving real data, there are two possibilities:
 
   * Real data being subject to a forward FFT that results in complex data (Hermitian).
@@ -271,10 +271,10 @@ a batch of 1D FFT vectors, if ``distance == 1`` and ``strideX == length(vector)`
 it means the data for each logical FFT is read along columns, in this case, along the batch. You must
 verify that the distance and strides are valid and confirm that each logical
 FFT instance does not overlap with any other in the output data. If this is not the case, undefined results
-can occur. Overlapping on input data is generally allowed. 
+can occur. Overlapping on input data is generally allowed.
 
 A simple example of a column data access pattern would be a 1D transform of length 4096 on
-each row of an array of 1024 rows by 4096 columns of values stored in a column-major array, 
+each row of an array of 1024 rows by 4096 columns of values stored in a column-major array,
 for example, from a Fortran program. (This would be equivalent to a C or C++ program that
 has an array of 4096 rows by 1024 columns stored in row-major format, where you
 execute a 1D transform of length 4096 on each column.) In this case, specify the strides as ``1024`` and the distance as ``1``.

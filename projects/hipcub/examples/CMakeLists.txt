@@ -88,7 +88,7 @@ function(add_hipcub_example EXAMPLE_NAME EXAMPLE_SOURCES)
     foreach( file_i ${third_party_dlls})
       add_custom_command( TARGET ${EXAMPLE_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/examples )
     endforeach( file_i )
-  endif()   
+  endif()
 endfunction()
 
 add_subdirectory(block)

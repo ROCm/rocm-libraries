@@ -27,6 +27,6 @@
 
 namespace {
     auto unused = benchmark_utils::executor::queue_sorted_instance<device_segmented_reduce_benchmark<
-        @DataType@, rocprim::plus<@DataType@>, 
+        @DataType@, rocprim::plus<@DataType@>,
         rocprim::reduce_config<@BlockSize@u, @ItemsPerThread@u, rocprim::block_reduce_algorithm::using_warp_reduce>>>();
 }

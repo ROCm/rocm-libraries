@@ -30,7 +30,7 @@ rocRAND has the following prerequisites:
 
    Use ``GTEST_ROOT`` to specify the GoogleTest location. For more information,
    see `FindGTest <https://cmake.org/cmake/help/latest/module/FindGTest.html>`_.
-   
+
    .. note::
 
       If GoogleTest is not already installed, it will be automatically downloaded and built.
@@ -175,7 +175,7 @@ To install support for rocRAND and HIP on Windows, use the ``rmake.py`` Python s
 
 .. code-block:: shell
 
-   git clone https://github.com/ROCm/rocm-libraries.git 
+   git clone https://github.com/ROCm/rocm-libraries.git
    cd rocm-libraries/projects/rocrand
 
    # the -i option will install rocRAND to C:\hipSDK by default
@@ -231,4 +231,3 @@ The tests can be executed as follows:
 
    cd rocm-libraries/projects/rocrand/python/rocrand
    python tests/rocrand_test.py
-

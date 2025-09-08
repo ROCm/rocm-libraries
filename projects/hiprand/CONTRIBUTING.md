@@ -13,4 +13,3 @@ Our code contriubtion guidelines closely follows the model of [GitHub pull-reque
   * new unit tests should integrate within the existing [googletest framework](https://github.com/google/googletest/blob/master/googletest/docs/Primer.md)
   * tests must have good code coverage
   * code must also have benchmark tests, and performance must be acceptable to maintainers
-

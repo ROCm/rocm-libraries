@@ -57,7 +57,7 @@ template<
 class WarpStore
 {
 private:
-    constexpr static bool IS_ARCH_WARP 
+    constexpr static bool IS_ARCH_WARP
         = static_cast<unsigned>(LOGICAL_WARP_THREADS) == HIPCUB_DEVICE_WARP_THREADS;
 
     template <WarpStoreAlgorithm _POLICY>

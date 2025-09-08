@@ -404,7 +404,7 @@ void sort_key_kernel(key_type* device_keys_output, unsigned int start_bit, unsig
     else                                                                            \
     {                                                                               \
         ASSERT_EQ(output, expected) << "at index: " << index;                       \
-    }    
+    }
 
 TYPED_TEST(HipcubBlockRadixSort, SortKeys)
 {
@@ -488,9 +488,9 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         // Verifying results
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(keys_output[i]), 
-                                        test_utils::convert_to_native(expected[i]), 
-                                        i, 
+            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(keys_output[i]),
+                                        test_utils::convert_to_native(expected[i]),
+                                        i,
                                         key_type);
         }
 
@@ -651,15 +651,15 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(keys_output[i]), 
-                                        test_utils::convert_to_native(expected[i].first), 
-                                        i, 
-                                        key_type);   
-                                        
-            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(values_output[i]), 
-                                        test_utils::convert_to_native(expected[i].second), 
-                                        i, 
-                                        value_type);                    
+            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(keys_output[i]),
+                                        test_utils::convert_to_native(expected[i].first),
+                                        i,
+                                        key_type);
+
+            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(values_output[i]),
+                                        test_utils::convert_to_native(expected[i].second),
+                                        i,
+                                        value_type);
         }
 
         HIP_CHECK(hipFree(device_keys_output));

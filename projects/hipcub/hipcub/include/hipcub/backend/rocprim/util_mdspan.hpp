@@ -2,7 +2,7 @@
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2024, NVIDIA CORPORATION.  All rights reserved.
  * Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -13,7 +13,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the
  *       names of its contributors may be used to endorse or promote products
  *       derived from this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -110,16 +110,16 @@ using extents = std::extents<IndexType, Extents...>;
  */
 
 /**
- * \brief The `extents` descriptor serves as an equivalent of `std::extents` 
- * in C++23. This class exists only for compatibility. In C++23, `std::extents` 
- * supports both static and dynamic extents, but supporting dynamic extents 
- * involves multiple C++20 and C++23 `constexpr` functions and templates. 
- * Therefore, implementing the full functionality of `std::extents` in this 
+ * \brief The `extents` descriptor serves as an equivalent of `std::extents`
+ * in C++23. This class exists only for compatibility. In C++23, `std::extents`
+ * supports both static and dynamic extents, but supporting dynamic extents
+ * involves multiple C++20 and C++23 `constexpr` functions and templates.
+ * Therefore, implementing the full functionality of `std::extents` in this
  * file is not a good idea. We should either upgrade the C++ version or adjust
- *  the compiler to make it possible to include those headers directly. Once 
+ *  the compiler to make it possible to include those headers directly. Once
  * `std::extents` is supported, we should remove this class.
  * \note This class only supports static extents. And to be clearer, the function
- * `extents::extent` is not implemented, please use `static_extent` instead. It's 
+ * `extents::extent` is not implemented, please use `static_extent` instead. It's
  * also a benefit because, we can do all calculations associated with the extents
  * during compile time.
  */
@@ -187,7 +187,7 @@ struct extents_remove_first<::hipcub::extents<IndexType, First, Extents...>>
 /**
  * \brief Helper template, to get the total size of `ExtentsType`
  * For example, if you have `::hipcub::extents<int,4,3,2>`,
- * it returns 24 (4 * 3 * 2). 
+ * it returns 24 (4 * 3 * 2).
  */
 template<class ExtentsType>
 struct extents_size
@@ -203,7 +203,7 @@ struct extents_size<::hipcub::extents<IndexType, First, Extents...>>
 };
 
 /**
- * \brief Helper template, returns the size of the sub extents of 
+ * \brief Helper template, returns the size of the sub extents of
  * `ExtentsType`, starting from rank number `StartRank`.
  */
 template<size_t StartRank, class ExtentsType, class Enable = void>

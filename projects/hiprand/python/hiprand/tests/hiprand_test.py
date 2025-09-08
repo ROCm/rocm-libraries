@@ -204,7 +204,7 @@ class TestGenerate(TestRNGBase):
         this_empty = np.empty if self.is_host else empty
         self.rng.uniform(this_empty(100, np.float32))
         self.rng.uniform(this_empty((10, 100), np.float32))
-    
+
     def _test_generate(self, dtype, mean, max_value):
         output = np.empty(OUTPUT_SIZE, dtype)
         self.rng.generate(output)

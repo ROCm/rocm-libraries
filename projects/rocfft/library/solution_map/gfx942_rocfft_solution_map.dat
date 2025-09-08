@@ -1,5 +1,5 @@
 {"Version":3,
-"Data":[ 
+"Data":[
 {"Problem":{"arch":"gfx942","token":"kernel_len100_single_sbrr"},
  "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 100,0 ],"precision":"single","scheme":"CS_KERNEL_STOCKHAM","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":true,"buffer_inst":false,"tpb":6,"wgs":120,"tpt":[ 20,0 ],"factors":[ 5,5,4 ],"ebtype":"R2C_POST","direction":-1,"static_dim":1,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},

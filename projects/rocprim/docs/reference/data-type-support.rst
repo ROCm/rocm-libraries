@@ -36,7 +36,7 @@ The following table shows the supported input and output datatypes.
       - float16
       - ✅
     *
-      - bfloat16      
+      - bfloat16
       - ✅
     *
       - tensorfloat32

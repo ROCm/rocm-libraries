@@ -75,7 +75,7 @@ template<typename T> struct
     static constexpr bool VALUE = std::is_volatile<T>::value;
 };
 
-template<typename T> struct 
+template<typename T> struct
 [[deprecated("[Since 1.16] RemoveQualifiers is deprecated use std::remove_cv instead.")]] RemoveQualifiers
 {
     using Type = typename std::remove_cv<T>::type;

@@ -18,8 +18,8 @@ struct default_merge_config : default_merge_config_base<key_type, value_type>::t
 // Based on {{ based_on_type }}
 template<class key_type, class value_type>
 struct default_merge_config<
-    static_cast<unsigned int>({{ benchmark_of_architecture.name }}), 
-    key_type, 
-    value_type, 
+    static_cast<unsigned int>({{ benchmark_of_architecture.name }}),
+    key_type,
+    value_type,
     {{ fallback_selection_criteria }}> :
 {%- endmacro %}

@@ -43,13 +43,13 @@
     TYPED_TEST_P(SUITE, SortKeys                ) { sort_keys<TestFixture>(); }
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeys);
 #elif ROCPRIM_TEST_SUITE_SLICE == 1
-    TYPED_TEST_P(SUITE, SortPairs               ) { sort_pairs<TestFixture>(); } 
+    TYPED_TEST_P(SUITE, SortPairs               ) { sort_pairs<TestFixture>(); }
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairs);
 #elif ROCPRIM_TEST_SUITE_SLICE == 2
-    TYPED_TEST_P(SUITE, SortKeysDoubleBuffer    ) { sort_keys_double_buffer<TestFixture>(); } 
+    TYPED_TEST_P(SUITE, SortKeysDoubleBuffer    ) { sort_keys_double_buffer<TestFixture>(); }
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeysDoubleBuffer);
 #elif ROCPRIM_TEST_SUITE_SLICE == 3
-    TYPED_TEST_P(SUITE, SortPairsDoubleBuffer   ) { sort_pairs_double_buffer<TestFixture>(); } 
+    TYPED_TEST_P(SUITE, SortPairsDoubleBuffer   ) { sort_pairs_double_buffer<TestFixture>(); }
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairsDoubleBuffer);
 #endif
 

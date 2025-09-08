@@ -130,25 +130,25 @@ HIPFFT_EXPORT hipfftResult hipfftXtSetCallbackSharedSize(hipfftHandle         pl
     types.
    *
    *  @details Assumes that the plan has been created already, and
-   *  modifies the plan associated with the plan handle. The number 
-   *  of elements to transform in each direction of the input data 
+   *  modifies the plan associated with the plan handle. The number
+   *  of elements to transform in each direction of the input data
    *  in the FFT plan is specified in n.
-   * 
-   *  The batch parameter tells hipFFT how many transforms to perform. 
-   *  The distance between the first elements of two consecutive batches 
-   *  of the input and output data are specified with the idist and odist 
+   *
+   *  The batch parameter tells hipFFT how many transforms to perform.
+   *  The distance between the first elements of two consecutive batches
+   *  of the input and output data are specified with the idist and odist
    *  parameters.
-   * 
+   *
    *  The inembed and onembed parameters define the input and output data
-   *  layouts. The number of elements in the data is assumed to be larger 
-   *  than the number of elements in the transform. Strided data layouts 
+   *  layouts. The number of elements in the data is assumed to be larger
+   *  than the number of elements in the transform. Strided data layouts
    *  are also supported. Strides along the fastest direction in the input
-   *  and output data are specified via the istride and ostride parameters.  
-   * 
-   *  If both inembed and onembed parameters are set to NULL, all the 
-   *  advanced data layout parameters are ignored and reverted to default 
+   *  and output data are specified via the istride and ostride parameters.
+   *
+   *  If both inembed and onembed parameters are set to NULL, all the
+   *  advanced data layout parameters are ignored and reverted to default
    *  values, i.e., the batched transform is performed with non-strided data
-   *  access and the number of data/transform elements are assumed to be  
+   *  access and the number of data/transform elements are assumed to be
    *  equivalent.
    *
    *  The inputType, outputType, executionType parameters specify the
@@ -249,7 +249,7 @@ HIPFFT_EXPORT hipfftResult hipfftXtExec(hipfftHandle plan,
 /*! @brief Set multiple GPUs on a plan.
  *
  *  Instructs hipFFT to use multiple GPUs for a plan.
- * 
+ *
  *  This function must be called after the plan is allocated using
  *  ::hipfftCreate, but before the plan is initialized by any of the
  *  "MakePlan" functions.  Therefore, API functions that combine
@@ -287,7 +287,7 @@ typedef enum hipfftXtSubFormat_t
  *  input or output.
  *
  *  The memory must be freed by calling ::hipfftXtFree.
- * 
+ *
  * @param[in] plan FFT plan to allocate descriptor memory for.
  * @param[out] desc Pointer to descriptors for allocated memory, the devices used, and sizes.
  * @param[in] format Subformat determines whether memory is used for FFT input or output.
@@ -305,7 +305,7 @@ HIPFFT_EXPORT hipfftResult hipfftXtMalloc(hipfftHandle      plan,
  *  - ::HIPFFT_COPY_HOST_TO_DEVICE: dest points to a \ref hipLibXtDesc_t structure that describes multi-device memory layout.  src points to a host memory buffer.
  *  - ::HIPFFT_COPY_DEVICE_TO_HOST: src points to a \ref hipLibXtDesc_t structure that describes multi-device memory layout.  dest points to a host memory buffer.
  *  - ::HIPFFT_COPY_DEVICE_TO_DEVICE: Both dest and src point to a \ref hipLibXtDesc_t structure that describes multi-device memory layout.  The two structures must describe memory with the same number of devices and memory sizes.
- * 
+ *
  * @param[in] plan Plan which has the descriptor.
  * @param[out] dest Buffer that will be populated.
  * @param[in] src Buffer that will be copied from.
@@ -321,7 +321,7 @@ HIPFFT_EXPORT hipfftResult hipfftXtMemcpy(hipfftHandle     plan,
 /*! @brief Free memory allocated by \ref hipfftXtMalloc.
  *
  * @param[in] desc Descriptor whose memory will be freed.
- * 
+ *
  * @warning Experimental
  */
 HIPFFT_EXPORT hipfftResult hipfftXtFree(hipLibXtDesc* desc);
@@ -332,7 +332,7 @@ HIPFFT_EXPORT hipfftResult hipfftXtFree(hipLibXtDesc* desc);
  *  outputs are pointers to \ref hipLibXtDesc_t descriptors.
  *  In-place transforms are performed by passing the same pointer for
  *  input and output.
- * 
+ *
  * @warning Experimental
  */
 
@@ -343,12 +343,12 @@ HIPFFT_EXPORT hipfftResult hipfftXtFree(hipLibXtDesc* desc);
 
 /**
  * @ingroup hipfftXtExecDescriptor
- * 
+ *
  * @param[in] plan The FFT plan.
  * @param[in] input Input data.
  * @param[out] output Output data.
  * @param[in] direction Either `HIPFFT_FORWARD` or `HIPFFT_BACKWARD`.
- * 
+ *
  * @brief Execute single-precision complex-to-complex transform.
 */
 HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
@@ -357,11 +357,11 @@ HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                                      int           direction);
 /**
  * @ingroup hipfftXtExecDescriptor
- * 
+ *
  * @param[in] plan The FFT plan.
  * @param[in] input Input data.
  * @param[out] output Output data.
- * 
+ *
  * @brief Execute single-precision real forward transform.
 */
 HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle  plan,
@@ -369,11 +369,11 @@ HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle  plan,
                                                      hipLibXtDesc* output);
 /**
  * @ingroup hipfftXtExecDescriptor
- * 
+ *
  * @param[in] plan The FFT plan.
  * @param[in] input Input data.
  * @param[out] output Output data.
- * 
+ *
  * @brief Execute single-precision real backward transform.
 */
 HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle  plan,
@@ -381,12 +381,12 @@ HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle  plan,
                                                      hipLibXtDesc* output);
 /**
  * @ingroup hipfftXtExecDescriptor
- * 
+ *
  * @param[in] plan The FFT plan.
  * @param[in] input Input data.
  * @param[out] output Output data.
  * @param[in] direction Either `HIPFFT_FORWARD` or `HIPFFT_BACKWARD`.
- * 
+ *
  * @brief Execute double-precision complex-to-complex transform.
 */
 HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
@@ -395,11 +395,11 @@ HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                                      int           direction);
 /**
  * @ingroup hipfftXtExecDescriptor
- * 
+ *
  * @param[in] plan The FFT plan.
  * @param[in] input Input data.
  * @param[out] output Output data.
- * 
+ *
  * @brief Execute double-precision real forward transform.
 */
 HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle  plan,
@@ -407,11 +407,11 @@ HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle  plan,
                                                      hipLibXtDesc* output);
 /**
  * @ingroup hipfftXtExecDescriptor
- * 
+ *
  * @param[in] plan The FFT plan.
  * @param[in] input Input data.
  * @param[out] output Output data.
- * 
+ *
  * @brief Execute double-precision real backward transform.
 */
 HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle  plan,
@@ -419,12 +419,12 @@ HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle  plan,
                                                      hipLibXtDesc* output);
 /**
  * @ingroup hipfftXtExecDescriptor
- * 
+ *
  * @param[in] plan The FFT plan.
  * @param[in] input Input data.
  * @param[out] output Output data.
  * @param[in] direction Either `HIPFFT_FORWARD` or `HIPFFT_BACKWARD`.
- * 
+ *
  * @brief Execute general transform - types of the descriptors must match the plan.
 */
 HIPFFT_EXPORT hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,

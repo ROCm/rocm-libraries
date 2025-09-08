@@ -85,7 +85,7 @@ xequals(0.0);
 //label((max(a), 0), string(max(a), 3), 1.5S);
 
 if(a.length > 1) {
-  
+
   real Step = 0.0;
   if(max(a) - min(a) < 4) {
     real order = ceil(log(max(a) - min(a))/log(10));

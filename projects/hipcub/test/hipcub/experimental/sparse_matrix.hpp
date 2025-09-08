@@ -442,7 +442,7 @@ struct CooMatrix
                     {
                         // No value specified
                         val = default_value;
-                        
+
                     }
                     else if (nparsed != 3)
                     {
@@ -777,7 +777,7 @@ struct CsrMatrix
     void Clear()
     {
 #ifdef CUB_MKL
-        if (numa_malloc) 
+        if (numa_malloc)
         {
             numa_free(row_offsets, sizeof(OffsetT) * (num_rows + 1));
             numa_free(values, sizeof(ValueT) * num_nonzeros);

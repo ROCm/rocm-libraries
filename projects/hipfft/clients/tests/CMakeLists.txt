@@ -190,7 +190,7 @@ foreach( target ${TEST_TARGETS} )
     hip::hipfft
     ${FFTW_LIBRARIES}
   )
-  
+
   if( BUILD_CLIENTS_TESTS_OPENMP )
     if( BUILD_WITH_LIB STREQUAL "CUDA" )
       message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
@@ -211,8 +211,8 @@ foreach( target ${TEST_TARGETS} )
   endif()
 
   set_target_properties(${target}
-                        PROPERTIES 
-                        RUNTIME_OUTPUT_DIRECTORY 
+                        PROPERTIES
+                        RUNTIME_OUTPUT_DIRECTORY
                         ${TESTS_OUT_DIR})
 
   rocm_install(TARGETS ${target} COMPONENT tests)

@@ -83,8 +83,8 @@ def cmake_path(os_path):
     if OS_info["ID"] == "windows":
         return os_path.replace("\\", "/")
     else:
-        return os.path.realpath(os_path)  
-        
+        return os.path.realpath(os_path)
+
 def config_cmd():
     global args
     global OS_info
@@ -95,7 +95,7 @@ def config_cmd():
     cmake_executable = ""
     cmake_options = []
     cmake_platform_opts = []
-    
+
     if (OS_info["ID"] == 'windows'):
         # we don't have ROCM on windows but have hip, ROCM can be downloaded if required
         raw_rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))

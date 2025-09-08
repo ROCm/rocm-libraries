@@ -55,7 +55,7 @@ endif()
 if( NOT MPI_FOUND )
   find_package( MPI REQUIRED )
 endif()
-  
+
 if( USE_HIPRAND AND NOT hiprand_FOUND )
   find_package( hiprand REQUIRED )
 endif()
@@ -118,8 +118,8 @@ foreach( sample ${sample_list} )
   string( CONCAT SAMPLES_ROCFFT_OUT_DIR "${PROJECT_BINARY_DIR}" ${SAMPLES_ROCFFT_OUT_DIR} )
 
   set_target_properties(${sample}
-                        PROPERTIES 
-                        RUNTIME_OUTPUT_DIRECTORY 
+                        PROPERTIES
+                        RUNTIME_OUTPUT_DIRECTORY
                         ${SAMPLES_ROCFFT_OUT_DIR})
 
   if( CUDA_FOUND )

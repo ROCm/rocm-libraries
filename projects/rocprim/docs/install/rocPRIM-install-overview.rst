@@ -1,9 +1,9 @@
 .. meta::
-  :description: rocPRIM installation overview 
+  :description: rocPRIM installation overview
   :keywords: install, rocPRIM, AMD, ROCm, installation, overview, general
 
 *********************************
-rocPRIM installation overview 
+rocPRIM installation overview
 *********************************
 
 The rocPRIM source code is available from the `ROCm libraries GitHub Repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim>`_. Use sparse checkout when cloning the rocPRIM project:

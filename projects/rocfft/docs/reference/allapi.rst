@@ -11,5 +11,3 @@ API reference
 This topic includes a comprehensive listing of the classes and methods in the rocFFT library.
 
 .. doxygenindex::
-
- 

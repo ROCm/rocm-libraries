@@ -1,5 +1,5 @@
 {"Version":3,
-"Data":[ 
+"Data":[
 {"Problem":{"arch":"gfx908","token":"kernel_token_builtin_kernel"},
  "Solutions":[ {"sol_node_type":"SOL_BUILTIN_KERNEL"}
                ]},

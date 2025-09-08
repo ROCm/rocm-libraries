@@ -76,4 +76,3 @@ deterministic, exclusive
 ------------------------
 
 .. doxygenfunction:: rocprim::deterministic_exclusive_scan_by_key(void *const temporary_storage, size_t &storage_size, const KeysInputIterator keys_input, const ValuesInputIterator values_input, const ValuesOutputIterator values_output, const InitialValueType initial_value, const size_t size, const BinaryFunction scan_op=BinaryFunction(), const KeyCompareFunction key_compare_op=KeyCompareFunction(), const hipStream_t stream=0, const bool debug_synchronous=false)
-

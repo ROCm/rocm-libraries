@@ -32,7 +32,7 @@ void drawbargraph(datapoint[][] data,
 
   real width = 1.0 / nbars;
   real skip = 0.5;
-  
+
   // Loop through all the data sets.
   for(int n = 0; n < nbars; ++n) {
     pen p = Pen(n); // + opacity(0.5);
@@ -49,7 +49,7 @@ void drawbargraph(datapoint[][] data,
     for(int i = 0; i < len; ++i) {
       right[i] = left[i] + width;
     }
-    
+
     // Draw an invisible graph to set up the axes.
     real[] fakex = new real[len];
     fakex[0] = left[0];
@@ -60,12 +60,12 @@ void drawbargraph(datapoint[][] data,
     for(int i = 0; i < len; ++i) {
       yvals[i] = data[n][i].y;
     }
-    draw(graph(left, yvals), invisible, legend = Label(otherlegs[n], p)); 
+    draw(graph(left, yvals), invisible, legend = Label(otherlegs[n], p));
 
 
     // TOTO: in log plots, compute a better bottom.
     real bottom = 0.0;
-    
+
     // Draw the bars
     for(int i = 0; i < data[n].length; ++i) {
       pair p0 = Scale((left[i], data[n][i].y));
@@ -75,7 +75,7 @@ void drawbargraph(datapoint[][] data,
       filldraw(p0--p1--p2--p3--cycle, p, black);
     }
 
-   
+
     // Draw the bounds:
     for(int i = 0; i < data[n].length; ++i) {
       real xval = 0.5 * (left[i] + right[i]);
@@ -88,7 +88,7 @@ void drawbargraph(datapoint[][] data,
       draw(phigh-(0.25*width)--phigh+(0.25*width));
     }
 
-    
+
     // This is there the legends go
     if(n == nbars - 1) {
       for(int i = 0; i <  data[n].length; ++i) {
@@ -97,7 +97,7 @@ void drawbargraph(datapoint[][] data,
 	label(rotate(90) * Label(data[n][i].label), align=S, p);
       }
     }
-    
+
   }
 }
 
@@ -133,7 +133,7 @@ if(primaryaxis == "gflops") {
 if(filenames == "") {
     filenames = getstring("filenames");
 }
-    
+
 if (legendlist == "") {
     legendlist = filenames;
 }
@@ -187,4 +187,3 @@ xaxis(BottomTop);
 yaxis("Time (ms)", LeftRight, RightTicks);
 
 attach(legend(),point(plain.E),  20*plain.E);
-

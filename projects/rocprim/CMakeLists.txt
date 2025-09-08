@@ -134,9 +134,9 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker searc
 
 if(DEFINED BUILD_SHARED_LIBS)
   set(PKG_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-else()  
+else()
   set(PKG_BUILD_SHARED_LIBS ON)
-endif()  
+endif()
 set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
 
 # Get dependencies (required here to get rocm-cmake)
@@ -253,7 +253,7 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
 
   rocm_create_package(
     NAME rocprim
-    DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives." 
+    DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives."
     MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
     HEADER_ONLY
   )

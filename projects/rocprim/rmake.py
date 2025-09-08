@@ -151,7 +151,7 @@ def config_cmd():
         cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]};{rocm_cmake_path[1:]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
     else:
         cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]},{rocm_cmake_path[1:-1]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
-    
+
     cmake_options.append( cmake_base_options )
 
     print( cmake_options )

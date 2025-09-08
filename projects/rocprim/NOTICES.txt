@@ -1,7 +1,7 @@
 Notices and Licenses file
 ______________________________________________________________________________
 
-AMD copyrighted code (MIT) 
+AMD copyrighted code (MIT)
 Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -23,7 +23,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-ROCmSoftwarePlatform-rocPRIM v2.5.0 (MIT) 
+ROCmSoftwarePlatform-rocPRIM v2.5.0 (MIT)
 Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -45,7 +45,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-florianrappl-cmdparser v-u (MIT) 
+florianrappl-cmdparser v-u (MIT)
 Copyright (c) 2015 - 2016 Florian Rappl
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

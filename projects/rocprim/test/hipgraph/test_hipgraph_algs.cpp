@@ -65,7 +65,7 @@ void computeExpectedSortAndSearchResult(std::vector<KeyType>& sort_input, const 
 {
     // Sort
     std::stable_sort(sort_input.begin(), sort_input.end(), compare_op);
-    
+
     // Search
     for (size_t i = 0; i < search_needles.size(); i++)
         expected_search_output[i] = std::binary_search(sort_input.begin(), sort_input.end(), search_needles[i], compare_op);
@@ -185,13 +185,13 @@ TEST(TestHipGraphAlgs, SortAndSearch)
 
         // Compute the expected result on the host
         computeExpectedSortAndSearchResult<key_type, compare_fcn_type>(sort_input, search_needles, expected_search_output, compare_op);
-        
+
         // Copy input data to the device
         d_sort_input.store(sort_input);
         d_search_needles.store(search_needles);
 
         // Launch the graph
-        gHelper.launchGraph(stream, true); 
+        gHelper.launchGraph(stream, true);
 
         // Copy output back to host
         device_output = d_search_output.load();
@@ -205,5 +205,3 @@ TEST(TestHipGraphAlgs, SortAndSearch)
     gHelper.cleanupGraphHelper();
     HIP_CHECK(hipStreamDestroy(stream));
 }
-                                  
-                                  

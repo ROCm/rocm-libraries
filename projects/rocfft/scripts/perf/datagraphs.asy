@@ -66,7 +66,7 @@ if(primaryaxis == "gflops") {
 if(filenames == "") {
     filenames = getstring("filenames");
 }
-    
+
 if (legendlist == "") {
     legendlist = filenames;
 }
@@ -144,7 +144,7 @@ for(int n = 0; n < xyval.length; ++n)
     string legend = myleg ? legends[n] : texify(testlist[n]);
     marker mark = marker(scale(0.5mm) * unitcircle, Draw(graphpen + solid));
 
-    
+
     if(dobars) {
         // Compute the error bars:
         pair[] dp; // high
@@ -157,10 +157,10 @@ for(int n = 0; n < xyval.length; ++n)
         //write(dm);
         errorbars(xyval[n], dp, dm, graphpen);
     }
-    
+
     // Actualy plot things:
     draw(graph(xyval[n]), graphpen, legend, mark);
-    
+
     if(scaling == "strong") {
         real[] ndevs = new real[];
         real[] tscale = new real[];
@@ -168,7 +168,7 @@ for(int n = 0; n < xyval.length; ++n)
             ndevs.push( xyval[n][idx].x );
             tscale.push( xyval[n][0].y / ndevs[idx] );
         }
-        
+
         draw(graph(ndevs, tscale), graphpen+dashed);
     }
     if(scaling == "weak") {
@@ -194,19 +194,19 @@ yaxis(ylabel, (secondary_filenames != "") ? Left : LeftRight,RightTicks);
 if(dolegend) {
     attach(legend(), point(S), 50*S);
 }
-    
+
 if(secondary_filenames != "")
 {
-  
+
   write("secondary_filenames: ", secondary_filenames);
   string[] second_list = listfromcsv(secondary_filenames);
   for(int idx = 0; idx < second_list.length; ++idx) {
     write(second_list[idx]);
   }
 
-  
+
     datapoint[][] datapoints = new datapoint[second_list.length][];
-    
+
     readfiles(second_list, datapoints);
 
 
@@ -216,16 +216,16 @@ if(secondary_filenames != "")
       }
     }
 
-    
+
     pair[][] xyval = new real[second_list.length][];
     pair[][] ylowhigh = new real[second_list.length][];
     for(int n = 0; n < datapoints.length; ++n) {
         datapoints[n] = sort(datapoints[n], datapointless);
         datapoints_to_xyvallowhigh(datapoints[n], xyval[n], ylowhigh[n]);
     }
-    
+
     bool interval = true;
-    
+
     // // FIXME: speedup has error bounds, so we should read it, but
     // // p-vals does not.
     // readfiles(second_list, xyval, ylowhigh, true);
@@ -234,7 +234,7 @@ if(secondary_filenames != "")
 	int penidx = testlist.length; // initialize to end of previous pen.
 
             scale(pic, xlog ? Log : Linear, Linear);
-            
+
             for(int n = 0; n < xyval.length; ++n)
             {
                 pen graphpen = Pen(penidx + n);
@@ -242,10 +242,10 @@ if(secondary_filenames != "")
                     graphpen = darkgreen;
                 }
                 graphpen += dashed;
-                
+
                 guide g = scale(0.5mm) * unitcircle;
                 marker mark = marker(g, Draw(graphpen + solid));
-                        
+
                 if(interval)
                 {
                     // Compute the error bars:
@@ -257,19 +257,19 @@ if(secondary_filenames != "")
                     }
 
                     errorbars(pic, xyval[n], dp, dm, graphpen);
-		    
+
                 }
                 int nbase = ngroup * (n # (ngroup - 1));
                 int ncomp = nbase + (n % (ngroup - 1)) + 1;
                 draw(pic,graph(pic, xyval[n]), graphpen,
                      legends[ncomp] + " over " + legends[nbase],mark);
 		//write(xyval[n]);
-		
+
 		yequals(pic, 1.0, lightgrey);
-		
+
             }
 
-	    
+
             yaxis(pic, secondaryaxis, Right, black, LeftTicks);
             if(dolegend) {
 	      attach(legend(pic), point(plain.E), 60*plain.E - 40 *plain.N  );

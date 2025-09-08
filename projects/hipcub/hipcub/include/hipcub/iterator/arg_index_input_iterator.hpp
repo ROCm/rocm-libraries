@@ -38,4 +38,3 @@
 #endif
 
 #endif // HIPCUB_ITERATOR_DISCARD_OUTPUT__HPP_
-

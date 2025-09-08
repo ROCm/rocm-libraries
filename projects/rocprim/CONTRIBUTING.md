@@ -69,7 +69,7 @@ Supporting code is distributed into several subdirectories depending on its scop
 
 Correctness code (tests) is located inside the `test` folder. Several test suites exist depending on what they assess:
 
-* `extra`: test suite that should be run after rocPRIM is installed from package or from source. It is a short smoke test to verify the correctness of the installation or packaging process. 
+* `extra`: test suite that should be run after rocPRIM is installed from package or from source. It is a short smoke test to verify the correctness of the installation or packaging process.
 * `hip`: test suite that checks HIP functionality that is of particular interest to rocPRIM.
 * `hipgraph`: test suite for verifying that rocPRIM's algorithms work with `hipGraph`.
 * `rocprim`: test suite for checking the correctness of rocPRIM's algorithms.
@@ -120,10 +120,10 @@ As mentioned in [Code Structure](#code-structure), rocPRIM's symbols are exposed
 
 Therefore, files from `rocprim/include/rocprim` containing any rocPRIM symbol should start with `BEGIN_ROCPRIM_NAMESPACE` and end with `END_ROCPRIM_NAMESPACE`. These are macros that wrap the namespace opening and closing, respectively.
 
-Implementation details are put into the `rocprim::detail` namespace. No wrapping macros are defined for this one, so just the ususal 
+Implementation details are put into the `rocprim::detail` namespace. No wrapping macros are defined for this one, so just the ususal
 ```c++
 namespace detail
-{ 
+{
   ...
 }
 ```
@@ -168,7 +168,7 @@ Some files also use the following structure:
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 ```
-New code should prefer `DOXYGEN_DOCUMENTATION_BUILD` over `DOXYGEN_SHOULD_SKIP_THIS`, as its easier to understand. `DOXYGEN_SHOULD_SKIP_THIS` is defined to be 1 when Doxygen is parsing, logically making its correct usage a double-negation. 
+New code should prefer `DOXYGEN_DOCUMENTATION_BUILD` over `DOXYGEN_SHOULD_SKIP_THIS`, as its easier to understand. `DOXYGEN_SHOULD_SKIP_THIS` is defined to be 1 when Doxygen is parsing, logically making its correct usage a double-negation.
 
 In general terms, a file properly documented should look like something along the lines of:
 

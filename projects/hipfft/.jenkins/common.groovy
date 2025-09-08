@@ -13,7 +13,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg = false)
         }
     }
 
-    String cmake = platform.jenkinsLabel.contains('centos') ? "cmake3" : "cmake" 
+    String cmake = platform.jenkinsLabel.contains('centos') ? "cmake3" : "cmake"
     String warningArgs = platform.jenkinsLabel.contains('cuda') ? '':'-DWERROR=ON'
     String hipClang = platform.jenkinsLabel.contains('hipClang') ? "HIP_COMPILER=clang" : ""
     String path = platform.jenkinsLabel.contains('centos7') ? "export PATH=/opt/rh/devtoolset-7/root/usr/bin:$PATH" : ":"
@@ -24,7 +24,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg = false)
 
     def command = """#!/usr/bin/env bash
                 set -x
-                
+
                 ls /fftw/lib
                 export FFTW_ROOT=/fftw
                 export FFTW_INCLUDE_PATH=\${FFTW_ROOT}/include
@@ -37,7 +37,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg = false)
 		unset HIPCC_COMPILE_FLAGS_APPEND
 		unset HIPCC_LINK_FLAGS_APPEND
 		${hipPlatformCommand}
-                
+
                 cd ${project.paths.project_build_prefix}
                 mkdir -p build/${dir} && cd build/${dir}
                 ${getDependenciesCommand}
@@ -78,7 +78,7 @@ def runPackageCommand(platform, project, jobName, label='')
             make package
             mkdir -p package
             for f in hipfft*.$ext
-            do 
+            do
                 mv "\$f" "hipfft${label}-\${f#*-}"
             done
             mv *.${ext} package/

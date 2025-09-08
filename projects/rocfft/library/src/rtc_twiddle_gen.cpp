@@ -196,7 +196,7 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
         auto i_col = threadIdx.y + blockIdx.y * blockDim.y;
 
         if(i_row < N && i_col < N)
-        {   
+        {
             auto n = i_row * i_col;
             double arg = -TWO_PI * n / N;
 

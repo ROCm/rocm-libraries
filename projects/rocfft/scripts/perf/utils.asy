@@ -36,7 +36,7 @@ string[] set_legends(string runlegs)
 	   runleg = "";
 	   flag = false;
 	 }
-    
+
 	 runleg = substr(runlegs, lastpos, pos - lastpos);
 
 	 lastpos = pos > 0 ? pos + 1 : -1;
@@ -100,9 +100,9 @@ struct datapoint
 	this.ylow = ylow;
         this.yhigh = yhigh;
     }
-  
+
   void mklabel(string ivariable) {
-    
+
     if(ivariable == "lengths") {
       this.label = "$";
       this.label += (string)this.length[0];
@@ -130,7 +130,7 @@ struct datapoint
       this.x = this.ndev;
     }
 
-    
+
   }
 }
 
@@ -142,14 +142,14 @@ void readfiles(string[] filelist, datapoint[][] datapoints, bool pval = false)
         string filename = filelist[n];
         //write("filename: ", filename);
         file fin = input(filename).line();
-        
+
         string hdr = "";
         while(hdr == "")
         {
             hdr = fin;
-        } 
+        }
         //write("header: ", hdr);
-        
+
         bool moretoread = true;
         while(moretoread) {
 	  string line = fin;
@@ -180,7 +180,7 @@ void readfiles(string[] filelist, datapoint[][] datapoints, bool pval = false)
 	  }
 
 	  //write(words);
-	  
+
           // Grab the lengths:
           int lenidx = 3;
           real[] length = new real[];
@@ -211,7 +211,7 @@ void readfiles(string[] filelist, datapoint[][] datapoints, bool pval = false)
 	      break;
 	    }
 	  }
-	  
+
           int ndev = 1;
           int devlist[] = {};
           for(int idx = 0; idx < words.length; ++idx) {
@@ -242,18 +242,18 @@ void readfiles(string[] filelist, datapoint[][] datapoints, bool pval = false)
 	  lastpos = pos > 0 ? pos + 1 : -1;
 
           string slow, shigh;
-          
+
           pos = find(vals, '\t', lastpos);
           slow = substr(vals, lastpos, pos - lastpos);
           //write("median low: ", slow);
           lastpos = pos > 0 ? pos + 1 : -1;
-          
+
           pos = find(vals, '\t', lastpos);
           shigh = substr(vals, lastpos, pos - lastpos);
           //write("median high: ", shigh);
           lastpos = pos > 0 ? pos + 1 : -1;
 
-                    
+
           datapoint d = datapoint(length,
                                   batch,
                                   placeness,
@@ -266,17 +266,17 @@ void readfiles(string[] filelist, datapoint[][] datapoints, bool pval = false)
           string spval = substr(vals, lastpos, pos - lastpos);
           //write("pval: ", spval);
           lastpos = pos > 0 ? pos + 1 : -1;
-          
+
           d.x = length[0];
 
           //write(d.x);
           datapoints[n].push(d);
-          
+
 	  if(eof(fin)) {
 	    moretoread = false;
 	    break;
 	  }
-	    
+
         }
     }
 }
@@ -289,7 +289,7 @@ void datapoints_to_xyvallowhigh(datapoint[] d,
         ylowhigh.push((d[i].ylow, d[i].yhigh));
     }
 }
-    
+
 
 
 // Given an array of values, get the x and y min and max.

@@ -24,7 +24,7 @@ logs that rocFFT supports.
    *  Estimates for the observed memory bandwidth and bandwidth efficiency
 
    .. note::
-   
+
       To provide the kernel duration, rocFFT must use ``hipEvents`` and wait for each kernel to complete.
       This might interfere with time measurement at higher levels, for example, for ``rocfft-bench``.
 
@@ -42,7 +42,7 @@ logs that rocFFT supports.
 
       The amount of data logged can become very large, particularly for 2D and 3D transforms, so
       logging it to a file instead of stderr is usually a good idea. See the next section for more details.
-      
+
       Writing the data involves extra ``hipMemcpy`` operations and serializing the
       data to the log can also take a significant amount of time. Both of these factors affect performance.
 
@@ -60,7 +60,7 @@ logs that rocFFT supports.
 
    .. note::
 
-      All non-code messages (except for compile errors) are written as C++ comments, so 
+      All non-code messages (except for compile errors) are written as C++ comments, so
       you can pass the whole file to clang-format to inspect the source code.
 
       The source code details for the runtime compilation can be very large, so consider writing

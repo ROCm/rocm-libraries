@@ -41,7 +41,7 @@ if (NOT DEFINED ENV{ROCM_PATH})
 #Path to ROCm installation
   set(ENV{ROCM_PATH} "/opt/rocm")
 endif()
-  
+
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
 

@@ -99,7 +99,7 @@ foreach( bench ${bench_list})
       hip::device
       )
   endif()
-    
+
   if( USE_HIPRAND )
     target_link_libraries( ${bench}
     PRIVATE

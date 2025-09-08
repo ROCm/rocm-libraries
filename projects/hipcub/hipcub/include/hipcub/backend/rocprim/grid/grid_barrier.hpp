@@ -46,9 +46,9 @@ BEGIN_HIPCUB_NAMESPACE
 
 /**
  * \brief GridBarrier implements a software global barrier among thread blocks within a hip grid
- * 
+ *
  * deprecated [Since rocm 7.1.0]
- * 
+ *
  */
 class HIPCUB_DEPRECATED_BECAUSE("Use the APIs from cooperative groups instead") GridBarrier
 {
@@ -130,9 +130,9 @@ public:
  *
  * Uses RAII for lifetime, i.e., device resources are reclaimed when
  * the destructor is called.
- * 
+ *
  * deprecated [Since rocm 7.1.0]
- * 
+ *
  */
 HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 class HIPCUB_DEPRECATED_BECAUSE("Use the APIs from cooperative groups instead") GridBarrierLifetime

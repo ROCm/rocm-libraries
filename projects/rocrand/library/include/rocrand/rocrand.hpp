@@ -506,7 +506,7 @@ public:
     /// \brief Returns \c true if the distribution is the same as \p other.
     ///
     /// Two distribution are equal, if their parameters are equal.
-    bool operator==(const normal_distribution<RealType>& other) const 
+    bool operator==(const normal_distribution<RealType>& other) const
     {
         return this->m_params == other.m_params;
     }

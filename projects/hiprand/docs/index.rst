@@ -25,11 +25,11 @@ The hipRAND public repository is located at `<https://github.com/ROCm/rocm-libra
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/installation>`    
+    * :doc:`Installation guide <./install/installation>`
 
   .. grid-item-card:: How to
 
-    * :doc:`Use hipRAND interfaces <./how-to/use-hiprand-interfaces>`    
+    * :doc:`Use hipRAND interfaces <./how-to/use-hiprand-interfaces>`
 
   .. grid-item-card:: Examples
 
@@ -40,7 +40,7 @@ The hipRAND public repository is located at `<https://github.com/ROCm/rocm-libra
     * :ref:`data-type`
     * :ref:`cpp-api`
     * :ref:`python-api`
-     
+
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

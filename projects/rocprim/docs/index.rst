@@ -20,7 +20,7 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
     * :doc:`rocPRIM installation overview <install/rocPRIM-install-overview>`
     * :doc:`Install rocPRIM on Linux <install/rocPRIM-build-install-linux>`
     * :doc:`Install rocPRIM on Windows <install/rocPRIM-build-install-windows>`
-  
+
 .. grid:: 2
 
   .. grid-item-card:: Conceptual
@@ -33,18 +33,18 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
   .. grid-item-card:: How-to
 
     * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
-   
+
   .. grid-item-card:: Reference
 
     * :ref:`glossary`
     * :ref:`data-type-support`
     * :ref:`types`
     * :ref:`type_traits`
-    * :ref:`iterators` 
-    * :ref:`intrinsics` 
+    * :ref:`iterators`
+    * :ref:`intrinsics`
     * :ref:`dev-index`
     * :ref:`block-index`
-    * :ref:`warp-index` 
+    * :ref:`warp-index`
     * :ref:`thread-index`
     * :ref:`developer`
 
@@ -52,6 +52,3 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
-
-
-

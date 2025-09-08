@@ -40,7 +40,7 @@ target_include_directories( hipfft-bench
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocFFT/library/include>
   )
-  
+
 if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
     if( WIN32 )

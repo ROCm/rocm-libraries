@@ -22,7 +22,7 @@
 
 # Find HIP package and verify that correct C++ compiler was selected for available
 # platform. On ROCm platform host and device code is compiled by the same compiler:
-# hipcc or clang. On CUDA host can be compiled by any C++ compiler while device 
+# hipcc or clang. On CUDA host can be compiled by any C++ compiler while device
 # code is compiled by nvcc compiler (CMake's CUDA package handles this).
 
 # A function for automatic detection of the CC of the installed NV GPUs

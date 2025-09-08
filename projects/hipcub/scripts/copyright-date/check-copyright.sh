@@ -12,7 +12,7 @@ uptodate_pattern="$preamble([0-9]{4}-)?%d$postamble"
 #   - \1 is the whole preamble text
 #   - \3 is the start year, \2 is skipped because it is used for an optional part of the preamble
 #   - \5 is the end of the copyright statement after the end year, \4 would be the original end year
-#     as written in the file, it is replaced by the current year instead. 
+#     as written in the file, it is replaced by the current year instead.
 replace_pattern="($preamble)([0-9]{4})(-[0-9]{4})?($postamble)/\\\1\\\3-%d\\\5"
 # End of configuration
 
@@ -40,7 +40,7 @@ forkdiff=false
 quiet=false
 cached=false
 
-while getopts "auhvkqcd:" arg; do 
+while getopts "auhvkqcd:" arg; do
     case $arg in
         a) update=true;apply=true;cached=true;;
         u) update=true;;
@@ -73,7 +73,7 @@ fi
 # Current year
 year="$(date +%Y)"
 
-# Enable rename detection with full matches only, this skips copyright checks for file name only 
+# Enable rename detection with full matches only, this skips copyright checks for file name only
 # changes.
 diff_opts=(-z --name-only '--diff-filter=MA' '--find-renames=100%')
 git_grep_opts=(-z --extended-regexp --ignore-case --no-recursive -I)
@@ -187,12 +187,12 @@ generate_patch() {
         b="\"b/$escaped\""
 
         printf -- "diff --git %s %s\n--- %s\n+++ %s\n" "$a" "$b" "$a" "$b"
- 
+
         # Print line number and line for each line with a copyright statement
         git cat-file blob ":$file" |                               \
             sed --quiet --regexp-extended "/$find_pattern/{=;p}" | \
             sed --regexp-extended "$to_hunk_cmd"
-    done 
+    done
 }
 
 patch_file="$(git rev-parse --git-dir)/copyright-fix.patch"

@@ -93,4 +93,3 @@ Segmented Descending Sort
 -------------------------
 
 .. doxygenfunction:: rocprim::segmented_radix_sort_pairs_desc(void *temporary_storage, size_t &storage_size, KeysInputIterator keys_input, KeysOutputIterator keys_output, ValuesInputIterator values_input, ValuesOutputIterator values_output, unsigned int size, unsigned int segments, OffsetIterator begin_offsets, OffsetIterator end_offsets, unsigned int begin_bit=0, unsigned int end_bit=8 *sizeof(Key), hipStream_t stream=0, bool debug_synchronous=false)
-

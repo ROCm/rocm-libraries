@@ -563,8 +563,8 @@ private:
                 if(blev_buffer_offset < num_blev_buffers)
                 {
                     auto tile_buffer_id = buffer_by_size_class[blev_buffer_offset].buffer_id;
-                    /* In the case that buffer_size_type is rocthrust::device_reference<T> a static cast to 
-                    / buffer_size_type is needed so that the type passed into ceiling_div is not 
+                    /* In the case that buffer_size_type is rocthrust::device_reference<T> a static cast to
+                    / buffer_size_type is needed so that the type passed into ceiling_div is not
                     / rocthrust::device_reference<T>. This is possible since rocthrust::device_reference<T>
                     / can be implicitly cast to type T.
                     */
@@ -646,8 +646,8 @@ private:
                 buffer_offset += warps_per_block)
             {
                 const auto buffer_id = buffers_by_size_class[buffer_offset].buffer_id;
-                /* In the case that buffer_size_type is rocthrust::device_reference<T> a static cast to 
-                / buffer_size_type is needed so that the type passed into copy_items is not 
+                /* In the case that buffer_size_type is rocthrust::device_reference<T> a static cast to
+                / buffer_size_type is needed so that the type passed into copy_items is not
                 / rocthrust::device_reference<T>. This is possible since rocthrust::device_reference<T>
                 / can be implicitly cast to type T.
                 */

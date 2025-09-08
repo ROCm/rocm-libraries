@@ -277,7 +277,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *  Offset, stride, and distance for either input or output provided
  *  here is ignored if a field is set for the corresponding input or
  *  output.
- * 
+ *
  *  @param[in, out] description description handle
  *  @param[in] in_array_type array type of input buffer
  *  @param[in] out_array_type array type of output buffer
@@ -313,7 +313,7 @@ ROCFFT_EXPORT rocfft_status
 ROCFFT_EXPORT rocfft_status rocfft_field_create(rocfft_field* field);
 
 /*! @brief Destroy a rocfft field struct
- * 
+ *
  * The field struct can be destroyed after being added to the plan description; it is not used for
  * plan execution.
  *
@@ -339,7 +339,7 @@ ROCFFT_EXPORT rocfft_status rocfft_get_version_string(char* buf, size_t len);
  *  @param[in] description description handle
  *  @param[in] comm_type communicator type
  *  @param[in] comm_handle handle to communication-library-specific state
- * 
+ *
  */
 ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_description description,
                                                              rocfft_comm_type        comm_type,
@@ -397,7 +397,7 @@ ROCFFT_EXPORT rocfft_status rocfft_brick_destroy(rocfft_brick brick);
  *
  * The brick may be added to another field or destroyed any time
  * after this function returns.
- * 
+ *
  * @param[in, out] field: \ref rocfft_field struct which holds the brick decomposition.
  * @param[in] brick: \ref rocfft_brick struct to add to the field.
  *
@@ -420,7 +420,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_add_infield(rocfft_plan_desc
 /*! @brief Add a \ref rocfft_field to a \ref rocfft_plan_description as an output.
  *
  * The field may be reused or freed immediately after the function returns.
- * 
+ *
  * @param[in, out] description: \ref rocfft_plan_description  that will pass the field information to plan creation
  * @param[in] field: \ref rocfft_field struct added as an output field
  *

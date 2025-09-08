@@ -10,7 +10,7 @@
  *     This glossary is to help users understand the basic concepts or terminologies used in the rocPRIM library.
  *
  *     @page rocprim_glossary_page Terminologies
- *     
+ *
  *     * \par Warp
  *       Refers to a group of threads that execute in SIMT (Single Instruction, Multiple Thread) fashion. Also known as \n
  *       wavefronts on AMD GPUs.

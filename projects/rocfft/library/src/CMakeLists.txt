@@ -460,7 +460,7 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
 
   target_link_std_experimental_filesystem(${target})
 
-  
+
   if ( ROCFFT_CRAY_MPI_ENABLE )
       get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
       target_link_directories( ${target}

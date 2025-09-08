@@ -1,4 +1,4 @@
-.. meta:: 
+.. meta::
   :description: hipCUB Installation Prerequisites
   :keywords: install, hipCUB, AMD, ROCm, prerequisites, dependencies, requirements
 
@@ -12,9 +12,9 @@ hipCUB has the following prerequisites on all platforms:
 
 On AMD GPUs:
 
-* `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/index.html>`_ 
-* `amdclang++ <https://rocm.docs.amd.com/projects/llvm-project/en/latest/index.html>`_ 
-* `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_ 
+* `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/index.html>`_
+* `amdclang++ <https://rocm.docs.amd.com/projects/llvm-project/en/latest/index.html>`_
+* `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_
 
 amdclang++ is installed with ROCm. rocPRIM is automatically downloaded and installed by the CMake script.
 

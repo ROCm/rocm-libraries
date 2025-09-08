@@ -70,4 +70,3 @@ else()
   )
   set(ROCFFT_SQLITE_LIB sqlite3)
 endif()
-

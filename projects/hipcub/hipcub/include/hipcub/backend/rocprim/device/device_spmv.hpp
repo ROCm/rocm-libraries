@@ -193,4 +193,3 @@ HIPCUB_RUNTIME_FUNCTION static hipError_t CsrMV(void*       d_temp_storage,
 END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_CUB_DEVICE_DEVICE_SELECT_HPP_
-

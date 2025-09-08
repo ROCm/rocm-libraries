@@ -54,13 +54,13 @@ Variable name                              Explanation
 
 .. note::
 
-   The benchmark tuning is only supported for AMD GPUs. 
+   The benchmark tuning is only supported for AMD GPUs.
 
 Using the number of multiprocessors as candidates
 -------------------------------------------------
 
 Multiples of the number of multiprocessors on the GPU being benchmarked are
-good candidate values for ``BENCHMARK_TUNING_BLOCK_OPTIONS``. 
+good candidate values for ``BENCHMARK_TUNING_BLOCK_OPTIONS``.
 The ``rocm-libraries/projects/rocrand/scripts/config-tuning/get_tuned_grid_sizes.py`` executable
 runs ``rocminfo`` to acquire the number of multiprocessors and prints a comma-separated list
 of grid size candidates to the standard output.

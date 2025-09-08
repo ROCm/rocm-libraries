@@ -29,9 +29,9 @@
 
 namespace {
     auto unused = benchmark_utils::executor::queue_autotune(
-        device_transform_benchmark_generator< 
+        device_transform_benchmark_generator<
         @DataType@,
-        false, 
+        false,
         @BlockSize@,
         rocprim::load_default>::create);
 }

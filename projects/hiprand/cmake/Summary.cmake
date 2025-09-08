@@ -52,7 +52,7 @@ function(print_configuration_summary)
             OUTPUT_VARIABLE LINUX_KERNEL_DETAILS
             OUTPUT_STRIP_TRAILING_WHITESPACE
         )
-    endif()  
+    endif()
 
     string(REPLACE "\n" ";" CMAKE_CXX_COMPILER_VERBOSE_DETAILS "${CMAKE_CXX_COMPILER_VERBOSE_DETAILS}")
     list(TRANSFORM CMAKE_CXX_COMPILER_VERBOSE_DETAILS PREPEND "--     ")
@@ -101,5 +101,5 @@ endif()
 if(UNAME_EXECUTABLE)
     message(STATUS "  Unix name                  : ${LINUX_KERNEL_DETAILS}")
 endif()
-  
+
 endfunction()

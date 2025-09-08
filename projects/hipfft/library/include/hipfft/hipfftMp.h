@@ -48,7 +48,7 @@ typedef enum hipfftMpCommType_t
    * This function must only be called on a plan that has already
    * been allocated by ::hipfftCreate, but before the plan is
    * initialized with any of the 'hipfftMakePlan' functions.
-   
+
    * @param[in] plan The FFT plan.
    * @param[in] comm_type Type of communication handle.
    * @param[in] comm_handle Pointer to the communication handle.

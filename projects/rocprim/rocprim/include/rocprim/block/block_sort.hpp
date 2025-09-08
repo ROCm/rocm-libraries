@@ -302,7 +302,7 @@ public:
         base_type::sort(thread_key, thread_value, compare_function);
     }
 
-    /// \brief This overload allows an array of \p ItemsPerThread keys and values 
+    /// \brief This overload allows an array of \p ItemsPerThread keys and values
     /// to be passed in so that each thread can process multiple items.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
@@ -365,7 +365,7 @@ public:
         base_type::sort(thread_key, thread_value, storage, compare_function);
     }
 
-    /// \brief This overload allows an array of \p ItemsPerThread keys and values 
+    /// \brief This overload allows an array of \p ItemsPerThread keys and values
     /// to be passed in so that each thread can process multiple items.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE ROCPRIM_INLINE

@@ -122,7 +122,7 @@ struct match_texture_type
 /// * Can only be constructed within host functions, and can only be dereferenced within
 /// device functions.
 /// * Accepts any data type from memory, and loads through texture cache.
-/// * This iterator is not functional on gfx94x architectures, as native texture fetch functions 
+/// * This iterator is not functional on gfx94x architectures, as native texture fetch functions
 /// are not supported in gfx94x.
 ///
 /// \tparam T type of value that can be obtained by dereferencing the iterator.

@@ -592,8 +592,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 3>::t
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected,
             is_add_op::value
                 ? std::max(test_utils::precision<T>, test_utils::precision<stored_type>)
-                : std::is_same<T, stored_type>::value 
-                    ? 0 
+                : std::is_same<T, stored_type>::value
+                    ? 0
                     : test_utils::precision<stored_type>));
         // clang-format on
     }

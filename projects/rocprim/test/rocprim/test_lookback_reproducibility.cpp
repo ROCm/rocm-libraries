@@ -228,7 +228,7 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ScanByKey)
     if (std::is_same_v<V, int> && attributes.major == 11){
         GTEST_SKIP();
     }
-    
+
     const size_t min_segment_length = 1000;
     const size_t max_segment_length = 10000;
 

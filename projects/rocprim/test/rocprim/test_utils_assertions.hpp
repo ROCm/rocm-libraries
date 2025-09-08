@@ -55,7 +55,7 @@ using is_uint128 = std::is_same<rocprim::uint128_t, typename std::remove_cv<T>::
 
 template<class T>
 using is_double_custom_type = std::is_same<typename std::remove_cv<T>::type, common::custom_type<double,double,1>>;
-    
+
 namespace {
 // On Windows, GTest doesn't provide the appropriate overloads
 // for printing 128 bit types. As a result, there may be linker errors

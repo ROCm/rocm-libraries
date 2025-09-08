@@ -4,7 +4,7 @@
 
 
 ***********************
-rocPRIM prerequisites 
+rocPRIM prerequisites
 ***********************
 
 rocPRIM on Linux requires `ROCm <https://rocm.docs.amd.com/en/latest/>`_. rocPRIM on Windows requires `HIP SDK for Windows <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/>`_.

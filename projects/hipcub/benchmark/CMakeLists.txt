@@ -65,7 +65,7 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
     foreach( file_i ${third_party_dlls})
       add_custom_command( TARGET ${BENCHMARK_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/benchmark )
     endforeach( file_i )
-  endif()         
+  endif()
 endfunction()
 
 # ****************************************************************************

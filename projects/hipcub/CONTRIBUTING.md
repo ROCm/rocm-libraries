@@ -60,7 +60,7 @@ The following subdirectories are organized according to software-scope level:
 
 Finally, the iterator/ subdirectory provides access to the iterators that are used to interact with most algorithms in the library.
 
-Back at the root level, you can find tests and benchmarks located inside directories of the same name. 
+Back at the root level, you can find tests and benchmarks located inside directories of the same name.
 There is also an examples/ folder that contains a number of sample API use cases.
 
 ## Coding Style ##
@@ -95,7 +95,7 @@ Releases are cut to release/rocm-rel-x.y, where x and y refer to the release maj
 
 ### Deliverables ###
 
-Code that introduces new features should have test coverage and benchmark coverage. 
+Code that introduces new features should have test coverage and benchmark coverage.
 hipCUB tests are located in the test/hipcub/ directory, while benchmarks can be found in the benchmark/ directory.
 
 ### Process ###

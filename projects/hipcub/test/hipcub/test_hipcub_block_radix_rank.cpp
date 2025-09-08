@@ -608,7 +608,7 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
 
 /**
  * name this function fall_back_exclusive_scan to prevent
- * ambiguous name error 
+ * ambiguous name error
  */
 template <typename It, typename OutIt, typename T>
 void fall_back_exclusive_scan(It first, It last, OutIt out, T init)

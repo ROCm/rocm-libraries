@@ -300,11 +300,11 @@ HIPCUB_RUNTIME_FUNCTION
 
     /**
      * \brief Iterate through a multi-dimensional extents.
-     * 
+     *
      * \tparam IndexType The index type to create the extents.
      * \tparam Extents The sizes of each extent.
      * \tparam OpT The function that will be applied for each iteration. The function should be callable
-     * with arguments (IndexType, ExtentsIndexType...extents_idx). The size of extents_idx... should be 
+     * with arguments (IndexType, ExtentsIndexType...extents_idx). The size of extents_idx... should be
      * the same as the rank of the the multi-dimensional extents.
      */
     template<class IndexType, size_t... Extents, typename OpT>
@@ -330,11 +330,11 @@ HIPCUB_RUNTIME_FUNCTION
 
     /**
      * \brief Iterate through a multi-dimensional extents.
-     * 
+     *
      * \tparam IndexType The index type to create the extents.
      * \tparam Extents The sizes of each extent.
      * \tparam OpT The function that will be applied for each iteration. The function should be callable
-     * with arguments (IndexType, ExtentsIndexType...extents_idx). The size of extents_idx... should be 
+     * with arguments (IndexType, ExtentsIndexType...extents_idx). The size of extents_idx... should be
      * the same as the rank of the the multi-dimensional extents.
      */
     template<class IndexType, size_t... Extents, typename OpT>

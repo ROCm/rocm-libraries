@@ -10,7 +10,7 @@ Building and installing hipCUB with CMake
 
 You can build and install hipCUB with CMake on AMD and NVIDIA GPUs on Windows or Linux.
 
-Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` if you're building hipCUB on an AMD GPU, or to ``nvcc`` if you're building hipCUB on an NVIDIA GPU. Then set ``CMAKE_CXX_COMPILER`` to the compiler's absolute path. For example: 
+Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` if you're building hipCUB on an AMD GPU, or to ``nvcc`` if you're building hipCUB on an NVIDIA GPU. Then set ``CMAKE_CXX_COMPILER`` to the compiler's absolute path. For example:
 
 .. code:: shell
 
@@ -24,7 +24,7 @@ After :doc:`cloning the project <./hipCUB-install-overview>`, create the ``build
     mkdir build
     cd build
 
-Generate the makefile using the ``cmake`` command: 
+Generate the makefile using the ``cmake`` command:
 
 .. code:: shell
 
@@ -34,7 +34,7 @@ The available build options are:
 
 
 * ``BUILD_BENCHMARK``. Set this to ``ON`` to build benchmark tests. Off by default.
-* ``BUILD_TEST``. Set this to ``ON`` to build tests. Off by default. 
+* ``BUILD_TEST``. Set this to ``ON`` to build tests. Off by default.
 * ``DEPENDENCIES_FORCE_DOWNLOAD``. Set this to ``ON`` to download the dependencies regardless of whether or not they are already installed. Off by default.
 
 Build hipCUB using the generated make file:

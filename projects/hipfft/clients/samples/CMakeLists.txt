@@ -66,7 +66,7 @@ foreach( sample ${sample_list} )
   target_link_libraries( ${sample} PRIVATE hip::hipfft )
 
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} )
-  
+
   if( NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
     if( WIN32 )
       find_package( HIP CONFIG REQUIRED )
@@ -105,9 +105,9 @@ foreach( sample ${sample_list} )
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
     ${HIP_ROOT_DIR}
     )
-  
+
   set_target_properties( ${sample} PROPERTIES CXX_EXTENSIONS NO )
-  
+
   if( HIPFFT_BUILD_SCOPE )
     set( SAMPLES_OUT_DIR "/../staging" )
   elseif( HIPFFT_CLIENTS_BUILD_SCOPE )
@@ -118,10 +118,10 @@ foreach( sample ${sample_list} )
   string( CONCAT SAMPLES_OUT_DIR "${PROJECT_BINARY_DIR}" ${SAMPLES_OUT_DIR} )
 
   set_target_properties( ${sample}
-                         PROPERTIES 
-                         RUNTIME_OUTPUT_DIRECTORY 
+                         PROPERTIES
+                         RUNTIME_OUTPUT_DIRECTORY
                          ${SAMPLES_OUT_DIR} )
-  
+
 endforeach()
 
 # callback code must be compiled as relocatable device code

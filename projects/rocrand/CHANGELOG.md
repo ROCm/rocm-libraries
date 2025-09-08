@@ -86,8 +86,8 @@ As of ROCm 7.0, the internal error state is cleared on each call to `hipGetLastE
 
 * Added host generator for MT19937
 * Support for `rocrand_generate_poisson` in hipGraphs
-* Added engine, distribution, mode, throughput_gigabytes_per_second, and lambda columns for the csv format in 
-  `benchmark_rocrand_host_api` and `benchmark_rocrand_device_api`. To see these new columns, set `--benchmark_format=csv` 
+* Added engine, distribution, mode, throughput_gigabytes_per_second, and lambda columns for the csv format in
+  `benchmark_rocrand_host_api` and `benchmark_rocrand_device_api`. To see these new columns, set `--benchmark_format=csv`
   or `--benchmark_out_format=csv --benchmark_out="outName.csv"`.
 
 ### Changed

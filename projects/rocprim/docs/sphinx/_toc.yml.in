@@ -36,7 +36,7 @@ subtrees:
     - file: conceptual/type_traits.rst
     - file: device_ops/index.rst
       subtrees:
-      - entries: 
+      - entries:
         - file: device_ops/config.rst
         - file: device_ops/transform.rst
         - file: device_ops/unique.rst
@@ -61,9 +61,9 @@ subtrees:
         - file: device_ops/search.rst
     - file: block_ops/index.rst
       subtrees:
-      - entries: 
+      - entries:
         - file: block_ops/ops_classes/index.rst
-          subtrees: 
+          subtrees:
           - entries:
             - file: block_ops/ops_classes/load.rst
             - file: block_ops/ops_classes/store.rst
@@ -78,7 +78,7 @@ subtrees:
             - file: block_ops/ops_classes/histogram.rst
         - file: block_ops/data_mov_funcs.rst
     - file: warp_ops/index.rst
-      subtrees: 
+      subtrees:
       - entries:
         - file: warp_ops/load.rst
         - file: warp_ops/store.rst
@@ -97,5 +97,5 @@ subtrees:
         - file: thread_ops/thread_scan.rst
         - file: thread_ops/thread_search.rst
         - file: thread_ops/thread_store.rst
-    - file: reference/developer.rst    
+    - file: reference/developer.rst
     - file: license.rst

@@ -5,9 +5,9 @@
 
 module fruit_util
   private
-  
+
   public :: equals, to_s, strip
-  
+
   interface equals
      module procedure equalEpsilon
      module procedure floatEqual
@@ -112,24 +112,24 @@ contains
   !------------------------
   ! test if 2 values are close
   !------------------------
-  !logical function equals (number1, number2) 
+  !logical function equals (number1, number2)
   !  real,  intent (in) :: number1, number2
-  !  
+  !
   !  return equalEpsilon (number1, number2, epsilon(number1))
   !
   !end function equals
 
 
   function equalEpsilon (number1, number2, epsilon ) result (resultValue)
-    real , intent (in) :: number1, number2, epsilon 
-    logical :: resultValue 
+    real , intent (in) :: number1, number2, epsilon
+    logical :: resultValue
 
     resultValue = .false.
 
     ! test very small number1
     if ( abs(number1) < epsilon .and.  abs(number1 - number2) < epsilon ) then
        resultValue = .true.
-    else 
+    else
        if ((abs(( number1 - number2)) / number1) < epsilon ) then
           resultValue = .true.
        else
@@ -141,8 +141,8 @@ contains
 
   function floatEqual (number1, number2 ) result (resultValue)
     real , intent (in) :: number1, number2
-    real :: epsilon 
-    logical :: resultValue 
+    real :: epsilon
+    logical :: resultValue
 
     resultValue = .false.
     epsilon = 1E-6
@@ -150,7 +150,7 @@ contains
     ! test very small number1
     if ( abs(number1) < epsilon .and.  abs(number1 - number2) < epsilon ) then
        resultValue = .true.
-    else 
+    else
        if ((abs(( number1 - number2)) / number1) < epsilon ) then
           resultValue = .true.
        else
@@ -161,8 +161,8 @@ contains
 
   function doublePrecisionEqual (number1, number2 ) result (resultValue)
     double precision , intent (in) :: number1, number2
-    real :: epsilon 
-    logical :: resultValue 
+    real :: epsilon
+    logical :: resultValue
 
     resultValue = .false.
     epsilon = 1E-6
@@ -171,7 +171,7 @@ contains
     ! test very small number1
     if ( abs(number1) < epsilon .and.  abs(number1 - number2) < epsilon ) then
        resultValue = .true.
-    else 
+    else
        if ((abs(( number1 - number2)) / number1) < epsilon ) then
           resultValue = .true.
        else
@@ -182,20 +182,20 @@ contains
 
   function integerEqual (number1, number2 ) result (resultValue)
     integer , intent (in) :: number1, number2
-    logical :: resultValue 
+    logical :: resultValue
 
     resultValue = .false.
 
     if ( number1 .eq. number2 ) then
        resultValue = .true.
-    else 
+    else
        resultValue = .false.
     end if
   end function integerEqual
 
   function stringEqual (str1, str2 ) result (resultValue)
     character(*) , intent (in) :: str1, str2
-    logical :: resultValue 
+    logical :: resultValue
 
     resultValue = .false.
 
@@ -206,7 +206,7 @@ contains
 
   function logicalEqual (l1, l2 ) result (resultValue)
     logical, intent (in) :: l1, l2
-    logical              :: resultValue 
+    logical              :: resultValue
 
     resultValue = .false.
 

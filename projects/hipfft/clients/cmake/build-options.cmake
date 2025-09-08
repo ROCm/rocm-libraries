@@ -34,4 +34,3 @@ endif( )
 if( NOT BUILD_CLIENTS_SAMPLES )
   option( BUILD_CLIENTS_SAMPLES "Build hipFFT samples" OFF )
 endif( )
-

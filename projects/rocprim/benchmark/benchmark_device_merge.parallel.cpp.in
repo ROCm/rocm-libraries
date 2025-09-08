@@ -27,7 +27,7 @@
 
 #include <stdint.h>
 
-namespace 
+namespace
 {
 auto unused = benchmark_utils::executor::queue_autotune(
     device_merge_benchmark_generator<@KeyType@, @ValueType@, @BlockSize@>::create);

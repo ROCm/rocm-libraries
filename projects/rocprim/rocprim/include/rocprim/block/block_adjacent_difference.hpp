@@ -159,7 +159,7 @@ public:
     }
 
     /// \brief Apply a function to each consecutive pair of elements partitioned across threads in
-    /// the block and write the output to the position of the left item, with an explicit item before 
+    /// the block and write the output to the position of the left item, with an explicit item before
     /// the tile.
     ///
     /// \code
@@ -178,7 +178,7 @@ public:
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param [in] tile_predecessor the item before the tile, will be used as the input 
+    /// \param [in] tile_predecessor the item before the tile, will be used as the input
     /// of the first application of `op`
     /// \param storage reference to a temporary storage object of type #storage_type
     /// \par Storage reuse
@@ -254,7 +254,7 @@ public:
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param [in] tile_predecessor the item before the tile, will be used as the input 
+    /// \param [in] tile_predecessor the item before the tile, will be used as the input
     /// of the first application of `op`
     /// \param [in] valid_items number of items in the block which are considered "valid" and will
     /// be used. Must be less or equal to `BlockSize` * `ItemsPerThread`
@@ -316,7 +316,7 @@ public:
     }
 
     /// \brief Apply a function to each consecutive pair of elements partitioned across threads in
-    /// the block and write the output to the position of the right item, with an explicit item after 
+    /// the block and write the output to the position of the right item, with an explicit item after
     /// the tile.
     ///
     /// \code
@@ -336,7 +336,7 @@ public:
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param [in] tile_successor the item after the tile, will be used as the input 
+    /// \param [in] tile_successor the item after the tile, will be used as the input
     /// of the last application of `op`
     /// \param storage reference to a temporary storage object of type #storage_type
     /// \par Storage reuse
