@@ -259,10 +259,10 @@ namespace MemoryTracerTest
 
             // Verify operation exists
             CHECK(detailed.operationDetails.count(100) == 1);
+            CHECK(detailed.gfx == GPUArchitectureGFX::GFX942);
 
             const auto& opDetail = detailed.operationDetails.at(100);
             CHECK(opDetail.threadsPerClock == 32);
-            CHECK(opDetail.gfx == GPUArchitectureGFX::GFX942);
             CHECK(opDetail.conflictsPerClock.size() == 2); // Two thread groups
 
             // Check thread group 0
@@ -298,11 +298,11 @@ namespace MemoryTracerTest
                 model.simulate(event);
             }
 
-            auto        detailed = model.detailedSummary(GPUArchitectureGFX::GFX950);
-            const auto& opDetail = detailed.operationDetails.at(200);
+            auto detailed = model.detailedSummary(GPUArchitectureGFX::GFX950);
+            CHECK(detailed.gfx == GPUArchitectureGFX::GFX950);
 
+            const auto& opDetail = detailed.operationDetails.at(200);
             CHECK(opDetail.threadsPerClock == 32);
-            CHECK(opDetail.gfx == GPUArchitectureGFX::GFX950);
             CHECK(opDetail.conflictsPerClock.size() == 2); // 64 workitems / 32 per clock = 2 groups
 
             // Each group should have evenly distributed bank accesses

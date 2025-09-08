@@ -220,6 +220,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
     {
         DetailedSummary detailedSummary;
+        detailedSummary.gfx = gfx;
 
         for(auto const& [operationTag, accesses] : m_bankAccesses)
         {
@@ -250,7 +251,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
                     const auto& ldsOp = std::get<MemoryOpLDS>(firstInstruction.memoryOp);
                     detail.threadsPerClock
                         = getThreadsPerClock(ldsOp, firstInstruction.dwords, gfx);
-                    detail.gfx = gfx;
                 }
             }
 
@@ -287,8 +287,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
                     bankToAddr[bankIndex].push_back(addr);
                 }
                 conflict.bankToAddresses = bankToAddr;
-
-                // Use calculateBankConflicts to find max conflict degree
                 conflict.maxConflictDegree
                     = calculateBankConflicts(threadGroupAddresses[groupIndex]);
 
@@ -360,7 +358,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                       ldsOp.direction == Direction::Load ? "Load" : "Store",
                                       instruction.dwords,
                                       detail.threadsPerClock,
-                                      rocRoller::toString(detail.gfx));
+                                      rocRoller::toString(this->gfx));
                 }
                 else
                 {

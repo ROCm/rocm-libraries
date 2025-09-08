@@ -78,10 +78,10 @@ namespace rocRoller::KernelGraph::MemoryTracer
             std::vector<MemoryInstruction>   instructions;
             std::vector<ThreadGroupConflict> conflictsPerClock;
             uint                             threadsPerClock;
-            GPUArchitectureGFX               gfx;
         };
 
         std::map<int, OperationDetail> operationDetails;
+        GPUArchitectureGFX             gfx;
 
         std::string toString() const;
     };
