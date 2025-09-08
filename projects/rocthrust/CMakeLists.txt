@@ -60,7 +60,7 @@ option(BUILD_EXAMPLE "Build example" OFF)
 option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
-cmake_dependent_option(USE_SYSTEM_LIB "Use installed ROCm libs when building tests" OFF BUILD_TEST OFF)
+cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 
 check_language(HIP)
@@ -209,9 +209,10 @@ endif()
   
 # Tests
 if(BUILD_TEST AND USE_SYSTEM_LIB)
-  # Ideally we should also check the compatibility of the installed rocprim version - unfortunately
-  # there is no good way to know the matching rocprim version from a given rocthrust version
   find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+  if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
+    message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+  endif()
   find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
   if (NOT ${rocthrust_VERSION} VERSION_EQUAL ${VERSION_STRING})
     message(WARNING "The installed rocthrust version, ${rocthrust_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
