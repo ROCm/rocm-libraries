@@ -94,6 +94,9 @@ def generate(
     generator = rrperf.utils.empty()
     if suite is not None:
         generator = chain(generator, rrperf.utils.load_suite(suite))
+    else:
+        print("No suite specified.")
+        return
 
     if build_dir is None:
         build_dir = rrperf.utils.get_build_dir()
