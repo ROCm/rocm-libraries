@@ -219,18 +219,8 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
   )
 endif()
 
-
-
-include( ../cmake/build-gtest.cmake )
-
-if( BUILD_GTEST OR NOT GTEST_FOUND )
-  add_dependencies( rocfft-test gtest )
-  list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
-else()  
-  list( APPEND rocfft-test_include_dirs $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
-  list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
-endif()
+find_package( GTest REQUIRED )
+target_link_libraries( rocfft-test PRIVATE GTest::gtest )
 
 target_compile_options( rocfft-test PRIVATE ${WARNING_FLAGS} -Wno-cpp )
 
