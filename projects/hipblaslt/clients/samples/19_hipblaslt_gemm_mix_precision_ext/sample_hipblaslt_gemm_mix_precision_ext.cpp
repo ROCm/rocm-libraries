@@ -81,8 +81,8 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
     }
 
     std::vector<TypeCD> gpuResult(runner.m * runner.n * runner.batch_count);
-    hipMemcpyDtoH(
-        gpuResult.data(), runner.d_d, runner.batch_count * runner.m * runner.n * sizeof(TypeCD));
+    CHECK_HIP_ERROR(hipMemcpyDtoH(
+        gpuResult.data(), runner.d_d, runner.batch_count * runner.m * runner.n * sizeof(TypeCD)));
 
     for(int64_t b = 0; b < runner.batch_count; ++b)
     {

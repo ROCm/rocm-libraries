@@ -1,3 +1,10 @@
+/*******************************************************************************
+ *
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ *******************************************************************************/
+
 #include <Tensile/analytical/Hardware.hpp>
 #include <Tensile/analytical/StreamK.hpp>
 #include <Tensile/analytical/Utils.hpp>

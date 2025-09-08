@@ -58,18 +58,14 @@ def setupCI(urlJobName, jobNameList, buildCommand, runCI, label, runTest)
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(label + ' ' + jobName) {
-                runCI(nodeDetails, jobName, buildCommand, label, runTest)
-            }
+            runCI(nodeDetails, jobName, buildCommand, label, runTest)
     }
 
     // For url job names that are not listed by the jobNameList i.e. compute-rocm-dkms-no-npi-1901
     if(!jobNameList.keySet().contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * *')])]))
-        stage(label + ' ' + urlJobName) {
-            runCI([ubuntu18:['gfx906']], urlJobName, buildCommand, label)
-        }
+        runCI([ubuntu18:['gfx906']], urlJobName, buildCommand, label)
     }
 }
 

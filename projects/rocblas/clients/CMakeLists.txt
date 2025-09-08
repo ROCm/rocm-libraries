@@ -37,6 +37,7 @@ function( apply_omp_settings lib_target_ )
     set_target_properties( ${lib_target_} PROPERTIES
       INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
     )
+    target_compile_options( ${lib_target_} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}> )
   endif()
 endfunction()
 
@@ -95,6 +96,7 @@ endif()
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
   set( COMMON_LINK_LIBS "OpenMP::omp")
   message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
+  list( APPEND COMMON_CXX_OPTIONS "-fopenmp") # this is linux only target
 else()
   # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
   # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
@@ -127,10 +129,6 @@ endif( )
 list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} /opt/rocm )
 if ( NOT hip_FOUND )
   find_package( hip REQUIRED CONFIG PATHS ${ROCM_PATH} )
-endif( )
-
-if( BUILD_CLIENTS_SAMPLES )
-  add_subdirectory( samples )
 endif( )
 
 if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
@@ -229,6 +227,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   endif( )
 
 endif()
+
+if( BUILD_CLIENTS_SAMPLES )
+  add_subdirectory( samples )
+endif( )
 
 set( ROCBLAS_COMMON "${PROJECT_BINARY_DIR}/staging/rocblas_common.yaml")
 add_custom_command( OUTPUT "${ROCBLAS_COMMON}"

@@ -34,7 +34,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, \
-  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCmpLeU32, \
+  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
 from rocisa.register import RegisterPool
@@ -949,8 +949,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
           # 26 is the instruction count for the TF32 emulation sequence in LocalRead.py
-          instPerPackA = 26#len(packAItems)
-          instPerPackB = 26#len(packBItems)
+          instPerPackA = 24 if kernel["UseDot2F32XEmulation"] else 26 #len(packAItems)
+          instPerPackB = 24 if kernel["UseDot2F32XEmulation"] else 26 #len(packBItems)
           while packAItems or packBItems:
             for n in range(instPerPackA):
               if packAItems:
@@ -4687,10 +4687,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("SKItersPerWG", 1)
       self.states.numSgprStreamK += 3
       if kernel["StreamK"] >= 2: # Two-tile SK
-        self.defineSgpr("skGridAndTiles", 1)
+        self.defineSgpr("skGrid", 1)
+        self.defineSgpr("skTiles", 1)
         self.defineSgpr("skExtraIters", 1)
         # self.defineSgpr("dpTilesPerWG", 1, kernarg=True)
-        self.states.numSgprStreamK += 2
+        self.states.numSgprStreamK += 3
 
     if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("LocalWriteAddrA", 1)
@@ -5503,6 +5504,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return ""
 
   ##############################################################################
+  # longBranchScc1 - 32 bit offset
+  ##############################################################################
+  @abc.abstractmethod
+  def longBranchScc1(self, label: Label, posNeg: int=0, comment=""):
+    return ""
+
+  ##############################################################################
+  # longBranchVccnz - 32 bit offset
+  ##############################################################################
+  @abc.abstractmethod
+  def longBranchVccnz(self, label: Label, posNeg: int=0, comment=""):
+    return ""
+
+  ##############################################################################
   # WaitCnt
   ##############################################################################
   def _wait(self, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, skipLocalRead, comment, skipGlobalReadInst=-1):
@@ -5612,6 +5627,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
               _placeholder.add(self.longBranchScc1(_target, 1, tmpSgprInfo))
         else:
           _placeholder.add(SCBranchSCC1(labelName=_target.getLabelName()))
+      elif _operation == "SCBranchVCCNZ":
+        if currentInstLength - count + 1 >= 16384:
+          with self.allocTmpSgpr(3) as tmpSgprInfo:
+              _placeholder.add(self.longBranchVccnz(_target, 1, tmpSgprInfo))
+        else:
+          _placeholder.add(SCBranchVCCNZ(labelName=_target.getLabelName()))
       elif _operation == "SBranch":
         if currentInstLength - count + 1 >= 16384:
           with self.allocTmpSgpr(3) as tmpSgprInfo:

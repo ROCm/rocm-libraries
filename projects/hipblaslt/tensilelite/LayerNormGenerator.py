@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.code import Label, Module, RegSet, TextBlock, ValueSet
+from rocisa.code import Label, Module, RegSet, TextBlock, ValueSet, SrdUpperValue
 from rocisa.container import EXEC, VCC, DSModifiers, MUBUFModifiers, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
@@ -40,6 +40,7 @@ from Tensile.Common.Utilities import _global_ti
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
+from Tensile.Common.Types import IsaVersion
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
@@ -70,6 +71,8 @@ def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
     header += f'  .amdhsa_system_vgpr_workitem_id 0\n'
     header += f'  .amdhsa_float_denorm_mode_32 3\n'
     header += f'  .amdhsa_float_denorm_mode_16_64 3\n'
+    if _global_ti.getArchCaps()["HasWave32"]:
+        header += f'  .amdhsa_wavefront_size32 1\n'
     header += f'.end_amdhsa_kernel\n'
     header += f'.text\n'
     return header
@@ -114,13 +117,20 @@ class LayerNormKernelGenerator:
                  num_load_count: int,
                  num_load_size: int,
                  sweep_once: int,
-                 arch: str):
+                 wavefront_size: int,
+                 arch: str,
+                 isa: IsaVersion):
         self.io_type = io_type
         self.bpe = io_type.numBytes()
         self.num_workitems = num_workitems
         self.num_load_count = num_load_count
         self.num_load_size = num_load_size
         self.sweep_once = sweep_once
+        self.wavefront_size = wavefront_size
+        self.laneSGPRCount = 2 if wavefront_size == 64 else 1
+        self.SMovBX = ri.SMovB64 if wavefront_size == 64 else ri.SMovB32
+        self.SAndBX = ri.SAndB64 if wavefront_size == 64 else ri.SAndB32
+        self.srdUpperValue = SrdUpperValue(isa)
         self.sgpr_pool = RegisterPool(24, RegisterType.Sgpr, True)
         self.vgpr_pool = RegisterPool(40, RegisterType.Vgpr, True)
         self.sgpr_pool.add(0, 23) #TODO: estimate this
@@ -135,7 +145,7 @@ class LayerNormKernelGenerator:
     def lds_usage_byte(self) -> int:
         # used in reduce inter wave mean and invvar
         # 4 data * half_wave_num * bpe
-        return 4 * (self.num_workitems // 64 // 2) * self.bpe
+        return 4 * (self.num_workitems // self.wavefront_size // 2) * self.bpe
 
     @property
     def func_name(self):
@@ -241,7 +251,7 @@ class LayerNormKernelGenerator:
             mod.add(RegSet("s", "sgpr"+skey, self.sgprs[skey]))
         mod.addSpaceLine()
 
-        mod.add(ValueSet("Srd127_96", "0x00020000", format=-1))
+        mod.add(ValueSet("Srd127_96", self.srdUpperValue.getValue(), format=1))
         mod.add(ValueSet("BufferLimit", "0xffffffff", format=-1))
         mod.addSpaceLine()
 
@@ -260,9 +270,10 @@ class LayerNormKernelGenerator:
         mod.add(ri.SLoadB32(sgpr("SizeLength"),       sgpr("KernelArg", 2), 52))
         mod.add(ri.SLoadB32(sgpr("Eps"),              sgpr("KernelArg", 2), 56))
         mod.add(ri.SWaitCnt(kmcnt=0))
+        if _global_ti.getArchCaps()["WorkGroupIdFromTTM"]:
+            mod.add(ri.SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
         mod.addSpaceLine()
         return mod
-
 
     def init_param(self) -> Module:
         mod = Module("defineVariables")
@@ -331,7 +342,7 @@ class LayerNormKernelGenerator:
         if self.sweep_once:
             mod.add(ri.VCmpLtU32(VCC(), vgpr("Index"), sgpr("SizeLength")))
             #mod.add(ri.SCBranchddVCCZ(label_sum_end.getLabelName()))
-            mod.add(ri.SMovB64(EXEC(), VCC()))
+            mod.add(self.SMovBX(EXEC(), VCC()))
             mod.add(ri.SNop(1))
         mod.add(ri.VAddF32(vgpr("Count"), vgpr("Count"), 1.0))
         mod.add(ri.VSubF32(vgpr("Tmp"), val, vgpr("Mean")))  # delta
@@ -343,7 +354,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.VMulF32(vgpr("Tmp"), vgpr("Tmp"), vgpr("Tmp+1")))
         mod.add(ri.VAddF32(vgpr("Invvar"), vgpr("Invvar"), vgpr("Tmp")))
         if self.sweep_once:
-            mod.add(ri.SMovB64(EXEC(), "-1"))
+            mod.add(self.SMovBX(EXEC(), "-1"))
             mod.add(ri.SNop(1))
             mod.add(ri.VAddU32(vgpr("Index"), vgpr("Index"), 1))
         mod.addSpaceLine()
@@ -433,13 +444,13 @@ class LayerNormKernelGenerator:
         mod.add(ri.SAndB32(sgpr("MainLoop"), sgpr("SizeLength"), self.num_workitems-1))
         mod.add(ri.VCmpLtU32(VCC(), vgpr("Serial"), sgpr("MainLoop")))
         mod.add(ri.SCBranchVCCZ(label_sum_end.getLabelName()))
-        mod.add(ri.SMovB64(EXEC(), VCC()))
+        mod.add(self.SMovBX(EXEC(), VCC()))
         mod.add(ri.SNop(1))
         mod.add(ri.BufferLoadB32(vgpr("Value"), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
         mod.add(ri.SWaitCnt(vlcnt=0))
         mod.addSpaceLine()
         mod.add(self.sum_per_data(vgpr("Value")))
-        mod.add(ri.SMovB64(EXEC(), "-1"))
+        mod.add(self.SMovBX(EXEC(), "-1"))
         mod.add(ri.SNop(1))
         mod.add(label_sum_end)
         mod.addSpaceLine()
@@ -455,7 +466,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.VSubF32(vgpr("Tmp"), vgpr("MeanB"), vgpr("MeanA")))
         mod.add(ri.VAddF32(vgpr("Count"), vgpr("CountA"), vgpr("CountB")))
         mod.add(ri.VCmpGTF32(VCC(), vgpr("Count"), 0))
-        mod.add(ri.SMovB64(EXEC(), VCC()))
+        mod.add(self.SMovBX(EXEC(), VCC()))
         mod.add(ri.SNop(1))
         mod.add(ri.VRcpF32(vgpr("Tmp+3"), vgpr("Count")))
         mod.add(ri.SNop(waitState=0, comment="1 wait states"))
@@ -471,7 +482,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.VMulF32(vgpr("Tmp"), vgpr("Tmp"), vgpr("Tmp+2")))
         mod.add(ri.VMulF32(vgpr("Tmp"), vgpr("Tmp"), vgpr("Count")))
         mod.add(ri.VAddF32(vgpr("Invvar"), vgpr("Invvar"), vgpr("Tmp")))
-        mod.add(ri.SMovB64(EXEC(), "-1"))
+        mod.add(self.SMovBX(EXEC(), "-1"))
         mod.add(ri.SNop(1))
         return mod
 
@@ -484,7 +495,7 @@ class LayerNormKernelGenerator:
         mod.add(label)
         mod.addSpaceLine()
         mod.add(ri.VAddU32(vgpr("Tmp"), sgpr("Tmp"), vgpr("Serial")))
-        mod.add(ri.VAndB32(vgpr("Tmp"), 63, vgpr("Tmp")))
+        mod.add(ri.VAndB32(vgpr("Tmp"), self.wavefront_size-1, vgpr("Tmp")))
         mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), 0x2, vgpr("Tmp")))
         mod.addSpaceLine()
         mod.add(ri.DSBPermuteB32(vgpr("CountB"), vgpr("Tmp"), vgpr("Count")))
@@ -494,7 +505,7 @@ class LayerNormKernelGenerator:
         mod.addSpaceLine()
         mod.add(self.merge_sum())
         mod.add(ri.SLShiftLeftB32(sgpr("Tmp"), 1, sgpr("Tmp")))
-        mod.add(ri.SCmpLtU32(sgpr("Tmp"), 64))
+        mod.add(ri.SCmpLtU32(sgpr("Tmp"), self.wavefront_size))
         mod.add(ri.SCBranchSCC1(label.getLabelName()))
         mod.addSpaceLine()
         return mod
@@ -508,16 +519,16 @@ class LayerNormKernelGenerator:
         label_end   = Label("end", f'end')
         mod = Module("inter_wave_reduction")
         mod.addComment0("inter_wave_reduction")
-        mod.add(ri.VLShiftRightB32(vgpr("Widx"), 6, vgpr("Serial")))
-        mod.add(ri.SMovB32(sgpr("Offset"), self.num_workitems // 64))
+        mod.add(ri.VLShiftRightB32(vgpr("Widx"), int(log2(self.wavefront_size)), vgpr("Serial")))
+        mod.add(ri.SMovB32(sgpr("Offset"), self.num_workitems // self.wavefront_size))
         mod.add(label_inter)
         mod.add(ri.SLShiftRightB32(sgpr("Offset"), 1, sgpr("Offset")))
         mod.add(ri.SCmpEQU32(sgpr("Offset"), 0))
         mod.add(ri.SCBranchSCC1(label_end.getLabelName()))
         mod.add(ri.SLShiftLeftB32(sgpr("Tmp"), 1, sgpr("Offset")))
-        mod.add(ri.VCmpLtU32(sgpr("Tmp+2",2), vgpr("Widx"), sgpr("Tmp")))
-        mod.add(ri.VCmpGEU32(sgpr("Tmp+4",2), vgpr("Widx"), sgpr("Offset")))
-        mod.add(ri.SAndB64(VCC(), sgpr("Tmp+2",2), sgpr("Tmp+4",2)))
+        mod.add(ri.VCmpLtU32(sgpr("Tmp+2", self.laneSGPRCount), vgpr("Widx"), sgpr("Tmp")))
+        mod.add(ri.VCmpGEU32(sgpr("Tmp+4", self.laneSGPRCount), vgpr("Widx"), sgpr("Offset")))
+        mod.add(self.SAndBX(VCC(), sgpr("Tmp+2", self.laneSGPRCount), sgpr("Tmp+4", self.laneSGPRCount)))
         mod.add(ri.SCBranchVCCNZ(label_upper.getLabelName()))
         mod.add(ri.VCmpLtU32(VCC(), vgpr("Widx"), sgpr("Offset")))
         mod.add(ri.SCBranchVCCNZ(label_lower.getLabelName()))
@@ -748,7 +759,7 @@ class LayerNormKernelGenerator:
             mod.addSpaceLine()
 
             mod.add(ri.BufferStoreB32(vgpr("Value"), vgpr("Offset"), sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
-            mod.add(ri.SWaitCnt(vlcnt=0))
+            mod.add(ri.SWaitCnt(vscnt=0))
             mod.add(ri.SMovB32(sgpr("Tmp"), self.num_workitems * self.bpe))
             mod.add(ri.VAddU32(vgpr("Offset"), vgpr("Offset"), sgpr("Tmp")))
             mod.addSpaceLine()
@@ -762,7 +773,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.SAndB32(sgpr("MainLoop"), sgpr("SizeLength"), self.num_workitems-1))
         mod.add(ri.VCmpLtU32(VCC(), vgpr("Serial"), sgpr("MainLoop")))
         mod.add(ri.SCBranchVCCZ(label_layernorm_end.getLabelName()))
-        mod.add(ri.SMovB64(EXEC(), VCC()))
+        mod.add(self.SMovBX(EXEC(), VCC()))
         mod.add(ri.SNop(1))
         mod.add(ri.BufferLoadB32(vgpr("Value"), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
         mod.add(ri.SWaitCnt(vlcnt=0))
@@ -787,8 +798,8 @@ class LayerNormKernelGenerator:
         mod.addSpaceLine()
 
         mod.add(ri.BufferStoreB32(vgpr("Value"), vgpr("Offset"), sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
-        mod.add(ri.SWaitCnt(vlcnt=0))
-        mod.add(ri.SMovB64(EXEC(), "-1"))
+        mod.add(ri.SWaitCnt(vscnt=0))
+        mod.add(self.SMovBX(EXEC(), "-1"))
         mod.add(ri.SNop(1))
         mod.add(label_layernorm_end)
         mod.addSpaceLine()
@@ -937,12 +948,13 @@ if __name__ == '__main__':
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
 
     _global_ti.init(isa, toolchain_path, False)
-    _global_ti.setKernel(isa, 64)
-    layernorm = LayerNormKernelGenerator(DataType('S'), w, c, 4, sweep_once, arch)
+    waveFrontSize = 32 if isa[0] in [11, 12] else 64
+    _global_ti.setKernel(isa, waveFrontSize)
+    layernorm = LayerNormKernelGenerator(DataType('S'), w, c, 4, sweep_once, waveFrontSize, arch, isa)
     kernel_body = layernorm.layernorm_kernel_body()
     args = layernorm.kernel_args()
     func_name = layernorm.func_name
-    meta = KernelMeta(func_name, layernorm.vgpr_pool.size(), layernorm.sgpr_pool.size(), 0, layernorm.lds_usage_byte, 64, w, 8, args)
+    meta = KernelMeta(func_name, layernorm.vgpr_pool.size(), layernorm.sgpr_pool.size(), 0, layernorm.lds_usage_byte, waveFrontSize, w, 8, args)
     meta.update_args_offsets()
     k_str = '\n'.join([kernel_header(func_name, arch, layernorm.vgpr_pool.size(), layernorm.sgpr_pool.size(), layernorm.lds_usage_byte),
                        meta_str((meta,)),

@@ -90,8 +90,9 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     if(alg_mode != rocsolver_alg_mode_hybrid || evect == rocblas_evect_original)
     {
         // extra requirements for computing eigenvalues and vectors (stedc)
-        rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count, &w31,
-                                                     &w22, &w12, size_tmpz, size_splits, &unused);
+        rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count,
+                                                     &w31, &w22, &w12, size_tmpz, size_splits,
+                                                     size_workArr);
     }
     else
     {
@@ -120,9 +121,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
 
     // size of array of pointers to workspace
     if(BATCHED)
-        *size_workArr = 2 * sizeof(T*) * batch_count;
-    else
-        *size_workArr = 0;
+        *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename S>
@@ -180,7 +179,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     {
         // extra requirements for computing eigenvalues and vectors (stedc)
         rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count,
-                                                     &w31, &w22, &w12, &z1, &s1, &unused);
+                                                     &w31, &w22, &w12, &z1, &s1, size_workArr);
     }
 
     if(evect == rocblas_evect_original)
@@ -207,9 +206,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
 
     // size of array of pointers to workspace
     if(BATCHED)
-        *size_workArr = 2 * sizeof(T*) * batch_count;
-    else
-        *size_workArr = 0;
+        *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename S, typename W>
@@ -378,6 +375,39 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
+    {
+        // memory workspace sizes:
+        // size for constants in rocblas calls
+        size_t size_scalars;
+        // size of reusable workspaces
+        size_t size_work1;
+        size_t size_work2;
+        size_t size_work3;
+        size_t size_work4;
+        size_t size_tmptau_W;
+        // extra space for stedc call
+        size_t size_splits, size_tmpz;
+        // size of array of pointers (only for batched case)
+        size_t size_workArr;
+        // size for temporary householder scalars
+        size_t size_tau;
+
+        rocsolver_syevd_heevd_getMemorySize<BATCHED, STRIDED, T, S>(
+            handle, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
+            &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau,
+            &size_workArr, &optim_mem);
+
+        // Memory in `scalars` has already been initialized at this point
+        HIP_CHECK(hipMemsetAsync((void*)work1, 0, size_work1, stream));
+        HIP_CHECK(hipMemsetAsync((void*)work2, 0, size_work2, stream));
+        HIP_CHECK(hipMemsetAsync((void*)work3, 0, size_work3, stream));
+        HIP_CHECK(hipMemsetAsync((void*)work4, 0, size_work4, stream));
+        HIP_CHECK(hipMemsetAsync((void*)tmpz, 0, size_tmpz, stream));
+        HIP_CHECK(hipMemsetAsync((void*)splits, 0, size_splits, stream));
+        HIP_CHECK(hipMemsetAsync((void*)tmptau_W, 0, size_tmptau_W, stream));
+        HIP_CHECK(hipMemsetAsync((void*)tau, 0, size_tau, stream));
+        HIP_CHECK(hipMemsetAsync((void*)workArr, 0, size_workArr, stream));
+    }
 
     rocsolver_alg_mode sterf_mode;
     ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &sterf_mode));

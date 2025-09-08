@@ -515,8 +515,8 @@ public:
     }
 };
 
-template<lookback_scan_determinism Determinism,
-         typename Config,
+template<typename ArchConfig,
+         lookback_scan_determinism Determinism,
          typename AccumulatorType,
          typename KeyIterator,
          typename ValueIterator,
@@ -544,8 +544,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<lookback_scan_determinism Determinism,
-         typename Config,
+template<typename ArchConfig,
+         lookback_scan_determinism Determinism,
          typename AccumulatorType,
          typename KeyIterator,
          typename ValueIterator,
@@ -571,7 +571,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                 const AccumulatorType* const   previous_accumulated)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr reduce_by_key_config_params params = device_params<Config>();
+    static constexpr reduce_by_key_config_params params = ArchConfig::params;
 
     static constexpr unsigned int         block_size       = params.kernel_config.block_size;
     static constexpr unsigned int         items_per_thread = params.kernel_config.items_per_thread;
