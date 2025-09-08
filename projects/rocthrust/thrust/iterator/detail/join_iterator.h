@@ -18,10 +18,21 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/iterator/iterator_facade.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -36,7 +47,7 @@ namespace join_iterator_detail
 template <typename RandomAccessIterator1, typename RandomAccessIterator2, typename Difference, typename Reference>
 struct join_iterator_base
 {
-  using value_type = ::cuda::std::__libcpp_remove_reference_t<Reference>;
+  using value_type = _THRUST_STD::remove_reference_t<Reference>;
 
   using system1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
   using system2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
@@ -88,7 +99,8 @@ private:
   // MSVC 2013 and 2015 incorrectly warning about returning a reference to
   // a local/temporary here.
   // See goo.gl/LELTNp
-  THRUST_DISABLE_MSVC_WARNING_BEGIN(4172)
+  THRUST_DIAG_PUSH
+  THRUST_DIAG_SUPPRESS_MSVC(4172)
 
   THRUST_HOST_DEVICE typename super_t::reference dereference() const
   {
@@ -96,7 +108,7 @@ private:
     return (i < m_n1) ? m_iter1[i] : static_cast<typename super_t::reference>(m_iter2[i]);
   } // end dereference()
 
-  THRUST_DISABLE_MSVC_WARNING_END(4172)
+  THRUST_DIAG_POP
 
   size_type m_n1;
   RandomAccessIterator1 m_iter1;

@@ -25,8 +25,8 @@
 #include <iterator>
 #include <type_traits>
 
-#include "../config.hpp"
 #include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
 
@@ -48,43 +48,50 @@ template<class Config,
          class OffsetIterator,
          class ResultType,
          class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().reduce_config.block_size) void
-    segmented_reduce_kernel(InputIterator  input,
-                            OutputIterator output,
-                            OffsetIterator begin_offsets,
-                            OffsetIterator end_offsets,
-                            BinaryFunction reduce_op,
-                            ResultType     initial_value)
+inline hipError_t launch_segmented_reduce(detail::target_arch arch,
+                                          InputIterator       input,
+                                          OutputIterator      output,
+                                          OffsetIterator      begin_offsets,
+                                          OffsetIterator      end_offsets,
+                                          BinaryFunction      reduce_op,
+                                          ResultType          initial_value,
+                                          dim3                grid,
+                                          dim3                block,
+                                          size_t              shmem,
+                                          hipStream_t         stream)
 {
-    segmented_reduce<Config>(
-        input, output,
-        begin_offsets, end_offsets,
-        reduce_op, initial_value
-    );
+    auto kernel = [=](auto arch_config)
+    {
+        segmented_reduce<decltype(arch_config)>(input,
+                                                output,
+                                                begin_offsets,
+                                                end_offsets,
+                                                reduce_op,
+                                                initial_value);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<
-    class Config,
-    class InputIterator,
-    class OutputIterator,
-    class OffsetIterator,
-    class InitValueType,
-    class BinaryFunction
->
-inline
-hipError_t segmented_reduce_impl(void * temporary_storage,
-                                 size_t& storage_size,
-                                 InputIterator input,
-                                 OutputIterator output,
-                                 unsigned int segments,
-                                 OffsetIterator begin_offsets,
-                                 OffsetIterator end_offsets,
-                                 BinaryFunction reduce_op,
-                                 InitValueType initial_value,
-                                 hipStream_t stream,
-                                 bool debug_synchronous)
+template<class Config,
+         class InputIterator,
+         class OutputIterator,
+         class OffsetIterator,
+         class InitValueType,
+         class BinaryFunction>
+inline hipError_t segmented_reduce_impl(void*          temporary_storage,
+                                        size_t&        storage_size,
+                                        InputIterator  input,
+                                        OutputIterator output,
+                                        unsigned int   segments,
+                                        OffsetIterator begin_offsets,
+                                        OffsetIterator end_offsets,
+                                        BinaryFunction reduce_op,
+                                        InitValueType  initial_value,
+                                        hipStream_t    stream,
+                                        bool           debug_synchronous)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
     using config = wrapped_segmented_reduce_config<Config, result_type>;
@@ -95,9 +102,9 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
     {
         return result;
     }
-    const reduce_config_params params = dispatch_target_arch<config>(target_arch);
+    const reduce_config_params params = dispatch_target_arch<config, false>(target_arch);
 
-    const unsigned int block_size = params.reduce_config.block_size;
+    const unsigned int block_size = params.kernel_config.block_size;
 
     if(temporary_storage == nullptr)
     {
@@ -107,27 +114,30 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
         return hipSuccess;
     }
 
-    if( segments == 0u )
+    if(segments == 0u)
         return hipSuccess;
 
     std::chrono::steady_clock::time_point start;
 
-    if(debug_synchronous) start = std::chrono::steady_clock::now();
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(segmented_reduce_kernel<config>),
-        dim3(segments), dim3(block_size), 0, stream,
-        input, output,
-        begin_offsets, end_offsets,
-        reduce_op, static_cast<result_type>(initial_value)
-    );
+    if(debug_synchronous)
+        start = std::chrono::steady_clock::now();
+    ROCPRIM_RETURN_ON_ERROR(launch_segmented_reduce<config>(target_arch,
+                                                            input,
+                                                            output,
+                                                            begin_offsets,
+                                                            end_offsets,
+                                                            reduce_op,
+                                                            static_cast<result_type>(initial_value),
+                                                            dim3(segments),
+                                                            dim3(block_size),
+                                                            0,
+                                                            stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", segments, start);
 
     return hipSuccess;
 }
 
-
-
-} // end of detail namespace
+} // namespace detail
 
 /// \brief Parallel segmented reduction primitive for device level.
 ///
@@ -187,7 +197,7 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
 ///
 /// // custom reduce function
 /// auto min_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };
@@ -222,34 +232,36 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
 /// // output: [4, 6, 1]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class InputIterator,
-    class OutputIterator,
-    class OffsetIterator,
-    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-    class InitValueType = typename std::iterator_traits<InputIterator>::value_type
->
-inline
-hipError_t segmented_reduce(void * temporary_storage,
-                            size_t& storage_size,
-                            InputIterator input,
-                            OutputIterator output,
-                            unsigned int segments,
-                            OffsetIterator begin_offsets,
-                            OffsetIterator end_offsets,
-                            BinaryFunction reduce_op = BinaryFunction(),
-                            InitValueType initial_value = InitValueType(),
-                            hipStream_t stream = 0,
-                            bool debug_synchronous = false)
+template<class Config = default_config,
+         class InputIterator,
+         class OutputIterator,
+         class OffsetIterator,
+         class BinaryFunction
+         = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
+         class InitValueType = typename std::iterator_traits<InputIterator>::value_type>
+inline hipError_t segmented_reduce(void*          temporary_storage,
+                                   size_t&        storage_size,
+                                   InputIterator  input,
+                                   OutputIterator output,
+                                   unsigned int   segments,
+                                   OffsetIterator begin_offsets,
+                                   OffsetIterator end_offsets,
+                                   BinaryFunction reduce_op         = BinaryFunction(),
+                                   InitValueType  initial_value     = InitValueType(),
+                                   hipStream_t    stream            = 0,
+                                   bool           debug_synchronous = false)
 {
-    return detail::segmented_reduce_impl<Config>(
-        temporary_storage, storage_size,
-        input, output,
-        segments, begin_offsets, end_offsets,
-        reduce_op, initial_value,
-        stream, debug_synchronous
-    );
+    return detail::segmented_reduce_impl<Config>(temporary_storage,
+                                                 storage_size,
+                                                 input,
+                                                 output,
+                                                 segments,
+                                                 begin_offsets,
+                                                 end_offsets,
+                                                 reduce_op,
+                                                 initial_value,
+                                                 stream,
+                                                 debug_synchronous);
 }
 
 /// @}
