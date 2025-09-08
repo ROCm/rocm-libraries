@@ -41,13 +41,15 @@ namespace conv {
 
 const miopen::ExecutionContext& GetDummyCtx();
 
-std::map<std::string, float>
+MIOPEN_INTERNALS_EXPORT std::map<std::string, float>
 GetFeatures3D(const miopen::conv::ProblemDescription&, int max_cu, const std::string& arch);
-std::vector<std::string> GetKernelAsTokens(const std::string& kernel);
-void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
-                          std::vector<int>& indexes,
-                          std::vector<std::vector<std::string>>& kernels);
-std::vector<int> GenerateSplitK(int max_split_k);
+
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetKernelAsTokens(const std::string& kernel);
+MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
+                                                  std::vector<int>& indexes,
+                                                  std::vector<std::vector<std::string>>& kernels);
+
+MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
 template <typename DataType>
 bool RunParameterPredictionModel(
     const miopen::ExecutionContext& ctx,
