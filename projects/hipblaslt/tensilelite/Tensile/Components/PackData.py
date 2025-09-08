@@ -62,13 +62,16 @@ class PackData_F16(PackData):
             else:
                 tmpDst   = formatVgpr
                 tmpDst_1 = formatting(sumIdxV-1, inputPrefix, prefixOffset)
-            if vi%2 == 1:
-                d = destIdx + vi//2
-            if ti.getAsmCaps()["HasPkF16CVT"] and vi%2 == 1:
-                module.add(VCvtPkF32toF16(dst=vgpr(d), src0=vgpr(formatVgpr_1), src1=vgpr(formatVgpr), comment="convert C to fp16 and pack with neighbor"))
+
+            if ti.getAsmCaps()["HasPkF16CVT"]:
+                # VCvtPkF32toF16: convert and pack a pair of elements by one instruction
+                if vi%2 == 1:
+                    d = destIdx + vi//2
+                    module.add(VCvtPkF32toF16(dst=vgpr(d), src0=vgpr(formatVgpr_1), src1=vgpr(formatVgpr), comment="convert C to fp16 and pack with neighbor"))
             else:
                 module.add(VCvtF32toF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), comment="convert C to fp16"))
                 if vi%2 == 1:
+                    d = destIdx + vi//2
                     module.add(VPackF16toB32(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
                             comment="Pack with neighbor"))
         return module
