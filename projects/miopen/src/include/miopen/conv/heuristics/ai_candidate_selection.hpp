@@ -102,7 +102,7 @@ public:
     EncodeInputFeatures(const std::map<std::string, float>& features) const;
     MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
     EncodeKernelConfigs(const std::vector<std::vector<float>>& encoded_candidates) const;
-    MIOPEN_INTERNALS_EXPORTint
+    MIOPEN_INTERNALS_EXPORT int
     SelectBestCandidateIdx(const std::vector<float>& encoded_features,
                            const std::vector<std::vector<float>>& encoded_configs) const;
     const CandidateSelectionMetadata& metadata() const { return metadata_; }
@@ -135,10 +135,10 @@ ModelSelectBestCandidate(const std::string& arch,
                          bool use_split_k);
 
 MIOPEN_INTERNALS_EXPORT
-    std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
-    ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
-                                 const std::vector<int>& indexes,
-                                 const std::vector<int>& split_ks);
+std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
+ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
+                             const std::vector<int>& indexes,
+                             const std::vector<int>& split_ks);
 
 } // namespace candidate_selection
 } // namespace tuning
