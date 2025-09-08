@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 This module is used to create git info file,
 if it is not found in output_folder_location specified by the end user.
