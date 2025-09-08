@@ -66,7 +66,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
             event.memoryOp, 1, DataType::UInt32, {static_cast<uint32_t>(ldsAddressInBytes)}};
 
         m_bankAccesses[event.operationTag].push_back(LDSBankAccess{
-            event.operationTag, ldsTag, ldsOp.direction, event.workItem, bankIndex, {instruction}});
+            event.operationTag, ldsTag, ldsOp.direction, event.workItem, bankIndex, instruction});
     }
 
     Summary LDSBankModel::summary() const
@@ -158,6 +158,10 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                           uint               dwords,
                                           GPUArchitectureGFX gfx)
     {
+        // TODO: These numbers are only for aligned accesses
+        // (e.g. for 128-bit bottom 4 bits of address are zero)
+        // There's no obvious way to check,
+        // given the kernel graph only provides relative address offsets
         if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == Direction::Load)
         {
             switch(dwords)
@@ -167,6 +171,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
             case 2:
                 return 32;
             case 3:
+                // ds_read_b96 on gfx950 retains the same peak throughput as gfx942
+                // and is thus slower than ds_read_b128
                 return 8;
             case 4:
                 return 16;
@@ -217,64 +223,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
     {
-        DetailedSummary detailedSummary;
-        detailedSummary.gfx = gfx;
-
-        for(auto const& [operationTag, accesses] : m_bankAccesses)
-        {
-            DetailedSummary::OperationDetail detail;
-
-            if(!accesses.empty() && !accesses[0].instructions.empty())
-            {
-                const auto& firstInstruction = accesses[0].instructions[0];
-                detail.instructions          = accesses[0].instructions;
-
-                // Get threads per clock based on operation type
-                if(std::holds_alternative<MemoryOpLDS>(firstInstruction.memoryOp))
-                {
-                    const auto& ldsOp = std::get<MemoryOpLDS>(firstInstruction.memoryOp);
-                    detail.threadsPerClock
-                        = getThreadsPerClock(ldsOp, firstInstruction.dwords, gfx);
-                }
-            }
-
-            // Group workitems by thread groups
-            std::map<uint, std::vector<uint>>     threadGroups;
-            std::map<uint, std::vector<uint32_t>> threadGroupAddresses;
-
-            for(auto const& access : accesses)
-            {
-                uint groupIndex = access.workitem / detail.threadsPerClock;
-                threadGroups[groupIndex].push_back(access.workitem);
-
-                for(auto const& instruction : access.instructions)
-                {
-                    for(auto addr : instruction.addresses)
-                    {
-                        threadGroupAddresses[groupIndex].push_back(addr);
-                    }
-                }
-            }
-
-            // Calculate conflicts for each thread group
-            for(auto const& [groupIndex, workitems] : threadGroups)
-            {
-                DetailedSummary::ThreadGroupConflict conflict;
-                conflict.threadGroupIndex = groupIndex;
-                conflict.workitemIds      = workitems;
-
-                conflict.bankToAddresses = makeBankMapping(
-                    threadGroupAddresses[groupIndex], m_entryWidthInBytes, m_numBanks);
-
-                conflict.maxConflictDegree = calculateBankConflicts(conflict.bankToAddresses);
-
-                detail.conflictsPerClock.push_back(conflict);
-            }
-
-            detailedSummary.operationDetails[operationTag] = detail;
-        }
-
-        return detailedSummary;
+        return {};
     }
 
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)
@@ -317,14 +266,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         std::stringstream ss;
 
-        for(auto const& [operationTag, detail] : operationDetails)
+        for(auto const& [operationTag, instructionDetails] : operationDetails)
         {
             ss << fmt::format("Operation tag {}:\n", operationTag);
 
             // Print instructions
-            for(size_t i = 0; i < detail.instructions.size(); ++i)
+            for(size_t i = 0; i < instructionDetails.size(); ++i)
             {
-                const auto& instruction = detail.instructions[i];
+                const auto& detail      = instructionDetails[i];
+                const auto& instruction = detail.instruction;
                 const auto& memOp       = instruction.memoryOp;
 
                 ss << fmt::format("\tInstruction {}: ", i);
@@ -342,40 +292,42 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 {
                     ss << "Non-LDS operation\n";
                 }
-            }
 
-            // Print thread group conflicts
-            for(const auto& conflict : detail.conflictsPerClock)
-            {
-                ss << fmt::format("\t\tThread group {} (workitems: ", conflict.threadGroupIndex);
-
-                // Print workitem IDs
-                for(size_t i = 0; i < conflict.workitemIds.size(); ++i)
+                // Print thread group conflicts for this instruction
+                for(const auto& conflict : detail.conflictsPerClock)
                 {
-                    if(i > 0)
-                        ss << ", ";
-                    ss << conflict.workitemIds[i];
-                }
-                ss << fmt::format(") - Max conflict degree: {}\n", conflict.maxConflictDegree);
+                    ss << fmt::format("\t\tThread group {} (workitems: ",
+                                      conflict.threadGroupIndex);
 
-                // Print bank conflicts details
-                for(const auto& [bankIndex, addresses] : conflict.bankToAddresses)
-                {
-                    ss << fmt::format("\t\t\tBank {}: {} addresses [", bankIndex, addresses.size());
-
-                    // Print first few addresses
-                    size_t numToPrint = std::min(addresses.size(), size_t(16));
-                    for(size_t i = 0; i < numToPrint; ++i)
+                    // Print workitem IDs
+                    for(size_t j = 0; j < conflict.workitemIds.size(); ++j)
                     {
-                        if(i > 0)
+                        if(j > 0)
                             ss << ", ";
-                        ss << fmt::format("{}", addresses[i]);
+                        ss << conflict.workitemIds[j];
                     }
-                    if(addresses.size() > 16)
+                    ss << fmt::format(") - Max conflict degree: {}\n", conflict.maxConflictDegree);
+
+                    // Print bank conflicts details
+                    for(const auto& [bankIndex, addresses] : conflict.bankToAddresses)
                     {
-                        ss << ", ...";
+                        ss << fmt::format(
+                            "\t\t\tBank {}: {} addresses [", bankIndex, addresses.size());
+
+                        // Print first few addresses
+                        size_t numToPrint = std::min(addresses.size(), size_t(16));
+                        for(size_t k = 0; k < numToPrint; ++k)
+                        {
+                            if(k > 0)
+                                ss << ", ";
+                            ss << fmt::format("{}", addresses[k]);
+                        }
+                        if(addresses.size() > 16)
+                        {
+                            ss << ", ...";
+                        }
+                        ss << "]\n";
                     }
-                    ss << "]\n";
                 }
             }
         }

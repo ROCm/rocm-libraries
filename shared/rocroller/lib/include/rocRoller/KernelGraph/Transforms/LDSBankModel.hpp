@@ -73,15 +73,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
             std::map<uint, std::vector<uint32_t>> bankToAddresses;
         };
 
-        struct OperationDetail
+        struct InstructionDetail
         {
-            std::vector<MemoryInstruction>   instructions;
-            std::vector<ThreadGroupConflict> conflictsPerClock;
+            MemoryInstruction                instruction;
             uint                             threadsPerClock;
+            std::vector<ThreadGroupConflict> conflictsPerClock;
         };
 
-        std::map<int, OperationDetail> operationDetails;
-        GPUArchitectureGFX             gfx;
+        std::map<int, std::vector<InstructionDetail>> operationDetails;
+        GPUArchitectureGFX                            gfx;
 
         std::string toString() const;
     };
@@ -95,12 +95,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         struct LDSBankAccess
         {
-            int                            operationTag;
-            int                            ldsTag;
-            Direction                      direction;
-            uint                           workitem;
-            uint                           bankIndex;
-            std::vector<MemoryInstruction> instructions;
+            int               operationTag;
+            int               ldsTag;
+            Direction         direction;
+            uint              workitem;
+            uint              bankIndex;
+            MemoryInstruction instruction;
         };
 
         /**
