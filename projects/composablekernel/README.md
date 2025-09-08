@@ -85,11 +85,11 @@ Docker images are available on [DockerHub](https://hub.docker.com/r/rocm/composa
     ```
 
     If you don't set `GPU_TARGETS` on the cmake command line, CK is built for all GPU targets
-    supported by the current compiler (this may take a long time). 
+    supported by the current compiler (this may take a long time).
     Tests and examples will only get built if the GPU_TARGETS is set by the user on the cmake command line.
 
-    NOTE: If you try setting `GPU_TARGETS` to a list of architectures, the build will only work if the 
-    architectures are similar, e.g., `gfx908;gfx90a`, or `gfx1100;gfx1101;gfx11012`. Otherwise, if you 
+    NOTE: If you try setting `GPU_TARGETS` to a list of architectures, the build will only work if the
+    architectures are similar, e.g., `gfx908;gfx90a`, or `gfx1100;gfx1101;gfx11012`. Otherwise, if you
     want to build the library for a list of different architectures,
     you should use the `GPU_ARCHS` build argument, for example `GPU_ARCHS=gfx908;gfx1030;gfx1100;gfx942`.
 
@@ -164,7 +164,7 @@ Additional cmake flags can be used to significantly speed-up the build:
   `batched_gemm_multi_d_dl`. These instances are useful on architectures like the NAVI2x, as most
   other platforms have faster instances, such as `xdl` or `wmma`, available.
 
-* `DISABLE_DPP_KERNELS` (default is OFF) must be set to ON in order not to build instances, such as `gemm_dpp`. 
+* `DISABLE_DPP_KERNELS` (default is OFF) must be set to ON in order not to build instances, such as `gemm_dpp`.
   These instances offer a slightly better performance of fp16 gemms on NAVI2x. But on other architectures faster alternatives are available.
 
 * `CK_USE_FP8_ON_UNSUPPORTED_ARCH` (default is OFF) must be set to ON in order to build instances,

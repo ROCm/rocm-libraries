@@ -151,7 +151,7 @@ static constexpr ck::index_t D2Vec         = 1;
 using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmBlockScale<
                Row, Col, DsLayout, ELayout,
                A0DataType, A1DataType, B0DataType, B1DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-               AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   
+               AElementOp,  BElementOp, CDEElementOp,       GemmSpec,
                BLOCKSIZE, Scale_Block_M, Scale_Block_N, Scale_Block_K,
                MPerBlock,   NPerBlock,    KPerBlock,
                AK1,   BK1,
@@ -166,7 +166,7 @@ using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmBlockScale<
 static constexpr ck::index_t MPerBlock = 64; using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmBlockScale<
                Row, Col, DsLayout, ELayout,
                A0DataType, A1DataType, B0DataType, B1DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-               AElementOp,  BElementOp, CDEElementOp,   GemmSpec,   
+               AElementOp,  BElementOp, CDEElementOp,   GemmSpec,
                256,  Scale_Block_M, Scale_Block_N, Scale_Block_K,
                MPerBlock,   128,    128,
                16,   16,

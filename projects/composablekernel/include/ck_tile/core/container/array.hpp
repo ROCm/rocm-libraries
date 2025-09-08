@@ -150,7 +150,7 @@ struct array
             { AR_AS_COM_();    return reinterpret_cast<array<Tx, vx>&>(data).at(number<I>{}); }
     template <typename Tx, index_t I> CK_TILE_HOST_DEVICE constexpr const auto& get_as(number<I>) const
             { AR_AS_COM_();    return reinterpret_cast<const array<Tx, vx>&>(data).at(number<I>{}); }
-    
+
     template <typename Tx> CK_TILE_HOST_DEVICE constexpr void set_as(index_t i, const Tx & x)
             { AR_AS_COM_();    reinterpret_cast<array<Tx, vx>&>(data).at(i) = x; }
     template <typename Tx, index_t I> CK_TILE_HOST_DEVICE constexpr void set_as(number<I>, const Tx & x)

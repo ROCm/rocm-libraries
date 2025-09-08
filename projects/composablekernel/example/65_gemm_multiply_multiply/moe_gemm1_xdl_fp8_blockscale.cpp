@@ -149,7 +149,7 @@ using DeviceOpInstance                   = ck::tensor_operation::device::DeviceM
     // clang-format off
         <      Row, Col, DsLayout, ELayout,
                A0DataType, A1DataType, B0DataType, B1DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-               AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   
+               AElementOp,  BElementOp, CDEElementOp,       GemmSpec,
                //threadnum, mblock, nblock, kblock
                BLOCKSIZE, Scale_Block_M, Scale_Block_N, Scale_Block_K,
                MPerBlock,   NPerBlock,    KPerBlock,
@@ -157,7 +157,7 @@ using DeviceOpInstance                   = ck::tensor_operation::device::DeviceM
                AK1,   BK1,
                // mn_perxdl
                MNPerXDL,   MNPerXDL,
-               // mn_xdlperwave 
+               // mn_xdlperwave
                MXDLPerWave,  NXDLPerWave,
                // a,b: loadtranfer cluster, cluster order, srcorder,VECDIM, srcpervec, dstpervec, lds_extra
                S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, AK1, AK1, 0,
@@ -171,7 +171,7 @@ using DeviceOpInstance                   = ck::tensor_operation::device::DeviceM
 static constexpr ck::index_t MPerBlock = 64; using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmBlockScale<
                Row, Col, DsLayout, ELayout,
                A0DataType, A1DataType, B0DataType, B1DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-               AElementOp,  BElementOp, CDEElementOp,   GemmSpec,   
+               AElementOp,  BElementOp, CDEElementOp,   GemmSpec,
                256,  Scale_Block_M, Scale_Block_N, Scale_Block_K,
                MPerBlock,   128,    128,
                16,   16,

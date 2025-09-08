@@ -50,7 +50,7 @@ using device_image_to_column_f16_instances =
         //#####################|        Dim|         |           |            |  Size| Block| Block|   Cluster|    Per|
         //#####################|    Spatial|         |           |            |      |      |      |   Lengths| Vector|
         //#####################|           |         |           |            |      |      |      |          |       |
-        // generic instance        
+        // generic instance
         DeviceImageToColumnImpl<NDimSpatial, InLayout,        F16,         F16,    64,    16,    16,   S<8, 8>,     1>,
 
         DeviceImageToColumnImpl<NDimSpatial, InLayout,        F16,         F16,    64,    32,    32,   S<8, 8>,     4>,
@@ -71,7 +71,7 @@ using device_image_to_column_f32_instances =
         //#####################|        Dim|         |           |            |  Size| Block| Block|   Cluster|    Per|
         //#####################|    Spatial|         |           |            |      |      |      |   Lengths| Vector|
         //#####################|           |         |           |            |      |      |      |          |       |
-        // generic instance      
+        // generic instance
         DeviceImageToColumnImpl<NDimSpatial, InLayout,        F32,         F32,    64,    16,    16,   S<8, 8>,     1>,
 
         DeviceImageToColumnImpl<NDimSpatial, InLayout,        F32,         F32,    64,    32,    32,   S<8, 8>,     4>,

@@ -1,7 +1,7 @@
 # ONLY XDL_KERNELS
 set(GEMM_AB_SCALE_INSTANCES)
 
-list(APPEND GEMM_AB_SCALE_INSTANCES 
+list(APPEND GEMM_AB_SCALE_INSTANCES
         # Row, Col
         device_gemm_ab_scale_xdl_f8_f8_bf16/device_gemm_ab_scale_xdl_f8_f8_bf16_mk_nk_mn_128_128_128_comp_default_instance.cpp
         device_gemm_ab_scale_xdl_f8_f8_bf16/device_gemm_ab_scale_xdl_f8_f8_bf16_mk_nk_mn_128_128_128_comp_kpadding_instance.cpp

@@ -24,6 +24,6 @@ if(GPU_TARGETS MATCHES "gfx9")
     add_executable(client_gemm_fastgelu_generic gemm_fastgelu_generic.cpp)
     target_link_libraries(client_gemm_fastgelu_generic PRIVATE composable_kernel::device_gemm_operations)
 
-    add_dependencies(client_gemm_fastgelu_generic_examples client_gemm_add_add_fastgelu_generic 
+    add_dependencies(client_gemm_fastgelu_generic_examples client_gemm_add_add_fastgelu_generic
                  client_gemm_add_fastgelu_generic client_gemm_fastgelu_generic)
 endif()

@@ -10,7 +10,7 @@ VERIFY=$4
 INIT=$5
 LOG=$6
 TIME=$7
-# GEMM kernel benchmarks used by ONNX 
+# GEMM kernel benchmarks used by ONNX
 ########  op  datatype  layout  verify  init  log  time  M___ N___ K___  StrideA StrideB StrideC
  $DRIVER $OP $DATATYPE $LAYOUT $VERIFY $INIT $LOG $TIME  384  768  768        -1     -1      -1
  $DRIVER $OP $DATATYPE $LAYOUT $VERIFY $INIT $LOG $TIME  384  768  2304       -1     -1      -1
@@ -28,4 +28,3 @@ TIME=$7
  $DRIVER $OP $DATATYPE $LAYOUT $VERIFY $INIT $LOG $TIME  24576 1024 3072      -1     -1      -1
  $DRIVER $OP $DATATYPE $LAYOUT $VERIFY $INIT $LOG $TIME  24576 1024 4096      -1     -1      -1
  $DRIVER $OP $DATATYPE $LAYOUT $VERIFY $INIT $LOG $TIME  24576 4096 1024      -1     -1      -1
- 

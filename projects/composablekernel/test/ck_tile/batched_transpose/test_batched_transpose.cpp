@@ -168,7 +168,7 @@ class TestCkTileBatchedTranspose //              N    C    H    W    layout_in==
 // clang-format off
 // the default indent is not sane
 static const auto kTestingValues = ::testing::Values(
-//             N  C   H  W   layout_in==NCHW    
+//             N  C   H  W   layout_in==NCHW
     std::tuple{1, 32, 1, 32, true},
     std::tuple{1, 64, 1, 64, true},
     std::tuple{1, 32, 1, 64, true},

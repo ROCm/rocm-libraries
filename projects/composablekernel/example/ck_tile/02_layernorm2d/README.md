@@ -24,8 +24,8 @@ we support smooth/dynamic quantization for `int8` output, by setting `-fquant=1`
 # assume output int8, hidden_states is [m, n] shape and in fp16/bf16
 # [m, 1]
 per_token_amax, _ = torch.max(
-     input=torch.abs(hidden_states), 
-     dim=-1, 
+     input=torch.abs(hidden_states),
+     dim=-1,
      keepdim=True
 )
 per_token_scale = per_token_amax.to(dtype=torch.float32) / 127.0

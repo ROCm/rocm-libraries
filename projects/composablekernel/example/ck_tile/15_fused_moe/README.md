@@ -28,7 +28,7 @@ summary of the key design of this fused-moe operator:
 * pre-shuffle B matric(weight) to maximize memory throughput. input(activation) keep original layout `[batch, hidden]`.
 * extrem optimized pipeline using block-inline-asm(we call it `micro-kernel` or `uk`), while not breaking the *composable* design of ck
 
-## 
+##
 ```
 // [indexing implementation-1]
 // using M_a as constexpr block_size to partition all tokens into different slices

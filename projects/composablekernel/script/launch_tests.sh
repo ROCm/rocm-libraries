@@ -55,5 +55,3 @@ with open('$TEST_FILE', 'r') as f:
 echo "$command"
 
 eval "$command"
-
-

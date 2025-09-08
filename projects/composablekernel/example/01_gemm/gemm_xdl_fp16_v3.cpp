@@ -22,19 +22,19 @@ using CElementOp = PassThrough;
 static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecialization::MNPadding;
 
 // clang-format off
-using DeviceGemmV2Instance = 
+using DeviceGemmV2Instance =
     ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<
-        ALayout,   BLayout,  CLayout,   
-        ADataType,   BDataType,  CDataType,  AccDataType,  CShuffleDataType, 
-        PassThrough, PassThrough, PassThrough, GemmDefault, 
+        ALayout,   BLayout,  CLayout,
+        ADataType,   BDataType,  CDataType,  AccDataType,  CShuffleDataType,
+        PassThrough, PassThrough, PassThrough, GemmDefault,
         64,
-        16, 16, 
+        16, 16,
         256, 8, 8,
         16,   16,
         1,    1,
-        S<32, 2, 1>,  S<1, 0, 2>,  S<1, 0, 2>, 
+        S<32, 2, 1>,  S<1, 0, 2>,  S<1, 0, 2>,
         2, 8, 8, 0,
-        S<32, 2, 1>,  S<1, 0, 2>,  S<1, 0, 2>, 
+        S<32, 2, 1>,  S<1, 0, 2>,  S<1, 0, 2>,
         2, 8, 8, 0,
         1, 1, S<1, 16, 1, 4>, 4,
         ck::BlockGemmPipelineScheduler::Interwave, ck::BlockGemmPipelineVersion::v2>;

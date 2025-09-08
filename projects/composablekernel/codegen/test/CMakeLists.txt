@@ -4,7 +4,7 @@ file(GLOB TEST_SRCS CONFIGURE_DEPENDS *.cpp)
 
 # TODO: These tests need to be refactored to remove dependency on main ck
 # headers and device compilation.
-set(TESTS_REQUIRE_DEVICE_COMPILE 
+set(TESTS_REQUIRE_DEVICE_COMPILE
   grouped_conv_fwd_multiple_d_v1
   grouped_conv_fwd_multiple_d_v2
   grouped_conv_fwd_multiple_d_v3

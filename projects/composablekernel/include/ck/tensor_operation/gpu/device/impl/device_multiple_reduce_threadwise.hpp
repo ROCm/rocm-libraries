@@ -408,8 +408,8 @@ struct DeviceMultipleReduceThreadWise : public DeviceMultipleReduce<Rank,
         str << "M_C" << BlockSize << "_S" << MThreadSliceSize << ",";
         str << "K_C" << 1 << "_S" << KThreadSliceSize << ",";
         str << "InSrcVectorDim_" << InSrcVectorDim << "_InSrcVectorSize_" << InSrcVectorSize << ",";
-        str << "OutDstVectorSize"; 
-        static_for<0, OutDstVectorSizeSeq::Size(), 1>{}([&](auto I) {str << "_" << OutDstVectorSizeSeq::At(I); }); 
+        str << "OutDstVectorSize";
+        static_for<0, OutDstVectorSizeSeq::Size(), 1>{}([&](auto I) {str << "_" << OutDstVectorSizeSeq::At(I); });
         str << ">";
         // clang-format on
 

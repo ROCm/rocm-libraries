@@ -22,4 +22,3 @@ endfunction(add_moe_smoothquant_example TARGET_NAME MAIN_SRC)
 file(GLOB INSTANCE_SRCS instances/*.cpp)
 
 add_moe_smoothquant_example(tile_example_moe_smoothquant moe_smoothquant.cpp ${INSTANCE_SRCS})
-

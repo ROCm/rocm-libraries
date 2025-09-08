@@ -1193,7 +1193,7 @@ struct FmhaBwdOGradDotOKernel
     {
         // sync with generate.py
         // clang-format off
-        
+
         #define _SS_  std::string
         #define _TS_  std::to_string
         auto pn = [&] () {
@@ -1449,7 +1449,7 @@ struct FmhaBwdConvertQGradKernel
     {
         // sync with generate.py
         // clang-format off
-        
+
         #define _SS_  std::string
         #define _TS_  std::to_string
         auto pn = [&] () {

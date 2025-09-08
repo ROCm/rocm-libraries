@@ -4,4 +4,3 @@ if(GPU_TARGETS MATCHES "gfx9")
         target_link_libraries(test_ck_tile_reduce2d PRIVATE utility)
     endif()
 endif()
-

@@ -1144,14 +1144,14 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
             << CShuffleNXdlPerWavePerShuffle << ", "
             << CBlockTransferScalarPerVector_NWaveNPerXdl;
 
-        if constexpr(is_NGCHW_NGKHW<InLayout, WeiLayout, OutLayout>() || 
+        if constexpr(is_NGCHW_NGKHW<InLayout, WeiLayout, OutLayout>() ||
                         is_NGCDHW_NGKDHW<InLayout, WeiLayout, OutLayout>()) {
                 str << ", TransposeTransferSrcScalarPerVectorAligned: "
                 << TransposeTransferSrcScalarPerVectorAligned <<", "
                 << "TransposeTransferDstScalarPerVectorAligned: " << TransposeTransferDstScalarPerVectorAligned;
             }
 
-            
+
             str << ">";
         // clang-format on
 

@@ -101,4 +101,4 @@ When submitting a Pull Request you should:
 Following the above guidelines ensures a seamless review process and faster assistance from our
 end.
 
-Thank you for your commitment to enhancing the Composable Kernel project! 
+Thank you for your commitment to enhancing the Composable Kernel project!

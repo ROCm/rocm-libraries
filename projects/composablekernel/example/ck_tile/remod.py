@@ -8,7 +8,7 @@ all_files = []
 for p in sorted(Path("./").rglob("*")):
     if p.suffix in ['.hpp', '.cpp']:
         all_files.append(pathlib.PurePath(p))
-            
+
 
 # formatting
 for x in all_files:

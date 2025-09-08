@@ -10,7 +10,7 @@ This experimental kernel is intended for novice CK developers. It introduces the
 ```
 # in the root of ck_tile
 mkdir build && cd build
-# you can replace <arch> with the appropriate architecture 
+# you can replace <arch> with the appropriate architecture
 # (for example gfx90a or gfx942) or leave it blank
 ../script/cmake-ck-dev.sh  ../ <arch>
 # Make the copy kernel executable
@@ -180,7 +180,7 @@ constexpr auto outer_encoding =
 
 - **M0, M1, M2**: Hierarchical distribution along M dimension
   - M0: Number of wave iterations along M
-  - M1: Number of waves along M  
+  - M1: Number of waves along M
   - M2: Number of threads per wave along M
 - **N0, N1**: Distribution along N dimension
   - N0: Number of threads along N
@@ -207,7 +207,7 @@ Combines memory buffer with tensor descriptor:
 auto x_m_n = make_naive_tensor_view<address_space_enum::global>(
     p_x,                        // memory buffer
     make_tuple(M, N),           // dimensions
-    make_tuple(N, 1),           // strides  
+    make_tuple(N, 1),           // strides
     number<S::ThreadTile_N>{},  // per-thread vector length
     number<1>{}                 // guaranteed last dimension vector stride
 );
@@ -237,7 +237,7 @@ struct TileCopyKernel
     CK_TILE_DEVICE void operator()(const XDataType* p_x, XDataType* p_y, index_t M, index_t N) const
     {
         // 1. Create tensor views
-        // 2. Create tile windows  
+        // 2. Create tile windows
         // 3. Iterate over N dimension tiles
         // 4. Load, copy, and store data
     }
@@ -284,7 +284,7 @@ struct TileCopyKernel
 
 ### How Load/Store Works
 
-1. **Load Tile**: 
+1. **Load Tile**:
    - Each thread loads its assigned elements based on tile distribution
    - Vectorized loads enable efficient memory bandwidth utilization
    - Data is distributed to per-thread register buffers

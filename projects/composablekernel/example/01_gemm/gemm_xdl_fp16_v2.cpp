@@ -25,17 +25,17 @@ using CElementOp = PassThrough;
 static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecialization::Default;
 
 // clang-format off
-using DeviceGemmInstance = 
+using DeviceGemmInstance =
     ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV2<
-        ALayout,   BLayout,  CLayout,   
-        F16,   F16,  F16,  F32,  F16, 
-        PassThrough, PassThrough, PassThrough, GemmDefault, 
+        ALayout,   BLayout,  CLayout,
+        F16,   F16,  F16,  F32,  F16,
+        PassThrough, PassThrough, PassThrough, GemmDefault,
         2,   256,
-        256, 256, 
+        256, 256,
         32, 8, 4,
         32,   32,
-        4,    4, 
-        S<4, 64, 1>,  S<1, 0, 2>,  S<1, 0, 2>, 
+        4,    4,
+        S<4, 64, 1>,  S<1, 0, 2>,  S<1, 0, 2>,
         2, 8, 8, 0,
         S<8, 32, 1>,  S<0, 2, 1>,  S<0, 2, 1>,
         1, 8, 4, 0,

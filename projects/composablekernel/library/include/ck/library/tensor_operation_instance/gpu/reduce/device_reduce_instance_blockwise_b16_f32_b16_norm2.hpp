@@ -14,10 +14,10 @@ namespace device {
 namespace instance {
 
 // clang-format off
-// InDataType | AccDataType | OutDataType | Rank | NumReduceDim | ReduceOperation | InElementwiseOp | AccElementwiseOp | PropagateNan | UseIndex 
-extern template void add_device_reduce_instance_blockwise<BF16, F32, BF16, 4, 3, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<BF16, F32, BF16, 4, 3, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&); 
-extern template void add_device_reduce_instance_blockwise<BF16, F32, BF16, 4, 4, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<BF16, F32, BF16, 4, 4, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&); 
-extern template void add_device_reduce_instance_blockwise<BF16, F32, BF16, 4, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<BF16, F32, BF16, 4, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&); 
+// InDataType | AccDataType | OutDataType | Rank | NumReduceDim | ReduceOperation | InElementwiseOp | AccElementwiseOp | PropagateNan | UseIndex
+extern template void add_device_reduce_instance_blockwise<BF16, F32, BF16, 4, 3, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<BF16, F32, BF16, 4, 3, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&);
+extern template void add_device_reduce_instance_blockwise<BF16, F32, BF16, 4, 4, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<BF16, F32, BF16, 4, 4, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&);
+extern template void add_device_reduce_instance_blockwise<BF16, F32, BF16, 4, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<BF16, F32, BF16, 4, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&);
 extern template void add_device_reduce_instance_blockwise<BF16, F32, BF16, 2, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<BF16, F32, BF16, 2, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&);
 // clang-format on
 

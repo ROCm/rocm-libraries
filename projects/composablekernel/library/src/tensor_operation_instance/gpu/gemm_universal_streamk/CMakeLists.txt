@@ -1,7 +1,7 @@
 # ONLY XDL_KERNELS
 set(GEMM_UNIVERSAL_STREAMK_INSTANCES)
 
-list(APPEND GEMM_UNIVERSAL_STREAMK_INSTANCES 
+list(APPEND GEMM_UNIVERSAL_STREAMK_INSTANCES
         device_gemm_xdl_universal_streamk_f16_f16_f16/device_gemm_xdl_universal_streamk_f16_f16_f16_mk_kn_mn_comp_default_instance.cpp
         device_gemm_xdl_universal_streamk_f16_f16_f16/device_gemm_xdl_universal_streamk_f16_f16_f16_mk_kn_mn_comp_kpadding_instance.cpp
         device_gemm_xdl_universal_streamk_f16_f16_f16/device_gemm_xdl_universal_streamk_f16_f16_f16_mk_kn_mn_comp_mnpadding_instance.cpp

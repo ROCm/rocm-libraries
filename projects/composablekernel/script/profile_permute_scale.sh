@@ -40,4 +40,3 @@ TIME=$6
 ########  op  datatype  verify  init  log  time  dims             in_strides_order out_strides_order
  $DRIVER $OP $DATATYPE $VERIFY $INIT $LOG $TIME  8 2 2 2 128 8192 0 1 2 3 4 5      5 4 3 2 1 0
  $DRIVER $OP $DATATYPE $VERIFY $INIT $LOG $TIME  8 2 2 2 128 8192 5 4 3 2 1 0      0 1 2 3 4 5
-

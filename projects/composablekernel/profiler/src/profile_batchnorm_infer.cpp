@@ -47,7 +47,7 @@ class BatchnormInferArgParser
         // clang-format off
         std::cout << "Usage of " << cmd << std::endl;
         std::cout << "--inOutLengths or -D, comma separated list of input tensor dimension lengths, must have 4 integers for nhwc" << std::endl;
-        std::cout << "--reduceDims or -R, comma separated list of dimensions to reduce on" << std::endl;  
+        std::cout << "--reduceDims or -R, comma separated list of dimensions to reduce on" << std::endl;
         std::cout << "--verify or -v, 1/0 to indicate whether to verify the result by comparing with the host-based batch-normalization" << std::endl;
         std::cout << "Arg1: data type (0: fp16, 1: fp32, 5: bp16, 6: fp64)" << std::endl;
         std::cout << "Arg2: init method used for bnScale and bnBias (0=no init, 1=single integer value, 2=scope integer value, 3=decimal value)" << std::endl;

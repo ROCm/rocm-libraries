@@ -151,7 +151,7 @@ struct GridwiseWelfordSecondHalfReduceFirstHalf
 
     // clang-format off
     // Two of the steps of Multiblock BatchNorm Backward
-    // Step 1: Second half of Welford method to calculate mean and variance, as well as getting inv-variance = 1/sqrt(epsilon+variance) 
+    // Step 1: Second half of Welford method to calculate mean and variance, as well as getting inv-variance = 1/sqrt(epsilon+variance)
     // Step 2: First half of Reduction: dbias = sum(dy), dscale = sum(dy * (x-mean) * inv-variance)
     // clang-format on
     __device__ static void Run(const XYGridDesc_M_K& x_grid_desc_m_k,

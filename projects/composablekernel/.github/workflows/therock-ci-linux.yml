@@ -47,7 +47,7 @@ jobs:
           echo "Git version: $(git --version)"
           git config --global --add safe.directory $PWD
           git config fetch.parallel 10
-      
+
       - name: Fetch sources
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12

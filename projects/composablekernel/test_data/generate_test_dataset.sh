@@ -13,7 +13,7 @@ echo "=========================================="
 echo "Checking for PyTorch installation..."
 if ! python3 -c "import torch" 2>/dev/null; then
     echo "PyTorch not found. Creating virtual environment..."
-    
+
     # Create a virtual environment in the current directory
     VENV_DIR="./pytorch_venv"
     if [ ! -d "$VENV_DIR" ]; then
@@ -27,10 +27,10 @@ if ! python3 -c "import torch" 2>/dev/null; then
             exit 1
         }
     fi
-    
+
     # Activate virtual environment
     source $VENV_DIR/bin/activate
-    
+
     # Install PyTorch in virtual environment with ROCm support
     echo "Installing PyTorch and torchvision with ROCm support in virtual environment..."
     # Since we're in a ROCm 6.4.1 environment, we need compatible PyTorch
@@ -46,7 +46,7 @@ if ! python3 -c "import torch" 2>/dev/null; then
         exit 1
     }
     echo "PyTorch installed successfully in virtual environment!"
-    
+
     # Use the virtual environment's Python for the rest of the script
     export PYTHON_CMD="$VENV_DIR/bin/python3"
 else
@@ -91,7 +91,7 @@ echo "Generating model configuration files (mode: $CONFIG_MODE)..."
 $PYTHON_CMD generate_model_configs.py \
     --mode $CONFIG_MODE \
     --output-2d $OUTPUT_DIR/model_configs_2d.csv \
-    --output-3d $OUTPUT_DIR/model_configs_3d.csv 
+    --output-3d $OUTPUT_DIR/model_configs_3d.csv
 
 if [ ! -f "$OUTPUT_DIR/model_configs_2d.csv" ] || [ ! -f "$OUTPUT_DIR/model_configs_3d.csv" ]; then
     echo "ERROR: Failed to generate configuration files"
@@ -143,21 +143,21 @@ while IFS=',' read -r config_name model batch_size channels height width precisi
     [[ "$config_name" =~ ^#.*$ ]] && continue
     [[ "$config_name" == "config_name" ]] && continue  # Skip header
     [[ -z "$config_name" ]] && continue
-    
+
     # Increment counter
     CURRENT_CONFIG=$((CURRENT_CONFIG + 1))
-    
-    
+
+
     # Build configuration command
     CONFIG="--model $model --batch-size $batch_size --channels $channels --height $height --width $width --precision $precision"
     CONFIG_NAME="$config_name"
-    
+
     echo -e "${GREEN}[${CURRENT_CONFIG}/${TOTAL_CONFIGS}]${NC} ${CYAN}2D${NC} ${YELLOW}$CONFIG_NAME${NC}"
-    
+
     # Actual run with logging (suppress stdout, only capture stderr with MIOpen commands)
     MIOPEN_ENABLE_LOGGING_CMD=1 $PYTHON_CMD run_model_with_miopen.py \
         --model $model --batch-size $batch_size --channels $channels --height $height --width $width --precision $precision \
-        > /dev/null 2>> $OUTPUT_DIR/${model}_miopen_log_2d.txt || true 
+        > /dev/null 2>> $OUTPUT_DIR/${model}_miopen_log_2d.txt || true
 
 
 done < $OUTPUT_DIR/model_configs_2d.csv
@@ -174,22 +174,22 @@ echo ""
 
 # Read 3D configurations from CSV (skip comments and header)
 while IFS=',' read -r config_name model batch_size channels temporal_size height width precision; do
-    # Skip comments and empty lines  
+    # Skip comments and empty lines
     [[ "$config_name" =~ ^#.*$ ]] && continue
     [[ "$config_name" == "config_name" ]] && continue  # Skip header
     [[ -z "$config_name" ]] && continue
-    
+
     # Increment counter
     CURRENT_3D_CONFIG=$((CURRENT_3D_CONFIG + 1))
-    
+
 
     # Build configuration command for 3D models
     CONFIG="--model $model --batch-size $batch_size --channels $channels --temporal-size $temporal_size --height $height --width $width --precision $precision"
     CONFIG_NAME="$config_name"
-    
+
     echo -e "${GREEN}[${CURRENT_3D_CONFIG}/${TOTAL_3D_CONFIGS}]${NC} ${CYAN}3D${NC} ${YELLOW}$CONFIG_NAME${NC}"
-    
-    
+
+
     # Actual run with logging (suppress stdout, only capture stderr with MIOpen commands)
     MIOPEN_ENABLE_LOGGING_CMD=1 $PYTHON_CMD run_model_with_miopen.py \
         --model $model --batch-size $batch_size --channels $channels --temporal-size $temporal_size --height $height --width $width --precision $precision \
@@ -209,7 +209,7 @@ for log_file in $OUTPUT_DIR/*_miopen_log_2d.txt; do
         # Extract model name from filename (e.g., resnet_miopen_log_2d.txt -> resnet)
         base_name=$(basename "$log_file" _miopen_log_2d.txt)
         output_csv="$OUTPUT_DIR/${base_name}_cases_2d.csv"
-        
+
         echo "  Converting $log_file -> $output_csv"
         $PYTHON_CMD miopen_to_csv.py \
             --input "$log_file" \
@@ -226,7 +226,7 @@ for log_file in $OUTPUT_DIR/*_miopen_log_3d.txt; do
         # Extract model name from filename (e.g., resnet3d_18_miopen_log_3d.txt -> resnet3d_18)
         base_name=$(basename "$log_file" _miopen_log_3d.txt)
         output_csv="$OUTPUT_DIR/${base_name}_cases_3d.csv"
-        
+
         echo "  Converting $log_file -> $output_csv"
         $PYTHON_CMD miopen_to_csv.py \
             --input "$log_file" \

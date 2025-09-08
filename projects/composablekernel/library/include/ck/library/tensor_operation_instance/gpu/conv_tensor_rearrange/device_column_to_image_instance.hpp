@@ -53,7 +53,7 @@ using device_column_to_image_f16_instances =
         //#####################|           |         |           |            |      |      |      |          |       |
         // generic instance
         DeviceColumnToImageImpl<NDimSpatial, InLayout,        F16,         F16,    64,    16,    16,   S<8, 8>,     1>,
-        
+
         DeviceColumnToImageImpl<NDimSpatial, InLayout,        F16,         F16,    64,    32,    32,   S<8, 8>,     4>,
         DeviceColumnToImageImpl<NDimSpatial, InLayout,        F16,         F16,    64,    64,    64,   S<8, 8>,     8>,
         DeviceColumnToImageImpl<NDimSpatial, InLayout,        F16,         F16,   128,    32,    64,  S<8, 16>,     4>,
@@ -74,7 +74,7 @@ using device_column_to_image_f32_instances =
         //#####################|           |         |           |            |      |      |      |          |       |
         // generic instance
         DeviceColumnToImageImpl<NDimSpatial, InLayout,        F32,         F32,    64,    16,    16,   S<8, 8>,     1>,
-        
+
         DeviceColumnToImageImpl<NDimSpatial, InLayout,        F32,         F32,    64,    32,    32,   S<8, 8>,     4>,
         DeviceColumnToImageImpl<NDimSpatial, InLayout,        F32,         F32,   128,    32,    64,  S<8, 16>,     4>,
         DeviceColumnToImageImpl<NDimSpatial, InLayout,        F32,         F32,   256,    64,    64, S<16, 16>,     4>,

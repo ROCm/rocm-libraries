@@ -55,8 +55,8 @@ using DeviceGemmInstance = ck::tensor_operation::device::DeviceGroupedGemm_Xdl
           BLayout,              //BLayout
           DsLayout,             //DsLayout
           ELayout,              //ELayout
-          KernelADataType,      //ADataType    
-          KernelBDataType,      //BDataType   
+          KernelADataType,      //ADataType
+          KernelBDataType,      //BDataType
           AccDataType,          //AccDataType
           CShuffleDataType,     //CShuffleDataType
           DsDataType,           //DsDataType

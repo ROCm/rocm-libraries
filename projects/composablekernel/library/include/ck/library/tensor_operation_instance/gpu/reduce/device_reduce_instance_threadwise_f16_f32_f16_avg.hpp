@@ -14,10 +14,10 @@ namespace device {
 namespace instance {
 
 // clang-format off
-// InDataType | AccDataType | OutDataType | Rank | NumReduceDim | ReduceOperation | InElementwiseOp | AccElementwiseOp | PropagateNan | UseIndex 
-extern template void add_device_reduce_instance_threadwise<F16, F32, F16, 4, 3, ReduceAdd, PassThrough, UnaryDivide, false, false>(std::vector<DeviceReducePtr<F16, F32, F16, 4, 3, ReduceAdd, PassThrough, UnaryDivide, false, false>>&); 
-extern template void add_device_reduce_instance_threadwise<F16, F32, F16, 4, 4, ReduceAdd, PassThrough, UnaryDivide, false, false>(std::vector<DeviceReducePtr<F16, F32, F16, 4, 4, ReduceAdd, PassThrough, UnaryDivide, false, false>>&); 
-extern template void add_device_reduce_instance_threadwise<F16, F32, F16, 4, 1, ReduceAdd, PassThrough, UnaryDivide, false, false>(std::vector<DeviceReducePtr<F16, F32, F16, 4, 1, ReduceAdd, PassThrough, UnaryDivide, false, false>>&); 
+// InDataType | AccDataType | OutDataType | Rank | NumReduceDim | ReduceOperation | InElementwiseOp | AccElementwiseOp | PropagateNan | UseIndex
+extern template void add_device_reduce_instance_threadwise<F16, F32, F16, 4, 3, ReduceAdd, PassThrough, UnaryDivide, false, false>(std::vector<DeviceReducePtr<F16, F32, F16, 4, 3, ReduceAdd, PassThrough, UnaryDivide, false, false>>&);
+extern template void add_device_reduce_instance_threadwise<F16, F32, F16, 4, 4, ReduceAdd, PassThrough, UnaryDivide, false, false>(std::vector<DeviceReducePtr<F16, F32, F16, 4, 4, ReduceAdd, PassThrough, UnaryDivide, false, false>>&);
+extern template void add_device_reduce_instance_threadwise<F16, F32, F16, 4, 1, ReduceAdd, PassThrough, UnaryDivide, false, false>(std::vector<DeviceReducePtr<F16, F32, F16, 4, 1, ReduceAdd, PassThrough, UnaryDivide, false, false>>&);
 extern template void add_device_reduce_instance_threadwise<F16, F32, F16, 2, 1, ReduceAdd, PassThrough, UnaryDivide, false, false>(std::vector<DeviceReducePtr<F16, F32, F16, 2, 1, ReduceAdd, PassThrough, UnaryDivide, false, false>>&);
 // clang-format on
 

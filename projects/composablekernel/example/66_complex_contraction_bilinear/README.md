@@ -7,5 +7,3 @@
 #arg3: time kernel (0=no, 1=yes)
 ./bin/example_contraction_bilinear_xdl_fp32 1 1 1
 ```
-
-

@@ -347,7 +347,7 @@ if(USE_BITINT_EXTENSION_INT4)
 endif()
 
 if(ENABLE_ASM_DUMP)
-    add_compile_options(--save-temps) 
+    add_compile_options(--save-temps)
     add_compile_options(-Wno-gnu-line-marker)
     message("CK compiled with ENABLE_ASM_DUMP set to ${ENABLE_ASM_DUMP}")
 endif()

@@ -153,19 +153,19 @@ static constexpr ck::index_t BlockSize = 256;
 static constexpr bool MulRoutedWeight  = true;
 
 // clang-format off
-using DeviceOpInstance                     = ck::tensor_operation::device::DeviceMoeGemmMX<      
-    A0Layout,    B0Layout,    DsLayout,    ELayout, 
+using DeviceOpInstance                     = ck::tensor_operation::device::DeviceMoeGemmMX<
+    A0Layout,    B0Layout,    DsLayout,    ELayout,
     A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
-    AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
-    ScaleBlockSize, BlockSize,   
+    AElementOp,  BElementOp, CDEElementOp, GemmSpec,
+    ScaleBlockSize, BlockSize,
     MPerBlock,      NPerBlock,    KPerBlock,
-    16,   16, 
+    16,   16,
     16,   16,
     4,     2,
     S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 1,
     S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 1,
     2,    2,     S<1, 32, 1, 8>, S<8, 1, 1, 1>,
-    ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, 
+    ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3,
     ActOP, Nswizzle, true, MulRoutedWeight, ck::index_t, A0DataType>;
 // clang-format on
 

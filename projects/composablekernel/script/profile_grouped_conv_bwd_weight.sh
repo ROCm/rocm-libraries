@@ -1,5 +1,5 @@
 #!/bin/bash
- 
+
 ## GPU visibility
 export HIP_VISIBLE_DEVICES=0
 DRIVER="../build/bin/ckProfiler"

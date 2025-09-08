@@ -51,4 +51,3 @@ if(GPU_TARGETS MATCHES "gfx9")
 else()
     message(DEBUG "Skipping ck tile add_rmsnorm2d_rdquant_fwd tests for current target")
 endif()
-

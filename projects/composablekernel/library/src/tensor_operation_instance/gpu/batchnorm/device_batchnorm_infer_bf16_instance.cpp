@@ -23,7 +23,7 @@ using Normalize = ck::tensor_operation::element_wise::NormalizeInInfer;
 template <index_t Rank>
 using device_batchnorm_infer_bf16_instances =
      std::tuple <
-        // Tuple<XDataType, MeanDataType, VarDataType, ScaleDataType, BiasDataType>, Tuple<YDataType>, NormalizeOp, Rank, BlockSize, MPerBlock, NPerBlock, MPerThread, NPerThread, ThreadClusterArrangerOrder, Sequence<XVectorSize, MeanDataType, VarDataType, ScaleVectorSize, BiasVectorSize>, Sequence<YVectorSize> 
+        // Tuple<XDataType, MeanDataType, VarDataType, ScaleDataType, BiasDataType>, Tuple<YDataType>, NormalizeOp, Rank, BlockSize, MPerBlock, NPerBlock, MPerThread, NPerThread, ThreadClusterArrangerOrder, Sequence<XVectorSize, MeanDataType, VarDataType, ScaleVectorSize, BiasVectorSize>, Sequence<YVectorSize>
         DeviceElementwiseImpl<Tuple<BF16, F32, F32, BF16, BF16>, Tuple<BF16>, Normalize, Rank, 64,  8,  8, 1, 1, ck::Sequence<1, 0>, Sequence<1, 1, 1, 1, 1>, Sequence<1> >,
         DeviceElementwiseImpl<Tuple<BF16, F32, F32, BF16, BF16>, Tuple<BF16>, Normalize, Rank, 64, 16, 16, 2, 2, ck::Sequence<1, 0>, Sequence<1, 1, 1, 1, 1>, Sequence<1> >,
         DeviceElementwiseImpl<Tuple<BF16, F32, F32, BF16, BF16>, Tuple<BF16>, Normalize, Rank, 64, 16, 16, 2, 2, ck::Sequence<1, 0>, Sequence<2, 1, 1, 1, 1>, Sequence<2> >,

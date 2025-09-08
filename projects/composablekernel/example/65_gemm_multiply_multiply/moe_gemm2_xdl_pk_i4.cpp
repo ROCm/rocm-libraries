@@ -144,7 +144,7 @@ static constexpr bool MulRoutedWeight      = true;
 using DeviceOpInstance                     = ck::tensor_operation::device::DeviceMoeGemm
     // clang-format off
         <      Row, Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-               AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   
+               AElementOp,  BElementOp, CDEElementOp,       GemmSpec,
                BLOCKSIZE,   MPerBlock,   NPerBlock,    KPerBlock,
                AK1,   BK1,
                MNPerXDL,   MNPerXDL,

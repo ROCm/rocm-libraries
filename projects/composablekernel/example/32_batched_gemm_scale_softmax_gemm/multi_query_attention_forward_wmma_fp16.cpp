@@ -72,7 +72,7 @@ static constexpr auto TensorSpecC  = ck::tensor_operation::device::TensorSpecial
 // #define CK_MHA_USE_WAVE_2
 // #define CK_MHA_USE_WAVE_4
 #define CK_MHA_USE_WAVE_8
-using DeviceMHAFactory = 
+using DeviceMHAFactory =
     std::tuple<
 #ifdef CK_MHA_USE_WAVE_1
         // 1 wave, mrepeat = 1, nrepeat = 2, k/o repeat = 1~5
@@ -85,8 +85,8 @@ using DeviceMHAFactory =
             //      Gemm 0
             16, 128, 64, 8,  8,
             //      Gemm 1
-                64, 64, 8,  
-            16, 16, 16, 
+                64, 64, 8,
+            16, 16, 16,
             // Per repeat = wave_m = wave_num, wave_n = 1
             1, 8, 4,
             // ABlockTransfer MK -> K0 M K1
@@ -96,7 +96,7 @@ using DeviceMHAFactory =
             // B1BlockTransfer NL -> L0 N L1
             S<2, 2, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 8, 1, false,
             // CShuffleBlockTransfer MN
-            1, 1, S<1, 16, 1, 2>, 8,             
+            1, 1, S<1, 16, 1, 2>, 8,
             MaskingSpec>,
         ck::tensor_operation::device::DeviceMultiQueryAttentionForward_Wmma<
             NumDimG, NumDimM, NumDimN, NumDimK, NumDimO,
@@ -107,8 +107,8 @@ using DeviceMHAFactory =
             //      Gemm 0
             16, 64, 64, 8,  8,
             //      Gemm 1
-                64, 64, 8,  
-            16, 16, 16, 
+                64, 64, 8,
+            16, 16, 16,
             // Per repeat = wave_m = wave_num, wave_n = 1
             1, 4, 4,
             // ABlockTransfer MK -> K0 M K1
@@ -118,7 +118,7 @@ using DeviceMHAFactory =
             // B1BlockTransfer NL -> L0 N L1
             S<2, 2, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 8, 1, false,
             // CShuffleBlockTransfer MN
-            1, 1, S<1, 16, 1, 2>, 8,             
+            1, 1, S<1, 16, 1, 2>, 8,
             MaskingSpec>,
 #endif
 #ifdef CK_MHA_USE_WAVE_2
@@ -131,8 +131,8 @@ using DeviceMHAFactory =
             //      Gemm 0
             32, 128, 64, 8, 8,
             //      Gemm 1
-                 64, 64, 8,  
-            16, 16, 16, 
+                 64, 64, 8,
+            16, 16, 16,
             // Per repeat = wave_m = wave_num, wave_n = 1
             1, 8, 4,
             // ABlockTransfer MK -> K0 M K1
@@ -142,7 +142,7 @@ using DeviceMHAFactory =
             // B1BlockTransfer NL -> L0 N L1
             S<2, 4, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 4, 1, false,
             // CShuffleBlockTransfer MN
-            1, 1, S<1, 32, 1, 2>, 8,             
+            1, 1, S<1, 32, 1, 2>, 8,
             MaskingSpec>,
         ck::tensor_operation::device::DeviceMultiQueryAttentionForward_Wmma<
             NumDimG, NumDimM, NumDimN, NumDimK, NumDimO,
@@ -153,8 +153,8 @@ using DeviceMHAFactory =
             //      Gemm 0
             32, 64, 64, 8, 8,
             //      Gemm 1
-                64, 64, 8,  
-            16, 16, 16, 
+                64, 64, 8,
+            16, 16, 16,
             // Per repeat = wave_m = wave_num, wave_n = 1
             1, 4, 4,
             // ABlockTransfer MK -> K0 M K1
@@ -164,7 +164,7 @@ using DeviceMHAFactory =
             // B1BlockTransfer NL -> L0 N L1
             S<2, 4, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 4, 1, false,
             // CShuffleBlockTransfer MN
-            1, 1, S<1, 32, 1, 2>, 8,             
+            1, 1, S<1, 32, 1, 2>, 8,
             MaskingSpec>,
 #endif
 #ifdef CK_MHA_USE_WAVE_4
@@ -177,8 +177,8 @@ using DeviceMHAFactory =
             //      Gemm 0
             64, 128, 64, 8, 8,
             //      Gemm 1
-                64, 64, 8,  
-            16, 16, 16, 
+                64, 64, 8,
+            16, 16, 16,
             // Per repeat = wave_m = wave_num, wave_n = 1
             1, 8, 4,
             // ABlockTransfer MK -> K0 M K1
@@ -199,8 +199,8 @@ using DeviceMHAFactory =
             //      Gemm 0
             64, 64, 64, 8, 8,
             //      Gemm 1
-                64, 64, 8,  
-            16, 16, 16, 
+                64, 64, 8,
+            16, 16, 16,
             // Per repeat = wave_m = wave_num, wave_n = 1
             1, 4, 4,
             // ABlockTransfer MK -> K0 M K1
@@ -210,7 +210,7 @@ using DeviceMHAFactory =
             // B1BlockTransfer NL -> L0 N L1
             S<2, 8, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 2, 1, false,
             // CShuffleBlockTransfer MN
-            1, 1, S<1, 64, 1, 2>, 8,             
+            1, 1, S<1, 64, 1, 2>, 8,
             MaskingSpec>,
 #endif
 #ifdef CK_MHA_USE_WAVE_8
@@ -221,10 +221,10 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             256,
             //      Gemm 0
-            128, 128, 64, 8, 8,   
+            128, 128, 64, 8, 8,
             //      Gemm 1
-                  64, 64, 8,  
-            16, 16, 16, 
+                  64, 64, 8,
+            16, 16, 16,
             // Per repeat = wave_m = wave_num, wave_n = 1
             1, 8, 4,
             // ABlockTransfer MK -> K0 M K1
@@ -234,7 +234,7 @@ using DeviceMHAFactory =
             // B1BlockTransfer NL -> L0 N L1
             S<2,  16, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 1, 1, false,
             // CShuffleBlockTransfer MN
-            1, 1, S<1, 128, 1, 2>, 8,             
+            1, 1, S<1, 128, 1, 2>, 8,
             MaskingSpec>,
         ck::tensor_operation::device::DeviceMultiQueryAttentionForward_Wmma<
             NumDimG, NumDimM, NumDimN, NumDimK, NumDimO,
@@ -243,10 +243,10 @@ using DeviceMHAFactory =
             GemmSpec, TensorSpecA, TensorSpecB0, TensorSpecB1, TensorSpecC, 1,
             256,
             //      Gemm 0
-            128, 128, 64, 8, 8,   
+            128, 128, 64, 8, 8,
             //      Gemm 1
-                  64, 64, 8,  
-            16, 16, 16, 
+                  64, 64, 8,
+            16, 16, 16,
             // Per repeat = wave_m = wave_num, wave_n = 1
             1, 8, 4,
             // ABlockTransfer MK -> K0 M K1
@@ -256,7 +256,7 @@ using DeviceMHAFactory =
             // B1BlockTransfer NL -> L0 N L1
             S<2,  16, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 1, 1, false,
             // CShuffleBlockTransfer MN
-            1, 1, S<1, 128, 1, 2>, 8,             
+            1, 1, S<1, 128, 1, 2>, 8,
             MaskingSpec>
 #endif
     >;

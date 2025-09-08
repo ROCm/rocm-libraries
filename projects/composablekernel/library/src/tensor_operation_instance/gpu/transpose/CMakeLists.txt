@@ -1,3 +1,3 @@
-add_instance_library(device_transpose_instance 
+add_instance_library(device_transpose_instance
 	device_transpose_instances_3d.cpp
 )

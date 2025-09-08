@@ -10,14 +10,14 @@ For reference please see `./configs/user_provided_config.json`.
 # Default
 The Tile engine also has a default kernel configuration for providing range of configuration parameter values, which helps users who lack kernel development experience to benchmark. For reference please see in `./configs/default_config.json`
 
-If user does not provide kernel configuration, the tile engine uses default kernel configuration to generate kernel instances and benchmark. 
+If user does not provide kernel configuration, the tile engine uses default kernel configuration to generate kernel instances and benchmark.
 
 ## Build Instructions
 ``` bash
 # in the root of composable kernel create build directory
 mkdir build && cd build
 # build composable kernel
-# replace [Arch] with the appropriate architecture or leave blank and 
+# replace [Arch] with the appropriate architecture or leave blank and
 # replace [Datatype] in comma separated datatypes string (possible datatypes are [fp16])
 # replace [Layout1;Layout2;...] in comma separated datatypes string (possible layouts are [rcr, rrr, crr, ccr])
 # replace "mul" with either of mul,add,passthrough for Elementwise function as Multiply, Add or Passthrough respectively. If this is not specified it is considered as mul by default.
@@ -37,7 +37,7 @@ rm -rf tile_engine/ && make benchmark_gemm_multi_d_[Datatype]_[Layout] -j  # reb
 ## For eaxmple build for gfx942 for datatype with rcr layout
 ``` bash
 mkdir build && cd build
-../script/cmake-ck-dev.sh  ../ gfx942 -DGEMM_MULTI_D_DATATYPE="fp16" -DGEMM_MULTI_D_LAYOUT="rcrr" 
+../script/cmake-ck-dev.sh  ../ gfx942 -DGEMM_MULTI_D_DATATYPE="fp16" -DGEMM_MULTI_D_LAYOUT="rcrr"
 make benchmark_gemm_multi_d_fp16_rcrr -j
 
 ## benchmark_gemm inputs
@@ -67,7 +67,7 @@ make benchmark_gemm_multi_d_fp16_rcrr -j
                   -pad_n    Whether pad or not in n direction. Possible values are true or false. Default is false.
                   -pad_k    Whether pad or not in k direction. Possible values are true or false. Default is false.
 
-Note: pipeline, scheduler, epilogue, pad_m, pad_n, pad_k should be one of the options specified in user_provided_config.json 
+Note: pipeline, scheduler, epilogue, pad_m, pad_n, pad_k should be one of the options specified in user_provided_config.json
 ```
 Note: In `./configs/user_provided_config.json` pipeline, scheduler, epilogue, pad_m, pad_n, pad_k should be from one of the values specified above.
 
@@ -76,9 +76,9 @@ Note: In `./configs/user_provided_config.json` pipeline, scheduler, epilogue, pa
 The following JSON file specifies parameters used to generate and build GEMM kernels across all possible combinations of pipelines, schedulers, epilogues with different tile and warp sizes.
 
 ```json
-{     
+{
     /// other parameters ///
-    
+
     "tile_m": {
       "values": [256]
     },
@@ -105,6 +105,6 @@ The following JSON file specifies parameters used to generate and build GEMM ker
 
 At runtime, a specific subset of the generated kernels can be selected using command-line arguments.
 ``` bash
-./bin/benchmark_gemm_multi_d_[Datatype]_[Layout] -pipeline=compv3 -scheduler=intrawave -epilogue=cshuffle 
+./bin/benchmark_gemm_multi_d_[Datatype]_[Layout] -pipeline=compv3 -scheduler=intrawave -epilogue=cshuffle
 ```
 The above command runs kernels configured with the compv3 pipeline, intrawave scheduler, and cshuffle epilogue, while sweeping over different BlockTile sizes, WarpTile sizes, and WarpTile mappings.

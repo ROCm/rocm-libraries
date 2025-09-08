@@ -46,8 +46,8 @@ static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecializa
 
 using DeviceGemmInstance = ck::tensor_operation::device::DeviceGemmXdlSplitKCShuffle
     // clang-format off
-        <KernelADataType,      //ADataType    
-         KernelBDataType,      //BDataType   
+        <KernelADataType,      //ADataType
+         KernelBDataType,      //BDataType
          CDataType,            //EDataType
          AccDataType,          //AccDataType
          ALayout,              //ALayout

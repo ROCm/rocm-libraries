@@ -74,4 +74,3 @@ add_instance_library(device_mha_instance ${device_files})
 if (TARGET device_mha_instance)
   add_dependencies(device_mha_instance generate_cpp_files)
 endif()
-

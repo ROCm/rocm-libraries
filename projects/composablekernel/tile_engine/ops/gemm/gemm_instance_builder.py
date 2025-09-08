@@ -466,13 +466,13 @@ struct SelectedKernel {{
         ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, WarpPerBlock_K>,
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>,
         false, false>;
-    
+
     // Tile partitioner
     using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;
-    
+
     // Traits
     using Traits = ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout, NumWaveGroups>;
-    
+
     // Pipeline problem
     using GemmPipelineProblem = ck_tile::GemmPipelineProblem<
         ADataType,
@@ -480,7 +480,7 @@ struct SelectedKernel {{
         AccDataType,
         TileShape,
         Traits>;
-    
+
     // Base pipeline for hot loop detection
     using BaseGemmPipeline = {base_pipeline_map.get(pipeline, "ck_tile::BaseGemmPipelineAgBgCrMem")}<GemmPipelineProblem>;
 
@@ -490,7 +490,7 @@ struct SelectedKernel {{
         const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(K_split);
         const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
         const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
-        
+
         float ave_time{{0}};
 
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_, const auto memory_operation_) {{
@@ -511,9 +511,9 @@ struct SelectedKernel {{
                 scheduler,
                 has_hot_loop_v,
                 tail_number_v>;
-            
+
             using GemmPipeline = {pipeline_impl_map.get(pipeline, "ck_tile::GemmPipelineAgBgCrCompV3")}<UniversalGemmProblem>;
-            
+
             // Epilogue
 """
 
@@ -538,7 +538,7 @@ struct SelectedKernel {{
                 TransposeC,                  // isCTransposed_
                 memory_operation,            // MemoryOperation_
                 NumWaveGroups>;              // kNumWaveGroups_
-            
+
             using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;
 """
         else:  # default epilogue
@@ -559,39 +559,39 @@ struct SelectedKernel {{
                 WarpTileN,  // kNPerXdl_
                 WarpTileK,  // kKPerXdl_
                 TransposeC>;  // isCTransposed_
-            
+
             using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;
 """
 
         instance_code += f"""
-            
+
             // Kernel type
             using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
-            
+
             // Make kernel arguments
             auto kargs = GemmKernel::MakeKernelArgs(args);
-            
+
             if (!GemmKernel::IsSupportedArgument(kargs)) {{
                 throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!");
             }}
-            
+
             // Get grid and block sizes
             const dim3 grids = {"GemmKernel::MaxOccupancyGridSize(stream)" if persistent == "true" else "GemmKernel::GridSize(args.M, args.N, args.k_batch)"};
             const dim3 blocks = GemmKernel::BlockSize();
-            
+
             if(stream.log_level_ > 0) {{
                 std::cout << "Launching kernel with args: " << GemmKernel::GetName() << '\\n'
                           << "grid: {{" << grids.x << ", " << grids.y << ", " << grids.z << "}}"
                           << ", blocks: {{" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}}"
                           << std::endl;
             }}
-            
+
             // Launch kernel
             constexpr int kBlockPerCu = 1;
             ave_time = ck_tile::launch_kernel(
                 stream,
                 ck_tile::make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
-            
+
             return ave_time;
         }};
 

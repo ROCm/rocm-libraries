@@ -50,7 +50,7 @@ Operations=5
 for op in $Operations; do
     set -x
     #######        datatype   layout             reduce dims  op     acctype   verify  init  repeats
-    $DRIVER reduce $PRECISION -D 256,14,14,1024  -R 0,1,2     -O $op $ACCTYPE  $VERIFY $INIT $NREPEAT 
+    $DRIVER reduce $PRECISION -D 256,14,14,1024  -R 0,1,2     -O $op $ACCTYPE  $VERIFY $INIT $NREPEAT
     $DRIVER reduce $PRECISION -D 256,28,28,128   -R 0,1,2     -O $op $ACCTYPE  $VERIFY $INIT $NREPEAT
     $DRIVER reduce $PRECISION -D 256,58,58,128   -R 0,1,2     -O $op $ACCTYPE  $VERIFY $INIT $NREPEAT
     $DRIVER reduce $PRECISION -D 256,7,7,2048    -R 0,1,2     -O $op $ACCTYPE  $VERIFY $INIT $NREPEAT
@@ -74,5 +74,4 @@ for op in $Operations; do
     $DRIVER reduce $PRECISION -D 128,7,7,512     -R 0,1,2     -O $op $ACCTYPE  $VERIFY $INIT $NREPEAT
     $DRIVER reduce $PRECISION -D 128,56,56,64    -R 0,1,2     -O $op $ACCTYPE  $VERIFY $INIT $NREPEAT
     set +x
-done 
-
+done

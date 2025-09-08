@@ -29,7 +29,7 @@ file(GLOB SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_library(ck_host STATIC ${SOURCES})
 target_link_libraries(ck_host PRIVATE ck_headers)
 
-set_target_properties(ck_host PROPERTIES 
+set_target_properties(ck_host PROPERTIES
     LINKER_LANGUAGE CXX
     POSITION_INDEPENDENT_CODE ON)
 
@@ -54,4 +54,3 @@ rocm_export_targets(
 if(BUILD_TESTING)
     add_subdirectory(test)
 endif()
-

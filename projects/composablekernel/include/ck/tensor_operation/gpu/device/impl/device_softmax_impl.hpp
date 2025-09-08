@@ -399,12 +399,12 @@ struct DeviceSoftmaxImpl : public DeviceSoftmax<InDataType,
         auto str = std::stringstream();
 
         // clang-format off
-        str << "DeviceReduceSoftmax<" 
+        str << "DeviceReduceSoftmax<"
             << Rank << "," << NumReduceDim << "," << BlockSize << ","
             << "M_C" << MThreadClusterSize << "_S" << MThreadSliceSize << ","
             << "K_C" << KThreadClusterSize << "_S" << KThreadSliceSize << ","
-            << "InSrcVectorDim_" << InSrcVectorDim 
-            << "_InSrcVectorSize_" << InSrcVectorSize 
+            << "InSrcVectorDim_" << InSrcVectorDim
+            << "_InSrcVectorSize_" << InSrcVectorSize
             << "_OutDstVectorSize_" << OutDstVectorSize << ">";
         // clang-format on
 

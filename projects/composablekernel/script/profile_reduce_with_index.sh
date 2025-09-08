@@ -66,5 +66,4 @@ for op in $Operations; do
         $DRIVER reduce $PRECISION -D 128,56,56,64    -R 0,1,2     -O $op -I $use_idx  $VERIFY $INIT $NREPEAT
         set +x
     done
-done 
-
+done

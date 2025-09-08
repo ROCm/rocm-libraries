@@ -60,4 +60,3 @@ bin/test_reduce_no_index -D 64,4,280,82  -R 2  5 2
 bin/test_reduce_no_index -D 64,4,280,82  -R 3  5 2
 
 set +x
-

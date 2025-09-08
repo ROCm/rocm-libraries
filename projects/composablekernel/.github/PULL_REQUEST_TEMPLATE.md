@@ -17,4 +17,3 @@ Please put an `x` into the boxes that apply. You can also fill these out after c
 ## Discussion
 
 If this is a relatively large or complex change, feel free to start a discussion by explaining why you chose the solution you did and what alternatives you considered
-

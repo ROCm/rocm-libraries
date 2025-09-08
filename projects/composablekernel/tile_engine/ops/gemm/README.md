@@ -409,7 +409,7 @@ import json
 
 # Run benchmark with JSON output
 result = subprocess.run([
-    './bin/benchmark_gemm_fp16_rcr_...', 
+    './bin/benchmark_gemm_fp16_rcr_...',
     '-m=1024', '-n=1024', '-k=1024',
     '-json_output=true'
 ], capture_output=True, text=True)

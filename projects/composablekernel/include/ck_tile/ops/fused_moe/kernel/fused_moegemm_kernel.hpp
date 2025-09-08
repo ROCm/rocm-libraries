@@ -33,7 +33,7 @@
 //
 // * Note on token_id_per_expert/sorted_token_ids_ptr data:
 // currently we do not have topk information from the data of token_id_per_expert/sorted_token_ids_ptr.
-// In some cases(like smooth-quant), we need topk information to indexing into tokens quant from 
+// In some cases(like smooth-quant), we need topk information to indexing into tokens quant from
 // different expert smooth quant. So we modify the number stored inside token_id_per_expert/sorted_token_ids_ptr
 //
 //       32bit    0........23 24.....31 bit

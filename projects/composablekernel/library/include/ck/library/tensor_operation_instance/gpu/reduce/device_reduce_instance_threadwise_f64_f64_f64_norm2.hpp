@@ -14,10 +14,10 @@ namespace device {
 namespace instance {
 
 // clang-format off
-// InDataType | AccDataType | OutDataType | Rank | NumReduceDim | ReduceOperation | InElementwiseOp | AccElementwiseOp | PropagateNan | UseIndex 
-extern template void add_device_reduce_instance_threadwise<F64, F64, F64, 4, 3, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 3, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&); 
-extern template void add_device_reduce_instance_threadwise<F64, F64, F64, 4, 4, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 4, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&); 
-extern template void add_device_reduce_instance_threadwise<F64, F64, F64, 4, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&); 
+// InDataType | AccDataType | OutDataType | Rank | NumReduceDim | ReduceOperation | InElementwiseOp | AccElementwiseOp | PropagateNan | UseIndex
+extern template void add_device_reduce_instance_threadwise<F64, F64, F64, 4, 3, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 3, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&);
+extern template void add_device_reduce_instance_threadwise<F64, F64, F64, 4, 4, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 4, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&);
+extern template void add_device_reduce_instance_threadwise<F64, F64, F64, 4, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&);
 extern template void add_device_reduce_instance_threadwise<F64, F64, F64, 2, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 2, 1, ReduceAdd, UnarySquare, UnarySqrt, false, false>>&);
 // clang-format on
 

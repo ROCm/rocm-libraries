@@ -61,15 +61,15 @@ for BENCH in $BENCHMARKS; do
     COUNTER=$((COUNTER + 1))
     BENCH_NAME=$(basename "$BENCH")
     echo -e "\n${GREEN}[$COUNTER/$NUM_BENCHMARKS] Running: $BENCH_NAME${NC}"
-    
+
     for SIZE in "${SIZES[@]}"; do
         echo -e "  Testing size: ${SIZE}x${SIZE}x${SIZE}"
-        
+
         # Run with verification
         "$BENCH" -m=$SIZE -n=$SIZE -k=$SIZE -verify=2 -warmup=10 -repeat=20 \
                  -csv_filename="$RESULTS_FILE" -csv_format=simple \
                  2>&1 | grep -E "(Time:|Performance:|Verification:|Error)"
-        
+
         if [ ${PIPESTATUS[0]} -ne 0 ]; then
             echo -e "  ${RED}Benchmark failed!${NC}"
         fi

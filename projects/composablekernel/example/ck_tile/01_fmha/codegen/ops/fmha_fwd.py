@@ -163,7 +163,7 @@ float fmha_fwd(fmha_fwd_traits t, fmha_fwd_args a, const ck_tile::stream_config&
     [[maybe_unused]] auto get_num_blocks = [&](unsigned kM0) {{
         return get_num_thread_blocks(a.batch, a.nhead_q, a.max_seqlen_q, kM0);
     }};
-    
+
     const bool has_load_tr = ck_tile::is_load_tr_supported();
 
 {F_dispatch}
@@ -248,11 +248,11 @@ class FmhaFwdApiTrait:
             if self.spad == 't' : return f'true /*a.seqlen_q % {self.bm0} != 0*/'  # TODO: order of get_pipelines() matters! (ugly)
             else :                return f'a.seqlen_q % {self.bm0} == 0'
         else: assert False
-    
+
     @property
     def seqtune(self) -> str:
         if self.bm0 == 128: return 'true/*fall back to largest tile*/'                  # group mode only generate spad/skpad == true
-        else: 
+        else:
             return f'a.seqlen_q <= {self.bm0}'
 
     @property
@@ -351,7 +351,7 @@ class FmhaFwdPipeline:
 
         if self.F_squant == 't' : n += '_squant'
         else: n += '_nsquant'
-        
+
         if self.F_trload == 't' : n += '_trload'
         else: n += '_ntrload'
 
@@ -378,7 +378,7 @@ class FmhaFwdApiPool:
             "t": "has_load_tr",
             "f": "true"
         }
-        
+
         per_tr_load =str()
         for tr_load in ["t", "f"]:
             per_dtypes=str()

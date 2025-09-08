@@ -917,7 +917,7 @@ namespace impl{
 template<index_t N>
 CK_TILE_DEVICE void insert_dummy_dep_per_dword(array<float, N>& b)
 {
-    constexpr auto kSize = remove_cvref_t<decltype(b)>::size(); 
+    constexpr auto kSize = remove_cvref_t<decltype(b)>::size();
     static_for<0, kSize, 1>{}([&](auto i){
         asm volatile(" " : : "v"(b.get(number<i>{})) : "memory");
     });

@@ -107,19 +107,19 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         DeviceOp::MakeB1GridDescriptor(b1_gs_os_ns_lengths, b1_gs_os_ns_strides);
     const auto c_grid_desc_m_n =
                   DeviceOp::Transform::MakeCGridDescriptor_M_N(c_gs_ms_os_lengths, c_gs_ms_os_strides);
-    const auto c_grid_desc_mblock_mperblock_nblock_nperblock = 
+    const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
                   GridwiseOp::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(c_grid_desc_m_n);
     const auto block_2_ctile_map = GridwiseOp::MakeDefaultBlock2CTileMap(c_grid_desc_m_n, 1, 1);
 
     const auto a_grid_desc_g_m_k =
                   DeviceOp::Transform::MakeAGridDescriptor_G_M_K(a_gs_ms_ks_lengths, a_gs_ms_ks_strides);
-    const auto b0_grid_desc_g_l_k = 
+    const auto b0_grid_desc_g_l_k =
                   DeviceOp::Transform::MakeB0GridDescriptor_G_N_K(b0_gs_ns_ks_lengths, b0_gs_ns_ks_strides);
-    const auto b1_grid_desc_g_n_l = 
+    const auto b1_grid_desc_g_n_l =
                   DeviceOp::Transform::MakeB1GridDescriptor_G_N_K(b1_gs_os_ns_lengths, b1_gs_os_ns_strides);
     const auto c_grid_desc_g_m_n =
                   DeviceOp::Transform::MakeCGridDescriptor_G_M_N(c_gs_ms_os_lengths, c_gs_ms_os_strides);
-    const auto compute_base_ptr_of_batch = 
+    const auto compute_base_ptr_of_batch =
                   typename DeviceOp::ComputeBasePtrOfStridedBatch{a_grid_desc_g_m_k, b0_grid_desc_g_l_k, b1_grid_desc_g_n_l, c_grid_desc_g_m_n};
     index_t batch_count = c_grid_desc_g_m_n.GetLength(Number<0>{});
     const auto c0_matrix_mask = typename DeviceOp::C0MatrixMask{b0_grid_desc_g_l_k.GetLength(Number<1>{})};

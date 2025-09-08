@@ -31,11 +31,11 @@ static constexpr bool PermuteB         = true;
 static constexpr ck::index_t KPerBlock = 128;
 
 // clang-format off
-using DeviceGemmV2Instance = 
+using DeviceGemmV2Instance =
     ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<
-        ALayout,   BLayout,  CLayout,   
-        ADataType, BDataType, CDataType, AccDataType, CShuffleDataType, 
-        AElementOp, BElementOp, CElementOp, GemmDefault, 
+        ALayout,   BLayout,  CLayout,
+        ADataType, BDataType, CDataType, AccDataType, CShuffleDataType,
+        AElementOp, BElementOp, CElementOp, GemmDefault,
         256,
         128, 128,
         KPerBlock, 16, 32,

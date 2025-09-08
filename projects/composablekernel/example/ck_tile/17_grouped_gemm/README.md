@@ -1,6 +1,6 @@
 # Grouped Gemm
 
-Grouped General Matrix Multiplication (Grouped GEMM) is a technique used in GPU computing and high-performance computing to batch together multiple independent GEMM operations (matrix multiplications) into a single kernel launch in order to improve performance and efficiency. This folder contains Grouped GEMM examples that use the ck_tile tile-programming implementation.  
+Grouped General Matrix Multiplication (Grouped GEMM) is a technique used in GPU computing and high-performance computing to batch together multiple independent GEMM operations (matrix multiplications) into a single kernel launch in order to improve performance and efficiency. This folder contains Grouped GEMM examples that use the ck_tile tile-programming implementation.
 
 ## Quick Tour for New Users
 
@@ -39,9 +39,9 @@ Where:
 - `stride_Bs` is the stride  values for matrix B.
 - `stride_Cs` is the stride  values for matrix C.
 
-### HostTensor and Device Memory Buffers (for CPU and GPU) 
+### HostTensor and Device Memory Buffers (for CPU and GPU)
 Each parameter `Ms`, `Ns`, `Ks`, `stride_As`, `stride_Bs` and `stride_Cs` contains values for more than one matrix, meaning different matrix sizes and strides can be used for different grouped GEMM computations.
-The next step is to properly load the input values. For each input matrix, `A` and `B`, and for each output matrix, `C`, you need to create both `HostTensor` and `DeviceMemory`, where: 
+The next step is to properly load the input values. For each input matrix, `A` and `B`, and for each output matrix, `C`, you need to create both `HostTensor` and `DeviceMemory`, where:
 - `HostTensor` represents the matrix data on the host (CPU). It stores the data before they are transferred to the device for computation.
 - `DeviceMemory` represents the matrix data on the device (GPU). This will store the data on the GPU for computation during the Grouped GEMM operation.
 
@@ -67,7 +67,7 @@ Now it's time to allocate memory on the device (GPU) and transfer the data from 
 std::vector<std::unique_ptr<ck_tile::DeviceMem>> a_m_k_dev_buf;
 std::vector<std::unique_ptr<ck_tile::DeviceMem>> b_k_n_dev_buf;
 std::vector<std::unique_ptr<ck_tile::DeviceMem>> c_m_n_dev_buf;
-``` 
+```
 Where:
 - `a_m_k_dev_buf` is the buffer used for storing matrix A on the GPU.
 - `b_k_n_dev_buf` is the buffer used for storing matrix B on the GPU.
@@ -86,7 +86,7 @@ auto get_default_stride(std::size_t row, std::size_t col, std::size_t stride, bo
 }
 ```
 
-Where: 
+Where:
 - `is_row_major` is a bool template parameter that determines whether the storage order is row-major (true) or column-major (false).
 - `row` is the number of rows in the matrix.
 - `col` is the number of columns in the matrix.
@@ -141,7 +141,7 @@ The grouped GEMM examples include two advanced optimization features:
 #### Weight Preshuffle
 Weight preshuffle is an optimization technique that reorganizes the B matrix (weights) in memory to improve data access patterns and reduce memory bandwidth requirements. This is particularly beneficial for inference workloads where the same weights are reused across multiple batches.
 
-- **Implementation**: Available in `grouped_gemm_preshuffle.cpp` 
+- **Implementation**: Available in `grouped_gemm_preshuffle.cpp`
 - **Configuration**: Uses `GemmConfigPreshuffleDecode` template configuration
 - **Constraints**: Currently supports only A(Row major) + B(Column major) → C(Row major) layouts
 - **Benefits**: Improved memory efficiency and reduced data movement

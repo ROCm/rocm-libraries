@@ -80,7 +80,7 @@ Table of supported cases by instance factory with fused output elementwise opera
 * **Add** - fp16 (int8 for B matrix)  for Row/Column/Row, bf16 (int8 for B matrix) for Row/Column/Row
 * **Bilinear** - fp16, int8
 * **Gelu** - fp16
-* **Multiply + Add** - fp16 for Row/Column/Row and Row/Row/Row, fp16 (int8 for B matrix, fp32 for Bias) for Row/Column/Row and Row/Row/Row, 
+* **Multiply + Add** - fp16 for Row/Column/Row and Row/Row/Row, fp16 (int8 for B matrix, fp32 for Bias) for Row/Column/Row and Row/Row/Row,
 * **Quantization** - int8
 
 ## GEMM V2 (Universal GEMM)
@@ -101,7 +101,7 @@ This implementation allows user to split K dimension between work groups. This i
 List of the device operations for in CK:
 
 * **DeviceGemm_Xdl_CShuffleV3** - Device operation with XDL instructions with CShuffle optimization for more optimized data store.
-* **DeviceGemm_Xdl_CShuffleV3R1** - Device operation with XDL instructions with CShuffle optimization for more optimized data store. This implementation perform reduction on splitted K dimension after GEMM instead of AtomicAdd instruction. 
+* **DeviceGemm_Xdl_CShuffleV3R1** - Device operation with XDL instructions with CShuffle optimization for more optimized data store. This implementation perform reduction on splitted K dimension after GEMM instead of AtomicAdd instruction.
 
 Table of supported cases by instance factory with XDL instruction for Row/Row/Row, Row/Column/Row, Column/Row/Row or Column/Column/Row:
 

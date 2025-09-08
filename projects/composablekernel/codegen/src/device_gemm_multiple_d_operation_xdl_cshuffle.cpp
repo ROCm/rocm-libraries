@@ -193,7 +193,7 @@ std::vector<Operation_Xdl_CShuffle> Operation_Xdl_CShuffle::CreateOperations(
 // CBlockTransferClusterLengths|  CBlockTransfer
 //         _MBlock_MWaveMPerXdl| ScalarPerVector
 //         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl
-//                             |                
+//                             |
   {              S<1, 32, 1, 8>,               8},
   {              S<1, 32, 1, 8>,               8},
   {              S<1, 16, 1, 8>,               8},

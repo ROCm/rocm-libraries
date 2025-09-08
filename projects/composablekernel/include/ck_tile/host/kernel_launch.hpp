@@ -115,20 +115,20 @@ CK_TILE_HOST double timing_loop_impl(TimerType timer,
  *
  * this is the function to launch arbitrary number of kernels with optional timer(selected by stream_config)
  * the callables should have signature as "operator()(const stream_config& s){ ... }" to call
- * 
+ *
  * the simplest way is pass in a lambda function, with "[=](const stream_config& s){ call_your_kernel_here() }"
  * as signature, for the callable (pay attention to the capture list)
- * 
+ *
  * e.g.
  *  ck_tile::launch_kernel(s,
  *                      [=](const stream_config& s){ hipMemset(ptr, 0, size) },
  *                      [=](const stream_config& s){ some_kernel<<<grids, blocks>>>(arg); }
  *                      );
- * 
+ *
  * if you use ck_tile kernel, or similiar to this style (structure with "static __device__ operator()(...){}")
  * you can pass your kernel to ck_tile::make_kernel(), which will create a anonymous functor for you,
  * then pass it to ck_tile::launch_kernel()
- * 
+ *
  * e.g.
  *  ck_tile::launch_kernel(s,
  *                      ck_tile::make_kernel<T0, B0>(kernel_0{}, grids0, blocks0, 0, kargs0),

@@ -1790,8 +1790,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                     << TransposeTransferInScalarPerVectorAligned <<", "
                     << "TransposeTransferOutScalarPerVectorAligned: " << TransposeTransferOutScalarPerVectorAligned;
                 }
-    
-                
+
+
             str << ">";
 
         return str.str();

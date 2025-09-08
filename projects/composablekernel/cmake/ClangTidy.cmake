@@ -159,4 +159,3 @@ function(clang_tidy_check TARGET)
         endif()
     endforeach()
 endfunction()
-

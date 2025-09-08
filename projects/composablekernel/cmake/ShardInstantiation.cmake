@@ -4,7 +4,7 @@
 # Developers can use ck::util::generate_sharded_instantiations to generate the instantiation functions,
 # which can be placed the TEMPLATE_FILE (typically a .in file).
 
-# This CMake function generates the instantiation functions and a caller function that calls all the instantiation 
+# This CMake function generates the instantiation functions and a caller function that calls all the instantiation
 # functions. The ck::util::generate_sharded_instantiations function allows us to generate an arbitrary number of
 # shards (NUM_SHARDS). This function loops over the shards, generates an instantiation function for each shard,
 # and generates a caller function that calls all the instantiation functions.
@@ -62,7 +62,7 @@ function(generate_sharded_instantiations)
     message(STATUS "Generating sharded instantiations for target: ${GEN_SHARDED_INSTANCES_NAME}")
 
     set(INSTANCES "${GEN_SHARDED_INSTANCES_NAME}")
-    
+
     # Generate the inc file with the template function defintions.
     # This include file will hold the template function definitions and a using alias for all the shard
     # instantiation functions.

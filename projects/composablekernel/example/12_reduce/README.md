@@ -14,7 +14,7 @@
 Result
 ```
 ./bin/example_reduce_blockwise -D 16,64,32,960 -v 1 0 2 1
-launch_and_time_kernel: grid_dim {240, 1, 1}, block_dim {256, 1, 1} 
+launch_and_time_kernel: grid_dim {240, 1, 1}, block_dim {256, 1, 1}
 Warm up 1 time
 Start running 10 times...
 Perf: 0.238063 ms, 264.285 GB/s, DeviceReduceBlockWise<256,M_C4_S1,K_C64_S1,InSrcVectorDim_0_InSrcVectorSize_1_OutDstVectorSize_1>

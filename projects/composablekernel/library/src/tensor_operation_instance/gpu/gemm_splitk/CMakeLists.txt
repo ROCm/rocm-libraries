@@ -1,7 +1,7 @@
 # ONLY XDL_KERNELS
 set(GEMM_SPLITK_INSTANCES)
 
-list(APPEND GEMM_SPLITK_INSTANCES 
+list(APPEND GEMM_SPLITK_INSTANCES
 	device_gemm_xdl_splitk_f32_f32_f32_mk_kn_mn_instance.cpp
 	device_gemm_xdl_splitk_f32_f32_f32_mk_nk_mn_instance.cpp
 	device_gemm_xdl_splitk_f32_f32_f32_km_kn_mn_instance.cpp

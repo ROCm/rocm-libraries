@@ -114,7 +114,7 @@ std::vector<Operation_Conv_Fwd_Xdl_Cshuffle> Operation_Conv_Fwd_Xdl_Cshuffle::Cr
 // CBlockTransferClusterLengths|  CBlockTransfer
 //         _MBlock_MWaveMPerXdl| ScalarPerVector
 //         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl
-//                             |                
+//                             |
   {              S<1, 16, 1, 4>,               1},
   {              S<1, 32, 1, 8>,               8},
   {              S<1, 32, 1, 8>,               8},
@@ -192,7 +192,7 @@ extern "C" __global__ void run_${name}(
     const ${BElementwiseOperation} b_element_op,
     const ${CDEElementwiseOperation} cde_element_op
 ){
-    
+
 
     auto arg = DeviceConv::Argument(in_dev,
                                     wei_dev,
@@ -218,7 +218,7 @@ extern "C" __global__ void run_${name}(
     {
 	printf("Arguement is not supported.\n");
 	return;
-    };    
+    };
 
     constexpr ck::LoopScheduler LoopSched = ck::make_default_loop_scheduler();
 
@@ -261,7 +261,7 @@ extern "C" __global__ void run_${name}(
 		     arg.block_2_etile_map_,
 		     arg.compute_ptr_offset_of_batch_
 		    );
-				    
+
 }
 )";
 

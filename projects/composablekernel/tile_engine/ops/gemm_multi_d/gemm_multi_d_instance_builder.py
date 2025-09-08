@@ -385,7 +385,7 @@ struct GemmKernelMultiD {{
 
     static float launch(ck_tile::GemmMultiDHostArgs<DsDataType::size()>& args, const ck_tile::stream_config& stream) {{
         static constexpr bool DoubleSmemBuffer ={"true" if pipeline == "compv4" else "false"};
-        
+
         static constexpr bool TransposeC = false;
 
         static constexpr int kBlockPerCu                         = 1;
@@ -462,7 +462,7 @@ struct GemmKernelMultiD {{
             ave_time = ck_tile::launch_kernel(stream,
                                           ck_tile::make_kernel<kBlockPerCu>(
                                               Kernel{{}}, grids, blocks, 0, kargs));
-                
+
             return ave_time;
 
         }};
@@ -530,7 +530,7 @@ struct GemmKernelMultiD {{
                 )
 
                 content = f"""
-#include "gemm_multi_d_{trait}.hpp" 
+#include "gemm_multi_d_{trait}.hpp"
 
 """
                 for warp_tile in warp_tiles:
@@ -642,11 +642,11 @@ struct GemmMultiDDispatcher {
     {
         std::string name = Kernel::get_name();
         float avg_time = Kernel::launch(args, stream);
-        
+
         return std::make_tuple(name, avg_time);
     }
-    
-    
+
+
     static auto dispatch(const KernelTraits& trait) {
         init();
         const std::string key = assemble_key(trait);

@@ -140,7 +140,7 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
-        return concat('_', "pipeline_AGmemBGmemCRegV2", 
+        return concat('_', "pipeline_AGmemBGmemCRegV2",
                       concat('x', kMPerBlock, kNPerBlock, kKPerBlock,  BlockSize),
                       concat('x', WG::kM, WG::kN, WG::kK),
                       concat('x', GetVectorSizeA(), GetVectorSizeB()),

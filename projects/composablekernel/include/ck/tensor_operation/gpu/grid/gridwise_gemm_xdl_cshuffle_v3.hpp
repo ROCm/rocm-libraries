@@ -673,19 +673,19 @@ struct GridwiseGemm_xdl_cshuffle_v3
         __host__ void Print() const
         {
             // clang-format off
-            std::cout << "problem {" 
-                      << "M:" << M << ", " 
-                      << "N:" << N << ", " 
+            std::cout << "problem {"
+                      << "M:" << M << ", "
+                      << "N:" << N << ", "
                       << "K:" << K << ", "
-                      << "SA:" << StrideA << ", " 
-                      << "SB:" << StrideB << ", " 
-                      << "SC:" << StrideC << ", " 
-                      << "MP:" << MPadded << ", " 
+                      << "SA:" << StrideA << ", "
+                      << "SB:" << StrideB << ", "
+                      << "SC:" << StrideC << ", "
+                      << "MP:" << MPadded << ", "
                       << "NP:" << NPadded << ", "
-                      << "KRead:" << KRead << ", " 
-                      << "KP:" << KPadded << ", " 
-                      << "AK0:" << AK0 << ", " 
-                      << "BK0:" << BK0 << ", " 
+                      << "KRead:" << KRead << ", "
+                      << "KP:" << KPadded << ", "
+                      << "AK0:" << AK0 << ", "
+                      << "BK0:" << BK0 << ", "
                       << "MBlock: " << MBlock << ", "
                       << "NBlock: " << NBlock << "}" << std::endl;
             // clang-format off
@@ -820,7 +820,7 @@ struct GridwiseGemm_xdl_cshuffle_v3
     {
         constexpr index_t MWave    = MPerBlock / (MXdlPerWave * MPerXdl);
         constexpr index_t NWave    = NPerBlock / (NXdlPerWave * NPerXdl);
-        constexpr index_t WaveSize = BlockSize / (MWave * NWave);   
+        constexpr index_t WaveSize = BlockSize / (MWave * NWave);
         // A matrix in LDS memory, dst of blockwise copy
         if constexpr(ABlockLdsExtraM || BlkGemmPipelineVer == BlockGemmPipelineVersion::v4)
         {
@@ -1173,14 +1173,14 @@ struct GridwiseGemm_xdl_cshuffle_v3
             is_gfx950_build = false,
 #endif
         };
-        
+
         // skip building the instances with K1>=32 && PackedSize != 2 on pre-gfx950
         if constexpr(static_cast<bool>(Arch::is_gfx950_build) ||
                     (AK1Number < 32 && BK1Number < 32) ||
                     (AK1Number >= 32 && APackedSize == 2) ||
                     (BK1Number >= 32 && BPackedSize == 2))
         {
-        
+
         }
         else
         {

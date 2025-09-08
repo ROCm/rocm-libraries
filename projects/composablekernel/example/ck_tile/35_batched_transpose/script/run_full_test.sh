@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
@@ -7,7 +7,7 @@
 # in order to run this script you'd first need to build the tile_example_batched_transpose executables in ../build/bin/
 #
 # run the script as "./run_full_test.sh <tag for your test environment> <branch name> <host name> <gpu_arch>
-# input arguments: 
+# input arguments:
 # environment tag  : a string describing the specifics of your test environment
 # branch name      : name of the branch in git repo (git status | grep -e 'On branch')
 # host name        : $hostname
@@ -39,4 +39,3 @@ function print_log_header(){
 example/ck_tile/35_batched_transpose/script/smoke_test.sh
 
 #run performance benchmarks
-

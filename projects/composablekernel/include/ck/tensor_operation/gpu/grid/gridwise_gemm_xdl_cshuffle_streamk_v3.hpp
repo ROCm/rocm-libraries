@@ -355,7 +355,7 @@ struct GridwiseGemm_xdl_cshuffle_streamk_v3
             make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
 
         return b_grid_desc_bk0_n_bk1;
-#if 0     
+#if 0
         using GemmSpecialization = tensor_operation::device::GemmSpecialization;
 
         if constexpr(GemmSpec == GemmSpecialization::NKPadding ||

@@ -572,7 +572,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
             // A matrix blockwise copy
             constexpr auto AK0PerBlock = KPerBlock/ AK1;
             auto a_block_buf = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-                static_cast<ADataType*>(p_shared) + SharedMemTrait::a_block_space_offset, 
+                static_cast<ADataType*>(p_shared) + SharedMemTrait::a_block_space_offset,
                 SharedMemTrait::a_block_space_size_aligned);
 
             auto a_blockwise_copy =
@@ -597,7 +597,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
 /* index_t DstScalarStrideInVector,               */     1,
 /* bool ThreadTransferSrcResetCoordinateAfterRun, */     AThreadTransferSrcResetCoordinateAfterRun,
 /* bool ThreadTransferDstResetCoordinateAfterRun, */     true,
-                                                        BlockwiseGemmPipe::GlobalBufferNum>( 
+                                                        BlockwiseGemmPipe::GlobalBufferNum>(
             a_grid_desc,
             make_multi_index(0, m_block_data_idx_on_grid, 0),
             a_element_op,
@@ -607,10 +607,10 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
 
             return make_tuple(a_block_buf, a_blockwise_copy);
         };
-        
+
         auto b0_block_trait = [&](){
             auto b0_block_buf = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-                static_cast<B0DataType*>(p_shared) + SharedMemTrait::b0_block_space_offset, 
+                static_cast<B0DataType*>(p_shared) + SharedMemTrait::b0_block_space_offset,
                 SharedMemTrait::b0_block_space_size_aligned);
 
             auto b0_blockwise_copy =
@@ -642,13 +642,13 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
             b0_block_desc,
             make_multi_index(0, 0, 0),
             ck::tensor_operation::element_wise::PassThrough{});
-            
+
             return make_tuple(b0_block_buf, b0_blockwise_copy);
         };
 
         auto a_block_buf       = a_block_trait()[I0];
         auto a_blockwise_copy  = a_block_trait()[I1];
-        
+
         auto b0_block_buf       = b0_block_trait()[I0];
         auto b0_blockwise_copy  = b0_block_trait()[I1];
 
@@ -660,9 +660,9 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
         auto acc0_thread_buf          = blockwise_gemm0_pipeline.GetCThreadBuffer();
 
         // Note that we are using the transposeC version of GetCThreadDescriptor.
-        constexpr auto acc0_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs = 
+        constexpr auto acc0_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs =
             blockwise_gemm0_pipeline.GetCThreadDescriptor_MRepeat_MWave_MThreadPerSubGroup_NRepeat_NWave_NSubGroup_NAccVgprs();
-        
+
         constexpr auto mrepeat            = acc0_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs.GetLength(I0);
         constexpr auto mwave              = acc0_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs.GetLength(I1);
         constexpr auto mthreadpersubgroup = acc0_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs.GetLength(I2);
@@ -679,7 +679,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
             make_tuple(Sequence<3, 4, 5>{}, Sequence<0, 1, 2>{}, Sequence<6>{}),
             make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
 
-/*******************************************************************************/        
+/*******************************************************************************/
         // Shift Per SUB_K
         constexpr auto a_block_slice_copy_step = MakeABlockSliceCopyStep();
         constexpr auto b0_block_slice_copy_step = MakeB0BlockSliceCopyStep();
@@ -697,15 +697,15 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
         }();
 
         const index_t KBlockMainLoop = __builtin_amdgcn_readfirstlane(K / KPerBlock);
-        
+
 /*******************************************************************************/
 // set up Gemm1
 /*******************************************************************************/
         // Acc0 thread buffer -> A1 thread buffer -> blockwise gemm
         // A1 matrix in VGPR
         constexpr auto A1ThreadSlice_L0PerBlock_MPerBlock_L1 = make_tuple(
-            Number<AL0 * AL1 / laccvgprs>{}, 
-            Number<mrepeat * mwave * mthreadpersubgroup>{}, 
+            Number<AL0 * AL1 / laccvgprs>{},
+            Number<mrepeat * mwave * mthreadpersubgroup>{},
             Number<laccvgprs>{});
 
         constexpr auto A1ThreadSliceL0PerBlock  = A1ThreadSlice_L0PerBlock_MPerBlock_L1[I0];
@@ -727,15 +727,15 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
             Sequence<0, 1, 2>,
             2,
             laccvgprs>{tensor_operation::element_wise::PassThrough{}};
-   
+
         auto a1_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, ADataType>(
-            a1_thread_desc_l0perblock_mperblock_l1.GetElementSpaceSize());       
-            
+            a1_thread_desc_l0perblock_mperblock_l1.GetElementSpaceSize());
+
         constexpr auto b1_block_desc = MakeB1BlockDescriptor();
 
         auto b1_block_trait = [&](){
             auto b1_block_buf = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-                static_cast<B1DataType*>(p_shared) + SharedMemTrait::b1_block_space_offset, 
+                static_cast<B1DataType*>(p_shared) + SharedMemTrait::b1_block_space_offset,
                 SharedMemTrait::b1_block_space_size_aligned);
 
             auto b1_blockwise_copy = ThreadGroupTensorSliceTransfer_v4r1<
@@ -767,7 +767,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
                 b1_block_desc,
                 make_multi_index(0, 0, 0),
                 tensor_operation::element_wise::PassThrough{});
-                    
+
             return make_tuple(b1_block_buf, b1_blockwise_copy);
         };
 
@@ -813,18 +813,18 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
         auto b_scale_struct = BScale{};
 
 /*******************************************************************************/
-        // 
+        //
         // Kernel Main Stage
         //
         index_t gemm1_l_block_outer_index = 0;
         // Outer loop, along GEMM_L
         // Inner loop, along GEMM_K
         do {
-            blockwise_gemm0_pipeline.template Run<HasMainKBlockLoop, TailNum>(a_grid_desc, 
-                                                                              a_block_desc, 
-                                                                              a_blockwise_copy, 
+            blockwise_gemm0_pipeline.template Run<HasMainKBlockLoop, TailNum>(a_grid_desc,
+                                                                              a_block_desc,
+                                                                              a_blockwise_copy,
                                                                               a_grid_buf,
-                                                                              a_block_buf, 
+                                                                              a_block_buf,
                                                                               a_block_slice_copy_step,
                                                                               b0_grid_desc,
                                                                               b0_block_desc,
@@ -902,7 +902,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
                         a1_thread_buf);
 
                     block_sync_lds();
-            
+
                     blockwise_gemm1.Run(a1_thread_buf, b1_block_buf, acc1_thread_buf);
                 }
             } // end gemm1
@@ -916,9 +916,9 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
             constexpr auto c_nwave              = c_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs.GetLength(I4);
             constexpr auto c_nsubgroup          = c_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs.GetLength(I5);
             constexpr auto c_naccvgprs          = c_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs.GetLength(I6);
-            
+
             constexpr auto c_thread_slice_desc_m_n = make_naive_tensor_descriptor_packed(
-                make_tuple(c_mrepeat * c_mwave * c_mthreadpersubgroup, 
+                make_tuple(c_mrepeat * c_mwave * c_mthreadpersubgroup,
                            c_nrepeat * c_nwave * c_nsubgroup * c_naccvgprs));
             constexpr auto c_thread_buf_slice_m = c_thread_slice_desc_m_n.GetLength(I0);
             constexpr auto c_thread_buf_slice_n = c_thread_slice_desc_m_n.GetLength(I1);
@@ -944,7 +944,7 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
 /*******************************************************************************/
         // write out to C, implement shuffle
         {
-            constexpr auto c_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs =  
+            constexpr auto c_thread_desc_mrepeat_mwave_mthreadpersubgroup_nrepeat_nwave_nsubgroup_naccvgprs =
             blockwise_gemm1.GetCThreadDescriptor_MRepeat_MWave_MThreadPerSubGroup_NRepeat_NWave_NSubGroup_NAccVgprs();
 
             // This API Provide All dimension (size) you need
@@ -1001,10 +1001,10 @@ struct GridwiseBatchedGemmGemm_wmma_cshuffle_v3
                 make_tuple(make_merge_transform(make_tuple(NRepeat, NWave, NSubGroup, NAccVgprs))),
                 make_tuple(Sequence<0, 1, 2, 3>{}),
                 make_tuple(Sequence<0>{}));
-            
+
             const auto m_thread_data_on_block_idx = m_thread_data_on_block_to_mrepeat_mwave_mthreadpersubgroup_adaptor.CalculateBottomIndex(
                 make_multi_index(m_thread_data_on_block));
-            
+
             const auto n_thread_data_on_block_idx = n_thread_data_on_block_to_nrepeat_nwave_nsubgroup_naccvgprs_adaptor.CalculateBottomIndex(
                 make_multi_index(n_thread_data_on_block));
 

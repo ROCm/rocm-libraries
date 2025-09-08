@@ -21,5 +21,5 @@ You must set the `GPU_TARGETS` macro to specify the GPU target architecture(s).
 
 ### Build client example
 ```bash
- make -j 
+ make -j
 ```

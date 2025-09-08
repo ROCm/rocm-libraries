@@ -31,11 +31,11 @@ static constexpr bool PermuteB = false;
 
 // clang-format off
 #if 0
-using DeviceGemmV2Instance = 
+using DeviceGemmV2Instance =
     ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3_BPreshuffle<
-        ALayout,   BLayout,  CLayout,   
-        ADataType, BDataType, CDataType, AccDataType, CShuffleDataType, 
-        AElementOp, BElementOp, CElementOp, GemmDefault, 
+        ALayout,   BLayout,  CLayout,
+        ADataType, BDataType, CDataType, AccDataType, CShuffleDataType,
+        AElementOp, BElementOp, CElementOp, GemmDefault,
         256,
         128, 128,
         256, 16, 32,
@@ -47,13 +47,13 @@ using DeviceGemmV2Instance =
         2, 32, 32, 0,
         1, 1, S<1, 32, 1, 8>, 4,
         ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v1, F8, F8, PermuteA, PermuteB>;
-        
+
 #else
-using DeviceGemmV2Instance = 
+using DeviceGemmV2Instance =
     ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3_BPreshuffle<
-        ALayout,   BLayout,  CLayout,   
-        ADataType, BDataType, CDataType, AccDataType, CShuffleDataType, 
-        AElementOp, BElementOp, CElementOp, GemmDefault, 
+        ALayout,   BLayout,  CLayout,
+        ADataType, BDataType, CDataType, AccDataType, CShuffleDataType,
+        AElementOp, BElementOp, CElementOp, GemmDefault,
         256,
         256, 256,
         128, 16, 32,

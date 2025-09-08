@@ -27,11 +27,11 @@ using CDEElementOp = Add;
 static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecialization::MNPadding;
 
 // clang-format off
-using DeviceGemmV2Instance = 
+using DeviceGemmV2Instance =
     ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3R1<
         ALayout,   BLayout,   DsLayout,  CLayout,
         ADataType,   BDataType, DsDataType,  CDataType, AccDataType,  CShuffleDataType,
-        AElementOp, BElementOp, CDEElementOp, GemmDefault, 
+        AElementOp, BElementOp, CDEElementOp, GemmDefault,
         256,
         128,  128,  64,
         8,    4,

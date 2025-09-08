@@ -1292,7 +1292,7 @@ struct GridwiseMoeGemmMX_BPreshuffle
     {
         ignore                           = b_element_op;
         index_t BN0Shuffled = CalculateBN0Shuffled(problem.N);
-        index_t BK0Shuffled = CalculateBK0Shuffled(problem.K);        
+        index_t BK0Shuffled = CalculateBK0Shuffled(problem.K);
         const auto a_grid_desc_ak0_m_ak1 = MakeAGridDescriptor_AK0_M_AK1(
             IsInputGemm ? problem.NumTokens : problem.NumTokens * problem.TopK,
             problem.MPadded,

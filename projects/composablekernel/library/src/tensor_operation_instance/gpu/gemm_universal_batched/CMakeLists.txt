@@ -1,7 +1,7 @@
 # ONLY XDL_KERNELS
 set(GEMM_UNIVERSAL_BATCHED_INSTANCES)
 
-list(APPEND GEMM_UNIVERSAL_BATCHED_INSTANCES 
+list(APPEND GEMM_UNIVERSAL_BATCHED_INSTANCES
         device_batched_gemm_xdl_universal_bf16_bf16_bf16/device_batched_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_comp_default_instance.cpp
         device_batched_gemm_xdl_universal_bf16_bf16_bf16/device_batched_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_mem_v1_default_instance.cpp
         device_batched_gemm_xdl_universal_bf16_bf16_bf16/device_batched_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_mem_v2_default_instance.cpp

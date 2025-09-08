@@ -22,9 +22,9 @@ add_instance_library(device_reduce_instance
    device_reduce_instance_blockwise_f64_f64_f64_amax.cpp
    device_reduce_instance_blockwise_i8_i32_i8_add.cpp
    device_reduce_instance_blockwise_i8_i32_i8_avg.cpp
-   device_reduce_instance_blockwise_i8_i8_i8_min.cpp   
-   device_reduce_instance_blockwise_i8_i8_i8_max.cpp   
-   device_reduce_instance_blockwise_i8_i8_i8_amax.cpp   
+   device_reduce_instance_blockwise_i8_i8_i8_min.cpp
+   device_reduce_instance_blockwise_i8_i8_i8_max.cpp
+   device_reduce_instance_blockwise_i8_i8_i8_amax.cpp
    device_reduce_instance_blockwise_b16_f32_b16_add.cpp
    device_reduce_instance_blockwise_b16_f32_b16_avg.cpp
    device_reduce_instance_blockwise_b16_f32_b16_norm2.cpp

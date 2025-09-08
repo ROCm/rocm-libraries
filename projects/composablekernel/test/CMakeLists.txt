@@ -277,7 +277,7 @@ endif()
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx942" OR SUPPORTED_GPU_TARGETS MATCHES "gfx950") # smfmac needs ROCm6.2
     add_subdirectory(smfmac_op)
 endif()
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx950") 
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     add_subdirectory(mx_mfma_op)
     add_subdirectory(gemm_mx)
 endif()

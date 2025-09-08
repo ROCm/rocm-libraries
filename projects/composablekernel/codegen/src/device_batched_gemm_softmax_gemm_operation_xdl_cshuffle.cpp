@@ -88,7 +88,7 @@ std::vector<Operation_Xdl_CShuffle> Operation_Xdl_CShuffle::CreateOperations(
   {   256,     64,   256,    32,    64,    32,   8,   8,    2,   16,   16,     1,    16,     4,        1},
   {   256,     64,   256,    64,   128,    32,   8,   8,    2,   16,   16,     1,    16,     8,        1},
   {   256,     64,   256,    64,    64,    32,   8,   8,    2,   16,   16,     1,    16,     4,        1},
-// Padded fallback kernel  
+// Padded fallback kernel
   {   256,    128,   128,    64,   128,    32,   8,   8,    2,   32,   32,     1,     4,     4,        1},
   {   256,    128,    64,    32,   128,    32,   8,   8,    2,   32,   32,     1,     2,     4,        1},
 // Irregular k
@@ -199,7 +199,7 @@ std::vector<Operation_Xdl_CShuffle> Operation_Xdl_CShuffle::CreateOperations(
 // CBlockTransferClusterLengths|  CBlockTransfer
 //         _MBlock_MWaveMPerXdl| ScalarPerVector
 //         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl
-//                             |                
+//                             |
   {              S<1, 32, 1, 8>,               8},
   {              S<1, 32, 1, 8>,               8},
   {              S<1, 32, 1, 8>,               8},

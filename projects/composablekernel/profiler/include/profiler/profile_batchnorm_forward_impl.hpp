@@ -385,7 +385,7 @@ bool profile_batchnorm_forward_impl(int do_verification,
             {
                 // clang-format off
                 dumpBufferToFile("dump_mean.bin", resultSaveMean.mData.data(), resultSaveMean.mDesc.GetElementSize());
-                dumpBufferToFile("dump_mean_ref.bin", resultSaveMean_ref.mData.data(), resultSaveMean_ref.mDesc.GetElementSize()); 
+                dumpBufferToFile("dump_mean_ref.bin", resultSaveMean_ref.mData.data(), resultSaveMean_ref.mDesc.GetElementSize());
                 dumpBufferToFile("dump_invvar.bin", resultSaveInvVariance.mData.data(), resultSaveInvVariance.mDesc.GetElementSize());
                 dumpBufferToFile("dump_invvar_ref.bin", resultSaveInvVariance_ref.mData.data(), resultSaveInvVariance_ref.mDesc.GetElementSize());
                 // clang-format on

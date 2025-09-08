@@ -171,9 +171,9 @@ static constexpr ck::index_t Nswizzle  = false;
 static constexpr ck::index_t Act_OP    = 1; // 0: gelu_and_mul, 1: silu_and_mul
 // clang-format off
 using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemm<
-            Row, Col, DsLayout, ELayout, 
+            Row, Col, DsLayout, ELayout,
             A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-            AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   
+            AElementOp,  BElementOp, CDEElementOp,       GemmSpec,
             256,   MPerBlock,   64,    128,
             16,   32,
             16,   16,

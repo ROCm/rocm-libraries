@@ -185,10 +185,10 @@ static constexpr bool MulRoutedWeight  = true;
 
 // clang-format off
 using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmMXBPreShuffle<
-    A0Layout,    B0Layout,    DsLayout,    ELayout, 
+    A0Layout,    B0Layout,    DsLayout,    ELayout,
     A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
-    AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
-    ScaleBlockSize,  256, 
+    AElementOp,  BElementOp, CDEElementOp, GemmSpec,
+    ScaleBlockSize,  256,
     MPerBlock,  64,  KPerBlock,
     16,   16,
     16,   16,

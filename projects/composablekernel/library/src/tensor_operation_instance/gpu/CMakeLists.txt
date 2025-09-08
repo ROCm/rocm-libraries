@@ -438,7 +438,7 @@ if(CK_DEVICE_MHA_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY AND BUILD_MHA_LIB)
             add_library(composablekernels::device_mha_operations ALIAS device_mha_operations)
             target_compile_features(device_mha_operations PUBLIC)
             set_target_properties(device_mha_operations PROPERTIES POSITION_INDEPENDENT_CODE ON)
-            
+
             rocm_install(TARGETS device_mha_operations
                 EXPORT device_mha_operationsTargets)
             rocm_install(EXPORT device_mha_operationsTargets

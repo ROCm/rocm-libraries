@@ -140,4 +140,3 @@ void add_device_grouped_conv3d_fwd_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_comp_instances_
 }
 
 } // namespace ck::tensor_operation::device::instance
-

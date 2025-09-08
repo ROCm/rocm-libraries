@@ -53,4 +53,3 @@ fi
 setup_rocm_compilers_hash_file
 $SCCACHE_BIN --version
 $SCCACHE_BIN --start-server
-

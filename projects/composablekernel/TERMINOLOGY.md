@@ -155,7 +155,7 @@ The ratio of active warps/wavefronts to the maximum number of warps/wavefronts s
 A function executed on the GPU, typically written in [HIP](#hip) or [CUDA](#cuda), that performs parallel computations over input data. Kernels are launched with specific grid and block dimensions to map computation to hardware. In CK, kernels are composed from pipelines and require a pipeline, tile partitioner, and epilogue component.
 
 ### Pipeline
-A CK Pipeline orchestrates the sequence of operations for a kernel, including data loading, computation, and storage phases. It consists of two core components: a [Problem](#problem) component that defines what to compute, and a [Policy](#policy) component that specifies how to move data around. 
+A CK Pipeline orchestrates the sequence of operations for a kernel, including data loading, computation, and storage phases. It consists of two core components: a [Problem](#problem) component that defines what to compute, and a [Policy](#policy) component that specifies how to move data around.
 
 ### Tile Partitioner
 Defines the mapping between problem dimensions (M, N, K) and GPU hierarchy. It specifies workgroup-level tile sizes (kM, kN, kK) and determines grid dimensions by dividing the problem size by tile sizes.
@@ -276,7 +276,7 @@ A common fused operation in ML and linear algebra, where an elementwise addition
 ## 7. Linear Algebra and ML Operations
 
 ### General Matrix Multiply (GEMM)
-Core matrix operation in linear algebra and deep learning. A GEMM is defined as C = αAB + βC for matrices A, B, and C. 
+Core matrix operation in linear algebra and deep learning. A GEMM is defined as C = αAB + βC for matrices A, B, and C.
 
 ### "Vanilla" GEMM (Naive GEMM) Kernel
 The **vanilla GEMM** is the simplest form of GEMM in CK. It:
@@ -287,10 +287,10 @@ This is the **baseline** or **building block** GEMM that all other complex versi
 
 ### Grouped GEMM (GGEMMs)
 
-A kernel which calls multiple VGEMMs. Each call can have a different input shape. Each input shape problem first finds its corresponding kernel and then data is mapped to the work-group (blocks) of that kernel. 
+A kernel which calls multiple VGEMMs. Each call can have a different input shape. Each input shape problem first finds its corresponding kernel and then data is mapped to the work-group (blocks) of that kernel.
 
 ### Batched GEMM
-A kernel which calls VGEMMs with different "batches" of data. All batches have the same input shape. 
+A kernel which calls VGEMMs with different "batches" of data. All batches have the same input shape.
 
 ### Split-K GEMM
 A parallelization strategy that partitions the reduction dimension (K) across multiple compute units, increasing parallelism for large matrix multiplications.

@@ -96,7 +96,7 @@ for args in "${ARGS_LIST[@]}"; do
     echo "  GB/s: ${GBPS}"
     echo "  Verification: ${VERIFICATION:-N/A}"
 
-    
+
     # Save to CSV file
     echo "$m,$n,$k,$PIPELINE,$TIME_MS,$TFLOPS,$GBPS,$VERIFICATION" >> "$OUTPUT_FILE"
   else

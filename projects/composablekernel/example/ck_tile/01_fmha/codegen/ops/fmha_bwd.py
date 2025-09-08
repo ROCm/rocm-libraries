@@ -665,7 +665,7 @@ class FmhaBwdApiTrait:
             return "&& (a.seqlen_k <= 256)"
         else:
             return ""
-    
+
     @property
     def convert_dq_bn0(self) -> int:
         return self.tile.F_bn0 if self.deterministic == 't' else 0
@@ -701,7 +701,7 @@ class FmhaBwdApiTrait:
 class FmhaBwdApiPool:
     def __init__(self, mask_impl):
         self.dq_dk_dv_pool = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list))))
-        
+
         self.mask_impl = mask_impl
 
     def register_dq_dk_dv_traits(self, trait : FmhaBwdApiTrait) -> None:
@@ -714,7 +714,7 @@ class FmhaBwdApiPool:
 
     def _api_innders(self, traits: List[FmhaBwdApiTrait]) -> str:
         inners = ""
-        i = 0 
+        i = 0
         for trait in traits:
             inners += FMHA_BWD_API_INNER_DISPATCH.format(F_if=self.if_(i), F_mode=MODE_MAP[trait.mode],
                 F_mask_check=get_mask_check_map(self.mask_impl)[trait.mask], F_mask=get_mask_map(self.mask_impl)[trait.mask], F_bias_check=BIAS_CHECK_MAP[trait.bias],

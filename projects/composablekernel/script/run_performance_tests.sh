@@ -1,8 +1,8 @@
-#!/bin/bash 
+#!/bin/bash
 #
 # in order to run this script you'd first need to build the ckProfiler executable in ../build/bin/
 # run the script as "./run_performance_tests.sh <verification> <tag for your test environment> <branch name> <node name>
-# input arguments: 
+# input arguments:
 # verification = 0 : do not verify result correctness on CPU
 #              = 1 : verify correctness on CPU (may take a long time)
 # environment tag  : a string describing the specifics of your test environment

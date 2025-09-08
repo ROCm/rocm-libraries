@@ -359,7 +359,7 @@ public:
 
     bool StartObject() { return true; }
     bool Key(const Ch* str, SizeType len, bool copy) { return String(str, len, copy); }
-    bool EndObject(SizeType memberCount) { 
+    bool EndObject(SizeType memberCount) {
         uint64_t h = Hash(0, kObjectType);
         uint64_t* kv = stack_.template Pop<uint64_t>(memberCount * 2);
         for (SizeType i = 0; i < memberCount; i++)
@@ -369,9 +369,9 @@ public:
         *stack_.template Push<uint64_t>() = h;
         return true;
     }
-    
+
     bool StartArray() { return true; }
-    bool EndArray(SizeType elementCount) { 
+    bool EndArray(SizeType elementCount) {
         uint64_t h = Hash(0, kArrayType);
         uint64_t* e = stack_.template Pop<uint64_t>(elementCount);
         for (SizeType i = 0; i < elementCount; i++)
@@ -398,9 +398,9 @@ private:
     };
 
     bool WriteType(Type type) { return WriteBuffer(type, 0, 0); }
-    
+
     bool WriteNumber(const Number& n) { return WriteBuffer(kNumberType, &n, sizeof(n)); }
-    
+
     bool WriteBuffer(Type type, const void* data, size_t len) {
         // FNV-1a from http://isthe.com/chongo/tech/comp/fnv/
         uint64_t h = Hash(RAPIDJSON_UINT64_C2(0xcbf29ce4, 0x84222325), type);
@@ -2435,7 +2435,7 @@ template <
     typename OutputHandler = BaseReaderHandler<typename SchemaDocumentType::SchemaType::EncodingType>,
     typename StateAllocator = CrtAllocator>
 class GenericSchemaValidator :
-    public internal::ISchemaStateFactory<typename SchemaDocumentType::SchemaType>, 
+    public internal::ISchemaStateFactory<typename SchemaDocumentType::SchemaType>,
     public internal::ISchemaValidator,
     public internal::IValidationErrorHandler<typename SchemaDocumentType::SchemaType> {
 public:
@@ -2456,7 +2456,7 @@ public:
     */
     GenericSchemaValidator(
         const SchemaDocumentType& schemaDocument,
-        StateAllocator* allocator = 0, 
+        StateAllocator* allocator = 0,
         size_t schemaStackCapacity = kDefaultSchemaStackCapacity,
         size_t documentStackCapacity = kDefaultDocumentStackCapacity)
         :
@@ -2487,7 +2487,7 @@ public:
     GenericSchemaValidator(
         const SchemaDocumentType& schemaDocument,
         OutputHandler& outputHandler,
-        StateAllocator* allocator = 0, 
+        StateAllocator* allocator = 0,
         size_t schemaStackCapacity = kDefaultSchemaStackCapacity,
         size_t documentStackCapacity = kDefaultDocumentStackCapacity)
         :
@@ -2846,7 +2846,7 @@ public:
         valid_ = !outputHandler_ || outputHandler_->StartObject();
         return valid_;
     }
-    
+
     bool Key(const Ch* str, SizeType len, bool copy) {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaValidator::Key", str);
         if (!valid_) return false;
@@ -2859,14 +2859,14 @@ public:
         valid_ = !outputHandler_ || outputHandler_->Key(str, len, copy);
         return valid_;
     }
-    
+
     bool EndObject(SizeType memberCount) {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaValidator::EndObject");
         if (!valid_) return false;
         RAPIDJSON_SCHEMA_HANDLE_PARALLEL_(EndObject, (memberCount));
-        if (!CurrentSchema().EndObject(CurrentContext(), memberCount) && !GetContinueOnErrors()) { 
-            valid_ = false; 
-            return valid_; 
+        if (!CurrentSchema().EndObject(CurrentContext(), memberCount) && !GetContinueOnErrors()) {
+            valid_ = false;
+            return valid_;
         }
         RAPIDJSON_SCHEMA_HANDLE_END_(EndObject, (memberCount));
     }
@@ -2878,7 +2878,7 @@ public:
         valid_ = !outputHandler_ || outputHandler_->StartArray();
         return valid_;
     }
-    
+
     bool EndArray(SizeType elementCount) {
         RAPIDJSON_SCHEMA_PRINT(Method, "GenericSchemaValidator::EndArray");
         if (!valid_) return false;
@@ -2939,7 +2939,7 @@ private:
     typedef GenericValue<UTF8<>, StateAllocator> HashCodeArray;
     typedef internal::Hasher<EncodingType, StateAllocator> HasherType;
 
-    GenericSchemaValidator( 
+    GenericSchemaValidator(
         const SchemaDocumentType& schemaDocument,
         const SchemaType& root,
         const char* basePath, size_t basePathSize,
@@ -3022,7 +3022,7 @@ private:
         RAPIDJSON_SCHEMA_PRINT(ValidatorPointers, sb.GetString(), documentStack_.template Bottom<Ch>(), depth_);
         void* hasher = CurrentContext().hasher;
         uint64_t h = hasher && CurrentContext().arrayUniqueness ? static_cast<HasherType*>(hasher)->GetHashCode() : 0;
-        
+
         PopSchema();
 
         if (!schemaStack_.Empty()) {
@@ -3071,7 +3071,7 @@ private:
     }
 
     RAPIDJSON_FORCEINLINE void PushSchema(const SchemaType& schema) { new (schemaStack_.template Push<Context>()) Context(*this, *this, &schema, flags_); }
-    
+
     RAPIDJSON_FORCEINLINE void PopSchema() {
         Context* c = schemaStack_.template Pop<Context>(1);
         if (HashCodeArray* a = static_cast<HashCodeArray*>(c->arrayElementHashCodes)) {

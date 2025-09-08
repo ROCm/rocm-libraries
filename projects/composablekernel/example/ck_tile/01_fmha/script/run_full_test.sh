@@ -1,9 +1,9 @@
-#!/bin/bash 
+#!/bin/bash
 #
 # in order to run this script you'd first need to build the tile_example_fmha_fwd and tile_eaxmple_fmha_bwd executables in ../build/bin/
 #
 # run the script as "./run_full_test.sh <tag for your test environment> <branch name> <host name> <gpu_arch>
-# input arguments: 
+# input arguments:
 # environment tag  : a string describing the specifics of your test environment
 # branch name      : name of the branch in git repo (git status | grep -e 'On branch')
 # host name        : $hostname
@@ -45,4 +45,3 @@ example/ck_tile/01_fmha/script/benchmark_fwd.sh 2>&1 | tee -a $fmha_fwd_log
 export fmha_bwd_log="perf_fmha_bwd_$GPU_arch.log"
 print_log_header $fmha_bwd_log $env_type $branch $host_name
 example/ck_tile/01_fmha/script/benchmark_bwd.sh 2>&1 | tee -a $fmha_bwd_log
-

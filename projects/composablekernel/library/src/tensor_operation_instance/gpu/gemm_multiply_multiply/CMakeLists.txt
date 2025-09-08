@@ -1,7 +1,7 @@
 # ONLY XDL_AND_WMMA_KERNELS
 set(GEMM_MULTIPLY_MULTIPLY_INSTANCES)
 
-list(APPEND GEMM_MULTIPLY_MULTIPLY_INSTANCES 
+list(APPEND GEMM_MULTIPLY_MULTIPLY_INSTANCES
         device_gemm_multiply_multiply_xdl_f8_f8_bf16/device_gemm_multiply_multiply_xdl_f8_f8_bf16_mk_nk_mn_comp_default_instance_part1.cpp
         device_gemm_multiply_multiply_xdl_f8_f8_bf16/device_gemm_multiply_multiply_xdl_f8_f8_bf16_mk_nk_mn_comp_kpadding_instance_part1.cpp
         device_gemm_multiply_multiply_xdl_f8_f8_bf16/device_gemm_multiply_multiply_xdl_f8_f8_bf16_mk_nk_mn_comp_default_instance_part2.cpp

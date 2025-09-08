@@ -18,7 +18,7 @@ Example:
     const auto shape_4x2x4         = ck::make_tuple(4, ck::make_tuple(2, 4));
     const auto strides_s2x1x8      = ck::make_tuple(2, ck::make_tuple(1, 8));
     const auto layout = ck::wrapper::make_layout(shape_4x2x4, strides_s2x1x8);
-    
+
     std::array<ck::index_t, 32> data;
     auto tensor = ck::wrapper::make_tensor<ck::wrapper::MemoryTypeEnum::Generic>(&data[0], layout);
 
@@ -41,8 +41,8 @@ Example:
 Output::
 
     dims:2,(2,4) strides:2,(1,8)
-    1 5 9 13 17 21 25 29 
-    2 6 10 14 18 22 26 30 
+    1 5 9 13 17 21 25 29
+    2 6 10 14 18 22 26 30
 
 
 Tutorials:

@@ -414,13 +414,13 @@ namespace impl {
 
 // clang-format off
 /*  y_ratio is used to describe the step length of y-direction changes
-    in certain performance optimization scenarios like merging seqlen 
+    in certain performance optimization scenarios like merging seqlen
     and qk_head_ratio, for example:
 
     x=1/y=6/y_ratio=2(top-left)
-    1 * * * * * * * 
     1 * * * * * * *
-    1 1 * * * * * * 
+    1 * * * * * * *
+    1 1 * * * * * *
     1 1 * * * * * *
     1 1 1 * * * * *
     1 1 1 * * * * *

@@ -350,7 +350,7 @@ float layernorm2d_fwd(layernorm2d_fwd_traits t,
     @dataclass
     class k_pipeline_one_pass:
         F_Problem         : Any #k_problem
-    
+
     @dataclass
     class k_pipeline_two_pass:
         F_Problem         : Any #k_problem
@@ -424,7 +424,7 @@ float layernorm2d_fwd(layernorm2d_fwd_traits t,
             dtype_str = f'{prec_i}' if prec_i == prec_o else f'{prec_i}_{prec_o}'
             nnn = f'layernorm2d_fwd_{dtype_str}_n{self.F_N}'
             if self.F_xbias != 0:
-                nnn = nnn + '_' + XBIAS_ENUM_STR_MAP[self.F_xbias] 
+                nnn = nnn + '_' + XBIAS_ENUM_STR_MAP[self.F_xbias]
             if self.F_add != 0:
                 nnn = nnn + '_' + FUSED_ADD_ENUM_STR_MAP[self.F_add]
             if self.F_sweep != 0:

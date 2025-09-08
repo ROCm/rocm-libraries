@@ -36,4 +36,3 @@ For example, to create a complex half-precision type:
 
 Custom types can be particularly useful for specialized applications such as complex number arithmetic,
 custom quantization schemes, or domain-specific number representations.
-

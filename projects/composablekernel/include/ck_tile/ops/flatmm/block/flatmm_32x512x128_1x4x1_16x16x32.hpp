@@ -475,8 +475,8 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_BF16 : public Flatmm_32x512x128_1x4x1_16
 #define CK_TILE_FLATMM_UK_2B 1
 #include "uk/flatmm_uk_gfx9_32x512x128_1x1x1_16x16x16.inc"
                 : _EXPAND_ASM_ARGS_OUT_TWO_ACC
-                : _EXPAND_ASM_ARGS_IN, 
-                    [s_res_b4]"s"(res_b[4]), 
+                : _EXPAND_ASM_ARGS_IN,
+                    [s_res_b4]"s"(res_b[4]),
                     [s_res_b5]"s"(res_b[5]),
                     [s_res_b6]"s"(res_b[6]),
                     [s_res_b7]"s"(res_b[7])
@@ -612,8 +612,8 @@ struct Flatmm_32x512x128_1x4x1_16x16x32_FP16 : public Flatmm_32x512x128_1x4x1_16
 #define CK_TILE_FLATMM_UK_2B 1
 #include "uk/flatmm_uk_gfx9_32x512x128_1x1x1_16x16x16.inc"
                 : _EXPAND_ASM_ARGS_OUT_TWO_ACC
-                : _EXPAND_ASM_ARGS_IN, 
-                    [s_res_b4]"s"(res_b[4]), 
+                : _EXPAND_ASM_ARGS_IN,
+                    [s_res_b4]"s"(res_b[4]),
                     [s_res_b5]"s"(res_b[5]),
                     [s_res_b6]"s"(res_b[6]),
                     [s_res_b7]"s"(res_b[7])

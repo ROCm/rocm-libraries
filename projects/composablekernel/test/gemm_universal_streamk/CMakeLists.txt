@@ -12,4 +12,3 @@ add_gtest_executable(test_gemm_universal_streamk_bf16 test_gemm_universal_stream
 if(result EQUAL 0)
    target_link_libraries(test_gemm_universal_streamk_bf16 PRIVATE utility device_gemm_universal_streamk_instance)
 endif()
-

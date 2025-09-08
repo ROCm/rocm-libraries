@@ -14,7 +14,7 @@ namespace device {
 namespace instance {
 
 // clang-format off
-// InDataType | AccDataType | OutDataType | Rank | NumReduceDim | ReduceOperation | InElementwiseOp | AccElementwiseOp | PropagateNan | UseIndex 
+// InDataType | AccDataType | OutDataType | Rank | NumReduceDim | ReduceOperation | InElementwiseOp | AccElementwiseOp | PropagateNan | UseIndex
 extern template void add_device_reduce_instance_blockwise<F64, F64, F64, 4, 3, ReduceMin, PassThrough, PassThrough, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 3, ReduceMin, PassThrough, PassThrough, false, false>>&);
 extern template void add_device_reduce_instance_blockwise<F64, F64, F64, 4, 4, ReduceMin, PassThrough, PassThrough, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 4, ReduceMin, PassThrough, PassThrough, false, false>>&);
 extern template void add_device_reduce_instance_blockwise<F64, F64, F64, 4, 1, ReduceMin, PassThrough, PassThrough, false, false>(std::vector<DeviceReducePtr<F64, F64, F64, 4, 1, ReduceMin, PassThrough, PassThrough, false, false>>&);

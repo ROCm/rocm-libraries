@@ -35,7 +35,7 @@ done
 done
 done
 
-# The following cases uses two pass pipeline which doesn't support quant epilogue. 
+# The following cases uses two pass pipeline which doesn't support quant epilogue.
 for fquant in ""
 for pr_i in "fp16" "bf16" ; do
 for fadd in "0" "1"; do

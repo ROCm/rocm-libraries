@@ -7,21 +7,21 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
     # Filter GPU targets to only gfx90a, gfx942, and gfx950
     set(GEMM_GPU_TARGETS "")
     set(DESIRED_TARGETS "gfx90a;gfx942;gfx950")
-    
+
     foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
         if(target IN_LIST DESIRED_TARGETS)
             list(APPEND GEMM_GPU_TARGETS ${target})
         endif()
     endforeach()
-    
+
     # Skip compilation if no matching targets found
     if(NOT GEMM_GPU_TARGETS)
         message(WARNING "Skipping Tile Engine GEMM Multi D compilation: No supported GPU targets (gfx90a, gfx942, gfx950) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
         return()
     endif()
-    
+
     message(STATUS "Building GEMM Multi D for GPU targets: ${GEMM_GPU_TARGETS}")
-    
+
     set(working_path "${CMAKE_CURRENT_BINARY_DIR}/${datatype}/${layout}")
 
     # Comment this if-else block when using user_provided_config
@@ -33,7 +33,7 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
 
     # uncomment this if you want to use user_provided_config.json
     # set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/user_provided_config.json")
-    
+
     # Generate kernel list
     execute_process(
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/gemm_multi_d_instance_builder.py
@@ -51,7 +51,7 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
 
     file(STRINGS "${working_path}/gemm_multi_d_instance_blobs.txt" codegen_blobs)
     file(STRINGS "${working_path}/gemm_multi_d_instance_blobs_range.txt" codegen_blobs_range)
-    
+
     # Generate the blobs
     add_custom_command(
         OUTPUT ${codegen_blobs}
@@ -72,7 +72,7 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
     foreach(blob IN LISTS codegen_blobs_range)
         string(STRIP "${blob}" stripped_blob)
         separate_arguments(spilit_blob UNIX_COMMAND "${stripped_blob}")
-        # Each line is: <trait_name> <first_index_inclusive> <last_index_exclusive>   
+        # Each line is: <trait_name> <first_index_inclusive> <last_index_exclusive>
         list(GET spilit_blob 0 name)
         list(GET spilit_blob 1 first)
         list(GET spilit_blob 2 last)
@@ -86,7 +86,7 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
         set(chunk_size 3)
         math(EXPR num_chunks "( ${total_files} + ${chunk_size} - 1 ) / ${chunk_size}")
         math(EXPR num_chunks_minus_1 "${num_chunks} - 1")
-        
+
         foreach(i RANGE 0 ${num_chunks_minus_1})
             math(EXPR start "${first} + ${i} * ${chunk_size} ")
             math(EXPR end "${start} + ${chunk_size} - 1")
@@ -116,12 +116,12 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
         if(sub_intermediate_libs)
             set(intermediate_lib_name "gemm_multi_d_staticlib_${name}_${datatype}_${layout}")
             # Collect the $<TARGET_OBJECTS:...> expressions
-            
+
             set(obj_exprs)
             foreach(objlib IN LISTS sub_intermediate_libs)
                 list(APPEND obj_exprs $<TARGET_OBJECTS:${objlib}>)
             endforeach()
-            
+
             add_library(${intermediate_lib_name} STATIC ${obj_exprs})
             add_dependencies(${intermediate_lib_name} gemm_multi_d_gen_${datatype}_${layout})
             set_property(TARGET ${intermediate_lib_name} PROPERTY HIP_ARCHITECTURES ${GEMM_GPU_TARGETS})
@@ -132,7 +132,7 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
         endif()
 
     endforeach()
-    
+
     # Interface library for instances
     add_library(gemm_multi_d_template_instances_${datatype}_${layout} INTERFACE)
     add_dependencies(gemm_multi_d_template_instances_${datatype}_${layout} gemm_multi_d_gen_${datatype}_${layout})
@@ -142,7 +142,7 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
         "${working_path}"
     )
     set_target_properties(gemm_multi_d_template_instances_${datatype}_${layout} PROPERTIES LINKER_LANGUAGE CXX)
-    
+
     # Host API interface library
     add_library(gemm_multi_d_host_api_${datatype}_${layout} INTERFACE)
     target_link_libraries(gemm_multi_d_host_api_${datatype}_${layout} INTERFACE gemm_multi_d_template_instances_${datatype}_${layout})
@@ -151,7 +151,7 @@ function(build_gemm_multi_d_for_datatype_layout datatype layout)
         "${working_path}"
     )
 
-    
+
 
     # Executable per datatype
     set(exec_name "benchmark_gemm_multi_d_${datatype}_${layout}")

@@ -19,4 +19,3 @@ if(GPU_TARGETS MATCHES "gfx94" OR GPU_TARGETS MATCHES "gfx95")
 else()
     message(DEBUG "Skipping ck_tile_gemm tests for current target")
 endif()
-

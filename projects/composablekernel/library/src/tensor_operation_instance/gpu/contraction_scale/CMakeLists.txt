@@ -47,4 +47,3 @@ foreach(idx IN LISTS DIMS)
 endforeach()
 
 add_instance_library(device_contraction_scale_instance ${DEVICE_CONTRACTION_SCALE_INSTANCES})
-

@@ -614,7 +614,7 @@ struct FusedMoeGemmPipeline_FlatmmEx
         clear_tile(acc_0);
 
         // preload for next round
-        gld_a(a_sst_win1, NEG1); 
+        gld_a(a_sst_win1, NEG1);
         gld_g(gs[I1], NEG1);
 
         // make sure a,g loaded

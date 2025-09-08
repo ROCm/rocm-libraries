@@ -290,7 +290,7 @@ bool test_moe_sorting(ck_tile::ArgParser args)
             for(int i_token = 0; i_token < tokens; i_token++) {
                 auto v_mesh = p_mesh[i_expert * row_size + i_token];
                 e_cnt += v_mesh != 0 ? 1 : 0;
-                printf("%d, ", v_mesh); 
+                printf("%d, ", v_mesh);
             }
             int e_cnt_unit = (e_cnt + unit_size - 1) / unit_size;
             printf("[%d/%d]", e_cnt, e_cnt_unit);

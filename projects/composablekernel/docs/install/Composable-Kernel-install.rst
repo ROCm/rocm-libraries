@@ -28,7 +28,7 @@ Change directory to the ``build`` directory and generate the makefile using the 
 
 Other build options are:
 
-* ``DISABLE_DL_KERNELS``: Set this to "ON" to not build deep learning (DL) and data parallel primitive (DPP) instances. 
+* ``DISABLE_DL_KERNELS``: Set this to "ON" to not build deep learning (DL) and data parallel primitive (DPP) instances.
 
   .. note::
 
@@ -56,7 +56,7 @@ Using ``-j`` alone will launch an unlimited number of threads and is not recomme
 Install the Composable Kernel library:
 
 .. code:: shell
-  
+
   make install
 
 After running ``make install``, the Composable Kernel files will be saved to the following locations:
@@ -68,5 +68,3 @@ After running ``make install``, the Composable Kernel files will be saved to the
 For information about ckProfiler, see `the ckProfiler readme file <https://github.com/ROCm/composable_kernel/blob/develop/profiler/README.md>`_.
 
 For information about running the examples and tests, see :doc:`Composable Kernel examples and tests <../tutorial/Composable-Kernel-examples>`.
-
-

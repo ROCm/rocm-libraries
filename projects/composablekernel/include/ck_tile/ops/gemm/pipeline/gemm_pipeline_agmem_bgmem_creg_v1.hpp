@@ -64,7 +64,7 @@ struct GemmPipelineAGmemBGmemCRegV1
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
-        return concat('_', "pipeline_AGmemBGmemCRegV1", 
+        return concat('_', "pipeline_AGmemBGmemCRegV1",
                       concat('x', kMPerBlock, kNPerBlock, kKPerBlock,  BlockSize),
                       concat('x', GetVectorSizeA(), GetVectorSizeB(), GetVectorSizeC()),
                       concat('x', kPadM, kPadN, kPadK));

@@ -66,7 +66,7 @@
 #                     2: A[k0, k1, m0, m1] * B[k0, k1, n0, n1] + D[m0, m1, n0, n1] = E[m0, m1, n0, n1];
 #                     3: A[k0, k1, m0, m1] * B[n0, n1, k0, k1] + D[m0, m1, n0, n1] = E[m0, m1, n0, n1])
 #arg6: verification (0: no; 1: yes)
-#arg7: initialization (0: no init; 1: integer value; 2: decimal 
+#arg7: initialization (0: no init; 1: integer value; 2: decimal
 #      value)
 #arg8: print tensor value (0: no; 1: yes)
 #arg9: time kernel (0: no, 1: yes)
@@ -111,7 +111,7 @@
 # arg7: time kernel (0: no, 1: yes)
 # Following arguments (depending on number of spatial dims):
 #  Number of spatial dimensions (1=Conv1D, 2=Conv2D, 3=Conv3D)
-#  G, N, K, C, 
+#  G, N, K, C,
 #  <filter spatial dimensions>, (ie Y, X for 2D)
 #  <input image spatial dimensions>, (ie Hi, Wi for 2D)
 #  <strides>, (ie Sy, Sx for 2D)
@@ -141,7 +141,7 @@
 # arg7: time kernel (0: no, 1: yes)
 # Following arguments (depending on number of spatial dims):
 #  Number of spatial dimensions (1=Conv1D, 2=Conv2D, 3=Conv3D)
-#  G, N, K, C, 
+#  G, N, K, C,
 #  <filter spatial dimensions>, (ie Y, X for 2D)
 #  <input image spatial dimensions>, (ie Hi, Wi for 2D)
 #  <strides>, (ie Sy, Sx for 2D)
@@ -174,7 +174,7 @@ Note: This kernel use atomic add, this will cause output buffer to be accumulate
 # arg8: operation type (0: ImageToColumn, 1: ColumnToImage)
 # Following arguments (depending on number of spatial dims):
 #  Number of spatial dimensions (1=Conv1D, 2=Conv2D, 3=Conv3D)
-#  G, N, K, C, 
+#  G, N, K, C,
 #  <filter spatial dimensions>, (ie Y, X for 2D)
 #  <input image spatial dimensions>, (ie Hi, Wi for 2D)
 #  <strides>, (ie Sy, Sx for 2D)
@@ -212,7 +212,7 @@ Note: Column to image kernel adds to the output memory, this will cause output b
 ```bash
 python3 ../script/convert_miopen_driver_to_profiler.py
 /opt/rocm/bin/MIOpenDriver conv -n 32 -c 64 -H 28 -W 28 -k 64 -y 3 -x 3
--p 1 -q 1 -u 2 -v 2 -l 1 -j 1 -m conv -g 32 -F 1 -t 1 
+-p 1 -q 1 -u 2 -v 2 -l 1 -j 1 -m conv -g 32 -F 1 -t 1
 ```
 
 Only convolution driver is supported.
