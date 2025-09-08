@@ -80,6 +80,9 @@ namespace rocisa
                 case InstType::INST_B64:
                     kStr = isa[0] < 11 ? "dwordx2" : "b64";
                     break;
+                case InstType::INST_B96:
+                    kStr = isa[0] < 11 ? "dwordx3" : "b96";
+                    break;
                 case InstType::INST_B128:
                     kStr = isa[0] < 11 ? "dwordx4" : "b128";
                     break;
@@ -976,6 +979,29 @@ namespace rocisa
         }
     };
 
+    struct BufferLoadB96 : public MUBUFReadInstruction
+    {
+        BufferLoadB96(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      const InstructionInput&                   soffset,
+                      std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                      const std::string&                        comment = "")
+            : MUBUFReadInstruction(InstType::INST_B96, dst, vaddr, saddr, soffset, mubuf, comment)
+        {
+        }
+
+        BufferLoadB96(const BufferLoadB96& other)
+            : MUBUFReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferLoadB96>(*this);
+        }
+    };
+
     struct BufferLoadB128 : public MUBUFReadInstruction
     {
         BufferLoadB128(const std::shared_ptr<RegisterContainer>& dst,
@@ -1857,6 +1883,31 @@ namespace rocisa
             return std::make_shared<DSLoadB64>(*this);
         }
     };
+
+    struct DSLoadB96TrB6 : public DSLoadInstruction
+    {
+        DSLoadB96TrB6(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& src,
+                      std::optional<DSModifiers>                ds      = std::nullopt,
+                      const std::string&                        comment = "")
+            : DSLoadInstruction(InstType::INST_B96, dst, src, ds, comment)
+        {
+            if(ds)
+                ds->na = 1;
+            setInst("ds_load_tr6_b96");
+        }
+
+        DSLoadB96TrB6(const DSLoadB96TrB6& other)
+            : DSLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<DSLoadB96TrB6>(*this);
+        }
+    };
+
     struct DSLoadB64TrB4 : public DSLoadInstruction
     {
         DSLoadB64TrB4(const std::shared_ptr<RegisterContainer>& dst,
@@ -2310,6 +2361,36 @@ namespace rocisa
         int getIssueLatency() const override
         {
             return issueLatency();
+        }
+    };
+
+    struct DSStoreB96 : public DSStoreInstruction
+    {
+        DSStoreB96(const std::shared_ptr<RegisterContainer>& dstAddr,
+                   const std::shared_ptr<RegisterContainer>& src,
+                   std::optional<DSModifiers>                ds      = std::nullopt,
+                   const std::string&                        comment = "")
+            : DSStoreInstruction(InstType::INST_B96, dstAddr, src, nullptr, ds, comment)
+        {
+            if(ds)
+                ds->na = 1;
+            setInst("ds_store_b96");
+        }
+
+        DSStoreB96(const DSStoreB96& other)
+            : DSStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<DSStoreB96>(*this);
+        }
+
+        //TODO: fill with correct value
+        static int issueLatency()
+        {
+            return 4;
         }
     };
 

@@ -680,6 +680,28 @@ class LocalReadMFMA(LocalRead):
                                 destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc, bufferIdx, iui, wtRegStride*tIdx, 2 * (innerIdx + 2 * outerIdx)), blockWidth)
                                 localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, int(valufIdx))))
                                 localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment="LDS Transpose"))
+                elif tP["bpeDS"] == 0.75:
+                    LocalReadX = instruction.getInst(0)
+                    wtRegStride = (int(kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr) + 15) // 16 * 16
+                    outerUnrolledIncrements = 64
+                    innerUnrolledIncrements = 16
+                    vwTrLoad = 16
+                    numVgprsPerLoad = 4 #use 3 for upcoming compiler change
+
+                    for tIdx in range(numberMTilesPerWave):
+                        constOffset = int((tP["localReadOffset"] + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                        for outerIdx in range(kernel["MIInputPerThread%s"%tc]//kernel["LocalReadVectorWidth"]):
+                            for innerIdx in range(kernel["LocalReadVectorWidth"]//vwTrLoad):
+                                paddedOffset = constOffset
+                                paddedOffset += int((innerIdx * innerUnrolledIncrements + outerIdx * outerUnrolledIncrements) * UnrollStride * tP["bpeDS"])
+                                if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
+                                    paddedOffset += int((paddedOffset // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
+                                ds = DSModifiers(na=1, offset=paddedOffset)
+                                vgprOffset = numVgprsPerLoad * (innerIdx + 2 * outerIdx)
+                                destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc, bufferIdx, iui, wtRegStride*tIdx, vgprOffset), blockWidth)
+                                localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, int(valufIdx))))
+                                localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment="LDS Transpose"))
+
                 elif tP["bpeDS"] == 1:
                     LocalReadX = instruction.getInst(0)
                     wtRegStride = kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr

@@ -1581,7 +1581,9 @@ class Solution(collections.abc.Mapping):
 
       if numBytes == 0.5:
         return asmCaps["HasLDSTrB64B4"]
-      if numBytes == 1:
+      elif numBytes == 0.75:
+        return asmCaps["HasLDSTrB96B6"]
+      elif numBytes == 1:
         return asmCaps["HasLDSTrB64B8"]
       elif numBytes == 2:
         return asmCaps["HasLDSTrB64B16"] or asmCaps["HasLDSTrB128B16"]
@@ -1936,8 +1938,8 @@ class Solution(collections.abc.Mapping):
     if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" \
       and (state["ProblemType"]["DataType"].isFloat4() or state["ProblemType"]["DataType"].is6bitFloat()):
       if state["ProblemType"]["DataType"].is6bitFloat():
-        state["AssertFree0ElementMultiple"] = 16
-        state["AssertFree1ElementMultiple"] = 16
+        state["AssertFree0ElementMultiple"] = max(state["AssertFree0ElementMultiple"], 16)
+        state["AssertFree1ElementMultiple"] = max(state["AssertFree1ElementMultiple"], 16)
         state["AssertSummationElementMultiple"] = state["DepthU"]
 
       if state["ProblemType"]["DataType"].isFloat4():
@@ -2524,6 +2526,12 @@ class Solution(collections.abc.Mapping):
           totalElementsPerpB = state["MacroTileB"]
           if state["DirectToVgprB"]:
             totalElementsPerpB *= state["MIWaveGroup"][0]
+
+        if state["GlobalReadVectorWidthA"] > totalElementsCoalescedA:
+          reject(state, printRejectionReason, f"GRVWA({state['GlobalReadVectorWidthA']}) > Coaleased({totalElementsCoalescedA})")
+
+        if state["GlobalReadVectorWidthB"] > totalElementsCoalescedB:
+          reject(state, printRejectionReason, f"GRVWB({state['GlobalReadVectorWidthB']}) > Coaleased({totalElementsCoalescedB})")
 
         totalElementsA = totalElementsCoalescedA * totalElementsPerpA
         totalElementsB = totalElementsCoalescedB * totalElementsPerpB

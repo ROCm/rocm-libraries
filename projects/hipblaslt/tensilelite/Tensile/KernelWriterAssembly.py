@@ -42,7 +42,7 @@ from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
-  BufferLoadB64, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
+  BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
   BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
   BufferStoreB8, BufferStoreD16HIB16, CommonInstruction, DSBPermuteB32, DSLoadB128, \
   DSLoadB16, DSLoadB32, DSLoadB64, DSLoadU16, DSStoreB128, DSStoreB16, DSStoreB32, \
@@ -534,6 +534,8 @@ class KernelWriterAssembly(KernelWriter):
       maxTrLoadNumReturnedVgpr = 4 if self.states.asmCaps["HasLDSTrB128B16"] else 2
       if tP["bpeDS"] in (0.5, 1):
         maxTrLoadNumReturnedVgpr = 2
+      elif tP["bpeDS"] == 0.75:
+        maxTrLoadNumReturnedVgpr = 3
       elif tP["bpeDS"] != 2:
         assert False, f"Unhandled bpeDS: {tP['bpeDS']}"
 
@@ -900,7 +902,7 @@ class KernelWriterAssembly(KernelWriter):
           if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not (kernel["UsePLRPack"] and self.states.numItersPLR):
             ri = 0
         ri = 0
-        if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+        if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
           moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
             for iui in range(0, kernel["InnerUnroll"]):
@@ -916,7 +918,7 @@ class KernelWriterAssembly(KernelWriter):
             moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
             ri += self.states.a.numVgprValuPerBlock
         ri = 0
-        if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+        if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
           moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
           for data in range(1,int(self.states.bpr/tPA["bpeDS"])):
             for bi in range(0,numBiFactor): # buffer indices
@@ -941,7 +943,7 @@ class KernelWriterAssembly(KernelWriter):
           if (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) and not (kernel["UsePLRPack"] and self.states.numItersPLR):
             ri = 0
         ri = 0
-        if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+        if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
           moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
             for iui in range(0, kernel["InnerUnroll"]):
@@ -957,7 +959,7 @@ class KernelWriterAssembly(KernelWriter):
             moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
             ri += self.states.b.numVgprValuPerBlock
         ri = 0
-        if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+        if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
           moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
           for data in range(1,int(self.states.bpr/tPB["bpeDS"])):
             for bi in range(0,numBiFactor): # buffer indices
@@ -7669,6 +7671,9 @@ class KernelWriterAssembly(KernelWriter):
         loopSwap = True
       inner = 1 - outer # inner is the opposite of outer
 
+      shiftedIndicesA = set()
+      shiftedIndicesB = set()
+
       idxOuter_start = 0
       idxInner_start = 0
       idxOuter_stop = kernel["MIWaveTile"][outer]
@@ -7707,6 +7712,30 @@ class KernelWriterAssembly(KernelWriter):
           bStr_base = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, idxB)
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
+
+          #TODO: remove this once upcoming compiler changes applied
+          def shiftLrElements(dstVgprStr: str, numVgprPerInput: int, tIdx: int) -> Module:
+            mod = Module("FP6 element shift")
+            paddedNumVgprs = 16
+            vgprPad = paddedNumVgprs - numVgprPerInput % paddedNumVgprs
+            startVgpr = 0 if tIdx else 4
+            offset = 0 if tIdx else 1
+
+            for i, r in enumerate(range(startVgpr, paddedNumVgprs, 4)):
+              for k in range(3):
+                mod.add(VMovB32(vgpr(f"{dstVgprStr}+{r+k-(i+offset)}"), vgpr(f"{dstVgprStr}+{tIdx*vgprPad+r+k}")))
+            return mod
+
+          if tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
+            if idxInner not in shiftedIndicesA:
+              imod.add(shiftLrElements(aStr_base, vgprPerInputA, idxInner))
+              shiftedIndicesA.add(idxInner)
+
+          if tPB["bpe"] == 0.75 and kernel["enableLDSTrB"]:
+            if idxOuter not in shiftedIndicesB:
+              imod.add(shiftLrElements(bStr_base, vgprPerInputB, idxOuter))
+              shiftedIndicesB.add(idxOuter)
+
           Str0     = aStr if tPB["tile01Idx"] else bStr
           Str1     = bStr if tPB["tile01Idx"] else aStr
 
@@ -9438,6 +9467,11 @@ class KernelWriterAssembly(KernelWriter):
               loopCnt += 1
               graIdx = i * self.states.rpgo if kernel["BufferLoad"] else i * self.states.rpga
               g2lIdx = i * loadWidth * tP["bpeRatio"]
+
+              #TODO: remove this if upcoming compiler changes getting merged
+              if loadWidth == 3:
+                g2lIdx = i * (loadWidth + 1) * tP["bpeRatio"]
+
               if (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc] and kernel["ConvertAfterDS"]:
                 # DTV + ConvertAfterDS case, if bpe > bpeGR, we need to shift g2lIdx for conversion
                 if tP["bpe"] > tP["bpeGR"]:
@@ -10185,6 +10219,10 @@ class KernelWriterAssembly(KernelWriter):
             if tP["isM"]:
               if not needToSplitMetadata:
                 g2lIdx = graIdx * ceil(blockWidth)
+
+            #TODO: remove this if upcoming compiler changes getting merged
+            if tP["globalReadInstruction"].blockWidth == 3:
+              g2lIdx = graIdx * 4
 
             # If g2lIdx is already in the dict and blockWidth < 1, the data may
             # be packed into one register.
@@ -13413,6 +13451,24 @@ class KernelWriterAssembly(KernelWriter):
         elif bpl==8:
           rv.add(BufferLoadB64(dst=dst, vaddr=addr0, saddr=addr1, \
                               soffset=soffset, mubuf=mubuf, comment=comment))
+          return rv
+        elif bpl==12:
+          # Cannot easily adopt to this due to alignment requirement
+          rv.add(BufferLoadB96(dst=dst, vaddr=addr0, saddr=addr1, \
+                              soffset=soffset, mubuf=mubuf, comment=comment))
+          # split into dwordx2 and dword loads. Second load offset is 8 bytes.
+          # rv = Module("emulated _buffer_load_b192")
+          # dst = None if lds else vgpr(destVgpr, 2)
+          # rv.add(BufferLoadB64(dst=dst, vaddr=addr0, saddr=addr1, \
+          #                      soffset=soffset, mubuf=mubuf, comment=comment))
+          # mubuf2 = MUBUFModifiers(offen=True, offset12=offset+8, glc=glc, slc=slc, nt=nt, lds=lds)
+          # if isinstance(destVgpr, str):
+          #   dst2 = f"{destVgpr}+{2}"
+          # elif isinstance(destVgpr, int):
+          #   dst2 = destVgpr + 2
+          # dst = None if lds else vgpr(dst2, 1)
+          # rv.add(BufferLoadB32(dst=dst, vaddr=addr0, saddr=addr1, \
+          #                      soffset=soffset, mubuf=mubuf2, comment=comment))
           return rv
         elif bpl==16:
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \

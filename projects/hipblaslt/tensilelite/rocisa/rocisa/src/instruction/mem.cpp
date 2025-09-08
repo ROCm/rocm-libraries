@@ -473,6 +473,23 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::BufferLoadB64(self);
         });
 
+    nb::class_<rocisa::BufferLoadB96, rocisa::MUBUFReadInstruction>(m_mem, "BufferLoadB96")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::MUBUFModifiers>,
+                      const std::string&>(),
+             nb::arg("dst").none(),
+             nb::arg("vaddr"),
+             nb::arg("saddr"),
+             nb::arg("soffset"),
+             nb::arg("mubuf")   = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::BufferLoadB96& self, const nb::dict&) {
+            return new rocisa::BufferLoadB96(self);
+        });
+
     nb::class_<rocisa::BufferLoadB128, rocisa::MUBUFReadInstruction>(m_mem, "BufferLoadB128")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -1024,6 +1041,20 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::DSLoadB64(self);
         });
 
+    
+    nb::class_<rocisa::DSLoadB96TrB6, rocisa::DSLoadInstruction>(m_mem, "DSLoadB96TrB6")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      std::optional<rocisa::DSModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("ds")      = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::DSLoadB96TrB6& self, const nb::dict&) {
+            return new rocisa::DSLoadB96TrB6(self);
+        });
+
     nb::class_<rocisa::DSLoadB64TrB4, rocisa::DSLoadInstruction>(m_mem, "DSLoadB64TrB4")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -1222,6 +1253,20 @@ void mem_inst(nb::module_ m_mem)
         .def_static("issueLatency", &rocisa::DSStoreB64::issueLatency)
         .def("__deepcopy__", [](const rocisa::DSStoreB64& self, const nb::dict&) {
             return new rocisa::DSStoreB64(self);
+        });
+
+    nb::class_<rocisa::DSStoreB96, rocisa::DSStoreInstruction>(m_mem, "DSStoreB96")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      std::optional<rocisa::DSModifiers>,
+                      const std::string&>(),
+             nb::arg("dstAddr"),
+             nb::arg("src"),
+             nb::arg("ds")      = std::nullopt,
+             nb::arg("comment") = "")
+        .def_static("issueLatency", &rocisa::DSStoreB96::issueLatency)
+        .def("__deepcopy__", [](const rocisa::DSStoreB96& self, const nb::dict&) {
+            return new rocisa::DSStoreB96(self);
         });
 
     nb::class_<rocisa::DSStoreB128, rocisa::DSStoreInstruction>(m_mem, "DSStoreB128")

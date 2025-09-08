@@ -28,11 +28,11 @@ from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
-from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, \
+from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
   BufferLoadD16B16, BufferLoadD16U8, DSLoad2B32, DSLoad2B64, DSLoadB128, \
   DSLoadB32, DSLoadB64, DSLoadB192, DSStoreB192, DSLoadB64TrB16, DSLoadB128TrB16, \
-  DSLoadB64TrB8, DSLoadB64TrB4, DSLoadInstruction, DSLoadU16, \
-  DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
+  DSLoadB64TrB8, DSLoadB64TrB4, DSLoadB96TrB6, DSLoadInstruction, DSLoadU16, \
+  DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB96, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB192, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
@@ -4511,6 +4511,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numVgprBufferPackA = self.states.numItersPLR + 1
       self.states.numVgprBufferPackB = self.states.numItersPLR + 1
 
+    if kernel["enableLDSTrA"]:
+      self.states.numVgprBufferPackA = 0
+
+    if kernel["enableLDSTrB"]:
+      self.states.numVgprBufferPackB = 0
+
     # TODO load sub-vector
     vwa = kernel["GlobalReadVectorWidthA"]
     vwb = kernel["GlobalReadVectorWidthB"]
@@ -4840,12 +4846,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     _ds_load_b128_tr_b16 = MemoryInstruction(DSLoadB128TrB16,    1, 1, 4, 4, bpe=2)
     _ds_load_b64_tr_b8 = MemoryInstruction(DSLoadB64TrB8,    1, 1, 2, 2, bpe=1)
     _ds_load_b64_tr_b4 = MemoryInstruction(DSLoadB64TrB4,    1, 1, 2, 2, bpe=0.5)
+    _ds_load_b96_tr_b6 = MemoryInstruction(DSLoadB96TrB6,    1, 1, 3, 3, bpe=0.75)
 
     ########################################
     # Local Write
     _ds_store_b256 = MemoryInstruction(DSStoreB256,  1, 1, 8, 8)
     _ds_store_b192 = MemoryInstruction(DSStoreB192,  1, 1, 6, 6)
     _ds_store_b128 = MemoryInstruction(DSStoreB128,  1, 1, 4, 4)
+    _ds_store_b96 = MemoryInstruction(DSStoreB96,  1, 1, 3, 3)
     _ds_store2_b64 = MemoryInstruction(DSStore2B64,  1, 2, 2, 2)
     _ds_store_b64 = MemoryInstruction(DSStoreB64,    1, 1, 2, 2)
     _ds_store2_b32 = MemoryInstruction(DSStore2B32,  1, 2, 1, 1)
@@ -4861,6 +4869,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     _buffer_load_b192 = MemoryInstruction(BufferLoadB192, 1, 0, 0, 6)
     _buffer_load_b128 = MemoryInstruction(BufferLoadB128, 1, 0, 0, 4)
+    _buffer_load_b96 = MemoryInstruction(BufferLoadB96, 1, 0, 0, 3)
     _buffer_load_b64 = MemoryInstruction(BufferLoadB64, 1, 0, 0, 2)
     _buffer_load_b32 = MemoryInstruction(BufferLoadB32, 1, 0, 0, 1)
     # generate half directly w/o using the format string to handle hi/lo correctly
@@ -4887,11 +4896,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if (kernel["BufferLoad"]):
       chosen_load_b192 = _buffer_load_b192
       chosen_load_b128 = _buffer_load_b128
+      chosen_load_b96 = _buffer_load_b96
       chosen_load_b64  = _buffer_load_b64
       chosen_load_b32  = _buffer_load_b32
       chosen_load_b16  = _buffer_load_d16_b16
       chosen_load_b8   = _buffer_load_d16_u8
     else:
+      #TODO: add flatl_load_b96
       chosen_load_b192 = _flat_load_b192
       chosen_load_b128 = _flat_load_b128
       chosen_load_b64  = _flat_load_b64
@@ -4904,14 +4915,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     chosen_store_b32  = _flat_store_b32
 
     self.memoryInstructions = {
-          "GlobalRead" : [ chosen_load_b192, chosen_load_b128, chosen_load_b64, chosen_load_b32,
-                           chosen_load_b16, chosen_load_b8 ],
+          "GlobalRead" : [ chosen_load_b192, chosen_load_b128, chosen_load_b96, chosen_load_b64,
+                           chosen_load_b32, chosen_load_b16, chosen_load_b8 ],
           "GlobalWrite": [ chosen_store_b128, chosen_store_b64, chosen_store_b32 ],
           "LocalRead"  : [ _ds_load_b192, _ds_load_b128, _ds_load2_b64, _ds_load_b64,
                            _ds_load2_b32, _ds_load_b32, _ds_load_u16, _ds_load_u8],
           "TrLocalRead": [_ds_load_b64_tr_b16, _ds_load_b128_tr_b16, _ds_load_b64_tr_b8,
-                          _ds_load_b64_tr_b4],
-          "LocalWrite" : [ _ds_store_b256, _ds_store_b192, _ds_store_b128,
+                          _ds_load_b64_tr_b4, _ds_load_b96_tr_b6],
+          "LocalWrite" : [ _ds_store_b256, _ds_store_b192, _ds_store_b128, _ds_store_b96,
                            _ds_store2_b64, _ds_store_b64, _ds_store2_b32,
                            _ds_store_b32, _ds_store_b16, _ds_store_b8 ]
         }
@@ -4963,6 +4974,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       self.states.a.numVgprValuPerBlock = int(kernel["MIWaveTileA"] * kernel["MIInputPerThreadA"] * tensorParametersA["bpe"] // self.states.bpr)
       self.states.b.numVgprValuPerBlock = int(kernel["MIWaveTileB"] * kernel["MIInputPerThreadB"] * tensorParametersB["bpe"] // self.states.bpr)
+
+      #TODO: remove this if upcoming compiler changes applied
+      if kernel["ProblemType"]["DataType"].numBytes() == 0.75:
+        if kernel["enableLDSTrA"]:
+          numVgprPerSubIter = int(kernel["MIInputPerThreadA"] * tensorParametersA["bpe"] // self.states.bpr)
+          numVgprPerLocalRead, vgprAlignment = 3, 4
+          numLoads = numVgprPerSubIter // numVgprPerLocalRead
+          self.states.a.numVgprValuPerBlock = kernel["MIWaveTileA"] * numLoads * vgprAlignment
+
+        if kernel["enableLDSTrB"]:
+          numVgprPerSubIter = int(kernel["MIInputPerThreadB"] * tensorParametersB["bpe"] // self.states.bpr)
+          numVgprPerLocalRead, vgprAlignment = 3, 4
+          numLoads = numVgprPerSubIter // numVgprPerLocalRead
+          self.states.b.numVgprValuPerBlock = kernel["MIWaveTileB"] * numLoads * vgprAlignment
 
       # change numVgprValuAPerBlock to 0 if DirectToVgpr is enabled (except for DTV + (pack or input conversion))
       if kernel["DirectToVgprA"] and not (self.states.packDTVA or self.states.convDTVA):
@@ -5023,12 +5048,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tpALocal = self.states.bpr if tensorParametersA["bpe"] * vwa < self.states.bpr else tensorParametersA["bpe"] * vwa
     numVgprG2LAllocatedLocal = roundUp((kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"] * \
         tpALocal) / (float)(self.states.bpr))
-    if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]) and (bpeMax * vwa < self.states.bpr):
-      # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
-      # We should optimize the usage for better performance.
-      statesANumVgprG2LAllocated = statesANumVgprG2L * (int)(self.states.bpr/(bpeMax * vwa))
+    if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]):
+      if bpeMax * vwa < self.states.bpr:
+        # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
+        # We should optimize the usage for better performance.
+        statesANumVgprG2LAllocated = statesANumVgprG2L * (int)(self.states.bpr/(bpeMax * vwa))
+      else:
+        # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
+        # We should optimize the usage for better performance.
+        statesANumVgprG2LAllocated = roundUp((kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"] * \
+          tpA) / (float)(self.states.bpr))
+        #TODO: remove this if upcoming compiler changes getting merged
+        if tensorParametersA["globalReadInstruction"].blockWidth == 3:
+          statesANumVgprG2LAllocated = roundUp(statesANumVgprG2LAllocated * 4 / 3)
     else:
       statesANumVgprG2LAllocated = statesANumVgprG2L
+
     if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
       self.states.a.numVgprG2L = statesANumVgprG2L
       self.states.a.numVgprG2LAllocated = statesANumVgprG2LAllocated
@@ -5063,10 +5098,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tpBLocal = self.states.bpr if tensorParametersB["bpe"] * vwb < self.states.bpr else tensorParametersB["bpe"] * vwb
     numVgprG2LAllocatedLocal = roundUp((kernel["NumLoadsCoalescedB"] * kernel["NumLoadsPerpendicularB"] * \
         tpBLocal) / (float)(self.states.bpr))
-    if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]) and (bpeMax * vwb < self.states.bpr):
-      # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
-      # We should optimize the usage for better performance.
-      statesBNumVgprG2LAllocated = statesBNumVgprG2L * (int)(self.states.bpr/(bpeMax * vwb))
+
+    if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]):
+      if bpeMax * vwb < self.states.bpr:
+        # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
+        # We should optimize the usage for better performance.
+        statesBNumVgprG2LAllocated = statesBNumVgprG2L * (int)(self.states.bpr/(bpeMax * vwb))
+      else:
+        # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
+        # We should optimize the usage for better performance.
+        statesBNumVgprG2LAllocated = roundUp((kernel["NumLoadsCoalescedB"] * kernel["NumLoadsPerpendicularB"] * \
+          tpB) / (float)(self.states.bpr))
+        if tensorParametersB["globalReadInstruction"].blockWidth == 3:
+          statesBNumVgprG2LAllocated = roundUp(statesBNumVgprG2LAllocated * 4 / 3)
     else:
       statesBNumVgprG2LAllocated = statesBNumVgprG2L
     if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]:
