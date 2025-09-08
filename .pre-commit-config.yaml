@@ -10,6 +10,11 @@
 # https://pre-commit.com/#regular-expressions.
 exclude: |
   (?x)
+    # These subprojects are not yet migrated to the superrepo and have alterate
+    # sources of truth, so do not run checks on their code.
+    projects/composablekernel/.*|
+    projects/hipsolver/.*|
+    projects/rocsolver/.*|
     # Large yaml files
     projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/.*|
     # Large (20k+ LOC) source files
