@@ -16,4 +16,3 @@ for irow=1:nrow,
   ip = ip + nz;
 end;
 A = sparse( ii,Ai+1,Ax, nrow,ncol );
-

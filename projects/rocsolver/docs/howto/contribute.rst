@@ -46,8 +46,8 @@ To run the rocSOLVER test suite, first build the rocSOLVER test client following
 the :doc:`Installation guide <../installation/installlinux>`. Then run the ``rocsolver-test`` binary. For a typical build, the test
 binary can be found at ``./build/release/clients/staging/rocsolver-test``.
 
-The full test suite is quite large and can take a long time to complete. During development, it might be useful to 
-`run a subset of the tests <https://github.com/google/googletest/blob/release-1.10.0/googletest/docs/advanced.md#running-a-subset-of-the-tests>`_ 
+The full test suite is quite large and can take a long time to complete. During development, it might be useful to
+`run a subset of the tests <https://github.com/google/googletest/blob/release-1.10.0/googletest/docs/advanced.md#running-a-subset-of-the-tests>`_
 by passing the ``--gtest_filter=<pattern>`` option to ``rocsolver-test``. A quick
 subset of tests can be run with ``--gtest_filter='checkin*'``, while the extended tests can be run
 using ``--gtest_filter='daily*'``.
@@ -56,6 +56,3 @@ Rejected contributions
 ---------------------------
 
 Unfortunately, sometimes a contribution cannot be accepted. The rationale for this decision is not always disclosed.
-
-
-

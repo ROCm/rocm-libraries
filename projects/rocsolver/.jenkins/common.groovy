@@ -33,7 +33,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false, boolean
         {
             // requires at command execution time ${auxiliary.gfxTargetParser()} to set gfx_var variable
             dynamicOptions = dynamicOptions + ' -a \$gfx_arch'
-            // TODO if enabling address sanitizer 
+            // TODO if enabling address sanitizer
             // dynamicOptions = dynamicOptions + ' -a \$gfx_arch:xnack+'
         }
     }

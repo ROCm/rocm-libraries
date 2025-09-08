@@ -31,4 +31,3 @@ end;
 
 
 A = sparse( i1:i2, j1:j2, d, m,m );
-

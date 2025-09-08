@@ -24,7 +24,7 @@ for more information on building the library and its clients.
 Testing rocSOLVER
 ==========================
 
-The ``rocsolver-test`` client executes a `GoogleTest <https://github.com/google/googletest>`_ (gtest) suite to 
+The ``rocsolver-test`` client executes a `GoogleTest <https://github.com/google/googletest>`_ (gtest) suite to
 verify the correct functioning of the library. The results computed by rocSOLVER on random input data
 are normally compared with the results computed by `NETLib LAPACK <https://www.netlib.org/lapack/>`_ on the CPU or tested implicitly
 in the context of the solved problem. This client is built if the ``-c`` flag is passed to ``install.sh`` or if the ``-DBUILD_CLIENTS_TESTS=ON`` flag is

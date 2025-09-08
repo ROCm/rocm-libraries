@@ -59,4 +59,3 @@ hipsolverRfSolve()
 hipsolverRfBatchSolve()
 ---------------------------------------------------
 .. doxygenfunction:: hipsolverRfBatchSolve
-

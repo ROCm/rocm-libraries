@@ -29,12 +29,12 @@ Plist="s d c z"
 
 # size cases to run:
 # valid options are: (default is large)
-# small  -> see definitions in rocsolver-perfoptim-suite.py for included size values  
+# small  -> see definitions in rocsolver-perfoptim-suite.py for included size values
 # medium -> see definitions in rocsolver-perfoptim-suite.py for included size values
 # large  -> see definitions in rocsolver-perfoptim-suite.py for included size values
 # (note: select only one as small is a sub-set of medium which is a sub-set of large)
 Clist="small medium large"
- 
+
 
 # Get and validate input arguments:
 error=true
@@ -64,9 +64,9 @@ else
                 if $new; then
                     suite+="$s "
                 fi
-                break 
+                break
             fi
-        done          
+        done
         for p in $Plist; do
             if [ $a == $p ]; then
                 new=true
@@ -82,7 +82,7 @@ else
                 fi
                 break
             fi
-        done  
+        done
         for c in $Clist; do
             if [ $a == $c ]; then
                 if $havecase; then
@@ -94,13 +94,13 @@ else
                 fi
                 break
             fi
-        done  
+        done
     done
 fi
 
 if $error; then
     echo "Incorrect arguments..."
-    exit 1 
+    exit 1
 fi
 if [ -z "$suite" ]; then
     suite=$Slist
@@ -116,7 +116,7 @@ fi
 # ensure this script is in the cwd
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-# setup output directory 
+# setup output directory
 output_dir=rocsolver_customer01_benchmarks
 mkdir -p "$output_dir"
 
@@ -128,4 +128,3 @@ for s in $suite; do
         done
     done
 done
-

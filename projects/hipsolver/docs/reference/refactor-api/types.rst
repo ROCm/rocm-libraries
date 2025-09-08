@@ -8,7 +8,7 @@
 Refactorization data types
 ********************************************************************
 
-hipSOLVER defines types and enumerations that are internally converted to the corresponding backend 
+hipSOLVER defines types and enumerations that are internally converted to the corresponding backend
 types at runtime. Here is a list of the types used in this compatibility API.
 
 hipSOLVER compatibility API types
@@ -49,4 +49,3 @@ hipsolverRfUnitDiagonal_t
 hipsolverStatus_t
 --------------------
 See :ref:`hipsolverStatus_t <status_t>`.
-

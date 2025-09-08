@@ -241,4 +241,3 @@ hipsolver<type>gesvdjBatched()
 .. doxygenfunction:: hipsolverDgesvdjBatched
    :outline:
 .. doxygenfunction:: hipsolverSgesvdjBatched
-

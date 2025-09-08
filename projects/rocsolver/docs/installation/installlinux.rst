@@ -49,7 +49,7 @@ on GitHub. Download the code and checkout the desired branch using these command
     git clone -b <desired_branch_name> https://github.com/ROCm/rocSOLVER.git
     cd rocSOLVER
 
-To build from source, external dependencies, such as CMake and Python, are required. Additionally, if 
+To build from source, external dependencies, such as CMake and Python, are required. Additionally, if
 you are building the library clients (which are not built by default), LAPACK and GoogleTest are also required.
 
 .. note::

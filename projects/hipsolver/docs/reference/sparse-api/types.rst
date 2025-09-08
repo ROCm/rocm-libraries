@@ -25,4 +25,3 @@ hipsparseMatDescr_t
 hipsolverStatus_t
 --------------------
 See :ref:`hipsolverStatus_t <status_t>`.
-

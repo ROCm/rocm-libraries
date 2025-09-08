@@ -17,7 +17,7 @@ The refactorization functions are divided into the following categories:
 * :ref:`rfsolver`: Based on triangular refactorization.
 
 .. note::
-   
+
    The API descriptions use the following notations:
 
    *  ``i``, ``j``, and ``k`` are used as general purpose indices. In some legacy LAPACK APIs, ``k`` can be

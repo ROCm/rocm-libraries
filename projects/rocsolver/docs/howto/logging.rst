@@ -8,8 +8,8 @@
 rocSOLVER multi-level logging
 ******************************
 
-rocSOLVER provides logging facilities that can be used to output information on rocSOLVER function calls. The infrastructure is 
-similar to `rocBLAS logging <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/reference/logging.html>`_. 
+rocSOLVER provides logging facilities that can be used to output information on rocSOLVER function calls. The infrastructure is
+similar to `rocBLAS logging <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/reference/logging.html>`_.
 Three logging modes are supported: trace logging, bench logging, and profile logging.
 
 .. note::

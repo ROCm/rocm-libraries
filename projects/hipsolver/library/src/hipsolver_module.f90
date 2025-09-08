@@ -94,7 +94,7 @@ module hipsolver
     !---------!
     !   Aux   !
     !---------!
-    
+
     interface
         function hipsolverCreate(handle) &
                 bind(c, name = 'hipsolverCreate')
@@ -140,7 +140,7 @@ module hipsolver
             type(c_ptr), value :: streamId
         end function hipsolverGetStream
     end interface
-    
+
     ! ******************** GESVDJ PARAMS ********************
     interface
         function hipsolverCreateGesvdjInfo(info) &
@@ -152,7 +152,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCreateGesvdjInfo
     end interface
-    
+
     interface
         function hipsolverDestroyGesvdjInfo(info) &
                 bind(c, name = 'hipsolverDestroyGesvdjInfo')
@@ -163,7 +163,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDestroyGesvdjInfo
     end interface
-    
+
     interface
         function hipsolverXgesvdjSetMaxSweeps(info, max_sweeps) &
                 bind(c, name = 'hipsolverXgesvdjSetMaxSweeps')
@@ -175,7 +175,7 @@ module hipsolver
             integer(c_int), value :: max_sweeps
         end function hipsolverXgesvdjSetMaxSweeps
     end interface
-    
+
     interface
         function hipsolverXgesvdjSetSortEig(info, sort_eig) &
                 bind(c, name = 'hipsolverXgesvdjSetSortEig')
@@ -187,7 +187,7 @@ module hipsolver
             integer(c_int), value :: sort_eig
         end function hipsolverXgesvdjSetSortEig
     end interface
-    
+
     interface
         function hipsolverXgesvdjSetTolerance(info, tolerance) &
                 bind(c, name = 'hipsolverXgesvdjSetTolerance')
@@ -199,7 +199,7 @@ module hipsolver
             real(c_double), value :: tolerance
         end function hipsolverXgesvdjSetTolerance
     end interface
-    
+
     interface
         function hipsolverXgesvdjGetResidual(handle, info, residual) &
                 bind(c, name = 'hipsolverXgesvdjGetResidual')
@@ -212,7 +212,7 @@ module hipsolver
             type(c_ptr), value :: residual
         end function hipsolverXgesvdjGetResidual
     end interface
-    
+
     interface
         function hipsolverXgesvdjGetSweeps(handle, info, executed_sweeps) &
                 bind(c, name = 'hipsolverXgesvdjGetSweeps')
@@ -225,7 +225,7 @@ module hipsolver
             type(c_ptr), value :: executed_sweeps
         end function hipsolverXgesvdjGetSweeps
     end interface
-    
+
     ! ******************** SYEVJ PARAMS ********************
     interface
         function hipsolverCreateSyevjInfo(info) &
@@ -237,7 +237,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCreateSyevjInfo
     end interface
-    
+
     interface
         function hipsolverDestroySyevjInfo(info) &
                 bind(c, name = 'hipsolverDestroySyevjInfo')
@@ -248,7 +248,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDestroySyevjInfo
     end interface
-    
+
     interface
         function hipsolverXsyevjSetMaxSweeps(info, max_sweeps) &
                 bind(c, name = 'hipsolverXsyevjSetMaxSweeps')
@@ -260,7 +260,7 @@ module hipsolver
             integer(c_int), value :: max_sweeps
         end function hipsolverXsyevjSetMaxSweeps
     end interface
-    
+
     interface
         function hipsolverXsyevjSetSortEig(info, sort_eig) &
                 bind(c, name = 'hipsolverXsyevjSetSortEig')
@@ -272,7 +272,7 @@ module hipsolver
             integer(c_int), value :: sort_eig
         end function hipsolverXsyevjSetSortEig
     end interface
-    
+
     interface
         function hipsolverXsyevjSetTolerance(info, tolerance) &
                 bind(c, name = 'hipsolverXsyevjSetTolerance')
@@ -284,7 +284,7 @@ module hipsolver
             real(c_double), value :: tolerance
         end function hipsolverXsyevjSetTolerance
     end interface
-    
+
     interface
         function hipsolverXsyevjGetResidual(handle, info, residual) &
                 bind(c, name = 'hipsolverXsyevjSetTolerance')
@@ -297,7 +297,7 @@ module hipsolver
             type(c_ptr), value :: residual
         end function hipsolverXsyevjGetResidual
     end interface
-    
+
     interface
         function hipsolverXsyevjGetSweeps(handle, info, executed_sweeps) &
                 bind(c, name = 'hipsolverXsyevjSetTolerance')
@@ -314,7 +314,7 @@ module hipsolver
     !------------!
     !   LAPACK   !
     !------------!
-    
+
     ! ******************** ORGBR/UNGBR ********************
     interface
         function hipsolverSorgbr_bufferSize(handle, side, m, n, k, A, lda, tau, lwork) &
@@ -334,7 +334,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSorgbr_bufferSize
     end interface
-    
+
     interface
         function hipsolverDorgbr_bufferSize(handle, side, m, n, k, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverDorgbr_bufferSize')
@@ -353,7 +353,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDorgbr_bufferSize
     end interface
-    
+
     interface
         function hipsolverCungbr_bufferSize(handle, side, m, n, k, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverCungbr_bufferSize')
@@ -372,7 +372,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCungbr_bufferSize
     end interface
-    
+
     interface
         function hipsolverZungbr_bufferSize(handle, side, m, n, k, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverZungbr_bufferSize')
@@ -391,7 +391,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverZungbr_bufferSize
     end interface
-    
+
     interface
         function hipsolverSorgbr(handle, side, m, n, k, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverSorgbr')
@@ -412,7 +412,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverSorgbr
     end interface
-    
+
     interface
         function hipsolverDorgbr(handle, side, m, n, k, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverDorgbr')
@@ -433,7 +433,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDorgbr
     end interface
-    
+
     interface
         function hipsolverCungbr(handle, side, m, n, k, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverCungbr')
@@ -454,7 +454,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCungbr
     end interface
-    
+
     interface
         function hipsolverZungbr(handle, side, m, n, k, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverZungbr')
@@ -475,7 +475,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZungbr
     end interface
-    
+
     ! ******************** ORGQR/UNGQR ********************
     interface
         function hipsolverSorgqr_bufferSize(handle, m, n, k, A, lda, tau, lwork) &
@@ -494,7 +494,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSorgqr_bufferSize
     end interface
-    
+
     interface
         function hipsolverDorgqr_bufferSize(handle, m, n, k, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverDorgqr_bufferSize')
@@ -512,7 +512,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDorgqr_bufferSize
     end interface
-    
+
     interface
         function hipsolverCungqr_bufferSize(handle, m, n, k, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverCungqr_bufferSize')
@@ -530,7 +530,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCungqr_bufferSize
     end interface
-    
+
     interface
         function hipsolverZungqr_bufferSize(handle, m, n, k, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverZungqr_bufferSize')
@@ -548,7 +548,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverZungqr_bufferSize
     end interface
-    
+
     interface
         function hipsolverSorgqr(handle, m, n, k, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverSorgqr')
@@ -568,7 +568,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverSorgqr
     end interface
-    
+
     interface
         function hipsolverDorgqr(handle, m, n, k, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverDorgqr')
@@ -588,7 +588,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDorgqr
     end interface
-    
+
     interface
         function hipsolverCungqr(handle, m, n, k, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverCungqr')
@@ -608,7 +608,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCungqr
     end interface
-    
+
     interface
         function hipsolverZungqr(handle, m, n, k, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverZungqr')
@@ -628,7 +628,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZungqr
     end interface
-    
+
     ! ******************** ORGTR/UNGTR ********************
     interface
         function hipsolverSorgtr_bufferSize(handle, uplo, n, A, lda, tau, lwork) &
@@ -646,7 +646,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSorgtr_bufferSize
     end interface
-    
+
     interface
         function hipsolverDorgtr_bufferSize(handle, uplo, n, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverDorgtr_bufferSize')
@@ -663,7 +663,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDorgtr_bufferSize
     end interface
-    
+
     interface
         function hipsolverCungtr_bufferSize(handle, uplo, n, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverCungtr_bufferSize')
@@ -680,7 +680,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCungtr_bufferSize
     end interface
-    
+
     interface
         function hipsolverZungtr_bufferSize(handle, uplo, n, A, lda, tau, lwork) &
                 bind(c, name = 'hipsolverZungtr_bufferSize')
@@ -697,7 +697,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverZungtr_bufferSize
     end interface
-    
+
     interface
         function hipsolverSorgtr(handle, uplo, n, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverSorgtr')
@@ -716,7 +716,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverSorgtr
     end interface
-    
+
     interface
         function hipsolverDorgtr(handle, uplo, n, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverDorgtr')
@@ -735,7 +735,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDorgtr
     end interface
-    
+
     interface
         function hipsolverCungtr(handle, uplo, n, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverCungtr')
@@ -754,7 +754,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCungtr
     end interface
-    
+
     interface
         function hipsolverZungtr(handle, uplo, n, A, lda, tau, work, lwork, info) &
                 bind(c, name = 'hipsolverZungtr')
@@ -773,7 +773,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZungtr
     end interface
-    
+
     ! ******************** ORMQR/UNMQR ********************
     interface
         function hipsolverSormqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork) &
@@ -796,7 +796,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSormqr_bufferSize
     end interface
-    
+
     interface
         function hipsolverDormqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork) &
                 bind(c, name = 'hipsolverDormqr_bufferSize')
@@ -818,7 +818,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDormqr_bufferSize
     end interface
-    
+
     interface
         function hipsolverCunmqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork) &
                 bind(c, name = 'hipsolverCunmqr_bufferSize')
@@ -840,7 +840,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCunmqr_bufferSize
     end interface
-    
+
     interface
         function hipsolverZunmqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork) &
                 bind(c, name = 'hipsolverZunmqr_bufferSize')
@@ -862,7 +862,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverZunmqr_bufferSize
     end interface
-    
+
     interface
         function hipsolverSormqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, info) &
                 bind(c, name = 'hipsolverSormqr')
@@ -886,7 +886,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverSormqr
     end interface
-    
+
     interface
         function hipsolverDormqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, info) &
                 bind(c, name = 'hipsolverDormqr')
@@ -910,7 +910,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDormqr
     end interface
-    
+
     interface
         function hipsolverCunmqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, info) &
                 bind(c, name = 'hipsolverCunmqr')
@@ -934,7 +934,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCunmqr
     end interface
-    
+
     interface
         function hipsolverZunmqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, info) &
                 bind(c, name = 'hipsolverZunmqr')
@@ -958,7 +958,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZunmqr
     end interface
-    
+
     ! ******************** ORMTR/UNMTR ********************
     interface
         function hipsolverSormtr_bufferSize(handle, side, uplo, trans, m, n, A, lda, tau, C, ldc, lwork) &
@@ -981,7 +981,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSormtr_bufferSize
     end interface
-    
+
     interface
         function hipsolverDormtr_bufferSize(handle, side, uplo, trans, m, n, A, lda, tau, C, ldc, lwork) &
                 bind(c, name = 'hipsolverDormtr_bufferSize')
@@ -1003,7 +1003,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDormtr_bufferSize
     end interface
-    
+
     interface
         function hipsolverCunmtr_bufferSize(handle, side, uplo, trans, m, n, A, lda, tau, C, ldc, lwork) &
                 bind(c, name = 'hipsolverCunmtr_bufferSize')
@@ -1025,7 +1025,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCunmtr_bufferSize
     end interface
-    
+
     interface
         function hipsolverZunmtr_bufferSize(handle, side, uplo, trans, m, n, A, lda, tau, C, ldc, lwork) &
                 bind(c, name = 'hipsolverZunmtr_bufferSize')
@@ -1047,7 +1047,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverZunmtr_bufferSize
     end interface
-    
+
     interface
         function hipsolverSormtr(handle, side, uplo, trans, m, n, A, lda, tau, C, ldc, work, lwork, info) &
                 bind(c, name = 'hipsolverSormtr')
@@ -1071,7 +1071,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverSormtr
     end interface
-    
+
     interface
         function hipsolverDormtr(handle, side, uplo, trans, m, n, A, lda, tau, C, ldc, work, lwork, info) &
                 bind(c, name = 'hipsolverDormtr')
@@ -1095,7 +1095,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDormtr
     end interface
-    
+
     interface
         function hipsolverCunmtr(handle, side, uplo, trans, m, n, A, lda, tau, C, ldc, work, lwork, info) &
                 bind(c, name = 'hipsolverCunmtr')
@@ -1119,7 +1119,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCunmtr
     end interface
-    
+
     interface
         function hipsolverZunmtr(handle, side, uplo, trans, m, n, A, lda, tau, C, ldc, work, lwork, info) &
                 bind(c, name = 'hipsolverZunmtr')
@@ -1143,7 +1143,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZunmtr
     end interface
-    
+
     ! ******************** GEBRD ********************
     interface
         function hipsolverSgebrd_bufferSize(handle, m, n, lwork) &
@@ -1158,7 +1158,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSgebrd_bufferSize
     end interface
-    
+
     interface
         function hipsolverDgebrd_bufferSize(handle, m, n, lwork) &
                 bind(c, name = 'hipsolverDgebrd_bufferSize')
@@ -1172,7 +1172,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDgebrd_bufferSize
     end interface
-    
+
     interface
         function hipsolverCgebrd_bufferSize(handle, m, n, lwork) &
                 bind(c, name = 'hipsolverCgebrd_bufferSize')
@@ -1186,7 +1186,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCgebrd_bufferSize
     end interface
-    
+
     interface
         function hipsolverZgebrd_bufferSize(handle, m, n, lwork) &
                 bind(c, name = 'hipsolverZgebrd_bufferSize')
@@ -1288,7 +1288,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZgebrd
     end interface
-    
+
     ! ******************** GELS ********************
     interface
         function hipsolverSSgels_bufferSize(handle, m, n, nrhs, A, lda, B, ldb, X, ldx, lwork) &
@@ -1310,7 +1310,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSSgels_bufferSize
     end interface
-    
+
     interface
         function hipsolverDDgels_bufferSize(handle, m, n, nrhs, A, lda, B, ldb, X, ldx, lwork) &
                 bind(c, name = 'hipsolverDDgels_bufferSize')
@@ -1331,7 +1331,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDDgels_bufferSize
     end interface
-    
+
     interface
         function hipsolverCCgels_bufferSize(handle, m, n, nrhs, A, lda, B, ldb, X, ldx, lwork) &
                 bind(c, name = 'hipsolverCCgels_bufferSize')
@@ -1352,7 +1352,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCCgels_bufferSize
     end interface
-    
+
     interface
         function hipsolverZZgels_bufferSize(handle, m, n, nrhs, A, lda, B, ldb, X, ldx, lwork) &
                 bind(c, name = 'hipsolverZZgels_bufferSize')
@@ -1469,7 +1469,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZZgels
     end interface
-    
+
     ! ******************** GEQRF ********************
     interface
         function hipsolverSgeqrf_bufferSize(handle, m, n, A, lda, lwork) &
@@ -1632,7 +1632,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSSgesv_bufferSize
     end interface
-    
+
     interface
         function hipsolverDDgesv_bufferSize(handle, n, nrhs, A, lda, ipiv, B, ldb, X, ldx, lwork) &
                 bind(c, name = 'hipsolverDDgesv_bufferSize')
@@ -1653,7 +1653,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDDgesv_bufferSize
     end interface
-    
+
     interface
         function hipsolverCCgesv_bufferSize(handle, n, nrhs, A, lda, ipiv, B, ldb, X, ldx, lwork) &
                 bind(c, name = 'hipsolverCCgesv_bufferSize')
@@ -1674,7 +1674,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCCgesv_bufferSize
     end interface
-    
+
     interface
         function hipsolverZZgesv_bufferSize(handle, n, nrhs, A, lda, ipiv, B, ldb, X, ldx, lwork) &
                 bind(c, name = 'hipsolverZZgesv_bufferSize')
@@ -1791,7 +1791,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZZgesv
     end interface
-    
+
     ! ******************** GESVD ********************
     interface
         function hipsolverSgesvd_bufferSize(handle, jobu, jobv, m, n, lwork) &
@@ -1808,7 +1808,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSgesvd_bufferSize
     end interface
-    
+
     interface
         function hipsolverDgesvd_bufferSize(handle, jobu, jobv, m, n, lwork) &
                 bind(c, name = 'hipsolverDgesvd_bufferSize')
@@ -1824,7 +1824,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDgesvd_bufferSize
     end interface
-    
+
     interface
         function hipsolverCgesvd_bufferSize(handle, jobu, jobv, m, n, lwork) &
                 bind(c, name = 'hipsolverCgesvd_bufferSize')
@@ -1840,7 +1840,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCgesvd_bufferSize
     end interface
-    
+
     interface
         function hipsolverZgesvd_bufferSize(handle, jobu, jobv, m, n, lwork) &
                 bind(c, name = 'hipsolverZgesvd_bufferSize')
@@ -1960,7 +1960,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZgesvd
     end interface
-    
+
     ! ******************** GESVDJ ********************
     interface
         function hipsolverSgesvdj_bufferSize(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, lwork, params) &
@@ -1985,7 +1985,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverSgesvdj_bufferSize
     end interface
-    
+
     interface
         function hipsolverDgesvdj_bufferSize(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, lwork, params) &
                 bind(c, name = 'hipsolverDgesvdj_bufferSize')
@@ -2009,7 +2009,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverDgesvdj_bufferSize
     end interface
-    
+
     interface
         function hipsolverCgesvdj_bufferSize(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, lwork, params) &
                 bind(c, name = 'hipsolverCgesvdj_bufferSize')
@@ -2033,7 +2033,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverCgesvdj_bufferSize
     end interface
-    
+
     interface
         function hipsolverZgesvdj_bufferSize(handle, jobz, econ, m, n, A, lda, S, U, ldu, V, ldv, lwork, params) &
                 bind(c, name = 'hipsolverZgesvdj_bufferSize')
@@ -2161,7 +2161,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverZgesvdj
     end interface
-    
+
     ! ******************** GESVDJ_BATCHED ********************
     interface
         function hipsolverSgesvdjBatched_bufferSize(handle, jobz, m, n, A, lda, S, U, ldu, V, ldv, lwork, params, batch_count) &
@@ -2186,7 +2186,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverSgesvdjBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverDgesvdjBatched_bufferSize(handle, jobz, m, n, A, lda, S, U, ldu, V, ldv, lwork, params, batch_count) &
                 bind(c, name = 'hipsolverDgesvdjBatched_bufferSize')
@@ -2210,7 +2210,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverDgesvdjBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverCgesvdjBatched_bufferSize(handle, jobz, m, n, A, lda, S, U, ldu, V, ldv, lwork, params, batch_count) &
                 bind(c, name = 'hipsolverCgesvdjBatched_bufferSize')
@@ -2234,7 +2234,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverCgesvdjBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverZgesvdjBatched_bufferSize(handle, jobz, m, n, A, lda, S, U, ldu, V, ldv, lwork, params, batch_count) &
                 bind(c, name = 'hipsolverZgesvdjBatched_bufferSize')
@@ -2379,7 +2379,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSgetrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverDgetrf_bufferSize(handle, m, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverDgetrf_bufferSize')
@@ -2395,7 +2395,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDgetrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverCgetrf_bufferSize(handle, m, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverCgetrf_bufferSize')
@@ -2411,7 +2411,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCgetrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverZgetrf_bufferSize(handle, m, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverZgetrf_bufferSize')
@@ -2446,7 +2446,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverSgetrf
     end interface
-    
+
     interface
         function hipsolverDgetrf(handle, m, n, A, lda, work, lwork, ipiv, info) &
                 bind(c, name = 'hipsolverDgetrf')
@@ -2465,7 +2465,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDgetrf
     end interface
-    
+
     interface
         function hipsolverCgetrf(handle, m, n, A, lda, work, lwork, ipiv, info) &
                 bind(c, name = 'hipsolverCgetrf')
@@ -2484,7 +2484,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCgetrf
     end interface
-    
+
     interface
         function hipsolverZgetrf(handle, m, n, A, lda, work, lwork, ipiv, info) &
                 bind(c, name = 'hipsolverZgetrf')
@@ -2524,7 +2524,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSgetrs_bufferSize
     end interface
-    
+
     interface
         function hipsolverDgetrs_bufferSize(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, lwork) &
                 bind(c, name = 'hipsolverDgetrs_bufferSize')
@@ -2544,7 +2544,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDgetrs_bufferSize
     end interface
-    
+
     interface
         function hipsolverCgetrs_bufferSize(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, lwork) &
                 bind(c, name = 'hipsolverCgetrs_bufferSize')
@@ -2564,7 +2564,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCgetrs_bufferSize
     end interface
-    
+
     interface
         function hipsolverZgetrs_bufferSize(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, lwork) &
                 bind(c, name = 'hipsolverZgetrs_bufferSize')
@@ -2606,7 +2606,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverSgetrs
     end interface
-    
+
     interface
         function hipsolverDgetrs(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, work, lwork, info) &
                 bind(c, name = 'hipsolverDgetrs')
@@ -2628,7 +2628,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverDgetrs
     end interface
-    
+
     interface
         function hipsolverCgetrs(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, work, lwork, info) &
                 bind(c, name = 'hipsolverCgetrs')
@@ -2650,7 +2650,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverCgetrs
     end interface
-    
+
     interface
         function hipsolverZgetrs(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, work, lwork, info) &
                 bind(c, name = 'hipsolverZgetrs')
@@ -2689,7 +2689,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSpotrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverDpotrf_bufferSize(handle, uplo, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverDpotrf_bufferSize')
@@ -2705,7 +2705,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDpotrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverCpotrf_bufferSize(handle, uplo, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverCpotrf_bufferSize')
@@ -2721,7 +2721,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCpotrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverZpotrf_bufferSize(handle, uplo, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverZpotrf_bufferSize')
@@ -2809,7 +2809,7 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZpotrf
     end interface
-    
+
     ! ******************** POTRF_BATCHED ********************
     interface
         function hipsolverSpotrfBatched_bufferSize(handle, uplo, n, A, lda, lwork, batch_count) &
@@ -2827,7 +2827,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverSpotrfBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverDpotrfBatched_bufferSize(handle, uplo, n, A, lda, lwork, batch_count) &
                 bind(c, name = 'hipsolverDpotrfBatched_bufferSize')
@@ -2844,7 +2844,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverDpotrfBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverCpotrfBatched_bufferSize(handle, uplo, n, A, lda, lwork, batch_count) &
                 bind(c, name = 'hipsolverCpotrfBatched_bufferSize')
@@ -2861,7 +2861,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverCpotrfBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverZpotrfBatched_bufferSize(handle, uplo, n, A, lda, lwork, batch_count) &
                 bind(c, name = 'hipsolverZpotrfBatched_bufferSize')
@@ -2897,7 +2897,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverSpotrfBatched
     end interface
-    
+
     interface
         function hipsolverDpotrfBatched(handle, uplo, n, A, lda, work, lwork, info, batch_count) &
                 bind(c, name = 'hipsolverDpotrfBatched')
@@ -2916,7 +2916,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverDpotrfBatched
     end interface
-    
+
     interface
         function hipsolverCpotrfBatched(handle, uplo, n, A, lda, work, lwork, info, batch_count) &
                 bind(c, name = 'hipsolverCpotrfBatched')
@@ -2935,7 +2935,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverCpotrfBatched
     end interface
-    
+
     interface
         function hipsolverZpotrfBatched(handle, uplo, n, A, lda, work, lwork, info, batch_count) &
                 bind(c, name = 'hipsolverZpotrfBatched')
@@ -2971,7 +2971,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSpotri_bufferSize
     end interface
-    
+
     interface
         function hipsolverDpotri_bufferSize(handle, uplo, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverDpotri_bufferSize')
@@ -2987,7 +2987,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDpotri_bufferSize
     end interface
-    
+
     interface
         function hipsolverCpotri_bufferSize(handle, uplo, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverCpotri_bufferSize')
@@ -3003,7 +3003,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCpotri_bufferSize
     end interface
-    
+
     interface
         function hipsolverZpotri_bufferSize(handle, uplo, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverZpotri_bufferSize')
@@ -3111,7 +3111,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSpotrs_bufferSize
     end interface
-    
+
     interface
         function hipsolverDpotrs_bufferSize(handle, uplo, n, nrhs, A, lda, B, ldb, lwork) &
                 bind(c, name = 'hipsolverDpotrs_bufferSize')
@@ -3130,7 +3130,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDpotrs_bufferSize
     end interface
-    
+
     interface
         function hipsolverCpotrs_bufferSize(handle, uplo, n, nrhs, A, lda, B, ldb, lwork) &
                 bind(c, name = 'hipsolverCpotrs_bufferSize')
@@ -3149,7 +3149,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCpotrs_bufferSize
     end interface
-    
+
     interface
         function hipsolverZpotrs_bufferSize(handle, uplo, n, nrhs, A, lda, B, ldb, lwork) &
                 bind(c, name = 'hipsolverZpotrs_bufferSize')
@@ -3273,7 +3273,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverSpotrsBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverDpotrsBatched_bufferSize(handle, uplo, n, nrhs, A, lda, B, ldb, lwork, batch_count) &
                 bind(c, name = 'hipsolverDpotrsBatched_bufferSize')
@@ -3293,7 +3293,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverDpotrsBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverCpotrsBatched_bufferSize(handle, uplo, n, nrhs, A, lda, B, ldb, lwork, batch_count) &
                 bind(c, name = 'hipsolverCpotrsBatched_bufferSize')
@@ -3313,7 +3313,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverCpotrsBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverZpotrsBatched_bufferSize(handle, uplo, n, nrhs, A, lda, B, ldb, lwork, batch_count) &
                 bind(c, name = 'hipsolverZpotrsBatched_bufferSize')
@@ -3440,7 +3440,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSsyevd_bufferSize
     end interface
-    
+
     interface
         function hipsolverDsyevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork) &
                 bind(c, name = 'hipsolverDsyevd_bufferSize')
@@ -3458,7 +3458,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDsyevd_bufferSize
     end interface
-    
+
     interface
         function hipsolverCheevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork) &
                 bind(c, name = 'hipsolverCheevd_bufferSize')
@@ -3476,7 +3476,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCheevd_bufferSize
     end interface
-    
+
     interface
         function hipsolverZheevd_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork) &
                 bind(c, name = 'hipsolverZheevd_bufferSize')
@@ -3594,7 +3594,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverSsyevj_bufferSize
     end interface
-    
+
     interface
         function hipsolverDsyevj_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork, params) &
                 bind(c, name = 'hipsolverDsyevj_bufferSize')
@@ -3613,7 +3613,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverDsyevj_bufferSize
     end interface
-    
+
     interface
         function hipsolverCheevj_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork, params) &
                 bind(c, name = 'hipsolverCheevj_bufferSize')
@@ -3632,7 +3632,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverCheevj_bufferSize
     end interface
-    
+
     interface
         function hipsolverZheevj_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork, params) &
                 bind(c, name = 'hipsolverZheevj_bufferSize')
@@ -3756,7 +3756,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverSsyevjBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverDsyevjBatched_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork, params, batch_count) &
                 bind(c, name = 'hipsolverDsyevjBatched_bufferSize')
@@ -3776,7 +3776,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverDsyevjBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverCheevjBatched_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork, params, batch_count) &
                 bind(c, name = 'hipsolverCheevjBatched_bufferSize')
@@ -3796,7 +3796,7 @@ module hipsolver
             integer(c_int), value :: batch_count
         end function hipsolverCheevjBatched_bufferSize
     end interface
-    
+
     interface
         function hipsolverZheevjBatched_bufferSize(handle, jobz, uplo, n, A, lda, W, lwork, params, batch_count) &
                 bind(c, name = 'hipsolverZheevjBatched_bufferSize')
@@ -3926,7 +3926,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSsygvd_bufferSize
     end interface
-    
+
     interface
         function hipsolverDsygvd_bufferSize(handle, itype, jobz, uplo, n, A, lda, B, ldb, W, lwork) &
                 bind(c, name = 'hipsolverDsygvd_bufferSize')
@@ -3947,7 +3947,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDsygvd_bufferSize
     end interface
-    
+
     interface
         function hipsolverChegvd_bufferSize(handle, itype, jobz, uplo, n, A, lda, B, ldb, W, lwork) &
                 bind(c, name = 'hipsolverChegvd_bufferSize')
@@ -3968,7 +3968,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverChegvd_bufferSize
     end interface
-    
+
     interface
         function hipsolverZhegvd_bufferSize(handle, itype, jobz, uplo, n, A, lda, B, ldb, W, lwork) &
                 bind(c, name = 'hipsolverZhegvd_bufferSize')
@@ -4104,7 +4104,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverSsygvj_bufferSize
     end interface
-    
+
     interface
         function hipsolverDsygvj_bufferSize(handle, itype, jobz, uplo, n, A, lda, B, ldb, W, lwork, params) &
                 bind(c, name = 'hipsolverDsygvj_bufferSize')
@@ -4126,7 +4126,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverDsygvj_bufferSize
     end interface
-    
+
     interface
         function hipsolverChegvj_bufferSize(handle, itype, jobz, uplo, n, A, lda, B, ldb, W, lwork, params) &
                 bind(c, name = 'hipsolverChegvj_bufferSize')
@@ -4148,7 +4148,7 @@ module hipsolver
             type(c_ptr), value :: params
         end function hipsolverChegvj_bufferSize
     end interface
-    
+
     interface
         function hipsolverZhegvj_bufferSize(handle, itype, jobz, uplo, n, A, lda, B, ldb, W, lwork, params) &
                 bind(c, name = 'hipsolverZhegvj_bufferSize')
@@ -4286,7 +4286,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSsytrd_bufferSize
     end interface
-    
+
     interface
         function hipsolverDsytrd_bufferSize(handle, uplo, n, A, lda, D, E, tau, lwork) &
                 bind(c, name = 'hipsolverDsytrd_bufferSize')
@@ -4305,7 +4305,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDsytrd_bufferSize
     end interface
-    
+
     interface
         function hipsolverChetrd_bufferSize(handle, uplo, n, A, lda, D, E, tau, lwork) &
                 bind(c, name = 'hipsolverChetrd_bufferSize')
@@ -4324,7 +4324,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverChetrd_bufferSize
     end interface
-    
+
     interface
         function hipsolverZhetrd_bufferSize(handle, uplo, n, A, lda, D, E, tau, lwork) &
                 bind(c, name = 'hipsolverZhetrd_bufferSize')
@@ -4443,7 +4443,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverSsytrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverDsytrf_bufferSize(handle, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverDsytrf_bufferSize')
@@ -4458,7 +4458,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverDsytrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverCsytrf_bufferSize(handle, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverCsytrf_bufferSize')
@@ -4473,7 +4473,7 @@ module hipsolver
             type(c_ptr), value :: lwork
         end function hipsolverCsytrf_bufferSize
     end interface
-    
+
     interface
         function hipsolverZsytrf_bufferSize(handle, n, A, lda, lwork) &
                 bind(c, name = 'hipsolverZsytrf_bufferSize')
@@ -4564,5 +4564,5 @@ module hipsolver
             type(c_ptr), value :: info
         end function hipsolverZsytrf
     end interface
-    
+
 end module hipsolver

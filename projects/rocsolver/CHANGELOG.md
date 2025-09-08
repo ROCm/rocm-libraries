@@ -540,4 +540,3 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Deprecated
 - rocSOLVER types and enumerations
 - hcc compiler support
-

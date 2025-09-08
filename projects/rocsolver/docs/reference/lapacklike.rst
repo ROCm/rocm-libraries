@@ -16,7 +16,7 @@ Other LAPACK-like routines are provided by rocSOLVER. They are divided into the 
 * :ref:`likesvds`: Singular values and related problems for general matrices.
 
 .. note::
-   
+
    The API descriptions use the following notations:
 
    *  ``i``, ``j``, and ``k`` are used as general purpose indices. In some legacy LAPACK APIs, ``k`` can be
@@ -646,4 +646,3 @@ rocsolver_<type>gesvdj_strided_batched()
 .. doxygenfunction:: rocsolver_dgesvdj_strided_batched
    :outline:
 .. doxygenfunction:: rocsolver_sgesvdj_strided_batched
-

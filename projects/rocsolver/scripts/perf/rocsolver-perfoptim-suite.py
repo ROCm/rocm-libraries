@@ -281,5 +281,3 @@ if __name__ == '__main__':
             execute_benchmarks(output_file, args.suite, args.precision, args.case, args.exe)
     else:
         execute_benchmarks(sys.stdout, args.suite, args.precision, args.case, args.exe)
-
-

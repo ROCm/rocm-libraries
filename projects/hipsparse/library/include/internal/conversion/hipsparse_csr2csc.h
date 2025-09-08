@@ -65,7 +65,7 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  The CSC arrays, \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the 
+*  The CSC arrays, \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the
 *  user prior to calling \p hipsparseXcsr2csc().
 *
 *  \note
@@ -122,7 +122,7 @@ extern "C" {
 *    //     6 0 0 7 8
 *    int hcsrRowPtr[4] = {0, 3, 5, 8};
 *    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
+*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
 *
 *    int m         = 3;
 *    int n         = 5;
@@ -153,7 +153,7 @@ extern "C" {
 *    hipFree(dcsrRowPtr);
 *    hipFree(dcsrColInd);
 *    hipFree(dcsrVal);
-*    
+*
 *    hipFree(dcscRowInd);
 *    hipFree(dcscColPtr);
 *    hipFree(dcsc_val);
@@ -227,7 +227,7 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
 *  when converting a sparse CSR matrix into a sparse CSC matrix.
 *
 *  \details
-*  \p hipsparseCsr2cscEx2_bufferSize calculates the required user allocated temporary buffer needed 
+*  \p hipsparseCsr2cscEx2_bufferSize calculates the required user allocated temporary buffer needed
 *  by \ref hipsparseCsr2cscEx2 to convert a CSR matrix into a CSC matrix. \ref hipsparseCsr2cscEx2
 *  can also be used to convert a CSC matrix into a CSR matrix. \p copyValues decides
 *  whether \p cscVal is being filled during conversion (\ref HIPSPARSE_ACTION_NUMERIC)
@@ -265,7 +265,7 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
 *  cscRowInd          array of \p nnz elements containing the row indices of the sparse
 *                     CSC matrix.
 *  @param[in]
-*  valType            The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F, 
+*  valType            The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F,
 *                     HIP_R_64F, HIP_C_32F or HIP_C_64F
 *  @param[in]
 *  copyValues         \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
@@ -342,7 +342,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *  cscRowInd   array of \p nnz elements containing the row indices of the sparse
 *              CSC matrix.
 *  @param[in]
-*  valType     The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F, 
+*  valType     The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F,
 *              HIP_R_64F, HIP_C_32F or HIP_C_64F
 *  @param[in]
 *  copyValues  \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
@@ -371,7 +371,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *    //     6 0 0 7 8
 *    int hcsrRowPtr[4] = {0, 3, 5, 8};
 *    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
+*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
 *
 *    int m         = 3;
 *    int n         = 5;
@@ -399,45 +399,45 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *    hipMalloc((void**)&dcsc_val, sizeof(float) * nnz);
 *
 *    size_t bufferSize;
-*    hipsparseCsr2cscEx2_bufferSize(handle, 
-*                                   m, 
-*                                   n, 
-*                                   nnz, 
-*                                   dcsrVal, 
-*                                   dcsrRowPtr, 
-*                                   dcsrColInd, 
-*                                   dcsc_val, 
-*                                   dcscColPtr, 
+*    hipsparseCsr2cscEx2_bufferSize(handle,
+*                                   m,
+*                                   n,
+*                                   nnz,
+*                                   dcsrVal,
+*                                   dcsrRowPtr,
+*                                   dcsrColInd,
+*                                   dcsc_val,
+*                                   dcscColPtr,
 *                                   dcscRowInd,
-*                                   HIP_R_32F, 
-*                                   action, 
-*                                   base, 
-*                                   alg, 
+*                                   HIP_R_32F,
+*                                   action,
+*                                   base,
+*                                   alg,
 *                                   &bufferSize);
 *
 *    void* dbuffer = nullptr;
 *    hipMalloc((void**)&dbuffer, bufferSize);
 *
-*    hipsparseCsr2cscEx2(handle, 
-*                        m, 
-*                        n, 
-*                        nnz, 
-*                        dcsrVal, 
-*                        dcsrRowPtr, 
-*                        dcsrColInd, 
-*                        dcsc_val, 
-*                        dcscColPtr, 
-*                        dcscRowInd, 
-*                        HIP_R_32F, 
-*                        action, 
-*                        base, 
-*                        alg, 
+*    hipsparseCsr2cscEx2(handle,
+*                        m,
+*                        n,
+*                        nnz,
+*                        dcsrVal,
+*                        dcsrRowPtr,
+*                        dcsrColInd,
+*                        dcsc_val,
+*                        dcscColPtr,
+*                        dcscRowInd,
+*                        HIP_R_32F,
+*                        action,
+*                        base,
+*                        alg,
 *                        dbuffer);
 *
 *    hipFree(dcsrRowPtr);
 *    hipFree(dcsrColInd);
 *    hipFree(dcsrVal);
-*    
+*
 *    hipFree(dcscRowInd);
 *    hipFree(dcscColPtr);
 *    hipFree(dcsc_val);

@@ -231,7 +231,7 @@ Different signatures and additional API methods
 
       ``lwork`` is ignored when the wrapper calls cuSOLVER because it is not needed.
 
-*  All rocSOLVER functions called by hipSOLVER require a workspace. To allow the user to specify one, 
+*  All rocSOLVER functions called by hipSOLVER require a workspace. To allow the user to specify one,
    :ref:`hipsolverXgetrs <getrs>`, :ref:`hipsolverXpotrfBatched <potrf_batched>`, :ref:`hipsolverXpotrs <potrs>`, and
    :ref:`hipsolverXpotrsBatched <potrs_batched>` require ``work`` and ``lwork`` as arguments.
 

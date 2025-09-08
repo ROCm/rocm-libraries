@@ -91,4 +91,3 @@ hipsolverEigRange_t
 hipsolverDeterministicMode_t
 -----------------------------
 .. doxygenenum:: hipsolverDeterministicMode_t
-

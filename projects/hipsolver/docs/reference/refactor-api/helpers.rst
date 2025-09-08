@@ -8,7 +8,7 @@
 Refactorization helper functions
 **********************************
 
-These helper functions control aspects of the hipSOLVER library. They are divided 
+These helper functions control aspects of the hipSOLVER library. They are divided
 into the following categories:
 
 * :ref:`refactor_initialize`: Functions to initialize and cleanup the library handle.
@@ -162,4 +162,3 @@ hipsolverRfSetNumericProperties()
 hipsolverRfSetResetValuesFastMode()
 -----------------------------------------
 .. doxygenfunction:: hipsolverRfSetResetValuesFastMode
-

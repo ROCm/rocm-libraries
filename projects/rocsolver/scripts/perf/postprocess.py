@@ -42,7 +42,7 @@ def operation_count(n, function):
         return (4 * n ** 3 / 3) + (2 * n ** 2) + (4 * n)
     elif function.startswith('getri'):
         return (4 * n ** 3 / 3) - (n ** 2) + (5 * n / 3)
-    else: 
+    else:
         raise ValueError(f'Could not calculate operation count for {function}.')
 
 if __name__ == '__main__':

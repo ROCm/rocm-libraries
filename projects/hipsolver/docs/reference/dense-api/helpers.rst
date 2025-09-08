@@ -194,4 +194,3 @@ hipsolverDnDestroyParams()
 hipsolverDnSetAdvOptions()
 ---------------------------------
 .. doxygenfunction:: hipsolverDnSetAdvOptions
-

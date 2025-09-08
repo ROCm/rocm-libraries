@@ -42,4 +42,3 @@ hipsolverSp<type>csrlsvqr()
 .. doxygenfunction:: hipsolverSpDcsrlsvqr
    :outline:
 .. doxygenfunction:: hipsolverSpScsrlsvqr
-

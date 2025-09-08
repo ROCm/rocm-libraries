@@ -20,7 +20,7 @@ into the following categories:
 * :ref:`svds`: Singular values and related problems for general matrices.
 
 .. note::
-   
+
    The API descriptions use the following notations:
 
    *  ``i``, ``j``, and ``k`` are used as general purpose indices. In some legacy LAPACK APIs, ``k`` can be
