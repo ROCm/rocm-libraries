@@ -635,6 +635,9 @@ rocblas_gemvt_row_vectorized_kernel(rocblas_int    m,
                                     rocblas_stride stridey,
                                     rocblas_int    batch_count)
 {
+// gfx90a gfx942 kernels
+#if defined(__gfx90a__) || defined(__gfx942__)
+
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
@@ -655,6 +658,8 @@ rocblas_gemvt_row_vectorized_kernel(rocblas_int    m,
 
 #if DEVICE_GRID_YZ_16BIT
     }
+#endif
+
 #endif
 }
 

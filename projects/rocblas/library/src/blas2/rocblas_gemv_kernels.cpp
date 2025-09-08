@@ -84,6 +84,27 @@ inline bool rocblas_gemvt_skinny_n(rocblas_operation transA, rocblas_int m, rocb
         return false;
 }
 
+template <typename T>
+inline bool rocblas_gemvt_fat_n(rocblas_int m, rocblas_int n, int gfx_arch)
+{
+    if(gfx_arch == 910)
+    {
+        bool fat = n / 4 > m;
+        return fat
+               && ((std::is_same_v<T, float> && m <= 768)
+                   || ((std::is_same_v<T, double> || std::is_same_v<T, rocblas_float_complex>)&&m
+                       <= 384)
+                   || (std::is_same_v<T, rocblas_double_complex> && m <= 128));
+    }
+    else if(gfx_arch == 942)
+    {
+        bool fat = n / 8 > m;
+        return fat && (std::is_same_v<T, float> && m <= 512);
+    }
+    else
+        return false;
+}
+
 /*! \brief rocblas_internal_gemv_kernel_workspace_size
     Currently only transpose/conj skinny n matrices use workspace memory, so usually returns 0
     Work buffer for column reductions: number of blocks * cols * batch_count
@@ -181,10 +202,11 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
 
     bool is_gfx11xx = arch_major == 11 ? true : false;
     bool is_gfx12xx = arch_major == 12 ? true : false;
-    bool is_gfx908  = handle->getArch() == 908 ? true : false;
-    bool is_gfx906  = handle->getArch() == 906 ? true : false;
-    bool is_gfx90a  = handle->getArch() == 910 ? true : false;
-    bool is_gfx942  = handle->getArch() == 942 ? true : false;
+    int  gfx_arch   = handle->getArch();
+    bool is_gfx908  = gfx_arch == 908 ? true : false;
+    bool is_gfx906  = gfx_arch == 906 ? true : false;
+    bool is_gfx90a  = gfx_arch == 910 ? true : false;
+    bool is_gfx942  = gfx_arch == 942 ? true : false;
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
@@ -444,6 +466,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
     {
         // transpose
         static constexpr bool CONJ = false;
+
         if(!i64_incs && m <= 64 && batch_count > 8) // few rows, e.g. qmcpack
         {
             // number of columns on the y-dim of the grid
@@ -506,13 +529,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                       stridey);
             }
         }
-        else if(!i64_incs
-                && ((is_gfx90a && (m <= n)
-                     && ((is_complex_double && m <= 128) || (is_float && m <= 1024)
-                         || ((is_double || is_complex_float) && m <= 512)))
-                    || (is_gfx942 && (m <= n)
-                        && ((is_complex_double && m <= 256) || (is_float && m <= 2048)
-                            || ((is_double || is_complex_float) && m <= 512)))))
+        else if(!i64_incs && rocblas_gemvt_fat_n<Ti>(m, n, gfx_arch))
         {
 #define gemvt_row_vectorized_KARGS(alpha_, beta_)                                              \
     gemvt_grid, gemvt_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, A, offseta, lda, \
@@ -816,10 +833,10 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         }
 #undef gemvt_KARGS
     }
-    else // conjugate transpose
+    else
     {
-        static constexpr bool CONJ = true;
         // conjugate transpose
+        static constexpr bool CONJ = true;
 
         if(!i64_incs && m <= 64 && batch_count > 8) // few rows, e.g. qmcpack
         {
@@ -883,13 +900,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                       stridey);
             }
         }
-        else if(!i64_incs
-                && ((is_gfx90a
-                     && ((is_complex_double && m <= 128) || (is_float && m <= 1024)
-                         || ((is_double || is_complex_float) && m <= 512)))
-                    || (is_gfx942
-                        && ((is_complex_double && m <= 1024) || (is_float && m <= 2048) || is_double
-                            || is_complex_float))))
+        else if(!i64_incs && rocblas_gemvt_fat_n<Ti>(m, n, gfx_arch))
         {
 #define gemvt_row_vectorized_KARGS(alpha_, beta_)                                              \
     gemvt_grid, gemvt_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, A, offseta, lda, \
