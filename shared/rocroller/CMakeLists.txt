@@ -1,4 +1,4 @@
-# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.24.4)
@@ -256,8 +256,8 @@ target_link_libraries(rocroller
         ${llvm_libs}
 )
 
-target_include_directories(rocroller 
-    PUBLIC 
+target_include_directories(rocroller
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
 )
 
