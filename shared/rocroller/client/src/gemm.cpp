@@ -1071,14 +1071,14 @@ int main(int argc, const char* argv[])
     rocRoller::Client::GEMMClient::SolutionParameters solution{
         .macM = 64,
         .macN = 64,
-        .macK = 64,
+        .macK = -1,
 
         .waveM = -1,
         .waveN = -1,
         .waveK = -1,
         .waveB = -1,
 
-        .workgroupSizeX         = 128,
+        .workgroupSizeX         = -1,
         .workgroupSizeY         = 2,
         .workgroupMappingDim    = -1,
         .workgroupRemapXCC      = false,
@@ -1268,7 +1268,7 @@ int main(int argc, const char* argv[])
     app.add_option(
         "--mi",
         [&solution](auto& args) -> bool { return ParseMI(args[0], solution); },
-        "MI instruction to use.  Default 32x32x2x1 for floats, 32x32x8x1 for halfs.");
+        "MI instruction to use");
 
     app.add_option(
         "--workgroup_size_x", solution.workgroupSizeX, "Workgroup size in the x dimension.");
@@ -1527,6 +1527,15 @@ int main(int argc, const char* argv[])
         types.scaleBlockSize = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
     }
 
+    if(solution.workgroupSizeX == -1)
+    {
+        solution.workgroupSizeX = 2 * arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+    }
+    if(solution.workgroupSizeY == -1)
+    {
+        solution.workgroupSizeY = 2;
+    }
+
     AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
                 || (types.typeAcc == "bf16"));
 
@@ -1538,9 +1547,12 @@ int main(int argc, const char* argv[])
     io.doSaveAsm = asmOption->count() > 0;
     io.doSaveCO  = coOption->count() > 0;
 
-    // Set default MI sizes
+    // Set default MI and macK sizes
     if(arch.HasCapability(GPUCapability::HasMFMA))
     {
+        if(solution.macK == -1)
+            solution.macK = 64;
+
         if(types.typeA == "float" && types.typeB == "float" && types.typeC == "float"
            && types.typeD == "float")
         {
@@ -1592,6 +1604,9 @@ int main(int argc, const char* argv[])
     {
         if(arch.target().isRDNA4GPU())
         {
+            if(solution.macK == -1)
+                solution.macK = 64;
+
             if((types.typeA == "half" && types.typeB == "half")
                || (types.typeA == "bf16" && types.typeB == "bf16")
                || (types.typeA == "fp8" && types.typeB == "fp8")
