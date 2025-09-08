@@ -17,7 +17,10 @@ exclude: |
     # Generated test yaml files
     projects/hipblaslt/tensilelite/Tensile/Tests/.*|
     # Large source files
-    projects/miopen/src/kernels/.*
+    projects/miopen/src/kernels/.*|
+    # Generated files (see rocrand/tools/ _generator.cpp files)
+    projects/rocrand/library/.*precomputed\.(cpp|h)|
+    projects/rocrand/library/.*constants\.(cpp|h)
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
