@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 import argparse
 import origami
 import math
@@ -88,7 +91,7 @@ def main():
         origami.datatype_to_bits(origami.string_to_datatype(args.type_acc)) // 8,
         args.occupancy,
         hardware,
-        args.dynamic_grid_version        
+        args.dynamic_grid_version
     )
 
     print(f"Best grid : {winner_grid}")
