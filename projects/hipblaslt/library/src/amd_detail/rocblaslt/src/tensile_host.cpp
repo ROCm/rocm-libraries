@@ -1110,8 +1110,7 @@ namespace
         }
     }
 
-    //TODO: add profile logging for grouped gemm
-    /*inline void
+    inline void
         logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGroupedGemm& problem,
                                       const TensileLite::ContractionGroupedInputs&      inputs,
                                       bool                                              flush,
@@ -1242,7 +1241,148 @@ namespace
             coldIterations,
             "iters",
             hotIterations);
-    }*/
+    }
+    inline void
+        logExtendedProfileFromTensileDataGemm(const TensileLite::ContractionProblemGroupedGemm& problem,
+                                              const TensileLite::ContractionGroupedInputs&      inputs,
+                                              const int&         solutionIndex,
+                                              const std::string& kernelName,
+                                              const std::string& solutionName,
+                                              bool               flush,
+                                              const int32_t&     rotatingBufferSize,
+                                              const int32_t&     coldIterations,
+                                              const int32_t&     hotIterations,
+                                              bool               isCpp)
+    {
+        size_t            gemmCount = problem.gemms.size();
+        std::stringstream grouped_gemm_profile_string;
+        for(int i = 0; i < gemmCount; ++i)
+        {
+            grouped_gemm_profile_string << " m: " << problem.gemms[i].c().sizes()[0] << ",";
+            grouped_gemm_profile_string << " n: " << problem.gemms[i].c().sizes()[1] << ",";
+            grouped_gemm_profile_string
+                << " k: " << problem.gemms[i].a().sizes()[problem.gemms[i].boundIndices()[0].a]
+                << ",";
+            grouped_gemm_profile_string << " lda: " << problem.gemms[i].a().strides()[1] << ",";
+            grouped_gemm_profile_string << " ldb: " << problem.gemms[i].b().strides()[1] << ",";
+            grouped_gemm_profile_string << " ldc: " << problem.gemms[i].c().strides()[1] << ",";
+            grouped_gemm_profile_string << " ldd: " << problem.gemms[i].d().strides()[1] << ",";
+            if(problem.gemms[i]
+                   .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                   .strides()
+                   .size())
+                grouped_gemm_profile_string
+                    << " lde: "
+                    << problem.gemms[i]
+                           .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                           .strides()[1]
+                    << ",";
+            grouped_gemm_profile_string << " stride_a: " << problem.gemms[i].a().strides()[2]
+                                        << ",";
+            grouped_gemm_profile_string << " stride_b: " << problem.gemms[i].b().strides()[2]
+                                        << ",";
+            grouped_gemm_profile_string << " stride_c: " << problem.gemms[i].c().strides()[2]
+                                        << ",";
+            if(i != (gemmCount - 1))
+            {
+                grouped_gemm_profile_string << " stride_d: " << problem.gemms[i].d().strides()[2]
+                                            << ",";
+                if(problem.gemms[i]
+                       .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                       .strides()
+                       .size())
+                    grouped_gemm_profile_string
+                        << " stride_e: "
+                        << problem.gemms[i]
+                               .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                               .strides()[2]
+                        << ",";
+            }
+            else
+            {
+                grouped_gemm_profile_string << " stride_d: " << problem.gemms[i].d().strides()[2];
+                if(problem.gemms[i]
+                       .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                       .strides()
+                       .size())
+                    grouped_gemm_profile_string
+                        << " stride_e: "
+                        << problem.gemms[i]
+                               .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                               .strides()[2];
+            }
+        }
+        log_profile(
+            "matmu",
+            "grouped_gemm",
+            grouped_gemm_profile_string.str(),
+            "alpha",
+            ToString(inputs.grouped[0].alpha),
+            "beta",
+            ToString(inputs.grouped[0].beta),
+            "transA",
+            problem.gemms[0].transA() ? "T" : "N",
+            "transB",
+            problem.gemms[0].transB() ? "T" : "N",
+            "batch_count",
+            problem.gemms[0].batchSize(0),
+            "scaleA",
+            problem.gemms[0].useScaleAB().empty()
+                ? 0
+                : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            "scaleB",
+            problem.gemms[0].useScaleAB().empty()
+                ? 0
+                : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            "scaleAlpha_vector",
+            problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
+            "gradient",
+            problem.gemms[0].useGradient() ? "true" : "false",
+            "use_e",
+            problem.gemms[0].useE() ? "true" : "false",
+            "bias_vector",
+            problem.gemms[0].useBias() ? "true" : "false",
+            "bias_source",
+            problem.gemms[0].useBias()
+                ? problem.gemms[0].tensor(problem.gemms[0].biasSrc()).getName()
+                : "d",
+            "a_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].a().dataType())),
+            "b_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].b().dataType())),
+            "c_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].c().dataType())),
+            "d_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].d().dataType())),
+            "scale_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].alphaType())),
+            "bias_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].bias().dataType())),
+            "aux_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].e().dataType())),
+            "compute_type",
+            tensileComputeInputType_to_profile_string(problem.gemms[0].computeType(),
+                                                      problem.gemms[0].f32XdlMathOp(),
+                                                      problem.gemms[0].computeInputType(),
+                                                      problem.gemms[0].a().dataType(),
+                                                      problem.gemms[0].b().dataType()),
+            "activation_type",
+            tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
+            "flush",
+            flush ? "true" : "false",
+            "rotating",
+            rotatingBufferSize,
+            "cold_iters",
+            coldIterations,
+            "iters",
+            hotIterations,
+            "solution_index",
+            solutionIndex,
+            "solution_Name",
+            solutionName,
+            "kernel_name",
+            kernelName);
+    }
 #undef GEN_BENCH_ARG
 
     /****************************************************************
@@ -2782,6 +2922,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
         {
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+            data->algoIndex = *solutionIndex;
+            auto solution
+                = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench))
             {
                 logBenchFromTensileDataGemm(data->problem,
@@ -2793,9 +2936,29 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                                             hotIterations,
                                             true);
             }
-            data->algoIndex = *solutionIndex;
-            auto solution
-                = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
+            {
+                logProfileFromTensileDataGemm(data->problem,
+                                          data->inputs,
+                                          flush,
+                                          rotatingBufferSize,
+                                          coldIterations,
+                                          hotIterations,
+                                          false);
+            }
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
+            {
+                logExtendedProfileFromTensileDataGemm(data->problem,
+                                                    data->inputs,
+                                                    data->algoIndex,
+                                                    solution->kernelName,
+                                                    solution->solutionName,
+                                                    flush,
+                                                    rotatingBufferSize,
+                                                    coldIterations,
+                                                    hotIterations,
+                                                    false);
+            }
 
             if(tuning)
             {
@@ -2964,24 +3127,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                           "GG is initialized with useUserArgs = true, workspace has no arguments.");
                 return rocblaslt_status_not_initialized;
             }
-            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-               || rocblaslt::Debug::Instance().printLogAsMarker()
-               || rocblaslt::Debug::Instance().benchPrintCommand())
-            {
-                logBenchFromTensileDataGemm(data->problem,
-                                            data->inputs,
-                                            data->algoIndex,
-                                            flush,
-                                            rotatingBufferSize,
-                                            coldIterations,
-                                            hotIterations,
-                                            true);
-            }
-            //TODO: add profile logging for grouped gemm
-            /*if(get_logger_layer_mode() & rocblaslt_layer_mode_log_profile)
-            {
-                logProfileFromTensileDataGemm(data->problem, data->inputs, true);
-            }*/
+
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
         }
         else
