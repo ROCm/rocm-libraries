@@ -139,7 +139,7 @@ __host__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, Ar
     // Sadly, hipHostUnregister performs an implicit device-wide synchronization. Thus, in order to use pinned host
     // memory for the async copy, we would either end up with a gradually growing amount of pinned memory, or need to
     // re-use the same pinned memory every time.
-    // __LIBGPU_HIP_CHECK__(hipHostRegister(worknode_ptr, sizeof(WorkNode_t), hipHostRegisterDefault));
+    // __LIBHIPTHREADS_HIP_CHECK__(hipHostRegister(worknode_ptr, sizeof(WorkNode_t), hipHostRegisterDefault));
 
     return ::std::unique_ptr<WorkNode_t>(worknode_ptr);
 }
@@ -211,7 +211,7 @@ __host__ WrappedFnPointer getWrapperFn() {
     //
     // __device__ template variables cannot be instantiated using a type defined in host code, so this doesn't work:
     // template <class Fn_t> __device__ WrappedFnPointer wrapper_ptr = wrapper<WorkNode<Fn_t>>;
-    // __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbol(&temp, HIP_SYMBOL(wrapper_ptr<Callable_t>), sizeof(temp), 0,
+    // __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyFromSymbol(&temp, HIP_SYMBOL(wrapper_ptr<Callable_t>), sizeof(temp), 0,
     // hipMemcpyDeviceToHost)); https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.5.12 Restrictions ->
     // Templates
     //
@@ -221,10 +221,10 @@ __host__ WrappedFnPointer getWrapperFn() {
     // Note that we only do this once for a given set of Fn_t and Args_t types
     static WrappedFnPointer saved_wrapper_fn = []() {
         WrappedFnPointer *tmp, *tmp_d;
-        __LIBGPU_HIP_CHECK__(hipHostMalloc(reinterpret_cast<void **>(&tmp), sizeof(tmp), hipHostRegisterMapped));
-        __LIBGPU_HIP_CHECK__(hipHostGetDevicePointer(reinterpret_cast<void **>(&tmp_d), tmp, 0));
+        __LIBHIPTHREADS_HIP_CHECK__(hipHostMalloc(reinterpret_cast<void **>(&tmp), sizeof(tmp), hipHostRegisterMapped));
+        __LIBHIPTHREADS_HIP_CHECK__(hipHostGetDevicePointer(reinterpret_cast<void **>(&tmp_d), tmp, 0));
         hipLaunchKernelGGL(getWrapperFn<WorkNode<Callable_t>>, dim3(1), dim3(1), 0, getEnqueingStream(), tmp_d);
-        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
         // TODO: Memory Leak! We can't un-register or free tmp because of the implicit hipDeviceSynchronize() that would
         // cause. However, this should only be a small amount of memory, and because this code only runs once per
         // specialization of the WorkNode class, it cannot grow indefinitely.

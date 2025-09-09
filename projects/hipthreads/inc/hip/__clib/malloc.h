@@ -33,7 +33,7 @@ inline hipStream_t &getEnqueingStream() {
     // TODO: investigate using hipExtStreamCreateWithCUMask for this
     static hipStream_t enqueingStream = []() -> hipStream_t {
         hipStream_t s;
-        __LIBGPU_HIP_CHECK__(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
         return s;
     }();
     return enqueingStream;
@@ -42,13 +42,13 @@ inline hipStream_t &getEnqueingStream() {
 
 inline __host__ void *malloc(::std::size_t size) {
     void *ptr;
-    __LIBGPU_HIP_CHECK__(hipMallocAsync(&ptr, size, internal::getEnqueingStream()));
-    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(internal::getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipMallocAsync(&ptr, size, internal::getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(internal::getEnqueingStream()));
     return ptr;
 }
 
 inline __host__ void free(void* ptr) {
-    __LIBGPU_HIP_CHECK__(hipFreeAsync(ptr, internal::getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipFreeAsync(ptr, internal::getEnqueingStream()));
 }
 
 } // namespace cuda

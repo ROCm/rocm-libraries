@@ -217,7 +217,7 @@ template<class Callable, class ...Args>
 namespace cuda {
 
 template <class _L0, class _L1>
-__device__ _LIBGPU_HIDE_FROM_ABI int
+__device__ _LIBHIPTHREADS_HIDE_FROM_ABI int
 try_lock(_L0& __l0, _L1& __l1)
 {
     unique_lock<_L0> __u0(__l0, ::std::try_to_lock);
@@ -234,10 +234,10 @@ try_lock(_L0& __l0, _L1& __l1)
     return 0;
 }
 
-#ifndef _LIBGPU_CXX03_LANG
+#ifndef _LIBHIPTHREADS_CXX03_LANG
 
 template <class _L0, class _L1, class _L2, class... _L3>
-__device__ _LIBGPU_HIDE_FROM_ABI int
+__device__ _LIBHIPTHREADS_HIDE_FROM_ABI int
 try_lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3)
 {
     int __r = 0;
@@ -253,10 +253,10 @@ try_lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3)
     return __r;
 }
 
-#endif // _LIBGPU_CXX03_LANG
+#endif // _LIBHIPTHREADS_CXX03_LANG
 
 template <class _L0, class _L1>
-__device__ _LIBGPU_HIDE_FROM_ABI void
+__device__ _LIBHIPTHREADS_HIDE_FROM_ABI void
 lock(_L0& __l0, _L1& __l1)
 {
     while (true)
@@ -282,7 +282,7 @@ lock(_L0& __l0, _L1& __l1)
     }
 }
 
-#ifndef _LIBGPU_CXX03_LANG
+#ifndef _LIBHIPTHREADS_CXX03_LANG
 
 template <class _L0, class _L1, class _L2, class ..._L3>
 __device__ void
@@ -329,7 +329,7 @@ __lock_first(int __i, _L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
 }
 
 template <class _L0, class _L1, class _L2, class ..._L3>
-__device__ inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBHIPTHREADS_INLINE_VISIBILITY
 void
 lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
 {
@@ -337,27 +337,27 @@ lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
 }
 
 template <class _L0>
-__device__ inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBHIPTHREADS_INLINE_VISIBILITY
 void __unlock(_L0& __l0) {
     __l0.unlock();
 }
 
 template <class _L0, class _L1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBHIPTHREADS_INLINE_VISIBILITY
 void __unlock(_L0& __l0, _L1& __l1) {
     __l0.unlock();
     __l1.unlock();
 }
 
 template <class _L0, class _L1, class _L2, class ..._L3>
-__device__ inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBHIPTHREADS_INLINE_VISIBILITY
 void __unlock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3) {
     __l0.unlock();
     __l1.unlock();
     hip::__unlock(__l2, __l3...);
 }
 
-#endif // _LIBGPU_CXX03_LANG
+#endif // _LIBHIPTHREADS_CXX03_LANG
 
 } // namespace cuda
 

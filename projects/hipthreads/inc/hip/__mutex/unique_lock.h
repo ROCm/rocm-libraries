@@ -41,7 +41,7 @@ namespace cuda {
 //====================================================================================================================//
 
 template <class _Mutex>
-class _LIBGPU_TEMPLATE_VIS unique_lock {
+class _LIBHIPTHREADS_TEMPLATE_VIS unique_lock {
 public:
   typedef _Mutex mutex_type;
 
@@ -50,31 +50,31 @@ private:
   bool __owns_;
 
 public:
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock() _NOEXCEPT : __m_(nullptr), __owns_(false) {}
-  __device__ _LIBGPU_HIDE_FROM_ABI explicit unique_lock(mutex_type& __m) : __m_(hip::std::addressof(__m)), __owns_(true) {
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock() _NOEXCEPT : __m_(nullptr), __owns_(false) {}
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI explicit unique_lock(mutex_type& __m) : __m_(hip::std::addressof(__m)), __owns_(true) {
     __m_->lock();
   }
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::defer_lock_t) _NOEXCEPT
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::defer_lock_t) _NOEXCEPT
       : __m_(hip::std::addressof(__m)),
         __owns_(false) {}
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::try_to_lock_t)
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::try_to_lock_t)
       : __m_(hip::std::addressof(__m)), __owns_(__m.try_lock()) {}
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::adopt_lock_t) : __m_(hip::std::addressof(__m)), __owns_(true) {}
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::adopt_lock_t) : __m_(hip::std::addressof(__m)), __owns_(true) {}
 
   // TODO: Uncomment this once we implement chrono
   // template <class _Clock, class _Duration>
-  // __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, const chrono::time_point<_Clock, _Duration>& __t)
+  // __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock(mutex_type& __m, const chrono::time_point<_Clock, _Duration>& __t)
   //     : __m_(hip::addressof(__m)), __owns_(__m.try_lock_until(__t)) {}
 
   // TODO: Uncomment this once we implement chrono
   // template <class _Rep, class _Period>
-  // __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, const chrono::duration<_Rep, _Period>& __d)
+  // __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock(mutex_type& __m, const chrono::duration<_Rep, _Period>& __d)
   //     : __m_(hip::addressof(__m)), __owns_(__m.try_lock_for(__d)) {}
 
-  __device__ _LIBGPU_HIDE_FROM_ABI ~unique_lock() {
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI ~unique_lock() {
     if (__owns_)
       __m_->unlock();
   }
@@ -82,12 +82,12 @@ public:
   __device__ unique_lock(unique_lock const&)            = delete;
   __device__ unique_lock& operator=(unique_lock const&) = delete;
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(unique_lock&& __u) _NOEXCEPT : __m_(__u.__m_), __owns_(__u.__owns_) {
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock(unique_lock&& __u) _NOEXCEPT : __m_(__u.__m_), __owns_(__u.__owns_) {
     __u.__m_    = nullptr;
     __u.__owns_ = false;
   }
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock& operator=(unique_lock&& __u) _NOEXCEPT {
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI unique_lock& operator=(unique_lock&& __u) _NOEXCEPT {
     if (__owns_)
       __m_->unlock();
 
@@ -111,23 +111,23 @@ public:
 
   __device__ void unlock();
 
-  __device__ _LIBGPU_HIDE_FROM_ABI void swap(unique_lock& __u) _NOEXCEPT {
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void swap(unique_lock& __u) _NOEXCEPT {
     hip::std::swap(__m_, __u.__m_);
     hip::std::swap(__owns_, __u.__owns_);
   }
 
-  __device__ _LIBGPU_HIDE_FROM_ABI mutex_type* release() _NOEXCEPT {
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI mutex_type* release() _NOEXCEPT {
     mutex_type* __m = __m_;
     __m_            = nullptr;
     __owns_         = false;
     return __m;
   }
 
-  __device__ _LIBGPU_HIDE_FROM_ABI bool owns_lock() const _NOEXCEPT { return __owns_; }
-  __device__ _LIBGPU_HIDE_FROM_ABI explicit operator bool() const _NOEXCEPT { return __owns_; }
-  __device__ _LIBGPU_HIDE_FROM_ABI mutex_type* mutex() const _NOEXCEPT { return __m_; }
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI bool owns_lock() const _NOEXCEPT { return __owns_; }
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI explicit operator bool() const _NOEXCEPT { return __owns_; }
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI mutex_type* mutex() const _NOEXCEPT { return __m_; }
 };
-_LIBGPU_CTAD_SUPPORTED_FOR_TYPE(unique_lock);
+_LIBHIPTHREADS_CTAD_SUPPORTED_FOR_TYPE(unique_lock);
 
 template <class _Mutex>
 __device__ void unique_lock<_Mutex>::lock() {
@@ -173,7 +173,7 @@ __device__ void unique_lock<_Mutex>::unlock() {
 }
 
 template <class _Mutex>
-__device__ inline _LIBGPU_HIDE_FROM_ABI void swap(unique_lock<_Mutex>& __x, unique_lock<_Mutex>& __y) _NOEXCEPT {
+__device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI void swap(unique_lock<_Mutex>& __x, unique_lock<_Mutex>& __y) _NOEXCEPT {
   __x.swap(__y);
 }
 

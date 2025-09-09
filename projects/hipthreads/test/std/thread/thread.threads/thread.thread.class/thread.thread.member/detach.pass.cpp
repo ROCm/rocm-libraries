@@ -70,7 +70,7 @@ __host__ __device__ void wait_for_done() {
     while (!done) {}
 #else
     hipLaunchKernelGGL(wait_for_done_kern, dim3(1), dim3(1), 0, hip::internal::getEnqueingStream());
-    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hip::internal::getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(hip::internal::getEnqueingStream()));
 #endif
 }
 

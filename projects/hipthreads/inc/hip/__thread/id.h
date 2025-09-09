@@ -16,11 +16,11 @@
 
 namespace cuda {
 
-class _LIBGPU_EXPORTED_FROM_ABI __thread_id;
+class _LIBHIPTHREADS_EXPORTED_FROM_ABI __thread_id;
 
 namespace this_thread {
 
-__device__ _LIBGPU_HIDE_FROM_ABI __thread_id get_id() _NOEXCEPT;
+__device__ _LIBHIPTHREADS_HIDE_FROM_ABI __thread_id get_id() _NOEXCEPT;
 
 } // namespace this_thread
 
@@ -33,16 +33,16 @@ namespace internal {
 } // namespace cuda
 
 template <class _CharT, class _Traits>
-_LIBGPU_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
+_LIBHIPTHREADS_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
 operator<<(::std::basic_ostream<_CharT, _Traits>& __os, hip::__thread_id __id);
 
 namespace cuda {
 
-class _LIBGPU_TEMPLATE_VIS __thread_id {
+class _LIBHIPTHREADS_TEMPLATE_VIS __thread_id {
   using underlying_type = uint32_t;
   underlying_type __id_;
 
-  __host__ __device__ static _LIBGPU_HIDE_FROM_ABI bool
+  __host__ __device__ static _LIBHIPTHREADS_HIDE_FROM_ABI bool
   __lt_impl(__thread_id __x, __thread_id __y) _NOEXCEPT { // id==0 is always less than any other thread_id
     if (__x.__id_ == 0)
       return __y.__id_ != 0;
@@ -52,32 +52,32 @@ class _LIBGPU_TEMPLATE_VIS __thread_id {
   }
 
 public:
-  __host__ __device__ _LIBGPU_HIDE_FROM_ABI __thread_id() _NOEXCEPT : __id_(0) {}
+  __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI __thread_id() _NOEXCEPT : __id_(0) {}
 
-  __host__ __device__ _LIBGPU_HIDE_FROM_ABI void __reset() { __id_ = 0; }
+  __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void __reset() { __id_ = 0; }
 
-  __host__ __device__ friend _LIBGPU_HIDE_FROM_ABI bool operator==(__thread_id __x, __thread_id __y) _NOEXCEPT;
-#  if _LIBGPU_STD_VER <= 17
-  __host__ __device__ friend _LIBGPU_HIDE_FROM_ABI bool operator<(__thread_id __x, __thread_id __y) _NOEXCEPT;
-#  else  // _LIBGPU_STD_VER <= 17
-  __host__ __device__ friend _LIBGPU_HIDE_FROM_ABI ::std::strong_ordering operator<=>(__thread_id __x, __thread_id __y) noexcept;
-#  endif // _LIBGPU_STD_VER <= 17
+  __host__ __device__ friend _LIBHIPTHREADS_HIDE_FROM_ABI bool operator==(__thread_id __x, __thread_id __y) _NOEXCEPT;
+#  if _LIBHIPTHREADS_STD_VER <= 17
+  __host__ __device__ friend _LIBHIPTHREADS_HIDE_FROM_ABI bool operator<(__thread_id __x, __thread_id __y) _NOEXCEPT;
+#  else  // _LIBHIPTHREADS_STD_VER <= 17
+  __host__ __device__ friend _LIBHIPTHREADS_HIDE_FROM_ABI ::std::strong_ordering operator<=>(__thread_id __x, __thread_id __y) noexcept;
+#  endif // _LIBHIPTHREADS_STD_VER <= 17
 
   template <class _CharT, class _Traits>
-  friend _LIBGPU_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
+  friend _LIBHIPTHREADS_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
   ::operator<<(::std::basic_ostream<_CharT, _Traits>& __os, __thread_id __id);
 
 private:
-  __host__ __device__ _LIBGPU_HIDE_FROM_ABI __thread_id(underlying_type __id) : __id_(__id) {}
+  __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI __thread_id(underlying_type __id) : __id_(__id) {}
 
-  __host__ __device__ _LIBGPU_HIDE_FROM_ABI friend underlying_type __get_underlying_id(const __thread_id __id) { return __id.__id_; }
+  __host__ __device__ _LIBHIPTHREADS_HIDE_FROM_ABI friend underlying_type __get_underlying_id(const __thread_id __id) { return __id.__id_; }
 
   friend __device__ __thread_id this_thread::get_id() _NOEXCEPT;
   friend class internal::thread;
   friend struct internal::ThreadData;
 };
 
-__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI bool operator==(__thread_id __x, __thread_id __y) _NOEXCEPT {
+__host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI bool operator==(__thread_id __x, __thread_id __y) _NOEXCEPT {
   // Don't pass id==0 to underlying routines
   if (__x.__id_ == 0)
     return __y.__id_ == 0;
@@ -86,21 +86,21 @@ __host__ __device__ inline _LIBGPU_HIDE_FROM_ABI bool operator==(__thread_id __x
   return __x.__id_ == __y.__id_;
 }
 
-#  if _LIBGPU_STD_VER <= 17
+#  if _LIBHIPTHREADS_STD_VER <= 17
 
-__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI bool operator!=(__thread_id __x, __thread_id __y) _NOEXCEPT { return !(__x == __y); }
+__host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI bool operator!=(__thread_id __x, __thread_id __y) _NOEXCEPT { return !(__x == __y); }
 
-__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI bool operator<(__thread_id __x, __thread_id __y) _NOEXCEPT {
+__host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI bool operator<(__thread_id __x, __thread_id __y) _NOEXCEPT {
   return __thread_id::__lt_impl(__x, __y);
 }
 
-__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI bool operator<=(__thread_id __x, __thread_id __y) _NOEXCEPT { return !(__y < __x); }
-__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI bool operator>(__thread_id __x, __thread_id __y) _NOEXCEPT { return __y < __x; }
-__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI bool operator>=(__thread_id __x, __thread_id __y) _NOEXCEPT { return !(__x < __y); }
+__host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI bool operator<=(__thread_id __x, __thread_id __y) _NOEXCEPT { return !(__y < __x); }
+__host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI bool operator>(__thread_id __x, __thread_id __y) _NOEXCEPT { return __y < __x; }
+__host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI bool operator>=(__thread_id __x, __thread_id __y) _NOEXCEPT { return !(__x < __y); }
 
-#  else // _LIBGPU_STD_VER <= 17
+#  else // _LIBHIPTHREADS_STD_VER <= 17
 
-__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI ::std::strong_ordering operator<=>(__thread_id __x, __thread_id __y) noexcept {
+__host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI ::std::strong_ordering operator<=>(__thread_id __x, __thread_id __y) noexcept {
   if (__x == __y)
     return ::std::strong_ordering::equal;
   if (__thread_id::__lt_impl(__x, __y))
@@ -108,12 +108,12 @@ __host__ __device__ inline _LIBGPU_HIDE_FROM_ABI ::std::strong_ordering operator
   return ::std::strong_ordering::greater;
 }
 
-#  endif // _LIBGPU_STD_VER <= 17
+#  endif // _LIBHIPTHREADS_STD_VER <= 17
 
 } // namespace cuda
 
 template <class _CharT, class _Traits>
-_LIBGPU_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
+_LIBHIPTHREADS_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
 operator<<(::std::basic_ostream<_CharT, _Traits>& __os, hip::__thread_id __id) {
   // [thread.thread.id]/9
   //   Effects: Inserts the text representation for charT of id into out.

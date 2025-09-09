@@ -322,7 +322,7 @@ static inline __device__ bool invokeNext(bool yielding = false) {
 static __host__ WorkNode_Header **getCPUWorkQueueAddr() {
     static WorkNode_Header ** const cpuWorkQueueAddr = [](){
         void *temp;
-        __LIBGPU_HIP_CHECK__(hipGetSymbolAddress(&temp, HIP_SYMBOL(cpuWorkQueue)));
+        __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&temp, HIP_SYMBOL(cpuWorkQueue)));
         auto workQueuePtr = static_cast<decltype(cpuWorkQueue) *>(temp);
         return &workQueuePtr->queue[0];
     }();
@@ -332,8 +332,8 @@ static __host__ WorkNode_Header **getCPUWorkQueueAddr() {
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     for (uint32_t curPopCount = 0; myPushCount - curPopCount >= CPU_WORK_QUEUE_SIZE; ) {
         // TODO: should we put this in a different stream so the copy from Device to Host can happen at the same time as other copies from Host to Device?
-        __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbolAsync(&curPopCount, HIP_SYMBOL(cpuWorkQueue), sizeof(curPopCount), offsetof(decltype(cpuWorkQueue), popCount), hipMemcpyDeviceToHost, getEnqueingStream()));
-        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyFromSymbolAsync(&curPopCount, HIP_SYMBOL(cpuWorkQueue), sizeof(curPopCount), offsetof(decltype(cpuWorkQueue), popCount), hipMemcpyDeviceToHost, getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
         // Maybe sleep or yield here? On the other hand, hipStreamSynchronize is a blocking call that is likely to take a while
     }
 }
@@ -355,21 +355,21 @@ static __host__ void prepDeviceForWork() {
     // cpuWorkQueue.pushCount = -1U, we'll use temp for that purpose too.
     static uint32_t temp = ([&isFirstTime]() {
         // TODO: investigate using hipExtStreamCreateWithCUMask for this
-        __LIBGPU_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
+        __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
         isFirstTime = true;
     }(), -1U);
 
     if (isFirstTime) {
         // Initalize numVcores, so device code can call hip::thread::hardware_concurrency
         static uint32_t temp2 = hip::thread::hardware_concurrency();
-        __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
     } else {
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
         // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
         // sure the change made by the last thread's destructor doesn't get over-written.
         // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through.
-        __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
-        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
     hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(hip::thread::max_width()), 0, mainStream);
@@ -379,11 +379,11 @@ static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bo
     // Needs to be static because the copy might not be done before we return
     static uint32_t temp;
     temp = cpuWorkQueuePushCount;
-    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
     if (blocking) {
         // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
         // synchronizing on mainStream, but there's no need.
-        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(mainStream));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(mainStream));
     }
 }
 
@@ -394,13 +394,13 @@ __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::se
     this->link_to_self = new_location;
 
     ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(hip::malloc(this->worknodeSize)));
-    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), this, this->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), this, this->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
     hipEvent_t copyFinished;
-    __LIBGPU_HIP_CHECK__(hipEventCreate(&copyFinished));
-    __LIBGPU_HIP_CHECK__(hipEventRecord(copyFinished, getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipEventCreate(&copyFinished));
+    __LIBHIPTHREADS_HIP_CHECK__(hipEventRecord(copyFinished, getEnqueingStream()));
 
     // *new_location = worknode_d.get();
-    __LIBGPU_HIP_CHECK__(hipStreamWriteValue64(getEnqueingStream(), new_location, reinterpret_cast<uintptr_t>(worknode_d.get()), 0));
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue64(getEnqueingStream(), new_location, reinterpret_cast<uintptr_t>(worknode_d.get()), 0));
 
     // TODO: If the GPU is able to see individual bytes as they get written, we need a way to signal when the whole
     // write is complete. It seems that on Navi4 cards, if the host uses hipMemcpyAsync to update queue[index], the
@@ -413,9 +413,9 @@ __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::se
     // always written last, we could combine the two operations into a single write. GPU is little-endian, therefore
     // reinterpret_cast<char *>(new_location) + 7 is the MSB and new_location is the LSB
 
-    // __LIBGPU_HIP_CHECK__(hipMemsetAsync(new_location, (reinterpret_cast<uintptr_t>(worknode_d.get()) & 0xFF) | 0x1, 1, getEnqueingStream()));
+    // __LIBHIPTHREADS_HIP_CHECK__(hipMemsetAsync(new_location, (reinterpret_cast<uintptr_t>(worknode_d.get()) & 0xFF) | 0x1, 1, getEnqueingStream()));
 
-    __LIBGPU_HIP_CHECK__(hipEventSynchronize(copyFinished));
+    __LIBHIPTHREADS_HIP_CHECK__(hipEventSynchronize(copyFinished));
     return worknode_d;
 }
 __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU() {
@@ -492,7 +492,7 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
 //====================================================================================================================//
 
 namespace this_thread {
-_LIBGPU_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns) {
+_LIBHIPTHREADS_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns) {
     cuda::std::__libcpp_thread_sleep_for(__ns);
 }
 
@@ -644,8 +644,8 @@ __host__ __device__ void thread::join() {
 
     // We don't have to worry about worknode_d getting invalidated by detach because we would have to be the one calling detach
     for (WorkNode_Header **link_to_self = reinterpret_cast<WorkNode_Header **>(1); link_to_self != nullptr;) {
-        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&link_to_self, &(worknode_d->link_to_self), sizeof(worknode_d->link_to_self), hipMemcpyDeviceToHost, getEnqueingStream()));
-        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyAsync(&link_to_self, &(worknode_d->link_to_self), sizeof(worknode_d->link_to_self), hipMemcpyDeviceToHost, getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
         // Maybe sleep or yield here? On the other hand, hipStreamSynchronize is a blocking call that is likely to take a while
     }
     worknode_d = nullptr;
@@ -676,8 +676,8 @@ __host__ unsigned int thread::hardware_concurrency() noexcept {
     try {
         static uint32_t multiprocessorCount = [](){
             int temp;
-            __LIBGPU_HIP_CHECK__(hipDeviceGetAttribute(&temp, hipDeviceAttributeMultiprocessorCount, 0));
-            // __LIBGPU_HIP_CHECK__(hipDeviceGetAttribute(&physicalMultiProcessorCount, hipDeviceAttributePhysicalMultiProcessorCount, 0));
+            __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&temp, hipDeviceAttributeMultiprocessorCount, 0));
+            // __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&physicalMultiProcessorCount, hipDeviceAttributePhysicalMultiProcessorCount, 0));
             return temp;
         }();
         // TODO: Make this multiplier configurable

@@ -38,7 +38,7 @@ namespace cuda {
 //====================================================================================================================//
 
 template <class _Mutex>
-class _LIBGPU_TEMPLATE_VIS _LIBGPU_THREAD_SAFETY_ANNOTATION(scoped_lockable) lock_guard {
+class _LIBHIPTHREADS_TEMPLATE_VIS _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(scoped_lockable) lock_guard {
 public:
   typedef _Mutex mutex_type;
 
@@ -46,21 +46,21 @@ private:
   mutex_type& __m_;
 
 public:
-  _LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI explicit lock_guard(mutex_type& __m) _LIBGPU_THREAD_SAFETY_ANNOTATION(acquire_capability(__m))
+  _LIBHIPTHREADS_NODISCARD_EXT __device__ _LIBHIPTHREADS_HIDE_FROM_ABI explicit lock_guard(mutex_type& __m) _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(acquire_capability(__m))
       : __m_(__m) {
     __m_.lock();
   }
 
-  _LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI lock_guard(mutex_type& __m, ::std::adopt_lock_t)
-      _LIBGPU_THREAD_SAFETY_ANNOTATION(requires_capability(__m))
+  _LIBHIPTHREADS_NODISCARD_EXT __device__ _LIBHIPTHREADS_HIDE_FROM_ABI lock_guard(mutex_type& __m, ::std::adopt_lock_t)
+      _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(requires_capability(__m))
       : __m_(__m) {}
-  __device__ _LIBGPU_HIDE_FROM_ABI ~lock_guard() _LIBGPU_THREAD_SAFETY_ANNOTATION(release_capability()) { __m_.unlock(); }
+  __device__ _LIBHIPTHREADS_HIDE_FROM_ABI ~lock_guard() _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(release_capability()) { __m_.unlock(); }
 
 private:
   __device__ lock_guard(lock_guard const&)            = delete;
   __device__ lock_guard& operator=(lock_guard const&) = delete;
 };
-_LIBGPU_CTAD_SUPPORTED_FOR_TYPE(lock_guard);
+_LIBHIPTHREADS_CTAD_SUPPORTED_FOR_TYPE(lock_guard);
 
 } // namespace cuda
 

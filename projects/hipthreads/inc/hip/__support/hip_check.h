@@ -25,7 +25,7 @@
 
 #define STRINGIZE_DETAIL(x) #x
 #define STRINGIZE(x) STRINGIZE_DETAIL(x)
-#define __LIBGPU_HIP_CHECK__(cmd)                                                                                      \
+#define __LIBHIPTHREADS_HIP_CHECK__(cmd)                                                                                      \
     {                                                                                                                  \
         hipError_t error = cmd;                                                                                        \
         if (error != hipSuccess) {                                                                                     \

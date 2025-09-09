@@ -37,9 +37,9 @@
 
 namespace cuda {
 
-class _LIBGPU_TYPE_VIS spin_condition_variable : private condition_variable_any {
+class _LIBHIPTHREADS_TYPE_VIS spin_condition_variable : private condition_variable_any {
   public:
-    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR spin_condition_variable() _NOEXCEPT = default;
+    __device__ _LIBHIPTHREADS_HIDE_FROM_ABI _LIBHIPTHREADS_CONSTEXPR spin_condition_variable() _NOEXCEPT = default;
 
     __device__ spin_condition_variable(const spin_condition_variable &) = delete;
     __device__ spin_condition_variable &operator=(const spin_condition_variable &) = delete;
@@ -51,25 +51,25 @@ class _LIBGPU_TYPE_VIS spin_condition_variable : private condition_variable_any 
         condition_variable_any::wait(__lk);
     }
     template <class _Predicate>
-    __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS void wait(unique_lock<spin_mutex> &__lk, _Predicate __pred) {
+    __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS void wait(unique_lock<spin_mutex> &__lk, _Predicate __pred) {
         condition_variable_any::wait(__lk, __pred);
     }
 
     // TODO: Uncomment these once we've implemented chrono
     // template <class _Clock, class _Duration>
-    // __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
+    // __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
     // wait_until(unique_lock<spin_mutex>& __lk, const chrono::time_point<_Clock, _Duration>& __t);
 
     // template <class _Clock, class _Duration, class _Predicate>
-    // __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS bool
+    // __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS bool
     // wait_until(unique_lock<spin_mutex>& __lk, const chrono::time_point<_Clock, _Duration>& __t, _Predicate __pred);
 
     // template <class _Rep, class _Period>
-    // __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
+    // __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
     // wait_for(unique_lock<spin_mutex>& __lk, const chrono::duration<_Rep, _Period>& __d);
 
     // template <class _Rep, class _Period, class _Predicate>
-    // __device__ bool _LIBGPU_HIDE_FROM_ABI
+    // __device__ bool _LIBHIPTHREADS_HIDE_FROM_ABI
     // wait_for(unique_lock<spin_mutex>& __lk, const chrono::duration<_Rep, _Period>& __d, _Predicate __pred);
 };
 
