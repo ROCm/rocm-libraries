@@ -159,7 +159,7 @@ namespace GEMMDriverTest
                                   ShowValue(floatMatrix.size()),
                                   ShowValue(I),
                                   ShowValue(J));
-                      valuesFile << name << "\n";
+                      valuesFile << name << std::endl;
                       for(size_t i = 0; i < I; i++)
                       {
                           for(size_t j = 0; j < J; j++)
