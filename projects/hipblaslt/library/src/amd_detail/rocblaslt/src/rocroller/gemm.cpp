@@ -26,6 +26,7 @@
 
 #include "gemm.hpp"
 #include "runtime_args_selection.hpp"
+
 #include "utility.hpp"
 
 using namespace rocRoller;
@@ -107,8 +108,8 @@ std::string genScaleModeString(Operations::ScaleMode mode)
 std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
 {
     std::ostringstream rv;
-    rv << "RR_GEMM_" << (gemm->kernelType.transA == HIPBLAS_OP_N ? "N" : "T")
-       << (gemm->kernelType.transB == HIPBLAS_OP_N ? "N" : "T");
+    rv << "RR_GEMM_" << (gemm->kernelType.transA ? "T" : "N")
+       << (gemm->kernelType.transB ? "T" : "N");
 
     rv << "_";
     for(auto const& t : {gemm->kernelType.typeA,
@@ -153,11 +154,11 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     std::vector<size_t> oneStridesT = std::vector<size_t>({(size_t)0, (size_t)1});
 
     auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-        2, dataTypeA, gemm->kernelType.transA == HIPBLAS_OP_N ? oneStridesN : oneStridesT)); // A
+        2, dataTypeA, gemm->kernelType.transA ? oneStridesT : oneStridesN)); // A
     auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
     auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-        2, dataTypeB, gemm->kernelType.transB == HIPBLAS_OP_N ? oneStridesN : oneStridesT)); // B
+        2, dataTypeB, gemm->kernelType.transB ? oneStridesT : oneStridesN)); // B
     auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
     auto mulInputA = tagLoadA;
@@ -182,7 +183,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
             2,
             gemm->kernelType.scaleTypeA,
-            gemm->kernelType.transA == HIPBLAS_OP_N ? oneStridesN : oneStridesT));
+            gemm->kernelType.transA ? oneStridesT : oneStridesN));
         tagLoadScaleA
             = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
 
@@ -198,7 +199,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
             2,
             gemm->kernelType.scaleTypeA,
-            gemm->kernelType.transB == HIPBLAS_OP_N ? oneStridesN : oneStridesT));
+            gemm->kernelType.transB ? oneStridesT : oneStridesN));
         tagLoadScaleB
             = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
 
@@ -432,8 +433,8 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->prefetch = false;
     }
 
-    params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm->kernelType.transA == HIPBLAS_OP_T);
-    params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm->kernelType.transB == HIPBLAS_OP_T);
+    params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm->kernelType.transA);
+    params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm->kernelType.transB);
 
     uint workgroupSizeX = gemm->workgroupSizeX * gemm->workgroupSizeY;
     uint workgroupSizeY = 1;
@@ -553,10 +554,10 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
 
     TensorDescriptor descA(gemm->params->kernelType.typeA,
                            {M, K},
-                           gemm->params->kernelType.transA == HIPBLAS_OP_T ? "T" : "N");
+                           gemm->params->kernelType.transA ? "T" : "N");
     TensorDescriptor descB(gemm->params->kernelType.typeB,
                            {K, N},
-                           gemm->params->kernelType.transB == HIPBLAS_OP_T ? "T" : "N");
+                           gemm->params->kernelType.transB ? "T" : "N");
 
     // TODO: Have to typecast void* pointer to something that CommandArgumentValue accepts
     setCommandTensorArg(commandArgs, gemm->tagTensorA, descA, (float*)nullptr);
@@ -567,7 +568,7 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
         auto const scaleBlockSize = prob.scaleABlockRowSize * prob.scaleABlockColSize;
         TensorDescriptor descAScale(gemm->params->kernelType.typeA,
                                     {size_t(M), size_t(K / scaleBlockSize)},
-                                    gemm->params->kernelType.transA == HIPBLAS_OP_T ? "T" : "N");
+                                    gemm->params->kernelType.transA ? "T" : "N");
         setCommandTensorArg(commandArgs, gemm->tagTensorScaleA, descAScale, (float*)nullptr);
     }
     if(gemm->params->kernelType.scaleBMode == Operations::ScaleMode::Separate)
@@ -575,7 +576,7 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
         auto const scaleBlockSize = prob.scaleBBlockRowSize * prob.scaleBBlockColSize;
         TensorDescriptor descBScale(gemm->params->kernelType.typeB,
                                     {size_t(K / scaleBlockSize), size_t(N)},
-                                    gemm->params->kernelType.transB == HIPBLAS_OP_T ? "T" : "N");
+                                    gemm->params->kernelType.transB ? "T" : "N");
         setCommandTensorArg(commandArgs, gemm->tagTensorScaleB, descBScale, (float*)nullptr);
     }
 

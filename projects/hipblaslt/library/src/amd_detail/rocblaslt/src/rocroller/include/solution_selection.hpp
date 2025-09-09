@@ -27,8 +27,8 @@
 
 #pragma once
 
+#include "kernel_type.hpp"
 #include "rocblaslt.h"
-#include "rocroller_host_internal.hpp"
 
 /**
  * @brief WorkGroupTileSize

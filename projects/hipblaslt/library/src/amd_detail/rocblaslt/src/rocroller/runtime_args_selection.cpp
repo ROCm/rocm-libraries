@@ -24,6 +24,7 @@
  *
  * ************************************************************************ */
 
+#include "analytical_utils.hpp"
 #include "gemm.hpp"
 #include "runtime_args_selection.hpp"
 

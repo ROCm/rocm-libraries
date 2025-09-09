@@ -26,67 +26,39 @@
  * ************************************************************************ */
 
 /*********************************************************
- * Use this for any header contents that you don't want exposed. *
+ * Helper for using Origami with rocRoller. *
  *********************************************************/
 
 #pragma once
 
-#include "rocblaslt.h"
-
 #include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/Operations/Command.hpp>
 
 #include <Tensile/analytical/Utils.hpp>
 
 /**
- * @brief KernelType
- *
- * All of the values required for different types of kernels.
- * This should not include any optimization flags.
- *
- */
-struct KernelType
-{
-    rocRoller::DataType typeA;
-    rocRoller::DataType typeB;
-    rocRoller::DataType typeC;
-    rocRoller::DataType typeD;
-    rocRoller::DataType typeAcc = rocRoller::DataType::Float;
-
-    hipblasOperation_t transA;
-    hipblasOperation_t transB;
-
-    rocRoller::Operations::ScaleMode scaleAMode;
-    rocRoller::Operations::ScaleMode scaleBMode;
-
-    size_t scaleABlockRowSize = 32u;
-    size_t scaleABlockColSize = 1u;
-    size_t scaleBBlockRowSize = 1u;
-    size_t scaleBBlockColSize = 32u;
-
-    rocRoller::DataType scaleTypeA = rocRoller::DataType::E8M0;
-    rocRoller::DataType scaleTypeB = rocRoller::DataType::E8M0;
-
-    auto operator<=>(const KernelType& other) const = default;
-};
-
-/**
- * @brief Convert hipDataType to a rocRoller::Datatype
- *
- * @param type
- * @return rocRoller::DataType
- */
-rocRoller::DataType hipDataType_to_rocRoller_type(hipDataType type);
-
-/**
- * @brief Convert a rocblaslt_compute_type to a rocRoller::DataType
- *
- * @param type
- * @return rocRoller::DataType
- */
-rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_type type);
-
-/**
  * @brief Convert rocRoller::Datatype to analytical::DataType
  */
-TensileLite::analytical::DataType rocroller_type_to_analytical_type(rocRoller::DataType type);
+inline TensileLite::analytical::DataType rocroller_type_to_analytical_type(rocRoller::DataType type)
+{
+    switch(type)
+    {
+        case rocRoller::DataType::Half:
+            return TensileLite::analytical::DataType::Half;
+        case rocRoller::DataType::Float:
+            return TensileLite::analytical::DataType::Float;
+        case rocRoller::DataType::BFloat16:
+            return TensileLite::analytical::DataType::BFloat16;
+        case rocRoller::DataType::FP8:
+            return TensileLite::analytical::DataType::Float8;
+        case rocRoller::DataType::BF8:
+            return TensileLite::analytical::DataType::BFloat8;
+        case rocRoller::DataType::FP6:
+            return TensileLite::analytical::DataType::Float6;
+        case rocRoller::DataType::BF6:
+            return TensileLite::analytical::DataType::BFloat6;
+        case rocRoller::DataType::FP4:
+            return TensileLite::analytical::DataType::Float4;
+        default:
+            return TensileLite::analytical::DataType::None;
+    }
+}

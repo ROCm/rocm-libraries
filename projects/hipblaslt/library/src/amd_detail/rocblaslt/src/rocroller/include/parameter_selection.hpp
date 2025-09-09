@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include "rocroller_host_internal.hpp"
+#include "kernel_type.hpp"
 #include "solution_selection.hpp"
 
 /**

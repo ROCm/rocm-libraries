@@ -29,8 +29,8 @@
  *********************************************************/
 
 #include "gemm.hpp"
+#include "kernel_type.hpp"
 #include "rocroller_host.hpp"
-#include "rocroller_host_internal.hpp"
 #include "runtime_args_selection.hpp"
 #include "parameter_selection.hpp"
 #include "solution_selection.hpp"
@@ -133,9 +133,9 @@ inline void logBench(const RocblasltContractionProblem& prob,
                      "--beta",
                      *((float*)prob.beta),
                      "--transA",
-                     prob.trans_a == HIPBLAS_OP_T ? "T" : "N",
+                     prob.trans_a ? "T" : "N",
                      "--transB",
-                     prob.trans_b == HIPBLAS_OP_T ? "T" : "N",
+                     prob.trans_b ? "T" : "N",
                      "--batch_count",
                      prob.batch_count,
                      "--scaleA",
@@ -383,31 +383,6 @@ rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_t
     }
 }
 
-TensileLite::analytical::DataType rocroller_type_to_analytical_type(rocRoller::DataType type)
-{
-    switch(type)
-    {
-        case rocRoller::DataType::Half:
-            return TensileLite::analytical::DataType::Half;
-        case rocRoller::DataType::Float:
-            return TensileLite::analytical::DataType::Float;
-        case rocRoller::DataType::BFloat16:
-            return TensileLite::analytical::DataType::BFloat16;
-        case rocRoller::DataType::FP8:
-            return TensileLite::analytical::DataType::Float8;
-        case rocRoller::DataType::BF8:
-            return TensileLite::analytical::DataType::BFloat8;
-        case rocRoller::DataType::FP6:
-            return TensileLite::analytical::DataType::Float6;
-        case rocRoller::DataType::BF6:
-            return TensileLite::analytical::DataType::BFloat6;
-        case rocRoller::DataType::FP4:
-            return TensileLite::analytical::DataType::Float4;
-        default:
-            return TensileLite::analytical::DataType::None;
-    }
-}
-
 /**
  * @brief Generate a KernelType from a RocblasltContractionProblem
  *
@@ -424,8 +399,8 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
     kernelType.typeC      = hipDataType_to_rocRoller_type(prob.c_type);
     kernelType.typeD      = hipDataType_to_rocRoller_type(prob.d_type);
     kernelType.typeAcc    = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
-    kernelType.transA     = prob.trans_a;
-    kernelType.transB     = prob.trans_b;
+    kernelType.transA     = prob.trans_a == HIPBLAS_OP_T;
+    kernelType.transB     = prob.trans_b == HIPBLAS_OP_T;
     kernelType.scaleAMode = prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
                                 ? rocRoller::Operations::ScaleMode::Separate
                                 : rocRoller::Operations::ScaleMode::None;

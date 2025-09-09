@@ -24,8 +24,8 @@
  *
  * ************************************************************************ */
 
-#include "rocroller_host.hpp"
-#include "rocroller_host_internal.hpp"
+#include "analytical_utils.hpp"
+#include "kernel_type.hpp"
 #include "solution_selection.hpp"
 
 #include <Tensile/analytical/Utils.hpp>
