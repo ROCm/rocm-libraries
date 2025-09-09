@@ -1555,60 +1555,8 @@ def fp8_target_d2lds_mi32x32x64_pf4x1():
     )
 
 
-def fp8_target_256x128_d2lds_mi32x32x64_pf4x1():
-    yield GEMMRun(
-        M=4096,
-        N=4096,
-        K=32768,
-        beta=0.0,
-        mac_m=256,
-        mac_n=128,
-        mac_k=128,
-        wave_m=32,
-        wave_n=32,
-        wave_k=64,
-        wave_b=1,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
-        prefetch=True,
-        prefetchInFlight=4,
-        prefetchLDSFactor=1,
-        prefetchScale=True,
-        swizzleScale=True,
-        prefetchMixMemOps=True,
-        betaInFma=True,
-        scheduler="Priority",
-        matchMemoryAccess=True,
-        types=TypeParameters(
-            trans_A="T",
-            trans_B="N",
-            type_A="fp8",
-            type_B="fp8",
-            type_C="half",
-            type_D="half",
-            type_acc="float",
-            scale_A="Separate",
-            scaleType_A="E8M0",
-            scale_B="Separate",
-            scaleType_B="E8M0",
-            scaleBlockSize=32,
-        ),
-        numOuter=1,
-        numWarmUp=1000,
-        numInner=1000,
-    )
-
-
 def fp8_target_d2lds_mi32x32x64_pf4x1_wgm():
-    yield from add_wgm((0, 2), fp8_target_d2lds_mi32x32x64_pf4x1())
-    yield from add_wgm((0, 2), fp8_target_256x128_d2lds_mi32x32x64_pf4x1())
+    yield from add_wgm((1, 2), fp8_target_d2lds_mi32x32x64_pf4x1())
 
 
 def fp8_target_d2lds_mi16x16x128_pf4x1():
@@ -1662,60 +1610,8 @@ def fp8_target_d2lds_mi16x16x128_pf4x1():
     )
 
 
-def fp8_target_256x128_d2lds_mi16x16x128_pf4x1():
-    yield GEMMRun(
-        M=4096,
-        N=4096,
-        K=32768,
-        beta=0.0,
-        mac_m=256,
-        mac_n=128,
-        mac_k=128,
-        wave_m=16,
-        wave_n=16,
-        wave_k=128,
-        wave_b=1,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
-        prefetch=True,
-        prefetchInFlight=4,
-        prefetchLDSFactor=1,
-        prefetchScale=True,
-        swizzleScale=True,
-        prefetchMixMemOps=True,
-        betaInFma=True,
-        scheduler="Priority",
-        matchMemoryAccess=True,
-        types=TypeParameters(
-            trans_A="T",
-            trans_B="N",
-            type_A="fp8",
-            type_B="fp8",
-            type_C="half",
-            type_D="half",
-            type_acc="float",
-            scale_A="Separate",
-            scaleType_A="E8M0",
-            scale_B="Separate",
-            scaleType_B="E8M0",
-            scaleBlockSize=32,
-        ),
-        numOuter=1,
-        numWarmUp=1000,
-        numInner=1000,
-    )
-
-
 def fp8_target_d2lds_mi16x16x128_pf4x1_wgm():
-    yield from add_wgm((0, 2), fp8_target_d2lds_mi16x16x128_pf4x1())
-    yield from add_wgm((0, 2), fp8_target_256x128_d2lds_mi16x16x128_pf4x1())
+    yield from add_wgm((1, 1), fp8_target_d2lds_mi16x16x128_pf4x1())
 
 
 def fp8_no_scale_target_d2lds_mi16x16x128_pf4x1():
@@ -1765,7 +1661,7 @@ def fp8_no_scale_target_d2lds_mi16x16x128_pf4x1():
 
 
 def fp8_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm():
-    yield from add_wgm((0, 2), fp8_no_scale_target_d2lds_mi16x16x128_pf4x1())
+    yield from add_wgm((1, 2), fp8_no_scale_target_d2lds_mi16x16x128_pf4x1())
 
 
 def fp8_kernels_no_wgm():
@@ -1779,9 +1675,9 @@ def fp8_kernels_no_wgm():
 
 def fp8_kernels_wgm():
     yield from fp8_target_d2lds_mi32x32x64_pf2x1_wgm()
-    # yield from fp8_target_d2lds_mi32x32x64_pf4x1_wgm()
-    # yield from fp8_target_d2lds_mi16x16x128_pf4x1_wgm()
-    # yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from fp8_target_d2lds_mi32x32x64_pf4x1_wgm()
+    yield from fp8_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
 def fp8_16x16x128_scale_options():
@@ -1803,9 +1699,9 @@ def fp8_kernels():
 
 def fp8_target_sweep_wgms():
     for wgm_dim in [0, 1]:
-        for wgm_value in range(1, 50):
+        for wgm_value in range(1, 9):
             yield from add_wgm(
-                (wgm_dim, wgm_value), fp8_target_d2lds_mi32x32x64_pf2x1()
+                (wgm_dim, wgm_value), fp8_no_scale_target_d2lds_mi16x16x128_pf4x1()
             )
 
 
