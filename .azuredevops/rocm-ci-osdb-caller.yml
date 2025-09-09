@@ -36,7 +36,6 @@ jobs:
     displayName: Get HEAD_SHA using git ls-remote   
   - script: |
       set -e
-      echo "Calling jenkins_api.py for push event, PR #$(PR_NUM)"
       cd $(repo_name)
       docker run \
         -v "$PWD:/src" \
