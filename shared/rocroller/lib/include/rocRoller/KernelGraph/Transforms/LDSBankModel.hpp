@@ -78,12 +78,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     struct InstructionAccesses
     {
-        MemoryOp memoryOp;
-        int      dwords;
-        std::vector<ThreadAccess>
-            accesses; // Simply collect raw thread accesses (used during simulation)
-        std::vector<ThreadGroup>
-            threadGroups; // Thread groups with clock cycles (populated in detailedSummary)
+        MemoryOp              memoryOp;
+        int                   dwords;
+        std::vector<uint32_t> addresses; // Only store addresses for immediateClockCount
     };
 
     struct OperationAccesses

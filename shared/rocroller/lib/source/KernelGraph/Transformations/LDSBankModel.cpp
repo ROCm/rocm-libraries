@@ -47,7 +47,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     bool LDSBankModel::filter(MemoryEventExpression event)
     {
-        // Check if the memory operation is for LDS
         return std::holds_alternative<MemoryOpLDS>(event.memoryOp);
     }
 
@@ -62,8 +61,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         opAccesses.ldsTag
             = ldsOp->direction == Direction::Load ? event.sourceTag : event.destinationTag;
 
-        // Since simulateLaunch now provides instruction-level events,
-        // we can directly work with the bytesRequested as it's already limited to 16 bytes max
         uint instructionDwords = (event.bytesRequested + 3) / 4; // Round up to dwords
 
         InstructionAccesses* targetInstruction = nullptr;
@@ -83,7 +80,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         if(!targetInstruction)
         {
-            // Create new instruction
             InstructionAccesses newInstr;
             newInstr.memoryOp = event.memoryOp;
             newInstr.dwords   = instructionDwords;
@@ -91,14 +87,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
             targetInstruction = &opAccesses.instructions.back();
         }
 
-        // Create thread access with the base address and workitem index
-        ThreadAccess threadAccess;
-        threadAccess.workitem  = event.workItem;
-        threadAccess.address   = event.byteOffset;
-        threadAccess.bankIndex = (event.byteOffset / m_entryWidthInBytes) % m_numBanks;
-
-        // Simply add the thread access to the instruction's accesses vector
-        targetInstruction->accesses.push_back(threadAccess);
+        targetInstruction->addresses.push_back(event.byteOffset);
 
         // Track unique banks accessed for legacy m_bankAccesses
         std::set<uint> banksAccessed;
@@ -109,8 +98,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
             banksAccessed.insert(bankIndex);
         }
 
-        // Also update legacy m_bankAccesses for backward compatibility
-        // Add entry for each bank accessed
+        // Update legacy m_bankAccesses for backward compatibility
         for(uint bankIndex : banksAccessed)
         {
             LDSBankAccess bankAccess;
@@ -128,18 +116,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         Summary summary;
 
-        // Process each operation
         for(const auto& [operationTag, bankAccesses] : m_bankAccesses)
         {
             Summary::Access access;
 
-            // Find the LDS tag from the first access
             if(!bankAccesses.empty())
             {
                 access.ldsTag = bankAccesses[0].ldsTag;
             }
 
-            // Create a map from bank index to workitems
             std::map<uint, std::vector<int>> bankToWorkitems;
             for(const auto& bankAccess : bankAccesses)
             {
@@ -431,66 +416,20 @@ namespace rocRoller::KernelGraph::MemoryTracer
         DetailedSummary detailed;
         detailed.gfx = gfx;
 
-        // TODO: these should not be hardcoded
-        const uint entryWidthInBytes = 4;
-        const uint numBanks          = 64;
-
-        // Copy and reorganize hierarchical accesses
+        // Simply copy the hierarchical accesses with their addresses
         for(const auto& [operationTag, sourceOpAccesses] : m_hierarchicalAccesses)
         {
             OperationAccesses opAccesses;
             opAccesses.operationTag = sourceOpAccesses.operationTag;
             opAccesses.ldsTag       = sourceOpAccesses.ldsTag;
 
-            // Process each instruction type
+            // Copy each instruction with its addresses
             for(const auto& sourceInstr : sourceOpAccesses.instructions)
             {
                 InstructionAccesses instr;
-                instr.memoryOp = sourceInstr.memoryOp;
-                instr.dwords   = sourceInstr.dwords;
-
-                // Copy all threads from source accesses
-                std::vector<ThreadAccess> allThreads = sourceInstr.accesses;
-
-                // Sort threads by workitem ID for consistent grouping
-                std::sort(allThreads.begin(),
-                          allThreads.end(),
-                          [](const ThreadAccess& a, const ThreadAccess& b) {
-                              return a.workitem < b.workitem;
-                          });
-
-                // Keep the raw accesses for compatibility
-                instr.accesses = allThreads;
-
-                // Get threads per clock for this instruction
-                const auto& ldsOp           = std::get<MemoryOpLDS>(sourceInstr.memoryOp);
-                uint        threadsPerClock = getThreadsPerClock(ldsOp, sourceInstr.dwords, gfx);
-
-                // Group threads based on threads per clock and organize into clock cycles
-                uint groupIndex = 0;
-                for(size_t i = 0; i < allThreads.size(); i += threadsPerClock)
-                {
-                    ThreadGroup threadGroup;
-                    threadGroup.groupIndex = groupIndex++;
-
-                    // Collect threads for this group (up to threadsPerClock)
-                    std::vector<ThreadAccess> groupThreads;
-                    for(size_t j = i; j < i + threadsPerClock && j < allThreads.size(); ++j)
-                    {
-                        groupThreads.push_back(allThreads[j]);
-                    }
-
-                    // Create a mapping of bank index to list of thread accesses
-                    // For multi-dword accesses, we need to track all banks touched
-                    auto bankToThreads = makeBankMappingForThreads(
-                        groupThreads, instr.dwords, entryWidthInBytes, numBanks);
-
-                    // Build thread group with clock cycles based on bank conflict resolution
-                    auto threadGroupWithCycles
-                        = buildThreadGroupWithClockCycles(bankToThreads, groupIndex - 1);
-
-                    instr.threadGroups.push_back(threadGroupWithCycles);
-                }
+                instr.memoryOp  = sourceInstr.memoryOp;
+                instr.dwords    = sourceInstr.dwords;
+                instr.addresses = sourceInstr.addresses;
 
                 opAccesses.instructions.push_back(instr);
             }
@@ -547,7 +486,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         {
             ss << fmt::format("Operation Tag: {}, LDS Tag: {}\n", operationTag, opAccesses.ldsTag);
 
-            uint operationTotalClocks = 0; // Track total clocks for the entire operation
+            uint operationTotalClocks = 0;
 
             for(const auto& instr : opAccesses.instructions)
             {
@@ -599,146 +538,32 @@ namespace rocRoller::KernelGraph::MemoryTracer
                     }
                 }
 
-                ss << fmt::format("  Instruction: {}\n", instructionName);
+                ss << fmt::format(
+                    "  Instruction: {} ({} addresses)\n", instructionName, instr.addresses.size());
 
-                uint instructionTotalClocks = 0; // Track total clocks for this instruction
-
-                // Process each thread group (already organized by detailedSummary)
-                for(const auto& threadGroup : instr.threadGroups)
+                // Use immediateClockCount to calculate cycles directly
+                if(!instr.addresses.empty())
                 {
-                    // Count total threads in all clock cycles
-                    uint totalThreads = 0;
-                    for(const auto& clockCycle : threadGroup.clockCycles)
-                    {
-                        totalThreads += clockCycle.size();
-                    }
+                    const auto& ldsOp       = std::get<MemoryOpLDS>(instr.memoryOp);
+                    uint        totalClocks = LDSBankModel::immediateClockCount(
+                        gfx, ldsOp, instr.dwords, instr.addresses);
 
-                    ss << fmt::format("    Thread Group {}: {} threads, {} clock cycles\n",
-                                      threadGroup.groupIndex,
-                                      totalThreads,
-                                      threadGroup.clockCycles.size());
+                    // The immediateClockCount already includes the 4-cycle address transfer
+                    uint bankConflictCycles = totalClocks - 4;
 
-                    // Print each clock cycle
-                    uint clockCycleIndex = 0;
-                    for(const auto& clockCycleThreads : threadGroup.clockCycles)
-                    {
-                        ss << fmt::format("      Clock Cycle {}:\n", clockCycleIndex);
+                    ss << fmt::format(
+                        "    Total clock cycles: {} ({} bank conflict + 4 address transfer)\n",
+                        totalClocks,
+                        bankConflictCycles);
 
-                        // Group addresses by work-item
-                        std::map<uint, std::vector<uint32_t>> workitemToAddresses;
-                        std::set<uint>                        banksUsed;
-
-                        for(const auto& thread : clockCycleThreads)
-                        {
-                            // Calculate all addresses this thread accesses
-                            uint bytesPerAccess = instr.dwords * 4;
-                            for(uint offset = 0; offset < bytesPerAccess; offset += 4)
-                            {
-                                uint currentAddr = thread.address + offset;
-                                uint bankIndex   = (currentAddr / 4) % 64;
-                                workitemToAddresses[thread.workitem].push_back(currentAddr);
-                                banksUsed.insert(bankIndex);
-                            }
-                        }
-
-                        // Print work-item index: [addresses, ...]
-                        for(const auto& [workitem, addresses] : workitemToAddresses)
-                        {
-                            ss << fmt::format("        workitem {}: [", workitem);
-                            bool first = true;
-                            for(uint32_t addr : addresses)
-                            {
-                                if(!first)
-                                    ss << ", ";
-                                ss << addr;
-                                first = false;
-                            }
-                            ss << "]\n";
-                        }
-
-                        // Print banks used and unused
-                        std::vector<uint> usedBanks(banksUsed.begin(), banksUsed.end());
-                        std::vector<uint> unusedBanks;
-
-                        for(uint bankIdx = 0; bankIdx < 64; ++bankIdx)
-                        {
-                            if(banksUsed.find(bankIdx) == banksUsed.end())
-                            {
-                                unusedBanks.push_back(bankIdx);
-                            }
-                        }
-
-                        ss << "        banks used: [";
-                        for(size_t i = 0; i < usedBanks.size(); ++i)
-                        {
-                            ss << usedBanks[i];
-                            if(i < usedBanks.size() - 1)
-                                ss << ", ";
-                        }
-                        ss << "]\n";
-
-                        ss << "        banks unused: [";
-                        for(size_t i = 0; i < unusedBanks.size(); ++i)
-                        {
-                            ss << unusedBanks[i];
-                            if(i < unusedBanks.size() - 1)
-                                ss << ", ";
-                        }
-                        ss << "]\n";
-
-                        clockCycleIndex++;
-                    }
-
-                    ss << fmt::format("      Total clock cycles: {}\n",
-                                      threadGroup.clockCycles.size());
-                    instructionTotalClocks
-                        += threadGroup.clockCycles.size(); // Add to instruction total
-                }
-
-                // Add 4 cycles for read/write address transfer
-                uint bankConflictCycles    = instructionTotalClocks;
-                uint addressTransferCycles = 4;
-                instructionTotalClocks += addressTransferCycles;
-
-                // Optional: Verify using the standalone immediateClockCount function
-                // This demonstrates how the new function can be used independently
-                if(!instr.accesses.empty())
-                {
-                    std::vector<uint32_t> addresses;
-                    for(const auto& access : instr.accesses)
-                    {
-                        addresses.push_back(access.address);
-                    }
-
-                    const auto& ldsOp = std::get<MemoryOpLDS>(instr.memoryOp);
-                    uint        verifyClocks
-                        = LDSBankModel::immediateClockCount(gfx, ldsOp, instr.dwords, addresses);
-
-                    // Note: The verification might differ slightly due to different ordering
-                    // of threads in the detailed simulation vs the standalone calculation
-                    ss << fmt::format("    Total clock cycles for {}: {} ({} bank conflict + {} "
-                                      "address transfer)\n",
-                                      instructionName,
-                                      instructionTotalClocks,
-                                      bankConflictCycles,
-                                      addressTransferCycles);
-                    ss << fmt::format("    [Verification using immediateClockCount: {} cycles]\n",
-                                      verifyClocks);
+                    operationTotalClocks += totalClocks;
                 }
                 else
                 {
-                    ss << fmt::format("    Total clock cycles for {}: {} ({} bank conflict + {} "
-                                      "address transfer)\n",
-                                      instructionName,
-                                      instructionTotalClocks,
-                                      bankConflictCycles,
-                                      addressTransferCycles);
+                    ss << "    No addresses to process\n";
                 }
-
-                operationTotalClocks += instructionTotalClocks; // Add to operation total
             }
 
-            // Print operation total after all instructions
             ss << fmt::format("  Total clock cycles for operation: {}\n", operationTotalClocks);
             ss << "\n";
         }
