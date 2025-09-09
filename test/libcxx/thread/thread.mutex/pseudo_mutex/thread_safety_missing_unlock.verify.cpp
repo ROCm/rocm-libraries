@@ -17,7 +17,7 @@
 
 // ADDITIONAL_COMPILE_FLAGS: -D_LIBGPU_ENABLE_THREAD_SAFETY_ANNOTATIONS
 
-#include <gpu/pseudo_mutex>
+#include <hip/pseudo_mutex>
 
 __device__ gpu::pseudo_mutex m;
 

@@ -12,7 +12,7 @@
 
 // thread& operator=(thread&& t);
 
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "force_include_hip.h"
 

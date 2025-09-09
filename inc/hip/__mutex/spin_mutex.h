@@ -20,7 +20,7 @@
 #ifndef __GPU___MUTEX_SPIN_MUTEX_H__
 #define __GPU___MUTEX_SPIN_MUTEX_H__
 
-#include "gpu/__config"
+#include "hip/thread_config"
 
 #include "hip/hip_runtime.h"
 #include <cassert>

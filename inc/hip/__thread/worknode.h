@@ -7,8 +7,8 @@
 
 #include <hip/std/__functional/invoke.h>
 
-#include "gpu/__clib/malloc.h"
-#include "gpu/__thread/id.h"
+#include "hip/__clib/malloc.h"
+#include "hip/__thread/id.h"
 
 namespace gpu::internal {
 

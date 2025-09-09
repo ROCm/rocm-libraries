@@ -13,7 +13,7 @@
 // void swap(jthread& x) noexcept;
 
 #include <cassert>
-#include <gpu/thread>
+#include <hip/thread>
 #include <type_traits>
 
 #include "make_test_thread.h"

@@ -1,4 +1,4 @@
-#include "gpu/mutex"
+#include "hip/mutex"
 
 int main() {
     return 0;

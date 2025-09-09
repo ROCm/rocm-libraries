@@ -23,7 +23,7 @@
 // This test ensures that we sleep for the right amount of time even when
 // we get interrupted by a signal, as fixed in 58a0a70fb2f1.
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <cassert>
 #include <hip/std/chrono>
 #include <cstring> // for std::memset

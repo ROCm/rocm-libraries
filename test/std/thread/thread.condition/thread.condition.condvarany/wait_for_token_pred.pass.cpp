@@ -27,7 +27,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <stop_token>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "helpers.h"
 #include "make_test_thread.h"

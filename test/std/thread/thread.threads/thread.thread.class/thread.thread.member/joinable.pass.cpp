@@ -14,7 +14,7 @@
 
 // bool joinable() const;
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <new>
 #include <cstdlib>
 #include <cassert>

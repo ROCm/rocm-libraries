@@ -18,7 +18,7 @@
 #include <concepts>
 #include <functional>
 #include <system_error>
-#include <gpu/thread>
+#include <hip/thread>
 #include <type_traits>
 #include <vector>
 

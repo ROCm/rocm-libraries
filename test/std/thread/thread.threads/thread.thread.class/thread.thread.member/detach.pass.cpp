@@ -15,7 +15,7 @@
 
 // void detach();
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <hip/std/atomic>
 #include <system_error>
 #include <cassert>

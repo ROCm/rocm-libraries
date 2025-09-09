@@ -123,9 +123,9 @@ public:
 
 */
 
-#include "gpu/__config"
+#include "hip/thread_config"
 
-#include "gpu/__condition_variable/condition_variable_any.h"
-#include "gpu/__condition_variable/spin_condition_variable.h"
+#include "hip/__condition_variable/condition_variable_any.h"
+#include "hip/__condition_variable/spin_condition_variable.h"
 
 #endif // __GPU_CONDITION_VARIABLE__

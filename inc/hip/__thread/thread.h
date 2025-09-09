@@ -43,10 +43,10 @@
 
 #include <hip/std/__utility/swap.h>
 
-#include "gpu/__support/hip_check.h"
-#include "gpu/__clib/memcpy.h"
-#include "gpu/__thread/id.h"
-#include "gpu/__thread/worknode.h"
+#include "hip/__support/hip_check.h"
+#include "hip/__clib/memcpy.h"
+#include "hip/__thread/id.h"
+#include "hip/__thread/worknode.h"
 
 namespace gpu {
 

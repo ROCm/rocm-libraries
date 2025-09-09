@@ -29,7 +29,7 @@
 #include <cassert>
 #include <concepts>
 #include <iterator>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "test_format_context.h"
 #include "test_macros.h"

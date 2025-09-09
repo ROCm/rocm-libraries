@@ -14,7 +14,7 @@
 
 // id(const id&) = default;
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <cassert>
 
 #include "test_macros.h"

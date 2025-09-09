@@ -21,7 +21,7 @@
 // native_handle_type native_handle();
 
 #include <cassert>
-#include <gpu/condition_variable>
+#include <hip/condition_variable>
 #include <pthread.h>
 #include <type_traits>
 

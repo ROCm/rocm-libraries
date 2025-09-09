@@ -1,5 +1,5 @@
-#include "gpu/mutex"
-#include "gpu/pseudo_mutex" // From gpu::thread library
+#include "hip/mutex"
+#include "hip/pseudo_mutex" // From gpu::thread library
 #include "hip/hip_runtime.h"
 #include <iostream>
 #include <cassert>

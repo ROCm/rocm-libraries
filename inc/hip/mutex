@@ -203,16 +203,16 @@ template<class Callable, class ...Args>
 
 */
 
-#include "gpu/__config"
+#include "hip/thread_config"
 
 #include <cstdint>
 #include <mutex>
 
-// #include "gpu/__condition_variable/condition_variable.h"
-// #include "gpu/__memory/shared_ptr.h"
-#include "gpu/__mutex/lock_guard.h"
-#include "gpu/__mutex/spin_mutex.h"
-#include "gpu/__mutex/unique_lock.h"
+// #include "hip/__condition_variable/condition_variable.h"
+// #include "hip/__memory/shared_ptr.h"
+#include "hip/__mutex/lock_guard.h"
+#include "hip/__mutex/spin_mutex.h"
+#include "hip/__mutex/unique_lock.h"
 
 namespace gpu {
 

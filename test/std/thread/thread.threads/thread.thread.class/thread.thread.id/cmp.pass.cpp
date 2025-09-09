@@ -21,7 +21,7 @@
 // bool operator>=(thread::id x, thread::id y) noexcept;
 // strong_ordering operator<=>(thread::id x, thread::id y) noexcept;
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <cassert>
 
 #include "test_macros.h"

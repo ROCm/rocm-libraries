@@ -18,7 +18,7 @@
 //     ...
 // };
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <type_traits>
 
 #include "test_macros.h"

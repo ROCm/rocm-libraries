@@ -22,8 +22,8 @@
 
 
 #include <condition_variable>
-#include <gpu/mutex>
-#include <gpu/thread>
+#include <hip/mutex>
+#include <hip/thread>
 #include <hip/std/chrono>
 #include <cassert>
 #include <pthread.h>

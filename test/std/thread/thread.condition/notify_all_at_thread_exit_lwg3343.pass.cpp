@@ -31,7 +31,7 @@
 #include <hip/std/chrono>
 #include <memory>
 #include <mutex>
-#include <gpu/thread>
+#include <hip/thread>
 
 int condition_variable_lock_skipped_counter = 0;
 

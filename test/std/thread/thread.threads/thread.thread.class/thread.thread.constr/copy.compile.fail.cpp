@@ -12,7 +12,7 @@
 
 // thread(const thread&) = delete;
 
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "force_include_hip.h"
 

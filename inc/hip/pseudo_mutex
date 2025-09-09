@@ -20,7 +20,7 @@
 #ifndef __GPU_PSEUDO_MUTEX_H__
 #define __GPU_PSEUDO_MUTEX_H__
 
-#include "gpu/thread"
+#include "hip/thread"
 #include "hip/hip_runtime.h"
 #include <cassert>
 #include <cstdint>

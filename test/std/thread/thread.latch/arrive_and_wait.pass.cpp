@@ -14,7 +14,7 @@
 // <latch>
 
 #include <latch>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"

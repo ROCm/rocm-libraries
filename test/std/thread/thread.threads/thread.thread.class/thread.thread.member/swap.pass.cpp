@@ -14,7 +14,7 @@
 
 // void swap(thread& t);
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <new>
 #include <cstdlib>
 #include <cassert>

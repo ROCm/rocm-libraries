@@ -23,7 +23,7 @@
 #include "hip/hip_runtime_api.h"
 #include <cstddef>
 
-#include "gpu/__support/hip_check.h"
+#include "hip/__support/hip_check.h"
 
 namespace gpu {
 

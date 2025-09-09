@@ -27,7 +27,7 @@
 #ifndef __GPU___CONDITION_VARIABLE_CONDITION_VARIABLE_ANY_H__
 #define __GPU___CONDITION_VARIABLE_CONDITION_VARIABLE_ANY_H__
 
-#include "gpu/__config"
+#include "hip/thread_config"
 
 #include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
 

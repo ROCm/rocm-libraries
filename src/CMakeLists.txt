@@ -20,7 +20,7 @@ if (WIN32)
 endif()
 
 # Generate static lib libhipthreads.a
-add_library(hipthreads STATIC gpu/thread.cxx)
+add_library(hipthreads STATIC hip/thread.cxx)
 target_include_directories(hipthreads PRIVATE ${CMAKE_SOURCE_DIR}/inc)
 
 target_compile_options(hipthreads PRIVATE "-Werror" "-Wall" "-Wextra" "-Wshadow" "-Wnull-dereference" "-Wold-style-cast" "-Wzero-as-null-pointer-constant" "-Wfloat-equal" "-Wdouble-promotion")
@@ -35,8 +35,8 @@ target_compile_definitions(hipthreads PUBLIC __HIP__)
 
 
 # add_custom_command(TARGET hipthreads POST_BUILD
-#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hipthreads.dir/gpu/thread-host-x86_64-unknown-linux-gnu.bc
+#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hipthreads.dir/hip/thread-host-x86_64-unknown-linux-gnu.bc
 # )
 # add_custom_command(TARGET hipthreads POST_BUILD
-#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hipthreads.dir/gpu/thread-hip-amdgcn-amd-amdhsa-gfx1100.bc
+#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hipthreads.dir/hip/thread-hip-amdgcn-amd-amdhsa-gfx1100.bc
 # )

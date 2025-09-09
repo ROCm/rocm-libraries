@@ -15,7 +15,7 @@
 
 #include <semaphore>
 #include <hip/std/chrono>
-#include <gpu/thread>
+#include <hip/thread>
 #include <type_traits>
 
 #include "make_test_thread.h"

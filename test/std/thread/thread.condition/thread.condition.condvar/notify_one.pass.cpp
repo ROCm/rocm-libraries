@@ -41,7 +41,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <mutex>
-#include <gpu/thread>
+#include <hip/thread>
 #include <cassert>
 
 #include "make_test_thread.h"

@@ -16,7 +16,7 @@
 #include <cassert>
 #include <hip/std/chrono>
 #include <cstdlib>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "test_macros.h"
 

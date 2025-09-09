@@ -24,7 +24,7 @@
 
 #include <cassert>
 #include <functional>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "test_macros.h"
 #include "force_include_hip.h"
