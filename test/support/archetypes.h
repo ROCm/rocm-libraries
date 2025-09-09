@@ -63,29 +63,29 @@ struct TestBase {
     TestBase() noexcept : value(0) {
         ++alive; ++constructed; ++default_constructed;
     }
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
     explicit TestBase(int x) noexcept : value(x) {
         ++alive; ++constructed; ++value_constructed;
     }
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
     TestBase(int x) noexcept : value(x) {
         ++alive; ++constructed; ++value_constructed;
     }
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
     explicit TestBase(int, int y) noexcept : value(y) {
         ++alive; ++constructed; ++value_constructed;
     }
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
     TestBase(int, int y) noexcept : value(y) {
         ++alive; ++constructed; ++value_constructed;
     }
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
-    explicit TestBase(std::initializer_list<int>& il, int = 0) noexcept
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
+    explicit TestBase(::std::initializer_list<int>& il, int = 0) noexcept
       : value(static_cast<int>(il.size())) {
         ++alive; ++constructed; ++value_constructed;
     }
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
-    explicit TestBase(std::initializer_list<int>& il, int = 0) noexcept : value(static_cast<int>(il.size())) {
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
+    explicit TestBase(::std::initializer_list<int>& il, int = 0) noexcept : value(static_cast<int>(il.size())) {
         ++alive; ++constructed; ++value_constructed;
     }
     TestBase& operator=(int xvalue) noexcept {
@@ -140,18 +140,18 @@ template <class D, bool E> int TestBase<D, E>::destroyed = 0;
 
 template <bool Explicit = false>
 struct ValueBase {
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
     explicit constexpr ValueBase(int x) : value(x) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
     constexpr ValueBase(int x) : value(x) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
     explicit constexpr ValueBase(int, int y) : value(y) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
     constexpr ValueBase(int, int y) : value(y) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
-    explicit constexpr ValueBase(std::initializer_list<int>& il, int = 0) : value(static_cast<int>(il.size())) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
-    constexpr ValueBase(std::initializer_list<int>& il, int = 0) : value(static_cast<int>(il.size())) {}
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
+    explicit constexpr ValueBase(::std::initializer_list<int>& il, int = 0) : value(static_cast<int>(il.size())) {}
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
+    constexpr ValueBase(::std::initializer_list<int>& il, int = 0) : value(static_cast<int>(il.size())) {}
     TEST_CONSTEXPR_CXX14 ValueBase& operator=(int xvalue) noexcept {
         value = xvalue;
         return *this;
@@ -200,18 +200,18 @@ protected:
 
 template <bool Explicit = false>
 struct TrivialValueBase {
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
     explicit constexpr TrivialValueBase(int x) : value(x) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
     constexpr TrivialValueBase(int x) : value(x) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
     explicit constexpr TrivialValueBase(int, int y) : value(y) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
     constexpr TrivialValueBase(int, int y) : value(y) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && Explicit, bool>::type = true>
-    explicit constexpr TrivialValueBase(std::initializer_list<int>& il, int = 0) : value(static_cast<int>(il.size())) {}
-    template <bool Dummy = true, typename std::enable_if<Dummy && !Explicit, bool>::type = true>
-    constexpr TrivialValueBase(std::initializer_list<int>& il, int = 0) : value(static_cast<int>(il.size())) {}
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && Explicit, bool>::type = true>
+    explicit constexpr TrivialValueBase(::std::initializer_list<int>& il, int = 0) : value(static_cast<int>(il.size())) {}
+    template <bool Dummy = true, typename ::std::enable_if<Dummy && !Explicit, bool>::type = true>
+    constexpr TrivialValueBase(::std::initializer_list<int>& il, int = 0) : value(static_cast<int>(il.size())) {}
     int value;
 #ifndef TEST_WORKAROUND_MSVC_BROKEN_ZA_CTOR_CHECK
 protected:

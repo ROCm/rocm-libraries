@@ -20,7 +20,7 @@
 #include <hip/thread>
 
 void test() {
-  std::jthread jt;
+  ::std::jthread jt;
   jt.joinable();             // expected-warning {{ignoring return value of function}}
   jt.get_id();               // expected-warning {{ignoring return value of function}}
   jt.native_handle();        // expected-warning {{ignoring return value of function}}

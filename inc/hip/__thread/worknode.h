@@ -10,7 +10,7 @@
 #include "hip/__clib/malloc.h"
 #include "hip/__thread/id.h"
 
-namespace gpu::internal {
+namespace cuda::internal {
 
 struct WorkNode_Header;
 
@@ -20,7 +20,7 @@ typedef void (*WrappedFnPointer)(WorkNode_Header *, bool);
 struct ThreadData {
     // How many threads per block/vthread are active.
     uint32_t width = 0;
-    // TODO: should this be a gpu::thread::max_width() array? For now we just store a common "base" id. See
+    // TODO: should this be a hip::thread::max_width() array? For now we just store a common "base" id. See
     // this_thread::get_id for details on how the base id is converted to a full thread id.
     __thread_id::underlying_type vthread_id = {};
 
@@ -35,12 +35,12 @@ struct ThreadData {
 };
 
 struct WorkNodeDeleter {
-    // WorkNode<T> is trivially destructible (implied by std::is_trivially_copyable).
+    // WorkNode<T> is trivially destructible (implied by ::std::is_trivially_copyable).
     // Note: Technically, we should do a static_cast of ptr back to WorkNode<T> before freeing. If we really want to fix
     // it, we could give unique_ptr a function pointer instead of a functor (i.e. the type of worknode_d would be
-    // std::unique_ptr<WorkNode_Header, void (*)(WorkNode_Header *)>), and at construction time pass a pointer to a
+    // ::std::unique_ptr<WorkNode_Header, void (*)(WorkNode_Header *)>), and at construction time pass a pointer to a
     // function that will do the cast before the free.
-    void operator()(WorkNode_Header* ptr) { gpu::free(ptr); }
+    void operator()(WorkNode_Header* ptr) { hip::free(ptr); }
 };
 
 // TODO: Can we make a bunch of these members private?
@@ -112,10 +112,10 @@ struct WorkNode_Header {
     // Post-condition: worknode is likely unlocked and may get invalidated
     __device__ void insertIntoMainQueue();
 
-    __host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> sendToGPU();
-    __host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> sendToGPU(WorkNode_Header **new_location);
+    __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> sendToGPU();
+    __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> sendToGPU(WorkNode_Header **new_location);
 };
-static_assert(std::is_standard_layout_v<WorkNode_Header>);
+static_assert(::std::is_standard_layout_v<WorkNode_Header>);
 
 template <class Callable_t>
 struct WorkNode : WorkNode_Header {
@@ -129,36 +129,36 @@ struct WorkNode : WorkNode_Header {
 
 template <class Fn_t, class... Args_t>
 __host__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
-    // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
+    // Ideally, we would also forward args in the capture (...args = ::std::forward<Args_t>(args)) to avoid an extra copy,
     // but that requires C++20
-    auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() -> void {
-        cuda::std::invoke(std::move(typed_fn), std::move(args)...);
+    auto lambda = [typed_fn = ::std::forward<Fn_t>(typed_fn), args...] __device__() -> void {
+        cuda::std::invoke(::std::move(typed_fn), ::std::move(args)...);
     };
     using WorkNode_t = WorkNode<decltype(lambda)>;
-    WorkNode_t *worknode_ptr = new WorkNode_t(width, std::move(lambda));
+    WorkNode_t *worknode_ptr = new WorkNode_t(width, ::std::move(lambda));
     // Sadly, hipHostUnregister performs an implicit device-wide synchronization. Thus, in order to use pinned host
     // memory for the async copy, we would either end up with a gradually growing amount of pinned memory, or need to
     // re-use the same pinned memory every time.
     // __LIBGPU_HIP_CHECK__(hipHostRegister(worknode_ptr, sizeof(WorkNode_t), hipHostRegisterDefault));
 
-    return std::unique_ptr<WorkNode_t>(worknode_ptr);
+    return ::std::unique_ptr<WorkNode_t>(worknode_ptr);
 }
 template <class Fn_t, class... Args_t>
 __device__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     // These will give a more user-friendly error message when the lambda is not move-constructible.
-    static_assert(std::is_move_constructible_v<Fn_t>);
-    static_assert((std::is_move_constructible_v<Args_t> && ...));
+    static_assert(::std::is_move_constructible_v<Fn_t>);
+    static_assert((::std::is_move_constructible_v<Args_t> && ...));
 
-    // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
+    // Ideally, we would also forward args in the capture (...args = ::std::forward<Args_t>(args)) to avoid an extra copy,
     // but that requires C++20
-    auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] () {
-        cuda::std::invoke(std::move(typed_fn), std::move(args)...);
+    auto lambda = [typed_fn = ::std::forward<Fn_t>(typed_fn), args...] () {
+        cuda::std::invoke(::std::move(typed_fn), ::std::move(args)...);
     };
 
     // Allocate memory using malloc instead of new, to guaranteed that ::free(worknode) is valid.
     // The C++ standard doesn't guarantee that new and malloc allocate from the same pool of memory.
     void *buf = ::malloc(sizeof(WorkNode<decltype(lambda)>));
-    return new(buf) WorkNode<decltype(lambda)>(width, std::move(lambda));
+    return new(buf) WorkNode<decltype(lambda)>(width, ::std::move(lambda));
 }
 
 //====================================================================================================================//
@@ -170,7 +170,7 @@ __device__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, 
 template <class WorkNode_t>
 __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     WorkNode_t *typed_node_ptr = static_cast<WorkNode_t *>(worknode);
-    typename WorkNode_t::Callable fn = std::move(typed_node_ptr->fn);
+    typename WorkNode_t::Callable fn = ::std::move(typed_node_ptr->fn);
     uint32_t width = typed_node_ptr->tdata.width;
     __syncthreads();
     // Include a threadfence for all threads just to be safe.
@@ -185,12 +185,12 @@ __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     // fn will get destructed when it goes out of scope, which will in turn invoke the destructor for the Fn_t and
     // Args_t the user passed in when constructing the thread.
     // TODO: figure out how to make all the threads with idx > width 'catch up' on missed __syncthreads() calls.
-    // Shouldn't be a concern as long as blockDim.x == gpu::thread::max_width() == warpSize
+    // Shouldn't be a concern as long as blockDim.x == hip::thread::max_width() == warpSize
 }
 
 template <class Callable_t>
 __device__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable)
-    : WorkNode_Header{wrapper<WorkNode<Callable_t>>, ThreadData(w)}, fn(std::move(callable)) {}
+    : WorkNode_Header{wrapper<WorkNode<Callable_t>>, ThreadData(w)}, fn(::std::move(callable)) {}
 
 template <class WorkNode_t>
 __global__ void getWrapperFn(WrappedFnPointer *ptr) {
@@ -236,8 +236,8 @@ __host__ WrappedFnPointer getWrapperFn() {
 template <class Callable_t>
 __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable)
     : WorkNode_Header{getWrapperFn<Callable_t>(), ThreadData(w), sizeof(WorkNode<Callable_t>)},
-      fn(std::move(callable)) {}
+      fn(::std::move(callable)) {}
 
-} // namespace gpu::internal
+} // namespace cuda::internal
 
 #endif // __GPU___THREAD_WORKITEM_H__

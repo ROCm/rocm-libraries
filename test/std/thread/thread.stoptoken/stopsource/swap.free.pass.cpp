@@ -24,12 +24,12 @@ concept IsNoThrowFreeSwappable = requires(T& t) {
   { swap(t, t) } noexcept;
 };
 
-static_assert(IsNoThrowFreeSwappable<std::stop_source>);
+static_assert(IsNoThrowFreeSwappable<::std::stop_source>);
 
 int main(int, char**) {
   {
-    std::stop_source ss1;
-    std::stop_source ss2;
+    ::std::stop_source ss1;
+    ::std::stop_source ss2;
 
     assert(ss1 != ss2);
 

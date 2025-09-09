@@ -21,9 +21,9 @@
 
 int main(int, char**)
 {
-  std::latch l(2);
+  ::std::latch l(2);
 
-  gpu::thread t = support::make_test_thread([&](){
+  hip::thread t = support::make_test_thread([&](){
       l.arrive_and_wait();
   });
   l.arrive_and_wait();

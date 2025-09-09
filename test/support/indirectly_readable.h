@@ -22,12 +22,12 @@ template <class Token>
 struct T2 : Common<Token> { };
 
 template <template <class> class T1Qual, template <class> class T2Qual, class Token>
-struct std::basic_common_reference<T1<Token>, T2<Token>, T1Qual, T2Qual> {
+struct ::std::basic_common_reference<T1<Token>, T2<Token>, T1Qual, T2Qual> {
   using type = Common<Token>;
 };
 template <template <class> class T2Qual, template <class> class T1Qual, class Token>
-struct std::basic_common_reference<T2<Token>, T1<Token>, T2Qual, T1Qual>
-  : std::basic_common_reference<T1<Token>, T2<Token>, T1Qual, T2Qual>
+struct ::std::basic_common_reference<T2<Token>, T1<Token>, T2Qual, T1Qual>
+  : ::std::basic_common_reference<T1<Token>, T2<Token>, T1Qual, T2Qual>
 { };
 
 template <class Token>

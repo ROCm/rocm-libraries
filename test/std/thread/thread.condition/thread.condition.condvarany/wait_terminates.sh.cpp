@@ -26,7 +26,7 @@
 
 // -----------------------------------------------------------------------------
 // Overview
-//   Check that std::terminate is called if wait(...) fails to meet its post
+//   Check that ::std::terminate is called if wait(...) fails to meet its post
 //   conditions. This can happen when reacquiring the mutex throws
 //   an exception.
 //
@@ -75,7 +75,7 @@
 #include "test_macros.h"
 
 void my_terminate() {
-  std::_Exit(0); // Use _Exit to prevent cleanup from taking place.
+  ::std::_Exit(0); // Use _Exit to prevent cleanup from taking place.
 }
 
 // The predicate used in the cv.wait calls.
@@ -86,7 +86,7 @@ bool pred_function() {
 
 class ThrowingMutex
 {
-  std::atomic_bool locked;
+  ::std::atomic_bool locked;
   unsigned state = 0;
   ThrowingMutex(const ThrowingMutex&) = delete;
   ThrowingMutex& operator=(const ThrowingMutex&) = delete;
@@ -109,7 +109,7 @@ public:
 };
 
 ThrowingMutex mut;
-std::condition_variable_any cv;
+::std::condition_variable_any cv;
 
 void signal_me() {
   while (mut.isLocked()) {} // wait until T1 releases mut inside the cv.wait call.
@@ -122,9 +122,9 @@ typedef cuda::std::chrono::milliseconds MS;
 
 int main(int argc, char **argv) {
   assert(argc == 2);
-  int id = std::stoi(argv[1]);
+  int id = ::std::stoi(argv[1]);
   assert(id >= 1 && id <= 9);
-  std::set_terminate(my_terminate); // set terminate after std::stoi because it can throw.
+  ::std::set_terminate(my_terminate); // set terminate after ::std::stoi because it can throw.
   MS wait(250);
   try {
     mut.lock();
@@ -138,9 +138,9 @@ int main(int argc, char **argv) {
       case 5: cv.wait_until(mut, Clock::now() + wait); break;
       case 6: cv.wait_until(mut, Clock::now() + wait, pred_function); break;
 #if TEST_STD_VER >= 20 && !(defined(_LIBCPP_VERSION) && !_LIBCPP_AVAILABILITY_HAS_SYNC)
-      case 7: cv.wait(mut, std::stop_source{}.get_token(), pred_function); break;
-      case 8: cv.wait_for(mut, std::stop_source{}.get_token(), wait, pred_function); break;
-      case 9: cv.wait_until(mut, std::stop_source{}.get_token(), Clock::now() + wait, pred_function); break;
+      case 7: cv.wait(mut, ::std::stop_source{}.get_token(), pred_function); break;
+      case 8: cv.wait_for(mut, ::std::stop_source{}.get_token(), wait, pred_function); break;
+      case 9: cv.wait_until(mut, ::std::stop_source{}.get_token(), Clock::now() + wait, pred_function); break;
 #else
       case 7:
       case 8:

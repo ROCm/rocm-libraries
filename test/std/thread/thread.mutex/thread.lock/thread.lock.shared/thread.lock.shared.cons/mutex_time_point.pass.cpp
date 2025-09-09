@@ -28,7 +28,7 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::shared_timed_mutex m;
+::std::shared_timed_mutex m;
 
 typedef cuda::std::chrono::steady_clock Clock;
 typedef Clock::time_point time_point;
@@ -41,13 +41,13 @@ ms ShortTime = ms(50);
 
 static constexpr unsigned Threads = 5;
 
-std::atomic<unsigned> CountDown(Threads);
+::std::atomic<unsigned> CountDown(Threads);
 
 void f1()
 {
   --CountDown;
   time_point t0 = Clock::now();
-  std::shared_lock<std::shared_timed_mutex> lk(m, t0 + LongTime);
+  ::std::shared_lock<::std::shared_timed_mutex> lk(m, t0 + LongTime);
   time_point t1 = Clock::now();
   assert(lk.owns_lock() == true);
   assert(t1 - t0 <= LongTime);
@@ -56,7 +56,7 @@ void f1()
 void f2()
 {
   time_point t0 = Clock::now();
-  std::shared_lock<std::shared_timed_mutex> lk(m, t0 + ShortTime);
+  ::std::shared_lock<::std::shared_timed_mutex> lk(m, t0 + ShortTime);
   time_point t1 = Clock::now();
   assert(lk.owns_lock() == false);
   assert(t1 - t0 >= ShortTime);
@@ -66,19 +66,19 @@ int main(int, char**)
 {
   {
     m.lock();
-    std::vector<gpu::thread> v;
+    ::std::vector<hip::thread> v;
     for (unsigned i = 0; i < Threads; ++i)
       v.push_back(support::make_test_thread(f1));
     while (CountDown > 0)
-      gpu::this_thread::pseudo_yield();
-    gpu::this_thread::sleep_for(ShortTime);
+      hip::this_thread::pseudo_yield();
+    hip::this_thread::sleep_for(ShortTime);
     m.unlock();
     for (auto& t : v)
       t.join();
   }
   {
     m.lock();
-    std::vector<gpu::thread> v;
+    ::std::vector<hip::thread> v;
     for (unsigned i = 0; i < Threads; ++i)
       v.push_back(support::make_test_thread(f2));
     for (auto& t : v)

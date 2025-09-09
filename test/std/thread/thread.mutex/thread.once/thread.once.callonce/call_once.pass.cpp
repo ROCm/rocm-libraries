@@ -24,22 +24,22 @@
 
 typedef cuda::std::chrono::milliseconds ms;
 
-std::once_flag flg0;
+::std::once_flag flg0;
 
 int init0_called = 0;
 
 void init0()
 {
-    gpu::this_thread::sleep_for(ms(250));
+    hip::this_thread::sleep_for(ms(250));
     ++init0_called;
 }
 
 void f0()
 {
-    std::call_once(flg0, init0);
+    ::std::call_once(flg0, init0);
 }
 
-std::once_flag flg3;
+::std::once_flag flg3;
 
 int init3_called = 0;
 int init3_completed = 0;
@@ -47,7 +47,7 @@ int init3_completed = 0;
 void init3()
 {
     ++init3_called;
-    gpu::this_thread::sleep_for(ms(250));
+    hip::this_thread::sleep_for(ms(250));
     if (init3_called == 1)
         TEST_THROW(1);
     ++init3_completed;
@@ -58,7 +58,7 @@ void f3()
 #ifndef TEST_HAS_NO_EXCEPTIONS
     try
     {
-        std::call_once(flg3, init3);
+        ::std::call_once(flg3, init3);
     }
     catch (...)
     {
@@ -77,11 +77,11 @@ struct init1
 
 int init1::called = 0;
 
-std::once_flag flg1;
+::std::once_flag flg1;
 
 void f1()
 {
-    std::call_once(flg1, init1(), 1);
+    ::std::call_once(flg1, init1(), 1);
 }
 
 struct init2
@@ -93,18 +93,18 @@ struct init2
 
 int init2::called = 0;
 
-std::once_flag flg2;
+::std::once_flag flg2;
 
 void f2()
 {
-    std::call_once(flg2, init2(), 2, 3);
-    std::call_once(flg2, init2(), 4, 5);
+    ::std::call_once(flg2, init2(), 2, 3);
+    ::std::call_once(flg2, init2(), 4, 5);
 }
 
 #endif // TEST_STD_VER >= 11
 
-std::once_flag flg41;
-std::once_flag flg42;
+::std::once_flag flg41;
+::std::once_flag flg42;
 
 int init41_called = 0;
 int init42_called = 0;
@@ -113,26 +113,26 @@ void init42();
 
 void init41()
 {
-    gpu::this_thread::sleep_for(ms(250));
+    hip::this_thread::sleep_for(ms(250));
     ++init41_called;
 }
 
 void init42()
 {
-    gpu::this_thread::sleep_for(ms(250));
+    hip::this_thread::sleep_for(ms(250));
     ++init42_called;
 }
 
 void f41()
 {
-    std::call_once(flg41, init41);
-    std::call_once(flg42, init42);
+    ::std::call_once(flg41, init41);
+    ::std::call_once(flg42, init42);
 }
 
 void f42()
 {
-    std::call_once(flg42, init42);
-    std::call_once(flg41, init41);
+    ::std::call_once(flg42, init42);
+    ::std::call_once(flg41, init41);
 }
 
 #if TEST_STD_VER >= 11
@@ -191,8 +191,8 @@ int main(int, char**)
 {
     // check basic functionality
     {
-        gpu::thread t0 = support::make_test_thread(f0);
-        gpu::thread t1 = support::make_test_thread(f0);
+        hip::thread t0 = support::make_test_thread(f0);
+        hip::thread t1 = support::make_test_thread(f0);
         t0.join();
         t1.join();
         assert(init0_called == 1);
@@ -200,8 +200,8 @@ int main(int, char**)
 #ifndef TEST_HAS_NO_EXCEPTIONS
     // check basic exception safety
     {
-        gpu::thread t0 = support::make_test_thread(f3);
-        gpu::thread t1 = support::make_test_thread(f3);
+        hip::thread t0 = support::make_test_thread(f3);
+        hip::thread t1 = support::make_test_thread(f3);
         t0.join();
         t1.join();
         assert(init3_called == 2);
@@ -210,8 +210,8 @@ int main(int, char**)
 #endif
     // check deadlock avoidance
     {
-        gpu::thread t0 = support::make_test_thread(f41);
-        gpu::thread t1 = support::make_test_thread(f42);
+        hip::thread t0 = support::make_test_thread(f41);
+        hip::thread t1 = support::make_test_thread(f42);
         t0.join();
         t1.join();
         assert(init41_called == 1);
@@ -220,37 +220,37 @@ int main(int, char**)
 #if TEST_STD_VER >= 11
     // check functors with 1 arg
     {
-        gpu::thread t0 = support::make_test_thread(f1);
-        gpu::thread t1 = support::make_test_thread(f1);
+        hip::thread t0 = support::make_test_thread(f1);
+        hip::thread t1 = support::make_test_thread(f1);
         t0.join();
         t1.join();
         assert(init1::called == 1);
     }
     // check functors with 2 args
     {
-        gpu::thread t0 = support::make_test_thread(f2);
-        gpu::thread t1 = support::make_test_thread(f2);
+        hip::thread t0 = support::make_test_thread(f2);
+        hip::thread t1 = support::make_test_thread(f2);
         t0.join();
         t1.join();
         assert(init2::called == 5);
     }
     {
-        std::once_flag f;
-        std::call_once(f, MoveOnly(), MoveOnly());
+        ::std::once_flag f;
+        ::std::call_once(f, MoveOnly(), MoveOnly());
     }
     // check LWG2442: call_once() shouldn't DECAY_COPY()
     {
-        std::once_flag f;
+        ::std::once_flag f;
         int i = 0;
-        std::call_once(f, NonCopyable(), i);
+        ::std::call_once(f, NonCopyable(), i);
     }
 // reference qualifiers on functions are a C++11 extension
     {
-        std::once_flag f1, f2;
+        ::std::once_flag f1, f2;
         RefQual rq;
-        std::call_once(f1, rq);
+        ::std::call_once(f1, rq);
         assert(rq.lv_called == 1);
-        std::call_once(f2, std::move(rq));
+        ::std::call_once(f2, ::std::move(rq));
         assert(rq.rv_called == 1);
     }
 #endif // TEST_STD_VER >= 11

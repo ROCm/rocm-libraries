@@ -18,15 +18,15 @@
 
 void f() {
     {
-        std::future<int> f0, f;
+        ::std::future<int> f0, f;
         f = f0; // expected-error {{overload resolution selected deleted operator '='}}
     }
     {
-        std::future<int &> f0, f;
+        ::std::future<int &> f0, f;
         f = f0; // expected-error {{overload resolution selected deleted operator '='}}
     }
     {
-        std::future<void> f0, f;
+        ::std::future<void> f0, f;
         f = f0; // expected-error {{overload resolution selected deleted operator '='}}
     }
 }

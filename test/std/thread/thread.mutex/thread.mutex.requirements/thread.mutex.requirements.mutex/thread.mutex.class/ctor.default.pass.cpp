@@ -18,12 +18,12 @@
 #include <cassert>
 #include <type_traits>
 
-static_assert(std::is_nothrow_default_constructible<std::mutex>::value, "");
+static_assert(::std::is_nothrow_default_constructible<::std::mutex>::value, "");
 
 int main(int, char**) {
   // The mutex is unlocked after default construction
   {
-    std::mutex m;
+    ::std::mutex m;
     assert(m.try_lock());
     m.unlock();
   }

@@ -23,8 +23,8 @@
 int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    gpu::thread::id id = gpu::this_thread::get_id();
-    assert(id != gpu::thread::id());
+    hip::thread::id id = hip::this_thread::get_id();
+    assert(id != hip::thread::id());
 #endif
 
   return 0;

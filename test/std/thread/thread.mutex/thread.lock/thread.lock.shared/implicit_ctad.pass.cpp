@@ -20,10 +20,10 @@
 #include "test_macros.h"
 
 int main(int, char**) {
-  std::shared_mutex mutex;
+  ::std::shared_mutex mutex;
   {
-    std::shared_lock lock(mutex);
-    ASSERT_SAME_TYPE(decltype(lock), std::shared_lock<std::shared_mutex>);
+    ::std::shared_lock lock(mutex);
+    ASSERT_SAME_TYPE(decltype(lock), ::std::shared_lock<::std::shared_mutex>);
   }
 
   return 0;

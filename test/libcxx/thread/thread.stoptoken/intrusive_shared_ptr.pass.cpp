@@ -18,15 +18,15 @@
 #include "test_macros.h"
 
 struct Object {
-  std::atomic<int> counter = 0;
+  ::std::atomic<int> counter = 0;
 };
 
 template <>
-struct std::__intrusive_shared_ptr_traits<Object> {
-  static std::atomic<int>& __get_atomic_ref_count(Object& obj) { return obj.counter; }
+struct ::std::__intrusive_shared_ptr_traits<Object> {
+  static ::std::atomic<int>& __get_atomic_ref_count(Object& obj) { return obj.counter; }
 };
 
-using Ptr = std::__intrusive_shared_ptr<Object>;
+using Ptr = ::std::__intrusive_shared_ptr<Object>;
 
 int main(int, char**) {
   // default
@@ -55,7 +55,7 @@ int main(int, char**) {
   {
     auto object = new Object;
     Ptr ptr(object);
-    auto ptr2 = std::move(ptr);
+    auto ptr2 = ::std::move(ptr);
     assert(!ptr);
     assert(ptr2->counter == 1);
   }
@@ -79,7 +79,7 @@ int main(int, char**) {
     Ptr ptr1(object1);
     Ptr ptr2(object2);
 
-    ptr1 = std::move(ptr2);
+    ptr1 = ::std::move(ptr2);
     assert(ptr1->counter == 1);
     assert(!ptr2);
   }

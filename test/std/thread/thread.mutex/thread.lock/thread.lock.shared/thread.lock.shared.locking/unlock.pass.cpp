@@ -34,7 +34,7 @@ mutex m;
 
 int main(int, char**)
 {
-    std::shared_lock<mutex> lk(m);
+    ::std::shared_lock<mutex> lk(m);
     lk.unlock();
     assert(unlock_called == true);
     assert(lk.owns_lock() == false);
@@ -44,7 +44,7 @@ int main(int, char**)
         lk.unlock();
         assert(false);
     }
-    catch (std::system_error& e)
+    catch (::std::system_error& e)
     {
         assert(e.code().value() == EPERM);
     }
@@ -56,7 +56,7 @@ int main(int, char**)
         lk.unlock();
         assert(false);
     }
-    catch (std::system_error& e)
+    catch (::std::system_error& e)
     {
         assert(e.code().value() == EPERM);
     }

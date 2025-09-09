@@ -23,18 +23,18 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::condition_variable cv;
-std::mutex mut;
+::std::condition_variable cv;
+::std::mutex mut;
 
 int test0 = 0;
 int test1 = 0;
 int test2 = 0;
 
-std::atomic<int> ready_count(0);
+::std::atomic<int> ready_count(0);
 
 void f1()
 {
-    gpu::unique_lock<std::mutex> lk(mut);
+    hip::unique_lock<::std::mutex> lk(mut);
     assert(test1 == 0);
     ready_count += 1;
     while (test1 == 0)
@@ -45,7 +45,7 @@ void f1()
 
 void f2()
 {
-    gpu::unique_lock<std::mutex> lk(mut);
+    hip::unique_lock<::std::mutex> lk(mut);
     assert(test2 == 0);
     ready_count += 1;
     while (test2 == 0)
@@ -56,20 +56,20 @@ void f2()
 
 int main(int, char**)
 {
-    gpu::thread t1 = support::make_test_thread(f1);
-    gpu::thread t2 = support::make_test_thread(f2);
+    hip::thread t1 = support::make_test_thread(f1);
+    hip::thread t2 = support::make_test_thread(f2);
     while (ready_count.load() != 2) {
-      gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
+      hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
     }
     {
-        gpu::unique_lock<std::mutex>lk(mut);
+        hip::unique_lock<::std::mutex>lk(mut);
         test1 = 1;
         test2 = 1;
     }
     cv.notify_all();
     {
-        gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
-        gpu::unique_lock<std::mutex>lk(mut);
+        hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
+        hip::unique_lock<::std::mutex>lk(mut);
     }
     t1.join();
     t2.join();

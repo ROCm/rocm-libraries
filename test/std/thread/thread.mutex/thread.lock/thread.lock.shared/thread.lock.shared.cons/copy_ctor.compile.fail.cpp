@@ -15,12 +15,12 @@
 
 #include <shared_mutex>
 
-std::shared_timed_mutex m;
+::std::shared_timed_mutex m;
 
 int main(int, char**)
 {
-    std::shared_lock<std::shared_timed_mutex> lk0(m);
-    std::shared_lock<std::shared_timed_mutex> lk = lk0;
+    ::std::shared_lock<::std::shared_timed_mutex> lk0(m);
+    ::std::shared_lock<::std::shared_timed_mutex> lk = lk0;
 
   return 0;
 }

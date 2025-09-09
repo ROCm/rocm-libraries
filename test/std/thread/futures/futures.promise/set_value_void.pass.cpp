@@ -25,8 +25,8 @@ int main(int, char**)
 {
     {
         typedef void T;
-        std::promise<T> p;
-        std::future<T> f = p.get_future();
+        ::std::promise<T> p;
+        ::std::future<T> f = p.get_future();
         p.set_value();
         f.get();
         try
@@ -34,9 +34,9 @@ int main(int, char**)
             p.set_value();
             assert(false);
         }
-        catch (const std::future_error& e)
+        catch (const ::std::future_error& e)
         {
-            assert(e.code() == make_error_code(std::future_errc::promise_already_satisfied));
+            assert(e.code() == make_error_code(::std::future_errc::promise_already_satisfied));
         }
     }
 

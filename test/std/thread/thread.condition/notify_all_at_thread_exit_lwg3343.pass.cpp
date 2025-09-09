@@ -42,8 +42,8 @@ TEST_MSVC_DIAGNOSTIC_IGNORED(4583)
 union X {
     X() : cv_() {}
     ~X() {}
-    std::condition_variable cv_;
-    unsigned char bytes_[sizeof(std::condition_variable)];
+    ::std::condition_variable cv_;
+    unsigned char bytes_[sizeof(::std::condition_variable)];
 };
 
 TEST_DIAGNOSTIC_POP
@@ -53,18 +53,18 @@ void test()
     constexpr int N = 3;
 
     X x;
-    std::mutex m;
+    ::std::mutex m;
     int threads_active = N;
 
     for (int i = 0; i < N; ++i) {
-        gpu::thread t = support::make_test_thread([&] {
+        hip::thread t = support::make_test_thread([&] {
             // Emulate work being done.
-            gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(1));
+            hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(1));
 
             // Signal thread completion.
-            gpu::unique_lock<std::mutex> lk(m);
+            hip::unique_lock<::std::mutex> lk(m);
             --threads_active;
-            std::notify_all_at_thread_exit(x.cv_, std::move(lk));
+            ::std::notify_all_at_thread_exit(x.cv_, ::std::move(lk));
         });
         t.detach();
     }
@@ -75,7 +75,7 @@ void test()
     // but it won't be able to continue until the last thread
     // unlocks `m`.
     {
-        gpu::unique_lock<std::mutex> lk(m);
+        hip::unique_lock<::std::mutex> lk(m);
         // Due to OS scheduling the workers might have terminated when this
         // code is reached. In that case the wait will not sleep and the call
         // to notify_all_at_thread_exit has no effect; the condition variable
@@ -106,7 +106,7 @@ void test()
        sum += c;
     }
     DoNotOptimize(sum);
-    assert(sum == (0xcd * sizeof(std::condition_variable)));
+    assert(sum == (0xcd * sizeof(::std::condition_variable)));
 }
 
 int main(int, char**)

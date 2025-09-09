@@ -16,10 +16,10 @@
 
 template <class CharT, class TestFunction, class ExceptionTest>
 void format_tests(TestFunction check, ExceptionTest check_exception) {
-  // Note the output of gpu::thread::id is unspecified. The output text is the
+  // Note the output of hip::thread::id is unspecified. The output text is the
   // same as the stream operator. Since that format is already released this
   // test follows the practice on existing systems.
-  gpu::thread::id input{};
+  hip::thread::id input{};
 
   /***** Test the type specific part *****/
 #if !defined(__APPLE__) && !defined(__FreeBSD__)
@@ -76,7 +76,7 @@ void format_tests(TestFunction check, ExceptionTest check_exception) {
   check_exception("The replacement field misses a terminating '}'", SV("{:L}"), input);
 
   // *** type ***
-  for (std::basic_string_view<CharT> fmt : fmt_invalid_types<CharT>(""))
+  for (::std::basic_string_view<CharT> fmt : fmt_invalid_types<CharT>(""))
     check_exception("The replacement field misses a terminating '}'", fmt, input);
 }
 

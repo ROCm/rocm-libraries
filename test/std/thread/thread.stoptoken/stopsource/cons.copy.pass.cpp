@@ -19,12 +19,12 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_nothrow_copy_constructible_v<std::stop_source>);
+static_assert(::std::is_nothrow_copy_constructible_v<::std::stop_source>);
 
 int main(int, char**) {
   {
-    std::stop_source source;
-    std::stop_source copy{source};
+    ::std::stop_source source;
+    ::std::stop_source copy{source};
 
     assert(source == copy);
 
@@ -44,11 +44,11 @@ int main(int, char**) {
 
   // source counter incremented
   {
-    std::optional<std::stop_source> source(std::in_place);
+    ::std::optional<::std::stop_source> source(::std::in_place);
     auto st = source->get_token();
     assert(st.stop_possible());
 
-    std::optional<std::stop_source> copy{source};
+    ::std::optional<::std::stop_source> copy{source};
     source.reset();
 
     assert(st.stop_possible());
@@ -59,8 +59,8 @@ int main(int, char**) {
 
   // copy from empty
   {
-    std::stop_source ss1{std::nostopstate};
-    std::stop_source copy{ss1};
+    ::std::stop_source ss1{::std::nostopstate};
+    ::std::stop_source copy{ss1};
     assert(!copy.stop_possible());
   }
 

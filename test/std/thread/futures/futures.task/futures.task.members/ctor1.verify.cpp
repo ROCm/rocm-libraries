@@ -15,14 +15,14 @@
 // template <class F>
 //   packaged_task(F&& f);
 // These constructors shall not participate in overload resolution if
-//    decay<F>::type is the same type as std::packaged_task<R(ArgTypes...)>.
+//    decay<F>::type is the same type as ::std::packaged_task<R(ArgTypes...)>.
 
 #include <future>
 #include <cassert>
 
 struct A {};
-typedef std::packaged_task<A(int, char)> PT;
-typedef volatile std::packaged_task<A(int, char)> VPT;
+typedef ::std::packaged_task<A(int, char)> PT;
+typedef volatile ::std::packaged_task<A(int, char)> VPT;
 
 
 int main(int, char**)
@@ -31,7 +31,7 @@ int main(int, char**)
     auto const& c_init = init;
     PT p1{init}; // expected-error {{no matching constructor}}
     PT p2{c_init}; // expected-error {{no matching constructor}}
-    PT p3{std::move(init)}; // expected-error {{no matching constructor for initialization of 'PT' (aka 'packaged_task<A (int, char)>')}}
+    PT p3{::std::move(init)}; // expected-error {{no matching constructor for initialization of 'PT' (aka 'packaged_task<A (int, char)>')}}
 
   return 0;
 }

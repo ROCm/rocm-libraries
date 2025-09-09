@@ -36,44 +36,44 @@ public:
     }
 };
 
-void func0(std::packaged_task<double(int, char)> p)
+void func0(::std::packaged_task<double(int, char)> p)
 {
-    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
+    hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
     p.make_ready_at_thread_exit(3, 97);
 }
 
-void func1(std::packaged_task<double(int, char)> p)
+void func1(::std::packaged_task<double(int, char)> p)
 {
-    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
+    hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
     p.make_ready_at_thread_exit(3, 122);
 }
 
-void func2(std::packaged_task<double(int, char)> p)
+void func2(::std::packaged_task<double(int, char)> p)
 {
 #ifndef TEST_HAS_NO_EXCEPTIONS
   p.make_ready_at_thread_exit(3, 97);
   try {
     p.make_ready_at_thread_exit(3, 99);
     }
-    catch (const std::future_error& e)
+    catch (const ::std::future_error& e)
     {
-        assert(e.code() == make_error_code(std::future_errc::promise_already_satisfied));
+        assert(e.code() == make_error_code(::std::future_errc::promise_already_satisfied));
     }
 #else
     ((void)p);
 #endif
 }
 
-void func3(std::packaged_task<double(int, char)> p)
+void func3(::std::packaged_task<double(int, char)> p)
 {
 #ifndef TEST_HAS_NO_EXCEPTIONS
     try
     {
       p.make_ready_at_thread_exit(3, 97);
     }
-    catch (const std::future_error& e)
+    catch (const ::std::future_error& e)
     {
-        assert(e.code() == make_error_code(std::future_errc::no_state));
+        assert(e.code() == make_error_code(::std::future_errc::no_state));
     }
 #else
     ((void)p);
@@ -83,16 +83,16 @@ void func3(std::packaged_task<double(int, char)> p)
 int main(int, char**)
 {
     {
-        std::packaged_task<double(int, char)> p(A(5));
-        std::future<double> f = p.get_future();
-        support::make_test_thread(func0, std::move(p)).detach();
+        ::std::packaged_task<double(int, char)> p(A(5));
+        ::std::future<double> f = p.get_future();
+        support::make_test_thread(func0, ::std::move(p)).detach();
         assert(f.get() == 105.0);
     }
 #ifndef TEST_HAS_NO_EXCEPTIONS
     {
-        std::packaged_task<double(int, char)> p(A(5));
-        std::future<double> f = p.get_future();
-        support::make_test_thread(func1, std::move(p)).detach();
+        ::std::packaged_task<double(int, char)> p(A(5));
+        ::std::future<double> f = p.get_future();
+        support::make_test_thread(func1, ::std::move(p)).detach();
         try
         {
             f.get();
@@ -104,14 +104,14 @@ int main(int, char**)
         }
     }
     {
-        std::packaged_task<double(int, char)> p(A(5));
-        std::future<double> f = p.get_future();
-        support::make_test_thread(func2, std::move(p)).detach();
+        ::std::packaged_task<double(int, char)> p(A(5));
+        ::std::future<double> f = p.get_future();
+        support::make_test_thread(func2, ::std::move(p)).detach();
         assert(f.get() == 105.0);
     }
     {
-        std::packaged_task<double(int, char)> p;
-        gpu::thread t = support::make_test_thread(func3, std::move(p));
+        ::std::packaged_task<double(int, char)> p;
+        hip::thread t = support::make_test_thread(func3, ::std::move(p));
         t.join();
     }
 #endif

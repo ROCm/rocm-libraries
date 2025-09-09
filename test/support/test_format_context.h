@@ -11,9 +11,9 @@
 #define SUPPORT_TEST_FORMAT_CONTEXT_HPP
 
 /**
- * @file Helper functions to create a @ref std::basic_format_context.
+ * @file Helper functions to create a @ref ::std::basic_format_context.
  *
- * Since the standard doesn't specify how a @ref std::basic_format_context is
+ * Since the standard doesn't specify how a @ref ::std::basic_format_context is
  * constructed this is implementation defined. To make the public API tests of
  * the class generic this header defines helper functions to create the
  * required object.
@@ -38,22 +38,22 @@
 
 #ifdef _LIBCPP_VERSION
 
-/** Creates a std::basic_format_context as-if the formatting function takes no locale. */
+/** Creates a ::std::basic_format_context as-if the formatting function takes no locale. */
 template <class OutIt, class CharT>
-std::basic_format_context<OutIt, CharT> test_format_context_create(
+::std::basic_format_context<OutIt, CharT> test_format_context_create(
     OutIt out_it,
-    std::basic_format_args<std::basic_format_context<OutIt, CharT>> args) {
-  return std::__format_context_create(std::move(out_it), args);
+    ::std::basic_format_args<::std::basic_format_context<OutIt, CharT>> args) {
+  return ::std::__format_context_create(::std::move(out_it), args);
 }
 
 #  ifndef TEST_HAS_NO_LOCALIZATION
-/** Creates a std::basic_format_context as-if the formatting function takes locale. */
+/** Creates a ::std::basic_format_context as-if the formatting function takes locale. */
 template <class OutIt, class CharT>
-std::basic_format_context<OutIt, CharT> test_format_context_create(
+::std::basic_format_context<OutIt, CharT> test_format_context_create(
     OutIt out_it,
-    std::basic_format_args<std::basic_format_context<OutIt, CharT>> args,
-    std::locale loc) {
-  return std::__format_context_create(std::move(out_it), args, std::move(loc));
+    ::std::basic_format_args<::std::basic_format_context<OutIt, CharT>> args,
+    ::std::locale loc) {
+  return ::std::__format_context_create(::std::move(out_it), args, ::std::move(loc));
 }
 #  endif // TEST_HAS_NO_LOCALIZATION
 #else    // _LIBCPP_VERSION

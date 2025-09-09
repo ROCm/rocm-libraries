@@ -22,8 +22,8 @@
 
 int main(int, char**)
 {
-    gpu::thread::id id0;
-    gpu::thread::id id1 = id0;
+    hip::thread::id id0;
+    hip::thread::id id1 = id0;
     assert(id1 == id0);
 
   return 0;

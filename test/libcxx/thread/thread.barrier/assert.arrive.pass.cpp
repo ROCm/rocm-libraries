@@ -27,12 +27,12 @@
 
 int main(int, char**) {
   {
-    std::barrier<> b(5);
+    ::std::barrier<> b(5);
     TEST_LIBCPP_ASSERT_FAILURE(b.arrive(0), "barrier:arrive must be called with a value greater than 0");
   }
 
   {
-    std::barrier<> b(5);
+    ::std::barrier<> b(5);
     TEST_LIBCPP_ASSERT_FAILURE(b.arrive(10), "update is greater than the expected count for the current barrier phase");
   }
 

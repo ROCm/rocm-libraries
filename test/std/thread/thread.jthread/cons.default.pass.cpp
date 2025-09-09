@@ -19,13 +19,13 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_nothrow_default_constructible_v<std::jthread>);
+static_assert(::std::is_nothrow_default_constructible_v<::std::jthread>);
 
 int main(int, char**) {
   {
-    std::jthread jt = {}; // implicit
+    ::std::jthread jt = {}; // implicit
     assert(!jt.get_stop_source().stop_possible());
-    assert(jt.get_id() == std::jthread::id());
+    assert(jt.get_id() == ::std::jthread::id());
   }
 
   return 0;

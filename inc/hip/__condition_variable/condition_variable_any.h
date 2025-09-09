@@ -31,7 +31,7 @@
 
 #include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
 
-namespace gpu {
+namespace cuda {
 
 class _LIBGPU_TYPE_VIS condition_variable_any {
     uint64_t wait_counter = 0;
@@ -54,7 +54,7 @@ class _LIBGPU_TYPE_VIS condition_variable_any {
     // TODO: uncomment these once we implement chrono
     // template <class _Lock, class _Clock, class _Duration>
     //     _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    //     std::cv_status
+    //     ::std::cv_status
     //     wait_until(_Lock& __lock,
     //                const chrono::time_point<_Clock, _Duration>& __t);
 
@@ -66,7 +66,7 @@ class _LIBGPU_TYPE_VIS condition_variable_any {
     //                _Predicate __pred);
 
     // template <class _Lock, class _Rep, class _Period>
-    //     std::cv_status
+    //     ::std::cv_status
     //     __device__ _LIBGPU_HIDE_FROM_ABI
     //     wait_for(_Lock& __lock,
     //              const chrono::duration<_Rep, _Period>& __d);
@@ -109,7 +109,7 @@ __device__ void condition_variable_any::wait(_Lock &__lock) {
     // This isn't a big deal though. We can't create a perfect replacement for condition variable anyways because we
     // can't actually 'sleep'. If we really wanted to, we could safely use this implementation for
     // spin_condition_variable only, and implement condition_variable_any using that (like libcxx uses
-    // std::condition_variable), but that would significantly hurt performance.
+    // ::std::condition_variable), but that would significantly hurt performance.
     __lock.unlock();
     while (myId >= atomicAdd(&notify_counter, 0)) {
         // __threadfence();
@@ -125,6 +125,6 @@ __device__ inline void condition_variable_any::wait(_Lock &__lock, _Predicate __
         wait(__lock);
 }
 
-} // namespace gpu
+} // namespace cuda
 
 #endif // __GPU___CONDITION_VARIABLE_CONDITION_VARIABLE_ANY_H__

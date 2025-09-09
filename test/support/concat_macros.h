@@ -22,27 +22,27 @@
 
 #  ifndef TEST_HAS_NO_LOCALIZATION
 template <class T>
-concept test_char_streamable = requires(T&& value) { std::stringstream{} << std::forward<T>(value); };
+concept test_char_streamable = requires(T&& value) { ::std::stringstream{} << ::std::forward<T>(value); };
 #  endif
 
 // If possible concatenates message for the assertion function, else returns a
 // default message. Not being able to stream is not considered and error. For
-// example, streaming to std::wcerr doesn't work properly in the CI. Therefore
-// the formatting tests should only stream to std::string.
+// example, streaming to ::std::wcerr doesn't work properly in the CI. Therefore
+// the formatting tests should only stream to ::std::string.
 //
 // The macro TEST_WRITE_CONCATENATED can be used to evaluate the arguments
 // lazily. This useful when using this function in combination with
 // assert_macros.h.
 template <class... Args>
-std::string test_concat_message([[maybe_unused]] Args&&... args) {
+::std::string test_concat_message([[maybe_unused]] Args&&... args) {
 #  ifndef TEST_HAS_NO_LOCALIZATION
   if constexpr ((test_char_streamable<Args> && ...)) {
-    std::stringstream sstr;
-    ((sstr << std::forward<Args>(args)), ...);
+    ::std::stringstream sstr;
+    ((sstr << ::std::forward<Args>(args)), ...);
     return sstr.str();
   } else
 #  endif
-    return "Message discarded since it can't be streamed to std::cerr.\n";
+    return "Message discarded since it can't be streamed to ::std::cerr.\n";
 }
 
 // Writes its arguments to stderr, using the test_concat_message helper.

@@ -28,19 +28,19 @@
 int main(int, char**) {
   // Exclusive-lock a mutex that is not locked yet. This should succeed.
   {
-    std::shared_mutex m;
+    ::std::shared_mutex m;
     m.lock();
     m.unlock();
   }
 
   // Exclusive-lock a mutex that is already locked exclusively. This should block until it is unlocked.
   {
-    std::atomic<bool> ready(false);
-    std::shared_mutex m;
+    ::std::atomic<bool> ready(false);
+    ::std::shared_mutex m;
     m.lock();
-    std::atomic<bool> is_locked_from_main(true);
+    ::std::atomic<bool> is_locked_from_main(true);
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       ready = true;
       m.lock();
       assert(!is_locked_from_main);
@@ -61,12 +61,12 @@ int main(int, char**) {
 
   // Exclusive-lock a mutex that is already share-locked. This should block until it is unlocked.
   {
-    std::atomic<bool> ready(false);
-    std::shared_mutex m;
+    ::std::atomic<bool> ready(false);
+    ::std::shared_mutex m;
     m.lock_shared();
-    std::atomic<bool> is_locked_from_main(true);
+    ::std::atomic<bool> is_locked_from_main(true);
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       ready = true;
       m.lock();
       assert(!is_locked_from_main);
@@ -87,10 +87,10 @@ int main(int, char**) {
 
   // Make sure that at most one thread can acquire the mutex concurrently.
   {
-    std::atomic<int> counter = 0;
-    std::shared_mutex mutex;
+    ::std::atomic<int> counter = 0;
+    ::std::shared_mutex mutex;
 
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 10; ++i) {
       threads.push_back(support::make_test_thread([&] {
         mutex.lock();

@@ -9,7 +9,7 @@
 #ifndef COUNTER_H
 #define COUNTER_H
 
-#include <functional> // for std::hash
+#include <functional> // for ::std::hash
 
 #include "test_macros.h"
 
@@ -24,8 +24,8 @@ public:
     Counter(const Counter& rhs) : data_(rhs.data_)  { ++gConstructed; }
     Counter& operator=(const Counter& rhs)          { data_ = rhs.data_; return *this; }
 #if TEST_STD_VER >= 11
-    Counter(Counter&& rhs) : data_(std::move(rhs.data_))  { ++gConstructed; }
-    Counter& operator=(Counter&& rhs) { data_ = std::move(rhs.data_); return *this; }
+    Counter(Counter&& rhs) : data_(::std::move(rhs.data_))  { ++gConstructed; }
+    Counter& operator=(Counter&& rhs) { data_ = ::std::move(rhs.data_); return *this; }
 #endif
     ~Counter() { --gConstructed; }
 
@@ -46,9 +46,9 @@ template <class T>
 struct hash<Counter<T> >
 {
     typedef Counter<T> argument_type;
-    typedef std::size_t result_type;
+    typedef ::std::size_t result_type;
 
-    std::size_t operator()(const Counter<T>& x) const {return std::hash<T>()(x.get());}
+    ::std::size_t operator()(const Counter<T>& x) const {return ::std::hash<T>()(x.get());}
 };
 }
 

@@ -36,11 +36,11 @@
 int main(int, char**) {
   // resource_deadlock_would_occur - if deadlock is detected or get_id() == this_thread::get_id().
   {
-    std::function<void()> f;
-    std::atomic_bool start = false;
-    std::atomic_bool done  = false;
+    ::std::function<void()> f;
+    ::std::atomic_bool start = false;
+    ::std::atomic_bool done  = false;
 
-    std::jthread jt = support::make_test_jthread([&] {
+    ::std::jthread jt = support::make_test_jthread([&] {
       start.wait(false);
       f();
       done = true;
@@ -51,8 +51,8 @@ int main(int, char**) {
       try {
         jt.join();
         assert(false);
-      } catch (const std::system_error& err) {
-        assert(err.code() == std::errc::resource_deadlock_would_occur);
+      } catch (const ::std::system_error& err) {
+        assert(err.code() == ::std::errc::resource_deadlock_would_occur);
       }
     };
     start = true;

@@ -23,10 +23,10 @@
 
 int main(int, char**) {
 #ifdef __HIP_DEVICE_COMPILE__
-  gpu::spin_mutex m;
+  hip::spin_mutex m;
   m.lock();
   {
-    gpu::unique_lock<gpu::spin_mutex> g(m, std::adopt_lock);
+    hip::unique_lock<hip::spin_mutex> g(m, ::std::adopt_lock);
   }
 #endif
 

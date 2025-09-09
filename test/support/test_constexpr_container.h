@@ -41,15 +41,15 @@ public:
     constexpr iterator insert(const_iterator pos, T t) {
         int i = static_cast<int>(pos - data_);
         if (i != size_) {
-            std::move_backward(data_ + i, data_ + size_, data_ + size_ + 1);
+            ::std::move_backward(data_ + i, data_ + size_, data_ + size_ + 1);
         }
-        data_[i] = std::move(t);
+        data_[i] = ::std::move(t);
         size_ += 1;
         return data_ + i;
     }
 
-    constexpr void push_back(T t) { insert(end(), std::move(t)); }
-    constexpr void push_front(T t) { insert(begin(), std::move(t)); }
+    constexpr void push_back(T t) { insert(end(), ::std::move(t)); }
+    constexpr void push_front(T t) { insert(begin(), ::std::move(t)); }
 };
 
 #endif // TEST_STD_VER >= 14

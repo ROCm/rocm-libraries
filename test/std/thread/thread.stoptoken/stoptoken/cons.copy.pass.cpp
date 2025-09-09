@@ -18,13 +18,13 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_nothrow_copy_constructible_v<std::stop_token>);
+static_assert(::std::is_nothrow_copy_constructible_v<::std::stop_token>);
 
 int main(int, char**) {
   {
-    std::stop_source source;
+    ::std::stop_source source;
     auto st = source.get_token();
-    std::stop_token copy{st};
+    ::std::stop_token copy{st};
 
     assert(st == copy);
 

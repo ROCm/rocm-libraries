@@ -25,17 +25,17 @@
 int main(int, char**)
 {
     {
-    typedef std::shared_timed_mutex M;
+    typedef ::std::shared_timed_mutex M;
     M m;
-    gpu::unique_lock<M> lk(m, std::defer_lock);
-    assert(lk.mutex() == std::addressof(m));
+    hip::unique_lock<M> lk(m, ::std::defer_lock);
+    assert(lk.mutex() == ::std::addressof(m));
     assert(lk.owns_lock() == false);
     }
     {
     typedef nasty_mutex M;
     M m;
-    gpu::unique_lock<M> lk(m, std::defer_lock);
-    assert(lk.mutex() == std::addressof(m));
+    hip::unique_lock<M> lk(m, ::std::defer_lock);
+    assert(lk.mutex() == ::std::addressof(m));
     assert(lk.owns_lock() == false);
     }
 

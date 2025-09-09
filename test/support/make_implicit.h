@@ -16,7 +16,7 @@
 
 template <class T, class... Args>
 T make_implicit(Args&&... args) {
-  return {std::forward<Args>(args)...};
+  return {::std::forward<Args>(args)...};
 }
 
 #endif // SUPPORT_MAKE_IMPLICIT_H

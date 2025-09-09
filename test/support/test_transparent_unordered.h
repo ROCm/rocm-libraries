@@ -24,13 +24,13 @@ struct SearchedType;
 
 struct hash_impl {
   template <typename T>
-  constexpr std::size_t operator()(SearchedType<T> const& t) const {
-    return static_cast<std::size_t>(t.get_value());
+  constexpr ::std::size_t operator()(SearchedType<T> const& t) const {
+    return static_cast<::std::size_t>(t.get_value());
   }
 
   template <typename T>
-  constexpr std::size_t operator()(StoredType<T> const& t) const {
-    return static_cast<std::size_t>(t.get_value());
+  constexpr ::std::size_t operator()(StoredType<T> const& t) const {
+    return static_cast<::std::size_t>(t.get_value());
   }
 };
 
@@ -42,7 +42,7 @@ struct transparent_hash : hash_impl {
 
 struct transparent_hash_final final : transparent_hash {};
 
-struct transparent_equal_final final : std::equal_to<> {};
+struct transparent_equal_final final : ::std::equal_to<> {};
 
 template <typename T>
 struct SearchedType {
@@ -160,11 +160,11 @@ template<class Container>
 void test_transparent_equal_range(Container c) {
   int conversions = 0;
   auto iters = c.equal_range(SearchedType<int>(1, &conversions));
-  assert(std::distance(iters.first, iters.second) > 0);
+  assert(::std::distance(iters.first, iters.second) > 0);
   iters = c.equal_range(SearchedType<int>(2, &conversions));
-  assert(std::distance(iters.first, iters.second) > 0);
+  assert(::std::distance(iters.first, iters.second) > 0);
   iters = c.equal_range(SearchedType<int>(3, &conversions));
-  assert(std::distance(iters.first, iters.second) == 0);
+  assert(::std::distance(iters.first, iters.second) == 0);
   assert(conversions == 0);
 }
 
@@ -172,13 +172,13 @@ template<class Container>
 void test_non_transparent_equal_range(Container c) {
   int conversions = 0;
   auto iters = c.equal_range(SearchedType<int>(1, &conversions));
-  assert(std::distance(iters.first, iters.second) > 0);
+  assert(::std::distance(iters.first, iters.second) > 0);
   assert(conversions == 1);
   iters = c.equal_range(SearchedType<int>(2, &conversions));
-  assert(std::distance(iters.first, iters.second) > 0);
+  assert(::std::distance(iters.first, iters.second) > 0);
   assert(conversions == 2);
   iters = c.equal_range(SearchedType<int>(3, &conversions));
-  assert(std::distance(iters.first, iters.second) == 0);
+  assert(::std::distance(iters.first, iters.second) == 0);
   assert(conversions == 3);
 }
 

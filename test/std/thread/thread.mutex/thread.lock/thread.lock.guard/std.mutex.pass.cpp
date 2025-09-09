@@ -9,7 +9,7 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03
 
-// Test the interoperation of gpu::lock_guard with std::mutex, since that is such
+// Test the interoperation of hip::lock_guard with ::std::mutex, since that is such
 // a common use case.
 
 #include <cassert>
@@ -20,14 +20,14 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-void do_try_lock(std::mutex& m) { assert(m.try_lock() == false); }
+void do_try_lock(::std::mutex& m) { assert(m.try_lock() == false); }
 
 int main(int, char**) {
   {
-    std::mutex m;
+    ::std::mutex m;
     {
-      gpu::lock_guard<std::mutex> lg(m);
-      gpu::thread t = support::make_test_thread(do_try_lock, std::ref(m));
+      hip::lock_guard<::std::mutex> lg(m);
+      hip::thread t = support::make_test_thread(do_try_lock, ::std::ref(m));
       t.join();
     }
 
@@ -39,9 +39,9 @@ int main(int, char**) {
   // Test CTAD
 #if TEST_STD_VER >= 17
   {
-    std::mutex m;
-    gpu::lock_guard lg(m);
-    static_assert(std::is_same<decltype(lg), gpu::lock_guard<std::mutex>>::value, "");
+    ::std::mutex m;
+    hip::lock_guard lg(m);
+    static_assert(::std::is_same<decltype(lg), hip::lock_guard<::std::mutex>>::value, "");
   }
 #endif
 

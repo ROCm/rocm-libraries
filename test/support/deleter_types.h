@@ -72,14 +72,14 @@ public:
   }
 
   template <class U>
-  __host__ __device__ TEST_CONSTEXPR_CXX23 Deleter(Deleter<U>&& d, typename std::enable_if<!std::is_same<U, T>::value>::type* = 0)
+  __host__ __device__ TEST_CONSTEXPR_CXX23 Deleter(Deleter<U>&& d, typename ::std::enable_if<!::std::is_same<U, T>::value>::type* = 0)
       : state_(d.state()) {
     d.set_state(0);
   }
 
 private:
   template <class U>
-  __host__ __device__ Deleter(const Deleter<U>& d, typename std::enable_if<!std::is_same<U, T>::value>::type* = 0);
+  __host__ __device__ Deleter(const Deleter<U>& d, typename ::std::enable_if<!::std::is_same<U, T>::value>::type* = 0);
 
 public:
   __host__ __device__ TEST_CONSTEXPR_CXX23 int state() const { return state_; }
@@ -88,11 +88,11 @@ public:
   __device__ TEST_CONSTEXPR_CXX23 void operator()(T* p) { delete p; }
   __host__ TEST_CONSTEXPR_CXX23 void operator()(T *p) {
     assert(hipFree(p) == hipSuccess);
-    if (std::is_same<T, B_h>::value) {
+    if (::std::is_same<T, B_h>::value) {
         --B_h::count;
         --A_h::count;
     }
-    if (std::is_same<T, A_h>::value) {
+    if (::std::is_same<T, A_h>::value) {
         --A_h::count;
     }
   }
@@ -150,7 +150,7 @@ public:
   }
 
   template <class U>
-  __host__ __device__ Deleter(Deleter<U> d, typename std::enable_if<!std::is_same<U, T>::value>::type* = 0) : state_(d.state()) {}
+  __host__ __device__ Deleter(Deleter<U> d, typename ::std::enable_if<!::std::is_same<U, T>::value>::type* = 0) : state_(d.state()) {}
 
 public:
   __host__ __device__ int state() const { return state_; }
@@ -159,11 +159,11 @@ public:
   __device__ void operator()(T* p) { delete p; }
   __host__ void operator()(T *p) {
     assert(hipFree(p) == hipSuccess);
-    if (std::is_same<T, B_h>::value) {
+    if (::std::is_same<T, B_h>::value) {
         --B_h::count;
         --A_h::count;
     }
-    if (std::is_same<T, A_h>::value) {
+    if (::std::is_same<T, A_h>::value) {
         --A_h::count;
     }
   }
@@ -199,9 +199,9 @@ public:
 
 template <class T>
 __host__ __device__ TEST_CONSTEXPR_CXX23 void swap(Deleter<T>& x, Deleter<T>& y) {
-  Deleter<T> t(std::move(x));
-  x = std::move(y);
-  y = std::move(t);
+  Deleter<T> t(::std::move(x));
+  x = ::std::move(y);
+  y = ::std::move(t);
 }
 
 template <class T>
@@ -227,11 +227,11 @@ public:
   __device__ TEST_CONSTEXPR_CXX23 void operator()(T* p) { delete p; }
   __host__ TEST_CONSTEXPR_CXX23 void operator()(T *p) {
     assert(hipFree(p) == hipSuccess);
-    if (std::is_same<T, B_h>::value) {
+    if (::std::is_same<T, B_h>::value) {
         --B_h::count;
         --A_h::count;
     }
-    if (std::is_same<T, A_h>::value) {
+    if (::std::is_same<T, A_h>::value) {
         --A_h::count;
     }
   }
@@ -262,9 +262,9 @@ public:
 
 template <class T>
 __host__ __device__ TEST_CONSTEXPR_CXX23 void swap(CDeleter<T>& x, CDeleter<T>& y) {
-  CDeleter<T> t(std::move(x));
-  x = std::move(y);
-  y = std::move(t);
+  CDeleter<T> t(::std::move(x));
+  x = ::std::move(y);
+  y = ::std::move(t);
 }
 
 // Non-copyable deleter
@@ -288,11 +288,11 @@ public:
   __device__ TEST_CONSTEXPR_CXX23 void operator()(T* p) { delete p; }
   __host__ TEST_CONSTEXPR_CXX23 void operator()(T *p) {
     assert(hipFree(p) == hipSuccess);
-    if (std::is_same<T, B_h>::value) {
+    if (::std::is_same<T, B_h>::value) {
         --B_h::count;
         --A_h::count;
     }
-    else if (std::is_same<T, A_h>::value) {
+    else if (::std::is_same<T, A_h>::value) {
         --A_h::count;
     }
   }
@@ -340,11 +340,11 @@ public:
   __device__ TEST_CONSTEXPR_CXX23 void operator()(T* p) const { delete p; }
   __host__ TEST_CONSTEXPR_CXX23 void operator()(T *p) const {
     assert(hipFree(p) == hipSuccess);
-    if (std::is_same<T, B_h>::value) {
+    if (::std::is_same<T, B_h>::value) {
         --B_h::count;
         --A_h::count;
     }
-    if (std::is_same<T, A_h>::value) {
+    if (::std::is_same<T, A_h>::value) {
         --A_h::count;
     }
   }
@@ -396,11 +396,11 @@ public:
   __device__ TEST_CONSTEXPR_CXX23 void operator()(T* p) { delete p; }
   __host__ TEST_CONSTEXPR_CXX23 void operator()(T *p) {
     assert(hipFree(p) == hipSuccess);
-    if (std::is_same<T, B_h>::value) {
+    if (::std::is_same<T, B_h>::value) {
         --B_h::count;
         --A_h::count;
     }
-    if (std::is_same<T, A_h>::value) {
+    if (::std::is_same<T, A_h>::value) {
         --A_h::count;
     }
   }
@@ -465,11 +465,11 @@ public:
     assert(state_ >= 0);
     ++dealloc_count;
     assert(hipFree(p) == hipSuccess);
-    if (std::is_same<T, B_h>::value) {
+    if (::std::is_same<T, B_h>::value) {
         --B_h::count;
         --A_h::count;
     }
-    if (std::is_same<T, A_h>::value) {
+    if (::std::is_same<T, A_h>::value) {
         --A_h::count;
     }
   }
@@ -484,9 +484,9 @@ private:
 
 template <class T>
 __host__ __device__ void swap(test_deleter<T>& x, test_deleter<T>& y) {
-  test_deleter<T> t(std::move(x));
-  x = std::move(y);
-  y = std::move(t);
+  test_deleter<T> t(::std::move(x));
+  x = ::std::move(y);
+  y = ::std::move(t);
 }
 
 #if TEST_STD_VER >= 11
@@ -497,7 +497,7 @@ class PointerDeleter {
   __host__ __device__ PointerDeleter& operator=(const PointerDeleter&);
 
 public:
-  typedef min_pointer<T, std::integral_constant<size_t, ID>> pointer;
+  typedef min_pointer<T, ::std::integral_constant<size_t, ID>> pointer;
 
   __host__ __device__ TEST_CONSTEXPR_CXX23 PointerDeleter()                            = default;
   __host__ __device__ TEST_CONSTEXPR_CXX23 PointerDeleter(PointerDeleter&&)            = default;
@@ -506,21 +506,21 @@ public:
 
   template <class U>
   __host__ __device__ TEST_CONSTEXPR_CXX23
-  PointerDeleter(PointerDeleter<U, ID>&&, typename std::enable_if<!std::is_same<U, T>::value>::type* = 0) {}
+  PointerDeleter(PointerDeleter<U, ID>&&, typename ::std::enable_if<!::std::is_same<U, T>::value>::type* = 0) {}
 
   __device__ TEST_CONSTEXPR_CXX23 void operator()(pointer p) {
     if (p) {
-      delete std::addressof(*p);
+      delete ::std::addressof(*p);
     }
   }
   __host__ TEST_CONSTEXPR_CXX23 void operator()(pointer p) {
     if (p) {
-      assert(hipFree(std::addressof(*p)) == hipSuccess);
-      if (std::is_same<T, B_h>::value) {
+      assert(hipFree(::std::addressof(*p)) == hipSuccess);
+      if (::std::is_same<T, B_h>::value) {
           --B_h::count;
           --A_h::count;
       }
-      if (std::is_same<T, A_h>::value) {
+      if (::std::is_same<T, A_h>::value) {
           --A_h::count;
       }
     }
@@ -528,7 +528,7 @@ public:
 
 private:
   template <class U>
-  __host__ __device__ PointerDeleter(const PointerDeleter<U, ID>&, typename std::enable_if<!std::is_same<U, T>::value>::type* = 0);
+  __host__ __device__ PointerDeleter(const PointerDeleter<U, ID>&, typename ::std::enable_if<!::std::is_same<U, T>::value>::type* = 0);
 };
 
 template <class T, size_t ID>
@@ -537,7 +537,7 @@ class PointerDeleter<T[], ID> {
   __host__ __device__ PointerDeleter& operator=(const PointerDeleter&);
 
 public:
-  typedef min_pointer<T, std::integral_constant<size_t, ID> > pointer;
+  typedef min_pointer<T, ::std::integral_constant<size_t, ID> > pointer;
 
   __host__ __device__ TEST_CONSTEXPR_CXX23 PointerDeleter()                            = default;
   __host__ __device__ TEST_CONSTEXPR_CXX23 PointerDeleter(PointerDeleter&&)            = default;
@@ -546,22 +546,22 @@ public:
 
   template <class U>
   __host__ __device__ TEST_CONSTEXPR_CXX23
-  PointerDeleter(PointerDeleter<U, ID>&&, typename std::enable_if<!std::is_same<U, T>::value>::type* = 0) {}
+  PointerDeleter(PointerDeleter<U, ID>&&, typename ::std::enable_if<!::std::is_same<U, T>::value>::type* = 0) {}
 
   __device__ TEST_CONSTEXPR_CXX23 void operator()(pointer p) {
     if (p) {
-      delete[] std::addressof(*p);
+      delete[] ::std::addressof(*p);
     }
   }
   __host__ TEST_CONSTEXPR_CXX23 void operator()(pointer p) {
     if (p) {
-      assert(hipFree(std::addressof(*p)) == hipSuccess);
+      assert(hipFree(::std::addressof(*p)) == hipSuccess);
     }
   }
 
 private:
   template <class U>
-  __host__ __device__ PointerDeleter(const PointerDeleter<U, ID>&, typename std::enable_if<!std::is_same<U, T>::value>::type* = 0);
+  __host__ __device__ PointerDeleter(const PointerDeleter<U, ID>&, typename ::std::enable_if<!::std::is_same<U, T>::value>::type* = 0);
 };
 
 #endif // TEST_STD_VER >= 11
@@ -575,11 +575,11 @@ public:
   __device__ TEST_CONSTEXPR_CXX23 void operator()(T* p) { delete p; }
   __host__ TEST_CONSTEXPR_CXX23 void operator()(T *p) {
     assert(hipFree(p) == hipSuccess);
-    if (std::is_same<T, B_h>::value) {
+    if (::std::is_same<T, B_h>::value) {
       --B_h::count;
       --A_h::count;
     }
-    if (std::is_same<T, A_h>::value) {
+    if (::std::is_same<T, A_h>::value) {
       --A_h::count;
     }
   }

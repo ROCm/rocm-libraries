@@ -14,7 +14,7 @@
 // UNSUPPORTED: using-built-library-before-llvm-10
 
 // This test is designed to cause and allow TSAN to detect a race condition
-// in std::async, as reported in https://llvm.org/PR38682.
+// in ::std::async, as reported in https://llvm.org/PR38682.
 
 #include <cassert>
 #include <functional>
@@ -25,8 +25,8 @@
 #include "test_macros.h"
 
 
-static int worker(std::vector<int> const& data) {
-  return std::accumulate(data.begin(), data.end(), 0);
+static int worker(::std::vector<int> const& data) {
+  return ::std::accumulate(data.begin(), data.end(), 0);
 }
 
 static int& worker_ref(int& i) { return i; }
@@ -36,9 +36,9 @@ static void worker_void() { }
 int main(int, char**) {
   // future<T>
   {
-    std::vector<int> const v{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    ::std::vector<int> const v{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     for (int i = 0; i != 20; ++i) {
-      std::future<int> fut = std::async(std::launch::async, worker, v);
+      ::std::future<int> fut = ::std::async(::std::launch::async, worker, v);
       int answer = fut.get();
       assert(answer == 55);
     }
@@ -47,7 +47,7 @@ int main(int, char**) {
   // future<T&>
   {
     for (int i = 0; i != 20; ++i) {
-      std::future<int&> fut = std::async(std::launch::async, worker_ref, std::ref(i));
+      ::std::future<int&> fut = ::std::async(::std::launch::async, worker_ref, ::std::ref(i));
       int& answer = fut.get();
       assert(answer == i);
     }
@@ -56,7 +56,7 @@ int main(int, char**) {
   // future<void>
   {
     for (int i = 0; i != 20; ++i) {
-      std::future<void> fut = std::async(std::launch::async, worker_void);
+      ::std::future<void> fut = ::std::async(::std::launch::async, worker_void);
       fut.get();
     }
   }

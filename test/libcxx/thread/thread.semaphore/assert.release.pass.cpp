@@ -26,15 +26,15 @@
 
 int main(int, char**) {
   {
-    std::counting_semaphore<> s(2);
+    ::std::counting_semaphore<> s(2);
     TEST_LIBCPP_ASSERT_FAILURE(s.release(-1), "counting_semaphore:release called with a negative value");
   }
 
   {
     // Call release with an arbitrary larger than expected value
-    std::counting_semaphore<> s(2);
+    ::std::counting_semaphore<> s(2);
     TEST_LIBCPP_ASSERT_FAILURE(
-        s.release(std::counting_semaphore<>::max()), "update is greater than the expected value");
+        s.release(::std::counting_semaphore<>::max()), "update is greater than the expected value");
   }
 
   return 0;

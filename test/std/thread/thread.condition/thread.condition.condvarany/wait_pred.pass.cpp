@@ -25,8 +25,8 @@
 #include "test_macros.h"
 
 template <class Mutex>
-struct MyLock : gpu::unique_lock<Mutex> {
-  using gpu::unique_lock<Mutex>::unique_lock;
+struct MyLock : hip::unique_lock<Mutex> {
+  using hip::unique_lock<Mutex>::unique_lock;
 };
 
 template <class Lock>
@@ -39,18 +39,18 @@ void test() {
   // spurious wakeup by updating the likely_spurious flag only immediately
   // before we perform the notification.
   {
-    std::atomic<bool> ready(false);
-    std::atomic<bool> likely_spurious(true);
-    std::condition_variable_any cv;
+    ::std::atomic<bool> ready(false);
+    ::std::atomic<bool> likely_spurious(true);
+    ::std::condition_variable_any cv;
     Mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
+    hip::thread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready = true;
       cv.wait(lock, [&] { return !likely_spurious; });
     });
 
-    gpu::thread t2 = support::make_test_thread([&] {
+    hip::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -78,19 +78,19 @@ void test() {
   // taken. In particular, we do need to eventually ensure we get out of the wait
   // by standard means, so we actually wake up the thread at the end.
   {
-    std::atomic<bool> ready(false);
-    std::atomic<bool> awoken(false);
-    std::condition_variable_any cv;
+    ::std::atomic<bool> ready(false);
+    ::std::atomic<bool> awoken(false);
+    ::std::condition_variable_any cv;
     Mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
+    hip::thread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready = true;
       cv.wait(lock, [&] { return true; });
       awoken = true;
     });
 
-    gpu::thread t2 = support::make_test_thread([&] {
+    hip::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -101,7 +101,7 @@ void test() {
       lock.unlock();
 
       // Give some time for t1 to be awoken spuriously so that code path is used.
-      gpu::this_thread::sleep_for(cuda::std::chrono::seconds(1));
+      hip::this_thread::sleep_for(cuda::std::chrono::seconds(1));
 
       // We would want to assert that the thread has been awoken after this time,
       // however nothing guarantees us that it ever gets spuriously awoken, so
@@ -119,10 +119,10 @@ void test() {
 }
 
 int main(int, char**) {
-  test<gpu::unique_lock<std::mutex>>();
-  test<gpu::unique_lock<std::timed_mutex>>();
-  test<MyLock<std::mutex>>();
-  test<MyLock<std::timed_mutex>>();
+  test<hip::unique_lock<::std::mutex>>();
+  test<hip::unique_lock<::std::timed_mutex>>();
+  test<MyLock<::std::mutex>>();
+  test<MyLock<::std::timed_mutex>>();
 
   return 0;
 }

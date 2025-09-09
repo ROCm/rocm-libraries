@@ -24,18 +24,18 @@ concept IsStopPossibleNoexcept = requires(const T& t) {
   { t.stop_possible() } noexcept;
 };
 
-static_assert(IsStopPossibleNoexcept<std::stop_source>);
+static_assert(IsStopPossibleNoexcept<::std::stop_source>);
 
 int main(int, char**) {
   // no state
   {
-    const std::stop_source st{std::nostopstate};
+    const ::std::stop_source st{::std::nostopstate};
     assert(!st.stop_possible());
   }
 
   // with state
   {
-    const std::stop_source st;
+    const ::std::stop_source st;
     assert(st.stop_possible());
   }
 

@@ -36,7 +36,7 @@
 
 #include "test_macros.h"
 
-static_assert(std::semiregular<std::formatter<gpu::thread::id, char>>);
+static_assert(::std::semiregular<::std::formatter<hip::thread::id, char>>);
 #ifndef TEST_HAS_NO_WIDE_CHARACTERS
-static_assert(std::semiregular<std::formatter<gpu::thread::id, wchar_t>>);
+static_assert(::std::semiregular<::std::formatter<hip::thread::id, wchar_t>>);
 #endif

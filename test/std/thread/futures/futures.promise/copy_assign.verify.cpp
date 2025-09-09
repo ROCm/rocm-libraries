@@ -18,15 +18,15 @@
 
 void f() {
     {
-        std::promise<int> p0, p;
+        ::std::promise<int> p0, p;
         p = p0; // expected-error {{overload resolution selected deleted operator '='}}
     }
     {
-        std::promise<int&> p0, p;
+        ::std::promise<int&> p0, p;
         p = p0; // expected-error {{overload resolution selected deleted operator '='}}
     }
     {
-        std::promise<void> p0, p;
+        ::std::promise<void> p0, p;
         p = p0; // expected-error {{overload resolution selected deleted operator '='}}
     }
 }

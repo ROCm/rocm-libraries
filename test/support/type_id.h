@@ -26,7 +26,7 @@ struct TypeID {
   __host__ __device__ friend bool operator!=(TypeID const& LHS, TypeID const& RHS)
   {return LHS.m_id != RHS.m_id; }
 
-  __host__ __device__ std::string name() const {
+  __host__ __device__ ::std::string name() const {
     return m_id;
   }
 

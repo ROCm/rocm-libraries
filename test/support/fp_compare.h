@@ -9,8 +9,8 @@
 #ifndef SUPPORT_FP_COMPARE_H
 #define SUPPORT_FP_COMPARE_H
 
-#include <cmath>      // for std::abs
-#include <algorithm>  // for std::max
+#include <cmath>      // for ::std::abs
+#include <algorithm>  // for ::std::max
 #include <cassert>
 
 // See https://www.boost.org/doc/libs/1_70_0/libs/test/doc/html/boost_test/testing_tools/extended_comparison/floating_point/floating_points_comparison_theory.html
@@ -23,11 +23,11 @@ bool fptest_close(T val, T expected, T eps)
 
     // Handle the zero cases
     if (eps      == zero) return val == expected;
-    if (val      == zero) return std::abs(expected) <= eps;
-    if (expected == zero) return std::abs(val)      <= eps;
+    if (val      == zero) return ::std::abs(expected) <= eps;
+    if (expected == zero) return ::std::abs(val)      <= eps;
 
-    return std::abs(val - expected) < eps
-        && std::abs(val - expected)/std::abs(val) < eps;
+    return ::std::abs(val - expected) < eps
+        && ::std::abs(val - expected)/::std::abs(val) < eps;
 }
 
 template<typename T>
@@ -38,7 +38,7 @@ bool fptest_close_pct(T val, T expected, T percent)
 
     // Handle the zero cases
     if (percent == zero) return val == expected;
-    T eps = (percent / T(100)) * std::max(std::abs(val), std::abs(expected));
+    T eps = (percent / T(100)) * ::std::max(::std::abs(val), ::std::abs(expected));
 
     return fptest_close(val, expected, eps);
 }

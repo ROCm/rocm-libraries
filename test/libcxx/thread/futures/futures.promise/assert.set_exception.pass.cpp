@@ -26,14 +26,14 @@
 int main(int, char**) {
     {
         typedef int T;
-        std::promise<T> p;
-        TEST_LIBCPP_ASSERT_FAILURE(p.set_exception(std::exception_ptr()), "promise::set_exception: received nullptr");
+        ::std::promise<T> p;
+        TEST_LIBCPP_ASSERT_FAILURE(p.set_exception(::std::exception_ptr()), "promise::set_exception: received nullptr");
     }
 
     {
         typedef int& T;
-        std::promise<T> p;
-        TEST_LIBCPP_ASSERT_FAILURE(p.set_exception(std::exception_ptr()), "promise::set_exception: received nullptr");
+        ::std::promise<T> p;
+        TEST_LIBCPP_ASSERT_FAILURE(p.set_exception(::std::exception_ptr()), "promise::set_exception: received nullptr");
     }
 
     return 0;

@@ -31,15 +31,15 @@ struct operator_hijacker {
   friend void operator||(T&&, U&&) = delete;
 };
 
-static_assert(std::is_trivially_copyable<operator_hijacker>::value &&     //
-                  std::is_copy_constructible<operator_hijacker>::value && //
-                  std::is_move_constructible<operator_hijacker>::value && //
-                  std::is_copy_assignable<operator_hijacker>::value &&    //
-                  std::is_move_assignable<operator_hijacker>::value,      //
+static_assert(::std::is_trivially_copyable<operator_hijacker>::value &&     //
+                  ::std::is_copy_constructible<operator_hijacker>::value && //
+                  ::std::is_move_constructible<operator_hijacker>::value && //
+                  ::std::is_copy_assignable<operator_hijacker>::value &&    //
+                  ::std::is_move_assignable<operator_hijacker>::value,      //
               "does not satisfy the requirements for atomic<operator_hijacker>");
 
 template <>
-struct std::hash<operator_hijacker> {
+struct ::std::hash<operator_hijacker> {
   size_t operator()(const operator_hijacker&) const { return 0; }
 };
 

@@ -17,4 +17,4 @@
 #include <mutex>
 #include <type_traits>
 
-static_assert(!std::is_copy_constructible<std::recursive_mutex>::value, "");
+static_assert(!::std::is_copy_constructible<::std::recursive_mutex>::value, "");

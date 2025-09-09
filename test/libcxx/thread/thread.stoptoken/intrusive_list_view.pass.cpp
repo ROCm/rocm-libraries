@@ -15,13 +15,13 @@
 
 #include "test_macros.h"
 
-struct Node : std::__intrusive_node_base<Node> {
+struct Node : ::std::__intrusive_node_base<Node> {
   int i;
 
   Node(int ii) : i(ii) {}
 };
 
-using ListView = std::__intrusive_list_view<Node>;
+using ListView = ::std::__intrusive_list_view<Node>;
 
 int main(int, char**) {
   // empty

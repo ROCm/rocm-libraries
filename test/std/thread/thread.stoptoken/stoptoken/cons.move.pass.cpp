@@ -19,17 +19,17 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_nothrow_move_constructible_v<std::stop_token>);
+static_assert(::std::is_nothrow_move_constructible_v<::std::stop_token>);
 
 int main(int, char**) {
   {
-    std::stop_source source;
+    ::std::stop_source source;
     auto st = source.get_token();
 
     assert(st.stop_possible());
     assert(!st.stop_requested());
 
-    std::stop_token st2{std::move(st)};
+    ::std::stop_token st2{::std::move(st)};
 
     assert(!st.stop_possible());
     assert(!st.stop_requested());

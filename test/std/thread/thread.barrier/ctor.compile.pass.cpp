@@ -19,4 +19,4 @@
 
 #include "test_convertible.h"
 
-static_assert(!test_convertible<std::barrier<>, std::ptrdiff_t>(), "This constructor must be explicit");
+static_assert(!test_convertible<::std::barrier<>, ::std::ptrdiff_t>(), "This constructor must be explicit");

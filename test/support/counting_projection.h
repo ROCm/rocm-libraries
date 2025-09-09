@@ -15,7 +15,7 @@
 
 #if TEST_STD_VER > 14
 
-template <class Proj = std::identity>
+template <class Proj = ::std::identity>
 class counting_projection {
   Proj proj_;
   int* count_ = nullptr;
@@ -23,16 +23,16 @@ class counting_projection {
 public:
   constexpr counting_projection() = default;
   constexpr counting_projection(int& count) : count_(&count) {}
-  constexpr counting_projection(Proj proj, int& count) : proj_(std::move(proj)), count_(&count) {}
+  constexpr counting_projection(Proj proj, int& count) : proj_(::std::move(proj)), count_(&count) {}
 
   template <class T>
   constexpr decltype(auto) operator()(T&& value) const {
     ++(*count_);
-    return std::invoke(proj_, std::forward<T>(value));
+    return ::std::invoke(proj_, ::std::forward<T>(value));
   }
 };
 
-counting_projection(int& count) -> counting_projection<std::identity>;
+counting_projection(int& count) -> counting_projection<::std::identity>;
 template <class Proj>
 counting_projection(Proj proj, int& count) -> counting_projection<Proj>;
 

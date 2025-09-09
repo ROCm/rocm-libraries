@@ -24,7 +24,7 @@
 
 int i = 0;
 
-void func(std::promise<int&> p)
+void func(::std::promise<int&> p)
 {
     p.set_value_at_thread_exit(i);
     i = 4;
@@ -33,9 +33,9 @@ void func(std::promise<int&> p)
 int main(int, char**)
 {
     {
-        std::promise<int&> p;
-        std::future<int&> f = p.get_future();
-        support::make_test_thread(func, std::move(p)).detach();
+        ::std::promise<int&> p;
+        ::std::future<int&> f = p.get_future();
+        support::make_test_thread(func, ::std::move(p)).detach();
         assert(f.get() == 4);
     }
 

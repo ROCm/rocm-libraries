@@ -1,5 +1,5 @@
 #include "hip/mutex"
-#include "hip/pseudo_mutex" // From gpu::thread library
+#include "hip/pseudo_mutex" // From hip::thread library
 #include "hip/hip_runtime.h"
 #include <iostream>
 #include <cassert>
@@ -17,21 +17,21 @@
     }
 
 __device__ void gmain() {
-    gpu::pseudo_mutex m, m2;
+    hip::pseudo_mutex m, m2;
     m.lock();
     m.unlock();
     m.try_lock();
     m.unlock();
     {
-        gpu::lock_guard guard(m);
+        hip::lock_guard guard(m);
     }
     {
         m.lock();
-        gpu::lock_guard guard(m, std::adopt_lock);
+        hip::lock_guard guard(m, ::std::adopt_lock);
     }
     {
-        gpu::unique_lock guard(m);
-        gpu::unique_lock guard2(m2);
+        hip::unique_lock guard(m);
+        hip::unique_lock guard2(m2);
         assert(guard.owns_lock());
         assert(guard2.owns_lock());
         guard.unlock();
@@ -45,18 +45,18 @@ __device__ void gmain() {
         assert(!guard2.owns_lock());
     }
     {
-        gpu::unique_lock guard(m, std::defer_lock);
+        hip::unique_lock guard(m, ::std::defer_lock);
         assert(!guard.owns_lock());
         guard.lock();
         assert(guard.owns_lock());
     }
     {
-        gpu::unique_lock guard(m, std::try_to_lock);
+        hip::unique_lock guard(m, ::std::try_to_lock);
         assert(guard.owns_lock());
     }
     {
         m.lock();
-        gpu::unique_lock guard(m, std::try_to_lock);
+        hip::unique_lock guard(m, ::std::try_to_lock);
         assert(!guard.owns_lock());
         m.unlock();
         assert(!guard.owns_lock());
@@ -64,17 +64,17 @@ __device__ void gmain() {
         assert(guard.owns_lock());
     }
     {
-        gpu::lock(m, m2);
+        hip::lock(m, m2);
         m.unlock();
         m2.unlock();
     }
 }
 
 __device__ void block_sync_test() {
-    static __device__ gpu::pseudo_mutex m;
+    static __device__ hip::pseudo_mutex m;
     static __device__ volatile int count = 0;
     {
-        gpu::unique_lock guard(m);
+        hip::unique_lock guard(m);
         for (int i = 0; i < 32; ++i)
         {
             assert(count++ == i);
@@ -88,7 +88,7 @@ __device__ void block_sync_test() {
 
 // TODO: Test using multiple threads per block
 #if 0
-[[clang::optnone]] __device__ bool critical_section(const gpu::unique_lock<gpu::pseudo_mutex> &guard, volatile int &count) {
+[[clang::optnone]] __device__ bool critical_section(const hip::unique_lock<hip::pseudo_mutex> &guard, volatile int &count) {
     if (guard.owns_lock()) {
         int threadId = threadIdx.x;
         printf("Thread %u owns lock\n", threadId);
@@ -106,7 +106,7 @@ __device__ void block_sync_test() {
 }
 
 __global__ void thread_test() {
-    static __device__ gpu::pseudo_mutex m [[maybe_unused]];
+    static __device__ hip::pseudo_mutex m [[maybe_unused]];
     static __device__ volatile int count [[maybe_unused]] = 0;
     int attempt [[maybe_unused]] = 0;
     int threadId = threadIdx.x;
@@ -115,7 +115,7 @@ __global__ void thread_test() {
         if (attempt++ == 50)
             printf("Attempt #50 for thread %u\n", threadId);
 
-        gpu::unique_lock guard(m, std::try_to_lock);
+        hip::unique_lock guard(m, ::std::try_to_lock);
         // TODO: if (guard.owns_lock()) { critical_section(count); break; /* OR */ success = true; }
         // results in critical section getting hoiseted out to AFTER the loop, breaking this code
         success = critical_section(guard, count);
@@ -124,19 +124,19 @@ __global__ void thread_test() {
 #endif // 0
 
 int main() {
-    gpu::thread([] __device__(){gmain();}).join();
+    hip::thread([] __device__(){gmain();}).join();
 
-    std::vector<gpu::thread> threads(1<<16);
+    ::std::vector<hip::thread> threads(1<<16);
     for (unsigned int i = 0; i < threads.size(); ++i) {
-        threads[i] = gpu::thread([] __device__(){block_sync_test();});
+        threads[i] = hip::thread([] __device__(){block_sync_test();});
         assert(threads[i].joinable());
     }
     for (unsigned int i = 0; i < threads.size(); ++i) {
         try {
             threads[i].join();
         } catch (...) {
-            std::cerr << "Exception when joining thread " << i << "\n";
-            std::cerr << "threads[" << i << "].get_id() = " << threads[i].get_id() << "\n";
+            ::std::cerr << "Exception when joining thread " << i << "\n";
+            ::std::cerr << "threads[" << i << "].get_id() = " << threads[i].get_id() << "\n";
             throw;
         }
     }

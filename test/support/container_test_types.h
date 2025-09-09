@@ -56,9 +56,9 @@
  * // Typedefs for container
  * using Key = CopyInsertable<1>;
  * using Value = CopyInsertable<2>;
- * using ValueTp = std::pair<const Key, Value>;
+ * using ValueTp = ::std::pair<const Key, Value>;
  * using Alloc = ContainerTestAllocator<ValueTp, ValueTp>;
- * using Map = std::unordered_map<Key, Value, std::hash<Key>, std::equal_to<Key>, Alloc>;
+ * using Map = ::std::unordered_map<Key, Value, ::std::hash<Key>, ::std::equal_to<Key>, Alloc>;
  *
  * // Get the global controller, reset it, and construct an allocator with
  * // the controller.
@@ -77,7 +77,7 @@
  * // Emplace the objects into the container. 'Alloc.construct(p, UArgs...)'
  * // will assert 'cc->check<UArgs&&>()' is true which will consume
  * // the call to 'cc->expect<...>()'.
- * m.emplace(k, std::move(v));
+ * m.emplace(k, ::std::move(v));
  *
  * // Assert that the "expect" was consumed by a matching "check" call within
  * // Alloc.
@@ -125,7 +125,7 @@ private:
 
 template <class L, class R>
 inline bool operator==(TypeInfo<L> const&, TypeInfo<R> const&)
-{ return std::is_same<L, R>::value; }
+{ return ::std::is_same<L, R>::value; }
 
 template <class L, class R>
 inline bool operator!=(TypeInfo<L> const& lhs, TypeInfo<R> const& rhs)
@@ -297,30 +297,30 @@ public:
       : controller(other.controller)
     {}
 
-    T* allocate(std::size_t n)
+    T* allocate(::std::size_t n)
     {
         return static_cast<T*>(::operator new(n*sizeof(T)));
     }
 
-    void deallocate(T* p, std::size_t)
+    void deallocate(T* p, ::std::size_t)
     {
         return ::operator delete(static_cast<void*>(p));
     }
 
     template <class Up, class ...Args>
     void construct(Up* p, Args&&... args) {
-      static_assert((std::is_same<Up, AllowConstructT>::value),
+      static_assert((::std::is_same<Up, AllowConstructT>::value),
                     "Only allowed to construct Up");
       assert(controller->check<Args&&...>());
       {
         InAllocatorConstructGuard g(controller);
-        ::new ((void*)p) Up(std::forward<Args>(args)...);
+        ::new ((void*)p) Up(::std::forward<Args>(args)...);
       }
     }
 
     template <class Up>
     void destroy(Up* p) {
-      static_assert((std::is_same<Up, AllowConstructT>::value),
+      static_assert((::std::is_same<Up, AllowConstructT>::value),
                     "Only allowed to destroy Up");
       {
         InAllocatorConstructGuard g(controller);
@@ -335,12 +335,12 @@ public:
 
 namespace test_detail {
 typedef ContainerTestAllocator<int, int> A1;
-typedef std::allocator_traits<A1> A1T;
+typedef ::std::allocator_traits<A1> A1T;
 typedef ContainerTestAllocator<float, int> A2;
-typedef std::allocator_traits<A2> A2T;
+typedef ::std::allocator_traits<A2> A2T;
 
-static_assert(std::is_same<A1T::rebind_traits<float>, A2T>::value, "");
-static_assert(std::is_same<A2T::rebind_traits<int>, A1T>::value, "");
+static_assert(::std::is_same<A1T::rebind_traits<float>, A2T>::value, "");
+static_assert(::std::is_same<A2T::rebind_traits<int>, A1T>::value, "");
 } // end namespace test_detail
 
 //===----------------------------------------------------------------------===//
@@ -467,53 +467,53 @@ _LIBCPP_END_NAMESPACE_STD
 namespace TCT {
 
 template <class T = CopyInsertable<1>>
-using vector = std::vector<T, ContainerTestAllocator<T, T> >;
+using vector = ::std::vector<T, ContainerTestAllocator<T, T> >;
 template <class T = CopyInsertable<1>>
-using deque = std::deque<T, ContainerTestAllocator<T, T> >;
+using deque = ::std::deque<T, ContainerTestAllocator<T, T> >;
 template <class T = CopyInsertable<1>>
-using list = std::list<T, ContainerTestAllocator<T, T> >;
+using list = ::std::list<T, ContainerTestAllocator<T, T> >;
 
 template <class Key = CopyInsertable<1>, class Value = CopyInsertable<2>,
-          class ValueTp = std::pair<const Key, Value> >
+          class ValueTp = ::std::pair<const Key, Value> >
 using unordered_map =
-      std::unordered_map<Key, Value, std::hash<Key>, std::equal_to<Key>,
+      ::std::unordered_map<Key, Value, ::std::hash<Key>, ::std::equal_to<Key>,
                               ContainerTestAllocator<ValueTp, ValueTp> >;
 
 template <class Key = CopyInsertable<1>, class Value = CopyInsertable<2>,
-          class ValueTp = std::pair<const Key, Value> >
+          class ValueTp = ::std::pair<const Key, Value> >
 using map =
-      std::map<Key, Value, std::less<Key>,
+      ::std::map<Key, Value, ::std::less<Key>,
                               ContainerTestAllocator<ValueTp, ValueTp> >;
 
 template <class Key = CopyInsertable<1>, class Value = CopyInsertable<2>,
-          class ValueTp = std::pair<const Key, Value> >
+          class ValueTp = ::std::pair<const Key, Value> >
 using unordered_multimap =
-      std::unordered_multimap<Key, Value, std::hash<Key>, std::equal_to<Key>,
+      ::std::unordered_multimap<Key, Value, ::std::hash<Key>, ::std::equal_to<Key>,
                                    ContainerTestAllocator<ValueTp, ValueTp> >;
 
 template <class Key = CopyInsertable<1>, class Value = CopyInsertable<2>,
-          class ValueTp = std::pair<const Key, Value> >
+          class ValueTp = ::std::pair<const Key, Value> >
 using multimap =
-      std::multimap<Key, Value, std::less<Key>,
+      ::std::multimap<Key, Value, ::std::less<Key>,
                               ContainerTestAllocator<ValueTp, ValueTp> >;
 
 template <class Value = CopyInsertable<1> >
 using unordered_set =
-  std::unordered_set<Value, std::hash<Value>, std::equal_to<Value>,
+  ::std::unordered_set<Value, ::std::hash<Value>, ::std::equal_to<Value>,
                                ContainerTestAllocator<Value, Value> >;
 
 template <class Value = CopyInsertable<1> >
 using set =
-    std::set<Value, std::less<Value>, ContainerTestAllocator<Value, Value> >;
+    ::std::set<Value, ::std::less<Value>, ContainerTestAllocator<Value, Value> >;
 
 template <class Value = CopyInsertable<1> >
 using unordered_multiset =
-    std::unordered_multiset<Value, std::hash<Value>, std::equal_to<Value>,
+    ::std::unordered_multiset<Value, ::std::hash<Value>, ::std::equal_to<Value>,
                                     ContainerTestAllocator<Value, Value> >;
 
 template <class Value = CopyInsertable<1> >
 using multiset =
-    std::multiset<Value, std::less<Value>, ContainerTestAllocator<Value, Value> >;
+    ::std::multiset<Value, ::std::less<Value>, ContainerTestAllocator<Value, Value> >;
 
 } // end namespace TCT
 

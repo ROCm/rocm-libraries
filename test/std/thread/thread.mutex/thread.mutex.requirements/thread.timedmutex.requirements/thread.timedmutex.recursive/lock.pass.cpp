@@ -23,9 +23,9 @@
 
 #include "make_test_thread.h"
 
-bool is_lockable(std::recursive_timed_mutex& m) {
+bool is_lockable(::std::recursive_timed_mutex& m) {
   bool did_lock;
-  gpu::thread t = support::make_test_thread([&] {
+  hip::thread t = support::make_test_thread([&] {
     did_lock = m.try_lock();
     if (did_lock)
       m.unlock(); // undo side effects
@@ -38,7 +38,7 @@ bool is_lockable(std::recursive_timed_mutex& m) {
 int main(int, char**) {
   // Lock a mutex that is not locked yet. This should succeed.
   {
-    std::recursive_timed_mutex m;
+    ::std::recursive_timed_mutex m;
     m.lock();
     m.unlock();
   }
@@ -46,7 +46,7 @@ int main(int, char**) {
   // Lock a mutex that is already locked by this thread. This should succeed and the mutex should only
   // be unlocked after a matching number of calls to unlock() on the same thread.
   {
-    std::recursive_timed_mutex m;
+    ::std::recursive_timed_mutex m;
     int lock_count = 0;
     for (int i = 0; i != 10; ++i) {
       m.lock();
@@ -62,12 +62,12 @@ int main(int, char**) {
 
   // Lock a mutex that is already locked by another thread. This should block until it is unlocked.
   {
-    std::atomic<bool> ready(false);
-    std::recursive_timed_mutex m;
+    ::std::atomic<bool> ready(false);
+    ::std::recursive_timed_mutex m;
     m.lock();
-    std::atomic<bool> is_locked_from_main(true);
+    ::std::atomic<bool> is_locked_from_main(true);
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       ready = true;
       m.lock();
       assert(!is_locked_from_main);
@@ -88,10 +88,10 @@ int main(int, char**) {
 
   // Make sure that at most one thread can acquire the mutex concurrently.
   {
-    std::atomic<int> counter(0);
-    std::recursive_timed_mutex mutex;
+    ::std::atomic<int> counter(0);
+    ::std::recursive_timed_mutex mutex;
 
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 10; ++i) {
       threads.push_back(support::make_test_thread([&] {
         mutex.lock();

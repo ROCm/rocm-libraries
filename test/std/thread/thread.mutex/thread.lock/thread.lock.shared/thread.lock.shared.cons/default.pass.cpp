@@ -22,7 +22,7 @@
 
 int main(int, char**)
 {
-    std::shared_lock<std::shared_timed_mutex> ul;
+    ::std::shared_lock<::std::shared_timed_mutex> ul;
     assert(!ul.owns_lock());
     assert(ul.mutex() == nullptr);
 

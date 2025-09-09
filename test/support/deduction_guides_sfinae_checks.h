@@ -23,11 +23,11 @@
 // constructor parameter types `CtrArgs` using CTAD.
 
 template<template<typename ...> class Instantiated, class ...CtrArgs,
-    class = decltype(Instantiated(std::declval<CtrArgs>()...))>
-std::false_type SFINAEs_away_impl(int);
+    class = decltype(Instantiated(::std::declval<CtrArgs>()...))>
+::std::false_type SFINAEs_away_impl(int);
 
 template<template<typename ...> class Instantiated, class ...CtrArgs>
-std::true_type SFINAEs_away_impl(...);
+::std::true_type SFINAEs_away_impl(...);
 
 template<template<typename ...> class Instantiated, class ...CtrArgs>
 constexpr bool SFINAEs_away =
@@ -40,7 +40,7 @@ constexpr bool SFINAEs_away =
 // - a bad allocator.
 template<template<typename ...> class Container, typename InstantiatedContainer>
 constexpr void SequenceContainerDeductionGuidesSfinaeAway() {
-  using Alloc = std::allocator<int>;
+  using Alloc = ::std::allocator<int>;
   using Iter = int*;
 
   struct BadAlloc {};
@@ -50,7 +50,7 @@ constexpr void SequenceContainerDeductionGuidesSfinaeAway() {
   // const value_type& value)`. These constructors would be used when passing
   // two integral types and would deduce `value_type` to be an integral type.
 #ifdef _LIBCPP_VERSION
-  using OutputIter = std::insert_iterator<InstantiatedContainer>;
+  using OutputIter = ::std::insert_iterator<InstantiatedContainer>;
 #endif // _LIBCPP_VERSION
 
   // (iter, iter)
@@ -81,17 +81,17 @@ constexpr void SequenceContainerDeductionGuidesSfinaeAway() {
 template<template<typename ...> class Container, typename InstantiatedContainer>
 constexpr void AssociativeContainerDeductionGuidesSfinaeAway() {
   using ValueType = typename InstantiatedContainer::value_type;
-  using Comp = std::less<int>;
-  using Alloc = std::allocator<ValueType>;
+  using Comp = ::std::less<int>;
+  using Alloc = ::std::allocator<ValueType>;
   using Iter = ValueType*;
-  using InitList = std::initializer_list<ValueType>;
+  using InitList = ::std::initializer_list<ValueType>;
 
   struct BadAlloc {};
   // The only requirement in the Standard is that integral types cannot be
   // considered input iterators, beyond that it is unspecified.
   using BadIter = int;
 #ifdef _LIBCPP_VERSION
-  using OutputIter = std::insert_iterator<InstantiatedContainer>;
+  using OutputIter = ::std::insert_iterator<InstantiatedContainer>;
 #endif // _LIBCPP_VERSION
   using AllocAsComp = Alloc;
 
@@ -152,11 +152,11 @@ constexpr void AssociativeContainerDeductionGuidesSfinaeAway() {
 template<template<typename ...> class Container, typename InstantiatedContainer>
 constexpr void UnorderedContainerDeductionGuidesSfinaeAway() {
   using ValueType = typename InstantiatedContainer::value_type;
-  using Pred = std::equal_to<int>;
-  using Hash = std::hash<int>;
-  using Alloc = std::allocator<ValueType>;
+  using Pred = ::std::equal_to<int>;
+  using Hash = ::std::hash<int>;
+  using Alloc = ::std::allocator<ValueType>;
   using Iter = ValueType*;
-  using InitList = std::initializer_list<ValueType>;
+  using InitList = ::std::initializer_list<ValueType>;
 
   using BadHash = int;
   struct BadAlloc {};
@@ -164,7 +164,7 @@ constexpr void UnorderedContainerDeductionGuidesSfinaeAway() {
   // considered input iterators, beyond that it is unspecified.
   using BadIter = int;
 #ifdef _LIBCPP_VERSION
-  using OutputIter = std::insert_iterator<InstantiatedContainer>;
+  using OutputIter = ::std::insert_iterator<InstantiatedContainer>;
 #endif // _LIBCPP_VERSION
   using AllocAsHash = Alloc;
   using AllocAsPred = Alloc;

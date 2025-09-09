@@ -20,7 +20,7 @@
 int main(int, char**) {
   // The mutex is unlocked after default construction
   {
-    std::recursive_timed_mutex m;
+    ::std::recursive_timed_mutex m;
     assert(m.try_lock());
     m.unlock();
   }

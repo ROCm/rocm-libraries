@@ -20,20 +20,20 @@
 #include "test_macros.h"
 
 int main(int, char**) {
-  std::mutex m1;
-  std::recursive_mutex m2;
-  std::recursive_timed_mutex m3;
+  ::std::mutex m1;
+  ::std::recursive_mutex m2;
+  ::std::recursive_timed_mutex m3;
   {
-    gpu::scoped_lock lock(m1);
-    ASSERT_SAME_TYPE(decltype(lock), gpu::scoped_lock<std::mutex>);
+    hip::scoped_lock lock(m1);
+    ASSERT_SAME_TYPE(decltype(lock), hip::scoped_lock<::std::mutex>);
   }
   {
-    gpu::scoped_lock lock(m1, m2);
-    ASSERT_SAME_TYPE(decltype(lock), gpu::scoped_lock<std::mutex, std::recursive_mutex>);
+    hip::scoped_lock lock(m1, m2);
+    ASSERT_SAME_TYPE(decltype(lock), hip::scoped_lock<::std::mutex, ::std::recursive_mutex>);
   }
   {
-    gpu::scoped_lock lock(m1, m2, m3);
-    ASSERT_SAME_TYPE(decltype(lock), gpu::scoped_lock<std::mutex, std::recursive_mutex, std::recursive_timed_mutex>);
+    hip::scoped_lock lock(m1, m2, m3);
+    ASSERT_SAME_TYPE(decltype(lock), hip::scoped_lock<::std::mutex, ::std::recursive_mutex, ::std::recursive_timed_mutex>);
   }
 
   return 0;

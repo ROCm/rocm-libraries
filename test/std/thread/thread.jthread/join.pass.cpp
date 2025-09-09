@@ -28,14 +28,14 @@
 int main(int, char**) {
   // Effects: Blocks until the thread represented by *this has completed.
   {
-    std::atomic_int calledTimes = 0;
-    std::vector<std::jthread> jts;
+    ::std::atomic_int calledTimes = 0;
+    ::std::vector<::std::jthread> jts;
     constexpr auto numberOfThreads = 10u;
     jts.reserve(numberOfThreads);
     for (auto i = 0u; i < numberOfThreads; ++i) {
       jts.emplace_back(support::make_test_jthread([&] {
-        gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(2));
-        calledTimes.fetch_add(1, std::memory_order_relaxed);
+        hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(2));
+        calledTimes.fetch_add(1, ::std::memory_order_relaxed);
       }));
     }
 
@@ -49,36 +49,36 @@ int main(int, char**) {
     // be less than numberOfThreads.
     // This is not going to catch issues 100%. Creating more threads to increase
     // the probability of catching the issue
-    assert(calledTimes.load(std::memory_order_relaxed) == numberOfThreads);
+    assert(calledTimes.load(::std::memory_order_relaxed) == numberOfThreads);
   }
 
   // Synchronization: The completion of the thread represented by *this synchronizes with
   // ([intro.multithread]) the corresponding successful join() return.
   {
     bool flag       = false;
-    std::jthread jt = support::make_test_jthread([&] { flag = true; });
+    ::std::jthread jt = support::make_test_jthread([&] { flag = true; });
     jt.join();
     assert(flag); // non atomic write is visible to the current thread
   }
 
   // Postconditions: The thread represented by *this has completed. get_id() == id().
   {
-    std::jthread jt = support::make_test_jthread([] {});
-    assert(jt.get_id() != std::jthread::id());
+    ::std::jthread jt = support::make_test_jthread([] {});
+    assert(jt.get_id() != ::std::jthread::id());
     jt.join();
-    assert(jt.get_id() == std::jthread::id());
+    assert(jt.get_id() == ::std::jthread::id());
   }
 
 #if !defined(TEST_HAS_NO_EXCEPTIONS)
   // Throws: system_error when an exception is required ([thread.req.exception]).
   // invalid_argument - if the thread is not joinable.
   {
-    std::jthread jt;
+    ::std::jthread jt;
     try {
       jt.join();
       assert(false);
-    } catch (const std::system_error& err) {
-      assert(err.code() == std::errc::invalid_argument);
+    } catch (const ::std::system_error& err) {
+      assert(err.code() == ::std::errc::invalid_argument);
     }
   }
 

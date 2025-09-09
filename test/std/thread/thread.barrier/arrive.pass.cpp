@@ -21,16 +21,16 @@
 
 int main(int, char**)
 {
-  std::barrier<> b(2);
+  ::std::barrier<> b(2);
 
   auto tok = b.arrive();
-  gpu::thread t = support::make_test_thread([&](){
+  hip::thread t = support::make_test_thread([&](){
     (void)b.arrive();
   });
-  b.wait(std::move(tok));
+  b.wait(::std::move(tok));
   t.join();
 
   auto tok2 = b.arrive(2);
-  b.wait(std::move(tok2));
+  b.wait(::std::move(tok2));
   return 0;
 }

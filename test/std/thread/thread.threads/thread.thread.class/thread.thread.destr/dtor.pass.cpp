@@ -51,21 +51,21 @@ __device__ bool G::op_run = false;
 
 void f1()
 {
-    std::_Exit(0);
+    ::std::_Exit(0);
 }
 
 int main(int, char**)
 {
 #ifndef __HIP_DEVICE_COMPILE__
-    std::set_terminate(f1);
+    ::std::set_terminate(f1);
 #else
     {
         assert(G::n_alive == 0);
         assert(!G::op_run);
         G g;
         {
-          gpu::thread t = support::make_test_thread(g);
-          gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
+          hip::thread t = support::make_test_thread(g);
+          hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
         }
     }
     assert(false);

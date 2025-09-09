@@ -26,12 +26,12 @@
 // erased_type. However we can't define that behavior directly in the header
 // because it can't include <experimental/memory_resource>
 template <>
-struct TransformErasedTypeAlloc<std::experimental::erased_type> {
-  using type = std::experimental::pmr::polymorphic_allocator<int>;
+struct TransformErasedTypeAlloc<::std::experimental::erased_type> {
+  using type = ::std::experimental::pmr::polymorphic_allocator<int>;
 };
 
 template <class ProviderT, int = 0>
-class TestResourceImp : public std::experimental::pmr::memory_resource
+class TestResourceImp : public ::std::experimental::pmr::memory_resource
 {
 public:
     static int resource_alive;
@@ -45,7 +45,7 @@ public:
         resource_destructed = 0;
     }
 
-    using memory_resource = std::experimental::pmr::memory_resource;
+    using memory_resource = ::std::experimental::pmr::memory_resource;
     using Provider = ProviderT;
 
     int value;
@@ -63,16 +63,16 @@ public:
     void reset() { C.reset(); P.reset(); }
     AllocController& getController() { return C; }
 
-    bool checkAlloc(void* p, std::size_t s, std::size_t a) const
+    bool checkAlloc(void* p, ::std::size_t s, ::std::size_t a) const
       { return C.checkAlloc(p, s, a); }
 
-    bool checkDealloc(void* p, std::size_t s, std::size_t a) const
+    bool checkDealloc(void* p, ::std::size_t s, ::std::size_t a) const
       { return C.checkDealloc(p, s, a); }
 
     bool checkIsEqualCalledEq(int n) const { return C.checkIsEqualCalledEq(n); }
 
 protected:
-    virtual void * do_allocate(std::size_t s, std::size_t a) {
+    virtual void * do_allocate(::std::size_t s, ::std::size_t a) {
         if (C.throw_on_alloc) {
 #ifndef TEST_HAS_NO_EXCEPTIONS
             throw TestException{};
@@ -85,7 +85,7 @@ protected:
         return ret;
     }
 
-    virtual void do_deallocate(void * p, std::size_t s, std::size_t a) {
+    virtual void do_deallocate(void * p, ::std::size_t s, ::std::size_t a) {
         C.countDealloc(p, s, a);
         P.deallocate(p, s, a);
     }
@@ -138,10 +138,10 @@ struct BufferProvider {
     BufferProvider() {}
 
     void* allocate(size_t s, size_t a) {
-        void* ret = std::align(s, a, next, space);
+        void* ret = ::std::align(s, a, next, space);
         if (ret == nullptr) {
 #ifndef TEST_HAS_NO_EXCEPTIONS
-            throw std::bad_alloc();
+            throw ::std::bad_alloc();
 #else
             assert(false);
 #endif

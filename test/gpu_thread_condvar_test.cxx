@@ -1,16 +1,16 @@
 #include "hip/thread"
 #include "hip/mutex"
-#include "hip/pseudo_mutex" // From gpu::thread library
+#include "hip/pseudo_mutex" // From hip::thread library
 #include "hip/pseudo_condition_variable"
 #include "hip/hip_runtime.h"
 #include <cassert>
 
 __device__ void gmain() {
-    static __device__ gpu::pseudo_mutex m1, m2;
-    static __device__ gpu::pseudo_condition_variable cv;
-    auto other_thread = gpu::thread([&] __device__() {
-        gpu::unique_lock guard1(m1);
-        gpu::unique_lock guard2(m2);
+    static __device__ hip::pseudo_mutex m1, m2;
+    static __device__ hip::pseudo_condition_variable cv;
+    auto other_thread = hip::thread([&] __device__() {
+        hip::unique_lock guard1(m1);
+        hip::unique_lock guard2(m2);
         assert(guard1.owns_lock());
         assert(guard2.owns_lock());
         cv.wait(guard1);
@@ -25,13 +25,13 @@ __device__ void gmain() {
         m2.unlock();
     }
 
-    gpu::unique_lock guard(m1); // wait for other_thread to call cv.wait(guard1)
+    hip::unique_lock guard(m1); // wait for other_thread to call cv.wait(guard1)
     guard.unlock(); // make sure we unlock m1 so other_thread doesn't spin forever trying to acquire it again when returning from cv.wait
     cv.notify_one();
     other_thread.join();
 }
 
 int main() {
-    gpu::thread([] __device__(){gmain();}).join();
+    hip::thread([] __device__(){gmain();}).join();
     return 0;
 }

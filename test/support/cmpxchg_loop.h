@@ -21,8 +21,8 @@ __host__ __device__ bool cmpxchg_weak_loop(A& atomic, typename A::value_type& ex
 
 template <class A>
 __host__ __device__ bool cmpxchg_weak_loop(A& atomic, typename A::value_type& expected, typename A::value_type desired,
-                       gpu::memory_order success,
-                       gpu::memory_order failure) {
+                       hip::memory_order success,
+                       hip::memory_order failure) {
   for (int i = 0; i < 10; i++) {
     if (atomic.compare_exchange_weak(expected, desired, success,
                                      failure) == true) {
@@ -36,7 +36,7 @@ __host__ __device__ bool cmpxchg_weak_loop(A& atomic, typename A::value_type& ex
 template <class A>
 __host__ __device__ bool c_cmpxchg_weak_loop(A* atomic, typename A::value_type* expected, typename A::value_type desired) {
   for (int i = 0; i < 10; i++) {
-    if (gpu::atomic_compare_exchange_weak(atomic, expected, desired) == true) {
+    if (hip::atomic_compare_exchange_weak(atomic, expected, desired) == true) {
       return true;
     }
   }
@@ -46,10 +46,10 @@ __host__ __device__ bool c_cmpxchg_weak_loop(A* atomic, typename A::value_type* 
 
 template <class A>
 __host__ __device__ bool c_cmpxchg_weak_loop(A* atomic, typename A::value_type* expected, typename A::value_type desired,
-                         gpu::memory_order success,
-                         gpu::memory_order failure) {
+                         hip::memory_order success,
+                         hip::memory_order failure) {
   for (int i = 0; i < 10; i++) {
-    if (gpu::atomic_compare_exchange_weak_explicit(atomic, expected, desired,
+    if (hip::atomic_compare_exchange_weak_explicit(atomic, expected, desired,
                                                    success, failure) == true) {
       return true;
     }

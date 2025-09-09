@@ -12,10 +12,10 @@
 
 /// Returns whether the basic_format_arg contains a type T with the expected value.
 template <class Context, class T>
-bool test_basic_format_arg(std::basic_format_arg<Context> arg, T expected) {
-  return std::visit_format_arg(
+bool test_basic_format_arg(::std::basic_format_arg<Context> arg, T expected) {
+  return ::std::visit_format_arg(
       [expected](auto a) {
-        if constexpr (std::same_as<decltype(a), T>)
+        if constexpr (::std::same_as<decltype(a), T>)
           return a == expected;
         else
           return false;

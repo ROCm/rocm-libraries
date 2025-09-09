@@ -25,8 +25,8 @@
 int main(int, char**) {
   // Try to lock-shared a mutex that is not locked yet. This should succeed.
   {
-    std::shared_mutex m;
-    std::vector<gpu::thread> threads;
+    ::std::shared_mutex m;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();
@@ -41,10 +41,10 @@ int main(int, char**) {
 
   // Try to lock-shared a mutex that is already exclusively locked. This should fail.
   {
-    std::shared_mutex m;
+    ::std::shared_mutex m;
     m.lock();
 
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();
@@ -60,9 +60,9 @@ int main(int, char**) {
 
   // Try to lock-shared a mutex that is already lock-shared. This should succeed.
   {
-    std::shared_mutex m;
+    ::std::shared_mutex m;
     m.lock_shared();
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();

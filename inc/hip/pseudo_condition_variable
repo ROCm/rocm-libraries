@@ -30,9 +30,9 @@
 #include "hip/thread"
 #include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
 
-namespace gpu {
+namespace cuda {
 
-// Like condition_variable_any but it calls gpu::this_thread::pseudo_yield(); when waiting for extended periods of time.
+// Like condition_variable_any but it calls hip::this_thread::pseudo_yield(); when waiting for extended periods of time.
 class pseudo_condition_variable {
     uint64_t wait_counter = 0;
     uint64_t notify_counter = 0;
@@ -85,7 +85,7 @@ __device__ void pseudo_condition_variable::wait(_Lock &__lock) {
             // Note that if another thread calls notify between getting myId and unlocking the lock, we're guaranteed to
             // never call yield, so this doesn't affect whether a user can differentiate between the 2 situations
             // desicribed above.
-            gpu::this_thread::pseudo_yield();
+            hip::this_thread::pseudo_yield();
         }
     }
     __lock.lock();
@@ -97,6 +97,6 @@ __device__ inline void pseudo_condition_variable::wait(_Lock &__lock, _Predicate
         wait(__lock);
 }
 
-} // namespace gpu
+} // namespace cuda
 
 #endif // __GPU_PSEUDO_CONDITION_VARIABLE__

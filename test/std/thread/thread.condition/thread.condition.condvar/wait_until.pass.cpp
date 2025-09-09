@@ -35,7 +35,7 @@ struct TestClock {
   static const bool is_steady = true;
 
   static time_point now() {
-    using namespace std::chrono;
+    using namespace ::std::chrono;
     return time_point(duration_cast<duration>(steady_clock::now().time_since_epoch()));
   }
 };
@@ -49,18 +49,18 @@ void test() {
   // happen that we get awoken spuriously and fail to recognize it
   // (making this test useless), but the likelihood should be small.
   {
-    std::atomic<bool> ready(false);
-    std::atomic<bool> likely_spurious(true);
+    ::std::atomic<bool> ready(false);
+    ::std::atomic<bool> likely_spurious(true);
     auto timeout = Clock::now() + cuda::std::chrono::seconds(3600);
-    std::condition_variable cv;
-    std::mutex mutex;
+    ::std::condition_variable cv;
+    ::std::mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
-      gpu::unique_lock<std::mutex> lock(mutex);
+    hip::thread t1 = support::make_test_thread([&] {
+      hip::unique_lock<::std::mutex> lock(mutex);
       ready = true;
       do {
-        std::cv_status result = cv.wait_until(lock, timeout);
-        assert(result == std::cv_status::no_timeout);
+        ::std::cv_status result = cv.wait_until(lock, timeout);
+        assert(result == ::std::cv_status::no_timeout);
       } while (likely_spurious);
 
       // This can technically fail if we have many spurious awakenings, but in practice the
@@ -68,14 +68,14 @@ void test() {
       assert(Clock::now() < timeout);
     });
 
-    gpu::thread t2 = support::make_test_thread([&] {
+    hip::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
 
       // Acquire the same mutex as t1. This blocks the condition variable inside its wait call
       // so we can notify it while it is waiting.
-      gpu::unique_lock<std::mutex> lock(mutex);
+      hip::unique_lock<::std::mutex> lock(mutex);
       cv.notify_one();
       likely_spurious = false;
       lock.unlock();
@@ -93,17 +93,17 @@ void test() {
   // other than a timeout.
   {
     auto timeout = Clock::now() + cuda::std::chrono::milliseconds(250);
-    std::condition_variable cv;
-    std::mutex mutex;
+    ::std::condition_variable cv;
+    ::std::mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
-      gpu::unique_lock<std::mutex> lock(mutex);
-      std::cv_status result;
+    hip::thread t1 = support::make_test_thread([&] {
+      hip::unique_lock<::std::mutex> lock(mutex);
+      ::std::cv_status result;
       do {
         result = cv.wait_until(lock, timeout);
-        if (result == std::cv_status::timeout)
+        if (result == ::std::cv_status::timeout)
           assert(Clock::now() >= timeout);
-      } while (result != std::cv_status::timeout);
+      } while (result != ::std::cv_status::timeout);
     });
 
     t1.join();

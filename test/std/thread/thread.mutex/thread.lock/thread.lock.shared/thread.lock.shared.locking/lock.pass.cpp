@@ -17,7 +17,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <mutex> // std::defer_lock
+#include <mutex> // ::std::defer_lock
 #include <shared_mutex>
 #include <system_error>
 #include <hip/thread>
@@ -49,15 +49,15 @@ void test() {
   // Basic sanity test
   {
     Mutex mutex;
-    std::vector<gpu::thread> threads;
-    std::atomic<bool> ready(false);
+    ::std::vector<hip::thread> threads;
+    ::std::atomic<bool> ready(false);
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         while (!ready) {
           // spin
         }
 
-        std::shared_lock<Mutex> lock(mutex, std::defer_lock);
+        ::std::shared_lock<Mutex> lock(mutex, ::std::defer_lock);
         lock.lock();
         assert(lock.owns_lock());
       }));
@@ -71,28 +71,28 @@ void test() {
   // Try locking the same shared_lock again in the same thread. This should throw an exception.
   {
     Mutex mutex;
-    std::shared_lock<Mutex> lock(mutex, std::defer_lock);
+    ::std::shared_lock<Mutex> lock(mutex, ::std::defer_lock);
     lock.lock();
     assert(lock.owns_lock());
 #ifndef TEST_HAS_NO_EXCEPTIONS
     try {
       lock.lock();
       assert(false);
-    } catch (std::system_error const& e) {
-      assert(e.code() == std::errc::resource_deadlock_would_occur);
+    } catch (::std::system_error const& e) {
+      assert(e.code() == ::std::errc::resource_deadlock_would_occur);
     }
 #endif
   }
 
   // Try locking a shared_lock that isn't associated to any mutex. This should throw an exception.
   {
-    std::shared_lock<Mutex> lock; // no associated mutex
+    ::std::shared_lock<Mutex> lock; // no associated mutex
 #ifndef TEST_HAS_NO_EXCEPTIONS
     try {
       lock.lock();
       assert(false);
-    } catch (std::system_error const& e) {
-      assert(e.code() == std::errc::operation_not_permitted);
+    } catch (::std::system_error const& e) {
+      assert(e.code() == ::std::errc::operation_not_permitted);
     }
 #endif
   }
@@ -100,9 +100,9 @@ void test() {
 
 int main(int, char**) {
 #if TEST_STD_VER >= 17
-  test<std::shared_mutex>();
+  test<::std::shared_mutex>();
 #endif
-  test<std::shared_timed_mutex>();
+  test<::std::shared_timed_mutex>();
   test<TrackedMutex>();
 
   // Use shared_lock with a dummy mutex class that tracks whether each
@@ -111,7 +111,7 @@ int main(int, char**) {
     Monitor monitor;
     TrackedMutex mutex{&monitor};
 
-    std::shared_lock<TrackedMutex> lock(mutex, std::defer_lock);
+    ::std::shared_lock<TrackedMutex> lock(mutex, ::std::defer_lock);
     lock.lock();
     assert(monitor.lock_shared_called);
     assert(lock.owns_lock());

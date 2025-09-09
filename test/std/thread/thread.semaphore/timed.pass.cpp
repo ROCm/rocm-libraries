@@ -25,15 +25,15 @@ int main(int, char**)
 {
   auto const start = cuda::std::chrono::steady_clock::now();
 
-  std::counting_semaphore<> s(0);
+  ::std::counting_semaphore<> s(0);
 
   assert(!s.try_acquire_until(start + cuda::std::chrono::milliseconds(250)));
   assert(!s.try_acquire_for(cuda::std::chrono::milliseconds(250)));
 
-  gpu::thread t = support::make_test_thread([&](){
-    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
+  hip::thread t = support::make_test_thread([&](){
+    hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
     s.release();
-    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
+    hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
     s.release();
   });
 

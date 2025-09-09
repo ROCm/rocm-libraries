@@ -23,7 +23,7 @@
 // Wrapper for basic_format_string.
 //
 // This layer of indirection is used since it's not possible to use
-// std::basic_format_string<CharT, Args...> in the test function directly.
+// ::std::basic_format_string<CharT, Args...> in the test function directly.
 //
 // In C++20 the basic-format-string was an exposition only type. In C++23 is
 // has been replaced with basic_format_string. Both libc++ and MSVC STL offer
@@ -32,10 +32,10 @@
 #  ifndef TEST_HAS_NO_WIDE_CHARACTERS
 template <class CharT, class... Args>
 using test_format_string =
-    std::conditional_t<std::same_as<CharT, char>, std::format_string<Args...>, std::wformat_string<Args...>>;
+    ::std::conditional_t<::std::same_as<CharT, char>, ::std::format_string<Args...>, ::std::wformat_string<Args...>>;
 #  else
 template <class CharT, class... Args>
-using test_format_string = std::format_string<Args...>;
+using test_format_string = ::std::format_string<Args...>;
 #  endif
 
 #else // TEST_STD_VER > 20 || defined(_LIBCPP_VERSION) || defined( _MSVC_STL_VERSION)

@@ -21,29 +21,29 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-static_assert(noexcept(std::declval<const std::jthread&>().joinable()));
+static_assert(noexcept(::std::declval<const ::std::jthread&>().joinable()));
 
 int main(int, char**) {
   // Default constructed
   {
-    const std::jthread jt;
-    std::same_as<bool> decltype(auto) result = jt.joinable();
+    const ::std::jthread jt;
+    ::std::same_as<bool> decltype(auto) result = jt.joinable();
     assert(!result);
   }
 
   // Non-default constructed
   {
-    const std::jthread jt                    = support::make_test_jthread([] {});
-    std::same_as<bool> decltype(auto) result = jt.joinable();
+    const ::std::jthread jt                    = support::make_test_jthread([] {});
+    ::std::same_as<bool> decltype(auto) result = jt.joinable();
     assert(result);
   }
 
   // Non-default constructed
   // the thread of execution has not finished
   {
-    std::atomic_bool done                    = false;
-    const std::jthread jt                    = support::make_test_jthread([&done] { done.wait(false); });
-    std::same_as<bool> decltype(auto) result = jt.joinable();
+    ::std::atomic_bool done                    = false;
+    const ::std::jthread jt                    = support::make_test_jthread([&done] { done.wait(false); });
+    ::std::same_as<bool> decltype(auto) result = jt.joinable();
     done                                     = true;
     done.notify_all();
     assert(result);

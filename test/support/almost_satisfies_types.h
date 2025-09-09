@@ -22,7 +22,7 @@ public:
   U end();
 };
 
-static_assert(std::ranges::contiguous_range<UncheckedRange<int*, int*>>);
+static_assert(::std::ranges::contiguous_range<UncheckedRange<int*, int*>>);
 
 // almost an input_iterator
 class InputIteratorNotDerivedFrom {
@@ -38,15 +38,15 @@ public:
 
 using InputRangeNotDerivedFrom = UncheckedRange<InputIteratorNotDerivedFrom>;
 
-static_assert(std::input_or_output_iterator<InputIteratorNotDerivedFrom>);
-static_assert(std::indirectly_readable<InputIteratorNotDerivedFrom>);
-static_assert(!std::input_iterator<InputIteratorNotDerivedFrom>);
-static_assert(!std::ranges::input_range<InputRangeNotDerivedFrom>);
+static_assert(::std::input_or_output_iterator<InputIteratorNotDerivedFrom>);
+static_assert(::std::indirectly_readable<InputIteratorNotDerivedFrom>);
+static_assert(!::std::input_iterator<InputIteratorNotDerivedFrom>);
+static_assert(!::std::ranges::input_range<InputRangeNotDerivedFrom>);
 
 class InputIteratorNotIndirectlyReadable {
 public:
   using difference_type = long;
-  using iterator_category = std::input_iterator_tag;
+  using iterator_category = ::std::input_iterator_tag;
 
   InputIteratorNotIndirectlyReadable& operator++();
   void operator++(int);
@@ -55,16 +55,16 @@ public:
 
 using InputRangeNotIndirectlyReadable = UncheckedRange<InputIteratorNotIndirectlyReadable>;
 
-static_assert(std::input_or_output_iterator<InputIteratorNotIndirectlyReadable>);
-static_assert(!std::indirectly_readable<InputIteratorNotIndirectlyReadable>);
-static_assert(!std::input_iterator<InputIteratorNotIndirectlyReadable>);
-static_assert(!std::ranges::input_range<InputIteratorNotIndirectlyReadable>);
+static_assert(::std::input_or_output_iterator<InputIteratorNotIndirectlyReadable>);
+static_assert(!::std::indirectly_readable<InputIteratorNotIndirectlyReadable>);
+static_assert(!::std::input_iterator<InputIteratorNotIndirectlyReadable>);
+static_assert(!::std::ranges::input_range<InputIteratorNotIndirectlyReadable>);
 
 class InputIteratorNotInputOrOutputIterator {
 public:
   using difference_type = long;
   using value_type = int;
-  using iterator_category = std::input_iterator_tag;
+  using iterator_category = ::std::input_iterator_tag;
 
   int& operator++();
   void operator++(int);
@@ -73,10 +73,10 @@ public:
 
 using InputRangeNotInputOrOutputIterator = UncheckedRange<InputIteratorNotInputOrOutputIterator>;
 
-static_assert(!std::input_or_output_iterator<InputIteratorNotInputOrOutputIterator>);
-static_assert(std::indirectly_readable<InputIteratorNotInputOrOutputIterator>);
-static_assert(!std::input_iterator<InputIteratorNotInputOrOutputIterator>);
-static_assert(!std::ranges::input_range<InputRangeNotInputOrOutputIterator>);
+static_assert(!::std::input_or_output_iterator<InputIteratorNotInputOrOutputIterator>);
+static_assert(::std::indirectly_readable<InputIteratorNotInputOrOutputIterator>);
+static_assert(!::std::input_iterator<InputIteratorNotInputOrOutputIterator>);
+static_assert(!::std::ranges::input_range<InputRangeNotInputOrOutputIterator>);
 
 // almost an indirect_unary_predicate
 class IndirectUnaryPredicateNotCopyConstructible {
@@ -85,16 +85,16 @@ public:
   bool operator()(int) const;
 };
 
-static_assert(std::predicate<IndirectUnaryPredicateNotCopyConstructible, int&>);
-static_assert(!std::indirect_unary_predicate<IndirectUnaryPredicateNotCopyConstructible, int*>);
+static_assert(::std::predicate<IndirectUnaryPredicateNotCopyConstructible, int&>);
+static_assert(!::std::indirect_unary_predicate<IndirectUnaryPredicateNotCopyConstructible, int*>);
 
 class IndirectUnaryPredicateNotPredicate {
 public:
   bool operator()(int&&) const;
 };
 
-static_assert(!std::predicate<IndirectUnaryPredicateNotPredicate, int&>);
-static_assert(!std::indirect_unary_predicate<IndirectUnaryPredicateNotPredicate, int*>);
+static_assert(!::std::predicate<IndirectUnaryPredicateNotPredicate, int&>);
+static_assert(!::std::indirect_unary_predicate<IndirectUnaryPredicateNotPredicate, int*>);
 
 // almost a sentinel_for cpp20_input_iterator
 class SentinelForNotSemiregular {
@@ -110,9 +110,9 @@ public:
 using InputRangeNotSentinelSemiregular = UncheckedRange<cpp20_input_iterator<int*>, SentinelForNotSemiregular>;
 using OutputRangeNotSentinelSemiregular = UncheckedRange<cpp20_output_iterator<int*>, SentinelForNotSemiregular>;
 
-static_assert(std::input_or_output_iterator<SentinelForNotSemiregular>);
-static_assert(!std::semiregular<SentinelForNotSemiregular>);
-static_assert(!std::sentinel_for<SentinelForNotSemiregular, cpp20_input_iterator<int*>>);
+static_assert(::std::input_or_output_iterator<SentinelForNotSemiregular>);
+static_assert(!::std::semiregular<SentinelForNotSemiregular>);
+static_assert(!::std::sentinel_for<SentinelForNotSemiregular, cpp20_input_iterator<int*>>);
 
 // almost a sentinel_for cpp20_input_iterator
 class SentinelForNotWeaklyEqualityComparableWith {
@@ -128,9 +128,9 @@ using InputRangeNotSentinelEqualityComparableWith =
 using OutputRangeNotSentinelEqualityComparableWith =
   UncheckedRange<cpp20_output_iterator<int*>, SentinelForNotWeaklyEqualityComparableWith>;
 
-static_assert(std::input_or_output_iterator<SentinelForNotWeaklyEqualityComparableWith>);
-static_assert(std::semiregular<SentinelForNotWeaklyEqualityComparableWith>);
-static_assert(!std::sentinel_for<SentinelForNotWeaklyEqualityComparableWith, cpp20_input_iterator<int*>>);
+static_assert(::std::input_or_output_iterator<SentinelForNotWeaklyEqualityComparableWith>);
+static_assert(::std::semiregular<SentinelForNotWeaklyEqualityComparableWith>);
+static_assert(!::std::sentinel_for<SentinelForNotWeaklyEqualityComparableWith, cpp20_input_iterator<int*>>);
 
 class WeaklyIncrementableNotMovable {
 public:
@@ -140,15 +140,15 @@ public:
   WeaklyIncrementableNotMovable(const WeaklyIncrementableNotMovable&) = delete;
 };
 
-static_assert(!std::movable<WeaklyIncrementableNotMovable>);
-static_assert(!std::weakly_incrementable<WeaklyIncrementableNotMovable>);
+static_assert(!::std::movable<WeaklyIncrementableNotMovable>);
+static_assert(!::std::weakly_incrementable<WeaklyIncrementableNotMovable>);
 
 // almost a forward_iterator
 class ForwardIteratorNotDerivedFrom {
 public:
   using difference_type = long;
   using value_type = int;
-  using iterator_category = std::input_iterator_tag;
+  using iterator_category = ::std::input_iterator_tag;
 
   ForwardIteratorNotDerivedFrom& operator++();
   ForwardIteratorNotDerivedFrom operator++(int);
@@ -158,16 +158,16 @@ public:
 
 using ForwardRangeNotDerivedFrom = UncheckedRange<ForwardIteratorNotDerivedFrom>;
 
-static_assert(std::input_iterator<ForwardIteratorNotDerivedFrom>);
-static_assert(std::incrementable<ForwardIteratorNotDerivedFrom>);
-static_assert(std::sentinel_for<ForwardIteratorNotDerivedFrom, ForwardIteratorNotDerivedFrom>);
-static_assert(!std::forward_iterator<ForwardIteratorNotDerivedFrom>);
+static_assert(::std::input_iterator<ForwardIteratorNotDerivedFrom>);
+static_assert(::std::incrementable<ForwardIteratorNotDerivedFrom>);
+static_assert(::std::sentinel_for<ForwardIteratorNotDerivedFrom, ForwardIteratorNotDerivedFrom>);
+static_assert(!::std::forward_iterator<ForwardIteratorNotDerivedFrom>);
 
 class ForwardIteratorNotIncrementable {
 public:
   using difference_type = long;
   using value_type = int;
-  using iterator_category = std::forward_iterator_tag;
+  using iterator_category = ::std::forward_iterator_tag;
 
   ForwardIteratorNotIncrementable& operator++();
   int operator++(int);
@@ -177,10 +177,10 @@ public:
 
 using ForwardRangeNotIncrementable = UncheckedRange<ForwardIteratorNotIncrementable>;
 
-static_assert(std::input_iterator<ForwardIteratorNotIncrementable>);
-static_assert(!std::incrementable<ForwardIteratorNotIncrementable>);
-static_assert(std::sentinel_for<ForwardIteratorNotIncrementable, ForwardIteratorNotIncrementable>);
-static_assert(!std::forward_iterator<ForwardIteratorNotIncrementable>);
+static_assert(::std::input_iterator<ForwardIteratorNotIncrementable>);
+static_assert(!::std::incrementable<ForwardIteratorNotIncrementable>);
+static_assert(::std::sentinel_for<ForwardIteratorNotIncrementable, ForwardIteratorNotIncrementable>);
+static_assert(!::std::forward_iterator<ForwardIteratorNotIncrementable>);
 
 using ForwardRangeNotSentinelSemiregular = UncheckedRange<forward_iterator<int*>, SentinelForNotSemiregular>;
 using ForwardRangeNotSentinelEqualityComparableWith =
@@ -190,7 +190,7 @@ class BidirectionalIteratorNotDerivedFrom {
 public:
   using difference_type = long;
   using value_type = int;
-  using iterator_category = std::forward_iterator_tag;
+  using iterator_category = ::std::forward_iterator_tag;
 
   BidirectionalIteratorNotDerivedFrom& operator++();
   BidirectionalIteratorNotDerivedFrom operator++(int);
@@ -207,15 +207,15 @@ using BidirectionalRangeNotSentinelSemiregular =
 using BidirectionalRangeNotSentinelWeaklyEqualityComparableWith =
     UncheckedRange<bidirectional_iterator<int*>, SentinelForNotWeaklyEqualityComparableWith>;
 
-static_assert(std::forward_iterator<BidirectionalIteratorNotDerivedFrom>);
-static_assert(!std::bidirectional_iterator<BidirectionalIteratorNotDerivedFrom>);
-static_assert(!std::ranges::bidirectional_range<BidirectionalRangeNotDerivedFrom>);
+static_assert(::std::forward_iterator<BidirectionalIteratorNotDerivedFrom>);
+static_assert(!::std::bidirectional_iterator<BidirectionalIteratorNotDerivedFrom>);
+static_assert(!::std::ranges::bidirectional_range<BidirectionalRangeNotDerivedFrom>);
 
 class BidirectionalIteratorNotDecrementable {
 public:
   using difference_type = long;
   using value_type = int;
-  using iterator_category = std::bidirectional_iterator_tag;
+  using iterator_category = ::std::bidirectional_iterator_tag;
 
   BidirectionalIteratorNotDecrementable& operator++();
   BidirectionalIteratorNotDecrementable operator++(int);
@@ -226,15 +226,15 @@ public:
 
 using BidirectionalRangeNotDecrementable = UncheckedRange<BidirectionalIteratorNotDecrementable>;
 
-static_assert(std::forward_iterator<BidirectionalIteratorNotDecrementable>);
-static_assert(!std::bidirectional_iterator<BidirectionalIteratorNotDecrementable>);
-static_assert(!std::ranges::bidirectional_range<BidirectionalRangeNotDecrementable>);
+static_assert(::std::forward_iterator<BidirectionalIteratorNotDecrementable>);
+static_assert(!::std::bidirectional_iterator<BidirectionalIteratorNotDecrementable>);
+static_assert(!::std::ranges::bidirectional_range<BidirectionalRangeNotDecrementable>);
 
 class PermutableNotForwardIterator {
 public:
   using difference_type = long;
   using value_type = int;
-  using iterator_category = std::input_iterator_tag;
+  using iterator_category = ::std::input_iterator_tag;
 
   PermutableNotForwardIterator& operator++();
   void operator++(int);
@@ -243,9 +243,9 @@ public:
 
 using PermutableRangeNotForwardIterator = UncheckedRange<PermutableNotForwardIterator>;
 
-static_assert(std::input_iterator<PermutableNotForwardIterator>);
-static_assert(!std::forward_iterator<PermutableNotForwardIterator>);
-static_assert(!std::permutable<PermutableNotForwardIterator>);
+static_assert(::std::input_iterator<PermutableNotForwardIterator>);
+static_assert(!::std::forward_iterator<PermutableNotForwardIterator>);
+static_assert(!::std::permutable<PermutableNotForwardIterator>);
 
 class PermutableNotSwappable {
 public:
@@ -255,7 +255,7 @@ public:
 
   using difference_type = long;
   using value_type = NotSwappable;
-  using iterator_category = std::contiguous_iterator_tag;
+  using iterator_category = ::std::contiguous_iterator_tag;
 
   PermutableNotSwappable& operator++();
   PermutableNotSwappable operator++(int);
@@ -266,16 +266,16 @@ public:
 
 using PermutableRangeNotSwappable = UncheckedRange<PermutableNotSwappable>;
 
-static_assert(std::input_iterator<PermutableNotSwappable>);
-static_assert(std::forward_iterator<PermutableNotSwappable>);
-static_assert(!std::permutable<PermutableNotSwappable>);
-static_assert(!std::indirectly_swappable<PermutableNotSwappable>);
+static_assert(::std::input_iterator<PermutableNotSwappable>);
+static_assert(::std::forward_iterator<PermutableNotSwappable>);
+static_assert(!::std::permutable<PermutableNotSwappable>);
+static_assert(!::std::indirectly_swappable<PermutableNotSwappable>);
 
 class OutputIteratorNotInputOrOutputIterator {
 public:
   using difference_type = long;
   using value_type = int;
-  using iterator_category = std::input_iterator_tag;
+  using iterator_category = ::std::input_iterator_tag;
 
   int& operator++();
   void operator++(int);
@@ -284,15 +284,15 @@ public:
 
 using OutputRangeNotInputOrOutputIterator = UncheckedRange<InputIteratorNotInputOrOutputIterator>;
 
-static_assert(!std::input_or_output_iterator<OutputIteratorNotInputOrOutputIterator>);
-static_assert(std::indirectly_writable<OutputIteratorNotInputOrOutputIterator, int>);
-static_assert(!std::output_iterator<OutputIteratorNotInputOrOutputIterator, int>);
-static_assert(!std::ranges::input_range<OutputRangeNotInputOrOutputIterator>);
+static_assert(!::std::input_or_output_iterator<OutputIteratorNotInputOrOutputIterator>);
+static_assert(::std::indirectly_writable<OutputIteratorNotInputOrOutputIterator, int>);
+static_assert(!::std::output_iterator<OutputIteratorNotInputOrOutputIterator, int>);
+static_assert(!::std::ranges::input_range<OutputRangeNotInputOrOutputIterator>);
 
 class OutputIteratorNotIndirectlyWritable {
 public:
   using difference_type = long;
-  using iterator_category = std::input_iterator_tag;
+  using iterator_category = ::std::input_iterator_tag;
 
   OutputIteratorNotIndirectlyWritable& operator++();
   void operator++(int);
@@ -301,15 +301,15 @@ public:
 
 using OutputRangeNotIndirectlyWritable = UncheckedRange<OutputIteratorNotIndirectlyWritable>;
 
-static_assert(std::input_or_output_iterator<OutputIteratorNotIndirectlyWritable>);
-static_assert(!std::indirectly_writable<OutputIteratorNotIndirectlyWritable, int>);
-static_assert(!std::output_iterator<OutputIteratorNotIndirectlyWritable, int>);
-static_assert(!std::ranges::output_range<OutputIteratorNotIndirectlyWritable, int>);
+static_assert(::std::input_or_output_iterator<OutputIteratorNotIndirectlyWritable>);
+static_assert(!::std::indirectly_writable<OutputIteratorNotIndirectlyWritable, int>);
+static_assert(!::std::output_iterator<OutputIteratorNotIndirectlyWritable, int>);
+static_assert(!::std::ranges::output_range<OutputIteratorNotIndirectlyWritable, int>);
 
 class IndirectBinaryPredicateNotIndirectlyReadable {
 public:
   using difference_type = long;
-  using iterator_category = std::input_iterator_tag;
+  using iterator_category = ::std::input_iterator_tag;
 
   int& operator++();
   void operator++(int);
@@ -319,7 +319,7 @@ public:
 using InputRangeIndirectBinaryPredicateNotIndirectlyReadable
      = UncheckedRange<cpp20_input_iterator<int*>, IndirectBinaryPredicateNotIndirectlyReadable>;
 
-static_assert(!std::indirect_binary_predicate<std::ranges::equal_to, IndirectBinaryPredicateNotIndirectlyReadable, int*>);
+static_assert(!::std::indirect_binary_predicate<::std::ranges::equal_to, IndirectBinaryPredicateNotIndirectlyReadable, int*>);
 
 class RandomAccessIteratorNotDerivedFrom {
   using Self = RandomAccessIteratorNotDerivedFrom;
@@ -329,8 +329,8 @@ public:
   using difference_type = long;
   using pointer = int*;
   using reference = int&;
-  // Deliberately not using the `std::random_access_iterator_tag` category.
-  using iterator_category = std::bidirectional_iterator_tag;
+  // Deliberately not using the `::std::random_access_iterator_tag` category.
+  using iterator_category = ::std::bidirectional_iterator_tag;
 
   reference operator*() const;
   reference operator[](difference_type) const;
@@ -350,8 +350,8 @@ public:
   auto operator<=>(const Self&) const = default;
 };
 
-static_assert(std::bidirectional_iterator<RandomAccessIteratorNotDerivedFrom>);
-static_assert(!std::random_access_iterator<RandomAccessIteratorNotDerivedFrom>);
+static_assert(::std::bidirectional_iterator<RandomAccessIteratorNotDerivedFrom>);
+static_assert(!::std::random_access_iterator<RandomAccessIteratorNotDerivedFrom>);
 
 using RandomAccessRangeNotDerivedFrom = UncheckedRange<RandomAccessIteratorNotDerivedFrom>;
 
@@ -363,7 +363,7 @@ public:
   using difference_type = long;
   using pointer = int*;
   using reference = int&;
-  using iterator_category = std::random_access_iterator_tag;
+  using iterator_category = ::std::random_access_iterator_tag;
 
   reference operator*() const;
   // Deliberately returning a type different from `reference`.
@@ -384,8 +384,8 @@ public:
   auto operator<=>(const Self&) const = default;
 };
 
-static_assert(std::bidirectional_iterator<RandomAccessIteratorBadIndex>);
-static_assert(!std::random_access_iterator<RandomAccessIteratorBadIndex>);
+static_assert(::std::bidirectional_iterator<RandomAccessIteratorBadIndex>);
+static_assert(!::std::random_access_iterator<RandomAccessIteratorBadIndex>);
 
 using RandomAccessRangeBadIndex = UncheckedRange<RandomAccessIteratorBadIndex>;
 
@@ -398,7 +398,7 @@ public:
   using difference_type   = double;
   using pointer           = double*;
   using reference         = double&;
-  using iterator_category = std::random_access_iterator_tag;
+  using iterator_category = ::std::random_access_iterator_tag;
 
   reference operator*() const;
   reference operator[](difference_type) const;
@@ -418,9 +418,9 @@ public:
   auto operator<=>(const Self&) const = default;
 };
 
-static_assert(std::regular<RandomAccessIteratorBadDifferenceType>);
-static_assert(!std::weakly_incrementable<RandomAccessIteratorBadDifferenceType>);
-static_assert(!std::random_access_iterator<RandomAccessIteratorBadDifferenceType>);
+static_assert(::std::regular<RandomAccessIteratorBadDifferenceType>);
+static_assert(!::std::weakly_incrementable<RandomAccessIteratorBadDifferenceType>);
+static_assert(!::std::random_access_iterator<RandomAccessIteratorBadDifferenceType>);
 
 template <class Iter>
 class ComparatorNotCopyable {

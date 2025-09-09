@@ -53,7 +53,7 @@ class NullAllocator;
   Type(Type const&) = delete; \
   Type& operator=(Type const&) = delete
 
-constexpr std::size_t MaxAlignV = alignof(std::max_align_t);
+constexpr ::std::size_t MaxAlignV = alignof(::std::max_align_t);
 
 struct TestException {};
 
@@ -66,20 +66,20 @@ struct AllocController {
     int dealloc_count = 0;
     int is_equal_count = 0;
 
-    std::size_t alive_size;
-    std::size_t allocated_size;
-    std::size_t deallocated_size;
+    ::std::size_t alive_size;
+    ::std::size_t allocated_size;
+    ::std::size_t deallocated_size;
 
-    std::size_t last_size = 0;
-    std::size_t last_align = 0;
+    ::std::size_t last_size = 0;
+    ::std::size_t last_align = 0;
     void * last_pointer = 0;
 
-    std::size_t last_alloc_size = 0;
-    std::size_t last_alloc_align = 0;
+    ::std::size_t last_alloc_size = 0;
+    ::std::size_t last_alloc_align = 0;
     void * last_alloc_pointer = nullptr;
 
-    std::size_t last_dealloc_size = 0;
-    std::size_t last_dealloc_align = 0;
+    ::std::size_t last_dealloc_size = 0;
+    ::std::size_t last_dealloc_align = 0;
     void * last_dealloc_pointer = nullptr;
 
     bool throw_on_alloc = false;
@@ -134,7 +134,7 @@ struct AllocController {
       last_destroy_pointer = p;
     }
 
-    void reset() { std::memset(this, 0, sizeof(*this)); }
+    void reset() { ::std::memset(this, 0, sizeof(*this)); }
     void resetConstructDestroy() {
       construct_called = 0;
       last_construct_pointer = nullptr;
@@ -253,14 +253,14 @@ public:
         P->move_constructed += 1;
     }
 
-    T* allocate(std::size_t n)
+    T* allocate(::std::size_t n)
     {
         void* ret = ::operator new(n*sizeof(T));
         P->countAlloc(ret, n*sizeof(T), alignof(T));
         return static_cast<T*>(ret);
     }
 
-    void deallocate(T* p, std::size_t n)
+    void deallocate(T* p, ::std::size_t n)
     {
         void* vp = static_cast<void*>(p);
         P->countDealloc(vp, n*sizeof(T), alignof(T));
@@ -269,7 +269,7 @@ public:
 
     template <class U, class ...Args>
     void construct(U *p, Args&&... args) {
-      ::new ((void*)p) U(std::forward<Args>(args)...);
+      ::new ((void*)p) U(::std::forward<Args>(args)...);
       P->countConstruct<Args&&...>(*this, p);
     }
 
@@ -370,7 +370,7 @@ public:
         P->move_constructed += 1;
     }
 
-    T* allocate(std::size_t n) {
+    T* allocate(::std::size_t n) {
         char* aligned_ptr = (char*)::operator new(alloc_size(n*sizeof(T)));
         assert(is_max_aligned(aligned_ptr));
 
@@ -382,7 +382,7 @@ public:
         return ((T*)unaligned_ptr);
     }
 
-    void deallocate(T* p, std::size_t n) {
+    void deallocate(T* p, ::std::size_t n) {
         assert(is_min_aligned(p));
 
         char* aligned_ptr = ((char*)p) - alignof(T);
@@ -395,7 +395,7 @@ public:
 
     template <class U, class ...Args>
     void construct(U *p, Args&&... args) {
-      auto *c = ::new ((void*)p) U(std::forward<Args>(args)...);
+      auto *c = ::new ((void*)p) U(::std::forward<Args>(args)...);
       P->countConstruct<Args&&...>(*this, p);
     }
 
@@ -408,24 +408,24 @@ public:
     AllocController& getController() const { return *P; }
 
 private:
-    static const std::size_t BlockSize = alignof(std::max_align_t);
+    static const ::std::size_t BlockSize = alignof(::std::max_align_t);
 
-    static std::size_t alloc_size(std::size_t s) {
-        std::size_t bytes = (s + BlockSize - 1) & ~(BlockSize - 1);
+    static ::std::size_t alloc_size(::std::size_t s) {
+        ::std::size_t bytes = (s + BlockSize - 1) & ~(BlockSize - 1);
         bytes += BlockSize;
         assert(bytes % BlockSize == 0);
         return bytes;
     }
 
     static bool is_max_aligned(void* p) {
-        return reinterpret_cast<std::uintptr_t>(p) % BlockSize == 0;
+        return reinterpret_cast<::std::uintptr_t>(p) % BlockSize == 0;
     }
 
     static bool is_min_aligned(void* p) {
         if (alignof(T) == BlockSize) {
             return is_max_aligned(p);
         } else {
-            return reinterpret_cast<std::uintptr_t>(p) % BlockSize == alignof(T);
+            return reinterpret_cast<::std::uintptr_t>(p) % BlockSize == alignof(T);
         }
     }
 
@@ -473,13 +473,13 @@ public:
         P->move_constructed += 1;
     }
 
-    T* allocate(std::size_t n)
+    T* allocate(::std::size_t n)
     {
         P->countAlloc(nullptr, n*sizeof(T), alignof(T));
         return nullptr;
     }
 
-    void deallocate(T* p, std::size_t n)
+    void deallocate(T* p, ::std::size_t n)
     {
         void* vp = static_cast<void*>(p);
         P->countDealloc(vp, n*sizeof(T), alignof(T));

@@ -33,17 +33,17 @@ public:
 int main(int, char**)
 {
     {
-        std::packaged_task<double(int, char)> p0(A(5));
-        std::packaged_task<double(int, char)> p = std::move(p0);
+        ::std::packaged_task<double(int, char)> p0(A(5));
+        ::std::packaged_task<double(int, char)> p = ::std::move(p0);
         assert(!p0.valid());
         assert(p.valid());
-        std::future<double> f = p.get_future();
+        ::std::future<double> f = p.get_future();
         p(3, 97);
         assert(f.get() == 105.0);
     }
     {
-        std::packaged_task<double(int, char)> p0;
-        std::packaged_task<double(int, char)> p = std::move(p0);
+        ::std::packaged_task<double(int, char)> p0;
+        ::std::packaged_task<double(int, char)> p = ::std::move(p0);
         assert(!p0.valid());
         assert(!p.valid());
     }

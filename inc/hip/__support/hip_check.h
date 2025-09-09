@@ -29,7 +29,7 @@
     {                                                                                                                  \
         hipError_t error = cmd;                                                                                        \
         if (error != hipSuccess) {                                                                                     \
-            throw std::runtime_error(std::string("[" __FILE__ ":" STRINGIZE(__LINE__) "] ") +                          \
+            throw ::std::runtime_error(::std::string("[" __FILE__ ":" STRINGIZE(__LINE__) "] ") +                          \
                                                  hipGetErrorString(error));                                            \
         }                                                                                                              \
     }

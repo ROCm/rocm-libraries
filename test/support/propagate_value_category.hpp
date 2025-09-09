@@ -48,13 +48,13 @@ inline constexpr bool hasValueCategory(ValueCategory Arg, ValueCategory Key) {
 
 template <class Tp>
 using UnCVRef =
-    typename std::remove_cv<typename std::remove_reference<Tp>::type>::type;
+    typename ::std::remove_cv<typename ::std::remove_reference<Tp>::type>::type;
 
 template <class Tp>
 constexpr ValueCategory getReferenceQuals() {
-  return std::is_lvalue_reference<Tp>::value
+  return ::std::is_lvalue_reference<Tp>::value
              ? VC_LVal
-             : (std::is_rvalue_reference<Tp>::value ? VC_RVal : VC_None);
+             : (::std::is_rvalue_reference<Tp>::value ? VC_RVal : VC_None);
 }
 static_assert(getReferenceQuals<int>() == VC_None, "");
 static_assert(getReferenceQuals<int &>() == VC_LVal, "");
@@ -62,12 +62,12 @@ static_assert(getReferenceQuals<int &&>() == VC_RVal, "");
 
 template <class Tp>
 constexpr ValueCategory getCVQuals() {
-  using Vp = typename std::remove_reference<Tp>::type;
-  return std::is_const<Vp>::value && std::is_volatile<Vp>::value
+  using Vp = typename ::std::remove_reference<Tp>::type;
+  return ::std::is_const<Vp>::value && ::std::is_volatile<Vp>::value
              ? VC_ConstVolatile
-             : (std::is_const<Vp>::value
+             : (::std::is_const<Vp>::value
                     ? VC_Const
-                    : (std::is_volatile<Vp>::value ? VC_Volatile : VC_None));
+                    : (::std::is_volatile<Vp>::value ? VC_Volatile : VC_None));
 }
 static_assert(getCVQuals<int>() == VC_None, "");
 static_assert(getCVQuals<int const>() == VC_Const, "");
@@ -92,43 +92,43 @@ private:
   static_assert(isValidValueCategory(VC), "");
 
   template <bool Pred, class Then, class Else>
-  using CondT = typename std::conditional<Pred, Then, Else>::type;
+  using CondT = typename ::std::conditional<Pred, Then, Else>::type;
 
 public:
   template <class Tp, class Vp = UnCVRef<Tp>>
   using ApplyCVQuals = CondT<
-      hasValueCategory(VC, VC_ConstVolatile), typename std::add_cv<Vp>::type,
-      CondT<hasValueCategory(VC, VC_Const), typename std::add_const<Vp>::type,
+      hasValueCategory(VC, VC_ConstVolatile), typename ::std::add_cv<Vp>::type,
+      CondT<hasValueCategory(VC, VC_Const), typename ::std::add_const<Vp>::type,
             CondT<hasValueCategory(VC, VC_Volatile),
-                  typename std::add_volatile<Vp>::type, Tp>>>;
+                  typename ::std::add_volatile<Vp>::type, Tp>>>;
 
-  template <class Tp, class Vp = typename std::remove_reference<Tp>::type>
+  template <class Tp, class Vp = typename ::std::remove_reference<Tp>::type>
   using ApplyReferenceQuals =
       CondT<hasValueCategory(VC, VC_LVal),
-            typename std::add_lvalue_reference<Vp>::type,
+            typename ::std::add_lvalue_reference<Vp>::type,
             CondT<hasValueCategory(VC, VC_RVal),
-                  typename std::add_rvalue_reference<Vp>::type, Vp>>;
+                  typename ::std::add_rvalue_reference<Vp>::type, Vp>>;
 
   template <class Tp>
   using Apply = ApplyReferenceQuals<ApplyCVQuals<UnCVRef<Tp>>>;
 
   template <class Tp, bool Dummy = true,
-            typename std::enable_if<Dummy && (VC & VC_LVal), bool>::type = true>
+            typename ::std::enable_if<Dummy && (VC & VC_LVal), bool>::type = true>
   static Apply<UnCVRef<Tp>> cast(Tp &&t) {
     using ToType = Apply<UnCVRef<Tp>>;
     return static_cast<ToType>(t);
   }
 
   template <class Tp, bool Dummy = true,
-            typename std::enable_if<Dummy && (VC & VC_RVal), bool>::type = true>
+            typename ::std::enable_if<Dummy && (VC & VC_RVal), bool>::type = true>
   static Apply<UnCVRef<Tp>> cast(Tp &&t) {
     using ToType = Apply<UnCVRef<Tp>>;
-    return static_cast<ToType>(std::move(t));
+    return static_cast<ToType>(::std::move(t));
   }
 
   template <
       class Tp, bool Dummy = true,
-      typename std::enable_if<Dummy && ((VC & (VC_LVal | VC_RVal)) == VC_None),
+      typename ::std::enable_if<Dummy && ((VC & (VC_LVal | VC_RVal)) == VC_None),
                               bool>::type = true>
   static Apply<UnCVRef<Tp>> cast(Tp &&t) {
     return t;
@@ -147,7 +147,7 @@ using PropagateValueCategoryT =
 
 template <ValueCategory VC, class Tp>
 typename ApplyValueCategory<VC>::template Apply<Tp> ValueCategoryCast(Tp &&t) {
-  return ApplyValueCategory<VC>::cast(std::forward<Tp>(t));
+  return ApplyValueCategory<VC>::cast(::std::forward<Tp>(t));
 };
 
 #endif // TEST_SUPPORT_PROPAGATE_VALUE_CATEGORY

@@ -22,8 +22,8 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::condition_variable_any* cv;
-std::mutex m;
+::std::condition_variable_any* cv;
+::std::mutex m;
 
 bool f_ready = false;
 bool g_ready = false;
@@ -49,13 +49,13 @@ void g()
 
 int main(int, char**)
 {
-    cv = new std::condition_variable_any;
-    gpu::thread th2 = support::make_test_thread(g);
+    cv = new ::std::condition_variable_any;
+    hip::thread th2 = support::make_test_thread(g);
     m.lock();
     while (!g_ready)
         cv->wait(m);
     m.unlock();
-    gpu::thread th1 = support::make_test_thread(f);
+    hip::thread th1 = support::make_test_thread(f);
     th1.join();
     th2.join();
 

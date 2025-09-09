@@ -31,10 +31,10 @@
 
 #include <mutex>
 
-namespace gpu {
+namespace cuda {
 
 //====================================================================================================================//
-//      Adapted from libc++ std::lock_guard
+//      Adapted from libc++ ::std::lock_guard
 //====================================================================================================================//
 
 template <class _Mutex>
@@ -51,7 +51,7 @@ public:
     __m_.lock();
   }
 
-  _LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI lock_guard(mutex_type& __m, std::adopt_lock_t)
+  _LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI lock_guard(mutex_type& __m, ::std::adopt_lock_t)
       _LIBGPU_THREAD_SAFETY_ANNOTATION(requires_capability(__m))
       : __m_(__m) {}
   __device__ _LIBGPU_HIDE_FROM_ABI ~lock_guard() _LIBGPU_THREAD_SAFETY_ANNOTATION(release_capability()) { __m_.unlock(); }
@@ -62,6 +62,6 @@ private:
 };
 _LIBGPU_CTAD_SUPPORTED_FOR_TYPE(lock_guard);
 
-} // namespace gpu
+} // namespace cuda
 
 #endif // __GPU___MUTEX_LOCK_GUARD_H__

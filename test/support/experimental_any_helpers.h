@@ -18,11 +18,11 @@
 
 template <class T>
   struct IsSmallObject
-    : public std::integral_constant<bool
+    : public ::std::integral_constant<bool
         , sizeof(T) <= (sizeof(void*)*3)
-          && std::alignment_of<void*>::value
-             % std::alignment_of<T>::value == 0
-          && std::is_nothrow_move_constructible<T>::value
+          && ::std::alignment_of<void*>::value
+             % ::std::alignment_of<T>::value == 0
+          && ::std::is_nothrow_move_constructible<T>::value
         >
   {};
 
@@ -31,7 +31,7 @@ template <class T>
 template <class Type>
 bool isSmallType() {
 #if defined(_LIBCPP_VERSION)
-    return std::experimental::__any_imp::_IsSmallObject<Type>::value;
+    return ::std::experimental::__any_imp::_IsSmallObject<Type>::value;
 #else
     return IsSmallObject<Type>::value;
 #endif
@@ -41,29 +41,29 @@ bool isSmallType() {
 // Assert that an object is empty. If the object used to contain an object
 // of type 'LastType' check that it can no longer be accessed.
 template <class LastType = int>
-void assertEmpty(std::experimental::any const& a) {
+void assertEmpty(::std::experimental::any const& a) {
     assert(a.empty());
     RTTI_ASSERT(a.type() == typeid(void));
-    assert(std::experimental::any_cast<LastType const>(&a) == nullptr);
+    assert(::std::experimental::any_cast<LastType const>(&a) == nullptr);
 }
 
 // Assert that an 'any' object stores the specified 'Type' and 'value'.
 template <class Type>
 _LIBCPP_AVAILABILITY_THROW_BAD_ANY_CAST
-void assertContains(std::experimental::any const& a, int value = 1) {
+void assertContains(::std::experimental::any const& a, int value = 1) {
     assert(!a.empty());
     RTTI_ASSERT(a.type() == typeid(Type));
-    assert(std::experimental::any_cast<Type const &>(a).value == value);
+    assert(::std::experimental::any_cast<Type const &>(a).value == value);
 }
 
 // Modify the value of a "test type" stored within an any to the specified
 // 'value'.
 template <class Type>
 _LIBCPP_AVAILABILITY_THROW_BAD_ANY_CAST
-void modifyValue(std::experimental::any& a, int value) {
+void modifyValue(::std::experimental::any& a, int value) {
     assert(!a.empty());
     RTTI_ASSERT(a.type() == typeid(Type));
-    std::experimental::any_cast<Type&>(a).value = value;
+    ::std::experimental::any_cast<Type&>(a).value = value;
 }
 
 // A test type that will trigger the small object optimization within 'any'.

@@ -60,18 +60,18 @@ class counting_predicate {
 
 public:
   constexpr counting_predicate() = default;
-  constexpr counting_predicate(Predicate pred, int& count) : pred_(std::move(pred)), count_(&count) {}
+  constexpr counting_predicate(Predicate pred, int& count) : pred_(::std::move(pred)), count_(&count) {}
 
   template <class... Args>
   constexpr decltype(auto) operator()(Args&& ...args) {
     ++(*count_);
-    return pred_(std::forward<Args>(args)...);
+    return pred_(::std::forward<Args>(args)...);
   }
 
   template <class... Args>
   constexpr decltype(auto) operator()(Args&& ...args) const {
     ++(*count_);
-    return pred_(std::forward<Args>(args)...);
+    return pred_(::std::forward<Args>(args)...);
   }
 };
 

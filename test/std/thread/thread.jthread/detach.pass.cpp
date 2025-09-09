@@ -28,9 +28,9 @@
 int main(int, char**) {
   // Effects: The thread represented by *this continues execution without the calling thread blocking.
   {
-    std::atomic_bool start{false};
-    std::atomic_bool done{false};
-    std::optional<std::jthread> jt = support::make_test_jthread([&start, &done] {
+    ::std::atomic_bool start{false};
+    ::std::atomic_bool done{false};
+    ::std::optional<::std::jthread> jt = support::make_test_jthread([&start, &done] {
       start.wait(false);
       done = true;
     });
@@ -49,26 +49,26 @@ int main(int, char**) {
 
   // Postconditions: get_id() == id().
   {
-    std::jthread jt = support::make_test_jthread([] {});
-    assert(jt.get_id() != std::jthread::id());
+    ::std::jthread jt = support::make_test_jthread([] {});
+    assert(jt.get_id() != ::std::jthread::id());
     jt.detach();
-    assert(jt.get_id() == std::jthread::id());
+    assert(jt.get_id() == ::std::jthread::id());
   }
 
 #if !defined(TEST_HAS_NO_EXCEPTIONS)
   // Throws: system_error when an exception is required ([thread.req.exception]).
   // invalid_argument - if the thread is not joinable.
   {
-    std::jthread jt;
+    ::std::jthread jt;
     try {
       jt.detach();
       assert(false);
-    } catch (const std::system_error& err) {
-      assert(err.code() == std::errc::invalid_argument);
+    } catch (const ::std::system_error& err) {
+      assert(err.code() == ::std::errc::invalid_argument);
     }
   }
 #endif
 
-  gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
+  hip::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
   return 0;
 }

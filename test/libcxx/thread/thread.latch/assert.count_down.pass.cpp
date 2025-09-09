@@ -27,14 +27,14 @@
 
 int main(int, char **) {
   {
-    std::latch l(5);
+    ::std::latch l(5);
 
     TEST_LIBCPP_ASSERT_FAILURE(
         l.count_down(-10), "latch::count_down called with a negative value");
   }
 
   {
-    std::latch l(5);
+    ::std::latch l(5);
 
     TEST_LIBCPP_ASSERT_FAILURE(l.count_down(10),
                                "latch::count_down called with a value greater "

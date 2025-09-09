@@ -9,12 +9,12 @@
 // UNSUPPORTED: c++03, c++11
 // REQUIRES: availability-synchronization_library-missing
 
-// Test the availability markup on std::latch.
+// Test the availability markup on ::std::latch.
 
 #include <latch>
 
 void f() {
-    std::latch latch(10);
+    ::std::latch latch(10);
     latch.count_down(); // expected-error {{is unavailable}}
     latch.count_down(3); // expected-error {{is unavailable}}
     latch.wait(); // expected-error {{is unavailable}}

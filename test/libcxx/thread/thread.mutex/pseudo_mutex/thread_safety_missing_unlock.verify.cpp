@@ -19,7 +19,7 @@
 
 #include <hip/pseudo_mutex>
 
-__device__ gpu::pseudo_mutex m;
+__device__ hip::pseudo_mutex m;
 
 __device__ void f() {
   m.lock();

@@ -18,13 +18,13 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_nothrow_constructible_v<std::stop_source, std::nostopstate_t>);
+static_assert(::std::is_nothrow_constructible_v<::std::stop_source, ::std::nostopstate_t>);
 // explicit
-static_assert(!std::is_convertible_v<std::nostopstate_t, std::stop_source>);
+static_assert(!::std::is_convertible_v<::std::nostopstate_t, ::std::stop_source>);
 
 int main(int, char**) {
   {
-    std::stop_source ss(std::nostopstate);
+    ::std::stop_source ss(::std::nostopstate);
     assert(!ss.stop_possible());
     assert(!ss.stop_requested());
   }

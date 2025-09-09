@@ -26,20 +26,20 @@ namespace std { namespace experimental {} }
 
 template <class T>
   struct IsSmallObject
-    : public std::integral_constant<bool
-        , sizeof(T) <= sizeof(std::any) - sizeof(void*)
-          && std::alignment_of<void*>::value
-             % std::alignment_of<T>::value == 0
-          && std::is_nothrow_move_constructible<T>::value
+    : public ::std::integral_constant<bool
+        , sizeof(T) <= sizeof(::std::any) - sizeof(void*)
+          && ::std::alignment_of<void*>::value
+             % ::std::alignment_of<T>::value == 0
+          && ::std::is_nothrow_move_constructible<T>::value
         >
   {};
 
 template <class T>
-bool containsType(std::any const& a) {
+bool containsType(::std::any const& a) {
 #if !defined(TEST_HAS_NO_RTTI)
     return a.type() == typeid(T);
 #else
-    return a.has_value() && std::any_cast<T>(&a) != nullptr;
+    return a.has_value() && ::std::any_cast<T>(&a) != nullptr;
 #endif
 }
 
@@ -52,35 +52,35 @@ bool isSmallType() {
 // Assert that an object is empty. If the object used to contain an object
 // of type 'LastType' check that it can no longer be accessed.
 template <class LastType = int>
-void assertEmpty(std::any const& a) {
+void assertEmpty(::std::any const& a) {
     assert(!a.has_value());
     RTTI_ASSERT(a.type() == typeid(void));
-    assert(std::any_cast<LastType const>(&a) == nullptr);
+    assert(::std::any_cast<LastType const>(&a) == nullptr);
 }
 
 template <class Type>
-constexpr auto has_value_member(int) -> decltype(std::declval<Type&>().value, true)
+constexpr auto has_value_member(int) -> decltype(::std::declval<Type&>().value, true)
 { return true; }
 template <class> constexpr bool has_value_member(long) { return false; }
 
 
 // Assert that an 'any' object stores the specified 'Type' and 'value'.
 template <class Type>
-std::enable_if_t<has_value_member<Type>(0)>
+::std::enable_if_t<has_value_member<Type>(0)>
 _LIBCPP_AVAILABILITY_THROW_BAD_ANY_CAST
-assertContains(std::any const& a, int value) {
+assertContains(::std::any const& a, int value) {
     assert(a.has_value());
     assert(containsType<Type>(a));
-    assert(std::any_cast<Type const &>(a).value == value);
+    assert(::std::any_cast<Type const &>(a).value == value);
 }
 
 template <class Type, class Value>
-std::enable_if_t<!has_value_member<Type>(0)>
+::std::enable_if_t<!has_value_member<Type>(0)>
 _LIBCPP_AVAILABILITY_THROW_BAD_ANY_CAST
-assertContains(std::any const& a, Value value) {
+assertContains(::std::any const& a, Value value) {
     assert(a.has_value());
     assert(containsType<Type>(a));
-    assert(std::any_cast<Type const &>(a) == value);
+    assert(::std::any_cast<Type const &>(a) == value);
 }
 
 
@@ -88,10 +88,10 @@ assertContains(std::any const& a, Value value) {
 // 'value'.
 template <class Type>
 _LIBCPP_AVAILABILITY_THROW_BAD_ANY_CAST
-void modifyValue(std::any& a, int value) {
+void modifyValue(::std::any& a, int value) {
     assert(a.has_value());
     assert(containsType<Type>(a));
-    std::any_cast<Type&>(a).value = value;
+    ::std::any_cast<Type&>(a).value = value;
 }
 
 // A test type that will trigger the small object optimization within 'any'.
@@ -119,7 +119,7 @@ struct small_type
     explicit small_type(int, int val, int) : value(val) {
         ++count;
     }
-    small_type(std::initializer_list<int> il) : value(*il.begin()) {
+    small_type(::std::initializer_list<int> il) : value(*il.begin()) {
         ++count;
     }
 
@@ -201,7 +201,7 @@ struct large_type
         ++count;
         data[0] = 0;
     }
-    large_type(std::initializer_list<int> il) : value(*il.begin()) {
+    large_type(::std::initializer_list<int> il) : value(*il.begin()) {
         ++count;
     }
     large_type(large_type const & other) {
@@ -390,8 +390,8 @@ struct small_tracked_t {
   explicit small_tracked_t(Args&&...)
       : arg_types(&makeArgumentID<Args...>()) {}
   template <class ...Args>
-  explicit small_tracked_t(std::initializer_list<int>, Args&&...)
-      : arg_types(&makeArgumentID<std::initializer_list<int>, Args...>()) {}
+  explicit small_tracked_t(::std::initializer_list<int>, Args&&...)
+      : arg_types(&makeArgumentID<::std::initializer_list<int>, Args...>()) {}
 
   TypeID const* arg_types;
 };
@@ -408,21 +408,21 @@ struct large_tracked_t {
   explicit large_tracked_t(Args&&...)
       : arg_types(&makeArgumentID<Args...>()) {}
   template <class ...Args>
-  explicit large_tracked_t(std::initializer_list<int>, Args&&...)
-      : arg_types(&makeArgumentID<std::initializer_list<int>, Args...>()) {}
+  explicit large_tracked_t(::std::initializer_list<int>, Args&&...)
+      : arg_types(&makeArgumentID<::std::initializer_list<int>, Args...>()) {}
 
   TypeID const* arg_types;
-  int dummy[sizeof(std::any) / sizeof(int) + 1];
+  int dummy[sizeof(::std::any) / sizeof(int) + 1];
 };
 
 static_assert(!IsSmallObject<large_tracked_t>::value, "must not be small");
 
 
 template <class Type, class ...Args>
-void assertArgsMatch(std::any const& a) {
+void assertArgsMatch(::std::any const& a) {
     assert(a.has_value());
     assert(containsType<Type>(a));
-    assert(std::any_cast<Type const &>(a).arg_types == &makeArgumentID<Args...>());
+    assert(::std::any_cast<Type const &>(a).arg_types == &makeArgumentID<Args...>());
 };
 
 

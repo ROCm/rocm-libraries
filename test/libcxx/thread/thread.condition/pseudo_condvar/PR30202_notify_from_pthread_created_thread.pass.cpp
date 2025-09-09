@@ -18,7 +18,7 @@
 // void notify_all_at_thread_exit(condition_variable& cond, unique_lock<mutex> lk);
 
 // Test that this function works with threads that were not created by
-// gpu::thread. See https://llvm.org/PR30202
+// hip::thread. See https://llvm.org/PR30202
 
 
 #include <condition_variable>
@@ -30,8 +30,8 @@
 
 #include "test_macros.h"
 
-std::condition_variable cv;
-std::mutex mut;
+::std::condition_variable cv;
+::std::mutex mut;
 bool exited = false;
 
 typedef cuda::std::chrono::milliseconds ms;
@@ -39,9 +39,9 @@ typedef cuda::std::chrono::high_resolution_clock Clock;
 
 void* func(void*)
 {
-    gpu::unique_lock<std::mutex> lk(mut);
-    std::notify_all_at_thread_exit(cv, std::move(lk));
-    gpu::this_thread::sleep_for(ms(300));
+    hip::unique_lock<::std::mutex> lk(mut);
+    ::std::notify_all_at_thread_exit(cv, ::std::move(lk));
+    hip::this_thread::sleep_for(ms(300));
     exited = true;
     return nullptr;
 }
@@ -49,7 +49,7 @@ void* func(void*)
 int main(int, char**)
 {
     {
-    gpu::unique_lock<std::mutex> lk(mut);
+    hip::unique_lock<::std::mutex> lk(mut);
     pthread_t id;
     int res = pthread_create(&id, 0, &func, nullptr);
     assert(res == 0);
@@ -63,8 +63,8 @@ int main(int, char**)
     }
     exited = false;
     {
-    gpu::unique_lock<std::mutex> lk(mut);
-    gpu::thread t(&func, nullptr);
+    hip::unique_lock<::std::mutex> lk(mut);
+    hip::thread t(&func, nullptr);
     Clock::time_point t0 = Clock::now();
     assert(exited == false);
     cv.wait(lk);

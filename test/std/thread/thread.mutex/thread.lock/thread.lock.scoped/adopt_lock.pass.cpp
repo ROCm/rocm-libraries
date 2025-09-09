@@ -34,35 +34,35 @@ struct TestMutex {
 int main(int, char**)
 {
     {
-        using LG = gpu::scoped_lock<>;
-        LG lg(std::adopt_lock);
+        using LG = hip::scoped_lock<>;
+        LG lg(::std::adopt_lock);
     }
     {
         TestMutex m1;
-        using LG = gpu::scoped_lock<TestMutex>;
+        using LG = hip::scoped_lock<TestMutex>;
         m1.lock();
         {
-            LG lg(std::adopt_lock, m1);
+            LG lg(::std::adopt_lock, m1);
             assert(m1.locked);
         }
         assert(!m1.locked);
     }
     {
         TestMutex m1, m2;
-        using LG = gpu::scoped_lock<TestMutex, TestMutex>;
+        using LG = hip::scoped_lock<TestMutex, TestMutex>;
         m1.lock(); m2.lock();
         {
-            LG lg(std::adopt_lock, m1, m2);
+            LG lg(::std::adopt_lock, m1, m2);
             assert(m1.locked && m2.locked);
         }
         assert(!m1.locked && !m2.locked);
     }
     {
         TestMutex m1, m2, m3;
-        using LG = gpu::scoped_lock<TestMutex, TestMutex, TestMutex>;
+        using LG = hip::scoped_lock<TestMutex, TestMutex, TestMutex>;
         m1.lock(); m2.lock(); m3.lock();
         {
-            LG lg(std::adopt_lock, m1, m2, m3);
+            LG lg(::std::adopt_lock, m1, m2, m3);
             assert(m1.locked && m2.locked && m3.locked);
         }
         assert(!m1.locked && !m2.locked && !m3.locked);

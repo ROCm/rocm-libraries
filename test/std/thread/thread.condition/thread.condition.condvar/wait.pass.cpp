@@ -22,15 +22,15 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::condition_variable cv;
-std::mutex mut;
+::std::condition_variable cv;
+::std::mutex mut;
 
 int test1 = 0;
 int test2 = 0;
 
 void f()
 {
-    gpu::unique_lock<std::mutex> lk(mut);
+    hip::unique_lock<::std::mutex> lk(mut);
     assert(test2 == 0);
     test1 = 1;
     cv.notify_one();
@@ -41,8 +41,8 @@ void f()
 
 int main(int, char**)
 {
-    gpu::unique_lock<std::mutex> lk(mut);
-    gpu::thread t = support::make_test_thread(f);
+    hip::unique_lock<::std::mutex> lk(mut);
+    hip::thread t = support::make_test_thread(f);
     assert(test1 == 0);
     while (test1 == 0)
         cv.wait(lk);

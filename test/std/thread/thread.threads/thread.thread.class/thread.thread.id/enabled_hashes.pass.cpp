@@ -28,7 +28,7 @@
 int main(int, char**) {
   test_library_hash_specializations_available();
   {
-    test_hash_enabled<gpu::thread::id>();
+    test_hash_enabled<hip::thread::id>();
   }
 
   return 0;

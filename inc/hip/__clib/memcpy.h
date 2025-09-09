@@ -23,9 +23,9 @@
 #include "hip/hip_runtime_api.h"
 #include <cstddef>
 
-namespace gpu {
+namespace cuda {
 
-inline __host__ __device__ void *memcpy(void *dest, const void *src, std::size_t count) {
+inline __host__ __device__ void *memcpy(void *dest, const void *src, ::std::size_t count) {
     unsigned char *d = reinterpret_cast<unsigned char *>(dest);
     const unsigned char *s = reinterpret_cast<const unsigned char *>(src);
     for (; count > 0; ++d, ++s, --count) {

@@ -19,16 +19,16 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_nothrow_move_constructible_v<std::stop_source>);
+static_assert(::std::is_nothrow_move_constructible_v<::std::stop_source>);
 
 int main(int, char**) {
   {
-    std::stop_source source;
+    ::std::stop_source source;
 
     assert(source.stop_possible());
     assert(!source.stop_requested());
 
-    std::stop_source source2{std::move(source)};
+    ::std::stop_source source2{::std::move(source)};
 
     assert(!source.stop_possible());
     assert(!source.stop_requested());

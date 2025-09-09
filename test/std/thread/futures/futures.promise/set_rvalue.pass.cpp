@@ -31,30 +31,30 @@ struct A
 int main(int, char**)
 {
     {
-        typedef std::unique_ptr<int> T;
+        typedef ::std::unique_ptr<int> T;
         T i(new int(3));
-        std::promise<T> p;
-        std::future<T> f = p.get_future();
-        p.set_value(std::move(i));
+        ::std::promise<T> p;
+        ::std::future<T> f = p.get_future();
+        p.set_value(::std::move(i));
         assert(*f.get() == 3);
         try
         {
-            p.set_value(std::move(i));
+            p.set_value(::std::move(i));
             assert(false);
         }
-        catch (const std::future_error& e)
+        catch (const ::std::future_error& e)
         {
-            assert(e.code() == make_error_code(std::future_errc::promise_already_satisfied));
+            assert(e.code() == make_error_code(::std::future_errc::promise_already_satisfied));
         }
     }
     {
         typedef A T;
         T i;
-        std::promise<T> p;
-        std::future<T> f = p.get_future();
+        ::std::promise<T> p;
+        ::std::future<T> f = p.get_future();
         try
         {
-            p.set_value(std::move(i));
+            p.set_value(::std::move(i));
             assert(false);
         }
         catch (int j)

@@ -43,14 +43,14 @@ int main(int, char**) {
   // the likelihood that we got awoken by a spurious wakeup by updating the
   // likely_spurious flag only immediately before we perform the notification.
   {
-    std::atomic<bool> ready(false);
-    std::atomic<bool> likely_spurious(true);
+    ::std::atomic<bool> ready(false);
+    ::std::atomic<bool> likely_spurious(true);
     auto timeout = cuda::std::chrono::seconds(3600);
-    std::condition_variable cv;
-    std::mutex mutex;
+    ::std::condition_variable cv;
+    ::std::mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
-      gpu::unique_lock<std::mutex> lock(mutex);
+    hip::thread t1 = support::make_test_thread([&] {
+      hip::unique_lock<::std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         ready       = true;
         bool result = cv.wait_for(lock, timeout, [&] { return !likely_spurious; });
@@ -59,14 +59,14 @@ int main(int, char**) {
       assert(elapsed < timeout);
     });
 
-    gpu::thread t2 = support::make_test_thread([&] {
+    hip::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
 
       // Acquire the same mutex as t1. This ensures that the condition variable has started
       // waiting (and hence released that mutex).
-      gpu::unique_lock<std::mutex> lock(mutex);
+      hip::unique_lock<::std::mutex> lock(mutex);
 
       likely_spurious = false;
       lock.unlock();
@@ -84,11 +84,11 @@ int main(int, char**) {
   // which means that we can't get out of the wait via a spurious wakeup.
   {
     auto timeout = cuda::std::chrono::milliseconds(250);
-    std::condition_variable cv;
-    std::mutex mutex;
+    ::std::condition_variable cv;
+    ::std::mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
-      gpu::unique_lock<std::mutex> lock(mutex);
+    hip::thread t1 = support::make_test_thread([&] {
+      hip::unique_lock<::std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         bool result = cv.wait_for(lock, timeout, [] { return false; }); // never stop waiting (until timeout)
         assert(!result); // return value should be false since the predicate returns false after the timeout
@@ -110,14 +110,14 @@ int main(int, char**) {
   // taken. In particular, we do need to eventually ensure we get out of the wait
   // by standard means, so we actually wake up the thread at the end.
   {
-    std::atomic<bool> ready(false);
-    std::atomic<bool> awoken(false);
+    ::std::atomic<bool> ready(false);
+    ::std::atomic<bool> awoken(false);
     auto timeout = cuda::std::chrono::seconds(3600);
-    std::condition_variable cv;
-    std::mutex mutex;
+    ::std::condition_variable cv;
+    ::std::mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
-      gpu::unique_lock<std::mutex> lock(mutex);
+    hip::thread t1 = support::make_test_thread([&] {
+      hip::unique_lock<::std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         ready       = true;
         bool result = cv.wait_for(lock, timeout, [&] { return true; });
@@ -127,18 +127,18 @@ int main(int, char**) {
       assert(elapsed < timeout); // can technically fail if t2 never executes and we timeout, but very unlikely
     });
 
-    gpu::thread t2 = support::make_test_thread([&] {
+    hip::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
 
       // Acquire the same mutex as t1. This ensures that the condition variable has started
       // waiting (and hence released that mutex).
-      gpu::unique_lock<std::mutex> lock(mutex);
+      hip::unique_lock<::std::mutex> lock(mutex);
       lock.unlock();
 
       // Give some time for t1 to be awoken spuriously so that code path is used.
-      gpu::this_thread::sleep_for(cuda::std::chrono::seconds(1));
+      hip::this_thread::sleep_for(cuda::std::chrono::seconds(1));
 
       // We would want to assert that the thread has been awoken after this time,
       // however nothing guarantees us that it ever gets spuriously awoken, so

@@ -30,18 +30,18 @@ concept IsStopPossibleNoexcept = requires(const T& t) {
   { t.stop_possible() } noexcept;
 };
 
-static_assert(IsStopPossibleNoexcept<std::stop_token>);
+static_assert(IsStopPossibleNoexcept<::std::stop_token>);
 
 int main(int, char**) {
   // no state
   {
-    const std::stop_token st;
+    const ::std::stop_token st;
     assert(!st.stop_possible());
   }
 
   // a stop request was not made and there are no associated stop_source objects
   {
-    std::optional<std::stop_source> ss{std::in_place};
+    ::std::optional<::std::stop_source> ss{::std::in_place};
     const auto st = ss->get_token();
     ss.reset();
 
@@ -50,14 +50,14 @@ int main(int, char**) {
 
   // a stop request was not made, but there is an associated stop_source objects
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     const auto st = ss.get_token();
     assert(st.stop_possible());
   }
 
   // a stop request was made and there are no associated stop_source objects
   {
-    std::optional<std::stop_source> ss{std::in_place};
+    ::std::optional<::std::stop_source> ss{::std::in_place};
     const auto st = ss->get_token();
     ss->request_stop();
     ss.reset();
@@ -67,7 +67,7 @@ int main(int, char**) {
 
   // a stop request was made and there is an associated stop_source objects
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     const auto st = ss.get_token();
     ss.request_stop();
     assert(st.stop_possible());
@@ -76,10 +76,10 @@ int main(int, char**) {
   // a stop request was made on a different thread and
   // there are no associated stop_source objects
   {
-    std::optional<std::stop_source> ss{std::in_place};
+    ::std::optional<::std::stop_source> ss{::std::in_place};
     const auto st = ss->get_token();
 
-    gpu::thread t = support::make_test_thread([&]() {
+    hip::thread t = support::make_test_thread([&]() {
       ss->request_stop();
       ss.reset();
     });

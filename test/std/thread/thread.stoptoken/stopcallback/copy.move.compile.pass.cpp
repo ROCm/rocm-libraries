@@ -22,7 +22,7 @@ struct Callback {
   void operator()() const;
 };
 
-static_assert(!std::is_copy_constructible_v<std::stop_callback<Callback>>);
-static_assert(!std::is_move_constructible_v<std::stop_callback<Callback>>);
-static_assert(!std::is_copy_assignable_v<std::stop_callback<Callback>>);
-static_assert(!std::is_move_assignable_v<std::stop_callback<Callback>>);
+static_assert(!::std::is_copy_constructible_v<::std::stop_callback<Callback>>);
+static_assert(!::std::is_move_constructible_v<::std::stop_callback<Callback>>);
+static_assert(!::std::is_copy_assignable_v<::std::stop_callback<Callback>>);
+static_assert(!::std::is_move_assignable_v<::std::stop_callback<Callback>>);

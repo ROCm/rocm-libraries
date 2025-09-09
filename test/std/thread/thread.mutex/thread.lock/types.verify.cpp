@@ -19,6 +19,6 @@
 
 #include <mutex>
 
-std::defer_lock_t f1() { return {}; } // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
-std::try_to_lock_t f2() { return {}; } // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
-std::adopt_lock_t f3() { return {}; } // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+::std::defer_lock_t f1() { return {}; } // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+::std::try_to_lock_t f2() { return {}; } // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+::std::adopt_lock_t f3() { return {}; } // expected-error 1 {{chosen constructor is explicit in copy-initialization}}

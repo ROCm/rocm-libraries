@@ -21,30 +21,30 @@
 #include "test_macros.h"
 
 int main(int, char**) {
-  ASSERT_NOEXCEPT(std::declval<std::future_error const&>().code());
-  ASSERT_SAME_TYPE(decltype(std::declval<std::future_error const&>().code()), std::error_code const&);
+  ASSERT_NOEXCEPT(::std::declval<::std::future_error const&>().code());
+  ASSERT_SAME_TYPE(decltype(::std::declval<::std::future_error const&>().code()), ::std::error_code const&);
 
-  // Before C++17, we can't construct std::future_error directly in a standards-conforming way
+  // Before C++17, we can't construct ::std::future_error directly in a standards-conforming way
 #if TEST_STD_VER >= 17
   {
-    std::future_error const f(std::future_errc::broken_promise);
-    std::error_code const& code = f.code();
-    assert(code == std::make_error_code(std::future_errc::broken_promise));
+    ::std::future_error const f(::std::future_errc::broken_promise);
+    ::std::error_code const& code = f.code();
+    assert(code == ::std::make_error_code(::std::future_errc::broken_promise));
   }
   {
-    std::future_error const f(std::future_errc::future_already_retrieved);
-    std::error_code const& code = f.code();
-    assert(code == std::make_error_code(std::future_errc::future_already_retrieved));
+    ::std::future_error const f(::std::future_errc::future_already_retrieved);
+    ::std::error_code const& code = f.code();
+    assert(code == ::std::make_error_code(::std::future_errc::future_already_retrieved));
   }
   {
-    std::future_error const f(std::future_errc::promise_already_satisfied);
-    std::error_code const& code = f.code();
-    assert(code == std::make_error_code(std::future_errc::promise_already_satisfied));
+    ::std::future_error const f(::std::future_errc::promise_already_satisfied);
+    ::std::error_code const& code = f.code();
+    assert(code == ::std::make_error_code(::std::future_errc::promise_already_satisfied));
   }
   {
-    std::future_error const f(std::future_errc::no_state);
-    std::error_code const& code = f.code();
-    assert(code == std::make_error_code(std::future_errc::no_state));
+    ::std::future_error const f(::std::future_errc::no_state);
+    ::std::error_code const& code = f.code();
+    assert(code == ::std::make_error_code(::std::future_errc::no_state));
   }
 #endif
 

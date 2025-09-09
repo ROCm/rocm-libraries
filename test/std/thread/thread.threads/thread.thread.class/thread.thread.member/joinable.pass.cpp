@@ -48,7 +48,7 @@ int main(int, char**)
 {
     {
         G g;
-        gpu::thread t0 = support::make_test_thread(g);
+        hip::thread t0 = support::make_test_thread(g);
         assert(t0.joinable());
         t0.join();
         assert(!t0.joinable());

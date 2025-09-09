@@ -23,7 +23,7 @@
 
 int main(int, char**)
 {
-    assert(gpu::thread::hardware_concurrency() > 0);
+    assert(hip::thread::hardware_concurrency() > 0);
 
   return 0;
 }

@@ -303,21 +303,21 @@ struct no_ge_not_totally_ordered_with {
 
 struct partial_ordering_totally_ordered_with {
   auto operator<=>(partial_ordering_totally_ordered_with const&) const noexcept = default;
-  std::partial_ordering operator<=>(totally_ordered_with_others const&) const noexcept;
+  ::std::partial_ordering operator<=>(totally_ordered_with_others const&) const noexcept;
 
   operator totally_ordered_with_others() const;
 };
 
 struct weak_ordering_totally_ordered_with {
   auto operator<=>(weak_ordering_totally_ordered_with const&) const noexcept = default;
-  std::weak_ordering operator<=>(totally_ordered_with_others const&) const noexcept;
+  ::std::weak_ordering operator<=>(totally_ordered_with_others const&) const noexcept;
 
   operator totally_ordered_with_others() const;
 };
 
 struct strong_ordering_totally_ordered_with {
   auto operator<=>(strong_ordering_totally_ordered_with const&) const noexcept = default;
-  std::strong_ordering operator<=>(totally_ordered_with_others const&) const noexcept;
+  ::std::strong_ordering operator<=>(totally_ordered_with_others const&) const noexcept;
 
   operator totally_ordered_with_others() const;
 };
@@ -462,27 +462,27 @@ struct ge_returns_explicit_bool {
 };
 
 struct returns_true_type {
-  friend std::true_type operator==(returns_true_type, returns_true_type);
-  friend std::true_type operator!=(returns_true_type, returns_true_type);
-  friend std::true_type operator<(returns_true_type, returns_true_type);
-  friend std::true_type operator>(returns_true_type, returns_true_type);
-  friend std::true_type operator<=(returns_true_type, returns_true_type);
-  friend std::true_type operator>=(returns_true_type, returns_true_type);
+  friend ::std::true_type operator==(returns_true_type, returns_true_type);
+  friend ::std::true_type operator!=(returns_true_type, returns_true_type);
+  friend ::std::true_type operator<(returns_true_type, returns_true_type);
+  friend ::std::true_type operator>(returns_true_type, returns_true_type);
+  friend ::std::true_type operator<=(returns_true_type, returns_true_type);
+  friend ::std::true_type operator>=(returns_true_type, returns_true_type);
 
   operator totally_ordered_with_others() const;
 
-  friend std::true_type operator==(returns_true_type, totally_ordered_with_others);
-  friend std::true_type operator==(totally_ordered_with_others, returns_true_type);
-  friend std::true_type operator!=(returns_true_type, totally_ordered_with_others);
-  friend std::true_type operator!=(totally_ordered_with_others, returns_true_type);
-  friend std::true_type operator<(returns_true_type, totally_ordered_with_others);
-  friend std::true_type operator<(totally_ordered_with_others, returns_true_type);
-  friend std::true_type operator>(returns_true_type, totally_ordered_with_others);
-  friend std::true_type operator>(totally_ordered_with_others, returns_true_type);
-  friend std::true_type operator<=(returns_true_type, totally_ordered_with_others);
-  friend std::true_type operator<=(totally_ordered_with_others, returns_true_type);
-  friend std::true_type operator>=(returns_true_type, totally_ordered_with_others);
-  friend std::true_type operator>=(totally_ordered_with_others, returns_true_type);
+  friend ::std::true_type operator==(returns_true_type, totally_ordered_with_others);
+  friend ::std::true_type operator==(totally_ordered_with_others, returns_true_type);
+  friend ::std::true_type operator!=(returns_true_type, totally_ordered_with_others);
+  friend ::std::true_type operator!=(totally_ordered_with_others, returns_true_type);
+  friend ::std::true_type operator<(returns_true_type, totally_ordered_with_others);
+  friend ::std::true_type operator<(totally_ordered_with_others, returns_true_type);
+  friend ::std::true_type operator>(returns_true_type, totally_ordered_with_others);
+  friend ::std::true_type operator>(totally_ordered_with_others, returns_true_type);
+  friend ::std::true_type operator<=(returns_true_type, totally_ordered_with_others);
+  friend ::std::true_type operator<=(totally_ordered_with_others, returns_true_type);
+  friend ::std::true_type operator>=(returns_true_type, totally_ordered_with_others);
+  friend ::std::true_type operator>=(totally_ordered_with_others, returns_true_type);
 };
 
 struct returns_int_ptr {

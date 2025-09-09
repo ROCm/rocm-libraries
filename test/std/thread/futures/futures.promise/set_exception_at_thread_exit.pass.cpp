@@ -22,18 +22,18 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-void func(std::promise<int> p)
+void func(::std::promise<int> p)
 {
-    p.set_exception_at_thread_exit(std::make_exception_ptr(3));
+    p.set_exception_at_thread_exit(::std::make_exception_ptr(3));
 }
 
 int main(int, char**)
 {
     {
         typedef int T;
-        std::promise<T> p;
-        std::future<T> f = p.get_future();
-        support::make_test_thread(func, std::move(p)).detach();
+        ::std::promise<T> p;
+        ::std::future<T> f = p.get_future();
+        support::make_test_thread(func, ::std::move(p)).detach();
         try
         {
             f.get();

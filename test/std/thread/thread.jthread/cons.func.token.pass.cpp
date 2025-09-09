@@ -27,36 +27,36 @@ struct Func {
 };
 
 // Constraints: remove_cvref_t<F> is not the same type as jthread.
-static_assert(std::is_constructible_v<std::jthread, Func<>>);
-static_assert(std::is_constructible_v<std::jthread, Func<int>, int>);
-static_assert(!std::is_constructible_v<std::jthread, std::jthread const&>);
+static_assert(::std::is_constructible_v<::std::jthread, Func<>>);
+static_assert(::std::is_constructible_v<::std::jthread, Func<int>, int>);
+static_assert(!::std::is_constructible_v<::std::jthread, ::std::jthread const&>);
 
 // explicit
 template <class T>
 void conversion_test(T);
 
 template <class T, class... Args>
-concept ImplicitlyConstructible = requires(Args&&... args) { conversion_test<T>({std::forward<Args>(args)...}); };
+concept ImplicitlyConstructible = requires(Args&&... args) { conversion_test<T>({::std::forward<Args>(args)...}); };
 
-static_assert(!ImplicitlyConstructible<std::jthread, Func<>>);
-static_assert(!ImplicitlyConstructible<std::jthread, Func<int>, int>);
+static_assert(!ImplicitlyConstructible<::std::jthread, Func<>>);
+static_assert(!ImplicitlyConstructible<::std::jthread, Func<int>, int>);
 
 int main(int, char**) {
   // Effects: Initializes ssource
   // Postconditions: get_id() != id() is true and ssource.stop_possible() is true
   // and *this represents the newly started thread.
   {
-    std::jthread jt{[] {}};
+    ::std::jthread jt{[] {}};
     assert(jt.get_stop_source().stop_possible());
-    assert(jt.get_id() != std::jthread::id());
+    assert(jt.get_id() != ::std::jthread::id());
   }
 
   // The new thread of execution executes
-  // invoke(auto(std::forward<F>(f)), get_stop_token(), auto(std::forward<Args>(args))...)
+  // invoke(auto(::std::forward<F>(f)), get_stop_token(), auto(::std::forward<Args>(args))...)
   // if that expression is well-formed,
   {
     int result = 0;
-    std::jthread jt{[&result](std::stop_token st, int i) {
+    ::std::jthread jt{[&result](::std::stop_token st, int i) {
                       assert(st.stop_possible());
                       assert(!st.stop_requested());
                       result += i;
@@ -67,10 +67,10 @@ int main(int, char**) {
   }
 
   // otherwise
-  // invoke(auto(std::forward<F>(f)), auto(std::forward<Args>(args))...)
+  // invoke(auto(::std::forward<F>(f)), auto(::std::forward<Args>(args))...)
   {
     int result = 0;
-    std::jthread jt{[&result](int i) { result += i; }, 5};
+    ::std::jthread jt{[&result](int i) { result += i; }, 5};
     jt.join();
     assert(result == 5);
   }
@@ -78,32 +78,32 @@ int main(int, char**) {
   // with the values produced by auto being materialized ([conv.rval]) in the constructing thread.
   {
     struct TrackThread {
-      std::jthread::id threadId;
+      ::std::jthread::id threadId;
       bool copyConstructed = false;
       bool moveConstructed = false;
 
-      TrackThread() : threadId(gpu::this_thread::get_id()) {}
-      TrackThread(const TrackThread&) : threadId(gpu::this_thread::get_id()), copyConstructed(true) {}
-      TrackThread(TrackThread&&) : threadId(gpu::this_thread::get_id()), moveConstructed(true) {}
+      TrackThread() : threadId(hip::this_thread::get_id()) {}
+      TrackThread(const TrackThread&) : threadId(hip::this_thread::get_id()), copyConstructed(true) {}
+      TrackThread(TrackThread&&) : threadId(hip::this_thread::get_id()), moveConstructed(true) {}
     };
 
-    auto mainThread = gpu::this_thread::get_id();
+    auto mainThread = hip::this_thread::get_id();
 
     TrackThread arg1;
-    std::jthread jt1{[mainThread](const TrackThread& arg) {
+    ::std::jthread jt1{[mainThread](const TrackThread& arg) {
                        assert(arg.threadId == mainThread);
-                       assert(arg.threadId != gpu::this_thread::get_id());
+                       assert(arg.threadId != hip::this_thread::get_id());
                        assert(arg.copyConstructed);
                      },
                      arg1};
 
     TrackThread arg2;
-    std::jthread jt2{[mainThread](const TrackThread& arg) {
+    ::std::jthread jt2{[mainThread](const TrackThread& arg) {
                        assert(arg.threadId == mainThread);
-                       assert(arg.threadId != gpu::this_thread::get_id());
+                       assert(arg.threadId != hip::this_thread::get_id());
                        assert(arg.moveConstructed);
                      },
-                     std::move(arg2)};
+                     ::std::move(arg2)};
   }
 
 #if !defined(TEST_HAS_NO_EXCEPTIONS)
@@ -111,19 +111,19 @@ int main(int, char**) {
   // of f will be thrown in the constructing thread, not the new thread. - end note]
   {
     struct Exception {
-      std::jthread::id threadId;
+      ::std::jthread::id threadId;
     };
     struct ThrowOnCopyFunc {
       ThrowOnCopyFunc() = default;
-      ThrowOnCopyFunc(const ThrowOnCopyFunc&) { throw Exception{gpu::this_thread::get_id()}; }
+      ThrowOnCopyFunc(const ThrowOnCopyFunc&) { throw Exception{hip::this_thread::get_id()}; }
       void operator()() const {}
     };
     ThrowOnCopyFunc f1;
     try {
-      std::jthread jt{f1};
+      ::std::jthread jt{f1};
       assert(false);
     } catch (const Exception& e) {
-      assert(e.threadId == gpu::this_thread::get_id());
+      assert(e.threadId == hip::this_thread::get_id());
     }
   }
 #endif // !defined(TEST_HAS_NO_EXCEPTIONS)
@@ -140,7 +140,7 @@ int main(int, char**) {
     };
 
     Arg arg(flag);
-    std::jthread jt(
+    ::std::jthread jt(
         [&flag](const auto&) {
           assert(flag == 5); // happens-after the copy-construction of arg
         },

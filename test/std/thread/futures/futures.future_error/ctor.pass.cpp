@@ -21,24 +21,24 @@
 
 int main(int, char**) {
   {
-    std::future_error f(std::future_errc::broken_promise);
-    assert(f.code() == std::make_error_code(std::future_errc::broken_promise));
+    ::std::future_error f(::std::future_errc::broken_promise);
+    assert(f.code() == ::std::make_error_code(::std::future_errc::broken_promise));
   }
   {
-    std::future_error f(std::future_errc::future_already_retrieved);
-    assert(f.code() == std::make_error_code(std::future_errc::future_already_retrieved));
+    ::std::future_error f(::std::future_errc::future_already_retrieved);
+    assert(f.code() == ::std::make_error_code(::std::future_errc::future_already_retrieved));
   }
   {
-    std::future_error f(std::future_errc::promise_already_satisfied);
-    assert(f.code() == std::make_error_code(std::future_errc::promise_already_satisfied));
+    ::std::future_error f(::std::future_errc::promise_already_satisfied);
+    assert(f.code() == ::std::make_error_code(::std::future_errc::promise_already_satisfied));
   }
   {
-    std::future_error f(std::future_errc::no_state);
-    assert(f.code() == std::make_error_code(std::future_errc::no_state));
+    ::std::future_error f(::std::future_errc::no_state);
+    assert(f.code() == ::std::make_error_code(::std::future_errc::no_state));
   }
 
   // Make sure the constructor is explicit
-  static_assert(!std::is_convertible_v<std::future_errc, std::future_error>);
+  static_assert(!::std::is_convertible_v<::std::future_errc, ::std::future_error>);
 
   return 0;
 }

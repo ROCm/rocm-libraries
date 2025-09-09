@@ -22,14 +22,14 @@
 
 #if TEST_STD_VER >= 11
 static_assert(
-    std::is_nothrow_constructible<gpu::unique_lock<checking_mutex>, checking_mutex&, std::defer_lock_t>::value, "");
+    ::std::is_nothrow_constructible<hip::unique_lock<checking_mutex>, checking_mutex&, ::std::defer_lock_t>::value, "");
 #endif
 
 int main(int, char**) {
   checking_mutex m;
-  gpu::unique_lock<checking_mutex> lk(m, std::defer_lock_t());
+  hip::unique_lock<checking_mutex> lk(m, ::std::defer_lock_t());
   assert(m.last_try == checking_mutex::none);
-  assert(lk.mutex() == std::addressof(m));
+  assert(lk.mutex() == ::std::addressof(m));
   assert(lk.owns_lock() == false);
 
   return 0;

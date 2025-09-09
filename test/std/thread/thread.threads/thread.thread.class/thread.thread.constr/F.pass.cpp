@@ -29,20 +29,20 @@
 
 #include "test_macros.h"
 
-std::atomic<unsigned> throw_one(0xFFFF);
-std::atomic<unsigned> outstanding_new(0);
+::std::atomic<unsigned> throw_one(0xFFFF);
+::std::atomic<unsigned> outstanding_new(0);
 
 
-void* operator new(std::size_t s) TEST_THROW_SPEC(std::bad_alloc)
+void* operator new(::std::size_t s) TEST_THROW_SPEC(::std::bad_alloc)
 {
     unsigned expected = throw_one;
     do {
-        if (expected == 0) TEST_THROW(std::bad_alloc());
+        if (expected == 0) TEST_THROW(::std::bad_alloc());
     } while (!throw_one.compare_exchange_weak(expected, expected - 1));
     ++outstanding_new;
-    void* ret = std::malloc(s);
+    void* ret = ::std::malloc(s);
     if (!ret) {
-      std::abort(); // placate MSVC's unchecked malloc warning (assert() won't silence it)
+      ::std::abort(); // placate MSVC's unchecked malloc warning (assert() won't silence it)
     }
     return ret;
 }
@@ -51,13 +51,13 @@ void  operator delete(void* p) TEST_NOEXCEPT
 {
     if (!p) return;
     --outstanding_new;
-    std::free(p);
+    ::std::free(p);
 }
 
 bool f_run = false;
 
 struct F {
-    std::vector<int> v_;  // so f's copy-ctor calls operator new
+    ::std::vector<int> v_;  // so f's copy-ctor calls operator new
     explicit F() : v_(10) {}
     void operator()() const { f_run = true; }
 };
@@ -110,13 +110,13 @@ public:
 
 #endif
 
-// Test throwing std::bad_alloc
+// Test throwing ::std::bad_alloc
 //-----------------------------
 // Concerns:
 //  A Each allocation performed during thread construction should be performed
-//    in the parent thread so that std::terminate is not called if
-//    std::bad_alloc is thrown by new.
-//  B gpu::thread's constructor should properly handle exceptions and not leak
+//    in the parent thread so that ::std::terminate is not called if
+//    ::std::bad_alloc is thrown by new.
+//  B hip::thread's constructor should properly handle exceptions and not leak
 //    memory.
 // Plan:
 //  1 Create a thread and count the number of allocations, 'numAllocs', it
@@ -134,7 +134,7 @@ void test_throwing_new_during_thread_creation() {
 #ifndef TEST_HAS_NO_EXCEPTIONS
     throw_one = 0xFFF;
     {
-        gpu::thread t(f);
+        hip::thread t(f);
         t.join();
     }
     numAllocs = 0xFFF - throw_one;
@@ -144,11 +144,11 @@ void test_throwing_new_during_thread_creation() {
         f_run = false;
         unsigned old_outstanding = outstanding_new;
         try {
-            gpu::thread t(f);
+            hip::thread t(f);
             assert(i == numAllocs); // Only final iteration will not throw.
             t.join();
             assert(f_run);
-        } catch (std::bad_alloc const&) {
+        } catch (::std::bad_alloc const&) {
             assert(i < numAllocs);
             assert(!f_run); // (2.2)
         }
@@ -163,7 +163,7 @@ int main(int, char**)
 {
     test_throwing_new_during_thread_creation();
     {
-        gpu::thread t(f);
+        hip::thread t(f);
         t.join();
         assert(f_run == true);
     }
@@ -173,7 +173,7 @@ int main(int, char**)
         assert(!G::op_run);
         {
             G g;
-            gpu::thread t(g);
+            hip::thread t(g);
             t.join();
         }
         assert(G::n_alive == 0);
@@ -181,7 +181,7 @@ int main(int, char**)
     }
     G::op_run = false;
 #ifndef TEST_HAS_NO_EXCEPTIONS
-    // The test below expects `gpu::thread` to call `new`, which may not be the
+    // The test below expects `hip::thread` to call `new`, which may not be the
     // case for all implementations.
     LIBCPP_ASSERT(numAllocs > 0); // libc++ should call new.
     if (numAllocs > 0) {
@@ -190,10 +190,10 @@ int main(int, char**)
             throw_one = 0;
             assert(G::n_alive == 0);
             assert(!G::op_run);
-            gpu::thread t((G()));
+            hip::thread t((G()));
             assert(false);
         }
-        catch (std::bad_alloc const&)
+        catch (::std::bad_alloc const&)
         {
             throw_one = 0xFFFF;
             assert(G::n_alive == 0);
@@ -207,14 +207,14 @@ int main(int, char**)
         assert(!G::op_run);
         {
             G g;
-            gpu::thread t(g, 5, 5.5);
+            hip::thread t(g, 5, 5.5);
             t.join();
         }
         assert(G::n_alive == 0);
         assert(G::op_run);
     }
     {
-        gpu::thread t = gpu::thread(MoveOnly(), MoveOnly());
+        hip::thread t = hip::thread(MoveOnly(), MoveOnly());
         t.join();
     }
 #endif

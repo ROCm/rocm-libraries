@@ -34,7 +34,7 @@ struct DeleteHolder {
 };
 
 struct CallbackHolder {
-  std::unique_ptr<std::stop_callback<DeleteHolder>> callback_;
+  ::std::unique_ptr<::std::stop_callback<DeleteHolder>> callback_;
 };
 
 void DeleteHolder::operator()() const { holder_.callback_.reset(); }
@@ -42,11 +42,11 @@ void DeleteHolder::operator()() const { holder_.callback_.reset(); }
 int main(int, char**) {
   // Unregisters the callback from the owned stop state, if any
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     bool called = false;
 
     {
-      std::stop_callback sc(ss.get_token(), [&] { called = true; });
+      ::std::stop_callback sc(ss.get_token(), [&] { called = true; });
     }
     ss.request_stop();
     assert(!called);
@@ -55,18 +55,18 @@ int main(int, char**) {
   // The destructor does not block waiting for the execution of another
   // callback registered by an associated stop_callback.
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
 
-    std::atomic<int> startedIndex    = 0;
-    std::atomic<bool> callbackFinish = false;
+    ::std::atomic<int> startedIndex    = 0;
+    ::std::atomic<bool> callbackFinish = false;
 
-    std::optional<std::stop_callback<std::function<void()>>> sc1(std::in_place, ss.get_token(), [&] {
+    ::std::optional<::std::stop_callback<::std::function<void()>>> sc1(::std::in_place, ss.get_token(), [&] {
       startedIndex = 1;
       startedIndex.notify_all();
       callbackFinish.wait(false);
     });
 
-    std::optional<std::stop_callback<std::function<void()>>> sc2(std::in_place, ss.get_token(), [&] {
+    ::std::optional<::std::stop_callback<::std::function<void()>>> sc2(::std::in_place, ss.get_token(), [&] {
       startedIndex = 2;
       startedIndex.notify_all();
       callbackFinish.wait(false);
@@ -95,12 +95,12 @@ int main(int, char**) {
   // callback is destroyed.
   {
     struct Callback {
-      std::atomic<bool>& started_;
-      std::atomic<bool>& waitDone_;
-      std::atomic<bool>& finished_;
+      ::std::atomic<bool>& started_;
+      ::std::atomic<bool>& waitDone_;
+      ::std::atomic<bool>& finished_;
       bool moved = false;
 
-      Callback(std::atomic<bool>& started, std::atomic<bool>& waitDone, std::atomic<bool>& finished)
+      Callback(::std::atomic<bool>& started, ::std::atomic<bool>& waitDone, ::std::atomic<bool>& finished)
           : started_(started), waitDone_(waitDone), finished_(finished) {}
       Callback(Callback&& other) : started_(other.started_), waitDone_(other.waitDone_), finished_(other.finished_) {
         other.moved = true;
@@ -108,8 +108,8 @@ int main(int, char**) {
 
       void operator()() const {
         struct ScopedGuard {
-          std::atomic<bool>& g_finished_;
-          ~ScopedGuard() { g_finished_.store(true, std::memory_order_relaxed); }
+          ::std::atomic<bool>& g_finished_;
+          ~ScopedGuard() { g_finished_.store(true, ::std::memory_order_relaxed); }
         };
 
         started_ = true;
@@ -121,26 +121,26 @@ int main(int, char**) {
       ~Callback() {
         if (!moved) {
           // destructor has to be called after operator() returns
-          assert(finished_.load(std::memory_order_relaxed));
+          assert(finished_.load(::std::memory_order_relaxed));
         }
       }
     };
 
-    std::stop_source ss;
+    ::std::stop_source ss;
 
-    std::atomic<bool> started  = false;
-    std::atomic<bool> waitDone = false;
-    std::atomic<bool> finished = false;
+    ::std::atomic<bool> started  = false;
+    ::std::atomic<bool> waitDone = false;
+    ::std::atomic<bool> finished = false;
 
-    std::optional<std::stop_callback<Callback>> sc{
-        std::in_place, ss.get_token(), Callback{started, waitDone, finished}};
+    ::std::optional<::std::stop_callback<Callback>> sc{
+        ::std::in_place, ss.get_token(), Callback{started, waitDone, finished}};
 
     auto thread1 = support::make_test_thread([&] { ss.request_stop(); });
     started.wait(false);
 
     auto thread2 = support::make_test_thread([&] {
-      using namespace std::chrono_literals;
-      gpu::this_thread::sleep_for(1ms);
+      using namespace ::std::chrono_literals;
+      hip::this_thread::sleep_for(1ms);
       waitDone = true;
       waitDone.notify_all();
     });
@@ -154,10 +154,10 @@ int main(int, char**) {
   // If callback is executing on the current thread, then the destructor does not block ([defns.block])
   // waiting for the return from the invocation of callback.
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
 
     CallbackHolder holder;
-    holder.callback_ = std::make_unique<std::stop_callback<DeleteHolder>>(ss.get_token(), DeleteHolder{holder});
+    holder.callback_ = ::std::make_unique<::std::stop_callback<DeleteHolder>>(ss.get_token(), DeleteHolder{holder});
 
     assert(holder.callback_ != nullptr);
 

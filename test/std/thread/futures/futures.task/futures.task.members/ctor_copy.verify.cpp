@@ -21,8 +21,8 @@
 int main(int, char**)
 {
     {
-        std::packaged_task<double(int, char)> p0;
-        std::packaged_task<double(int, char)> p(p0); // expected-error {{call to deleted constructor of 'std::packaged_task<double (int, char)>'}}
+        ::std::packaged_task<double(int, char)> p0;
+        ::std::packaged_task<double(int, char)> p(p0); // expected-error {{call to deleted constructor of '::std::packaged_task<double (int, char)>'}}
     }
 
   return 0;

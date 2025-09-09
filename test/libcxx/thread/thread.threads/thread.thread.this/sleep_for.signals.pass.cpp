@@ -26,7 +26,7 @@
 #include <hip/thread>
 #include <cassert>
 #include <hip/std/chrono>
-#include <cstring> // for std::memset
+#include <cstring> // for ::std::memset
 
 #include <signal.h>
 #include <sys/time.h>
@@ -49,7 +49,7 @@ int main(int, char**)
   assert(!ec);
 
   struct itimerval it;
-  std::memset(&it, 0, sizeof(itimerval));
+  ::std::memset(&it, 0, sizeof(itimerval));
   it.it_value.tv_sec = 0;
   it.it_value.tv_usec = 250000;
   // This will result in a SIGALRM getting fired resulting in the nanosleep
@@ -61,7 +61,7 @@ int main(int, char**)
   typedef Clock::time_point time_point;
   cuda::std::chrono::milliseconds ms(500);
   time_point t0 = Clock::now();
-  gpu::this_thread::sleep_for(ms);
+  hip::this_thread::sleep_for(ms);
   time_point t1 = Clock::now();
   // NOTE: Operating systems are (by default) best effort and therefore we may
   // have slept longer, perhaps much longer than we requested.

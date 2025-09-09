@@ -25,49 +25,49 @@ int main(int, char**)
 {
     {
         typedef int T;
-        std::promise<T> p;
-        std::shared_future<T> f0 = p.get_future();
-        std::shared_future<T> f = f0;
+        ::std::promise<T> p;
+        ::std::shared_future<T> f0 = p.get_future();
+        ::std::shared_future<T> f = f0;
 #if TEST_STD_VER > 14
-        static_assert(noexcept(std::shared_future<T>{f0}), "" );
+        static_assert(noexcept(::std::shared_future<T>{f0}), "" );
 #endif
         assert(f0.valid());
         assert(f.valid());
     }
     {
         typedef int T;
-        std::shared_future<T> f0;
-        std::shared_future<T> f = f0;
+        ::std::shared_future<T> f0;
+        ::std::shared_future<T> f = f0;
         assert(!f0.valid());
         assert(!f.valid());
     }
     {
         typedef int& T;
-        std::promise<T> p;
-        std::shared_future<T> f0 = p.get_future();
-        std::shared_future<T> f = f0;
+        ::std::promise<T> p;
+        ::std::shared_future<T> f0 = p.get_future();
+        ::std::shared_future<T> f = f0;
         assert(f0.valid());
         assert(f.valid());
     }
     {
         typedef int& T;
-        std::shared_future<T> f0;
-        std::shared_future<T> f = std::move(f0);
+        ::std::shared_future<T> f0;
+        ::std::shared_future<T> f = ::std::move(f0);
         assert(!f0.valid());
         assert(!f.valid());
     }
     {
         typedef void T;
-        std::promise<T> p;
-        std::shared_future<T> f0 = p.get_future();
-        std::shared_future<T> f = f0;
+        ::std::promise<T> p;
+        ::std::shared_future<T> f0 = p.get_future();
+        ::std::shared_future<T> f = f0;
         assert(f0.valid());
         assert(f.valid());
     }
     {
         typedef void T;
-        std::shared_future<T> f0;
-        std::shared_future<T> f = f0;
+        ::std::shared_future<T> f0;
+        ::std::shared_future<T> f = f0;
         assert(!f0.valid());
         assert(!f.valid());
     }

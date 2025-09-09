@@ -57,12 +57,12 @@ int main(int, char**)
         assert(G::n_alive == 1);
         assert(!G::op_run);
 
-        gpu::thread t0 = support::make_test_thread(g);
-        gpu::thread::id id = t0.get_id();
+        hip::thread t0 = support::make_test_thread(g);
+        hip::thread::id id = t0.get_id();
 
-        gpu::thread t1 = std::move(t0);
+        hip::thread t1 = ::std::move(t0);
         assert(t1.get_id() == id);
-        assert(t0.get_id() == gpu::thread::id());
+        assert(t0.get_id() == hip::thread::id());
 
         t1.join();
         assert(G::n_alive == 1);

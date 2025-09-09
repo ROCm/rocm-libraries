@@ -19,7 +19,7 @@
 
 int main(int, char**)
 {
-    gpu::this_thread::pseudo_yield();
+    hip::this_thread::pseudo_yield();
 
   return 0;
 }

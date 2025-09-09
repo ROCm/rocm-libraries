@@ -21,21 +21,21 @@
 #include "test_macros.h"
 
 #if TEST_STD_VER >= 11
-static_assert(noexcept(swap(std::declval<gpu::unique_lock<checking_mutex>&>(),
-                            std::declval<gpu::unique_lock<checking_mutex>&>())),
+static_assert(noexcept(swap(::std::declval<hip::unique_lock<checking_mutex>&>(),
+                            ::std::declval<hip::unique_lock<checking_mutex>&>())),
               "");
 #endif
 
 int main(int, char**) {
   checking_mutex mux;
-  gpu::unique_lock<checking_mutex> lock1(mux);
-  gpu::unique_lock<checking_mutex> lock2;
+  hip::unique_lock<checking_mutex> lock1(mux);
+  hip::unique_lock<checking_mutex> lock2;
 
   swap(lock1, lock2);
 
   assert(lock1.mutex() == nullptr);
   assert(!lock1.owns_lock());
-  assert(lock2.mutex() == std::addressof(mux));
+  assert(lock2.mutex() == ::std::addressof(mux));
   assert(lock2.owns_lock() == true);
 
   return 0;

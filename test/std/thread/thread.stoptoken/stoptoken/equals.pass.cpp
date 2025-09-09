@@ -33,22 +33,22 @@ concept IsNoThrowInequalityComparable = requires(const T& t1, const T& t2) {
   { t1 != t2 } noexcept;
 };
 
-static_assert(IsNoThrowEqualityComparable<std::stop_token>);
-static_assert(IsNoThrowInequalityComparable<std::stop_token>);
+static_assert(IsNoThrowEqualityComparable<::std::stop_token>);
+static_assert(IsNoThrowInequalityComparable<::std::stop_token>);
 
 int main(int, char**) {
   // both no state
   {
-    const std::stop_token st1;
-    const std::stop_token st2;
+    const ::std::stop_token st1;
+    const ::std::stop_token st2;
     assert(st1 == st2);
     assert(!(st1 != st2));
   }
 
   // only one has no state
   {
-    std::stop_source ss;
-    const std::stop_token st1;
+    ::std::stop_source ss;
+    const ::std::stop_token st1;
     const auto st2 = ss.get_token();
     assert(!(st1 == st2));
     assert(st1 != st2);
@@ -56,7 +56,7 @@ int main(int, char**) {
 
   // both has states. same source
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     const auto st1 = ss.get_token();
     const auto st2 = ss.get_token();
     assert(st1 == st2);
@@ -65,7 +65,7 @@ int main(int, char**) {
 
   // both has states. different sources with same states
   {
-    std::stop_source ss1;
+    ::std::stop_source ss1;
     auto ss2 = ss1;
     const auto st1 = ss1.get_token();
     const auto st2 = ss2.get_token();
@@ -75,8 +75,8 @@ int main(int, char**) {
 
   // both has states. different sources with different states
   {
-    std::stop_source ss1;
-    std::stop_source ss2;
+    ::std::stop_source ss1;
+    ::std::stop_source ss2;
     const auto st1 = ss1.get_token();
     const auto st2 = ss2.get_token();
     assert(!(st1 == st2));

@@ -25,37 +25,37 @@ concept IsNoThrowEqualityComparable = requires(const T& t1, const T& t2) {
   { t1 == t2 } noexcept;
 };
 
-static_assert(IsNoThrowEqualityComparable<std::stop_source>);
+static_assert(IsNoThrowEqualityComparable<::std::stop_source>);
 
 int main(int, char**) {
   // both no state
   {
-    const std::stop_source ss1(std::nostopstate);
-    const std::stop_source ss2(std::nostopstate);
+    const ::std::stop_source ss1(::std::nostopstate);
+    const ::std::stop_source ss2(::std::nostopstate);
     assert(ss1 == ss2);
     assert(!(ss1 != ss2));
   }
 
   // only one has no state
   {
-    const std::stop_source ss1(std::nostopstate);
-    const std::stop_source ss2;
+    const ::std::stop_source ss1(::std::nostopstate);
+    const ::std::stop_source ss2;
     assert(!(ss1 == ss2));
     assert(ss1 != ss2);
   }
 
   // both has states. same state
   {
-    const std::stop_source ss1;
-    const std::stop_source ss2(ss1);
+    const ::std::stop_source ss1;
+    const ::std::stop_source ss2(ss1);
     assert(ss1 == ss2);
     assert(!(ss1 != ss2));
   }
 
   // both has states. different states
   {
-    const std::stop_source ss1;
-    const std::stop_source ss2;
+    const ::std::stop_source ss1;
+    const ::std::stop_source ss2;
     assert(!(ss1 == ss2));
     assert(ss1 != ss2);
   }

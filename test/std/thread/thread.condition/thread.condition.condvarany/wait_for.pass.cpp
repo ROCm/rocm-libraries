@@ -27,8 +27,8 @@
 #include "test_macros.h"
 
 template <class Mutex>
-struct MyLock : gpu::unique_lock<Mutex> {
-  using gpu::unique_lock<Mutex>::unique_lock;
+struct MyLock : hip::unique_lock<Mutex> {
+  using hip::unique_lock<Mutex>::unique_lock;
 };
 
 template <class Function>
@@ -49,19 +49,19 @@ void test() {
   // happen that we get awoken spuriously and fail to recognize it
   // (making this test useless), but the likelihood should be small.
   {
-    std::atomic<bool> ready(false);
-    std::atomic<bool> likely_spurious(true);
+    ::std::atomic<bool> ready(false);
+    ::std::atomic<bool> likely_spurious(true);
     auto timeout = cuda::std::chrono::seconds(3600);
-    std::condition_variable_any cv;
+    ::std::condition_variable_any cv;
     Mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
+    hip::thread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       auto elapsed = measure([&] {
         ready = true;
         do {
-          std::cv_status result = cv.wait_for(lock, timeout);
-          assert(result == std::cv_status::no_timeout);
+          ::std::cv_status result = cv.wait_for(lock, timeout);
+          assert(result == ::std::cv_status::no_timeout);
         } while (likely_spurious);
       });
 
@@ -70,7 +70,7 @@ void test() {
       assert(elapsed < timeout);
     });
 
-    gpu::thread t2 = support::make_test_thread([&] {
+    hip::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -95,17 +95,17 @@ void test() {
   // other than a timeout.
   {
     auto timeout = cuda::std::chrono::milliseconds(250);
-    std::condition_variable_any cv;
+    ::std::condition_variable_any cv;
     Mutex mutex;
 
-    gpu::thread t1 = support::make_test_thread([&] {
+    hip::thread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
-      std::cv_status result;
+      ::std::cv_status result;
       do {
         auto elapsed = measure([&] { result = cv.wait_for(lock, timeout); });
-        if (result == std::cv_status::timeout)
+        if (result == ::std::cv_status::timeout)
           assert(elapsed >= timeout);
-      } while (result != std::cv_status::timeout);
+      } while (result != ::std::cv_status::timeout);
     });
 
     t1.join();
@@ -113,9 +113,9 @@ void test() {
 }
 
 int main(int, char**) {
-  test<gpu::unique_lock<std::mutex>>();
-  test<gpu::unique_lock<std::timed_mutex>>();
-  test<MyLock<std::mutex>>();
-  test<MyLock<std::timed_mutex>>();
+  test<hip::unique_lock<::std::mutex>>();
+  test<hip::unique_lock<::std::timed_mutex>>();
+  test<MyLock<::std::mutex>>();
+  test<MyLock<::std::timed_mutex>>();
   return 0;
 }

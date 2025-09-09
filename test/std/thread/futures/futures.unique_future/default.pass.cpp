@@ -22,15 +22,15 @@
 int main(int, char**)
 {
     {
-        std::future<int> f;
+        ::std::future<int> f;
         assert(!f.valid());
     }
     {
-        std::future<int&> f;
+        ::std::future<int&> f;
         assert(!f.valid());
     }
     {
-        std::future<void> f;
+        ::std::future<void> f;
         assert(!f.valid());
     }
 

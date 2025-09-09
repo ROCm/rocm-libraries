@@ -10,7 +10,7 @@
 // the processing goes awry preventing the definition of the types.
 // XFAIL: msvc
 
-// hipthreads doesn't provide an equivalent to std::scoped_lock yet
+// hipthreads doesn't provide an equivalent to ::std::scoped_lock yet
 // XFAIL: *
 
 // UNSUPPORTED: no-threads
@@ -26,12 +26,12 @@
 
 #include "force_include_hip.h"
 
-__device__ gpu::pseudo_mutex m;
+__device__ hip::pseudo_mutex m;
 __device__ int foo __attribute__((guarded_by(m)));
 
 __device__ static void scoped() {
 #if TEST_STD_VER >= 17
-  gpu::scoped_lock<gpu::pseudo_mutex> lock(m);
+  hip::scoped_lock<hip::pseudo_mutex> lock(m);
   foo++;
 #endif
 }
@@ -39,7 +39,7 @@ __device__ static void scoped() {
 int main(int, char**) {
 #ifdef __HIP_DEVICE_COMPILE__
   scoped();
-  gpu::lock_guard<gpu::pseudo_mutex> lock(m);
+  hip::lock_guard<hip::pseudo_mutex> lock(m);
   foo++;
 #endif
 

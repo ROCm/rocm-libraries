@@ -29,13 +29,13 @@
 
 #include <hip/std/chrono>
 
-namespace gpu {
+namespace cuda {
 
 namespace this_thread {
 
 _LIBGPU_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns);
 
-// TODO: Should we also provide an implementation that accepts std::chrono::duration (and not just cuda::std::chrono::duration)?
+// TODO: Should we also provide an implementation that accepts ::std::chrono::duration (and not just cuda::std::chrono::duration)?
 template <class _Rep, class _Period>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI void sleep_for(const cuda::std::chrono::duration<_Rep, _Period>& __d) {
   if (__d > cuda::std::chrono::duration<_Rep, _Period>::zero()) {
@@ -50,7 +50,7 @@ __host__ __device__ _LIBGPU_HIDE_FROM_ABI void sleep_for(const cuda::std::chrono
         ++__ns;
     } else
       __ns = cuda::std::chrono::nanoseconds::max();
-    gpu::this_thread::sleep_for(__ns);
+    hip::this_thread::sleep_for(__ns);
   }
 }
 
@@ -60,6 +60,6 @@ __device__ unsigned int get_fiber_id() noexcept;
 
 } // namespace this_thread
 
-} // namespace gpu
+} // namespace cuda
 
 #endif // __GPU___THREAD_THIS_THREAD_H__
