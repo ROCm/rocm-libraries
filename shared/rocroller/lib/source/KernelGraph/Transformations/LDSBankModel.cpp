@@ -53,17 +53,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     void LDSBankModel::simulate(MemoryEventSimulated event)
     {
-        // Only process LDS operations
         auto ldsOp = std::get_if<MemoryOpLDS>(&event.memoryOp);
         if(!ldsOp)
             return;
 
-        // Get or create operation accesses for this operationTag
         auto& opAccesses        = m_hierarchicalAccesses[event.operationTag];
         opAccesses.operationTag = event.operationTag;
-        opAccesses.ldsTag       = event.sourceTag; // Assuming sourceTag is the LDS tag
+        opAccesses.ldsTag
+            = ldsOp->direction == Direction::Load ? event.sourceTag : event.destinationTag;
 
-        // Break up bytesRequested into instructions
         uint remainingBytes = event.bytesRequested;
         uint currentOffset  = event.byteOffset;
 
@@ -90,12 +88,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
             }
             else
             {
-                // Less than 4 bytes - round up to 4 bytes (1 dword)
+                // Round to 1 dword
                 instructionBytes  = 4;
                 instructionDwords = 1;
             }
 
-            // Find or create instruction for this dword size
             InstructionAccesses* targetInstruction = nullptr;
             for(auto& instr : opAccesses.instructions)
             {
@@ -110,6 +107,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
                     }
                 }
             }
+
+            std::cout << bool(targetInstruction != nullptr) << "\n";
 
             if(!targetInstruction)
             {
