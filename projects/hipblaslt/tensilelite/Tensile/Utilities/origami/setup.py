@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # setup.py
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
