@@ -37,6 +37,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#include <hip/hip_runtime.h>
 
 #include "common_host_helpers.hpp"
 #include "lib_host_helpers.hpp"
@@ -45,6 +46,12 @@
 #include "rocsolver_logvalue.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
+#define HIP_CHECK(...)                                         \
+    {                                                          \
+        hipError_t _status = (__VA_ARGS__);                    \
+        if(_status != hipSuccess)                              \
+            return get_rocblas_status_for_hip_status(_status); \
+    }
 
 /***************************************************************************
  * rocSOLVER logging macros
@@ -81,16 +88,13 @@ ROCSOLVER_BEGIN_NAMESPACE
             _log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);   \
         }                                                                                     \
     } while(0)
-#define ROCSOLVER_LAUNCH_KERNEL(name, ...)                                                          \
-    do                                                                                              \
-    {                                                                                               \
-        std::unique_ptr<rocsolver_logger::scope_guard<T>> _kernel_log_token;                        \
-        if(rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
-        {                                                                                           \
-            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name);                     \
-            _kernel_log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);  \
-        }                                                                                           \
-        hipLaunchKernelGGL((name), __VA_ARGS__);                                                    \
+#define ROCSOLVER_LAUNCH_KERNEL(name, ...) \
+    do { \
+        if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
+            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name "_kernel"); \
+        hipLaunchKernelGGL((name), __VA_ARGS__); \
+        if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
+            rocsolver_logger::instance()->log_exit<T>(handle); \
     } while(0)
 
 /***************************************************************************
@@ -104,9 +108,14 @@ struct rocsolver_log_entry
     int level;
     double start_time;
 
+    hipEvent_t start_evt = nullptr;
+    hipEvent_t stop_evt = nullptr;
+
     rocsolver_log_entry()
         : level(0)
         , start_time(0)
+        , start_evt(nullptr)
+        , stop_evt(nullptr)
     {
     }
 
@@ -115,6 +124,23 @@ struct rocsolver_log_entry
 
     // Copy constructor
     rocsolver_log_entry(const rocsolver_log_entry&) = default;
+    // Destroy HIP events if constructed
+    ~rocsolver_log_entry()
+    {
+        // Only destroy events if both are still owned here and not moved to profile_entry
+        // (once log_profile moves them, they are managed/destroyed there)
+        // So: only destroy if neither was moved (i.e., both non-zero)
+        // This reduces risk of double-destroy
+        // if(start_evt && stop_evt)
+        // {
+        //     printf("WOAH!!!!!!!!! DELETING EVENTS\n");
+        //     hipEventDestroy(start_evt);
+        //     hipEventDestroy(stop_evt);
+        // }
+        // // Null them to prevent accidental double-destruction
+        // start_evt = nullptr;
+        // stop_evt = nullptr;
+    }
 };
 
 /***************************************************************************
@@ -129,13 +155,14 @@ struct rocsolver_profile_entry
     std::string name;
     int level;
     int calls;
-    double time;
+    double total_time; // now stores accumulated elapsed time in microseconds
+    std::vector<std::pair<hipEvent_t, hipEvent_t>> events;
     std::unique_ptr<rocsolver_profile_map> internal_calls;
 
     rocsolver_profile_entry()
         : level(0)
         , calls(0)
-        , time(0)
+        , total_time(0)
     {
     }
 
@@ -144,6 +171,17 @@ struct rocsolver_profile_entry
 
     // Copy constructor is deleted
     rocsolver_profile_entry(const rocsolver_profile_entry&) = delete;
+
+    // Destroy HIP events when profile entry is destroyed
+    ~rocsolver_profile_entry()
+    {
+        // for(auto& e : events)
+        // {
+        //     printf("WOAH!!!!!!!!! DELETING EVENTS in profile\n");
+        //     if(e.first) hipEventDestroy(e.first);
+        //     if(e.second) hipEventDestroy(e.second);
+        // }
+    }
 };
 
 /***************************************************************************
@@ -174,6 +212,9 @@ private:
 
     // returns a unique_ptr to a file stream or a given default stream
     std::ostream* open_log_stream(const char* environment_variable);
+
+    // recurse and accumulate HIP event timings (previously lambda in log_end_impl)
+    void accumulate_times(rocsolver_profile_map& m);
 
     // returns a log entry on the call stack
     rocsolver_log_entry& push_log_entry(rocblas_handle handle, std::string&& name);
@@ -238,17 +279,12 @@ private:
     template <typename T>
     void log_profile(rocblas_handle handle, rocsolver_log_entry& from_stack)
     {
-        hipStream_t stream;
-        rocblas_get_stream(handle, &stream);
-        double time = get_time_us_sync(stream) - from_stack.start_time;
-
         const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
 
         rocsolver_profile_map* map = &profile;
-        for(const std::string& caller_name : from_stack.callers)
-        {
+        for (const std::string& caller_name : from_stack.callers) {
             rocsolver_profile_entry& entry = (*map)[caller_name];
-            if(!entry.internal_calls)
+            if (!entry.internal_calls)
                 entry.internal_calls = std::make_unique<rocsolver_profile_map>();
             map = entry.internal_calls.get();
         }
@@ -257,7 +293,8 @@ private:
         from_profile.name = from_stack.name;
         from_profile.level = from_stack.level;
         from_profile.calls++;
-        from_profile.time += time;
+        // Store HIP event pair for later to compute time at log_end_impl.
+        from_profile.events.push_back({from_stack.start_evt, from_stack.stop_evt});
     }
 
     static std::unique_lock<std::mutex> acquire_lock()
