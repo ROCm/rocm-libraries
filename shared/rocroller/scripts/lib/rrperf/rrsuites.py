@@ -1693,8 +1693,8 @@ def fp8_32x32x64_scale_options():
 def fp8_kernels():
     yield from fp8_kernels_no_wgm()
     yield from fp8_kernels_wgm()
-    # yield from fp8_16x16x128_scale_options()
-    # yield from fp8_32x32x64_scale_options()
+    yield from fp8_16x16x128_scale_options()
+    yield from fp8_32x32x64_scale_options()
 
 
 def fp8_target_sweep_wgms():
