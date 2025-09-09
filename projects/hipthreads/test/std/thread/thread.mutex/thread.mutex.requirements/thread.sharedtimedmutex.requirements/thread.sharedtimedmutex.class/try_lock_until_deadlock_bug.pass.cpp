@@ -24,11 +24,11 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::shared_timed_mutex m;
+::std::shared_timed_mutex m;
 
 const int total_readers = 2;
-std::atomic<int> readers_started(0);
-std::atomic<int> readers_finished(0);
+::std::atomic<int> readers_started(0);
+::std::atomic<int> readers_finished(0);
 
 // Wait for the readers to start then try and acquire the write lock.
 void writer_one() {
@@ -55,14 +55,14 @@ int main(int, char**)
   typedef cuda::std::chrono::steady_clock Clock;
 
   m.lock_shared();
-  gpu::thread t1 = support::make_test_thread(writer_one);
+  hip::thread t1 = support::make_test_thread(writer_one);
   // create some readers
-  gpu::thread t2 = support::make_test_thread(blocked_reader);
-  gpu::thread t3 = support::make_test_thread(blocked_reader);
+  hip::thread t2 = support::make_test_thread(blocked_reader);
+  hip::thread t3 = support::make_test_thread(blocked_reader);
   // Kill the test after 10 seconds if it hasn't completed.
   auto end_point = Clock::now() + cuda::std::chrono::seconds(10);
   while (readers_finished != total_readers && Clock::now() < end_point) {
-    gpu::this_thread::sleep_for(cuda::std::chrono::seconds(1));
+    hip::this_thread::sleep_for(cuda::std::chrono::seconds(1));
   }
   assert(readers_finished == total_readers);
   m.unlock_shared();

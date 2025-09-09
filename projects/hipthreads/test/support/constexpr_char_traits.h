@@ -20,9 +20,9 @@ struct constexpr_char_traits
 {
     typedef CharT     char_type;
     typedef int       int_type;
-    typedef std::streamoff off_type;
-    typedef std::streampos pos_type;
-    typedef std::mbstate_t state_type;
+    typedef ::std::streamoff off_type;
+    typedef ::std::streampos pos_type;
+    typedef ::std::mbstate_t state_type;
     // The comparison_category is omitted so the class will have weak_ordering
     // in C++20. This is intentional.
 

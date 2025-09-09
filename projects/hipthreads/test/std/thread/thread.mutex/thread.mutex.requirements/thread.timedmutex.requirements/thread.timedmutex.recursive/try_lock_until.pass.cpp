@@ -24,9 +24,9 @@
 
 #include "make_test_thread.h"
 
-bool is_lockable(std::recursive_timed_mutex& m) {
+bool is_lockable(::std::recursive_timed_mutex& m) {
   bool did_lock;
-  gpu::thread t = support::make_test_thread([&] {
+  hip::thread t = support::make_test_thread([&] {
     did_lock = m.try_lock();
     if (did_lock)
       m.unlock(); // undo side effects
@@ -47,7 +47,7 @@ cuda::std::chrono::microseconds measure(Function f) {
 int main(int, char**) {
   // Try to lock a mutex that is not locked yet. This should succeed immediately.
   {
-    std::recursive_timed_mutex m;
+    ::std::recursive_timed_mutex m;
     bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + cuda::std::chrono::milliseconds(1));
     assert(succeeded);
     m.unlock();
@@ -56,7 +56,7 @@ int main(int, char**) {
   // Lock a mutex that is already locked by this thread. This should succeed immediately and the mutex
   // should only be unlocked after a matching number of calls to unlock() on the same thread.
   {
-    std::recursive_timed_mutex m;
+    ::std::recursive_timed_mutex m;
     int lock_count = 0;
     for (int i = 0; i != 10; ++i) {
       assert(m.try_lock_until(cuda::std::chrono::steady_clock::now() + cuda::std::chrono::milliseconds(1)));
@@ -76,12 +76,12 @@ int main(int, char**) {
   {
     cuda::std::chrono::milliseconds const wait_time(500);
     cuda::std::chrono::milliseconds const tolerance = wait_time * 3;
-    std::atomic<bool> ready(false);
+    ::std::atomic<bool> ready(false);
 
-    std::recursive_timed_mutex m;
+    ::std::recursive_timed_mutex m;
     m.lock();
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         ready          = true;
         bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + wait_time);
@@ -100,7 +100,7 @@ int main(int, char**) {
     // There is still technically a race condition here.
     while (!ready)
       /* spin */;
-    gpu::this_thread::sleep_for(wait_time / 5);
+    hip::this_thread::sleep_for(wait_time / 5);
 
     m.unlock(); // this should allow the thread to lock 'm'
     t.join();
@@ -112,10 +112,10 @@ int main(int, char**) {
     cuda::std::chrono::milliseconds const wait_time(10);
     cuda::std::chrono::milliseconds const tolerance(750); // in case the thread we spawned goes to sleep or something
 
-    std::recursive_timed_mutex m;
+    ::std::recursive_timed_mutex m;
     m.lock();
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + wait_time);
         assert(!succeeded);

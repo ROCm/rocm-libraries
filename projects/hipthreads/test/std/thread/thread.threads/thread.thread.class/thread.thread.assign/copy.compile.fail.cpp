@@ -18,8 +18,8 @@
 
 int main(int, char**)
 {
-    gpu::thread t0;
-    gpu::thread t1;
+    hip::thread t0;
+    hip::thread t1;
     t0 = t1;
     return 0;
 }

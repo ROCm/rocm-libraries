@@ -48,17 +48,17 @@
 #include "test_macros.h"
 
 
-std::condition_variable cv;
-std::mutex mut;
+::std::condition_variable cv;
+::std::mutex mut;
 
-std::atomic_int test1(0);
-std::atomic_int test2(0);
-std::atomic_int ready(2);
-std::atomic_int which(0);
+::std::atomic_int test1(0);
+::std::atomic_int test2(0);
+::std::atomic_int ready(2);
+::std::atomic_int which(0);
 
 void f1()
 {
-  gpu::unique_lock<std::mutex> lk(mut);
+  hip::unique_lock<::std::mutex> lk(mut);
   assert(test1 == 0);
   --ready;
   while (test1 == 0)
@@ -70,7 +70,7 @@ void f1()
 
 void f2()
 {
-  gpu::unique_lock<std::mutex> lk(mut);
+  hip::unique_lock<::std::mutex> lk(mut);
   assert(test2 == 0);
   --ready;
   while (test2 == 0)
@@ -82,15 +82,15 @@ void f2()
 
 int main(int, char**)
 {
-  gpu::thread t1 = support::make_test_thread(f1);
-  gpu::thread t2 = support::make_test_thread(f2);
+  hip::thread t1 = support::make_test_thread(f1);
+  hip::thread t2 = support::make_test_thread(f2);
   {
     while (ready > 0)
-      gpu::this_thread::pseudo_yield();
+      hip::this_thread::pseudo_yield();
     // At this point:
     // 1) Both f1 and f2 have entered their condition variable wait.
     // 2) Either f1 or f2 has the mutex locked and is about to wait.
-    gpu::unique_lock<std::mutex> lk(mut);
+    hip::unique_lock<::std::mutex> lk(mut);
     test1 = 1;
     test2 = 1;
     ready = 1;
@@ -98,8 +98,8 @@ int main(int, char**)
   }
   {
     while (which == 0)
-      gpu::this_thread::pseudo_yield();
-    gpu::unique_lock<std::mutex> lk(mut);
+      hip::this_thread::pseudo_yield();
+    hip::unique_lock<::std::mutex> lk(mut);
     if (test1 == 2) {
       assert(test2 == 1);
       t1.join();
@@ -115,8 +115,8 @@ int main(int, char**)
   }
   {
     while (which == 0)
-      gpu::this_thread::pseudo_yield();
-    gpu::unique_lock<std::mutex> lk(mut);
+      hip::this_thread::pseudo_yield();
+    hip::unique_lock<::std::mutex> lk(mut);
     if (test1 == 2) {
       assert(test2 == 0);
       t1.join();

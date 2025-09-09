@@ -49,11 +49,11 @@ int main(int, char**)
 {
     test_allocator_statistics alloc_stats;
     {
-        std::packaged_task<double(int, char)> p(std::allocator_arg,
+        ::std::packaged_task<double(int, char)> p(::std::allocator_arg,
                                                 test_allocator<A>(&alloc_stats), A(5));
         assert(alloc_stats.alloc_count > 0);
         assert(p.valid());
-        std::future<double> f = p.get_future();
+        ::std::future<double> f = p.get_future();
         p(3, 'a');
         assert(f.get() == 105.0);
         assert(A::n_copies == 0);
@@ -64,11 +64,11 @@ int main(int, char**)
     A::n_moves  = 0;
     {
         A a(5);
-        std::packaged_task<double(int, char)> p(std::allocator_arg,
+        ::std::packaged_task<double(int, char)> p(::std::allocator_arg,
                                                 test_allocator<A>(&alloc_stats), a);
         assert(alloc_stats.alloc_count > 0);
         assert(p.valid());
-        std::future<double> f = p.get_future();
+        ::std::future<double> f = p.get_future();
         p(3, 'a');
         assert(f.get() == 105.0);
         assert(A::n_copies > 0);
@@ -79,10 +79,10 @@ int main(int, char**)
     A::n_moves  = 0;
     {
         A a(5);
-        std::packaged_task<int(int)> p(std::allocator_arg, test_allocator<A>(&alloc_stats), &func);
+        ::std::packaged_task<int(int)> p(::std::allocator_arg, test_allocator<A>(&alloc_stats), &func);
         assert(alloc_stats.alloc_count > 0);
         assert(p.valid());
-        std::future<int> f = p.get_future();
+        ::std::future<int> f = p.get_future();
         p(4);
         assert(f.get() == 4);
     }
@@ -91,10 +91,10 @@ int main(int, char**)
     A::n_moves  = 0;
     {
         A a(5);
-        std::packaged_task<int(int)> p(std::allocator_arg, test_allocator<A>(&alloc_stats), func);
+        ::std::packaged_task<int(int)> p(::std::allocator_arg, test_allocator<A>(&alloc_stats), func);
         assert(alloc_stats.alloc_count > 0);
         assert(p.valid());
-        std::future<int> f = p.get_future();
+        ::std::future<int> f = p.get_future();
         p(4);
         assert(f.get() == 4);
     }
@@ -102,10 +102,10 @@ int main(int, char**)
     A::n_copies = 0;
     A::n_moves  = 0;
     {
-        std::packaged_task<double(int, char)> p(std::allocator_arg,
+        ::std::packaged_task<double(int, char)> p(::std::allocator_arg,
                                                 bare_allocator<void>(), A(5));
         assert(p.valid());
-        std::future<double> f = p.get_future();
+        ::std::future<double> f = p.get_future();
         p(3, 'a');
         assert(f.get() == 105.0);
         assert(A::n_copies == 0);
@@ -114,10 +114,10 @@ int main(int, char**)
     A::n_copies = 0;
     A::n_moves  = 0;
     {
-        std::packaged_task<double(int, char)> p(std::allocator_arg,
+        ::std::packaged_task<double(int, char)> p(::std::allocator_arg,
                                                 min_allocator<void>(), A(5));
         assert(p.valid());
-        std::future<double> f = p.get_future();
+        ::std::future<double> f = p.get_future();
         p(3, 'a');
         assert(f.get() == 105.0);
         assert(A::n_copies == 0);

@@ -18,11 +18,11 @@
 #include <utility>
 
 void test() {
-  std::stop_token st;
+  ::std::stop_token st;
   auto a = [] {};
-  static_assert(std::is_same_v<decltype(std::stop_callback(st, a)), std::stop_callback<decltype(a)>>);
-  static_assert(std::is_same_v<decltype(std::stop_callback(st, std::as_const(a))), std::stop_callback<decltype(a)>>);
-  static_assert(std::is_same_v<decltype(std::stop_callback(st, std::move(a))), std::stop_callback<decltype(a)>>);
+  static_assert(::std::is_same_v<decltype(::std::stop_callback(st, a)), ::std::stop_callback<decltype(a)>>);
+  static_assert(::std::is_same_v<decltype(::std::stop_callback(st, ::std::as_const(a))), ::std::stop_callback<decltype(a)>>);
+  static_assert(::std::is_same_v<decltype(::std::stop_callback(st, ::std::move(a))), ::std::stop_callback<decltype(a)>>);
   static_assert(
-      std::is_same_v<decltype(std::stop_callback(st, std::move(std::as_const(a)))), std::stop_callback<decltype(a)>>);
+      ::std::is_same_v<decltype(::std::stop_callback(st, ::std::move(::std::as_const(a)))), ::std::stop_callback<decltype(a)>>);
 }

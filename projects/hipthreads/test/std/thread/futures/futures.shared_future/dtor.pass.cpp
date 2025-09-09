@@ -28,9 +28,9 @@ int main(int, char**)
     assert(alloc_stats.alloc_count == 0);
     {
         typedef int T;
-        std::shared_future<T> f;
+        ::std::shared_future<T> f;
         {
-            std::promise<T> p(std::allocator_arg, test_allocator<T>(&alloc_stats));
+            ::std::promise<T> p(::std::allocator_arg, test_allocator<T>(&alloc_stats));
             assert(alloc_stats.alloc_count == 1);
             f = p.get_future();
             assert(alloc_stats.alloc_count == 1);
@@ -42,9 +42,9 @@ int main(int, char**)
     assert(alloc_stats.alloc_count == 0);
     {
         typedef int& T;
-        std::shared_future<T> f;
+        ::std::shared_future<T> f;
         {
-            std::promise<T> p(std::allocator_arg, test_allocator<int>(&alloc_stats));
+            ::std::promise<T> p(::std::allocator_arg, test_allocator<int>(&alloc_stats));
             assert(alloc_stats.alloc_count == 1);
             f = p.get_future();
             assert(alloc_stats.alloc_count == 1);
@@ -56,9 +56,9 @@ int main(int, char**)
     assert(alloc_stats.alloc_count == 0);
     {
         typedef void T;
-        std::shared_future<T> f;
+        ::std::shared_future<T> f;
         {
-            std::promise<T> p(std::allocator_arg, test_allocator<T>(&alloc_stats));
+            ::std::promise<T> p(::std::allocator_arg, test_allocator<T>(&alloc_stats));
             assert(alloc_stats.alloc_count == 1);
             f = p.get_future();
             assert(alloc_stats.alloc_count == 1);

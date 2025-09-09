@@ -18,11 +18,11 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_nothrow_default_constructible_v<std::stop_token>);
+static_assert(::std::is_nothrow_default_constructible_v<::std::stop_token>);
 
 int main(int, char**) {
   {
-    std::stop_token st = {}; // implicit
+    ::std::stop_token st = {}; // implicit
     assert(!st.stop_possible());
     assert(!st.stop_requested());
   }

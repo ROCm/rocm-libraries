@@ -21,21 +21,21 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_trivially_default_constructible_v<std::nostopstate_t>);
+static_assert(::std::is_trivially_default_constructible_v<::std::nostopstate_t>);
 
 struct Empty {};
-static_assert(sizeof(Empty) == sizeof(std::nostopstate_t));
+static_assert(sizeof(Empty) == sizeof(::std::nostopstate_t));
 
 template <class T>
 void conversionTest(T);
 
 template <class T>
 concept ImplicitlyDefaultConstructible = requires { conversionTest<T>({}); };
-static_assert(!ImplicitlyDefaultConstructible<std::nostopstate_t>);
+static_assert(!ImplicitlyDefaultConstructible<::std::nostopstate_t>);
 
 int main(int, char**) {
-  [[maybe_unused]] std::same_as<std::nostopstate_t> auto x = std::nostopstate;
-  [[maybe_unused]] auto y                                  = std::nostopstate_t{};
+  [[maybe_unused]] ::std::same_as<::std::nostopstate_t> auto x = ::std::nostopstate;
+  [[maybe_unused]] auto y                                  = ::std::nostopstate_t{};
 
   return 0;
 }

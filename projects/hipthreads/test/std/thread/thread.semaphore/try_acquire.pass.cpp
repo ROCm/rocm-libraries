@@ -22,7 +22,7 @@
 
 int main(int, char**)
 {
-  std::counting_semaphore<> s(1);
+  ::std::counting_semaphore<> s(1);
 
   assert(s.try_acquire());
   assert(!s.try_acquire());
@@ -30,7 +30,7 @@ int main(int, char**)
   assert(s.try_acquire());
   assert(!s.try_acquire());
   s.release(2);
-  gpu::thread t = support::make_test_thread([&](){
+  hip::thread t = support::make_test_thread([&](){
     assert(s.try_acquire());
   });
   t.join();

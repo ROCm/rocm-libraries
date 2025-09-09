@@ -27,7 +27,7 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::shared_timed_mutex m;
+::std::shared_timed_mutex m;
 
 typedef cuda::std::chrono::system_clock Clock;
 typedef Clock::time_point time_point;
@@ -49,23 +49,23 @@ void f()
 {
     time_point t0 = Clock::now();
     {
-        std::shared_lock<std::shared_timed_mutex> lk(m, std::try_to_lock);
+        ::std::shared_lock<::std::shared_timed_mutex> lk(m, ::std::try_to_lock);
         assert(lk.owns_lock() == false);
     }
     {
-        std::shared_lock<std::shared_timed_mutex> lk(m, std::try_to_lock);
+        ::std::shared_lock<::std::shared_timed_mutex> lk(m, ::std::try_to_lock);
         assert(lk.owns_lock() == false);
     }
     {
-        std::shared_lock<std::shared_timed_mutex> lk(m, std::try_to_lock);
+        ::std::shared_lock<::std::shared_timed_mutex> lk(m, ::std::try_to_lock);
         assert(lk.owns_lock() == false);
     }
     while (true)
     {
-        std::shared_lock<std::shared_timed_mutex> lk(m, std::try_to_lock);
+        ::std::shared_lock<::std::shared_timed_mutex> lk(m, ::std::try_to_lock);
         if (lk.owns_lock())
             break;
-        gpu::this_thread::pseudo_yield();
+        hip::this_thread::pseudo_yield();
     }
     time_point t1 = Clock::now();
     ns d = t1 - t0 - ms(250);
@@ -75,10 +75,10 @@ void f()
 int main(int, char**)
 {
     m.lock();
-    std::vector<gpu::thread> v;
+    ::std::vector<hip::thread> v;
     for (int i = 0; i < 5; ++i)
         v.push_back(support::make_test_thread(f));
-    gpu::this_thread::sleep_for(ms(250));
+    hip::this_thread::sleep_for(ms(250));
     m.unlock();
     for (auto& t : v)
         t.join();

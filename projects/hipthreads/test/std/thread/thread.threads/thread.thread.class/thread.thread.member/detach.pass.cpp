@@ -69,8 +69,8 @@ __host__ __device__ void wait_for_done() {
 #ifdef __HIP_DEVICE_COMPILE__
     while (!done) {}
 #else
-    hipLaunchKernelGGL(wait_for_done_kern, dim3(1), dim3(1), 0, gpu::internal::getEnqueingStream());
-    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(gpu::internal::getEnqueingStream()));
+    hipLaunchKernelGGL(wait_for_done_kern, dim3(1), dim3(1), 0, hip::internal::getEnqueingStream());
+    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hip::internal::getEnqueingStream()));
 #endif
 }
 
@@ -79,7 +79,7 @@ int main(int, char**)
 #ifdef __HIP_DEVICE_COMPILE__
     {
         G g;
-        gpu::thread t0 = support::make_test_thread(g);
+        hip::thread t0 = support::make_test_thread(g);
         assert(t0.joinable());
         t0.detach();
         assert(!t0.joinable());
@@ -93,9 +93,9 @@ int main(int, char**)
 #ifndef TEST_HAS_NO_EXCEPTIONS
     {
 #ifdef __HIP_DEVICE_COMPILE__
-        gpu::thread t0 = support::make_test_thread(foo);
+        hip::thread t0 = support::make_test_thread(foo);
 #else
-        gpu::thread t0 = support::make_test_thread([]__device__(){foo();});
+        hip::thread t0 = support::make_test_thread([]__device__(){foo();});
 #endif
         assert(t0.joinable());
         t0.detach();
@@ -103,7 +103,7 @@ int main(int, char**)
 #ifndef __HIP_DEVICE_COMPILE__
         try {
             t0.detach();
-        } catch (std::system_error const&) {
+        } catch (::std::system_error const&) {
         }
 #endif
         // Wait to make sure that the detached thread has started up.

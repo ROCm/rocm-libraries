@@ -23,8 +23,8 @@
 
 int main(int, char**)
 {
-    gpu::thread t;
-    assert(t.get_id() == gpu::thread::id());
+    hip::thread t;
+    assert(t.get_id() == hip::thread::id());
 
   return 0;
 }

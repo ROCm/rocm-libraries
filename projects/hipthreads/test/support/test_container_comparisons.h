@@ -52,8 +52,8 @@ constexpr void test_ordered_container_spaceship_with_type() {
     assert(testOrder(l1, l2, Order::greater));
   }
   // Unordered
-  if constexpr (std::is_same_v<Elem, PartialOrder>) {
-    Container<Elem> l1{1, std::numeric_limits<int>::min()};
+  if constexpr (::std::is_same_v<Elem, PartialOrder>) {
+    Container<Elem> l1{1, ::std::numeric_limits<int>::min()};
     Container<Elem> l2{1, 2};
     assert(testOrder(l1, l2, Order::unordered));
   }
@@ -62,21 +62,21 @@ constexpr void test_ordered_container_spaceship_with_type() {
 // Tests the `operator<=>` on ordered containers
 template <template <typename...> typename Container>
 constexpr bool test_ordered_container_spaceship() {
-  // The container should fulfil `std::three_way_comparable`
-  static_assert(std::three_way_comparable<Container<int>>);
+  // The container should fulfil `::std::three_way_comparable`
+  static_assert(::std::three_way_comparable<Container<int>>);
 
   // Test different comparison categories
-  test_ordered_container_spaceship_with_type<Container, int, std::strong_ordering>();
-  test_ordered_container_spaceship_with_type<Container, StrongOrder, std::strong_ordering>();
-  test_ordered_container_spaceship_with_type<Container, WeakOrder, std::weak_ordering>();
-  test_ordered_container_spaceship_with_type<Container, PartialOrder, std::partial_ordering>();
+  test_ordered_container_spaceship_with_type<Container, int, ::std::strong_ordering>();
+  test_ordered_container_spaceship_with_type<Container, StrongOrder, ::std::strong_ordering>();
+  test_ordered_container_spaceship_with_type<Container, WeakOrder, ::std::weak_ordering>();
+  test_ordered_container_spaceship_with_type<Container, PartialOrder, ::std::partial_ordering>();
 
   // `LessAndEqComp` does not have `operator<=>`. ordering is sythesized based on `operator<`
-  test_ordered_container_spaceship_with_type<Container, LessAndEqComp, std::weak_ordering>();
+  test_ordered_container_spaceship_with_type<Container, LessAndEqComp, ::std::weak_ordering>();
 
   // Thanks to SFINAE, the following is not a compiler error but returns `false`
   struct NonComparable {};
-  static_assert(!std::three_way_comparable<Container<NonComparable>>);
+  static_assert(!::std::three_way_comparable<Container<NonComparable>>);
 
   return true;
 }

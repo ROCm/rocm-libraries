@@ -20,7 +20,7 @@
 #include "test_macros.h"
 
 int main(int, char**) {
-  std::shared_mutex m;
+  ::std::shared_mutex m;
   (void)m;
 
   return 0;

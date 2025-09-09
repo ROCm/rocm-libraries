@@ -26,7 +26,7 @@
 
 int main(int, char **) {
   {
-    TEST_LIBCPP_ASSERT_FAILURE([]{ std::latch l(-1); }(),
+    TEST_LIBCPP_ASSERT_FAILURE([]{ ::std::latch l(-1); }(),
                                "latch::latch(ptrdiff_t): latch cannot be "
                                "initialized with a negative value");
   }

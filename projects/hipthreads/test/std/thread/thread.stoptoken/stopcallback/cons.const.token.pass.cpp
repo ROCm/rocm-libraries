@@ -30,20 +30,20 @@ struct Cb {
 };
 
 // Constraints: Callback and C satisfy constructible_from<Callback, C>.
-static_assert(std::is_constructible_v<std::stop_callback<void (*)()>, const std::stop_token&, void (*)()>);
-static_assert(!std::is_constructible_v<std::stop_callback<void (*)()>, const std::stop_token&, void (*)(int)>);
-static_assert(std::is_constructible_v<std::stop_callback<Cb>, const std::stop_token&, Cb&>);
-static_assert(std::is_constructible_v<std::stop_callback<Cb&>, const std::stop_token&, Cb&>);
-static_assert(!std::is_constructible_v<std::stop_callback<Cb>, const std::stop_token&, int>);
+static_assert(::std::is_constructible_v<::std::stop_callback<void (*)()>, const ::std::stop_token&, void (*)()>);
+static_assert(!::std::is_constructible_v<::std::stop_callback<void (*)()>, const ::std::stop_token&, void (*)(int)>);
+static_assert(::std::is_constructible_v<::std::stop_callback<Cb>, const ::std::stop_token&, Cb&>);
+static_assert(::std::is_constructible_v<::std::stop_callback<Cb&>, const ::std::stop_token&, Cb&>);
+static_assert(!::std::is_constructible_v<::std::stop_callback<Cb>, const ::std::stop_token&, int>);
 
 // explicit
 template <class T>
 void conversion_test(T);
 
 template <class T, class... Args>
-concept ImplicitlyConstructible = requires(Args&&... args) { conversion_test<T>({std::forward<Args>(args)...}); };
+concept ImplicitlyConstructible = requires(Args&&... args) { conversion_test<T>({::std::forward<Args>(args)...}); };
 static_assert(ImplicitlyConstructible<int, int>);
-static_assert(!ImplicitlyConstructible<std::stop_callback<Cb>, const std::stop_token&, Cb>);
+static_assert(!ImplicitlyConstructible<::std::stop_callback<Cb>, const ::std::stop_token&, Cb>);
 
 // noexcept
 template <bool NoExceptCtor>
@@ -51,28 +51,28 @@ struct CbNoExcept {
   CbNoExcept(int) noexcept(NoExceptCtor);
   void operator()() const;
 };
-static_assert(std::is_nothrow_constructible_v<std::stop_callback<CbNoExcept<true>>, const std::stop_token&, int>);
-static_assert(!std::is_nothrow_constructible_v<std::stop_callback<CbNoExcept<false>>, const std::stop_token&, int>);
+static_assert(::std::is_nothrow_constructible_v<::std::stop_callback<CbNoExcept<true>>, const ::std::stop_token&, int>);
+static_assert(!::std::is_nothrow_constructible_v<::std::stop_callback<CbNoExcept<false>>, const ::std::stop_token&, int>);
 
 int main(int, char**) {
   // was requested
   {
-    std::stop_source ss;
-    const std::stop_token st = ss.get_token();
+    ::std::stop_source ss;
+    const ::std::stop_token st = ss.get_token();
     ss.request_stop();
 
     bool called = false;
-    std::stop_callback sc(st, [&] { called = true; });
+    ::std::stop_callback sc(st, [&] { called = true; });
     assert(called);
   }
 
   // was not requested
   {
-    std::stop_source ss;
-    const std::stop_token st = ss.get_token();
+    ::std::stop_source ss;
+    const ::std::stop_token st = ss.get_token();
 
     bool called = false;
-    std::stop_callback sc(st, [&] { called = true; });
+    ::std::stop_callback sc(st, [&] { called = true; });
     assert(!called);
 
     ss.request_stop();
@@ -81,21 +81,21 @@ int main(int, char**) {
 
   // token has no state
   {
-    std::stop_token st;
+    ::std::stop_token st;
     bool called = false;
-    std::stop_callback sc(st, [&] { called = true; });
+    ::std::stop_callback sc(st, [&] { called = true; });
     assert(!called);
   }
 
   // should not be called multiple times
   {
-    std::stop_source ss;
-    const std::stop_token st = ss.get_token();
+    ::std::stop_source ss;
+    const ::std::stop_token st = ss.get_token();
 
     int calledTimes = 0;
-    std::stop_callback sc(st, [&] { ++calledTimes; });
+    ::std::stop_callback sc(st, [&] { ++calledTimes; });
 
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (auto i = 0; i < 10; ++i) {
       threads.emplace_back(support::make_test_thread([&] { ss.request_stop(); }));
     }
@@ -108,12 +108,12 @@ int main(int, char**) {
 
   // adding more callbacks during invoking other callbacks
   {
-    std::stop_source ss;
-    const std::stop_token st = ss.get_token();
+    ::std::stop_source ss;
+    const ::std::stop_token st = ss.get_token();
 
-    std::atomic<bool> startedFlag = false;
-    std::atomic<bool> finishFlag  = false;
-    std::stop_callback sc(st, [&] {
+    ::std::atomic<bool> startedFlag = false;
+    ::std::atomic<bool> finishFlag  = false;
+    ::std::stop_callback sc(st, [&] {
       startedFlag = true;
       startedFlag.notify_all();
       finishFlag.wait(false);
@@ -125,7 +125,7 @@ int main(int, char**) {
 
     // first callback is still running, adding another one;
     bool secondCallbackCalled = false;
-    std::stop_callback sc2(st, [&] { secondCallbackCalled = true; });
+    ::std::stop_callback sc2(st, [&] { secondCallbackCalled = true; });
 
     finishFlag = true;
     finishFlag.notify_all();
@@ -136,27 +136,27 @@ int main(int, char**) {
 
   // adding callbacks on different threads
   {
-    std::stop_source ss;
-    const std::stop_token st = ss.get_token();
+    ::std::stop_source ss;
+    const ::std::stop_token st = ss.get_token();
 
-    std::vector<gpu::thread> threads;
-    std::atomic<int> callbackCalledTimes = 0;
-    std::atomic<bool> done               = false;
+    ::std::vector<hip::thread> threads;
+    ::std::atomic<int> callbackCalledTimes = 0;
+    ::std::atomic<bool> done               = false;
     for (auto i = 0; i < 10; ++i) {
       threads.emplace_back(support::make_test_thread([&] {
-        std::stop_callback sc{st, [&] { callbackCalledTimes.fetch_add(1, std::memory_order_relaxed); }};
+        ::std::stop_callback sc{st, [&] { callbackCalledTimes.fetch_add(1, ::std::memory_order_relaxed); }};
         done.wait(false);
       }));
     }
-    using namespace std::chrono_literals;
-    gpu::this_thread::sleep_for(1ms);
+    using namespace ::std::chrono_literals;
+    hip::this_thread::sleep_for(1ms);
     ss.request_stop();
     done = true;
     done.notify_all();
     for (auto& thread : threads) {
       thread.join();
     }
-    assert(callbackCalledTimes.load(std::memory_order_relaxed) == 10);
+    assert(callbackCalledTimes.load(::std::memory_order_relaxed) == 10);
   }
 
   // correct overload
@@ -179,11 +179,11 @@ int main(int, char**) {
       bool lvalueConstCalled = false;
       bool rvalueCalled      = false;
       bool rvalueConstCalled = false;
-      std::stop_source ss;
-      const std::stop_token st = ss.get_token();
+      ::std::stop_source ss;
+      const ::std::stop_token st = ss.get_token();
       ss.request_stop();
 
-      std::stop_callback<CBWithTracking> sc(
+      ::std::stop_callback<CBWithTracking> sc(
           st, CBWithTracking{lvalueCalled, lvalueConstCalled, rvalueCalled, rvalueConstCalled});
       assert(rvalueCalled);
     }
@@ -194,11 +194,11 @@ int main(int, char**) {
       bool lvalueConstCalled = false;
       bool rvalueCalled      = false;
       bool rvalueConstCalled = false;
-      std::stop_source ss;
-      const std::stop_token st = ss.get_token();
+      ::std::stop_source ss;
+      const ::std::stop_token st = ss.get_token();
       ss.request_stop();
 
-      std::stop_callback<const CBWithTracking> sc(
+      ::std::stop_callback<const CBWithTracking> sc(
           st, CBWithTracking{lvalueCalled, lvalueConstCalled, rvalueCalled, rvalueConstCalled});
       assert(rvalueConstCalled);
     }
@@ -209,11 +209,11 @@ int main(int, char**) {
       bool lvalueConstCalled = false;
       bool rvalueCalled      = false;
       bool rvalueConstCalled = false;
-      std::stop_source ss;
-      const std::stop_token st = ss.get_token();
+      ::std::stop_source ss;
+      const ::std::stop_token st = ss.get_token();
       ss.request_stop();
       CBWithTracking cb{lvalueCalled, lvalueConstCalled, rvalueCalled, rvalueConstCalled};
-      std::stop_callback<CBWithTracking&> sc(st, cb);
+      ::std::stop_callback<CBWithTracking&> sc(st, cb);
       assert(lvalueCalled);
     }
 
@@ -223,11 +223,11 @@ int main(int, char**) {
       bool lvalueConstCalled = false;
       bool rvalueCalled      = false;
       bool rvalueConstCalled = false;
-      std::stop_source ss;
-      const std::stop_token st = ss.get_token();
+      ::std::stop_source ss;
+      const ::std::stop_token st = ss.get_token();
       ss.request_stop();
       CBWithTracking cb{lvalueCalled, lvalueConstCalled, rvalueCalled, rvalueConstCalled};
-      std::stop_callback<const CBWithTracking&> sc(st, cb);
+      ::std::stop_callback<const CBWithTracking&> sc(st, cb);
       assert(lvalueConstCalled);
     }
   }

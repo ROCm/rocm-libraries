@@ -36,8 +36,8 @@ cuda::std::chrono::microseconds measure(Function f) {
 int main(int, char**) {
   // Try to lock-shared a mutex that is not locked yet. This should succeed immediately.
   {
-    std::shared_timed_mutex m;
-    std::vector<gpu::thread> threads;
+    ::std::shared_timed_mutex m;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared_until(cuda::std::chrono::steady_clock::now() + cuda::std::chrono::milliseconds(1));
@@ -56,12 +56,12 @@ int main(int, char**) {
   {
     cuda::std::chrono::milliseconds const wait_time(500);
     cuda::std::chrono::milliseconds const tolerance = wait_time * 3;
-    std::atomic<int> ready(0);
+    ::std::atomic<int> ready(0);
 
-    std::shared_timed_mutex m;
+    ::std::shared_timed_mutex m;
     m.lock();
 
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         ++ready;
@@ -86,7 +86,7 @@ int main(int, char**) {
     // There is still technically a race condition here.
     while (ready < 5)
       /* spin */;
-    gpu::this_thread::sleep_for(wait_time / 5);
+    hip::this_thread::sleep_for(wait_time / 5);
 
     m.unlock(); // this should allow the threads to lock-shared 'm'
 
@@ -100,10 +100,10 @@ int main(int, char**) {
     cuda::std::chrono::milliseconds const wait_time(10);
     cuda::std::chrono::milliseconds const tolerance(750); // in case the thread we spawned goes to sleep or something
 
-    std::shared_timed_mutex m;
+    ::std::shared_timed_mutex m;
     m.lock();
 
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         auto elapsed = measure([&] {

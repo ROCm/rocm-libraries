@@ -20,18 +20,18 @@
 #include "test_macros.h"
 
 #if TEST_STD_VER >= 11
-static_assert(noexcept(std::declval<gpu::unique_lock<checking_mutex>&>().release()), "");
+static_assert(noexcept(::std::declval<hip::unique_lock<checking_mutex>&>().release()), "");
 #endif
 
 int main(int, char**) {
   checking_mutex mux;
-  gpu::unique_lock<checking_mutex> lock(mux);
-  assert(lock.mutex() == std::addressof(mux));
+  hip::unique_lock<checking_mutex> lock(mux);
+  assert(lock.mutex() == ::std::addressof(mux));
   assert(lock.owns_lock());
 
   assert(mux.current_state == checking_mutex::locked_via_lock);
 
-  assert(lock.release() == std::addressof(mux));
+  assert(lock.release() == ::std::addressof(mux));
   assert(lock.mutex() == nullptr);
   assert(!lock.owns_lock());
   assert(mux.last_try == checking_mutex::locked_via_lock);

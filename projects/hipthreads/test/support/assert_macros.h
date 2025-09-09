@@ -31,19 +31,19 @@
 
 void test_log(const char* condition, const char* file, int line, const char* message) {
   const char* msg = condition ? "Assertion failure: " : "Unconditional failure:";
-  std::fprintf(stderr, "%s%s %s %d\n%s", msg, condition, file, line, message);
+  ::std::fprintf(stderr, "%s%s %s %d\n%s", msg, condition, file, line, message);
 }
 
 template <class F>
 void test_log(const char* condition, const char* file, int line, const F& functor) {
-  std::fprintf(stderr, "Assertion failure: %s %s %d\n", condition, file, line);
+  ::std::fprintf(stderr, "Assertion failure: %s %s %d\n", condition, file, line);
   functor();
 }
 
 template <class Arg>
 [[noreturn]] void test_fail(const char* file, int line, const Arg& arg) {
   test_log("", file, line, arg);
-  std::abort();
+  ::std::abort();
 }
 
 template <class Arg>
@@ -52,12 +52,12 @@ void test_require(bool condition, const char* condition_str, const char* file, i
     return;
 
   test_log(condition_str, file, line, arg);
-  std::abort();
+  ::std::abort();
 }
 
 // assert(false) replacement
 // The ARG is either a
-// - c-ctring or std::string, in which case the string is printed to stderr,
+// - c-ctring or ::std::string, in which case the string is printed to stderr,
 // - an invocable object, which will be invoked.
 #define TEST_FAIL(ARG) ::test_fail(__FILE__, __LINE__, ARG)
 

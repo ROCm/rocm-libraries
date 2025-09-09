@@ -33,45 +33,45 @@ auto test_typedef(...) -> NAT;
 
 template <class LG>
 constexpr bool has_mutex_type() {
-    return !std::is_same<decltype(test_typedef<LG>(0)), NAT>::value;
+    return !::std::is_same<decltype(test_typedef<LG>(0)), NAT>::value;
 }
 
 int main(int, char**)
 {
     {
-        using T = gpu::scoped_lock<>;
+        using T = hip::scoped_lock<>;
         static_assert(!has_mutex_type<T>(), "");
     }
     {
-        using M1 = std::mutex;
-        using T = gpu::scoped_lock<M1>;
-        static_assert(std::is_same<T::mutex_type, M1>::value, "");
+        using M1 = ::std::mutex;
+        using T = hip::scoped_lock<M1>;
+        static_assert(::std::is_same<T::mutex_type, M1>::value, "");
     }
     {
-        using M1 = std::recursive_mutex;
-        using T = gpu::scoped_lock<M1>;
-        static_assert(std::is_same<T::mutex_type, M1>::value, "");
+        using M1 = ::std::recursive_mutex;
+        using T = hip::scoped_lock<M1>;
+        static_assert(::std::is_same<T::mutex_type, M1>::value, "");
     }
     {
-        using M1 = std::mutex;
-        using M2 = std::recursive_mutex;
-        using T = gpu::scoped_lock<M1, M2>;
+        using M1 = ::std::mutex;
+        using M2 = ::std::recursive_mutex;
+        using T = hip::scoped_lock<M1, M2>;
         static_assert(!has_mutex_type<T>(), "");
     }
     {
-        using M1 = std::mutex;
-        using M2 = std::recursive_mutex;
-        using T = gpu::scoped_lock<M1, M1, M2>;
+        using M1 = ::std::mutex;
+        using M2 = ::std::recursive_mutex;
+        using T = hip::scoped_lock<M1, M1, M2>;
         static_assert(!has_mutex_type<T>(), "");
     }
     {
-        using M1 = std::mutex;
-        using T = gpu::scoped_lock<M1, M1>;
+        using M1 = ::std::mutex;
+        using T = hip::scoped_lock<M1, M1>;
         static_assert(!has_mutex_type<T>(), "");
     }
     {
-        using M1 = std::recursive_mutex;
-        using T = gpu::scoped_lock<M1, M1, M1>;
+        using M1 = ::std::recursive_mutex;
+        using T = hip::scoped_lock<M1, M1, M1>;
         static_assert(!has_mutex_type<T>(), "");
     }
 

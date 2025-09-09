@@ -18,7 +18,7 @@
 
 int main(int, char**)
 {
-    gpu::thread t0; (void)t0;
-    gpu::thread t1(t0); (void)t1;
+    hip::thread t0; (void)t0;
+    hip::thread t1(t0); (void)t1;
     return 0;
 }

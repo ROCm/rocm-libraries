@@ -26,10 +26,10 @@
 #include <cassert>
 #include <cstdint>
 
-namespace gpu {
+namespace cuda {
 
 //====================================================================================================================//
-//      Adapted from libc++ std::mutex
+//      Adapted from libc++ ::std::mutex
 //====================================================================================================================//
 
 // TODO: add a scope paramter
@@ -84,6 +84,6 @@ class _LIBGPU_TYPE_VIS _LIBGPU_THREAD_SAFETY_ANNOTATION(capability("spin_mutex")
     }
 };
 
-} // namespace gpu
+} // namespace cuda
 
 #endif // __GPU___MUTEX_SPIN_MUTEX_H__

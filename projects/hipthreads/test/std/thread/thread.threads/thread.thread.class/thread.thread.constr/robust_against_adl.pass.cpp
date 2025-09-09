@@ -34,7 +34,7 @@ int main(int, char **)
     // call in an extended lambda causes an ADL lookup.
 #ifdef __HIP_DEVICE_COMPILE__ 
     Holder<Incomplete> *p = nullptr;
-    gpu::thread t(f, p);
+    hip::thread t(f, p);
     t.join();
 #endif
     return 0;

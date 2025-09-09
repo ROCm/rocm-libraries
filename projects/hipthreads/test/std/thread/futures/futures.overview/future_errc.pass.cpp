@@ -27,17 +27,17 @@
 
 int main(int, char**)
 {
-    static_assert(std::future_errc::broken_promise != std::future_errc::future_already_retrieved, "");
-    static_assert(std::future_errc::broken_promise != std::future_errc::promise_already_satisfied, "");
-    static_assert(std::future_errc::broken_promise != std::future_errc::no_state, "");
-    static_assert(std::future_errc::future_already_retrieved != std::future_errc::promise_already_satisfied, "");
-    static_assert(std::future_errc::future_already_retrieved != std::future_errc::no_state, "");
-    static_assert(std::future_errc::promise_already_satisfied != std::future_errc::no_state, "");
+    static_assert(::std::future_errc::broken_promise != ::std::future_errc::future_already_retrieved, "");
+    static_assert(::std::future_errc::broken_promise != ::std::future_errc::promise_already_satisfied, "");
+    static_assert(::std::future_errc::broken_promise != ::std::future_errc::no_state, "");
+    static_assert(::std::future_errc::future_already_retrieved != ::std::future_errc::promise_already_satisfied, "");
+    static_assert(::std::future_errc::future_already_retrieved != ::std::future_errc::no_state, "");
+    static_assert(::std::future_errc::promise_already_satisfied != ::std::future_errc::no_state, "");
 
-    static_assert(std::future_errc::broken_promise != static_cast<std::future_errc>(0), "");
-    static_assert(std::future_errc::future_already_retrieved != static_cast<std::future_errc>(0), "");
-    static_assert(std::future_errc::promise_already_satisfied != static_cast<std::future_errc>(0), "");
-    static_assert(std::future_errc::no_state != static_cast<std::future_errc>(0), "");
+    static_assert(::std::future_errc::broken_promise != static_cast<::std::future_errc>(0), "");
+    static_assert(::std::future_errc::future_already_retrieved != static_cast<::std::future_errc>(0), "");
+    static_assert(::std::future_errc::promise_already_satisfied != static_cast<::std::future_errc>(0), "");
+    static_assert(::std::future_errc::no_state != static_cast<::std::future_errc>(0), "");
 
   return 0;
 }

@@ -23,10 +23,10 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::condition_variable_any cv;
+::std::condition_variable_any cv;
 
-typedef std::timed_mutex L0;
-typedef gpu::unique_lock<L0> L1;
+typedef ::std::timed_mutex L0;
+typedef hip::unique_lock<L0> L1;
 
 L0 m0;
 
@@ -47,7 +47,7 @@ void f()
 int main(int, char**)
 {
     L1 lk(m0);
-    gpu::thread t = support::make_test_thread(f);
+    hip::thread t = support::make_test_thread(f);
     assert(test1 == 0);
     while (test1 == 0)
         cv.wait(lk);

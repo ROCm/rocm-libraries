@@ -19,7 +19,7 @@
 
 #include <hip/mutex>
 
-__device__ gpu::spin_mutex m;
+__device__ hip::spin_mutex m;
 
 __device__ void f() {
   m.lock();

@@ -58,7 +58,7 @@ public:
 
 
 template <>
-struct std::hash<MoveOnly>
+struct ::std::hash<MoveOnly>
 {
     typedef MoveOnly argument_type;
     typedef size_t result_type;

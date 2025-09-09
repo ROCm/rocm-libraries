@@ -24,12 +24,12 @@ struct MutableCopy {
   constexpr MutableCopy(MutableCopy&) = default;
   constexpr MutableCopy(const MutableCopy&) = delete;
 
-  constexpr MutableCopy(std::allocator_arg_t, const test_allocator<int>&, MutableCopy& o)
+  constexpr MutableCopy(::std::allocator_arg_t, const test_allocator<int>&, MutableCopy& o)
       : val(o.val), alloc_constructed(true) {}
 };
 
 template <>
-struct std::uses_allocator<MutableCopy, test_allocator<int>> : std::true_type {};
+struct ::std::uses_allocator<MutableCopy, test_allocator<int>> : ::std::true_type {};
 
 struct ConstCopy {
   int val;
@@ -40,12 +40,12 @@ struct ConstCopy {
   constexpr ConstCopy(const ConstCopy&) = default;
   constexpr ConstCopy(ConstCopy&) = delete;
 
-  constexpr ConstCopy(std::allocator_arg_t, const test_allocator<int>&, const ConstCopy& o)
+  constexpr ConstCopy(::std::allocator_arg_t, const test_allocator<int>&, const ConstCopy& o)
       : val(o.val), alloc_constructed(true) {}
 };
 
 template <>
-struct std::uses_allocator<ConstCopy, test_allocator<int>> : std::true_type {};
+struct ::std::uses_allocator<ConstCopy, test_allocator<int>> : ::std::true_type {};
 
 struct MutableMove {
   int val;
@@ -56,12 +56,12 @@ struct MutableMove {
   constexpr MutableMove(MutableMove&&) = default;
   constexpr MutableMove(const MutableMove&&) = delete;
 
-  constexpr MutableMove(std::allocator_arg_t, const test_allocator<int>&, MutableMove&& o)
+  constexpr MutableMove(::std::allocator_arg_t, const test_allocator<int>&, MutableMove&& o)
       : val(o.val), alloc_constructed(true) {}
 };
 
 template <>
-struct std::uses_allocator<MutableMove, test_allocator<int>> : std::true_type {};
+struct ::std::uses_allocator<MutableMove, test_allocator<int>> : ::std::true_type {};
 
 struct ConstMove {
   int val;
@@ -72,12 +72,12 @@ struct ConstMove {
   constexpr ConstMove(const ConstMove&& o) : val(o.val) {}
   constexpr ConstMove(ConstMove&&) = delete;
 
-  constexpr ConstMove(std::allocator_arg_t, const test_allocator<int>&, const ConstMove&& o)
+  constexpr ConstMove(::std::allocator_arg_t, const test_allocator<int>&, const ConstMove&& o)
       : val(o.val), alloc_constructed(true) {}
 };
 
 template <>
-struct std::uses_allocator<ConstMove, test_allocator<int>> : std::true_type {};
+struct ::std::uses_allocator<ConstMove, test_allocator<int>> : ::std::true_type {};
 
 template <class T>
 struct ConvertibleFrom {
@@ -86,28 +86,28 @@ struct ConvertibleFrom {
 
   constexpr ConvertibleFrom() = default;
   constexpr ConvertibleFrom(T& _v)
-    requires(std::is_constructible_v<T, T&>)
+    requires(::std::is_constructible_v<T, T&>)
   : v(_v) {}
   constexpr ConvertibleFrom(const T& _v)
-    requires(std::is_constructible_v<T, const T&> && !std::is_const_v<T>)
+    requires(::std::is_constructible_v<T, const T&> && !::std::is_const_v<T>)
   : v(_v) {}
   constexpr ConvertibleFrom(T&& _v)
-    requires(std::is_constructible_v<T, T &&>)
-  : v(std::move(_v)) {}
+    requires(::std::is_constructible_v<T, T &&>)
+  : v(::std::move(_v)) {}
   constexpr ConvertibleFrom(const T&& _v)
-    requires(std::is_constructible_v<T, const T &&> && !std::is_const_v<T>)
-  : v(std::move(_v)) {}
+    requires(::std::is_constructible_v<T, const T &&> && !::std::is_const_v<T>)
+  : v(::std::move(_v)) {}
 
   template <class U>
-    requires std::is_constructible_v<ConvertibleFrom, U&&>
-  constexpr ConvertibleFrom(std::allocator_arg_t, const test_allocator<int>&, U&& _u)
-      : ConvertibleFrom{std::forward<U>(_u)} {
+    requires ::std::is_constructible_v<ConvertibleFrom, U&&>
+  constexpr ConvertibleFrom(::std::allocator_arg_t, const test_allocator<int>&, U&& _u)
+      : ConvertibleFrom{::std::forward<U>(_u)} {
     alloc_constructed = true;
   }
 };
 
 template <class T>
-struct std::uses_allocator<ConvertibleFrom<T>, test_allocator<int>> : std::true_type {};
+struct ::std::uses_allocator<ConvertibleFrom<T>, test_allocator<int>> : ::std::true_type {};
 
 template <class T>
 struct ExplicitConstructibleFrom {
@@ -116,28 +116,28 @@ struct ExplicitConstructibleFrom {
 
   constexpr explicit ExplicitConstructibleFrom() = default;
   constexpr explicit ExplicitConstructibleFrom(T& _v)
-    requires(std::is_constructible_v<T, T&>)
+    requires(::std::is_constructible_v<T, T&>)
   : v(_v) {}
   constexpr explicit ExplicitConstructibleFrom(const T& _v)
-    requires(std::is_constructible_v<T, const T&> && !std::is_const_v<T>)
+    requires(::std::is_constructible_v<T, const T&> && !::std::is_const_v<T>)
   : v(_v) {}
   constexpr explicit ExplicitConstructibleFrom(T&& _v)
-    requires(std::is_constructible_v<T, T &&>)
-  : v(std::move(_v)) {}
+    requires(::std::is_constructible_v<T, T &&>)
+  : v(::std::move(_v)) {}
   constexpr explicit ExplicitConstructibleFrom(const T&& _v)
-    requires(std::is_constructible_v<T, const T &&> && !std::is_const_v<T>)
-  : v(std::move(_v)) {}
+    requires(::std::is_constructible_v<T, const T &&> && !::std::is_const_v<T>)
+  : v(::std::move(_v)) {}
 
   template <class U>
-    requires std::is_constructible_v<ExplicitConstructibleFrom, U&&>
-  constexpr ExplicitConstructibleFrom(std::allocator_arg_t, const test_allocator<int>&, U&& _u)
-      : ExplicitConstructibleFrom{std::forward<U>(_u)} {
+    requires ::std::is_constructible_v<ExplicitConstructibleFrom, U&&>
+  constexpr ExplicitConstructibleFrom(::std::allocator_arg_t, const test_allocator<int>&, U&& _u)
+      : ExplicitConstructibleFrom{::std::forward<U>(_u)} {
     alloc_constructed = true;
   }
 };
 
 template <class T>
-struct std::uses_allocator<ExplicitConstructibleFrom<T>, test_allocator<int>> : std::true_type {};
+struct ::std::uses_allocator<ExplicitConstructibleFrom<T>, test_allocator<int>> : ::std::true_type {};
 
 struct TracedCopyMove {
   int nonConstCopy = 0;
@@ -163,15 +163,15 @@ struct TracedCopyMove {
         constMove(other.constMove + 1) {}
 
   template <class U>
-    requires std::is_constructible_v<TracedCopyMove, U&&>
-  constexpr TracedCopyMove(std::allocator_arg_t, const test_allocator<int>&, U&& _u)
-      : TracedCopyMove{std::forward<U>(_u)} {
+    requires ::std::is_constructible_v<TracedCopyMove, U&&>
+  constexpr TracedCopyMove(::std::allocator_arg_t, const test_allocator<int>&, U&& _u)
+      : TracedCopyMove{::std::forward<U>(_u)} {
     alloc_constructed = true;
   }
 };
 
 template <>
-struct std::uses_allocator<TracedCopyMove, test_allocator<int>> : std::true_type {};
+struct ::std::uses_allocator<TracedCopyMove, test_allocator<int>> : ::std::true_type {};
 
 // If the constructor tuple(tuple<UTyles...>&) is not available,
 // the fallback call to `tuple(const tuple&) = default;` or any other
@@ -191,33 +191,33 @@ struct NoConstructorFromInt {};
 
 struct CvtFromTupleRef : TracedCopyMove {
   constexpr CvtFromTupleRef() = default;
-  constexpr CvtFromTupleRef(std::tuple<CvtFromTupleRef>& other)
-      : TracedCopyMove(static_cast<TracedCopyMove&>(std::get<0>(other))) {}
+  constexpr CvtFromTupleRef(::std::tuple<CvtFromTupleRef>& other)
+      : TracedCopyMove(static_cast<TracedCopyMove&>(::std::get<0>(other))) {}
 };
 
 struct ExplicitCtrFromTupleRef : TracedCopyMove {
   constexpr explicit ExplicitCtrFromTupleRef() = default;
-  constexpr explicit ExplicitCtrFromTupleRef(std::tuple<ExplicitCtrFromTupleRef>& other)
-      : TracedCopyMove(static_cast<TracedCopyMove&>(std::get<0>(other))) {}
+  constexpr explicit ExplicitCtrFromTupleRef(::std::tuple<ExplicitCtrFromTupleRef>& other)
+      : TracedCopyMove(static_cast<TracedCopyMove&>(::std::get<0>(other))) {}
 };
 
 struct CvtFromConstTupleRefRef : TracedCopyMove {
   constexpr CvtFromConstTupleRefRef() = default;
-  constexpr CvtFromConstTupleRefRef(const std::tuple<CvtFromConstTupleRefRef>&& other)
-      : TracedCopyMove(static_cast<const TracedCopyMove&&>(std::get<0>(other))) {}
+  constexpr CvtFromConstTupleRefRef(const ::std::tuple<CvtFromConstTupleRefRef>&& other)
+      : TracedCopyMove(static_cast<const TracedCopyMove&&>(::std::get<0>(other))) {}
 };
 
 struct ExplicitCtrFromConstTupleRefRef : TracedCopyMove {
   constexpr explicit ExplicitCtrFromConstTupleRefRef() = default;
-  constexpr explicit ExplicitCtrFromConstTupleRefRef(std::tuple<const ExplicitCtrFromConstTupleRefRef>&& other)
-      : TracedCopyMove(static_cast<const TracedCopyMove&&>(std::get<0>(other))) {}
+  constexpr explicit ExplicitCtrFromConstTupleRefRef(::std::tuple<const ExplicitCtrFromConstTupleRefRef>&& other)
+      : TracedCopyMove(static_cast<const TracedCopyMove&&>(::std::get<0>(other))) {}
 };
 
 template <class T>
 void conversion_test(T);
 
 template <class T, class... Args>
-concept ImplicitlyConstructible = requires(Args&&... args) { conversion_test<T>({std::forward<Args>(args)...}); };
+concept ImplicitlyConstructible = requires(Args&&... args) { conversion_test<T>({::std::forward<Args>(args)...}); };
 
 struct CopyAssign {
   int val;
@@ -285,34 +285,34 @@ struct AssignableFrom {
 
   template <class U>
   constexpr AssignableFrom(U&& u)
-    requires std::is_constructible_v<T, U&&>
-  : v(std::forward<U>(u)) {}
+    requires ::std::is_constructible_v<T, U&&>
+  : v(::std::forward<U>(u)) {}
 
   constexpr AssignableFrom& operator=(const T& t)
-    requires std::is_copy_assignable_v<T>
+    requires ::std::is_copy_assignable_v<T>
   {
     v = t;
     return *this;
   }
 
   constexpr AssignableFrom& operator=(T&& t)
-    requires std::is_move_assignable_v<T>
+    requires ::std::is_move_assignable_v<T>
   {
-    v = std::move(t);
+    v = ::std::move(t);
     return *this;
   }
 
   constexpr const AssignableFrom& operator=(const T& t) const
-    requires std::is_assignable_v<const T&, const T&>
+    requires ::std::is_assignable_v<const T&, const T&>
   {
     v = t;
     return *this;
   }
 
   constexpr const AssignableFrom& operator=(T&& t) const
-    requires std::is_assignable_v<const T&, T&&>
+    requires ::std::is_assignable_v<const T&, T&&>
   {
-    v = std::move(t);
+    v = ::std::move(t);
     return *this;
   }
 };

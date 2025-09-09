@@ -24,7 +24,7 @@
 // the format functions test.
 
 // TODO: This currently only tests formatting thread IDs in host code. We should add tests for device code if/when
-// libhipcxx adds support for strings and std::format
+// libhipcxx adds support for strings and ::std::format
 
 #include <cassert>
 #include <concepts>
@@ -38,15 +38,15 @@
 #define SV(S) MAKE_STRING_VIEW(CharT, S)
 
 template <class StringViewT>
-constexpr void test_parse(StringViewT fmt, std::size_t offset) {
+constexpr void test_parse(StringViewT fmt, ::std::size_t offset) {
   using CharT    = typename StringViewT::value_type;
-  auto parse_ctx = std::basic_format_parse_context<CharT>(fmt);
-  std::formatter<gpu::thread::id, CharT> formatter;
-  static_assert(std::semiregular<decltype(formatter)>);
+  auto parse_ctx = ::std::basic_format_parse_context<CharT>(fmt);
+  ::std::formatter<hip::thread::id, CharT> formatter;
+  static_assert(::std::semiregular<decltype(formatter)>);
 
-  std::same_as<typename StringViewT::iterator> auto it = formatter.parse(parse_ctx);
-  // std::to_address works around LWG3989 and MSVC STL's iterator debugging mechanism.
-  assert(std::to_address(it) == std::to_address(fmt.end()) - offset);
+  ::std::same_as<typename StringViewT::iterator> auto it = formatter.parse(parse_ctx);
+  // ::std::to_address works around LWG3989 and MSVC STL's iterator debugging mechanism.
+  assert(::std::to_address(it) == ::std::to_address(fmt.end()) - offset);
 }
 
 template <class CharT>

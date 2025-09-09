@@ -34,12 +34,12 @@
 typedef cuda::std::chrono::high_resolution_clock Clock;
 typedef cuda::std::chrono::milliseconds ms;
 
-std::atomic_bool invoked{false};
+::std::atomic_bool invoked{false};
 
 int f0()
 {
     invoked = true;
-    gpu::this_thread::sleep_for(ms(200));
+    hip::this_thread::sleep_for(ms(200));
     return 3;
 }
 
@@ -48,33 +48,33 @@ int i = 0;
 int& f1()
 {
     invoked = true;
-    gpu::this_thread::sleep_for(ms(200));
+    hip::this_thread::sleep_for(ms(200));
     return i;
 }
 
 void f2()
 {
     invoked = true;
-    gpu::this_thread::sleep_for(ms(200));
+    hip::this_thread::sleep_for(ms(200));
 }
 
-std::unique_ptr<int> f3(int j)
+::std::unique_ptr<int> f3(int j)
 {
     invoked = true;
-    gpu::this_thread::sleep_for(ms(200));
-    return std::unique_ptr<int>(new int(j));
+    hip::this_thread::sleep_for(ms(200));
+    return ::std::unique_ptr<int>(new int(j));
 }
 
-std::unique_ptr<int> f4(std::unique_ptr<int>&& p)
+::std::unique_ptr<int> f4(::std::unique_ptr<int>&& p)
 {
     invoked = true;
-    gpu::this_thread::sleep_for(ms(200));
-    return std::move(p);
+    hip::this_thread::sleep_for(ms(200));
+    return ::std::move(p);
 }
 
 void f5(int j)
 {
-    gpu::this_thread::sleep_for(ms(200));
+    hip::this_thread::sleep_for(ms(200));
     ((void)j);
     TEST_THROW(j);
 }
@@ -85,8 +85,8 @@ void test(CheckLambda&& getAndCheckFn, bool IsDeferred, Args&&... args) {
   invoked = false;
 
   // Create the future and wait
-  std::future<Ret> f = std::async(std::forward<Args>(args)...);
-  gpu::this_thread::sleep_for(ms(300));
+  ::std::future<Ret> f = ::std::async(::std::forward<Args>(args)...);
+  hip::this_thread::sleep_for(ms(300));
 
   // Check that deferred async's have not invoked the function.
   assert(invoked == !IsDeferred);
@@ -109,49 +109,49 @@ void test(CheckLambda&& getAndCheckFn, bool IsDeferred, Args&&... args) {
 int main(int, char**)
 {
     // The default launch policy is implementation defined. libc++ defines
-    // it to be std::launch::async.
+    // it to be ::std::launch::async.
     bool DefaultPolicyIsDeferred = false;
     bool DPID = DefaultPolicyIsDeferred;
 
-    std::launch AnyPolicy = std::launch::async | std::launch::deferred;
-    LIBCPP_ASSERT(AnyPolicy == std::launch::any);
+    ::std::launch AnyPolicy = ::std::launch::async | ::std::launch::deferred;
+    LIBCPP_ASSERT(AnyPolicy == ::std::launch::any);
 
     {
-        auto checkInt = [](std::future<int>& f) { return f.get() == 3; };
+        auto checkInt = [](::std::future<int>& f) { return f.get() == 3; };
         test<int>(checkInt, DPID,  f0);
-        test<int>(checkInt, false, std::launch::async, f0);
-        test<int>(checkInt, true,  std::launch::deferred, f0);
+        test<int>(checkInt, false, ::std::launch::async, f0);
+        test<int>(checkInt, true,  ::std::launch::deferred, f0);
         test<int>(checkInt, DPID,  AnyPolicy, f0);
     }
     {
-        auto checkIntRef = [&](std::future<int&>& f) { return &f.get() == &i; };
+        auto checkIntRef = [&](::std::future<int&>& f) { return &f.get() == &i; };
         test<int&>(checkIntRef, DPID,  f1);
-        test<int&>(checkIntRef, false, std::launch::async, f1);
-        test<int&>(checkIntRef, true,  std::launch::deferred, f1);
+        test<int&>(checkIntRef, false, ::std::launch::async, f1);
+        test<int&>(checkIntRef, true,  ::std::launch::deferred, f1);
         test<int&>(checkIntRef, DPID,  AnyPolicy, f1);
     }
     {
-        auto checkVoid = [](std::future<void>& f) { f.get(); return true; };
+        auto checkVoid = [](::std::future<void>& f) { f.get(); return true; };
         test<void>(checkVoid, DPID,  f2);
-        test<void>(checkVoid, false, std::launch::async, f2);
-        test<void>(checkVoid, true,  std::launch::deferred, f2);
+        test<void>(checkVoid, false, ::std::launch::async, f2);
+        test<void>(checkVoid, true,  ::std::launch::deferred, f2);
         test<void>(checkVoid, DPID,  AnyPolicy, f2);
     }
     {
-        using Ret = std::unique_ptr<int>;
-        auto checkUPtr = [](std::future<Ret>& f) { return *f.get() == 3; };
+        using Ret = ::std::unique_ptr<int>;
+        auto checkUPtr = [](::std::future<Ret>& f) { return *f.get() == 3; };
         test<Ret>(checkUPtr, DPID, f3, 3);
-        test<Ret>(checkUPtr, DPID, f4, std::unique_ptr<int>(new int(3)));
+        test<Ret>(checkUPtr, DPID, f4, ::std::unique_ptr<int>(new int(3)));
     }
 #ifndef TEST_HAS_NO_EXCEPTIONS
     {
-        std::future<void> f = std::async(f5, 3);
-        gpu::this_thread::sleep_for(ms(300));
+        ::std::future<void> f = ::std::async(f5, 3);
+        hip::this_thread::sleep_for(ms(300));
         try { f.get(); assert (false); } catch ( int ) {}
     }
     {
-        std::future<void> f = std::async(std::launch::deferred, f5, 3);
-        gpu::this_thread::sleep_for(ms(300));
+        ::std::future<void> f = ::std::async(::std::launch::deferred, f5, 3);
+        hip::this_thread::sleep_for(ms(300));
         try { f.get(); assert (false); } catch ( int ) {}
     }
 #endif

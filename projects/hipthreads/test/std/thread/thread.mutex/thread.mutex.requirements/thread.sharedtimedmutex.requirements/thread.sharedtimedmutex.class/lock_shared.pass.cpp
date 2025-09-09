@@ -27,8 +27,8 @@
 int main(int, char**) {
   // Lock-shared a mutex that is not locked yet. This should succeed.
   {
-    std::shared_timed_mutex m;
-    std::vector<gpu::thread> threads;
+    ::std::shared_timed_mutex m;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         m.lock_shared();
@@ -42,12 +42,12 @@ int main(int, char**) {
 
   // Lock-shared a mutex that is already exclusively locked. This should block until it is unlocked.
   {
-    std::atomic<int> ready(0);
-    std::shared_timed_mutex m;
+    ::std::atomic<int> ready(0);
+    ::std::shared_timed_mutex m;
     m.lock();
-    std::atomic<bool> is_locked_from_main(true);
+    ::std::atomic<bool> is_locked_from_main(true);
 
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         ++ready;
@@ -75,11 +75,11 @@ int main(int, char**) {
 
   // Lock-shared a mutex that is already lock-shared. This should succeed.
   {
-    std::atomic<int> ready(0);
-    std::shared_timed_mutex m;
+    ::std::atomic<int> ready(0);
+    ::std::shared_timed_mutex m;
     m.lock_shared();
 
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         ++ready;
@@ -107,12 +107,12 @@ int main(int, char**) {
   // us to know whether the test was somewhat effective at causing multiple threads to lock at
   // the same time.
   {
-    std::shared_timed_mutex mutex;
-    std::vector<gpu::thread> threads;
+    ::std::shared_timed_mutex mutex;
+    ::std::vector<hip::thread> threads;
     constexpr int n_threads = 5;
-    std::atomic<int> holders(0);
+    ::std::atomic<int> holders(0);
     int concurrent_holders[n_threads] = {};
-    std::atomic<bool> ready(false);
+    ::std::atomic<bool> ready(false);
 
     for (int i = 0; i != n_threads; ++i) {
       threads.push_back(support::make_test_thread([&, i] {
@@ -134,7 +134,7 @@ int main(int, char**) {
 
     // We can't guarantee that we'll ever have more than 1 concurrent holder so that's what
     // we assert, however in principle we should often trigger more than 1 concurrent holder.
-    int max_concurrent_holders = *std::max_element(std::begin(concurrent_holders), std::end(concurrent_holders));
+    int max_concurrent_holders = *::std::max_element(::std::begin(concurrent_holders), ::std::end(concurrent_holders));
     assert(max_concurrent_holders >= 1);
   }
 

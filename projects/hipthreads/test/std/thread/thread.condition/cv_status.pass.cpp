@@ -19,8 +19,8 @@
 
 int main(int, char**)
 {
-    assert(static_cast<int>(std::cv_status::no_timeout) == 0);
-    assert(static_cast<int>(std::cv_status::timeout)    == 1);
+    assert(static_cast<int>(::std::cv_status::no_timeout) == 0);
+    assert(static_cast<int>(::std::cv_status::timeout)    == 1);
 
   return 0;
 }

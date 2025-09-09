@@ -20,7 +20,7 @@
 
 int main(int, char**)
 {
-  std::latch l(1);
+  ::std::latch l(1);
 
   l.count_down();
   bool const b = l.try_wait();

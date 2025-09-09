@@ -102,7 +102,7 @@
 #    define _LIBGPU_ABI_ALTERNATE_STRING_LAYOUT
 // Fix deque iterator type in order to support incomplete types.
 #    define _LIBGPU_ABI_INCOMPLETE_TYPES_IN_DEQUE
-// Fix undefined behavior in how std::list stores its linked nodes.
+// Fix undefined behavior in how ::std::list stores its linked nodes.
 #    define _LIBGPU_ABI_LIST_REMOVE_NODE_POINTER_UB
 // Fix undefined behavior in  how __tree stores its end and parent nodes.
 #    define _LIBGPU_ABI_TREE_REMOVE_NODE_POINTER_UB
@@ -122,26 +122,26 @@
 // Enable optimized version of __do_get_(un)signed which avoids redundant copies.
 #    define _LIBGPU_ABI_OPTIMIZED_LOCALE_NUM_GET
 // Give reverse_iterator<T> one data member of type T, not two.
-// Also, in C++17 and later, don't derive iterator types from std::iterator.
+// Also, in C++17 and later, don't derive iterator types from ::std::iterator.
 #    define _LIBGPU_ABI_NO_ITERATOR_BASES
 // Use the smallest possible integer type to represent the index of the variant.
 // Previously libc++ used "unsigned int" exclusively.
 #    define _LIBGPU_ABI_VARIANT_INDEX_TYPE_OPTIMIZATION
-// Unstable attempt to provide a more optimized std::function
+// Unstable attempt to provide a more optimized ::std::function
 #    define _LIBGPU_ABI_OPTIMIZED_FUNCTION
 // All the regex constants must be distinct and nonzero.
 #    define _LIBGPU_ABI_REGEX_CONSTANTS_NONZERO
-// Re-worked external template instantiations for std::string with a focus on
+// Re-worked external template instantiations for ::std::string with a focus on
 // performance and fast-path inlining.
 #    define _LIBGPU_ABI_STRING_OPTIMIZED_EXTERNAL_INSTANTIATION
-// Enable clang::trivial_abi on std::unique_ptr.
+// Enable clang::trivial_abi on ::std::unique_ptr.
 #    define _LIBGPU_ABI_ENABLE_UNIQUE_PTR_TRIVIAL_ABI
-// Enable clang::trivial_abi on std::shared_ptr and std::weak_ptr
+// Enable clang::trivial_abi on ::std::shared_ptr and ::std::weak_ptr
 #    define _LIBGPU_ABI_ENABLE_SHARED_PTR_TRIVIAL_ABI
-// std::random_device holds some state when it uses an implementation that gets
+// ::std::random_device holds some state when it uses an implementation that gets
 // entropy from a file (see _LIBGPU_USING_DEV_RANDOM). When switching from this
 // implementation to another one on a platform that has already shipped
-// std::random_device, one needs to retain the same object layout to remain ABI
+// ::std::random_device, one needs to retain the same object layout to remain ABI
 // compatible. This switch removes these workarounds for platforms that don't care
 // about ABI compatibility.
 #    define _LIBGPU_ABI_NO_RANDOM_DEVICE_COMPATIBILITY_LAYOUT
@@ -151,16 +151,16 @@
 #    define _LIBGPU_ABI_DO_NOT_EXPORT_VECTOR_BASE_COMMON
 // According to the Standard, `bitset::operator[] const` returns bool
 #    define _LIBGPU_ABI_BITSET_VECTOR_BOOL_CONST_SUBSCRIPT_RETURN_BOOL
-// Fix the implementation of CityHash used for std::hash<fundamental-type>.
-// This is an ABI break because `std::hash` will return a different result,
+// Fix the implementation of CityHash used for ::std::hash<fundamental-type>.
+// This is an ABI break because `::std::hash` will return a different result,
 // which means that hashing the same object in translation units built against
 // different versions of libc++ can return inconsistent results. This is especially
-// tricky since std::hash is used in the implementation of unordered containers.
+// tricky since ::std::hash is used in the implementation of unordered containers.
 //
 // The incorrect implementation of CityHash has the problem that it drops some
 // bits on the floor.
 #    define _LIBGPU_ABI_FIX_CITYHASH_IMPLEMENTATION
-// Remove the base 10 implementation of std::to_chars from the dylib.
+// Remove the base 10 implementation of ::std::to_chars from the dylib.
 // The implementation moved to the header, but we still export the symbols from
 // the dylib for backwards compatibility.
 #    define _LIBGPU_ABI_DO_NOT_EXPORT_TO_CHARS_BASE_10
@@ -372,43 +372,43 @@
 #    define _LIBGPU_SHORT_WCHAR 1
 #  endif
 
-// Libc++ supports various implementations of std::random_device.
+// Libc++ supports various implementations of ::std::random_device.
 //
 // _LIBGPU_USING_DEV_RANDOM
 //      Read entropy from the given file, by default `/dev/urandom`.
 //      If a token is provided, it is assumed to be the path to a file
 //      to read entropy from. This is the default behavior if nothing
 //      else is specified. This implementation requires storing state
-//      inside `std::random_device`.
+//      inside `::std::random_device`.
 //
 // _LIBGPU_USING_ARC4_RANDOM
 //      Use arc4random(). This allows obtaining random data even when
 //      using sandboxing mechanisms. On some platforms like Apple, this
 //      is the recommended source of entropy for user-space programs.
-//      When this option is used, the token passed to `std::random_device`'s
+//      When this option is used, the token passed to `::std::random_device`'s
 //      constructor *must* be "/dev/urandom" -- anything else is an error.
 //
 // _LIBGPU_USING_GETENTROPY
 //      Use getentropy().
-//      When this option is used, the token passed to `std::random_device`'s
+//      When this option is used, the token passed to `::std::random_device`'s
 //      constructor *must* be "/dev/urandom" -- anything else is an error.
 //
 // _LIBGPU_USING_FUCHSIA_CPRNG
 //      Use Fuchsia's zx_cprng_draw() system call, which is specified to
 //      deliver high-quality entropy and cannot fail.
-//      When this option is used, the token passed to `std::random_device`'s
+//      When this option is used, the token passed to `::std::random_device`'s
 //      constructor *must* be "/dev/urandom" -- anything else is an error.
 //
 // _LIBGPU_USING_NACL_RANDOM
 //      NaCl's sandbox (which PNaCl also runs in) doesn't allow filesystem access,
 //      including accesses to the special files under `/dev`. This implementation
 //      uses the NaCL syscall `nacl_secure_random_init()` to get entropy.
-//      When this option is used, the token passed to `std::random_device`'s
+//      When this option is used, the token passed to `::std::random_device`'s
 //      constructor *must* be "/dev/urandom" -- anything else is an error.
 //
 // _LIBGPU_USING_WIN32_RANDOM
 //      Use rand_s(), for use on Windows.
-//      When this option is used, the token passed to `std::random_device`'s
+//      When this option is used, the token passed to `::std::random_device`'s
 //      constructor *must* be "/dev/urandom" -- anything else is an error.
 #  if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) ||                     \
       defined(__DragonFly__) || defined(__sun__)
@@ -700,7 +700,7 @@ _LIBGPU_BEGIN_NAMESPACE_STD _LIBGPU_END_NAMESPACE_STD
 #  define _LIBGPU_END_NAMESPACE_FILESYSTEM _LIBGPU_END_NAMESPACE_STD }}
 // clang-format on
 
-#  define _VSTD_FS std::__fs::filesystem
+#  define _VSTD_FS ::std::__fs::filesystem
 
 #  if __has_attribute(__enable_if__)
 #    define _LIBGPU_PREFERRED_OVERLOAD __attribute__((__enable_if__(true, "")))

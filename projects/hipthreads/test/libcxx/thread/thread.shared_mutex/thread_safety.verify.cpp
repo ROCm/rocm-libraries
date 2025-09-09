@@ -29,7 +29,7 @@
 
 #include <shared_mutex>
 
-std::shared_mutex m;
+::std::shared_mutex m;
 int data __attribute__((guarded_by(m))) = 0;
 void read(int);
 

@@ -14,7 +14,7 @@
 
 #include "hip/thread_config"
 
-namespace gpu {
+namespace cuda {
 
 class _LIBGPU_EXPORTED_FROM_ABI __thread_id;
 
@@ -30,13 +30,13 @@ namespace internal {
   struct ThreadData;
 }
 
-} // namespace gpu
+} // namespace cuda
 
 template <class _CharT, class _Traits>
-_LIBGPU_HIDE_FROM_ABI std::basic_ostream<_CharT, _Traits>&
-operator<<(std::basic_ostream<_CharT, _Traits>& __os, gpu::__thread_id __id);
+_LIBGPU_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
+operator<<(::std::basic_ostream<_CharT, _Traits>& __os, hip::__thread_id __id);
 
-namespace gpu {
+namespace cuda {
 
 class _LIBGPU_TEMPLATE_VIS __thread_id {
   using underlying_type = uint32_t;
@@ -60,12 +60,12 @@ public:
 #  if _LIBGPU_STD_VER <= 17
   __host__ __device__ friend _LIBGPU_HIDE_FROM_ABI bool operator<(__thread_id __x, __thread_id __y) _NOEXCEPT;
 #  else  // _LIBGPU_STD_VER <= 17
-  __host__ __device__ friend _LIBGPU_HIDE_FROM_ABI std::strong_ordering operator<=>(__thread_id __x, __thread_id __y) noexcept;
+  __host__ __device__ friend _LIBGPU_HIDE_FROM_ABI ::std::strong_ordering operator<=>(__thread_id __x, __thread_id __y) noexcept;
 #  endif // _LIBGPU_STD_VER <= 17
 
   template <class _CharT, class _Traits>
-  friend _LIBGPU_HIDE_FROM_ABI std::basic_ostream<_CharT, _Traits>&
-  ::operator<<(std::basic_ostream<_CharT, _Traits>& __os, __thread_id __id);
+  friend _LIBGPU_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
+  ::operator<<(::std::basic_ostream<_CharT, _Traits>& __os, __thread_id __id);
 
 private:
   __host__ __device__ _LIBGPU_HIDE_FROM_ABI __thread_id(underlying_type __id) : __id_(__id) {}
@@ -100,21 +100,21 @@ __host__ __device__ inline _LIBGPU_HIDE_FROM_ABI bool operator>=(__thread_id __x
 
 #  else // _LIBGPU_STD_VER <= 17
 
-__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI std::strong_ordering operator<=>(__thread_id __x, __thread_id __y) noexcept {
+__host__ __device__ inline _LIBGPU_HIDE_FROM_ABI ::std::strong_ordering operator<=>(__thread_id __x, __thread_id __y) noexcept {
   if (__x == __y)
-    return std::strong_ordering::equal;
+    return ::std::strong_ordering::equal;
   if (__thread_id::__lt_impl(__x, __y))
-    return std::strong_ordering::less;
-  return std::strong_ordering::greater;
+    return ::std::strong_ordering::less;
+  return ::std::strong_ordering::greater;
 }
 
 #  endif // _LIBGPU_STD_VER <= 17
 
-} // namespace gpu
+} // namespace cuda
 
 template <class _CharT, class _Traits>
-_LIBGPU_HIDE_FROM_ABI std::basic_ostream<_CharT, _Traits>&
-operator<<(std::basic_ostream<_CharT, _Traits>& __os, gpu::__thread_id __id) {
+_LIBGPU_HIDE_FROM_ABI ::std::basic_ostream<_CharT, _Traits>&
+operator<<(::std::basic_ostream<_CharT, _Traits>& __os, hip::__thread_id __id) {
   // [thread.thread.id]/9
   //   Effects: Inserts the text representation for charT of id into out.
   //
@@ -131,8 +131,8 @@ operator<<(std::basic_ostream<_CharT, _Traits>& __os, gpu::__thread_id __id) {
   // use a temporary stream instead and just output the thread
   // id representation as a string.
 
-  std::basic_ostringstream<_CharT, _Traits> __sstr;
-  __sstr.imbue(std::locale::classic());
+  ::std::basic_ostringstream<_CharT, _Traits> __sstr;
+  __sstr.imbue(::std::locale::classic());
   __sstr << __id.__id_;
   return __os << __sstr.str();
 }

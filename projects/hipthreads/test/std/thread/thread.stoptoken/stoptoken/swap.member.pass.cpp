@@ -24,13 +24,13 @@ concept IsNoThrowMemberSwappable = requires(T& t) {
   { t.swap(t) } noexcept;
 };
 
-static_assert(IsNoThrowMemberSwappable<std::stop_token>);
+static_assert(IsNoThrowMemberSwappable<::std::stop_token>);
 
 int main(int, char**) {
   {
-    std::stop_token st1;
+    ::std::stop_token st1;
 
-    std::stop_source source;
+    ::std::stop_source source;
     auto st2 = source.get_token();
 
     assert(st1 != st2);

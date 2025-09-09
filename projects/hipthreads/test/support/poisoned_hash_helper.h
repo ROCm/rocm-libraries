@@ -29,7 +29,7 @@ TEST_CONSTEXPR_CXX20 void test_hash_enabled(InputKey const& key = InputKey{});
 
 template <class T, class InputKey = T>
 TEST_CONSTEXPR_CXX20 void test_hash_enabled_for_type(InputKey const& key = InputKey{}) {
-  return test_hash_enabled<std::hash<T>, T, InputKey>(key);
+  return test_hash_enabled<::std::hash<T>, T, InputKey>(key);
 }
 
 // Test that the specified Hash meets the requirements of a disabled hash.
@@ -38,7 +38,7 @@ void test_hash_disabled();
 
 template <class T>
 void test_hash_disabled_for_type() {
-  return test_hash_disabled<std::hash<T>, T>();
+  return test_hash_disabled<::std::hash<T>, T>();
 }
 
 namespace PoisonedHashDetail {
@@ -111,13 +111,13 @@ struct ConvertibleTo {
   To to{};
   operator To&() & { return to; }
   operator To const&() const & { return to; }
-  operator To&&() && { return std::move(to); }
-  operator To const&&() const && { return std::move(to); }
+  operator To&&() && { return ::std::move(to); }
+  operator To const&&() const && { return ::std::move(to); }
 };
 
-template <class Hasher, class Key, class Res = decltype(std::declval<Hasher&>()(std::declval<Key>()))>
+template <class Hasher, class Key, class Res = decltype(::std::declval<Hasher&>()(::std::declval<Key>()))>
 constexpr bool can_hash(int) {
-  return std::is_same<Res, size_t>::value;
+  return ::std::is_same<Res, size_t>::value;
 }
 template <class, class>
 constexpr bool can_hash(long) {
@@ -133,18 +133,18 @@ template <class Hash, class Key, class InputKey>
 TEST_CONSTEXPR_CXX20 void test_hash_enabled(InputKey const& key) {
   using namespace PoisonedHashDetail;
 
-  static_assert(std::is_destructible<Hash>::value, "");
+  static_assert(::std::is_destructible<Hash>::value, "");
   // Enabled hash requirements
-  static_assert(std::is_default_constructible<Hash>::value, "");
-  static_assert(std::is_copy_constructible<Hash>::value, "");
-  static_assert(std::is_move_constructible<Hash>::value, "");
-  static_assert(std::is_copy_assignable<Hash>::value, "");
-  static_assert(std::is_move_assignable<Hash>::value, "");
+  static_assert(::std::is_default_constructible<Hash>::value, "");
+  static_assert(::std::is_copy_constructible<Hash>::value, "");
+  static_assert(::std::is_move_constructible<Hash>::value, "");
+  static_assert(::std::is_copy_assignable<Hash>::value, "");
+  static_assert(::std::is_move_assignable<Hash>::value, "");
 
 #if TEST_STD_VER > 14
-  static_assert(std::is_swappable<Hash>::value, "");
+  static_assert(::std::is_swappable<Hash>::value, "");
 #elif defined(_LIBCPP_VERSION)
-  static_assert(std::__is_swappable<Hash>::value, "");
+  static_assert(::std::__is_swappable<Hash>::value, "");
 #endif
 
   // Hashable requirements
@@ -174,15 +174,15 @@ void test_hash_disabled() {
   using namespace PoisonedHashDetail;
 
   // Disabled hash requirements
-  static_assert(!std::is_default_constructible<Hash>::value, "");
-  static_assert(!std::is_copy_constructible<Hash>::value, "");
-  static_assert(!std::is_move_constructible<Hash>::value, "");
-  static_assert(!std::is_copy_assignable<Hash>::value, "");
-  static_assert(!std::is_move_assignable<Hash>::value, "");
+  static_assert(!::std::is_default_constructible<Hash>::value, "");
+  static_assert(!::std::is_copy_constructible<Hash>::value, "");
+  static_assert(!::std::is_move_constructible<Hash>::value, "");
+  static_assert(!::std::is_copy_assignable<Hash>::value, "");
+  static_assert(!::std::is_move_assignable<Hash>::value, "");
 
-  static_assert(!std::is_function<
-      typename std::remove_pointer<
-          typename std::remove_reference<Hash>::type
+  static_assert(!::std::is_function<
+      typename ::std::remove_pointer<
+          typename ::std::remove_reference<Hash>::type
       >::type
     >::value, "");
 
@@ -233,7 +233,7 @@ struct TypeList<> {
 
 struct TestLibraryTrait {
     template <class Type>
-    static void apply() { test_hash_enabled<std::hash<Type>, Type>(); }
+    static void apply() { test_hash_enabled<::std::hash<Type>, Type>(); }
 };
 
 template <class Types>

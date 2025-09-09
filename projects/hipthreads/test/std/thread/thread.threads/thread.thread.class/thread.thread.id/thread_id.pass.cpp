@@ -32,12 +32,12 @@
 int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    gpu::thread::id id1;
-    gpu::thread::id id2 = gpu::this_thread::get_id();
-    typedef std::hash<gpu::thread::id> H;
+    hip::thread::id id1;
+    hip::thread::id id2 = hip::this_thread::get_id();
+    typedef ::std::hash<hip::thread::id> H;
 #if TEST_STD_VER <= 14
-    static_assert((std::is_same<typename H::argument_type, gpu::thread::id>::value), "" );
-    static_assert((std::is_same<typename H::result_type, std::size_t>::value), "" );
+    static_assert((::std::is_same<typename H::argument_type, hip::thread::id>::value), "" );
+    static_assert((::std::is_same<typename H::result_type, ::std::size_t>::value), "" );
 #endif
     ASSERT_NOEXCEPT(H()(id2));
     H h;

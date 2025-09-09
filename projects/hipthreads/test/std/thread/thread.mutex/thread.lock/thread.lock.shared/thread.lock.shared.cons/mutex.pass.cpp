@@ -51,15 +51,15 @@ void test() {
   // Basic sanity test
   {
     Mutex mutex;
-    std::vector<gpu::thread> threads;
-    std::atomic<bool> ready(false);
+    ::std::vector<hip::thread> threads;
+    ::std::atomic<bool> ready(false);
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         while (!ready) {
           // spin
         }
 
-        std::shared_lock<Mutex> lock(mutex);
+        ::std::shared_lock<Mutex> lock(mutex);
         assert(lock.owns_lock());
       }));
     }
@@ -73,17 +73,17 @@ void test() {
   {
 #if TEST_STD_VER >= 17
     Mutex mutex;
-    std::shared_lock lock(mutex);
-    static_assert(std::is_same<decltype(lock), std::shared_lock<Mutex>>::value);
+    ::std::shared_lock lock(mutex);
+    static_assert(::std::is_same<decltype(lock), ::std::shared_lock<Mutex>>::value);
 #endif
   }
 }
 
 int main(int, char**) {
 #if TEST_STD_VER >= 17
-  test<std::shared_mutex>();
+  test<::std::shared_mutex>();
 #endif
-  test<std::shared_timed_mutex>();
+  test<::std::shared_timed_mutex>();
   test<TrackedMutex>();
 
   // Use shared_lock with a dummy mutex class that tracks whether each
@@ -92,7 +92,7 @@ int main(int, char**) {
     Monitor monitor;
     TrackedMutex mutex{&monitor};
 
-    std::shared_lock<TrackedMutex> lock(mutex);
+    ::std::shared_lock<TrackedMutex> lock(mutex);
     assert(monitor.lock_shared_called);
     assert(lock.owns_lock());
 

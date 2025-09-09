@@ -20,25 +20,25 @@
 
 int main(int, char**)
 {
-    using M = std::mutex;
+    using M = ::std::mutex;
     M m0, m1, m2;
     {
-        using LG = gpu::scoped_lock<>;
+        using LG = hip::scoped_lock<>;
         const LG Orig;
         LG Copy(Orig); // expected-error{{call to deleted constructor of 'LG'}}
     }
     {
-        using LG = gpu::scoped_lock<M>;
+        using LG = hip::scoped_lock<M>;
         const LG Orig(m0);
         LG Copy(Orig); // expected-error{{call to deleted constructor of 'LG'}}
     }
     {
-        using LG = gpu::scoped_lock<M, M>;
+        using LG = hip::scoped_lock<M, M>;
         const LG Orig(m0, m1);
         LG Copy(Orig); // expected-error{{call to deleted constructor of 'LG'}}
     }
     {
-        using LG = gpu::scoped_lock<M, M, M>;
+        using LG = hip::scoped_lock<M, M, M>;
         const LG Orig(m0, m1, m2);
         LG Copy(Orig); // expected-error{{call to deleted constructor of 'LG'}}
     }

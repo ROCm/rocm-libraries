@@ -23,35 +23,35 @@
 
 template <uint8_t LockBit>
 void test() {
-  using Lock = std::__atomic_unique_lock<uint8_t, LockBit>;
+  using Lock = ::std::__atomic_unique_lock<uint8_t, LockBit>;
 
   // lock on constructor
   {
-    std::atomic<uint8_t> state{0};
+    ::std::atomic<uint8_t> state{0};
     Lock l(state);
     assert(l.__owns_lock());
   }
 
   // always give up locking
   {
-    std::atomic<uint8_t> state{0};
+    ::std::atomic<uint8_t> state{0};
     Lock l(state, [](auto const&) { return true; });
     assert(!l.__owns_lock());
   }
 
   // test overload that has custom state after lock
   {
-    std::atomic<uint8_t> state{0};
+    ::std::atomic<uint8_t> state{0};
     auto neverGiveUpLocking = [](auto const&) { return false; };
     auto stateAfter         = [](auto) { return uint8_t{255}; };
-    Lock l(state, neverGiveUpLocking, stateAfter, std::memory_order_acq_rel);
+    Lock l(state, neverGiveUpLocking, stateAfter, ::std::memory_order_acq_rel);
     assert(l.__owns_lock());
     assert(state.load() == 255);
   }
 
   // lock and unlock
   {
-    std::atomic<uint8_t> state{0};
+    ::std::atomic<uint8_t> state{0};
     Lock l(state);
     assert(l.__owns_lock());
 
@@ -64,12 +64,12 @@ void test() {
 
   // lock blocking
   {
-    std::atomic<uint8_t> state{0};
+    ::std::atomic<uint8_t> state{0};
     int i = 0;
     Lock l1(state);
 
     auto thread1 = support::make_test_thread([&] {
-      gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds{10});
+      hip::this_thread::sleep_for(cuda::std::chrono::milliseconds{10});
       i = 5;
       l1.__unlock();
     });

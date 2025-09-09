@@ -22,7 +22,7 @@
 int main(int, char**) {
   checking_mutex mux;
 
-  gpu::unique_lock<checking_mutex> lock(mux, std::defer_lock_t());
+  hip::unique_lock<checking_mutex> lock(mux, ::std::defer_lock_t());
   assert(lock.try_lock());
   assert(mux.current_state == checking_mutex::locked_via_try_lock);
   assert(lock.owns_lock());
@@ -32,9 +32,9 @@ int main(int, char**) {
     mux.last_try = checking_mutex::none;
     TEST_IGNORE_NODISCARD lock.try_lock();
     assert(false);
-  } catch (std::system_error& e) {
+  } catch (::std::system_error& e) {
     assert(mux.last_try == checking_mutex::none);
-    assert(e.code() == std::errc::resource_deadlock_would_occur);
+    assert(e.code() == ::std::errc::resource_deadlock_would_occur);
   }
 #endif
 
@@ -52,9 +52,9 @@ int main(int, char**) {
     mux.last_try = checking_mutex::none;
     (void)lock.try_lock();
     assert(false);
-  } catch (std::system_error& e) {
+  } catch (::std::system_error& e) {
     assert(mux.last_try == checking_mutex::none);
-    assert(e.code() == std::errc::operation_not_permitted);
+    assert(e.code() == ::std::errc::operation_not_permitted);
   }
 #endif
 

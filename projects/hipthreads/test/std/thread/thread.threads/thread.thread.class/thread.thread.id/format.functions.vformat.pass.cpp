@@ -11,7 +11,7 @@
 
 // UNSUPPORTED: GCC-ALWAYS_INLINE-FIXME
 
-// TODO FMT This test should not require std::to_chars(floating-point)
+// TODO FMT This test should not require ::std::to_chars(floating-point)
 // XFAIL: availability-fp_to_chars-missing
 
 // <thread>
@@ -23,7 +23,7 @@
 // wstring vformat(wstring_view fmt, wformat_args args);
 
 // TODO: This currently only tests formatting thread IDs in host code. We should add tests for device code if/when
-// libhipcxx adds support for strings and std::format
+// libhipcxx adds support for strings and ::std::format
 
 #include <format>
 #include <cassert>
@@ -34,8 +34,8 @@
 #include "test_macros.h"
 
 auto test = []<class CharT, class... Args>(
-                std::basic_string_view<CharT> expected, std::basic_string_view<CharT> fmt, Args&&... args) {
-  std::basic_string<CharT> out = std::vformat(fmt, std::make_format_args<context_t<CharT>>(args...));
+                ::std::basic_string_view<CharT> expected, ::std::basic_string_view<CharT> fmt, Args&&... args) {
+  ::std::basic_string<CharT> out = ::std::vformat(fmt, ::std::make_format_args<context_t<CharT>>(args...));
   TEST_REQUIRE(out == expected,
                TEST_WRITE_CONCATENATED(
                    "\nFormat string   ", fmt, "\nExpected output ", expected, "\nActual output   ", out, '\n'));
@@ -43,18 +43,18 @@ auto test = []<class CharT, class... Args>(
 
 auto test_exception =
     []<class CharT, class... Args>(
-        [[maybe_unused]] std::string_view what,
-        [[maybe_unused]] std::basic_string_view<CharT> fmt,
+        [[maybe_unused]] ::std::string_view what,
+        [[maybe_unused]] ::std::basic_string_view<CharT> fmt,
         [[maybe_unused]] Args&&... args) {
       TEST_VALIDATE_EXCEPTION(
-          std::format_error,
-          [&]([[maybe_unused]] const std::format_error& e) {
+          ::std::format_error,
+          [&]([[maybe_unused]] const ::std::format_error& e) {
             TEST_LIBCPP_REQUIRE(
                 e.what() == what,
                 TEST_WRITE_CONCATENATED(
                     "\nFormat string   ", fmt, "\nExpected exception ", what, "\nActual exception   ", e.what(), '\n'));
           },
-          TEST_IGNORE_NODISCARD std::vformat(fmt, std::make_format_args<context_t<CharT>>(args...)));
+          TEST_IGNORE_NODISCARD ::std::vformat(fmt, ::std::make_format_args<context_t<CharT>>(args...)));
     };
 
 int main(int, char**) {

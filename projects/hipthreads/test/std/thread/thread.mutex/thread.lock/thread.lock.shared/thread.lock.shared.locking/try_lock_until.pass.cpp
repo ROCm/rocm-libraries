@@ -44,7 +44,7 @@ mutex m;
 int main(int, char**)
 {
     typedef cuda::std::chrono::steady_clock Clock;
-    std::shared_lock<mutex> lk(m, std::defer_lock);
+    ::std::shared_lock<mutex> lk(m, ::std::defer_lock);
     assert(lk.try_lock_until(Clock::now()) == true);
     assert(try_lock_until_called == true);
     assert(lk.owns_lock() == true);
@@ -54,7 +54,7 @@ int main(int, char**)
         TEST_IGNORE_NODISCARD lk.try_lock_until(Clock::now());
         assert(false);
     }
-    catch (std::system_error& e)
+    catch (::std::system_error& e)
     {
         assert(e.code().value() == EDEADLK);
     }
@@ -70,7 +70,7 @@ int main(int, char**)
         TEST_IGNORE_NODISCARD lk.try_lock_until(Clock::now());
         assert(false);
     }
-    catch (std::system_error& e)
+    catch (::std::system_error& e)
     {
         assert(e.code().value() == EPERM);
     }

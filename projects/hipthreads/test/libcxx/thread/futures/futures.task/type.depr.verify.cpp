@@ -24,5 +24,5 @@
 
 struct A {};
 
-using RA = std::packaged_task<A(int, char)>::result_type;    // expected-warning {{'result_type' is deprecated}}
-using RV = std::packaged_task<void(int, char)>::result_type; // expected-warning {{'result_type' is deprecated}}
+using RA = ::std::packaged_task<A(int, char)>::result_type;    // expected-warning {{'result_type' is deprecated}}
+using RV = ::std::packaged_task<void(int, char)>::result_type; // expected-warning {{'result_type' is deprecated}}

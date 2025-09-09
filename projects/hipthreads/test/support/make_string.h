@@ -93,10 +93,10 @@ struct MultiStringType {
 
 // Like MAKE_CSTRING but makes a basic_string<CharT>. Embedded nulls are OK.
 #define MAKE_STRING(CharT, Str)                                                \
-  std::basic_string<CharT>(MAKE_CSTRING(CharT, Str), MKSTR_LEN(CharT, Str))
+  ::std::basic_string<CharT>(MAKE_CSTRING(CharT, Str), MKSTR_LEN(CharT, Str))
 
 // Like MAKE_CSTRING but makes a basic_string_view<CharT>. Embedded nulls are OK.
 #define MAKE_STRING_VIEW(CharT, Str)                                           \
-  std::basic_string_view<CharT>(MAKE_CSTRING(CharT, Str), MKSTR_LEN(CharT, Str))
+  ::std::basic_string_view<CharT>(MAKE_CSTRING(CharT, Str), MKSTR_LEN(CharT, Str))
 
 #endif

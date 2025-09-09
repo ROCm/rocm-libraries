@@ -19,15 +19,15 @@
 #include "test_macros.h"
 
 #if TEST_STD_VER >= 11
-static_assert(noexcept(std::declval<gpu::unique_lock<checking_mutex>&>().owns_lock()), "");
+static_assert(noexcept(::std::declval<hip::unique_lock<checking_mutex>&>().owns_lock()), "");
 #endif
 
 int main(int, char**) {
   {
     checking_mutex mux;
-    const gpu::unique_lock<checking_mutex> lock0; // Make sure `owns_lock()` is `const`
+    const hip::unique_lock<checking_mutex> lock0; // Make sure `owns_lock()` is `const`
     assert(!lock0.owns_lock());
-    gpu::unique_lock<checking_mutex> lock1(mux);
+    hip::unique_lock<checking_mutex> lock1(mux);
     assert(lock1.owns_lock());
     lock1.unlock();
     assert(!lock1.owns_lock());

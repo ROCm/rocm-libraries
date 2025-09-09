@@ -35,7 +35,7 @@
 #include "hip/__mutex/spin_mutex.h"
 #include "hip/__mutex/unique_lock.h"
 
-namespace gpu {
+namespace cuda {
 
 class _LIBGPU_TYPE_VIS spin_condition_variable : private condition_variable_any {
   public:
@@ -57,7 +57,7 @@ class _LIBGPU_TYPE_VIS spin_condition_variable : private condition_variable_any 
 
     // TODO: Uncomment these once we've implemented chrono
     // template <class _Clock, class _Duration>
-    // __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS std::cv_status
+    // __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
     // wait_until(unique_lock<spin_mutex>& __lk, const chrono::time_point<_Clock, _Duration>& __t);
 
     // template <class _Clock, class _Duration, class _Predicate>
@@ -65,7 +65,7 @@ class _LIBGPU_TYPE_VIS spin_condition_variable : private condition_variable_any 
     // wait_until(unique_lock<spin_mutex>& __lk, const chrono::time_point<_Clock, _Duration>& __t, _Predicate __pred);
 
     // template <class _Rep, class _Period>
-    // __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS std::cv_status
+    // __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
     // wait_for(unique_lock<spin_mutex>& __lk, const chrono::duration<_Rep, _Period>& __d);
 
     // template <class _Rep, class _Period, class _Predicate>
@@ -73,6 +73,6 @@ class _LIBGPU_TYPE_VIS spin_condition_variable : private condition_variable_any 
     // wait_for(unique_lock<spin_mutex>& __lk, const chrono::duration<_Rep, _Period>& __d, _Predicate __pred);
 };
 
-} // namespace gpu
+} // namespace cuda
 
 #endif // __GPU___CONDITION_VARIABLE_SPIN_CONDITION_VARIABLE_H__

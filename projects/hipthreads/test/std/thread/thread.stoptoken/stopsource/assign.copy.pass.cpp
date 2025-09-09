@@ -19,13 +19,13 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_nothrow_copy_assignable_v<std::stop_source>);
+static_assert(::std::is_nothrow_copy_assignable_v<::std::stop_source>);
 
 int main(int, char**) {
   // have two different states
   {
-    std::stop_source ss1;
-    std::stop_source ss2;
+    ::std::stop_source ss1;
+    ::std::stop_source ss2;
 
     assert(ss1 != ss2);
 
@@ -34,7 +34,7 @@ int main(int, char**) {
     assert(!ss1.stop_requested());
     assert(ss2.stop_requested());
 
-    std::same_as<std::stop_source&> decltype(auto) ref = ss1 = ss2;
+    ::std::same_as<::std::stop_source&> decltype(auto) ref = ss1 = ss2;
     assert(&ref == &ss1);
 
     assert(ss1 == ss2);
@@ -44,8 +44,8 @@ int main(int, char**) {
 
   // this has no state
   {
-    std::stop_source ss1{std::nostopstate};
-    std::stop_source ss2;
+    ::std::stop_source ss1{::std::nostopstate};
+    ::std::stop_source ss2;
 
     assert(ss1 != ss2);
 
@@ -56,7 +56,7 @@ int main(int, char**) {
     assert(ss2.stop_requested());
     assert(ss2.stop_possible());
 
-    std::same_as<std::stop_source&> decltype(auto) ref = ss1 = ss2;
+    ::std::same_as<::std::stop_source&> decltype(auto) ref = ss1 = ss2;
     assert(&ref == &ss1);
 
     assert(ss1 == ss2);
@@ -68,8 +68,8 @@ int main(int, char**) {
 
   // other has no state
   {
-    std::stop_source ss1;
-    std::stop_source ss2{std::nostopstate};
+    ::std::stop_source ss1;
+    ::std::stop_source ss2{::std::nostopstate};
 
     assert(ss1 != ss2);
 
@@ -80,7 +80,7 @@ int main(int, char**) {
     assert(!ss2.stop_requested());
     assert(!ss2.stop_possible());
 
-    std::same_as<std::stop_source&> decltype(auto) ref = ss1 = ss2;
+    ::std::same_as<::std::stop_source&> decltype(auto) ref = ss1 = ss2;
     assert(&ref == &ss1);
 
     assert(ss1 == ss2);
@@ -92,8 +92,8 @@ int main(int, char**) {
 
   // both no state
   {
-    std::stop_source ss1{std::nostopstate};
-    std::stop_source ss2{std::nostopstate};
+    ::std::stop_source ss1{::std::nostopstate};
+    ::std::stop_source ss2{::std::nostopstate};
 
     assert(ss1 == ss2);
 
@@ -102,7 +102,7 @@ int main(int, char**) {
     assert(!ss2.stop_requested());
     assert(!ss2.stop_possible());
 
-    std::same_as<std::stop_source&> decltype(auto) ref = ss1 = ss2;
+    ::std::same_as<::std::stop_source&> decltype(auto) ref = ss1 = ss2;
     assert(&ref == &ss1);
 
     assert(ss1 == ss2);
@@ -114,12 +114,12 @@ int main(int, char**) {
 
   // self assignment
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     auto& self = ss;
 
     assert(!ss.stop_requested());
 
-    std::same_as<std::stop_source&> decltype(auto) ref = ss = self;
+    ::std::same_as<::std::stop_source&> decltype(auto) ref = ss = self;
     assert(&ref == &ss);
 
     assert(!ss.stop_requested());

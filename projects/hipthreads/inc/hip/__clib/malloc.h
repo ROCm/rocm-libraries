@@ -25,7 +25,7 @@
 
 #include "hip/__support/hip_check.h"
 
-namespace gpu {
+namespace cuda {
 
 namespace internal {
 // NOTE: NOT STATIC so that there is only one copy of the static local variable inside!
@@ -40,7 +40,7 @@ inline hipStream_t &getEnqueingStream() {
 }
 }
 
-inline __host__ void *malloc(std::size_t size) {
+inline __host__ void *malloc(::std::size_t size) {
     void *ptr;
     __LIBGPU_HIP_CHECK__(hipMallocAsync(&ptr, size, internal::getEnqueingStream()));
     __LIBGPU_HIP_CHECK__(hipStreamSynchronize(internal::getEnqueingStream()));
@@ -51,7 +51,7 @@ inline __host__ void free(void* ptr) {
     __LIBGPU_HIP_CHECK__(hipFreeAsync(ptr, internal::getEnqueingStream()));
 }
 
-} // namespace gpu
+} // namespace cuda
 
 
 #endif // __GPU___MEMORY_MALLOC_H__

@@ -31,45 +31,45 @@ typedef cuda::std::chrono::milliseconds ms;
 static const ms sleepTime(500);
 static const ms waitTime(5000);
 
-void func1(std::promise<int> p)
+void func1(::std::promise<int> p)
 {
-  gpu::this_thread::sleep_for(sleepTime);
+  hip::this_thread::sleep_for(sleepTime);
   p.set_value(3);
 }
 
 int j = 0;
 
-void func3(std::promise<int&> p)
+void func3(::std::promise<int&> p)
 {
-  gpu::this_thread::sleep_for(sleepTime);
+  hip::this_thread::sleep_for(sleepTime);
   j = 5;
   p.set_value(j);
 }
 
-void func5(std::promise<void> p)
+void func5(::std::promise<void> p)
 {
-  gpu::this_thread::sleep_for(sleepTime);
+  hip::this_thread::sleep_for(sleepTime);
   p.set_value();
 }
 
 template <typename T, typename F>
 void test(F func, bool waitFirst) {
   typedef cuda::std::chrono::high_resolution_clock Clock;
-  std::promise<T> p;
-  std::future<T> f = p.get_future();
+  ::std::promise<T> p;
+  ::std::future<T> f = p.get_future();
   Clock::time_point t1, t0 = Clock::now();
-  support::make_test_thread(func, std::move(p)).detach();
+  support::make_test_thread(func, ::std::move(p)).detach();
   assert(f.valid());
-  assert(f.wait_for(ms(1)) == std::future_status::timeout);
+  assert(f.wait_for(ms(1)) == ::std::future_status::timeout);
   assert(f.valid());
   if (waitFirst) {
     f.wait();
     assert(f.valid());
     t1 = Clock::now();
-    assert(f.wait_for(ms(waitTime)) == std::future_status::ready);
+    assert(f.wait_for(ms(waitTime)) == ::std::future_status::ready);
     assert(f.valid());
   } else {
-    assert(f.wait_for(ms(waitTime)) == std::future_status::ready);
+    assert(f.wait_for(ms(waitTime)) == ::std::future_status::ready);
     assert(f.valid());
     t1 = Clock::now();
     f.wait();

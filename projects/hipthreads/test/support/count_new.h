@@ -25,9 +25,9 @@ namespace detail
    TEST_NORETURN
    inline void throw_bad_alloc_helper() {
 #ifndef TEST_HAS_NO_EXCEPTIONS
-       throw std::bad_alloc();
+       throw ::std::bad_alloc();
 #else
-       std::abort();
+       ::std::abort();
 #endif
    }
 }
@@ -61,21 +61,21 @@ public:
     int delete_called;
     int aligned_new_called;
     int aligned_delete_called;
-    std::size_t last_new_size;
-    std::size_t last_new_align;
-    std::size_t last_delete_align;
+    ::std::size_t last_new_size;
+    ::std::size_t last_new_align;
+    ::std::size_t last_delete_align;
 
     int outstanding_array_new;
     int new_array_called;
     int delete_array_called;
     int aligned_new_array_called;
     int aligned_delete_array_called;
-    std::size_t last_new_array_size;
-    std::size_t last_new_array_align;
-    std::size_t last_delete_array_align;
+    ::std::size_t last_new_array_size;
+    ::std::size_t last_new_array_align;
+    ::std::size_t last_delete_array_align;
 
 public:
-    void newCalled(std::size_t s)
+    void newCalled(::std::size_t s)
     {
         assert(disable_allocations == false);
         assert(s);
@@ -90,7 +90,7 @@ public:
         last_new_size = s;
     }
 
-    void alignedNewCalled(std::size_t s, std::size_t a) {
+    void alignedNewCalled(::std::size_t s, ::std::size_t a) {
       newCalled(s);
       ++aligned_new_called;
       last_new_align = a;
@@ -103,13 +103,13 @@ public:
         ++delete_called;
     }
 
-    void alignedDeleteCalled(void *p, std::size_t a) {
+    void alignedDeleteCalled(void *p, ::std::size_t a) {
       deleteCalled(p);
       ++aligned_delete_called;
       last_delete_align = a;
     }
 
-    void newArrayCalled(std::size_t s)
+    void newArrayCalled(::std::size_t s)
     {
         assert(disable_allocations == false);
         assert(s);
@@ -124,7 +124,7 @@ public:
         last_new_array_size = s;
     }
 
-    void alignedNewArrayCalled(std::size_t s, std::size_t a) {
+    void alignedNewArrayCalled(::std::size_t s, ::std::size_t a) {
       newArrayCalled(s);
       ++aligned_new_array_called;
       last_new_array_align = a;
@@ -137,7 +137,7 @@ public:
         ++delete_array_called;
     }
 
-    void alignedDeleteArrayCalled(void * p, std::size_t a) {
+    void alignedDeleteArrayCalled(void * p, ::std::size_t a) {
       deleteArrayCalled(p);
       ++aligned_delete_array_called;
       last_delete_array_align = a;
@@ -241,42 +241,42 @@ public:
         return disable_checking || n != aligned_delete_called;
     }
 
-    bool checkLastNewSizeEq(std::size_t n) const
+    bool checkLastNewSizeEq(::std::size_t n) const
     {
         return disable_checking || n == last_new_size;
     }
 
-    bool checkLastNewSizeNotEq(std::size_t n) const
+    bool checkLastNewSizeNotEq(::std::size_t n) const
     {
         return disable_checking || n != last_new_size;
     }
 
-    bool checkLastNewSizeGe(std::size_t n) const
+    bool checkLastNewSizeGe(::std::size_t n) const
     {
         return disable_checking || last_new_size >= n;
     }
 
-    bool checkLastNewAlignEq(std::size_t n) const
+    bool checkLastNewAlignEq(::std::size_t n) const
     {
         return disable_checking || n == last_new_align;
     }
 
-    bool checkLastNewAlignNotEq(std::size_t n) const
+    bool checkLastNewAlignNotEq(::std::size_t n) const
     {
         return disable_checking || n != last_new_align;
     }
 
-    bool checkLastNewAlignGe(std::size_t n) const
+    bool checkLastNewAlignGe(::std::size_t n) const
     {
         return disable_checking || last_new_align >= n;
     }
 
-    bool checkLastDeleteAlignEq(std::size_t n) const
+    bool checkLastDeleteAlignEq(::std::size_t n) const
     {
         return disable_checking || n == last_delete_align;
     }
 
-    bool checkLastDeleteAlignNotEq(std::size_t n) const
+    bool checkLastDeleteAlignNotEq(::std::size_t n) const
     {
         return disable_checking || n != last_delete_align;
     }
@@ -336,22 +336,22 @@ public:
         return disable_checking || n != aligned_delete_array_called;
     }
 
-    bool checkLastNewArraySizeEq(std::size_t n) const
+    bool checkLastNewArraySizeEq(::std::size_t n) const
     {
         return disable_checking || n == last_new_array_size;
     }
 
-    bool checkLastNewArraySizeNotEq(std::size_t n) const
+    bool checkLastNewArraySizeNotEq(::std::size_t n) const
     {
         return disable_checking || n != last_new_array_size;
     }
 
-    bool checkLastNewArrayAlignEq(std::size_t n) const
+    bool checkLastNewArrayAlignEq(::std::size_t n) const
     {
         return disable_checking || n == last_new_array_align;
     }
 
-    bool checkLastNewArrayAlignNotEq(std::size_t n) const
+    bool checkLastNewArrayAlignNotEq(::std::size_t n) const
     {
         return disable_checking || n != last_new_array_align;
     }
@@ -374,10 +374,10 @@ TEST_DIAGNOSTIC_POP
 MemCounter &globalMemCounter = *getGlobalMemCounter();
 
 #ifndef DISABLE_NEW_COUNT
-void* operator new(std::size_t s) TEST_THROW_SPEC(std::bad_alloc)
+void* operator new(::std::size_t s) TEST_THROW_SPEC(::std::bad_alloc)
 {
     getGlobalMemCounter()->newCalled(s);
-    void* ret = std::malloc(s);
+    void* ret = ::std::malloc(s);
     if (ret == nullptr)
         detail::throw_bad_alloc_helper();
     return ret;
@@ -386,10 +386,10 @@ void* operator new(std::size_t s) TEST_THROW_SPEC(std::bad_alloc)
 void  operator delete(void* p) TEST_NOEXCEPT
 {
     getGlobalMemCounter()->deleteCalled(p);
-    std::free(p);
+    ::std::free(p);
 }
 
-void* operator new[](std::size_t s) TEST_THROW_SPEC(std::bad_alloc)
+void* operator new[](::std::size_t s) TEST_THROW_SPEC(::std::bad_alloc)
 {
     getGlobalMemCounter()->newArrayCalled(s);
     return operator new(s);
@@ -407,8 +407,8 @@ void operator delete[](void* p) TEST_NOEXCEPT
 #define USE_ALIGNED_ALLOC
 #endif
 
-void* operator new(std::size_t s, std::align_val_t av) TEST_THROW_SPEC(std::bad_alloc) {
-  const std::size_t a = static_cast<std::size_t>(av);
+void* operator new(::std::size_t s, ::std::align_val_t av) TEST_THROW_SPEC(::std::bad_alloc) {
+  const ::std::size_t a = static_cast<::std::size_t>(av);
   getGlobalMemCounter()->alignedNewCalled(s, a);
   void *ret;
 #ifdef USE_ALIGNED_ALLOC
@@ -421,8 +421,8 @@ void* operator new(std::size_t s, std::align_val_t av) TEST_THROW_SPEC(std::bad_
   return ret;
 }
 
-void operator delete(void *p, std::align_val_t av) TEST_NOEXCEPT {
-  const std::size_t a = static_cast<std::size_t>(av);
+void operator delete(void *p, ::std::align_val_t av) TEST_NOEXCEPT {
+  const ::std::size_t a = static_cast<::std::size_t>(av);
   getGlobalMemCounter()->alignedDeleteCalled(p, a);
   if (p) {
 #ifdef USE_ALIGNED_ALLOC
@@ -433,14 +433,14 @@ void operator delete(void *p, std::align_val_t av) TEST_NOEXCEPT {
   }
 }
 
-void* operator new[](std::size_t s, std::align_val_t av) TEST_THROW_SPEC(std::bad_alloc) {
-  const std::size_t a = static_cast<std::size_t>(av);
+void* operator new[](::std::size_t s, ::std::align_val_t av) TEST_THROW_SPEC(::std::bad_alloc) {
+  const ::std::size_t a = static_cast<::std::size_t>(av);
   getGlobalMemCounter()->alignedNewArrayCalled(s, a);
   return operator new(s, av);
 }
 
-void operator delete[](void *p, std::align_val_t av) TEST_NOEXCEPT {
-  const std::size_t a = static_cast<std::size_t>(av);
+void operator delete[](void *p, ::std::align_val_t av) TEST_NOEXCEPT {
+  const ::std::size_t a = static_cast<::std::size_t>(av);
   getGlobalMemCounter()->alignedDeleteArrayCalled(p, a);
   return operator delete(p, av);
 }
@@ -508,7 +508,7 @@ private:
 #endif
 
 struct RequireAllocationGuard {
-    explicit RequireAllocationGuard(std::size_t RequireAtLeast = 1)
+    explicit RequireAllocationGuard(::std::size_t RequireAtLeast = 1)
             : m_req_alloc(RequireAtLeast),
               m_new_count_on_init(globalMemCounter.new_called),
               m_outstanding_new_on_init(globalMemCounter.outstanding_new),
@@ -516,20 +516,20 @@ struct RequireAllocationGuard {
     {
     }
 
-    void requireAtLeast(std::size_t N) { m_req_alloc = N; m_exactly = false; }
-    void requireExactly(std::size_t N) { m_req_alloc = N; m_exactly = true; }
+    void requireAtLeast(::std::size_t N) { m_req_alloc = N; m_exactly = false; }
+    void requireExactly(::std::size_t N) { m_req_alloc = N; m_exactly = true; }
 
     ~RequireAllocationGuard() {
         assert(globalMemCounter.checkOutstandingNewEq(static_cast<int>(m_outstanding_new_on_init)));
-        std::size_t Expect = m_new_count_on_init + m_req_alloc;
+        ::std::size_t Expect = m_new_count_on_init + m_req_alloc;
         assert(globalMemCounter.checkNewCalledEq(static_cast<int>(Expect)) ||
                (!m_exactly && globalMemCounter.checkNewCalledGreaterThan(static_cast<int>(Expect))));
     }
 
 private:
-    std::size_t m_req_alloc;
-    const std::size_t m_new_count_on_init;
-    const std::size_t m_outstanding_new_on_init;
+    ::std::size_t m_req_alloc;
+    const ::std::size_t m_new_count_on_init;
+    const ::std::size_t m_outstanding_new_on_init;
     bool m_exactly;
     RequireAllocationGuard(RequireAllocationGuard const&);
     RequireAllocationGuard& operator=(RequireAllocationGuard const&);

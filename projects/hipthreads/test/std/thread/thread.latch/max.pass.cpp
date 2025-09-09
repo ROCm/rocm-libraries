@@ -18,6 +18,6 @@
 
 int main(int, char**)
 {
-  static_assert(std::latch::max() > 0, "");
+  static_assert(::std::latch::max() > 0, "");
   return 0;
 }

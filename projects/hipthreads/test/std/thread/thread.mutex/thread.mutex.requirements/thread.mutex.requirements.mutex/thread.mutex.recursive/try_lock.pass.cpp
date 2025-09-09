@@ -23,9 +23,9 @@
 
 #include "make_test_thread.h"
 
-bool is_lockable(std::recursive_mutex& m) {
+bool is_lockable(::std::recursive_mutex& m) {
   bool did_lock;
-  gpu::thread t = support::make_test_thread([&] {
+  hip::thread t = support::make_test_thread([&] {
     did_lock = m.try_lock();
     if (did_lock)
       m.unlock(); // undo side effects
@@ -38,7 +38,7 @@ bool is_lockable(std::recursive_mutex& m) {
 int main(int, char**) {
   // Try to lock a mutex that is not locked yet. This should succeed.
   {
-    std::recursive_mutex m;
+    ::std::recursive_mutex m;
     bool succeeded = m.try_lock();
     assert(succeeded);
     m.unlock();
@@ -47,7 +47,7 @@ int main(int, char**) {
   // Try to lock a mutex that is already locked by this thread. This should succeed and the mutex should only
   // be unlocked after a matching number of calls to unlock() on the same thread.
   {
-    std::recursive_mutex m;
+    ::std::recursive_mutex m;
     int lock_count = 0;
     for (int i = 0; i != 10; ++i) {
       assert(m.try_lock());
@@ -63,10 +63,10 @@ int main(int, char**) {
 
   // Try to lock a mutex that is already locked by another thread. This should fail.
   {
-    std::recursive_mutex m;
+    ::std::recursive_mutex m;
     m.lock();
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       for (int i = 0; i != 10; ++i) {
         bool succeeded = m.try_lock();
         assert(!succeeded);

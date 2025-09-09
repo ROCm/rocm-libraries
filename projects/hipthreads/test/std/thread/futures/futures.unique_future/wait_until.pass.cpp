@@ -28,20 +28,20 @@
 enum class WorkerThreadState { Uninitialized, AllowedToRun, Exiting };
 typedef cuda::std::chrono::milliseconds ms;
 
-std::atomic<WorkerThreadState> thread_state(WorkerThreadState::Uninitialized);
+::std::atomic<WorkerThreadState> thread_state(WorkerThreadState::Uninitialized);
 
 void set_worker_thread_state(WorkerThreadState state)
 {
-  thread_state.store(state, std::memory_order_relaxed);
+  thread_state.store(state, ::std::memory_order_relaxed);
 }
 
 void wait_for_worker_thread_state(WorkerThreadState state)
 {
-  while (thread_state.load(std::memory_order_relaxed) != state)
-    gpu::this_thread::pseudo_yield();
+  while (thread_state.load(::std::memory_order_relaxed) != state)
+    hip::this_thread::pseudo_yield();
 }
 
-void func1(std::promise<int> p)
+void func1(::std::promise<int> p)
 {
   wait_for_worker_thread_state(WorkerThreadState::AllowedToRun);
   p.set_value(3);
@@ -50,7 +50,7 @@ void func1(std::promise<int> p)
 
 int j = 0;
 
-void func3(std::promise<int&> p)
+void func3(::std::promise<int&> p)
 {
   wait_for_worker_thread_state(WorkerThreadState::AllowedToRun);
   j = 5;
@@ -58,7 +58,7 @@ void func3(std::promise<int&> p)
   set_worker_thread_state(WorkerThreadState::Exiting);
 }
 
-void func5(std::promise<void> p)
+void func5(::std::promise<void> p)
 {
   wait_for_worker_thread_state(WorkerThreadState::AllowedToRun);
   p.set_value();
@@ -70,54 +70,54 @@ int main(int, char**)
   typedef cuda::std::chrono::high_resolution_clock Clock;
   {
     typedef int T;
-    std::promise<T> p;
-    std::future<T> f = p.get_future();
-    support::make_test_thread(func1, std::move(p)).detach();
+    ::std::promise<T> p;
+    ::std::future<T> f = p.get_future();
+    support::make_test_thread(func1, ::std::move(p)).detach();
     assert(f.valid());
-    assert(f.wait_until(Clock::now() + ms(10)) == std::future_status::timeout);
+    assert(f.wait_until(Clock::now() + ms(10)) == ::std::future_status::timeout);
     assert(f.valid());
 
     // allow the worker thread to produce the result and wait until the worker is done
     set_worker_thread_state(WorkerThreadState::AllowedToRun);
     wait_for_worker_thread_state(WorkerThreadState::Exiting);
 
-    assert(f.wait_until(Clock::now() + ms(10)) == std::future_status::ready);
+    assert(f.wait_until(Clock::now() + ms(10)) == ::std::future_status::ready);
     assert(f.valid());
     f.wait();
     assert(f.valid());
   }
   {
     typedef int& T;
-    std::promise<T> p;
-    std::future<T> f = p.get_future();
-    support::make_test_thread(func3, std::move(p)).detach();
+    ::std::promise<T> p;
+    ::std::future<T> f = p.get_future();
+    support::make_test_thread(func3, ::std::move(p)).detach();
     assert(f.valid());
-    assert(f.wait_until(Clock::now() + ms(10)) == std::future_status::timeout);
+    assert(f.wait_until(Clock::now() + ms(10)) == ::std::future_status::timeout);
     assert(f.valid());
 
     // allow the worker thread to produce the result and wait until the worker is done
     set_worker_thread_state(WorkerThreadState::AllowedToRun);
     wait_for_worker_thread_state(WorkerThreadState::Exiting);
 
-    assert(f.wait_until(Clock::now() + ms(10)) == std::future_status::ready);
+    assert(f.wait_until(Clock::now() + ms(10)) == ::std::future_status::ready);
     assert(f.valid());
     f.wait();
     assert(f.valid());
   }
   {
     typedef void T;
-    std::promise<T> p;
-    std::future<T> f = p.get_future();
-    support::make_test_thread(func5, std::move(p)).detach();
+    ::std::promise<T> p;
+    ::std::future<T> f = p.get_future();
+    support::make_test_thread(func5, ::std::move(p)).detach();
     assert(f.valid());
-    assert(f.wait_until(Clock::now() + ms(10)) == std::future_status::timeout);
+    assert(f.wait_until(Clock::now() + ms(10)) == ::std::future_status::timeout);
     assert(f.valid());
 
     // allow the worker thread to produce the result and wait until the worker is done
     set_worker_thread_state(WorkerThreadState::AllowedToRun);
     wait_for_worker_thread_state(WorkerThreadState::Exiting);
 
-    assert(f.wait_until(Clock::now() + ms(10)) == std::future_status::ready);
+    assert(f.wait_until(Clock::now() + ms(10)) == ::std::future_status::ready);
     assert(f.valid());
     f.wait();
     assert(f.valid());

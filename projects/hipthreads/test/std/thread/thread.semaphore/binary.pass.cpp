@@ -21,21 +21,21 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-static_assert(std::is_same<std::binary_semaphore, std::counting_semaphore<1>>::value, "");
+static_assert(::std::is_same<::std::binary_semaphore, ::std::counting_semaphore<1>>::value, "");
 
 int main(int, char**)
 {
-  std::binary_semaphore s(1);
+  ::std::binary_semaphore s(1);
 
   auto l = [&](){
     for(int i = 0; i < 1024; ++i) {
         s.acquire();
-        gpu::this_thread::sleep_for(cuda::std::chrono::microseconds(1));
+        hip::this_thread::sleep_for(cuda::std::chrono::microseconds(1));
         s.release();
     }
   };
 
-  gpu::thread t = support::make_test_thread(l);
+  hip::thread t = support::make_test_thread(l);
   l();
 
   t.join();

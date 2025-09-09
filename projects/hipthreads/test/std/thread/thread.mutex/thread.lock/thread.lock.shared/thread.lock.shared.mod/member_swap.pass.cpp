@@ -30,8 +30,8 @@ mutex m;
 
 int main(int, char**)
 {
-    std::shared_lock<mutex> lk1(m);
-    std::shared_lock<mutex> lk2;
+    ::std::shared_lock<mutex> lk1(m);
+    ::std::shared_lock<mutex> lk2;
     lk1.swap(lk2);
     assert(lk1.mutex() == nullptr);
     assert(lk1.owns_lock() == false);

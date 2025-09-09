@@ -44,9 +44,9 @@ int func(int i) { return i; }
 int main(int, char**)
 {
     {
-        std::packaged_task<double(int, char)> p(A(5));
+        ::std::packaged_task<double(int, char)> p(A(5));
         assert(p.valid());
-        std::future<double> f = p.get_future();
+        ::std::future<double> f = p.get_future();
         p(3, 97);
         assert(f.get() == 105.0);
         assert(A::n_copies == 0);
@@ -56,25 +56,25 @@ int main(int, char**)
     A::n_copies = 0;
     {
         A a(5);
-        std::packaged_task<double(int, char)> p(a);
+        ::std::packaged_task<double(int, char)> p(a);
         assert(p.valid());
-        std::future<double> f = p.get_future();
+        ::std::future<double> f = p.get_future();
         p(3, 97);
         assert(f.get() == 105.0);
         assert(A::n_copies > 0);
         assert(A::n_moves > 0);
     }
     {
-        std::packaged_task<int(int)> p(&func);
+        ::std::packaged_task<int(int)> p(&func);
         assert(p.valid());
-        std::future<int> f = p.get_future();
+        ::std::future<int> f = p.get_future();
         p(4);
         assert(f.get() == 4);
     }
     {
-        std::packaged_task<int(int)> p(func);
+        ::std::packaged_task<int(int)> p(func);
         assert(p.valid());
-        std::future<int> f = p.get_future();
+        ::std::future<int> f = p.get_future();
         p(4);
         assert(f.get() == 4);
     }

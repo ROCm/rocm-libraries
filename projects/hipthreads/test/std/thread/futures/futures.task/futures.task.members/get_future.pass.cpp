@@ -33,35 +33,35 @@ public:
 int main(int, char**)
 {
     {
-        std::packaged_task<double(int, char)> p(A(5));
-        std::future<double> f = p.get_future();
+        ::std::packaged_task<double(int, char)> p(A(5));
+        ::std::future<double> f = p.get_future();
         p(3, 97);
         assert(f.get() == 105.0);
     }
 #ifndef TEST_HAS_NO_EXCEPTIONS
     {
-        std::packaged_task<double(int, char)> p(A(5));
-        std::future<double> f = p.get_future();
+        ::std::packaged_task<double(int, char)> p(A(5));
+        ::std::future<double> f = p.get_future();
         try
         {
             f = p.get_future();
             assert(false);
         }
-        catch (const std::future_error& e)
+        catch (const ::std::future_error& e)
         {
-            assert(e.code() ==  make_error_code(std::future_errc::future_already_retrieved));
+            assert(e.code() ==  make_error_code(::std::future_errc::future_already_retrieved));
         }
     }
     {
-        std::packaged_task<double(int, char)> p;
+        ::std::packaged_task<double(int, char)> p;
         try
         {
-            std::future<double> f = p.get_future();
+            ::std::future<double> f = p.get_future();
             assert(false);
         }
-        catch (const std::future_error& e)
+        catch (const ::std::future_error& e)
         {
-            assert(e.code() ==  make_error_code(std::future_errc::no_state));
+            assert(e.code() ==  make_error_code(::std::future_errc::no_state));
         }
     }
 #endif

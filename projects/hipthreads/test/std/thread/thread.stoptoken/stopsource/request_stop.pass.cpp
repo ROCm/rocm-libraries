@@ -27,12 +27,12 @@ concept IsRequestStopNoexcept = requires(T& t) {
   { t.request_stop() } noexcept;
 };
 
-static_assert(IsRequestStopNoexcept<std::stop_source>);
+static_assert(IsRequestStopNoexcept<::std::stop_source>);
 
 int main(int, char**) {
   // If *this does not have ownership of a stop state, returns false
   {
-    std::stop_source ss{std::nostopstate};
+    ::std::stop_source ss{::std::nostopstate};
     auto ret = ss.request_stop();
     assert(!ret);
     assert(!ss.stop_requested());
@@ -41,7 +41,7 @@ int main(int, char**) {
   // Otherwise, atomically determines whether the owned stop state has received
   // a stop request, and if not, makes a stop request
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
 
     auto ret = ss.request_stop();
     assert(ret);
@@ -50,7 +50,7 @@ int main(int, char**) {
 
   // already requested
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     ss.request_stop();
     assert(ss.stop_requested());
 
@@ -62,13 +62,13 @@ int main(int, char**) {
   // If the request was made, the callbacks registered by
   // associated stop_callback objects are synchronously called.
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     auto st = ss.get_token();
 
     bool cb1Called = false;
     bool cb2Called = false;
-    std::stop_callback sc1(st, [&] { cb1Called = true; });
-    std::stop_callback sc2(st, [&] { cb2Called = true; });
+    ::std::stop_callback sc1(st, [&] { cb1Called = true; });
+    ::std::stop_callback sc2(st, [&] { cb2Called = true; });
 
     ss.request_stop();
     assert(cb1Called);

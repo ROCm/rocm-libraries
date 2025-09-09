@@ -15,4 +15,4 @@
 #include <future>
 #include <type_traits>
 
-static_assert(std::is_convertible<std::future_error*, std::logic_error*>::value, "");
+static_assert(::std::is_convertible<::std::future_error*, ::std::logic_error*>::value, "");

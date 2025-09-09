@@ -33,7 +33,7 @@
 namespace std
 {
 
-enum class std::cv_status { no_timeout, timeout };
+enum class ::std::cv_status { no_timeout, timeout };
 
 class condition_variable
 {
@@ -52,7 +52,7 @@ public:
         void wait(unique_lock<mutex>& lock, Predicate pred);
 
     template <class Clock, class Duration>
-        std::cv_status
+        ::std::cv_status
         wait_until(unique_lock<mutex>& lock,
                    const chrono::time_point<Clock, Duration>& abs_time);
 
@@ -63,7 +63,7 @@ public:
                    Predicate pred);
 
     template <class Rep, class Period>
-        std::cv_status
+        ::std::cv_status
         wait_for(unique_lock<mutex>& lock,
                  const chrono::duration<Rep, Period>& rel_time);
 
@@ -97,7 +97,7 @@ public:
         void wait(Lock& lock, Predicate pred);
 
     template <class Lock, class Clock, class Duration>
-        std::cv_status
+        ::std::cv_status
         wait_until(Lock& lock,
                    const chrono::time_point<Clock, Duration>& abs_time);
 
@@ -108,7 +108,7 @@ public:
                    Predicate pred);
 
     template <class Lock, class Rep, class Period>
-        std::cv_status
+        ::std::cv_status
         wait_for(Lock& lock,
                  const chrono::duration<Rep, Period>& rel_time);
 

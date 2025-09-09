@@ -17,8 +17,8 @@
 
 int main(int, char**)
 {
-    std::condition_variable cv0;
-    std::condition_variable cv1;
+    ::std::condition_variable cv0;
+    ::std::condition_variable cv1;
     cv1 = cv0;
 
   return 0;

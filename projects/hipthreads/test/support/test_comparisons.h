@@ -116,45 +116,45 @@ TEST_NODISCARD __host__ __device__ TEST_CONSTEXPR_CXX14 bool testComparisonsValu
 
 template <class T, class U = T>
 __host__ __device__ TEST_CONSTEXPR_CXX14 void AssertComparisonsAreNoexcept() {
-    ASSERT_NOEXCEPT(std::declval<const T&>() == std::declval<const U&>());
-    ASSERT_NOEXCEPT(std::declval<const T&>() != std::declval<const U&>());
-    ASSERT_NOEXCEPT(std::declval<const T&>() <  std::declval<const U&>());
-    ASSERT_NOEXCEPT(std::declval<const T&>() <= std::declval<const U&>());
-    ASSERT_NOEXCEPT(std::declval<const T&>() >  std::declval<const U&>());
-    ASSERT_NOEXCEPT(std::declval<const T&>() >= std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() == ::std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() != ::std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() <  ::std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() <= ::std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() >  ::std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() >= ::std::declval<const U&>());
 }
 
 template <class T, class U = T>
 __host__ __device__ TEST_CONSTEXPR_CXX14 void AssertComparisonsReturnBool() {
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() == std::declval<const U&>()), bool);
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() != std::declval<const U&>()), bool);
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() <  std::declval<const U&>()), bool);
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() <= std::declval<const U&>()), bool);
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() >  std::declval<const U&>()), bool);
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() >= std::declval<const U&>()), bool);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() == ::std::declval<const U&>()), bool);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() != ::std::declval<const U&>()), bool);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() <  ::std::declval<const U&>()), bool);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() <= ::std::declval<const U&>()), bool);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() >  ::std::declval<const U&>()), bool);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() >= ::std::declval<const U&>()), bool);
 }
 
 template <class T, class U = T>
 __host__ __device__ void AssertComparisonsConvertibleToBool() {
-    static_assert((std::is_convertible<decltype(std::declval<const T&>() == std::declval<const U&>()), bool>::value), "");
-    static_assert((std::is_convertible<decltype(std::declval<const T&>() != std::declval<const U&>()), bool>::value), "");
-    static_assert((std::is_convertible<decltype(std::declval<const T&>() <  std::declval<const U&>()), bool>::value), "");
-    static_assert((std::is_convertible<decltype(std::declval<const T&>() <= std::declval<const U&>()), bool>::value), "");
-    static_assert((std::is_convertible<decltype(std::declval<const T&>() >  std::declval<const U&>()), bool>::value), "");
-    static_assert((std::is_convertible<decltype(std::declval<const T&>() >= std::declval<const U&>()), bool>::value), "");
+    static_assert((::std::is_convertible<decltype(::std::declval<const T&>() == ::std::declval<const U&>()), bool>::value), "");
+    static_assert((::std::is_convertible<decltype(::std::declval<const T&>() != ::std::declval<const U&>()), bool>::value), "");
+    static_assert((::std::is_convertible<decltype(::std::declval<const T&>() <  ::std::declval<const U&>()), bool>::value), "");
+    static_assert((::std::is_convertible<decltype(::std::declval<const T&>() <= ::std::declval<const U&>()), bool>::value), "");
+    static_assert((::std::is_convertible<decltype(::std::declval<const T&>() >  ::std::declval<const U&>()), bool>::value), "");
+    static_assert((::std::is_convertible<decltype(::std::declval<const T&>() >= ::std::declval<const U&>()), bool>::value), "");
 }
 
 #if TEST_STD_VER > 17
 template <class T, class U = T>
 __host__ __device__ constexpr void AssertOrderAreNoexcept() {
     AssertComparisonsAreNoexcept<T, U>();
-    ASSERT_NOEXCEPT(std::declval<const T&>() <=> std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() <=> ::std::declval<const U&>());
 }
 
 template <class Order, class T, class U = T>
 __host__ __device__ constexpr void AssertOrderReturn() {
     AssertComparisonsReturnBool<T, U>();
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() <=> std::declval<const U&>()), Order);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() <=> ::std::declval<const U&>()), Order);
 }
 
 template <class Order, class T, class U = T>
@@ -204,20 +204,20 @@ TEST_NODISCARD __host__ __device__ TEST_CONSTEXPR_CXX14 bool testEqualityValues(
 
 template <class T, class U = T>
 __host__ __device__ void AssertEqualityAreNoexcept() {
-    ASSERT_NOEXCEPT(std::declval<const T&>() == std::declval<const U&>());
-    ASSERT_NOEXCEPT(std::declval<const T&>() != std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() == ::std::declval<const U&>());
+    ASSERT_NOEXCEPT(::std::declval<const T&>() != ::std::declval<const U&>());
 }
 
 template <class T, class U = T>
 __host__ __device__ void AssertEqualityReturnBool() {
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() == std::declval<const U&>()), bool);
-    ASSERT_SAME_TYPE(decltype(std::declval<const T&>() != std::declval<const U&>()), bool);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() == ::std::declval<const U&>()), bool);
+    ASSERT_SAME_TYPE(decltype(::std::declval<const T&>() != ::std::declval<const U&>()), bool);
 }
 
 template <class T, class U = T>
 __host__ __device__ void AssertEqualityConvertibleToBool() {
-    static_assert((std::is_convertible<decltype(std::declval<const T&>() == std::declval<const U&>()), bool>::value), "");
-    static_assert((std::is_convertible<decltype(std::declval<const T&>() != std::declval<const U&>()), bool>::value), "");
+    static_assert((::std::is_convertible<decltype(::std::declval<const T&>() == ::std::declval<const U&>()), bool>::value), "");
+    static_assert((::std::is_convertible<decltype(::std::declval<const T&>() != ::std::declval<const U&>()), bool>::value), "");
 }
 
 struct LessAndEqComp {
@@ -238,25 +238,25 @@ struct LessAndEqComp {
 struct StrongOrder {
   int value;
   __host__ __device__ constexpr StrongOrder(int v) : value(v) {}
-  friend __host__ __device__ std::strong_ordering operator<=>(StrongOrder, StrongOrder) = default;
+  friend __host__ __device__ ::std::strong_ordering operator<=>(StrongOrder, StrongOrder) = default;
 };
 
 struct WeakOrder {
   int value;
   __host__ __device__ constexpr WeakOrder(int v) : value(v) {}
-  friend __host__ __device__ std::weak_ordering operator<=>(WeakOrder, WeakOrder) = default;
+  friend __host__ __device__ ::std::weak_ordering operator<=>(WeakOrder, WeakOrder) = default;
 };
 
 struct PartialOrder {
   int value;
   __host__ __device__ constexpr PartialOrder(int v) : value(v) {}
-  friend __host__ __device__ constexpr std::partial_ordering operator<=>(PartialOrder lhs, PartialOrder rhs) {
-    if (lhs.value == std::numeric_limits<int>::min() || rhs.value == std::numeric_limits<int>::min())
-      return std::partial_ordering::unordered;
+  friend __host__ __device__ constexpr ::std::partial_ordering operator<=>(PartialOrder lhs, PartialOrder rhs) {
+    if (lhs.value == ::std::numeric_limits<int>::min() || rhs.value == ::std::numeric_limits<int>::min())
+      return ::std::partial_ordering::unordered;
     return lhs.value <=> rhs.value;
   }
   friend __host__ __device__ constexpr bool operator==(PartialOrder lhs, PartialOrder rhs) {
-    return (lhs <=> rhs) == std::partial_ordering::equivalent;
+    return (lhs <=> rhs) == ::std::partial_ordering::equivalent;
   }
 };
 

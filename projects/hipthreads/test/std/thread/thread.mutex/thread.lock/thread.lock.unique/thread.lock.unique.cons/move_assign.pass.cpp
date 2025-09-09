@@ -21,13 +21,13 @@
 int main(int, char**) {
   checking_mutex m0;
   checking_mutex m1;
-  gpu::unique_lock<checking_mutex> lk0(m0);
-  gpu::unique_lock<checking_mutex> lk1(m1);
+  hip::unique_lock<checking_mutex> lk0(m0);
+  hip::unique_lock<checking_mutex> lk1(m1);
 
-  auto& result = (lk1 = std::move(lk0));
+  auto& result = (lk1 = ::std::move(lk0));
 
   assert(&result == &lk1);
-  assert(lk1.mutex() == std::addressof(m0));
+  assert(lk1.mutex() == ::std::addressof(m0));
   assert(lk1.owns_lock());
   assert(lk0.mutex() == nullptr);
   assert(!lk0.owns_lock());

@@ -21,7 +21,7 @@
 
 int main(int, char**)
 {
-    std::condition_variable_any cv;
+    ::std::condition_variable_any cv;
 
   return 0;
 }

@@ -5,9 +5,9 @@
 #include "test_macros.h"
 
 #if defined(_LIBCPP_VERSION) && TEST_STD_VER < 17
-namespace fs = std::__fs::filesystem;
+namespace fs = ::std::__fs::filesystem;
 #else
-namespace fs = std::filesystem;
+namespace fs = ::std::filesystem;
 #endif
 
 #endif

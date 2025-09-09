@@ -23,29 +23,29 @@ void test_conversion(LG) {}
 
 int main(int, char**)
 {
-    using M = std::mutex;
+    using M = ::std::mutex;
     M m0, m1, m2;
     M n0, n1, n2;
     {
-        using LG = gpu::scoped_lock<>;
+        using LG = hip::scoped_lock<>;
         LG lg = {}; // expected-error{{chosen constructor is explicit in copy-initialization}}
         test_conversion<LG>({}); // expected-error{{no matching function for call}}
         ((void)lg);
     }
     {
-        using LG = gpu::scoped_lock<M>;
+        using LG = hip::scoped_lock<M>;
         LG lg = {m0}; // expected-error{{chosen constructor is explicit in copy-initialization}}
         test_conversion<LG>({n0}); // expected-error{{no matching function for call}}
         ((void)lg);
     }
     {
-        using LG = gpu::scoped_lock<M, M>;
+        using LG = hip::scoped_lock<M, M>;
         LG lg = {m0, m1}; // expected-error{{chosen constructor is explicit in copy-initialization}}
         test_conversion<LG>({n0, n1}); // expected-error{{no matching function for call}}
         ((void)lg);
     }
     {
-        using LG = gpu::scoped_lock<M, M, M>;
+        using LG = hip::scoped_lock<M, M, M>;
         LG lg = {m0, m1, m2}; // expected-error{{chosen constructor is explicit in copy-initialization}}
         test_conversion<LG>({n0, n1, n2}); // expected-error{{no matching function for call}}
     }

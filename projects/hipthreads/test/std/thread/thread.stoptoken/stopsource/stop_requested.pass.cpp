@@ -28,18 +28,18 @@ concept IsStopRequestedNoexcept = requires(const T& t) {
   { t.stop_requested() } noexcept;
 };
 
-static_assert(IsStopRequestedNoexcept<std::stop_source>);
+static_assert(IsStopRequestedNoexcept<::std::stop_source>);
 
 int main(int, char**) {
   // no state
   {
-    const std::stop_source ss{std::nostopstate};
+    const ::std::stop_source ss{::std::nostopstate};
     assert(!ss.stop_requested());
   }
 
   // has state
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     assert(!ss.stop_requested());
 
     ss.request_stop();
@@ -48,7 +48,7 @@ int main(int, char**) {
 
   // request from another instance with same state
   {
-    std::stop_source ss1;
+    ::std::stop_source ss1;
     auto ss2 = ss1;
     ss2.request_stop();
     assert(ss1.stop_requested());
@@ -56,8 +56,8 @@ int main(int, char**) {
 
   // request from another instance with different state
   {
-    std::stop_source ss1;
-    std::stop_source ss2;
+    ::std::stop_source ss1;
+    ::std::stop_source ss2;
 
     ss2.request_stop();
     assert(!ss1.stop_requested());
@@ -65,9 +65,9 @@ int main(int, char**) {
 
   // multiple threads
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
 
-    gpu::thread t = support::make_test_thread([&]() { ss.request_stop(); });
+    hip::thread t = support::make_test_thread([&]() { ss.request_stop(); });
 
     t.join();
     assert(ss.stop_requested());
@@ -77,13 +77,13 @@ int main(int, char**) {
   // synchronizes with a call to stop_requested on an associated stop_source
   // or stop_source object that returns true.
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
 
     bool flag = false;
 
-    gpu::thread t = support::make_test_thread([&]() {
-      using namespace std::chrono_literals;
-      gpu::this_thread::sleep_for(1ms);
+    hip::thread t = support::make_test_thread([&]() {
+      using namespace ::std::chrono_literals;
+      hip::this_thread::sleep_for(1ms);
 
       // happens-before request_stop
       flag   = true;
@@ -92,7 +92,7 @@ int main(int, char**) {
     });
 
     while (!ss.stop_requested()) {
-      gpu::this_thread::pseudo_yield();
+      hip::this_thread::pseudo_yield();
     }
 
     // write should be visible to the current thread

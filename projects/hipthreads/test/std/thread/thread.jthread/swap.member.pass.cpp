@@ -24,35 +24,35 @@ concept IsMemberSwapNoexcept = requires(T& a, T& b) {
   { a.swap(b) } noexcept;
 };
 
-static_assert(IsMemberSwapNoexcept<std::jthread>);
+static_assert(IsMemberSwapNoexcept<::std::jthread>);
 
 int main(int, char**) {
   // this is default constructed
   {
-    std::jthread t1;
-    std::jthread t2        = support::make_test_jthread([] {});
+    ::std::jthread t1;
+    ::std::jthread t2        = support::make_test_jthread([] {});
     const auto originalId2 = t2.get_id();
     t1.swap(t2);
 
     assert(t1.get_id() == originalId2);
-    assert(t2.get_id() == std::jthread::id());
+    assert(t2.get_id() == ::std::jthread::id());
   }
 
   // that is default constructed
   {
-    std::jthread t1 = support::make_test_jthread([] {});
-    std::jthread t2{};
+    ::std::jthread t1 = support::make_test_jthread([] {});
+    ::std::jthread t2{};
     const auto originalId1 = t1.get_id();
     t1.swap(t2);
 
-    assert(t1.get_id() == std::jthread::id());
+    assert(t1.get_id() == ::std::jthread::id());
     assert(t2.get_id() == originalId1);
   }
 
   // both not default constructed
   {
-    std::jthread t1        = support::make_test_jthread([] {});
-    std::jthread t2        = support::make_test_jthread([] {});
+    ::std::jthread t1        = support::make_test_jthread([] {});
+    ::std::jthread t2        = support::make_test_jthread([] {});
     const auto originalId1 = t1.get_id();
     const auto originalId2 = t2.get_id();
     t1.swap(t2);
@@ -63,12 +63,12 @@ int main(int, char**) {
 
   // both default constructed
   {
-    std::jthread t1;
-    std::jthread t2;
+    ::std::jthread t1;
+    ::std::jthread t2;
     t1.swap(t2);
 
-    assert(t1.get_id() == std::jthread::id());
-    assert(t2.get_id() == std::jthread::id());
+    assert(t1.get_id() == ::std::jthread::id());
+    assert(t2.get_id() == ::std::jthread::id());
   }
 
   return 0;

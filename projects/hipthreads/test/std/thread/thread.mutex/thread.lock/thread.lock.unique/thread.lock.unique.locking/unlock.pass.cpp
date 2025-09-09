@@ -21,7 +21,7 @@
 
 int main(int, char**) {
   checking_mutex mux;
-  gpu::unique_lock<checking_mutex> lock(mux);
+  hip::unique_lock<checking_mutex> lock(mux);
   assert(mux.current_state == checking_mutex::locked_via_lock);
   lock.unlock();
   assert(mux.current_state == checking_mutex::unlocked);
@@ -32,9 +32,9 @@ int main(int, char**) {
     mux.last_try = checking_mutex::none;
     lock.unlock();
     assert(false);
-  } catch (std::system_error& e) {
+  } catch (::std::system_error& e) {
     assert(mux.last_try == checking_mutex::none);
-    assert(e.code() == std::errc::operation_not_permitted);
+    assert(e.code() == ::std::errc::operation_not_permitted);
   }
 #endif
 
@@ -45,9 +45,9 @@ int main(int, char**) {
     mux.last_try = checking_mutex::none;
     lock.unlock();
     assert(false);
-  } catch (std::system_error& e) {
+  } catch (::std::system_error& e) {
     assert(mux.last_try == checking_mutex::none);
-    assert(e.code() == std::errc::operation_not_permitted);
+    assert(e.code() == ::std::errc::operation_not_permitted);
   }
 #endif
 

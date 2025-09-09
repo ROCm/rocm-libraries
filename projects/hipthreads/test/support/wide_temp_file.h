@@ -19,8 +19,8 @@
 TEST_DIAGNOSTIC_PUSH
 TEST_CLANG_DIAGNOSTIC_IGNORED("-Wdeprecated-declarations")
 TEST_GCC_DIAGNOSTIC_IGNORED("-Wdeprecated-declarations")
-inline std::wstring get_wide_temp_file_name() {
-    return std::wstring_convert<std::codecvt_utf8_utf16<wchar_t> >().from_bytes(get_temp_file_name());
+inline ::std::wstring get_wide_temp_file_name() {
+    return ::std::wstring_convert<::std::codecvt_utf8_utf16<wchar_t> >().from_bytes(get_temp_file_name());
 }
 TEST_DIAGNOSTIC_POP
 

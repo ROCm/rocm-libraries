@@ -16,5 +16,5 @@
 #include <hip/thread>
 #include <type_traits>
 
-static_assert(std::is_same_v<std::jthread::id, gpu::thread::id>);
-static_assert(std::is_same_v<std::jthread::native_handle_type, gpu::thread::native_handle_type>);
+static_assert(::std::is_same_v<::std::jthread::id, hip::thread::id>);
+static_assert(::std::is_same_v<::std::jthread::native_handle_type, hip::thread::native_handle_type>);

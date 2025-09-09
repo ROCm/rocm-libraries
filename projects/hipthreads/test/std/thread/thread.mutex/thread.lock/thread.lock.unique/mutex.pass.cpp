@@ -10,7 +10,7 @@
 
 // <mutex>
 
-// Make sure gpu::unique_lock works with std::mutex as expected.
+// Make sure hip::unique_lock works with ::std::mutex as expected.
 
 #include <atomic>
 #include <cassert>
@@ -18,26 +18,26 @@
 
 #include "make_test_thread.h"
 
-std::atomic<bool> keep_waiting;
-std::atomic<bool> child_thread_locked;
-std::mutex mux;
+::std::atomic<bool> keep_waiting;
+::std::atomic<bool> child_thread_locked;
+::std::mutex mux;
 bool main_thread_unlocked  = false;
 bool child_thread_unlocked = false;
 
 void lock_thread() {
-  gpu::unique_lock<std::mutex> lock(mux);
+  hip::unique_lock<::std::mutex> lock(mux);
   assert(main_thread_unlocked);
   main_thread_unlocked  = false;
   child_thread_unlocked = true;
 }
 
 void try_lock_thread() {
-  gpu::unique_lock<std::mutex> lock(mux, std::try_to_lock_t());
+  hip::unique_lock<::std::mutex> lock(mux, ::std::try_to_lock_t());
   assert(lock.owns_lock());
   child_thread_locked = true;
 
   while (keep_waiting)
-    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(10));
+    hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(10));
 
   child_thread_unlocked = true;
 }
@@ -45,7 +45,7 @@ void try_lock_thread() {
 int main(int, char**) {
   {
     mux.lock();
-    gpu::thread t        = support::make_test_thread(lock_thread);
+    hip::thread t        = support::make_test_thread(lock_thread);
     main_thread_unlocked = true;
     mux.unlock();
     t.join();
@@ -56,9 +56,9 @@ int main(int, char**) {
     child_thread_unlocked = false;
     child_thread_locked   = false;
     keep_waiting          = true;
-    gpu::thread t         = support::make_test_thread(try_lock_thread);
+    hip::thread t         = support::make_test_thread(try_lock_thread);
     while (!child_thread_locked)
-      gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(10));
+      hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(10));
     assert(!mux.try_lock());
     keep_waiting = false;
     t.join();

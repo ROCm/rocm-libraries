@@ -24,12 +24,12 @@
 
 int main(int, char**)
 {
-    gpu::thread::id id0;
-    gpu::thread::id id1;
+    hip::thread::id id0;
+    hip::thread::id id1;
     id1 = id0;
     assert(id1 == id0);
 #ifdef __HIP_DEVICE_COMPILE__
-    id1 = gpu::this_thread::get_id();
+    id1 = hip::this_thread::get_id();
     assert(id1 != id0);
 #endif
 

@@ -24,13 +24,13 @@ namespace LocaleHelpers {
 
 #ifndef TEST_HAS_NO_WIDE_CHARACTERS
 
-std::wstring convert_thousands_sep(std::wstring const& in, wchar_t sep) {
-  std::wstring out;
+::std::wstring convert_thousands_sep(::std::wstring const& in, wchar_t sep) {
+  ::std::wstring out;
   bool seen_num_start = false;
   bool seen_decimal = false;
   for (unsigned i = 0; i < in.size(); ++i) {
     seen_decimal |= in[i] == L',';
-    seen_num_start |= in[i] == L'-' || std::iswdigit(in[i]);
+    seen_num_start |= in[i] == L'-' || ::std::iswdigit(in[i]);
     if (seen_decimal || !seen_num_start || in[i] != L' ') {
       out.push_back(in[i]);
       continue;
@@ -45,7 +45,7 @@ std::wstring convert_thousands_sep(std::wstring const& in, wchar_t sep) {
 // This function converts the spaces in string inputs to U+202F if need
 // be. FreeBSD's locale data also uses U+202F, since 2018.
 // Windows uses U+00A0 NO-BREAK SPACE.
-std::wstring convert_thousands_sep_fr_FR(std::wstring const& in) {
+::std::wstring convert_thousands_sep_fr_FR(::std::wstring const& in) {
 #if defined(_CS_GNU_LIBC_VERSION)
   if (glibc_version_less_than("2.27"))
     return in;
@@ -62,7 +62,7 @@ std::wstring convert_thousands_sep_fr_FR(std::wstring const& in) {
 
 // GLIBC 2.27 uses U+202F NARROW NO-BREAK SPACE as a thousands separator.
 // FreeBSD, AIX and Windows use U+00A0 NO-BREAK SPACE.
-std::wstring convert_thousands_sep_ru_RU(std::wstring const& in) {
+::std::wstring convert_thousands_sep_ru_RU(::std::wstring const& in) {
 #if defined(TEST_HAS_GLIBC)
   return convert_thousands_sep(in, L'\u202F');
 #  elif defined(__FreeBSD__) || defined(_WIN32) || defined(_AIX)
@@ -72,7 +72,7 @@ std::wstring convert_thousands_sep_ru_RU(std::wstring const& in) {
 #  endif
 }
 
-std::wstring negate_en_US(std::wstring s) {
+::std::wstring negate_en_US(::std::wstring s) {
 #if defined(_WIN32)
   return L"(" + s + L")";
 #else
@@ -82,7 +82,7 @@ std::wstring negate_en_US(std::wstring s) {
 
 #endif // TEST_HAS_NO_WIDE_CHARACTERS
 
-std::string negate_en_US(std::string s) {
+::std::string negate_en_US(::std::string s) {
 #if defined(_WIN32)
   return "(" + s + ")";
 #else

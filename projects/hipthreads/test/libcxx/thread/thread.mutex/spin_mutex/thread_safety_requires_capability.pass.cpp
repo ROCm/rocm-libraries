@@ -23,7 +23,7 @@
 
 #include "force_include_hip.h"
 
-__device__ gpu::spin_mutex m;
+__device__ hip::spin_mutex m;
 __device__ int foo __attribute__((guarded_by(m)));
 
 __device__ void increment() __attribute__((requires_capability(m))) {

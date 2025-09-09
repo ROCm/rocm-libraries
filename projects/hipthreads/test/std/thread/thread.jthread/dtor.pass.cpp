@@ -26,16 +26,16 @@
 int main(int, char**) {
   // !joinable()
   {
-    std::jthread jt;
+    ::std::jthread jt;
     assert(!jt.joinable());
   }
 
   // If joinable() is true, calls request_stop() and then join().
   // request_stop is called
   {
-    std::optional<std::jthread> jt = support::make_test_jthread([] {});
+    ::std::optional<::std::jthread> jt = support::make_test_jthread([] {});
     bool called                    = false;
-    std::stop_callback cb(jt->get_stop_token(), [&called] { called = true; });
+    ::std::stop_callback cb(jt->get_stop_token(), [&called] { called = true; });
     jt.reset();
     assert(called);
   }
@@ -43,15 +43,15 @@ int main(int, char**) {
   // If joinable() is true, calls request_stop() and then join().
   // join is called
   {
-    std::atomic_int calledTimes = 0;
-    std::vector<std::jthread> jts;
+    ::std::atomic_int calledTimes = 0;
+    ::std::vector<::std::jthread> jts;
 
     constexpr auto numberOfThreads = 10u;
     jts.reserve(numberOfThreads);
     for (auto i = 0u; i < numberOfThreads; ++i) {
       jts.emplace_back(support::make_test_jthread([&calledTimes] {
-        gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
-        calledTimes.fetch_add(1, std::memory_order_relaxed);
+        hip::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
+        calledTimes.fetch_add(1, ::std::memory_order_relaxed);
       }));
     }
     jts.clear();
@@ -62,7 +62,7 @@ int main(int, char**) {
     // be less than numberOfThreads.
     // This is not going to catch issues 100%. Creating more threads would increase
     // the probability of catching the issue
-    assert(calledTimes.load(std::memory_order_relaxed) == numberOfThreads);
+    assert(calledTimes.load(::std::memory_order_relaxed) == numberOfThreads);
   }
 
   return 0;

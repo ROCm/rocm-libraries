@@ -32,7 +32,7 @@ public:
     static bool copy_called;
     static bool move_called;
     static bool allocate_called;
-    static std::pair<T*, std::size_t> deallocate_called;
+    static ::std::pair<T*, ::std::size_t> deallocate_called;
 
     A1(const A1& a) TEST_NOEXCEPT : id_(a.id()) {copy_called = true;}
     A1(A1&& a)      TEST_NOEXCEPT : id_(a.id()) {move_called = true;}
@@ -44,24 +44,24 @@ public:
     template <class U>
         A1(A1<U>&& a) TEST_NOEXCEPT : id_(a.id()) {move_called = true;}
 
-    T* allocate(std::size_t n)
+    T* allocate(::std::size_t n)
     {
         allocate_called = true;
         return (T*)n;
     }
 
-    void deallocate(T* p, std::size_t n)
+    void deallocate(T* p, ::std::size_t n)
     {
-        deallocate_called = std::pair<T*, std::size_t>(p, n);
+        deallocate_called = ::std::pair<T*, ::std::size_t>(p, n);
     }
 
-    std::size_t max_size() const {return id_;}
+    ::std::size_t max_size() const {return id_;}
 };
 
 template <class T> bool A1<T>::copy_called = false;
 template <class T> bool A1<T>::move_called = false;
 template <class T> bool A1<T>::allocate_called = false;
-template <class T> std::pair<T*, std::size_t> A1<T>::deallocate_called;
+template <class T> ::std::pair<T*, ::std::size_t> A1<T>::deallocate_called;
 
 template <class T, class U>
 inline
@@ -89,7 +89,7 @@ public:
     typedef unsigned size_type;
     typedef int difference_type;
 
-    typedef std::true_type propagate_on_container_move_assignment;
+    typedef ::std::true_type propagate_on_container_move_assignment;
 
     int id() const {return id_;}
 
@@ -102,7 +102,7 @@ public:
     A2& operator=(const A2& a) TEST_NOEXCEPT { id_ = a.id(); copy_called = true; return *this;}
     A2& operator=(A2&& a)      TEST_NOEXCEPT { id_ = a.id(); move_called = true; return *this;}
 
-    T* allocate(std::size_t, const void* hint)
+    T* allocate(::std::size_t, const void* hint)
     {
         allocate_called = true;
         return (T*) const_cast<void *>(hint);
@@ -136,8 +136,8 @@ public:
 
     typedef T value_type;
 
-    typedef std::true_type propagate_on_container_copy_assignment;
-    typedef std::true_type propagate_on_container_swap;
+    typedef ::std::true_type propagate_on_container_copy_assignment;
+    typedef ::std::true_type propagate_on_container_swap;
 
     int id() const {return id_;}
 
@@ -154,7 +154,7 @@ public:
     template <class U, class ...Args>
     void construct(U* p, Args&& ...args)
     {
-        ::new (p) U(std::forward<Args>(args)...);
+        ::new (p) U(::std::forward<Args>(args)...);
         constructed = true;
     }
 
@@ -195,7 +195,7 @@ class MaybePOCCAAllocator {
     template<class, bool> friend class MaybePOCCAAllocator;
 
 public:
-    typedef std::integral_constant<bool, POCCAValue> propagate_on_container_copy_assignment;
+    typedef ::std::integral_constant<bool, POCCAValue> propagate_on_container_copy_assignment;
     typedef T value_type;
 
     template <class U>
@@ -220,14 +220,14 @@ public:
         return *this;
     }
 
-    TEST_CONSTEXPR_CXX20 T* allocate(std::size_t n)
+    TEST_CONSTEXPR_CXX20 T* allocate(::std::size_t n)
     {
-        return std::allocator<T>().allocate(n);
+        return ::std::allocator<T>().allocate(n);
     }
 
-    TEST_CONSTEXPR_CXX20 void deallocate(T* ptr, std::size_t n)
+    TEST_CONSTEXPR_CXX20 void deallocate(T* ptr, ::std::size_t n)
     {
-        std::allocator<T>().deallocate(ptr, n);
+        ::std::allocator<T>().deallocate(ptr, n);
     }
 
     TEST_CONSTEXPR int id() const { return id_; }

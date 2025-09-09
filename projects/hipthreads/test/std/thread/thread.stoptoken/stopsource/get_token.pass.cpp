@@ -24,21 +24,21 @@ concept IsGetTokenNoexcept = requires(const T& t) {
   { t.get_token() } noexcept;
 };
 
-static_assert(IsGetTokenNoexcept<std::stop_source>);
+static_assert(IsGetTokenNoexcept<::std::stop_source>);
 
 int main(int, char**) {
   // no state
   {
-    std::stop_source ss{std::nostopstate};
-    std::same_as<std::stop_token> decltype(auto) st = ss.get_token();
+    ::std::stop_source ss{::std::nostopstate};
+    ::std::same_as<::std::stop_token> decltype(auto) st = ss.get_token();
     assert(!st.stop_possible());
     assert(!st.stop_requested());
   }
 
   // with state
   {
-    std::stop_source ss;
-    std::same_as<std::stop_token> decltype(auto) st = ss.get_token();
+    ::std::stop_source ss;
+    ::std::same_as<::std::stop_token> decltype(auto) st = ss.get_token();
     assert(st.stop_possible());
     assert(!st.stop_requested());
 

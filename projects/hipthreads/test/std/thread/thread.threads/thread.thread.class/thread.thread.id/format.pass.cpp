@@ -24,7 +24,7 @@
 // the format functions test.
 
 // TODO: This currently only tests formatting thread IDs in host code. We should add tests for device code if/when
-// libhipcxx adds support for strings and std::format
+// libhipcxx adds support for strings and ::std::format
 
 #include <cassert>
 #include <concepts>
@@ -38,17 +38,17 @@
 #define SV(S) MAKE_STRING_VIEW(CharT, S)
 
 template <class StringViewT>
-void test_format(StringViewT expected, gpu::thread::id arg) {
+void test_format(StringViewT expected, hip::thread::id arg) {
   using CharT      = typename StringViewT::value_type;
-  using String     = std::basic_string<CharT>;
-  using OutIt      = std::back_insert_iterator<String>;
-  using FormatCtxT = std::basic_format_context<OutIt, CharT>;
+  using String     = ::std::basic_string<CharT>;
+  using OutIt      = ::std::back_insert_iterator<String>;
+  using FormatCtxT = ::std::basic_format_context<OutIt, CharT>;
 
-  const std::formatter<gpu::thread::id, CharT> formatter;
+  const ::std::formatter<hip::thread::id, CharT> formatter;
 
   String result;
-  OutIt out             = std::back_inserter(result);
-  FormatCtxT format_ctx = test_format_context_create<OutIt, CharT>(out, std::make_format_args<FormatCtxT>(arg));
+  OutIt out             = ::std::back_inserter(result);
+  FormatCtxT format_ctx = test_format_context_create<OutIt, CharT>(out, ::std::make_format_args<FormatCtxT>(arg));
   formatter.format(arg, format_ctx);
   assert(result == expected);
 }
@@ -56,9 +56,9 @@ void test_format(StringViewT expected, gpu::thread::id arg) {
 template <class CharT>
 void test_fmt() {
 #if !defined(__APPLE__) && !defined(__FreeBSD__)
-  test_format(SV("0"), gpu::thread::id());
+  test_format(SV("0"), hip::thread::id());
 #else
-  test_format(SV("0x0"), gpu::thread::id());
+  test_format(SV("0x0"), hip::thread::id());
 #endif
 }
 

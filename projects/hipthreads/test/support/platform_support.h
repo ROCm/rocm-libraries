@@ -56,7 +56,7 @@ extern "C" {
 #endif
 
 inline
-std::string get_temp_file_name()
+::std::string get_temp_file_name()
 {
 #if defined(_WIN32)
     while (true) {
@@ -72,7 +72,7 @@ std::string get_temp_file_name()
         abort();
     }
 #else
-    std::string Name = "libcxx.XXXXXX";
+    ::std::string Name = "libcxx.XXXXXX";
     int FD = mkstemp(&Name[0]);
     if (FD == -1) {
         perror("mkstemp");
@@ -85,7 +85,7 @@ std::string get_temp_file_name()
 
 #if defined(_CS_GNU_LIBC_VERSION)
 inline bool glibc_version_less_than(char const* version) {
-  std::string test_version = std::string("glibc ") + version;
+  ::std::string test_version = ::std::string("glibc ") + version;
 
   size_t n = confstr(_CS_GNU_LIBC_VERSION, nullptr, (size_t)0);
   char *current_version = new char[n];

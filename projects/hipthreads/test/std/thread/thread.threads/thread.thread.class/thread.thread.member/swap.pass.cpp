@@ -48,10 +48,10 @@ int main(int, char**)
 {
     {
         G g;
-        gpu::thread t0 = support::make_test_thread(g);
-        gpu::thread::id id0 = t0.get_id();
-        gpu::thread t1;
-        gpu::thread::id id1 = t1.get_id();
+        hip::thread t0 = support::make_test_thread(g);
+        hip::thread::id id0 = t0.get_id();
+        hip::thread t1;
+        hip::thread::id id1 = t1.get_id();
         t0.swap(t1);
         assert(t0.get_id() == id1);
         assert(t1.get_id() == id0);

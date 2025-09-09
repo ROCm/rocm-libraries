@@ -23,4 +23,4 @@
 #include "test_macros.h"
 #include "test_allocator.h"
 
-static_assert((std::uses_allocator<std::packaged_task<double(int, char)>, test_allocator<int> >::value), "");
+static_assert((::std::uses_allocator<::std::packaged_task<double(int, char)>, test_allocator<int> >::value), "");

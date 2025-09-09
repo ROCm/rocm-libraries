@@ -26,7 +26,7 @@
 
 int main(int, char **) {
   {
-    std::latch l(5);
+    ::std::latch l(5);
 
     TEST_LIBCPP_ASSERT_FAILURE(
         l.arrive_and_wait(-10),

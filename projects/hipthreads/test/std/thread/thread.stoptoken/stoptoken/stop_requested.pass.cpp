@@ -28,18 +28,18 @@ concept IsStopRequestedNoexcept = requires(const T& t) {
   { t.stop_requested() } noexcept;
 };
 
-static_assert(IsStopRequestedNoexcept<std::stop_token>);
+static_assert(IsStopRequestedNoexcept<::std::stop_token>);
 
 int main(int, char**) {
   // no state
   {
-    const std::stop_token st;
+    const ::std::stop_token st;
     assert(!st.stop_requested());
   }
 
   // has state
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     const auto st = ss.get_token();
     assert(!st.stop_requested());
 
@@ -49,7 +49,7 @@ int main(int, char**) {
 
   // already requested before constructor
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     ss.request_stop();
     const auto st = ss.get_token();
     assert(st.stop_requested());
@@ -57,7 +57,7 @@ int main(int, char**) {
 
   // stop_token should share the state
   {
-    std::optional<std::stop_source> ss{std::in_place};
+    ::std::optional<::std::stop_source> ss{::std::in_place};
     ss->request_stop();
     const auto st = ss->get_token();
 
@@ -67,7 +67,7 @@ int main(int, char**) {
 
   // single stop_source, multiple stop_token
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     const auto st1 = ss.get_token();
     const auto st2 = ss.get_token();
     assert(!st1.stop_requested());
@@ -80,8 +80,8 @@ int main(int, char**) {
 
   // multiple stop_source, multiple stop_token
   {
-    std::stop_source ss1;
-    std::stop_source ss2;
+    ::std::stop_source ss1;
+    ::std::stop_source ss2;
 
     const auto st1 = ss1.get_token();
     const auto st2 = ss2.get_token();
@@ -95,11 +95,11 @@ int main(int, char**) {
 
   // multiple threads
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     const auto st = ss.get_token();
     assert(!st.stop_requested());
 
-    gpu::thread t = support::make_test_thread([&]() { ss.request_stop(); });
+    hip::thread t = support::make_test_thread([&]() { ss.request_stop(); });
 
     t.join();
     assert(st.stop_requested());
@@ -107,15 +107,15 @@ int main(int, char**) {
 
   // maybe concurrent calls
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     const auto st = ss.get_token();
     assert(!st.stop_requested());
 
-    gpu::thread t = support::make_test_thread([&]() { ss.request_stop(); });
+    hip::thread t = support::make_test_thread([&]() { ss.request_stop(); });
 
     while (!st.stop_requested()) {
       // should eventually exit the loop
-      gpu::this_thread::pseudo_yield();
+      hip::this_thread::pseudo_yield();
     }
 
     t.join();
@@ -125,15 +125,15 @@ int main(int, char**) {
   // synchronizes with a call to stop_requested on an associated stop_token
   // or stop_source object that returns true.
   {
-    std::stop_source ss;
+    ::std::stop_source ss;
     const auto st = ss.get_token();
     assert(!st.stop_requested());
 
     bool flag = false;
 
-    gpu::thread t = support::make_test_thread([&]() {
-      using namespace std::chrono_literals;
-      gpu::this_thread::sleep_for(1ms);
+    hip::thread t = support::make_test_thread([&]() {
+      using namespace ::std::chrono_literals;
+      hip::this_thread::sleep_for(1ms);
 
       // happens-before request_stop
       flag   = true;
@@ -142,7 +142,7 @@ int main(int, char**) {
     });
 
     while (!st.stop_requested()) {
-      gpu::this_thread::pseudo_yield();
+      hip::this_thread::pseudo_yield();
     }
 
     // write should be visible to the current thread

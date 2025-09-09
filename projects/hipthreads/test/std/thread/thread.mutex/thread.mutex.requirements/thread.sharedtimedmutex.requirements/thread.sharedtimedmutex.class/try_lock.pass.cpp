@@ -26,7 +26,7 @@
 int main(int, char**) {
   // Try to exclusive-lock a mutex that is not locked yet. This should succeed.
   {
-    std::shared_timed_mutex m;
+    ::std::shared_timed_mutex m;
     bool succeeded = m.try_lock();
     assert(succeeded);
     m.unlock();
@@ -34,10 +34,10 @@ int main(int, char**) {
 
   // Try to exclusive-lock a mutex that is already locked exclusively. This should fail.
   {
-    std::shared_timed_mutex m;
+    ::std::shared_timed_mutex m;
     m.lock();
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       bool succeeded = m.try_lock();
       assert(!succeeded);
     });
@@ -48,10 +48,10 @@ int main(int, char**) {
 
   // Try to exclusive-lock a mutex that is already share-locked. This should fail.
   {
-    std::shared_timed_mutex m;
+    ::std::shared_timed_mutex m;
     m.lock_shared();
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       bool succeeded = m.try_lock();
       assert(!succeeded);
     });

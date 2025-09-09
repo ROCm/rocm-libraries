@@ -28,13 +28,13 @@ struct M {
 
 int main(int, char**)
 {
-    static_assert(std::is_constructible<bool, std::shared_lock<M>>::value, "");
-    static_assert(!std::is_convertible<std::shared_lock<M>, bool>::value, "");
+    static_assert(::std::is_constructible<bool, ::std::shared_lock<M>>::value, "");
+    static_assert(!::std::is_convertible<::std::shared_lock<M>, bool>::value, "");
 
     M m;
-    std::shared_lock<M> lk0;
+    ::std::shared_lock<M> lk0;
     assert(static_cast<bool>(lk0) == false);
-    std::shared_lock<M> lk1(m);
+    ::std::shared_lock<M> lk1(m);
     assert(static_cast<bool>(lk1) == true);
     lk1.unlock();
     assert(static_cast<bool>(lk1) == false);

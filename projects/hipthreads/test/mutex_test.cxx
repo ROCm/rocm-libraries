@@ -15,21 +15,21 @@
     }
 
 __global__ void gmain() {
-    gpu::spin_mutex m, m2;
+    hip::spin_mutex m, m2;
     m.lock();
     m.unlock();
     m.try_lock();
     m.unlock();
     {
-        gpu::lock_guard guard(m);
+        hip::lock_guard guard(m);
     }
     {
         m.lock();
-        gpu::lock_guard guard(m, std::adopt_lock);
+        hip::lock_guard guard(m, ::std::adopt_lock);
     }
     {
-        gpu::unique_lock guard(m);
-        gpu::unique_lock guard2(m2);
+        hip::unique_lock guard(m);
+        hip::unique_lock guard2(m2);
         assert(guard.owns_lock());
         assert(guard2.owns_lock());
         guard.unlock();
@@ -43,18 +43,18 @@ __global__ void gmain() {
         assert(!guard2.owns_lock());
     }
     {
-        gpu::unique_lock guard(m, std::defer_lock);
+        hip::unique_lock guard(m, ::std::defer_lock);
         assert(!guard.owns_lock());
         guard.lock();
         assert(guard.owns_lock());
     }
     {
-        gpu::unique_lock guard(m, std::try_to_lock);
+        hip::unique_lock guard(m, ::std::try_to_lock);
         assert(guard.owns_lock());
     }
     {
         m.lock();
-        gpu::unique_lock guard(m, std::try_to_lock);
+        hip::unique_lock guard(m, ::std::try_to_lock);
         assert(!guard.owns_lock());
         m.unlock();
         assert(!guard.owns_lock());
@@ -62,17 +62,17 @@ __global__ void gmain() {
         assert(guard.owns_lock());
     }
     {
-        gpu::lock(m, m2);
+        hip::lock(m, m2);
         m.unlock();
         m2.unlock();
     }
 }
 
 __global__ void block_sync_test() {
-    static __device__ gpu::spin_mutex m;
+    static __device__ hip::spin_mutex m;
     static __device__ volatile int count = 0;
     {
-        gpu::unique_lock guard(m);
+        hip::unique_lock guard(m);
         for (int i = 0; i < 32; ++i)
         {
             assert(count++ == i);
@@ -86,7 +86,7 @@ __global__ void block_sync_test() {
 
 // TODO: Test using multiple threads per block
 #if 0
-[[clang::optnone]] __device__ bool critical_section(const gpu::unique_lock<gpu::spin_mutex> &guard, volatile int &count) {
+[[clang::optnone]] __device__ bool critical_section(const hip::unique_lock<hip::spin_mutex> &guard, volatile int &count) {
     if (guard.owns_lock()) {
         int threadId = threadIdx.x;
         printf("Thread %u owns lock\n", threadId);
@@ -104,7 +104,7 @@ __global__ void block_sync_test() {
 }
 
 __global__ void thread_test() {
-    static __device__ gpu::spin_mutex m [[maybe_unused]];
+    static __device__ hip::spin_mutex m [[maybe_unused]];
     static __device__ volatile int count [[maybe_unused]] = 0;
     int attempt [[maybe_unused]] = 0;
     int threadId = threadIdx.x;
@@ -113,7 +113,7 @@ __global__ void thread_test() {
         if (attempt++ == 50)
             printf("Attempt #50 for thread %u\n", threadId);
 
-        gpu::unique_lock guard(m, std::try_to_lock);
+        hip::unique_lock guard(m, ::std::try_to_lock);
         // TODO: if (guard.owns_lock()) { critical_section(count); break; /* OR */ success = true; }
         // results in critical section getting hoiseted out to AFTER the loop, breaking this code
         success = critical_section(guard, count);

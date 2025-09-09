@@ -48,14 +48,14 @@ struct AssertionInfoMatcher {
         return true;
     // Write to stdout because that's the file descriptor captured by the parent
     // process.
-    std::printf("Failed to match assertion info!\n%s\nVS\n%s:%d (%s)\n", ToString().data(), file, line, message);
+    ::std::printf("Failed to match assertion info!\n%s\nVS\n%s:%d (%s)\n", ToString().data(), file, line, message);
     return false;
   }
 
-  std::string ToString() const {
-    std::string result = "msg = \""; result += msg_; result += "\"\n";
-    result += "line = " + (line_ == any_line ? "'*'" : std::to_string(line_)) + "\n";
-    result += "file = " + (file_ == any_file ? "'*'" : std::string(file_));
+  ::std::string ToString() const {
+    ::std::string result = "msg = \""; result += msg_; result += "\"\n";
+    result += "line = " + (line_ == any_line ? "'*'" : ::std::to_string(line_)) + "\n";
+    result += "file = " + (file_ == any_file ? "'*'" : ::std::string(file_));
     return result;
   }
 
@@ -67,12 +67,12 @@ private:
     return got_line == line_;
   }
 
-  bool CheckFileMatches(std::string_view got_file) const {
+  bool CheckFileMatches(::std::string_view got_file) const {
     assert(!empty() && "empty matcher");
     if (file_ == any_file)
       return true;
-    std::size_t found_at = got_file.find(file_);
-    if (found_at == std::string_view::npos)
+    ::std::size_t found_at = got_file.find(file_);
+    if (found_at == ::std::string_view::npos)
       return false;
     // require the match start at the beginning of the file or immediately after
     // a directory separator.
@@ -85,20 +85,20 @@ private:
     return got_file.substr(found_at) == file_;
   }
 
-  bool CheckMessageMatches(std::string_view got_msg) const {
+  bool CheckMessageMatches(::std::string_view got_msg) const {
     assert(!empty() && "empty matcher");
     if (msg_ == any_msg)
       return true;
-    std::size_t found_at = got_msg.find(msg_);
-    if (found_at == std::string_view::npos)
+    ::std::size_t found_at = got_msg.find(msg_);
+    if (found_at == ::std::string_view::npos)
       return false;
     // Allow any match
     return true;
   }
 private:
   bool is_empty_;
-  std::string_view msg_;
-  std::string_view file_;
+  ::std::string_view msg_;
+  ::std::string_view file_;
   int line_;
 };
 
@@ -143,15 +143,15 @@ struct DeathTest {
         "failed to fork a process to perform a death test");
     child_pid_ = child_pid;
     if (child_pid_ == 0) {
-      RunForChild(std::forward<Func>(f));
+      RunForChild(::std::forward<Func>(f));
       assert(false && "unreachable");
     }
     return RunForParent();
   }
 
   int getChildExitCode() const { return exit_code_; }
-  std::string const& getChildStdOut() const { return stdout_from_child_; }
-  std::string const& getChildStdErr() const { return stderr_from_child_; }
+  ::std::string const& getChildStdOut() const { return stdout_from_child_; }
+  ::std::string const& getChildStdErr() const { return stderr_from_child_; }
 private:
   template <class Func>
   TEST_NORETURN void RunForChild(Func&& f) {
@@ -160,18 +160,18 @@ private:
     auto DupFD = [](int DestFD, int TargetFD) {
       int dup_result = dup2(DestFD, TargetFD);
       if (dup_result == -1)
-        std::exit(RK_SetupFailure);
+        ::std::exit(RK_SetupFailure);
     };
     DupFD(GetStdOutWriteFD(), STDOUT_FILENO);
     DupFD(GetStdErrWriteFD(), STDERR_FILENO);
 
     GlobalMatcher() = matcher_;
     f();
-    std::exit(RK_DidNotDie);
+    ::std::exit(RK_DidNotDie);
   }
 
-  static std::string ReadChildIOUntilEnd(int FD) {
-    std::string error_msg;
+  static ::std::string ReadChildIOUntilEnd(int FD) {
+    ::std::string error_msg;
     char buffer[256];
     int num_read;
     do {
@@ -232,11 +232,11 @@ private:
   int exit_code_ = -1;
   int stdout_pipe_fd_[2];
   int stderr_pipe_fd_[2];
-  std::string stdout_from_child_;
-  std::string stderr_from_child_;
+  ::std::string stdout_from_child_;
+  ::std::string stderr_from_child_;
 };
 
-void std::__libcpp_verbose_abort(char const* format, ...) {
+void ::std::__libcpp_verbose_abort(char const* format, ...) {
   assert(!GlobalMatcher().empty());
 
   // Extract information from the error message. This has to stay synchronized with
@@ -250,9 +250,9 @@ void std::__libcpp_verbose_abort(char const* format, ...) {
   va_end(list);
 
   if (GlobalMatcher().Matches(file, line, message)) {
-    std::exit(DeathTest::RK_MatchFound);
+    ::std::exit(DeathTest::RK_MatchFound);
   }
-  std::exit(DeathTest::RK_MatchFailure);
+  ::std::exit(DeathTest::RK_MatchFailure);
 }
 
 template <class Func>
@@ -260,15 +260,15 @@ inline bool ExpectDeath(const char* stmt, Func&& func, AssertionInfoMatcher Matc
   DeathTest DT(Matcher);
   DeathTest::ResultKind RK = DT.Run(func);
   auto OnFailure = [&](const char* msg) {
-    std::fprintf(stderr, "EXPECT_DEATH( %s ) failed! (%s)\n\n", stmt, msg);
+    ::std::fprintf(stderr, "EXPECT_DEATH( %s ) failed! (%s)\n\n", stmt, msg);
     if (RK != DeathTest::RK_Unknown) {
-      std::fprintf(stderr, "child exit code: %d\n", DT.getChildExitCode());
+      ::std::fprintf(stderr, "child exit code: %d\n", DT.getChildExitCode());
     }
     if (!DT.getChildStdErr().empty()) {
-      std::fprintf(stderr, "---------- standard err ----------\n%s\n", DT.getChildStdErr().c_str());
+      ::std::fprintf(stderr, "---------- standard err ----------\n%s\n", DT.getChildStdErr().c_str());
     }
     if (!DT.getChildStdOut().empty()) {
-      std::fprintf(stderr, "---------- standard out ----------\n%s\n", DT.getChildStdOut().c_str());
+      ::std::fprintf(stderr, "---------- standard out ----------\n%s\n", DT.getChildStdOut().c_str());
     }
     return false;
   };

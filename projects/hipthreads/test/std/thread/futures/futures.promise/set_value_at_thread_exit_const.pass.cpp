@@ -21,7 +21,7 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-void func(std::promise<int> p)
+void func(::std::promise<int> p)
 {
     const int i = 5;
     p.set_value_at_thread_exit(i);
@@ -30,9 +30,9 @@ void func(std::promise<int> p)
 int main(int, char**)
 {
     {
-        std::promise<int> p;
-        std::future<int> f = p.get_future();
-        support::make_test_thread(func, std::move(p)).detach();
+        ::std::promise<int> p;
+        ::std::future<int> f = p.get_future();
+        support::make_test_thread(func, ::std::move(p)).detach();
         assert(f.get() == 5);
     }
 

@@ -34,10 +34,10 @@
 #include "hip/std/__memory/addressof.h"
 #include "hip/std/__utility/swap.h"
 
-namespace gpu {
+namespace cuda {
 
 //====================================================================================================================//
-//      Adapted from libc++ std::unique_lock
+//      Adapted from libc++ ::std::unique_lock
 //====================================================================================================================//
 
 template <class _Mutex>
@@ -55,24 +55,24 @@ public:
     __m_->lock();
   }
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, std::defer_lock_t) _NOEXCEPT
+  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::defer_lock_t) _NOEXCEPT
       : __m_(hip::std::addressof(__m)),
         __owns_(false) {}
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, std::try_to_lock_t)
+  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::try_to_lock_t)
       : __m_(hip::std::addressof(__m)), __owns_(__m.try_lock()) {}
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, std::adopt_lock_t) : __m_(hip::std::addressof(__m)), __owns_(true) {}
+  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, ::std::adopt_lock_t) : __m_(hip::std::addressof(__m)), __owns_(true) {}
 
   // TODO: Uncomment this once we implement chrono
   // template <class _Clock, class _Duration>
   // __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, const chrono::time_point<_Clock, _Duration>& __t)
-  //     : __m_(gpu::addressof(__m)), __owns_(__m.try_lock_until(__t)) {}
+  //     : __m_(hip::addressof(__m)), __owns_(__m.try_lock_until(__t)) {}
 
   // TODO: Uncomment this once we implement chrono
   // template <class _Rep, class _Period>
   // __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, const chrono::duration<_Rep, _Period>& __d)
-  //     : __m_(gpu::addressof(__m)), __owns_(__m.try_lock_for(__d)) {}
+  //     : __m_(hip::addressof(__m)), __owns_(__m.try_lock_for(__d)) {}
 
   __device__ _LIBGPU_HIDE_FROM_ABI ~unique_lock() {
     if (__owns_)
@@ -177,6 +177,6 @@ __device__ inline _LIBGPU_HIDE_FROM_ABI void swap(unique_lock<_Mutex>& __x, uniq
   __x.swap(__y);
 }
 
-} // namespace gpu
+} // namespace cuda
 
 #endif // __GPU___MUTEX_UNIQUE_LOCK_H__

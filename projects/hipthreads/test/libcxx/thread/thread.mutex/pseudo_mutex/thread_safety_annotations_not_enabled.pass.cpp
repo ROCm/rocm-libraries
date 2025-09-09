@@ -24,10 +24,10 @@
 
 int main(int, char**) {
 #ifdef __HIP_DEVICE_COMPILE__
-  gpu::pseudo_mutex m;
+  hip::pseudo_mutex m;
   m.lock();
   {
-    gpu::unique_lock<gpu::pseudo_mutex> g(m, std::adopt_lock);
+    hip::unique_lock<hip::pseudo_mutex> g(m, ::std::adopt_lock);
   }
 #endif
 

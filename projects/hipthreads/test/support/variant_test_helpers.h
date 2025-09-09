@@ -71,15 +71,15 @@ struct MakeEmptyT {
   }
    ~MakeEmptyT() { --alive; }
 };
-static_assert(std::is_swappable_v<MakeEmptyT>, ""); // required for test
+static_assert(::std::is_swappable_v<MakeEmptyT>, ""); // required for test
 
 int MakeEmptyT::alive = 0;
 
 template <class Variant>
 void makeEmpty(Variant& v) {
-    Variant v2(std::in_place_type<MakeEmptyT>);
+    Variant v2(::std::in_place_type<MakeEmptyT>);
     try {
-        v = std::move(v2);
+        v = ::std::move(v2);
         assert(false);
     } catch (...) {
         assert(v.valueless_by_exception());
@@ -117,20 +117,20 @@ struct ForwardingCallObject {
   template <class... Args>
   ForwardingCallObject&& operator()(Args&&...) && {
     set_call<Args &&...>(CT_NonConst | CT_RValue);
-    return std::move(*this);
+    return ::std::move(*this);
   }
 
   template <class... Args>
   const ForwardingCallObject&& operator()(Args&&...) const && {
     set_call<Args &&...>(CT_Const | CT_RValue);
-    return std::move(*this);
+    return ::std::move(*this);
   }
 
   template <class... Args> static void set_call(CallType type) {
     assert(last_call_type == CT_None);
     assert(last_call_args == nullptr);
     last_call_type = type;
-    last_call_args = std::addressof(makeArgumentID<Args...>());
+    last_call_args = ::std::addressof(makeArgumentID<Args...>());
   }
 
   template <class... Args> static bool check_call(CallType type) {

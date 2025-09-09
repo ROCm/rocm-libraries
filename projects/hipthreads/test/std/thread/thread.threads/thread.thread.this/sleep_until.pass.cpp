@@ -26,7 +26,7 @@ int main(int, char**)
   typedef Clock::time_point time_point;
   cuda::std::chrono::milliseconds ms(500);
   time_point t0 = Clock::now();
-  std::this_thread::sleep_until(t0 + ms);
+  ::std::this_thread::sleep_until(t0 + ms);
   time_point t1 = Clock::now();
   // NOTE: Operating systems are (by default) best effort and therefore we may
   // have slept longer, perhaps much longer than we requested.

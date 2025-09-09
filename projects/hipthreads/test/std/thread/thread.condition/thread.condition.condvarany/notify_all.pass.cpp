@@ -24,16 +24,16 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::condition_variable_any cv;
+::std::condition_variable_any cv;
 
-typedef std::timed_mutex L0;
-typedef gpu::unique_lock<L0> L1;
+typedef ::std::timed_mutex L0;
+typedef hip::unique_lock<L0> L1;
 
 L0 m0;
 
 const unsigned threadCount = 2;
 bool pleaseExit = false;
-std::atomic<unsigned> notReady;
+::std::atomic<unsigned> notReady;
 
 void helper() {
   L1 lk(m0);
@@ -45,12 +45,12 @@ void helper() {
 int main(int, char**)
 {
   notReady = threadCount;
-  std::vector<gpu::thread> threads(threadCount);
+  ::std::vector<hip::thread> threads(threadCount);
   for (unsigned i = 0; i < threadCount; i++)
     threads[i] = support::make_test_thread(helper);
   {
     while (notReady > 0)
-      gpu::this_thread::pseudo_yield();
+      hip::this_thread::pseudo_yield();
     // At this point, both threads have had a chance to acquire the lock and are
     // either waiting on the condition variable or about to wait.
     L1 lk(m0);

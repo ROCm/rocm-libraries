@@ -19,11 +19,11 @@
 
 #include "test_macros.h"
 
-static_assert(noexcept(std::jthread::hardware_concurrency()));
+static_assert(noexcept(::std::jthread::hardware_concurrency()));
 
 int main(int, char**) {
-  std::same_as<unsigned int> decltype(auto) result = std::jthread::hardware_concurrency();
-  assert(result == gpu::thread::hardware_concurrency());
+  ::std::same_as<unsigned int> decltype(auto) result = ::std::jthread::hardware_concurrency();
+  assert(result == hip::thread::hardware_concurrency());
 
   return 0;
 }

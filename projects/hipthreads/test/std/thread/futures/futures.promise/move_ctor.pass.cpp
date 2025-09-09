@@ -26,10 +26,10 @@ int main(int, char**)
     test_allocator_statistics alloc_stats;
     assert(alloc_stats.alloc_count == 0);
     {
-        std::promise<int> p0(std::allocator_arg, test_allocator<int>(&alloc_stats));
-        std::promise<int> p(std::move(p0));
+        ::std::promise<int> p0(::std::allocator_arg, test_allocator<int>(&alloc_stats));
+        ::std::promise<int> p(::std::move(p0));
         assert(alloc_stats.alloc_count == 1);
-        std::future<int> f = p.get_future();
+        ::std::future<int> f = p.get_future();
         assert(alloc_stats.alloc_count == 1);
         assert(f.valid());
 #ifndef TEST_HAS_NO_EXCEPTIONS
@@ -38,19 +38,19 @@ int main(int, char**)
             f = p0.get_future();
             assert(false);
         }
-        catch (const std::future_error& e)
+        catch (const ::std::future_error& e)
         {
-            assert(e.code() == make_error_code(std::future_errc::no_state));
+            assert(e.code() == make_error_code(::std::future_errc::no_state));
         }
         assert(alloc_stats.alloc_count == 1);
 #endif
     }
     assert(alloc_stats.alloc_count == 0);
     {
-        std::promise<int&> p0(std::allocator_arg, test_allocator<int>(&alloc_stats));
-        std::promise<int&> p(std::move(p0));
+        ::std::promise<int&> p0(::std::allocator_arg, test_allocator<int>(&alloc_stats));
+        ::std::promise<int&> p(::std::move(p0));
         assert(alloc_stats.alloc_count == 1);
-        std::future<int&> f = p.get_future();
+        ::std::future<int&> f = p.get_future();
         assert(alloc_stats.alloc_count == 1);
         assert(f.valid());
 #ifndef TEST_HAS_NO_EXCEPTIONS
@@ -59,19 +59,19 @@ int main(int, char**)
             f = p0.get_future();
             assert(false);
         }
-        catch (const std::future_error& e)
+        catch (const ::std::future_error& e)
         {
-            assert(e.code() == make_error_code(std::future_errc::no_state));
+            assert(e.code() == make_error_code(::std::future_errc::no_state));
         }
         assert(alloc_stats.alloc_count == 1);
 #endif
     }
     assert(alloc_stats.alloc_count == 0);
     {
-        std::promise<void> p0(std::allocator_arg, test_allocator<void>(&alloc_stats));
-        std::promise<void> p(std::move(p0));
+        ::std::promise<void> p0(::std::allocator_arg, test_allocator<void>(&alloc_stats));
+        ::std::promise<void> p(::std::move(p0));
         assert(alloc_stats.alloc_count == 1);
-        std::future<void> f = p.get_future();
+        ::std::future<void> f = p.get_future();
         assert(alloc_stats.alloc_count == 1);
         assert(f.valid());
 #ifndef TEST_HAS_NO_EXCEPTIONS
@@ -80,9 +80,9 @@ int main(int, char**)
             f = p0.get_future();
             assert(false);
         }
-        catch (const std::future_error& e)
+        catch (const ::std::future_error& e)
         {
-            assert(e.code() == make_error_code(std::future_errc::no_state));
+            assert(e.code() == make_error_code(::std::future_errc::no_state));
         }
         assert(alloc_stats.alloc_count == 1);
 #endif

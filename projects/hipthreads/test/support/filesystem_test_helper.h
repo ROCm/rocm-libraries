@@ -49,13 +49,13 @@ namespace utils {
     }
     inline int setenv(const char *var, const char *val, int overwrite) {
         (void)overwrite;
-        return ::_putenv((std::string(var) + "=" + std::string(val)).c_str());
+        return ::_putenv((::std::string(var) + "=" + ::std::string(val)).c_str());
     }
     inline int unsetenv(const char *var) {
-        return ::_putenv((std::string(var) + "=").c_str());
+        return ::_putenv((::std::string(var) + "=").c_str());
     }
-    inline bool space(std::string path, std::uintmax_t &capacity,
-                      std::uintmax_t &free, std::uintmax_t &avail) {
+    inline bool space(::std::string path, ::std::uintmax_t &capacity,
+                      ::std::uintmax_t &free, ::std::uintmax_t &avail) {
         ULARGE_INTEGER FreeBytesAvailableToCaller, TotalNumberOfBytes,
                        TotalNumberOfFreeBytes;
         if (!GetDiskFreeSpaceExA(path.c_str(), &FreeBytesAvailableToCaller,
@@ -75,8 +75,8 @@ namespace utils {
     using ::link;
     using ::setenv;
     using ::unsetenv;
-    inline bool space(std::string path, std::uintmax_t &capacity,
-                      std::uintmax_t &free, std::uintmax_t &avail) {
+    inline bool space(::std::string path, ::std::uintmax_t &capacity,
+                      ::std::uintmax_t &free, ::std::uintmax_t &avail) {
         struct statvfs expect;
         if (::statvfs(path.c_str(), &expect) == -1)
           return false;
@@ -85,9 +85,9 @@ namespace utils {
         assert(expect.f_bsize > 0);
         assert(expect.f_blocks > 0);
         assert(expect.f_frsize > 0);
-        auto do_mult = [&](std::uintmax_t val) {
-            std::uintmax_t fsize = expect.f_frsize;
-            std::uintmax_t new_val = val * fsize;
+        auto do_mult = [&](::std::uintmax_t val) {
+            ::std::uintmax_t fsize = expect.f_frsize;
+            ::std::uintmax_t new_val = val * fsize;
             assert(new_val / fsize == val); // Test for overflow
             return new_val;
         };
@@ -129,16 +129,16 @@ namespace utils {
 #endif
     }
 
-    inline std::string getcwd() {
+    inline ::std::string getcwd() {
         // Assume that path lengths are not greater than this.
         // This should be fine for testing purposes.
         char buf[4096];
         char* ret = ::getcwd(buf, sizeof(buf));
         assert(ret && "getcwd failed");
-        return std::string(ret);
+        return ::std::string(ret);
     }
 
-    inline bool exists(std::string const& path) {
+    inline bool exists(::std::string const& path) {
         struct ::stat tmp;
         return ::stat(path.c_str(), &tmp) == 0;
     }
@@ -150,11 +150,11 @@ struct scoped_test_env
 #ifdef _WIN32
         // Windows mkdir can create multiple recursive directories
         // if needed.
-        std::string cmd = "mkdir " + test_root.string();
+        ::std::string cmd = "mkdir " + test_root.string();
 #else
-        std::string cmd = "mkdir -p " + test_root.string();
+        ::std::string cmd = "mkdir -p " + test_root.string();
 #endif
-        int ret = std::system(cmd.c_str());
+        int ret = ::std::system(cmd.c_str());
         assert(ret == 0);
 
         // Ensure that the root_path is fully resolved, i.e. it contains no
@@ -166,18 +166,18 @@ struct scoped_test_env
 
     ~scoped_test_env() {
 #ifdef _WIN32
-        std::string cmd = "rmdir /s /q " + test_root.string();
-        int ret = std::system(cmd.c_str());
+        ::std::string cmd = "rmdir /s /q " + test_root.string();
+        int ret = ::std::system(cmd.c_str());
         assert(ret == 0);
 #else
 #if defined(__MVS__)
         // The behaviour of chmod -R on z/OS prevents recursive
         // permission change for directories that do not have read permission.
-        std::string cmd = "find  " + test_root.string() + " -exec chmod 777 {} \\;";
+        ::std::string cmd = "find  " + test_root.string() + " -exec chmod 777 {} \\;";
 #else
-        std::string cmd = "chmod -R 777 " + test_root.string();
+        ::std::string cmd = "chmod -R 777 " + test_root.string();
 #endif // defined(__MVS__)
-        int ret = std::system(cmd.c_str());
+        int ret = ::std::system(cmd.c_str());
 #if !defined(_AIX)
         // On AIX the chmod command will return non-zero when trying to set
         // the permissions on a directory that contains a bad symlink. This triggers
@@ -187,7 +187,7 @@ struct scoped_test_env
 #endif
 
         cmd = "rm -rf " + test_root.string();
-        ret = std::system(cmd.c_str());
+        ret = ::std::system(cmd.c_str());
         assert(ret == 0);
 #endif
     }
@@ -195,11 +195,11 @@ struct scoped_test_env
     scoped_test_env(scoped_test_env const &) = delete;
     scoped_test_env & operator=(scoped_test_env const &) = delete;
 
-    fs::path make_env_path(std::string p) { return sanitize_path(p); }
+    fs::path make_env_path(::std::string p) { return sanitize_path(p); }
 
-    std::string sanitize_path(std::string raw) {
-        assert(raw.find("..") == std::string::npos);
-        std::string root = test_root.string();
+    ::std::string sanitize_path(::std::string raw) {
+        assert(raw.find("..") == ::std::string::npos);
+        ::std::string root = test_root.string();
         if (root.compare(0, root.size(), raw, 0, root.size()) != 0) {
             assert(raw.front() != '\\');
             fs::path tmp(test_root);
@@ -211,15 +211,15 @@ struct scoped_test_env
 
     // Purposefully using a size potentially larger than off_t here so we can
     // test the behavior of libc++fs when it is built with _FILE_OFFSET_BITS=64
-    // but the caller is not (std::filesystem also uses uintmax_t rather than
+    // but the caller is not (::std::filesystem also uses uintmax_t rather than
     // off_t). On a 32-bit system this allows us to create a file larger than
     // 2GB.
-    std::string create_file(fs::path filename_path, uintmax_t size = 0) {
-        std::string filename = sanitize_path(filename_path.string());
+    ::std::string create_file(fs::path filename_path, uintmax_t size = 0) {
+        ::std::string filename = sanitize_path(filename_path.string());
 
         if (size >
-            static_cast<typename std::make_unsigned<utils::off64_t>::type>(
-                std::numeric_limits<utils::off64_t>::max())) {
+            static_cast<typename ::std::make_unsigned<utils::off64_t>::type>(
+                ::std::numeric_limits<utils::off64_t>::max())) {
             fprintf(stderr, "create_file(%s, %ju) too large\n",
                     filename.c_str(), size);
             abort();
@@ -249,55 +249,55 @@ struct scoped_test_env
         return filename;
     }
 
-    std::string create_dir(fs::path filename_path) {
-        std::string filename = filename_path.string();
-        filename = sanitize_path(std::move(filename));
+    ::std::string create_dir(fs::path filename_path) {
+        ::std::string filename = filename_path.string();
+        filename = sanitize_path(::std::move(filename));
         int ret = utils::mkdir(filename.c_str(), 0777); // rwxrwxrwx mode
         assert(ret == 0);
         return filename;
     }
 
-    std::string create_file_dir_symlink(fs::path source_path,
+    ::std::string create_file_dir_symlink(fs::path source_path,
                                         fs::path to_path,
                                         bool sanitize_source = true,
                                         bool is_dir = false) {
-        std::string source = source_path.string();
-        std::string to = to_path.string();
+        ::std::string source = source_path.string();
+        ::std::string to = to_path.string();
         if (sanitize_source)
-            source = sanitize_path(std::move(source));
-        to = sanitize_path(std::move(to));
+            source = sanitize_path(::std::move(source));
+        to = sanitize_path(::std::move(to));
         int ret = utils::symlink(source.c_str(), to.c_str(), is_dir);
         assert(ret == 0);
         return to;
     }
 
-    std::string create_symlink(fs::path source_path,
+    ::std::string create_symlink(fs::path source_path,
                                fs::path to_path,
                                bool sanitize_source = true) {
         return create_file_dir_symlink(source_path, to_path, sanitize_source,
                                        false);
     }
 
-    std::string create_directory_symlink(fs::path source_path,
+    ::std::string create_directory_symlink(fs::path source_path,
                                          fs::path to_path,
                                          bool sanitize_source = true) {
         return create_file_dir_symlink(source_path, to_path, sanitize_source,
                                        true);
     }
 
-    std::string create_hardlink(fs::path source_path, fs::path to_path) {
-        std::string source = source_path.string();
-        std::string to = to_path.string();
-        source = sanitize_path(std::move(source));
-        to = sanitize_path(std::move(to));
+    ::std::string create_hardlink(fs::path source_path, fs::path to_path) {
+        ::std::string source = source_path.string();
+        ::std::string to = to_path.string();
+        source = sanitize_path(::std::move(source));
+        to = sanitize_path(::std::move(to));
         int ret = utils::link(source.c_str(), to.c_str());
         assert(ret == 0);
         return to;
     }
 
 #ifndef _WIN32
-    std::string create_fifo(std::string file) {
-        file = sanitize_path(std::move(file));
+    ::std::string create_fifo(::std::string file) {
+        file = sanitize_path(::std::move(file));
         int ret = ::mkfifo(file.c_str(), 0666); // rw-rw-rw- mode
         assert(ret == 0);
         return file;
@@ -307,8 +307,8 @@ struct scoped_test_env
   // Some platforms doesn't support socket files so we shouldn't even
   // allow tests to call this unguarded.
 #if !defined(__FreeBSD__) && !defined(__APPLE__) && !defined(_WIN32)
-    std::string create_socket(std::string file) {
-        file = sanitize_path(std::move(file));
+    ::std::string create_socket(::std::string file) {
+        file = sanitize_path(::std::move(file));
 
         ::sockaddr_un address;
         address.sun_family = AF_UNIX;
@@ -334,11 +334,11 @@ private:
     static inline fs::path available_cwd_path() {
         fs::path const cwd = utils::getcwd();
         fs::path const tmp = fs::temp_directory_path();
-        std::string base = cwd.filename().string();
-        size_t i = std::hash<std::string>()(cwd.string());
-        fs::path p = tmp / (base + "-static_env." + std::to_string(i));
+        ::std::string base = cwd.filename().string();
+        size_t i = ::std::hash<::std::string>()(cwd.string());
+        fs::path p = tmp / (base + "-static_env." + ::std::to_string(i));
         while (utils::exists(p.string())) {
-            p = tmp / (base + "-static_env." + std::to_string(++i));
+            p = tmp / (base + "-static_env." + ::std::to_string(++i));
         }
         return p;
     }
@@ -390,14 +390,14 @@ public:
         return env_path / p;
     }
 
-    const std::vector<fs::path> TestFileList = {
+    const ::std::vector<fs::path> TestFileList = {
         makePath("empty_file"),
         makePath("non_empty_file"),
         makePath("dir1/file1"),
         makePath("dir1/file2")
     };
 
-    const std::vector<fs::path> TestDirList = {
+    const ::std::vector<fs::path> TestDirList = {
         makePath("dir1"),
         makePath("dir1/dir2"),
         makePath("dir1/dir2/dir3")
@@ -415,20 +415,20 @@ public:
     const fs::path NonEmptyFile  = TestFileList[1];
     const fs::path CharFile      = "/dev/null"; // Hopefully this exists
 
-    const std::vector<fs::path> DirIterationList = {
+    const ::std::vector<fs::path> DirIterationList = {
         makePath("dir1/dir2"),
         makePath("dir1/file1"),
         makePath("dir1/file2")
     };
 
-    const std::vector<fs::path> DirIterationListDepth1 = {
+    const ::std::vector<fs::path> DirIterationListDepth1 = {
         makePath("dir1/dir2/afile3"),
         makePath("dir1/dir2/dir3"),
         makePath("dir1/dir2/symlink_to_dir3"),
         makePath("dir1/dir2/file4"),
     };
 
-    const std::vector<fs::path> RecDirIterationList = {
+    const ::std::vector<fs::path> RecDirIterationList = {
         makePath("dir1/dir2"),
         makePath("dir1/file1"),
         makePath("dir1/file2"),
@@ -439,7 +439,7 @@ public:
         makePath("dir1/dir2/dir3/file5")
     };
 
-    const std::vector<fs::path> RecDirFollowSymlinksIterationList = {
+    const ::std::vector<fs::path> RecDirFollowSymlinksIterationList = {
         makePath("dir1/dir2"),
         makePath("dir1/file1"),
         makePath("dir1/file2"),
@@ -453,7 +453,7 @@ public:
 };
 
 struct CWDGuard {
-  std::string oldCwd_;
+  ::std::string oldCwd_;
   CWDGuard() : oldCwd_(utils::getcwd()) { }
   ~CWDGuard() {
     int ret = ::chdir(oldCwd_.c_str());
@@ -514,7 +514,7 @@ const unsigned PathListSize = sizeof(PathList) / sizeof(MultiStringType);
 
 template <class Iter>
 Iter IterEnd(Iter B) {
-  using VT = typename std::iterator_traits<Iter>::value_type;
+  using VT = typename ::std::iterator_traits<Iter>::value_type;
   for (; *B != VT{}; ++B)
     ;
   return B;
@@ -526,14 +526,14 @@ const CharT* StrEnd(CharT const* P) {
 }
 
 template <class CharT>
-std::size_t StrLen(CharT const* P) {
+::std::size_t StrLen(CharT const* P) {
     return StrEnd(P) - P;
 }
 
 // Testing the allocation behavior of the code_cvt functions requires
 // *knowing* that the allocation was not done by "path::__str_".
 // This hack forces path to allocate enough memory.
-inline void PathReserve(fs::path& p, std::size_t N) {
+inline void PathReserve(fs::path& p, ::std::size_t N) {
   auto const& native_ref = p.native();
   const_cast<fs::path::string_type&>(native_ref).reserve(N);
 }
@@ -572,8 +572,8 @@ bool checkCollectionsEqualBackwards(
 // We often need to test that the error_code was cleared if no error occurs
 // this function returns an error_code which is set to an error that will
 // never be returned by the filesystem functions.
-inline std::error_code GetTestEC(unsigned Idx = 0) {
-  using std::errc;
+inline ::std::error_code GetTestEC(unsigned Idx = 0) {
+  using ::std::errc;
   auto GetErrc = [&]() {
     switch (Idx) {
     case 0:
@@ -586,15 +586,15 @@ inline std::error_code GetTestEC(unsigned Idx = 0) {
       return errc::argument_list_too_long;
     default:
       assert(false && "Idx out of range");
-      std::abort();
+      ::std::abort();
     }
   };
-  return std::make_error_code(GetErrc());
+  return ::std::make_error_code(GetErrc());
 }
 
-inline bool ErrorIsImp(const std::error_code& ec,
-                       std::vector<std::errc> const& errors) {
-  std::error_condition cond = ec.default_error_condition();
+inline bool ErrorIsImp(const ::std::error_code& ec,
+                       ::std::vector<::std::errc> const& errors) {
+  ::std::error_condition cond = ec.default_error_condition();
   for (auto errc : errors) {
     if (cond.value() == static_cast<int>(errc))
       return true;
@@ -603,15 +603,15 @@ inline bool ErrorIsImp(const std::error_code& ec,
 }
 
 template <class... ErrcT>
-inline bool ErrorIs(const std::error_code& ec, std::errc First, ErrcT... Rest) {
-  std::vector<std::errc> errors = {First, Rest...};
+inline bool ErrorIs(const ::std::error_code& ec, ::std::errc First, ErrcT... Rest) {
+  ::std::vector<::std::errc> errors = {First, Rest...};
   return ErrorIsImp(ec, errors);
 }
 
-// Provide our own Sleep routine since gpu::this_thread::sleep_for is not
+// Provide our own Sleep routine since hip::this_thread::sleep_for is not
 // available in single-threaded mode.
 template <class Dur> void SleepFor(Dur dur) {
-    using namespace std::chrono;
+    using namespace ::std::chrono;
 #if defined(_LIBCPP_HAS_NO_MONOTONIC_CLOCK)
     using Clock = system_clock;
 #else
@@ -650,24 +650,24 @@ inline fs::perms NormalizeExpectedPerms(fs::perms P) {
 }
 
 struct ExceptionChecker {
-  std::errc expected_err;
+  ::std::errc expected_err;
   fs::path expected_path1;
   fs::path expected_path2;
   unsigned num_paths;
   const char* func_name;
-  std::string opt_message;
+  ::std::string opt_message;
 
-  explicit ExceptionChecker(std::errc first_err, const char* fun_name,
-                            std::string opt_msg = {})
+  explicit ExceptionChecker(::std::errc first_err, const char* fun_name,
+                            ::std::string opt_msg = {})
       : expected_err{first_err}, num_paths(0), func_name(fun_name),
         opt_message(opt_msg) {}
-  explicit ExceptionChecker(fs::path p, std::errc first_err,
-                            const char* fun_name, std::string opt_msg = {})
+  explicit ExceptionChecker(fs::path p, ::std::errc first_err,
+                            const char* fun_name, ::std::string opt_msg = {})
       : expected_err(first_err), expected_path1(p), num_paths(1),
         func_name(fun_name), opt_message(opt_msg) {}
 
-  explicit ExceptionChecker(fs::path p1, fs::path p2, std::errc first_err,
-                            const char* fun_name, std::string opt_msg = {})
+  explicit ExceptionChecker(fs::path p1, fs::path p2, ::std::errc first_err,
+                            const char* fun_name, ::std::string opt_msg = {})
       : expected_err(first_err), expected_path1(p1), expected_path2(p2),
         num_paths(2), func_name(fun_name), opt_message(opt_msg) {}
 
@@ -679,16 +679,16 @@ struct ExceptionChecker {
   }
 
   void check_libcxx_string(fs::filesystem_error const& Err) {
-    std::string message = std::make_error_code(expected_err).message();
+    ::std::string message = ::std::make_error_code(expected_err).message();
 
-    std::string additional_msg = "";
+    ::std::string additional_msg = "";
     if (!opt_message.empty()) {
       additional_msg = opt_message + ": ";
     }
     auto transform_path = [](const fs::path& p) {
       return "\"" + p.string() + "\"";
     };
-    std::string format = [&]() -> std::string {
+    ::std::string format = [&]() -> ::std::string {
       switch (num_paths) {
       case 0:
         return format_string("filesystem error: in %s: %s%s", func_name,
@@ -725,7 +725,7 @@ inline fs::path GetWindowsInaccessibleDir() {
   // Only makes sense on windows, but the code can be compiled for
   // any platform.
   const fs::path dir("C:\\System Volume Information");
-  std::error_code ec;
+  ::std::error_code ec;
   const fs::path root("C:\\");
   for (const auto &ent : fs::directory_iterator(root, ec)) {
     if (ent != dir)

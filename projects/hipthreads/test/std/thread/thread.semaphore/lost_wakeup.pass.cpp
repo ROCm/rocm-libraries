@@ -22,8 +22,8 @@
 
 #include "make_test_thread.h"
 
-static std::counting_semaphore<> s(0);
-static std::barrier<> b(8 + 1);
+static ::std::counting_semaphore<> s(0);
+static ::std::barrier<> b(8 + 1);
 
 void acquire() {
   for (int i = 0; i < 10'000; ++i) {
@@ -50,7 +50,7 @@ void release() {
 
 int main(int, char**) {
   for (int run = 0; run < 20; ++run) {
-    std::vector<gpu::thread> threads;
+    ::std::vector<hip::thread> threads;
     for (int i = 0; i < 8; ++i)
       threads.push_back(support::make_test_thread(acquire));
 

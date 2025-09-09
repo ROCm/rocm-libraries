@@ -88,7 +88,7 @@ constexpr bool isMulti(ContainerType CT) {
 
 template <class Container, class ValueType = typename Container::value_type>
 struct ContainerDebugHelper {
-  static_assert(std::is_constructible<ValueType, int>::value,
+  static_assert(::std::is_constructible<ValueType, int>::value,
                 "must be constructible from int");
 
   static ValueType makeValueType(int val = 0, int = 0) {
@@ -104,11 +104,11 @@ struct ContainerDebugHelper<Container, char> {
 };
 
 template <class Container, class Key, class Value>
-struct ContainerDebugHelper<Container, std::pair<const Key, Value> > {
-  using ValueType = std::pair<const Key, Value>;
-  static_assert(std::is_constructible<Key, int>::value,
+struct ContainerDebugHelper<Container, ::std::pair<const Key, Value> > {
+  using ValueType = ::std::pair<const Key, Value>;
+  static_assert(::std::is_constructible<Key, int>::value,
                 "must be constructible from int");
-  static_assert(std::is_constructible<Value, int>::value,
+  static_assert(::std::is_constructible<Value, int>::value,
                 "must be constructible from int");
 
   static ValueType makeValueType(int key = 0, int val = 0) {
@@ -123,14 +123,14 @@ struct BasicContainerChecks {
   using iterator = typename Container::iterator;
   using const_iterator = typename Container::const_iterator;
   using allocator_type = typename Container::allocator_type;
-  using traits = std::iterator_traits<iterator>;
+  using traits = ::std::iterator_traits<iterator>;
   using category = typename traits::iterator_category;
 
-  static_assert(std::is_same<test_allocator<value_type>, allocator_type>::value,
+  static_assert(::std::is_same<test_allocator<value_type>, allocator_type>::value,
                 "the container must use a test allocator");
 
   static constexpr bool IsBiDir =
-      std::is_convertible<category, std::bidirectional_iterator_tag>::value;
+      ::std::is_convertible<category, ::std::bidirectional_iterator_tag>::value;
 
  public:
   static void run() {
@@ -172,7 +172,7 @@ struct BasicContainerChecks {
     } else {
       for (int i = 0; i < size; ++i)
         C.insert(C.end(), Helper::makeValueType(i));
-      assert(C.size() == static_cast<std::size_t>(size));
+      assert(C.size() == static_cast<::std::size_t>(size));
     }
     return C;
   }
@@ -272,7 +272,7 @@ struct BasicContainerChecks {
     // copy move invalidates iterators
     Container C1 = makeContainer(3);
     iterator i = C1.begin();
-    Container C2 = std::move(C1);
+    Container C2 = ::std::move(C1);
     (void) *i;
     if constexpr (CT == CT_ForwardList) {
       EXPECT_DEATH( C1.erase_after(i) );

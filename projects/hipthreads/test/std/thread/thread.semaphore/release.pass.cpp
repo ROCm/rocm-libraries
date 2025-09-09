@@ -21,12 +21,12 @@
 
 int main(int, char**)
 {
-  std::counting_semaphore<> s(0);
+  ::std::counting_semaphore<> s(0);
 
   s.release();
   s.acquire();
 
-  gpu::thread t = support::make_test_thread([&](){
+  hip::thread t = support::make_test_thread([&](){
     s.acquire();
   });
   s.release(2);

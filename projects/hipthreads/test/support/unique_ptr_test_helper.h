@@ -52,21 +52,21 @@ struct B : public A {
 __device__ int B::count = 0;
 
 template <class T>
-__device__ TEST_CONSTEXPR_CXX23 typename std::enable_if<!std::is_array<T>::value, T*>::type newValue(int num_elements) {
+__device__ TEST_CONSTEXPR_CXX23 typename ::std::enable_if<!::std::is_array<T>::value, T*>::type newValue(int num_elements) {
   assert(num_elements == 1);
   return new T;
 }
 
 template <class T>
-__device__ TEST_CONSTEXPR_CXX23 typename std::enable_if<std::is_array<T>::value, typename std::remove_all_extents<T>::type*>::type
+__device__ TEST_CONSTEXPR_CXX23 typename ::std::enable_if<::std::is_array<T>::value, typename ::std::remove_all_extents<T>::type*>::type
 newValue(int num_elements) {
-  typedef typename std::remove_all_extents<T>::type VT;
+  typedef typename ::std::remove_all_extents<T>::type VT;
   assert(num_elements >= 1);
   return new VT[num_elements];
 }
 
 template <class T>
-__host__ TEST_CONSTEXPR_CXX23 typename std::enable_if<!std::is_array<T>::value, T*>::type newValue(int num_elements) {
+__host__ TEST_CONSTEXPR_CXX23 typename ::std::enable_if<!::std::is_array<T>::value, T*>::type newValue(int num_elements) {
   assert(num_elements == 1);
   T *__buf;
   assert(hipMalloc(&__buf, sizeof(T) == 0 ? 1 : sizeof(T)) == hipSuccess);
@@ -74,9 +74,9 @@ __host__ TEST_CONSTEXPR_CXX23 typename std::enable_if<!std::is_array<T>::value, 
 }
 
 template <class T>
-__host__ TEST_CONSTEXPR_CXX23 typename std::enable_if<std::is_array<T>::value, typename std::remove_all_extents<T>::type*>::type
+__host__ TEST_CONSTEXPR_CXX23 typename ::std::enable_if<::std::is_array<T>::value, typename ::std::remove_all_extents<T>::type*>::type
 newValue(int num_elements) {
-  typedef typename std::remove_all_extents<T>::type VT;
+  typedef typename ::std::remove_all_extents<T>::type VT;
   assert(num_elements >= 1);
   VT *__buf;
   assert(hipMalloc(&__buf, sizeof(VT) == 0 ? 1 : sizeof(VT) * num_elements) == hipSuccess);
@@ -146,25 +146,25 @@ __device__ IncompleteType* getNewIncompleteArray(int size);
 
 #if TEST_STD_VER >= 11
 template <class ThisT, class... Args>
-struct args_is_this_type : std::false_type {};
+struct args_is_this_type : ::std::false_type {};
 
 template <class ThisT, class A1>
-struct args_is_this_type<ThisT, A1> : std::is_same<ThisT, typename std::decay<A1>::type> {};
+struct args_is_this_type<ThisT, A1> : ::std::is_same<ThisT, typename ::std::decay<A1>::type> {};
 #endif
 
-template <class IncompleteT = IncompleteType, class Del = gpu::default_delete<IncompleteT> >
+template <class IncompleteT = IncompleteType, class Del = hip::default_delete<IncompleteT> >
 struct StoresIncomplete {
   static_assert(
-      (std::is_same<IncompleteT, IncompleteType>::value || std::is_same<IncompleteT, IncompleteType[]>::value), "");
+      (::std::is_same<IncompleteT, IncompleteType>::value || ::std::is_same<IncompleteT, IncompleteType[]>::value), "");
 
-  gpu::unique_ptr<IncompleteT, Del> m_ptr;
+  hip::unique_ptr<IncompleteT, Del> m_ptr;
 
 #if TEST_STD_VER >= 11
   __device__ StoresIncomplete(StoresIncomplete const&) = delete;
   __device__ StoresIncomplete(StoresIncomplete&&)      = default;
 
   template <class... Args>
-  __device__ StoresIncomplete(Args&&... args) : m_ptr(std::forward<Args>(args)...) {
+  __device__ StoresIncomplete(Args&&... args) : m_ptr(::std::forward<Args>(args)...) {
     static_assert(!args_is_this_type<StoresIncomplete, Args...>::value, "");
   }
 #else
@@ -183,11 +183,11 @@ public:
 };
 
 #if TEST_STD_VER >= 11
-template <class IncompleteT = IncompleteType, class Del = gpu::default_delete<IncompleteT>, class... Args>
+template <class IncompleteT = IncompleteType, class Del = hip::default_delete<IncompleteT>, class... Args>
 __device__ void doIncompleteTypeTest(int expect_alive, Args&&... ctor_args) {
   checkNumIncompleteTypeAlive(expect_alive);
   {
-    StoresIncomplete<IncompleteT, Del> sptr(std::forward<Args>(ctor_args)...);
+    StoresIncomplete<IncompleteT, Del> sptr(::std::forward<Args>(ctor_args)...);
     checkNumIncompleteTypeAlive(expect_alive);
     if (expect_alive == 0)
       assert(sptr.get() == nullptr);

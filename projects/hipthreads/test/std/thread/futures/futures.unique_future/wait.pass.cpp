@@ -23,35 +23,35 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-void func1(std::promise<int> p)
+void func1(::std::promise<int> p)
 {
-    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
+    hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
     p.set_value(3);
 }
 
 int j = 0;
 
-void func3(std::promise<int&> p)
+void func3(::std::promise<int&> p)
 {
-    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
+    hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
     j = 5;
     p.set_value(j);
 }
 
-void func5(std::promise<void> p)
+void func5(::std::promise<void> p)
 {
-    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
+    hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
     p.set_value();
 }
 
 template <typename T, typename F>
 void test(F func) {
     typedef cuda::std::chrono::high_resolution_clock Clock;
-    typedef cuda::std::chrono::duration<double, std::milli> ms;
+    typedef cuda::std::chrono::duration<double, ::std::milli> ms;
 
-    std::promise<T> p;
-    std::future<T> f = p.get_future();
-    support::make_test_thread(func, std::move(p)).detach();
+    ::std::promise<T> p;
+    ::std::future<T> f = p.get_future();
+    support::make_test_thread(func, ::std::move(p)).detach();
     assert(f.valid());
     f.wait();
     assert(f.valid());

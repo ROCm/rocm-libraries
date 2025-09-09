@@ -35,7 +35,7 @@ mutex m;
 
 int main(int, char**)
 {
-    std::shared_lock<mutex> lk(m);
+    ::std::shared_lock<mutex> lk(m);
     assert(lk.mutex() == &m);
     assert(lk.owns_lock() == true);
     assert(mutex::lock_count == 1);

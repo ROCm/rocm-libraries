@@ -64,12 +64,12 @@ struct TestMutexThrows {
 int main(int, char**)
 {
     {
-        using LG = gpu::scoped_lock<>;
+        using LG = hip::scoped_lock<>;
         LG lg;
         (void)lg;
     }
     {
-        using LG = gpu::scoped_lock<TestMutex>;
+        using LG = hip::scoped_lock<TestMutex>;
         TestMutex m1;
         {
             LG lg(m1);
@@ -78,7 +78,7 @@ int main(int, char**)
         assert(!m1.locked);
     }
     {
-        using LG = gpu::scoped_lock<TestMutex, TestMutex>;
+        using LG = hip::scoped_lock<TestMutex, TestMutex>;
         TestMutex m1, m2;
         {
             LG lg(m1, m2);
@@ -87,7 +87,7 @@ int main(int, char**)
         assert(!m1.locked && !m2.locked);
     }
     {
-        using LG = gpu::scoped_lock<TestMutex, TestMutex, TestMutex>;
+        using LG = hip::scoped_lock<TestMutex, TestMutex, TestMutex>;
         TestMutex m1, m2, m3;
         {
             LG lg(m1, m2, m3);
@@ -98,7 +98,7 @@ int main(int, char**)
 #if !defined(TEST_HAS_NO_EXCEPTIONS)
     {
         using MT = TestMutexThrows;
-        using LG = gpu::scoped_lock<MT>;
+        using LG = hip::scoped_lock<MT>;
         MT m1;
         m1.throws_on_lock = true;
         try {
@@ -109,7 +109,7 @@ int main(int, char**)
     }
     {
         using MT = TestMutexThrows;
-        using LG = gpu::scoped_lock<MT, MT>;
+        using LG = hip::scoped_lock<MT, MT>;
         MT m1, m2;
         m1.throws_on_lock = true;
         try {
@@ -120,7 +120,7 @@ int main(int, char**)
     }
     {
         using MT = TestMutexThrows;
-        using LG = gpu::scoped_lock<MT, MT, MT>;
+        using LG = hip::scoped_lock<MT, MT, MT>;
         MT m1, m2, m3;
         m2.throws_on_lock = true;
         try {
@@ -135,20 +135,20 @@ int main(int, char**)
     {
     TestMutex m1, m2, m3;
         {
-        gpu::scoped_lock sl{};
-        static_assert((std::is_same<decltype(sl), gpu::scoped_lock<>>::value), "" );
+        hip::scoped_lock sl{};
+        static_assert((::std::is_same<decltype(sl), hip::scoped_lock<>>::value), "" );
         }
         {
-        gpu::scoped_lock sl{m1};
-        static_assert((std::is_same<decltype(sl), gpu::scoped_lock<decltype(m1)>>::value), "" );
+        hip::scoped_lock sl{m1};
+        static_assert((::std::is_same<decltype(sl), hip::scoped_lock<decltype(m1)>>::value), "" );
         }
         {
-        gpu::scoped_lock sl{m1, m2};
-        static_assert((std::is_same<decltype(sl), gpu::scoped_lock<decltype(m1), decltype(m2)>>::value), "" );
+        hip::scoped_lock sl{m1, m2};
+        static_assert((::std::is_same<decltype(sl), hip::scoped_lock<decltype(m1), decltype(m2)>>::value), "" );
         }
         {
-        gpu::scoped_lock sl{m1, m2, m3};
-        static_assert((std::is_same<decltype(sl), gpu::scoped_lock<decltype(m1), decltype(m2), decltype(m3)>>::value), "" );
+        hip::scoped_lock sl{m1, m2, m3};
+        static_assert((::std::is_same<decltype(sl), hip::scoped_lock<decltype(m1), decltype(m2), decltype(m3)>>::value), "" );
         }
     }
 #endif

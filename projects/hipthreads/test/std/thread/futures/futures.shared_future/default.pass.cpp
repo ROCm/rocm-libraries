@@ -22,15 +22,15 @@
 int main(int, char**)
 {
     {
-        std::shared_future<int> f;
+        ::std::shared_future<int> f;
         assert(!f.valid());
     }
     {
-        std::shared_future<int&> f;
+        ::std::shared_future<int&> f;
         assert(!f.valid());
     }
     {
-        std::shared_future<void> f;
+        ::std::shared_future<void> f;
         assert(!f.valid());
     }
 

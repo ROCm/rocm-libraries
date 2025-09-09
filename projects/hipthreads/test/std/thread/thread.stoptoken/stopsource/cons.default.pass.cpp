@@ -18,11 +18,11 @@
 
 #include "test_macros.h"
 
-static_assert(std::is_default_constructible_v<std::stop_source>);
+static_assert(::std::is_default_constructible_v<::std::stop_source>);
 
 int main(int, char**) {
   {
-    std::stop_source ss = {}; // implicit
+    ::std::stop_source ss = {}; // implicit
     assert(ss.stop_possible());
     assert(!ss.stop_requested());
   }

@@ -8,7 +8,7 @@
 #include <cstdarg>
 
 namespace format_string_detail {
-inline std::string format_string_imp(const char* msg, ...) {
+inline ::std::string format_string_imp(const char* msg, ...) {
   // we might need a second shot at this, so pre-emptively make a copy
   struct GuardVAList {
     va_list& xtarget;
@@ -33,37 +33,37 @@ inline std::string format_string_imp(const char* msg, ...) {
   va_copy(args_cp, args);
   GuardVAList args_copy_guard(args_cp);
 
-  std::array<char, 256> local_buff;
-  std::size_t size = local_buff.size();
+  ::std::array<char, 256> local_buff;
+  ::std::size_t size = local_buff.size();
   auto ret = ::vsnprintf(local_buff.data(), size, msg, args_cp);
 
   args_copy_guard.clear();
 
   // handle empty expansion
   if (ret == 0)
-    return std::string{};
-  if (static_cast<std::size_t>(ret) < size)
-    return std::string(local_buff.data());
+    return ::std::string{};
+  if (static_cast<::std::size_t>(ret) < size)
+    return ::std::string(local_buff.data());
 
   // we did not provide a long enough buffer on our first attempt.
   // add 1 to size to account for null-byte in size cast to prevent overflow
-  size = static_cast<std::size_t>(ret) + 1;
-  auto buff_ptr = std::unique_ptr<char[]>(new char[size]);
+  size = static_cast<::std::size_t>(ret) + 1;
+  auto buff_ptr = ::std::unique_ptr<char[]>(new char[size]);
   ret = ::vsnprintf(buff_ptr.get(), size, msg, args);
-  return std::string(buff_ptr.get());
+  return ::std::string(buff_ptr.get());
 }
 
-const char* unwrap(std::string& s) { return s.c_str(); }
+const char* unwrap(::std::string& s) { return s.c_str(); }
 template <class Arg>
 Arg const& unwrap(Arg& a) {
-  static_assert(!std::is_class<Arg>::value, "cannot pass class here");
+  static_assert(!::std::is_class<Arg>::value, "cannot pass class here");
   return a;
 }
 
 } // namespace format_string_detail
 
 template <class... Args>
-std::string format_string(const char* fmt, Args const&... args) {
+::std::string format_string(const char* fmt, Args const&... args) {
   return format_string_detail::format_string_imp(
       fmt, format_string_detail::unwrap(const_cast<Args&>(args))...);
 }

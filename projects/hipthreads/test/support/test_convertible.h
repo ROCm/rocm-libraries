@@ -11,7 +11,7 @@
 
 // "test_convertible<Tp, Args...>()" is a metafunction used to check if 'Tp'
 // is implicitly convertible from 'Args...' for any number of arguments,
-// Unlike 'std::is_convertible' which only allows checking for single argument
+// Unlike '::std::is_convertible' which only allows checking for single argument
 // conversions.
 
 #include <type_traits>
@@ -27,7 +27,7 @@ namespace detail {
 
     template <class Tp, class ...Args>
     constexpr auto test_convertible_imp(int)
-        -> decltype(eat_type<Tp>({std::declval<Args>()...}), true)
+        -> decltype(eat_type<Tp>({::std::declval<Args>()...}), true)
     { return true; }
 
     template <class Tp, class ...Args>

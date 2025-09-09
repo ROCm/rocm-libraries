@@ -20,21 +20,21 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-static_assert(noexcept(std::declval<const std::jthread&>().get_id()));
+static_assert(noexcept(::std::declval<const ::std::jthread&>().get_id()));
 
 int main(int, char**) {
   // Does not represent a thread
   {
-    const std::jthread jt;
-    std::same_as<std::jthread::id> decltype(auto) result = jt.get_id();
-    assert(result == std::jthread::id());
+    const ::std::jthread jt;
+    ::std::same_as<::std::jthread::id> decltype(auto) result = jt.get_id();
+    assert(result == ::std::jthread::id());
   }
 
   // Represents a thread
   {
-    const std::jthread jt                                = support::make_test_jthread([] {});
-    std::same_as<std::jthread::id> decltype(auto) result = jt.get_id();
-    assert(result != std::jthread::id());
+    const ::std::jthread jt                                = support::make_test_jthread([] {});
+    ::std::same_as<::std::jthread::id> decltype(auto) result = jt.get_id();
+    assert(result != ::std::jthread::id());
   }
 
   return 0;

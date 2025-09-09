@@ -23,7 +23,7 @@
 
 #include "force_include_hip.h"
 
-__device__ gpu::pseudo_mutex m;
+__device__ hip::pseudo_mutex m;
 __device__ int foo __attribute__((guarded_by(m)));
 
 int main(int, char**) {

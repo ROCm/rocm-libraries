@@ -24,7 +24,7 @@
 int main(int, char**) {
   // Try to lock a mutex that is not locked yet. This should succeed.
   {
-    std::timed_mutex m;
+    ::std::timed_mutex m;
     bool succeeded = m.try_lock();
     assert(succeeded);
     m.unlock();
@@ -32,10 +32,10 @@ int main(int, char**) {
 
   // Try to lock a mutex that is already locked. This should fail.
   {
-    std::timed_mutex m;
+    ::std::timed_mutex m;
     m.lock();
 
-    gpu::thread t = support::make_test_thread([&] {
+    hip::thread t = support::make_test_thread([&] {
       for (int i = 0; i != 10; ++i) {
         bool succeeded = m.try_lock();
         assert(!succeeded);

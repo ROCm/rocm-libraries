@@ -25,13 +25,13 @@
 int main(int, char**)
 {
     {
-    typedef std::shared_timed_mutex M;
+    typedef ::std::shared_timed_mutex M;
     M m0;
     M m1;
-    std::shared_lock<M> lk0(m0);
-    std::shared_lock<M> lk1(m1);
-    lk1 = std::move(lk0);
-    assert(lk1.mutex() == std::addressof(m0));
+    ::std::shared_lock<M> lk0(m0);
+    ::std::shared_lock<M> lk1(m1);
+    lk1 = ::std::move(lk0);
+    assert(lk1.mutex() == ::std::addressof(m0));
     assert(lk1.owns_lock() == true);
     assert(lk0.mutex() == nullptr);
     assert(lk0.owns_lock() == false);
@@ -40,10 +40,10 @@ int main(int, char**)
     typedef nasty_mutex M;
     M m0;
     M m1;
-    std::shared_lock<M> lk0(m0);
-    std::shared_lock<M> lk1(m1);
-    lk1 = std::move(lk0);
-    assert(lk1.mutex() == std::addressof(m0));
+    ::std::shared_lock<M> lk0(m0);
+    ::std::shared_lock<M> lk1(m1);
+    lk1 = ::std::move(lk0);
+    assert(lk1.mutex() == ::std::addressof(m0));
     assert(lk1.owns_lock() == true);
     assert(lk0.mutex() == nullptr);
     assert(lk0.owns_lock() == false);

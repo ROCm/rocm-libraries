@@ -23,7 +23,7 @@
 // For cuda::std::__libcpp_thread_sleep_for
 #include <hip/std/atomic>
 
-namespace gpu {
+namespace cuda {
 
 enum {
     CPU_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
@@ -69,9 +69,9 @@ struct WorkQueue {
 
 // Initializing cpuWorkQueue.pushCount to the maximum value of a uint32_t forces the GPU to keep polling until we update
 // cpuWorkQueue.pushCount with the value of cpuWorkQueuePushCount from the CPU. We do this update once there are no
-// more gpu::thread objects in the current scope.
+// more hip::thread objects in the current scope.
 __device__ WorkQueue<CPU_WORK_QUEUE_SIZE> cpuWorkQueue = {0, -1U};
-std::atomic<uint32_t> cpuWorkQueuePushCount = 0;
+::std::atomic<uint32_t> cpuWorkQueuePushCount = 0;
 
 __device__ WorkQueue<MAIN_WORK_QUEUE_SIZE> mainWorkQueue;
 
@@ -81,10 +81,10 @@ __device__ uint32_t activeVcoreCount = 0;
 __device__ WorkNode_Header *currentWorkNode[8192] = {};
 
 hipStream_t mainStream;
-std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
+::std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
 
 __host__ __thread_id::underlying_type ThreadData::nextTid() {
-    static std::atomic<__thread_id::underlying_type> threadIdCounter = 1;
+    static ::std::atomic<__thread_id::underlying_type> threadIdCounter = 1;
     // Increment by 2 so host and device can use alternating ids.
     return (threadIdCounter += 2);
 }
@@ -360,8 +360,8 @@ static __host__ void prepDeviceForWork() {
     }(), -1U);
 
     if (isFirstTime) {
-        // Initalize numVcores, so device code can call gpu::thread::hardware_concurrency
-        static uint32_t temp2 = gpu::thread::hardware_concurrency();
+        // Initalize numVcores, so device code can call hip::thread::hardware_concurrency
+        static uint32_t temp2 = hip::thread::hardware_concurrency();
         __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
     } else {
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
@@ -372,7 +372,7 @@ static __host__ void prepDeviceForWork() {
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
-    hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(gpu::thread::max_width()), 0, mainStream);
+    hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(hip::thread::max_width()), 0, mainStream);
 }
 
 static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
@@ -388,12 +388,12 @@ static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bo
 }
 
 // TODO: Should we return a thrust::unique_ptr instead?
-__host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU(WorkNode_Header **new_location) {
+__host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU(WorkNode_Header **new_location) {
     prepDeviceForWork();
 
     this->link_to_self = new_location;
 
-    std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(gpu::malloc(this->worknodeSize)));
+    ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(hip::malloc(this->worknodeSize)));
     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), this, this->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
     hipEvent_t copyFinished;
     __LIBGPU_HIP_CHECK__(hipEventCreate(&copyFinished));
@@ -418,7 +418,7 @@ __host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::send
     __LIBGPU_HIP_CHECK__(hipEventSynchronize(copyFinished));
     return worknode_d;
 }
-__host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU() {
+__host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU() {
     const uint32_t myPushCount = cpuWorkQueuePushCount++;
     const size_t myPushIndex = myPushCount % CPU_WORK_QUEUE_SIZE;
 
@@ -449,7 +449,7 @@ static __device__ bool shouldKeepPollingForWork() {
 
 static __global__ void threading_main() {
     for (bool workFound = true; workFound || shouldKeepPollingForWork();) {
-        // TODO: why do we need this when blockDim.x == gpu::thread::max_width() == warpSize?
+        // TODO: why do we need this when blockDim.x == hip::thread::max_width() == warpSize?
         __syncthreads();
         workFound = invokeNext();
         if (!workFound)
@@ -463,7 +463,7 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     WorkNode_Header **link_to_self = oldWorkNode->lock();
     if (link_to_self == nullptr) {
         // workitem has already finished, so the scheduler has no way of finding oldWorkNode. Thus, we don't have to
-        // worry about updating its state or copying it. Just return so the gpu::thread destructor can free oldWorkNode.
+        // worry about updating its state or copying it. Just return so the hip::thread destructor can free oldWorkNode.
         ::free(newWorkNode);
         return;
     }
@@ -471,7 +471,7 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     oldWorkNode->link_to_self = nullptr;
     // TODO: Technically this is not standards compliant. Even though WorkNode<T> is TriviallyCopyable, it is not a
     // StandardLayoutType, so WorkNode_Header and WorkNode<T> pointers are not interchangeable.
-    gpu::memcpy(newWorkNode, oldWorkNode, oldWorkNode->worknodeSize);
+    hip::memcpy(newWorkNode, oldWorkNode, oldWorkNode->worknodeSize);
 
     // If there is a waiting worknode, update its link_to_self value so it points at newWorkNode->next.
     if (oldWorkNode->hasWaiting) {
@@ -496,9 +496,9 @@ _LIBGPU_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::
     cuda::std::__libcpp_thread_sleep_for(__ns);
 }
 
-__device__ gpu::thread::id get_id() noexcept {
+__device__ hip::thread::id get_id() noexcept {
     using namespace internal;
-    __shared__ gpu::__thread_id::underlying_type base_vtid;
+    __shared__ hip::__thread_id::underlying_type base_vtid;
     if (threadIdx.x == 0) {
         WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
         base_vtid = current->tdata.vthread_id;
@@ -507,10 +507,10 @@ __device__ gpu::thread::id get_id() noexcept {
     // TODO: What if only some of the fibers call this_thread::get_id()? This could deadlock. Also, what if the fiber
     // with threadIdx.x == 0 isn't one of the calling fibers?
     __syncthreads();
-    return gpu::__thread_id(base_vtid * thread::max_width() + threadIdx.x);
+    return hip::__thread_id(base_vtid * thread::max_width() + threadIdx.x);
 
     // Something along these lines might work for when threadIdx.x == 0 isn't among the calling fibers.
-    // __shared__ gpu::__thread_id::underlying_type base_vtid;
+    // __shared__ hip::__thread_id::underlying_type base_vtid;
     // base_vtid = 0;
     // // TODO: this could still deadlock though...
     // __syncthreads();
@@ -522,7 +522,7 @@ __device__ gpu::thread::id get_id() noexcept {
     //     }
     //     __syncthreads();
     // } while (base_vtid == 0);
-    // return gpu::__thread_id(base_vtid * thread::max_width() + threadIdx.x);
+    // return hip::__thread_id(base_vtid * thread::max_width() + threadIdx.x);
 }
 
 __device__ void pseudo_yield() {
@@ -563,29 +563,29 @@ __host__ thread::thread() noexcept {
 __host__ __device__ thread &thread::operator=(thread &&other) noexcept {
 #ifdef __HIP_DEVICE_COMPILE__
     if (joinable()) {
-        assert(!joinable() && "Attempted to assign to a gpu::thread object that still has an associated thread");
+        assert(!joinable() && "Attempted to assign to a hip::thread object that still has an associated thread");
     }
 
     worknode_d = other.worknode_d;
     other.worknode_d = nullptr;
 #else // __HIP_DEVICE_COMPILE__
     if (joinable()) {
-        std::terminate();
+        ::std::terminate();
     }
 
-    worknode_d = std::move(other.worknode_d);
+    worknode_d = ::std::move(other.worknode_d);
 #endif // !__HIP_DEVICE_COMPILE__
-    cached_tdata = std::move(other.cached_tdata);
+    cached_tdata = ::std::move(other.cached_tdata);
     return *this;
 }
 
 __host__ __device__ thread::~thread() {
     if (joinable()) {
 #ifdef __HIP_DEVICE_COMPILE__
-        assert(!joinable() && "Attempted to destroy a gpu::thread object that still has an associated thread");
+        assert(!joinable() && "Attempted to destroy a hip::thread object that still has an associated thread");
     }
 #else
-        std::terminate();
+        ::std::terminate();
     }
     if (--gpuThreadFromHost_counter == 0) {
         notifyDeviceThereMightNotBeAnyMoreWork();
@@ -602,30 +602,30 @@ __host__ __device__ thread::id thread::get_id(uint32_t index) const {
     }
 
 #ifdef __HIP_DEVICE_COMPILE__
-    // Don't need to lock because it's illegal for gpu::thread::detach to be called at the same time as any other
-    // gpu::thread method, so we know worknode_d won't change while we're in this function.
+    // Don't need to lock because it's illegal for hip::thread::detach to be called at the same time as any other
+    // hip::thread method, so we know worknode_d won't change while we're in this function.
     // Also, since vthread_id doesn't change, we don't need to force a fetch from memory, a cached value is fine.
     assert(index < cached_tdata.width);
 #else // __HIP_DEVICE_COMPILE__
     if (index >= cached_tdata.width) {
-        throw std::out_of_range("thread::get_id: index is greater than thread width");
+        throw ::std::out_of_range("thread::get_id: index is greater than thread width");
     }
 #endif // !__HIP_DEVICE_COMPILE__
-    return gpu::__thread_id(cached_tdata.vthread_id * thread::max_width() + index);
+    return hip::__thread_id(cached_tdata.vthread_id * thread::max_width() + index);
 }
 
 __host__ __device__ void thread::join() {
 #ifdef __HIP_DEVICE_COMPILE__
-    // TODO: check that the user has called gpu::start(), in case they use a hip kernel launch to get here
+    // TODO: check that the user has called hip::start(), in case they use a hip kernel launch to get here
     if (!joinable()) {
-        assert(joinable() && "Attempted to join a gpu::thread object that doesn't have an associated thread");
+        assert(joinable() && "Attempted to join a hip::thread object that doesn't have an associated thread");
     }
     // A cached value is ok here because if we did call join on ourselves, then we would have been the ones to write to
     // worknode_d->link_to_self when we popped worknode_d off the work queue. It's also not possible for
     // worknode_d->link_to_self == nullptr if we called join on ourselves, because calling join implies nobody will call
     // detach, and the actively executing thread is by definition, not finished.
     if (worknode_d->link_to_self == &currentWorkNode[blockIdx.x]) {
-        assert(false && "Attempted to join the gpu::thread object associated with the active thread");
+        assert(false && "Attempted to join the hip::thread object associated with the active thread");
     }
     // We don't need to lock here because we know nobody is going to call detach on worknode_d.
     while (!worknode_d->isSchedulerDoneWith()) {
@@ -633,13 +633,13 @@ __host__ __device__ void thread::join() {
         __builtin_amdgcn_s_sleep(8);
     }
 
-    // WorkNode<T> is trivially destructible (checked in gpu::thread constructor), so we can safely use free instead
+    // WorkNode<T> is trivially destructible (checked in hip::thread constructor), so we can safely use free instead
     // of delete
     ::free(worknode_d);
     worknode_d = nullptr;
 #else // __HIP_DEVICE_COMPILE__
     if (!joinable()) {
-        throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::join failed");
+        throw ::std::system_error(::std::error_code(EINVAL, ::std::system_category()), "thread::join failed");
     }
 
     // We don't have to worry about worknode_d getting invalidated by detach because we would have to be the one calling detach
@@ -655,7 +655,7 @@ __host__ __device__ void thread::join() {
 __host__ __device__ void thread::detach() {
 #ifdef __HIP_DEVICE_COMPILE__
     if (!joinable()) {
-        assert(joinable() && "Attempted to detach a gpu::thread object that doesn't have an associated thread");
+        assert(joinable() && "Attempted to detach a hip::thread object that doesn't have an associated thread");
     }
 
     worknode_d->release();
@@ -663,10 +663,10 @@ __host__ __device__ void thread::detach() {
     worknode_d = nullptr;
 #else // __HIP_DEVICE_COMPILE__
     if (!joinable()) {
-        throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::detach failed");
+        throw ::std::system_error(::std::error_code(EINVAL, ::std::system_category()), "thread::detach failed");
     }
     hipLaunchKernelGGL(detachWorkNode, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
-    // No sync needed because gpu::free does the hipFreeAsync in EnqueingStream.
+    // No sync needed because hip::free does the hipFreeAsync in EnqueingStream.
     worknode_d = nullptr;
 #endif // !__HIP_DEVICE_COMPILE__
 }
@@ -684,7 +684,7 @@ __host__ unsigned int thread::hardware_concurrency() noexcept {
         return multiprocessorCount * 16;
     }
     catch (...) {
-        std::cerr << "Exception while fetching multiprocessorCount\n";
+        ::std::cerr << "Exception while fetching multiprocessorCount\n";
         return 1;
     }
 }

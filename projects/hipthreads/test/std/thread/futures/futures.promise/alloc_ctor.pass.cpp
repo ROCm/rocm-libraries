@@ -28,59 +28,59 @@ int main(int, char**)
     test_allocator_statistics alloc_stats;
     assert(alloc_stats.alloc_count == 0);
     {
-        std::promise<int> p(std::allocator_arg, test_allocator<int>(42, &alloc_stats));
+        ::std::promise<int> p(::std::allocator_arg, test_allocator<int>(42, &alloc_stats));
         assert(alloc_stats.alloc_count == 1);
-        std::future<int> f = p.get_future();
-        assert(alloc_stats.alloc_count == 1);
-        assert(f.valid());
-    }
-    assert(alloc_stats.alloc_count == 0);
-    {
-        std::promise<int&> p(std::allocator_arg, test_allocator<int>(42, &alloc_stats));
-        assert(alloc_stats.alloc_count == 1);
-        std::future<int&> f = p.get_future();
+        ::std::future<int> f = p.get_future();
         assert(alloc_stats.alloc_count == 1);
         assert(f.valid());
     }
     assert(alloc_stats.alloc_count == 0);
     {
-        std::promise<void> p(std::allocator_arg, test_allocator<void>(42, &alloc_stats));
+        ::std::promise<int&> p(::std::allocator_arg, test_allocator<int>(42, &alloc_stats));
         assert(alloc_stats.alloc_count == 1);
-        std::future<void> f = p.get_future();
+        ::std::future<int&> f = p.get_future();
+        assert(alloc_stats.alloc_count == 1);
+        assert(f.valid());
+    }
+    assert(alloc_stats.alloc_count == 0);
+    {
+        ::std::promise<void> p(::std::allocator_arg, test_allocator<void>(42, &alloc_stats));
+        assert(alloc_stats.alloc_count == 1);
+        ::std::future<void> f = p.get_future();
         assert(alloc_stats.alloc_count == 1);
         assert(f.valid());
     }
     assert(alloc_stats.alloc_count == 0);
     // Test with a minimal allocator
     {
-        std::promise<int> p(std::allocator_arg, bare_allocator<void>());
-        std::future<int> f = p.get_future();
+        ::std::promise<int> p(::std::allocator_arg, bare_allocator<void>());
+        ::std::future<int> f = p.get_future();
         assert(f.valid());
     }
     {
-        std::promise<int&> p(std::allocator_arg, bare_allocator<void>());
-        std::future<int&> f = p.get_future();
+        ::std::promise<int&> p(::std::allocator_arg, bare_allocator<void>());
+        ::std::future<int&> f = p.get_future();
         assert(f.valid());
     }
     {
-        std::promise<void> p(std::allocator_arg, bare_allocator<void>());
-        std::future<void> f = p.get_future();
+        ::std::promise<void> p(::std::allocator_arg, bare_allocator<void>());
+        ::std::future<void> f = p.get_future();
         assert(f.valid());
     }
     // Test with a minimal allocator that returns class-type pointers
     {
-        std::promise<int> p(std::allocator_arg, min_allocator<void>());
-        std::future<int> f = p.get_future();
+        ::std::promise<int> p(::std::allocator_arg, min_allocator<void>());
+        ::std::future<int> f = p.get_future();
         assert(f.valid());
     }
     {
-        std::promise<int&> p(std::allocator_arg, min_allocator<void>());
-        std::future<int&> f = p.get_future();
+        ::std::promise<int&> p(::std::allocator_arg, min_allocator<void>());
+        ::std::future<int&> f = p.get_future();
         assert(f.valid());
     }
     {
-        std::promise<void> p(std::allocator_arg, min_allocator<void>());
-        std::future<void> f = p.get_future();
+        ::std::promise<void> p(::std::allocator_arg, min_allocator<void>());
+        ::std::future<void> f = p.get_future();
         assert(f.valid());
     }
 

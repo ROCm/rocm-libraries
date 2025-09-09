@@ -9,7 +9,7 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03
 
-// gpu::threads doesn't currently support constructing threads during the destruction of global variables
+// hip::threads doesn't currently support constructing threads during the destruction of global variables
 // XFAIL: *
 
 #include "make_test_thread.h"

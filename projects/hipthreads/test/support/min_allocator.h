@@ -32,12 +32,12 @@ public:
     template <class U>
     __host__ __device__ bare_allocator(bare_allocator<U>) TEST_NOEXCEPT {}
 
-    __host__ __device__ T* allocate(std::size_t n)
+    __host__ __device__ T* allocate(::std::size_t n)
     {
         return static_cast<T*>(::operator new(n*sizeof(T)));
     }
 
-    __host__ __device__ void deallocate(T* p, std::size_t)
+    __host__ __device__ void deallocate(T* p, ::std::size_t)
     {
         return ::operator delete(static_cast<void*>(p));
     }
@@ -70,12 +70,12 @@ public:
     template <class U>
     __host__ __device__ no_default_allocator(no_default_allocator<U>) TEST_NOEXCEPT {}
 
-    __host__ __device__ T* allocate(std::size_t n)
+    __host__ __device__ T* allocate(::std::size_t n)
     {
         return static_cast<T*>(::operator new(n*sizeof(T)));
     }
 
-    __host__ __device__ void deallocate(T* p, std::size_t)
+    __host__ __device__ void deallocate(T* p, ::std::size_t)
     {
         return ::operator delete(static_cast<void*>(p));
     }
@@ -121,20 +121,20 @@ public:
     template <class U>
     __host__ __device__ malloc_allocator(malloc_allocator<U>) TEST_NOEXCEPT {}
 
-    __host__ __device__ T* allocate(std::size_t n)
+    __host__ __device__ T* allocate(::std::size_t n)
     {
         const size_t nbytes = n*sizeof(T);
         ++alloc_count;
         outstanding_bytes += nbytes;
-        return static_cast<T*>(std::malloc(nbytes));
+        return static_cast<T*>(::std::malloc(nbytes));
     }
 
-    __host__ __device__ void deallocate(T* p, std::size_t n)
+    __host__ __device__ void deallocate(T* p, ::std::size_t n)
     {
         const size_t nbytes = n*sizeof(T);
         ++dealloc_count;
         outstanding_bytes -= nbytes;
-        std::free(static_cast<void*>(p));
+        ::std::free(static_cast<void*>(p));
     }
 
     __host__ __device__ friend bool operator==(malloc_allocator, malloc_allocator) {return true;}
@@ -157,7 +157,7 @@ struct cpp03_allocator : bare_allocator<T>
         return p;
     }
 
-    __host__ __device__ std::size_t max_size() const
+    __host__ __device__ ::std::size_t max_size() const
     {
         return UINT_MAX / sizeof(T);
     }
@@ -174,27 +174,27 @@ struct cpp03_overload_allocator : bare_allocator<T>
 
     __host__ __device__ void construct(pointer p, const value_type& val)
     {
-        construct(p, val, std::is_class<T>());
+        construct(p, val, ::std::is_class<T>());
     }
-    __host__ __device__ void construct(pointer p, const value_type& val, std::true_type)
+    __host__ __device__ void construct(pointer p, const value_type& val, ::std::true_type)
     {
         ::new(p) value_type(val);
         construct_called = true;
     }
-    __host__ __device__ void construct(pointer p, const value_type& val, std::false_type)
+    __host__ __device__ void construct(pointer p, const value_type& val, ::std::false_type)
     {
         ::new(p) value_type(val);
         construct_called = true;
     }
 
-    __host__ __device__ std::size_t max_size() const
+    __host__ __device__ ::std::size_t max_size() const
     {
         return UINT_MAX / sizeof(T);
     }
 };
 template <class T> bool cpp03_overload_allocator<T>::construct_called = false;
 
-template <class T, class = std::integral_constant<size_t, 0> > class min_pointer;
+template <class T, class = ::std::integral_constant<size_t, 0> > class min_pointer;
 template <class T, class ID> class min_pointer<const T, ID>;
 template <class ID> class min_pointer<void, ID>;
 template <class ID> class min_pointer<const void, ID>;
@@ -206,7 +206,7 @@ class min_pointer<const void, ID>
     const void* ptr_;
 public:
     __host__ __device__ min_pointer() TEST_NOEXCEPT = default;
-    __host__ __device__ min_pointer(std::nullptr_t) TEST_NOEXCEPT : ptr_(nullptr) {}
+    __host__ __device__ min_pointer(::std::nullptr_t) TEST_NOEXCEPT : ptr_(nullptr) {}
     template <class T>
     __host__ __device__ min_pointer(min_pointer<T, ID> p) TEST_NOEXCEPT : ptr_(p.ptr_) {}
 
@@ -223,11 +223,11 @@ class min_pointer<void, ID>
     void* ptr_;
 public:
     __host__ __device__ min_pointer() TEST_NOEXCEPT = default;
-    __host__ __device__ TEST_CONSTEXPR_CXX14 min_pointer(std::nullptr_t) TEST_NOEXCEPT : ptr_(nullptr) {}
+    __host__ __device__ TEST_CONSTEXPR_CXX14 min_pointer(::std::nullptr_t) TEST_NOEXCEPT : ptr_(nullptr) {}
     template <class T,
-              class = typename std::enable_if
+              class = typename ::std::enable_if
                        <
-                            !std::is_const<T>::value
+                            !::std::is_const<T>::value
                        >::type
              >
     __host__ __device__ TEST_CONSTEXPR_CXX14 min_pointer(min_pointer<T, ID> p) TEST_NOEXCEPT : ptr_(p.ptr_) {}
@@ -247,16 +247,16 @@ class min_pointer
     __host__ __device__ TEST_CONSTEXPR_CXX14 explicit min_pointer(T* p) TEST_NOEXCEPT : ptr_(p) {}
 public:
     __host__ __device__ min_pointer() TEST_NOEXCEPT = default;
-    __host__ __device__ TEST_CONSTEXPR_CXX14 min_pointer(std::nullptr_t) TEST_NOEXCEPT : ptr_(nullptr) {}
+    __host__ __device__ TEST_CONSTEXPR_CXX14 min_pointer(::std::nullptr_t) TEST_NOEXCEPT : ptr_(nullptr) {}
     __host__ __device__ TEST_CONSTEXPR_CXX14 explicit min_pointer(min_pointer<void, ID> p) TEST_NOEXCEPT : ptr_(static_cast<T*>(p.ptr_)) {}
 
     __host__ __device__ TEST_CONSTEXPR_CXX14 explicit operator bool() const {return ptr_ != nullptr;}
 
-    typedef std::ptrdiff_t difference_type;
+    typedef ::std::ptrdiff_t difference_type;
     typedef T& reference;
     typedef T* pointer;
     typedef T value_type;
-    typedef std::random_access_iterator_tag iterator_category;
+    typedef ::std::random_access_iterator_tag iterator_category;
 
     __host__ __device__ TEST_CONSTEXPR_CXX14 reference operator*() const {return *ptr_;}
     __host__ __device__ TEST_CONSTEXPR_CXX14 pointer operator->() const {return ptr_;}
@@ -301,7 +301,7 @@ public:
     __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator<=(min_pointer x, min_pointer y) {return !(y < x);}
     __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator>=(min_pointer x, min_pointer y) {return !(x < y);}
 
-    __host__ __device__ static TEST_CONSTEXPR_CXX14 min_pointer pointer_to(T& t) {return min_pointer(std::addressof(t));}
+    __host__ __device__ static TEST_CONSTEXPR_CXX14 min_pointer pointer_to(T& t) {return min_pointer(::std::addressof(t));}
 
     __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator==(min_pointer x, min_pointer y) {return x.ptr_ == y.ptr_;}
     __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator!=(min_pointer x, min_pointer y) {return !(x == y);}
@@ -317,17 +317,17 @@ class min_pointer<const T, ID>
     __host__ __device__ TEST_CONSTEXPR_CXX14 explicit min_pointer(const T* p) : ptr_(p) {}
 public:
     __host__ __device__ min_pointer() TEST_NOEXCEPT = default;
-    __host__ __device__ TEST_CONSTEXPR_CXX14 min_pointer(std::nullptr_t) : ptr_(nullptr) {}
+    __host__ __device__ TEST_CONSTEXPR_CXX14 min_pointer(::std::nullptr_t) : ptr_(nullptr) {}
     __host__ __device__ TEST_CONSTEXPR_CXX14 min_pointer(min_pointer<T, ID> p) : ptr_(p.ptr_) {}
     __host__ __device__ TEST_CONSTEXPR_CXX14 explicit min_pointer(min_pointer<const void, ID> p) : ptr_(static_cast<const T*>(p.ptr_)) {}
 
     __host__ __device__ TEST_CONSTEXPR_CXX14 explicit operator bool() const {return ptr_ != nullptr;}
 
-    typedef std::ptrdiff_t difference_type;
+    typedef ::std::ptrdiff_t difference_type;
     typedef const T& reference;
     typedef const T* pointer;
     typedef const T value_type;
-    typedef std::random_access_iterator_tag iterator_category;
+    typedef ::std::random_access_iterator_tag iterator_category;
 
     __host__ __device__ TEST_CONSTEXPR_CXX14 reference operator*() const {return *ptr_;}
     __host__ __device__ TEST_CONSTEXPR_CXX14 pointer operator->() const {return ptr_;}
@@ -372,14 +372,14 @@ public:
     __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator<=(min_pointer x, min_pointer y) {return !(y < x);}
     __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator>=(min_pointer x, min_pointer y) {return !(x < y);}
 
-    __host__ __device__ static TEST_CONSTEXPR_CXX14 min_pointer pointer_to(const T& t) {return min_pointer(std::addressof(t));}
+    __host__ __device__ static TEST_CONSTEXPR_CXX14 min_pointer pointer_to(const T& t) {return min_pointer(::std::addressof(t));}
 
     __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator==(min_pointer x, min_pointer y) {return x.ptr_ == y.ptr_;}
     __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator!=(min_pointer x, min_pointer y) {return x.ptr_ != y.ptr_;}
-    __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator==(min_pointer x, std::nullptr_t) {return x.ptr_ == nullptr;}
-    __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator!=(min_pointer x, std::nullptr_t) {return x.ptr_ != nullptr;}
-    __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator==(std::nullptr_t, min_pointer x) {return x.ptr_ == nullptr;}
-    __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator!=(std::nullptr_t, min_pointer x) {return x.ptr_ != nullptr;}
+    __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator==(min_pointer x, ::std::nullptr_t) {return x.ptr_ == nullptr;}
+    __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator!=(min_pointer x, ::std::nullptr_t) {return x.ptr_ != nullptr;}
+    __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator==(::std::nullptr_t, min_pointer x) {return x.ptr_ == nullptr;}
+    __host__ __device__ friend TEST_CONSTEXPR_CXX14 bool operator!=(::std::nullptr_t, min_pointer x) {return x.ptr_ != nullptr;}
     template <class U, class XID> friend class min_pointer;
 };
 
@@ -394,14 +394,14 @@ public:
     template <class U>
     __host__ __device__ TEST_CONSTEXPR_CXX20 min_allocator(min_allocator<U>) {}
 
-    __host__ __device__ TEST_CONSTEXPR_CXX20 pointer allocate(std::ptrdiff_t n)
+    __host__ __device__ TEST_CONSTEXPR_CXX20 pointer allocate(::std::ptrdiff_t n)
     {
-        return pointer(std::allocator<T>().allocate(n));
+        return pointer(::std::allocator<T>().allocate(n));
     }
 
-    __host__ __device__ TEST_CONSTEXPR_CXX20 void deallocate(pointer p, std::ptrdiff_t n)
+    __host__ __device__ TEST_CONSTEXPR_CXX20 void deallocate(pointer p, ::std::ptrdiff_t n)
     {
-        std::allocator<T>().deallocate(p.ptr_, n);
+        ::std::allocator<T>().deallocate(p.ptr_, n);
     }
 
     __host__ __device__ TEST_CONSTEXPR_CXX20 friend bool operator==(min_allocator, min_allocator) {return true;}
@@ -419,14 +419,14 @@ public:
     template <class U>
     __host__ __device__ TEST_CONSTEXPR_CXX20 explicit explicit_allocator(explicit_allocator<U>) TEST_NOEXCEPT {}
 
-    __host__ __device__ TEST_CONSTEXPR_CXX20 T* allocate(std::size_t n)
+    __host__ __device__ TEST_CONSTEXPR_CXX20 T* allocate(::std::size_t n)
     {
-        return static_cast<T*>(std::allocator<T>().allocate(n));
+        return static_cast<T*>(::std::allocator<T>().allocate(n));
     }
 
-    __host__ __device__ TEST_CONSTEXPR_CXX20 void deallocate(T* p, std::size_t n)
+    __host__ __device__ TEST_CONSTEXPR_CXX20 void deallocate(T* p, ::std::size_t n)
     {
-        std::allocator<T>().deallocate(p, n);
+        ::std::allocator<T>().deallocate(p, n);
     }
 
     __host__ __device__ TEST_CONSTEXPR_CXX20 friend bool operator==(explicit_allocator, explicit_allocator) {return true;}
@@ -444,9 +444,9 @@ public:
   template <class U>
   __host__ __device__ TEST_CONSTEXPR_CXX20 explicit unaligned_allocator(unaligned_allocator<U>) TEST_NOEXCEPT {}
 
-  __host__ __device__ TEST_CONSTEXPR_CXX20 T* allocate(std::size_t n) { return std::allocator<T>().allocate(n + 1) + 1; }
+  __host__ __device__ TEST_CONSTEXPR_CXX20 T* allocate(::std::size_t n) { return ::std::allocator<T>().allocate(n + 1) + 1; }
 
-  __host__ __device__ TEST_CONSTEXPR_CXX20 void deallocate(T* p, std::size_t n) { std::allocator<T>().deallocate(p - 1, n + 1); }
+  __host__ __device__ TEST_CONSTEXPR_CXX20 void deallocate(T* p, ::std::size_t n) { ::std::allocator<T>().deallocate(p - 1, n + 1); }
 
   __host__ __device__ TEST_CONSTEXPR_CXX20 friend bool operator==(unaligned_allocator, unaligned_allocator) { return true; }
   __host__ __device__ TEST_CONSTEXPR_CXX20 friend bool operator!=(unaligned_allocator x, unaligned_allocator y) { return !(x == y); }
@@ -462,18 +462,18 @@ public:
   template <class U>
   __host__ __device__ TEST_CONSTEXPR_CXX20 safe_allocator(safe_allocator<U>) TEST_NOEXCEPT {}
 
-  __host__ __device__ TEST_CONSTEXPR_CXX20 T* allocate(std::size_t n) {
-    T* memory = std::allocator<T>().allocate(n);
+  __host__ __device__ TEST_CONSTEXPR_CXX20 T* allocate(::std::size_t n) {
+    T* memory = ::std::allocator<T>().allocate(n);
     if (!__builtin_is_constant_evaluated())
-      std::memset(memory, 0, sizeof(T) * n);
+      ::std::memset(memory, 0, sizeof(T) * n);
 
     return memory;
   }
 
-  __host__ __device__ TEST_CONSTEXPR_CXX20 void deallocate(T* p, std::size_t n) {
+  __host__ __device__ TEST_CONSTEXPR_CXX20 void deallocate(T* p, ::std::size_t n) {
     if (!__builtin_is_constant_evaluated())
-      DoNotOptimize(std::memset(p, 0, sizeof(T) * n));
-    std::allocator<T>().deallocate(p, n);
+      DoNotOptimize(::std::memset(p, 0, sizeof(T) * n));
+    ::std::allocator<T>().deallocate(p, n);
   }
 
   __host__ __device__ TEST_CONSTEXPR_CXX20 friend bool operator==(safe_allocator, safe_allocator) { return true; }

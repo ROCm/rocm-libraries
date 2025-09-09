@@ -20,17 +20,17 @@
 #include "test_macros.h"
 
 #if TEST_STD_VER >= 11
-static_assert(noexcept(static_cast<bool>(std::declval<gpu::unique_lock<checking_mutex>&>())), "");
+static_assert(noexcept(static_cast<bool>(::std::declval<hip::unique_lock<checking_mutex>&>())), "");
 #endif
 
 int main(int, char**) {
-  static_assert(std::is_constructible<bool, gpu::unique_lock<checking_mutex> >::value, "");
-  static_assert(!std::is_convertible<gpu::unique_lock<checking_mutex>, bool>::value, "");
+  static_assert(::std::is_constructible<bool, hip::unique_lock<checking_mutex> >::value, "");
+  static_assert(!::std::is_convertible<hip::unique_lock<checking_mutex>, bool>::value, "");
 
   checking_mutex mux;
-  const gpu::unique_lock<checking_mutex> lk0; // Make sure `operator bool()` is `const`
+  const hip::unique_lock<checking_mutex> lk0; // Make sure `operator bool()` is `const`
   assert(!static_cast<bool>(lk0));
-  gpu::unique_lock<checking_mutex> lk1(mux);
+  hip::unique_lock<checking_mutex> lk1(mux);
   assert(static_cast<bool>(lk1));
   lk1.unlock();
   assert(!static_cast<bool>(lk1));

@@ -27,7 +27,7 @@
 
 int main(int, char**)
 {
-    gpu::spin_mutex m;
+    hip::spin_mutex m;
     pthread_mutex_t* h = m.native_handle();
     assert(h);
 

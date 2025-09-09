@@ -32,7 +32,7 @@
 
 int f_async() {
     typedef cuda::std::chrono::milliseconds ms;
-    gpu::this_thread::sleep_for(ms(200));
+    hip::this_thread::sleep_for(ms(200));
     return 42;
 }
 
@@ -45,18 +45,18 @@ int f_deferred() {
 
 void test_each() {
     {
-        std::future<int> f = std::async(f_async);
+        ::std::future<int> f = ::std::async(f_async);
         int const result = f.get();
         assert(result == 42);
     }
     {
-        std::future<int> f = std::async(std::launch::async, f_async);
+        ::std::future<int> f = ::std::async(::std::launch::async, f_async);
         int const result = f.get();
         assert(result == 42);
     }
     {
         ran = false;
-        std::future<int> f = std::async(std::launch::deferred, f_deferred);
+        ::std::future<int> f = ::std::async(::std::launch::deferred, f_deferred);
         assert(ran == false);
         int const result = f.get();
         assert(ran == true);

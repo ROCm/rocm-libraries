@@ -214,13 +214,13 @@ template<class Callable, class ...Args>
 #include "hip/__mutex/spin_mutex.h"
 #include "hip/__mutex/unique_lock.h"
 
-namespace gpu {
+namespace cuda {
 
 template <class _L0, class _L1>
 __device__ _LIBGPU_HIDE_FROM_ABI int
 try_lock(_L0& __l0, _L1& __l1)
 {
-    unique_lock<_L0> __u0(__l0, std::try_to_lock);
+    unique_lock<_L0> __u0(__l0, ::std::try_to_lock);
     if (__u0.owns_lock())
     {
         if (__l1.try_lock())
@@ -241,10 +241,10 @@ __device__ _LIBGPU_HIDE_FROM_ABI int
 try_lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3)
 {
     int __r = 0;
-    unique_lock<_L0> __u0(__l0, std::try_to_lock);
+    unique_lock<_L0> __u0(__l0, ::std::try_to_lock);
     if (__u0.owns_lock())
     {
-        __r = gpu::try_lock(__l1, __l2, __l3...);
+        __r = hip::try_lock(__l1, __l2, __l3...);
         if (__r == -1)
             __u0.release();
         else
@@ -295,7 +295,7 @@ __lock_first(int __i, _L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
         case 0:
             {
                 unique_lock<_L0> __u0(__l0);
-                __i = gpu::try_lock(__l1, __l2, __l3...);
+                __i = hip::try_lock(__l1, __l2, __l3...);
                 if (__i == -1)
                 {
                     __u0.release();
@@ -308,7 +308,7 @@ __lock_first(int __i, _L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
         case 1:
             {
                 unique_lock<_L1> __u1(__l1);
-                __i = gpu::try_lock(__l2, __l3..., __l0);
+                __i = hip::try_lock(__l2, __l3..., __l0);
                 if (__i == -1)
                 {
                     __u1.release();
@@ -322,7 +322,7 @@ __lock_first(int __i, _L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
             // __libcpp_thread_yield();
             break;
         default:
-            gpu::__lock_first(__i - 2, __l2, __l3..., __l0, __l1);
+            hip::__lock_first(__i - 2, __l2, __l3..., __l0, __l1);
             return;
         }
     }
@@ -333,7 +333,7 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY
 void
 lock(_L0& __l0, _L1& __l1, _L2& __l2, _L3& ...__l3)
 {
-    gpu::__lock_first(0, __l0, __l1, __l2, __l3...);
+    hip::__lock_first(0, __l0, __l1, __l2, __l3...);
 }
 
 template <class _L0>
@@ -354,11 +354,11 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY
 void __unlock(_L0& __l0, _L1& __l1, _L2& __l2, _L3&... __l3) {
     __l0.unlock();
     __l1.unlock();
-    gpu::__unlock(__l2, __l3...);
+    hip::__unlock(__l2, __l3...);
 }
 
 #endif // _LIBGPU_CXX03_LANG
 
-} // namespace gpu
+} // namespace cuda
 
 #endif // __GPU_MUTEX___

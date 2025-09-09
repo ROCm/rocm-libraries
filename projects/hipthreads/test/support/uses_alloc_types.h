@@ -39,30 +39,30 @@ inline const char* toString(UsesAllocatorType UA) {
     case UA_AllocLast:
         return "UA_AllocLast";
     default:
-    std::abort();
+    ::std::abort();
     }
 }
 
-template <class Alloc, std::size_t N>
+template <class Alloc, ::std::size_t N>
 class UsesAllocatorV1;
     // Implements form (1) of uses-allocator construction from the specified
     // 'Alloc' type and exactly 'N' additional arguments. It also provides
     // non-uses allocator construction from 'N' arguments. This test type
     // blows up when form (2) of uses-allocator is even considered.
 
-template <class Alloc, std::size_t N>
+template <class Alloc, ::std::size_t N>
 class UsesAllocatorV2;
     // Implements form (2) of uses-allocator construction from the specified
     // 'Alloc' type and exactly 'N' additional arguments. It also provides
     // non-uses allocator construction from 'N' arguments.
 
-template <class Alloc, std::size_t N>
+template <class Alloc, ::std::size_t N>
 class UsesAllocatorV3;
     // Implements both form (1) and (2) of uses-allocator construction from
     // the specified 'Alloc' type and exactly 'N' additional arguments. It also
     // provides non-uses allocator construction from 'N' arguments.
 
-template <class Alloc, std::size_t>
+template <class Alloc, ::std::size_t>
 class NotUsesAllocator;
     // Implements both form (1) and (2) of uses-allocator construction from
     // the specified 'Alloc' type and exactly 'N' additional arguments. It also
@@ -123,7 +123,7 @@ template <class T>
 using IdentityT = typename Identity<T>::type;
 
 template <bool Value>
-using EnableIfB = typename std::enable_if<Value, bool>::type;
+using EnableIfB = typename ::std::enable_if<Value, bool>::type;
 
 } // end namespace detail
 
@@ -141,7 +141,7 @@ using detail::EnableIfB;
 
 struct AllocLastTag {};
 
-template <class Alloc, bool = std::is_default_constructible<Alloc>::value>
+template <class Alloc, bool = ::std::is_default_constructible<Alloc>::value>
 struct UsesAllocatorTestBaseStorage {
     Alloc allocator;
     UsesAllocatorTestBaseStorage() = default;
@@ -227,7 +227,7 @@ protected:
     {}
 
     template <class ...Args>
-    UsesAllocatorTestBase(std::allocator_arg_t, CtorAlloc const& a, Args&&...)
+    UsesAllocatorTestBase(::std::allocator_arg_t, CtorAlloc const& a, Args&&...)
         : args_id(&makeArgumentID<Args&&...>()),
           constructor_called(UA_AllocArg),
           alloc_store(a)
@@ -239,7 +239,7 @@ protected:
           constructor_called(UA_AllocLast),
           alloc_store(UsesAllocatorTestBase::getAllocatorFromPack(
             typename ArgsIDL::type{},
-            std::forward<Args>(args)...))
+            ::std::forward<Args>(args)...))
     {
     }
 
@@ -284,15 +284,15 @@ public:
 
     // Uses Allocator Arg Ctor
     template <class ...Args>
-    UsesAllocatorV1(std::allocator_arg_t tag, CtorAlloc const & a, Args&&... args)
-        : Base(tag, a, std::forward<Args>(args)...)
+    UsesAllocatorV1(::std::allocator_arg_t tag, CtorAlloc const & a, Args&&... args)
+        : Base(tag, a, ::std::forward<Args>(args)...)
     { }
 
     // BLOWS UP: Uses Allocator Last Ctor
     template <class First, class ...Args, EnableIfB<sizeof...(Args) == Arity> Dummy = false>
     constexpr UsesAllocatorV1(First&&, Args&&...)
     {
-        static_assert(!std::is_same<First, First>::value, "");
+        static_assert(!::std::is_same<First, First>::value, "");
     }
 };
 
@@ -319,7 +319,7 @@ public:
     // Uses Allocator Last Ctor
     template <class ...Args, EnableIfB<sizeof...(Args) == Arity + 1> = false>
     UsesAllocatorV2(Args&&... args)
-        : Base(AllocLastTag{}, std::forward<Args>(args)...)
+        : Base(AllocLastTag{}, ::std::forward<Args>(args)...)
     {}
 };
 
@@ -344,14 +344,14 @@ public:
 
     // Uses Allocator Arg Ctor
     template <class ...Args>
-    UsesAllocatorV3(std::allocator_arg_t tag, CtorAlloc const& alloc, Args&&... args)
-        : Base(tag, alloc, std::forward<Args>(args)...)
+    UsesAllocatorV3(::std::allocator_arg_t tag, CtorAlloc const& alloc, Args&&... args)
+        : Base(tag, alloc, ::std::forward<Args>(args)...)
     {}
 
     // Uses Allocator Last Ctor
     template <class ...Args, EnableIfB<sizeof...(Args) == Arity + 1> = false>
     UsesAllocatorV3(Args&&... args)
-        : Base(AllocLastTag{}, std::forward<Args>(args)...)
+        : Base(AllocLastTag{}, ::std::forward<Args>(args)...)
     {}
 };
 
@@ -375,14 +375,14 @@ public:
 
     // Uses Allocator Arg Ctor
     template <class ...Args>
-    NotUsesAllocator(std::allocator_arg_t tag, CtorAlloc const& alloc, Args&&... args)
-        : Base(tag, alloc, std::forward<Args>(args)...)
+    NotUsesAllocator(::std::allocator_arg_t tag, CtorAlloc const& alloc, Args&&... args)
+        : Base(tag, alloc, ::std::forward<Args>(args)...)
     {}
 
     // Uses Allocator Last Ctor
     template <class ...Args, EnableIfB<sizeof...(Args) == Arity + 1> = false>
     NotUsesAllocator(Args&&... args)
-        : Base(AllocLastTag{}, std::forward<Args>(args)...)
+        : Base(AllocLastTag{}, ::std::forward<Args>(args)...)
     {}
 };
 

@@ -26,7 +26,7 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-std::once_flag flg0;
+::std::once_flag flg0;
 long global = 0;
 
 void init0()
@@ -36,14 +36,14 @@ void init0()
 
 void f0()
 {
-    std::call_once(flg0, init0);
+    ::std::call_once(flg0, init0);
     assert(global == 1);
 }
 
 int main(int, char**)
 {
-    gpu::thread t0 = support::make_test_thread(f0);
-    gpu::thread t1 = support::make_test_thread(f0);
+    hip::thread t0 = support::make_test_thread(f0);
+    hip::thread t1 = support::make_test_thread(f0);
     t0.join();
     t1.join();
     assert(global == 1);

@@ -20,13 +20,13 @@
 
 #include "test_macros.h"
 
-std::shared_timed_mutex m;
+::std::shared_timed_mutex m;
 
 int main(int, char**)
 {
-    std::shared_lock<std::shared_timed_mutex> lk0;
+    ::std::shared_lock<::std::shared_timed_mutex> lk0;
     assert(lk0.owns_lock() == false);
-    std::shared_lock<std::shared_timed_mutex> lk1(m);
+    ::std::shared_lock<::std::shared_timed_mutex> lk1(m);
     assert(lk1.owns_lock() == true);
     lk1.unlock();
     assert(lk1.owns_lock() == false);

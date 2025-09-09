@@ -29,10 +29,10 @@
 
 int main(int, char**)
 {
-    static_assert((std::is_same<gpu::pseudo_condition_variable::native_handle_type,
+    static_assert((::std::is_same<hip::pseudo_condition_variable::native_handle_type,
                                 pthread_cond_t*>::value), "");
-    gpu::pseudo_condition_variable cv;
-    gpu::pseudo_condition_variable::native_handle_type h = cv.native_handle();
+    hip::pseudo_condition_variable cv;
+    hip::pseudo_condition_variable::native_handle_type h = cv.native_handle();
     assert(h != nullptr);
   return 0;
 }

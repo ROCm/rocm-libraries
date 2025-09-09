@@ -22,9 +22,9 @@
 int main(int, char**)
 {
     {
-        std::error_code ec = make_error_code(std::future_errc::broken_promise);
-        assert(ec.value() == static_cast<int>(std::future_errc::broken_promise));
-        assert(ec.category() == std::future_category());
+        ::std::error_code ec = make_error_code(::std::future_errc::broken_promise);
+        assert(ec.value() == static_cast<int>(::std::future_errc::broken_promise));
+        assert(ec.category() == ::std::future_category());
     }
 
   return 0;
