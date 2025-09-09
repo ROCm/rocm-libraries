@@ -108,13 +108,6 @@ rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std
     rocblas_get_stream(handle, &stream);
     THROW_IF_HIP_ERROR(hipEventCreate(&result.start_evt));
     THROW_IF_HIP_ERROR(hipEventRecord(result.start_evt, stream));
-    // if(hipEventCreate(&result.start_evt) == hipSuccess){
-    //     if(hipEventRecord(result.start_evt, stream) != hipSuccess){
-    //         printf("BADNESS IN EVENT RECORD\n");
-    //     }
-    // }else{
-    //     printf("BADNESS IN EVENT CREATE\n");
-    // }
 
     for(int i = 1; i < stack.size() - 1; i++)
         result.callers.push_back(stack[i].name);
@@ -139,14 +132,6 @@ rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
     rocblas_get_stream(handle, &stream);
     THROW_IF_HIP_ERROR(hipEventCreate(&result.stop_evt));
     THROW_IF_HIP_ERROR(hipEventRecord(result.stop_evt, stream));
-    // if(hipEventCreate(&result.stop_evt) == hipSuccess){
-
-    //     if(hipEventRecord(result.stop_evt, stream) != hipSuccess){
-    //         printf("BADNESS IN EVENT RECORD in pop_entry\n");
-    //     }
-    // }else{
-    //     printf("BADNESS IN EVENT CREATE in pop_entry\n");
-    // }
 
     stack.pop_back();
 
@@ -164,7 +149,6 @@ void rocsolver_logger::append_profile(std::string& str,
                                       rocsolver_profile_map::iterator start,
                                       rocsolver_profile_map::iterator end)
 {
-    // printf("hello\n");
     for(auto it = start; it != end; ++it)
     {
         rocsolver_profile_entry& entry = it->second;
@@ -241,55 +225,22 @@ rocblas_status rocsolver_log_begin_impl()
 rocblas_status rocsolver_log_end_impl()
 {
     const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
-    // printf("world\n");
-    // printf("what the\n");
 
     // if there is an active logger:
     if(rocsolver_logger::_instance == nullptr)
         return rocblas_status_internal_error;
-    // if(rocsolver_logger::_instance == nullptr){
-    //     // printf("null\n");
-    //     return rocblas_status_internal_error;
-    // } else{
-    //     // printf("not null\n");
-    // }
 
     auto logger = rocsolver_logger::_instance;
 
+    // if there are pending log_exit calls:
     if(!rocsolver_logger::_instance->call_stack.empty())
         return rocblas_status_internal_error;
-    // if there are pending log_exit calls:
-    // if(!rocsolver_logger::_instance->call_stack.empty()){
-    //     printf("call stack not empty\n");
-    //     return rocblas_status_internal_error;
-    // } else{
-    //     printf("call stack empty\n");
-    // }
 
     // ONE device sync prior to time collection
     hipDeviceSynchronize();
 
     // Recursively accumulate elapsed times for all profile entries and destroy events
     logger->accumulate_times(logger->profile);
-    // printf("made it out\n");
-
-    // if(logger->profile.empty()){
-    //     printf("empty\n");
-    // } else{
-    //     printf("not empty\n");
-    // }
-
-    // if(logger->layer_mode){
-    //     printf("not none\n");
-    // } else{
-    //     printf("none\n");
-    // }
-
-    // if(logger->layer_mode & rocblas_layer_mode_log_profile){
-    //     printf("profile\n");
-    // } else{
-    //     printf("not profile\n");
-    // }
 
     // // print profile logging results
     if(logger->layer_mode & rocblas_layer_mode_log_profile && !logger->profile.empty())
@@ -310,44 +261,22 @@ rocblas_status rocsolver_log_end_impl()
 
 void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
 {
-    // printf("accumulate_times\n");
-    // printf("size: %zu\n", m.size());
     for(auto& kv : m)
     {
-        // printf("name: %s\n", kv.second.name.c_str());
-        // printf("key name: %s\n", kv.first.c_str());
-        // printf("num events: %zu\n", kv.second.events.size());
-        // hipError_t err;
         rocsolver_profile_entry& entry = kv.second;
         entry.total_time = 0;
         for(auto& pair : entry.events)
         {
             float ms = 0;
-            // printf("event pair\n");
-            // if(!pair.first || !pair.second)
-            //     printf("BADNESS, NULL EVENT\n");
             if(pair.first && pair.second)
                 THROW_IF_HIP_ERROR(hipEventElapsedTime(&ms, pair.first, pair.second));
-                // err = hipEventElapsedTime(&ms, pair.first, pair.second);
-                // printf("error: %s\n", hipGetErrorString(err));
-            // if (err != hipSuccess)
-            //     printf("BADNESS IN ELAPSED TIME\n");
-            //     printf("error: %s\n", hipGetErrorString(err));
             entry.total_time += ms * 1000; // us
-            // Destroy events after measurement
+            // destroy events after measurement
             THROW_IF_HIP_ERROR(hipEventDestroy(pair.first));
-            // err = hipEventDestroy(pair.first);
-            // if (err != hipSuccess)
-            //     printf("BADNESS IN EVENT DESTROY\n");
-            //     printf("error: %s\n", hipGetErrorString(err));
             THROW_IF_HIP_ERROR(hipEventDestroy(pair.second));
-            // err = hipEventDestroy(pair.second);
-            // if (err != hipSuccess)
-            //     printf("BADNESS IN EVENT DESTROY 2\n");
-            //     printf("error: %s\n", hipGetErrorString(err));
         }
         entry.events.clear();
-        // Recurse
+        // recurse on internal calls
         if(entry.internal_calls)
             accumulate_times(*entry.internal_calls);
     }

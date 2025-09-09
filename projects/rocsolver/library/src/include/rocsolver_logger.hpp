@@ -127,19 +127,6 @@ struct rocsolver_log_entry
     // Destroy HIP events if constructed
     ~rocsolver_log_entry()
     {
-        // Only destroy events if both are still owned here and not moved to profile_entry
-        // (once log_profile moves them, they are managed/destroyed there)
-        // So: only destroy if neither was moved (i.e., both non-zero)
-        // This reduces risk of double-destroy
-        // if(start_evt && stop_evt)
-        // {
-        //     printf("WOAH!!!!!!!!! DELETING EVENTS\n");
-        //     hipEventDestroy(start_evt);
-        //     hipEventDestroy(stop_evt);
-        // }
-        // // Null them to prevent accidental double-destruction
-        // start_evt = nullptr;
-        // stop_evt = nullptr;
     }
 };
 
@@ -175,12 +162,6 @@ struct rocsolver_profile_entry
     // Destroy HIP events when profile entry is destroyed
     ~rocsolver_profile_entry()
     {
-        // for(auto& e : events)
-        // {
-        //     printf("WOAH!!!!!!!!! DELETING EVENTS in profile\n");
-        //     if(e.first) hipEventDestroy(e.first);
-        //     if(e.second) hipEventDestroy(e.second);
-        // }
     }
 };
 
@@ -293,7 +274,7 @@ private:
         from_profile.name = from_stack.name;
         from_profile.level = from_stack.level;
         from_profile.calls++;
-        // Store HIP event pair for later to compute time at log_end_impl.
+        // store HIP event pair for later to compute time at log_end_impl.
         from_profile.events.push_back({from_stack.start_evt, from_stack.stop_evt});
     }
 
