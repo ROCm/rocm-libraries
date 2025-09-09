@@ -70,7 +70,8 @@ Tests:
 - name: matmul_small
   category: quick
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *small_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
@@ -79,7 +80,8 @@ Tests:
 - name: matmul_conj_small
   category: quick
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *small_matrix_size_range
   transA_transB: *conjugate_transA_transB_range
   alpha_beta: *alpha_beta_range_small
@@ -88,7 +90,8 @@ Tests:
 - name: matmul_medium
   category: pre_checkin
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *medium_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
@@ -96,7 +99,8 @@ Tests:
 - name: matmul_batch_medium
   category: pre_checkin
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *medium_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
@@ -105,7 +109,8 @@ Tests:
 - name: matmul_medium_HMM
   category: HMM
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *medium_matrix_size_range
   transA: [ N ]
   transB: [ N ]
@@ -116,7 +121,8 @@ Tests:
 - name: matmul_chunk
   category: pre_checkin
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *chunk_matrix_size_range
   transA_transB: *transA_transB_range
   alpha: 2
@@ -125,7 +131,8 @@ Tests:
 - name: matmul_deepbench
   category: nightly
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *deepbench_sizes
   alpha_beta: *deepbench_alpha_beta_range
   transA_transB: *deepbench_transA_transB_range
