@@ -77,6 +77,7 @@ mkdir build; cd build
 #   RNG_SEED_COUNT               - 0 by default, controls non-repeatable random dataset count
 #   PRNG_SEEDS                   - 1 by default, reproducible seeds to generate random data
 #   USE_HIPCXX                   - OFF by default, builds with CMake HIP language support. This eliminates the need to set CXX.
+#   USE_SYSTEM_LIB               - OFF by default, builds tests using the installed ROCm libs provided by the system. This only takes effect when BUILD_TEST is ON.
 #
 # ! IMPORTANT !
 # On ROCm platform set C++ compiler to HipCC. You can do it by adding 'CXX=<path-to-hipcc>'
@@ -115,7 +116,7 @@ To specify an option, add it to your camke command, prefixed with the `-D` switc
 
 ### HIP on Windows
 
-We've added initial support for HIP on Windows. 
+We've added initial support for HIP on Windows.
 To install, first clone rocThrust using the steps described in [obtaining the source code](#obtaining-the-source-code).
 Then, use the provided `rmake.py` Python script:
 
