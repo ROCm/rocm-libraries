@@ -262,7 +262,7 @@ bool RunParameterPredictionModel(
 }
 
 // Explicit template instantiations for common types
-MIOPEN_INTERNALS_EXPORT template bool RunParameterPredictionModel<float>(
+template bool RunParameterPredictionModel<float>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -272,7 +272,7 @@ MIOPEN_INTERNALS_EXPORT template bool RunParameterPredictionModel<float>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
 
-MIOPEN_INTERNALS_EXPORT template bool RunParameterPredictionModel<int8_t>(
+template bool RunParameterPredictionModel<int8_t>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -283,7 +283,7 @@ MIOPEN_INTERNALS_EXPORT template bool RunParameterPredictionModel<int8_t>(
     std::string);
 #if MIOPEN_USE_COMPOSABLEKERNEL
 
-MIOPEN_INTERNALS_EXPORT template bool RunParameterPredictionModel<ck::half_t>(
+template bool RunParameterPredictionModel<ck::half_t>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
@@ -293,7 +293,7 @@ MIOPEN_INTERNALS_EXPORT template bool RunParameterPredictionModel<ck::half_t>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string);
 
-MIOPEN_INTERNALS_EXPORT template bool RunParameterPredictionModel<ck::bhalf_t>(
+template bool RunParameterPredictionModel<ck::bhalf_t>(
     const ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,

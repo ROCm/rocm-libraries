@@ -52,7 +52,7 @@ MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>
 
 MIOPEN_INTERNALS_EXPORT std::vector<int> GenerateSplitK(int max_split_k);
 template <typename DataType>
-bool RunParameterPredictionModel(
+MIOPEN_INTERNALS_EXPORT bool RunParameterPredictionModel(
     const miopen::ExecutionContext& ctx,
     const miopen::conv::ProblemDescription& problem,
     std::vector<std::string>& valid_kernels,
