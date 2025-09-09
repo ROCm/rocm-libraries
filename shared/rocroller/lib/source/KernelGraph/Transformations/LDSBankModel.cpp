@@ -588,9 +588,18 @@ namespace rocRoller::KernelGraph::MemoryTracer
                         += threadGroup.clockCycles.size(); // Add to instruction total
                 }
 
+                // Add 4 cycles for read/write address transfer
+                uint bankConflictCycles    = instructionTotalClocks;
+                uint addressTransferCycles = 4;
+                instructionTotalClocks += addressTransferCycles;
+
                 // Print instruction total after all thread groups
                 ss << fmt::format(
-                    "    Total clock cycles for {}: {}\n", instructionName, instructionTotalClocks);
+                    "    Total clock cycles for {}: {} ({} bank conflict + {} address transfer)\n",
+                    instructionName,
+                    instructionTotalClocks,
+                    bankConflictCycles,
+                    addressTransferCycles);
                 operationTotalClocks += instructionTotalClocks; // Add to operation total
             }
 
