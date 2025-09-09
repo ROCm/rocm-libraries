@@ -5,12 +5,12 @@
 .. _install-with-cmake:
 
 ********************************************************************
-Building and installing rocThrust on Windows and Linux with CMake 
+Building and installing rocThrust on Windows and Linux with CMake
 ********************************************************************
 
 You can build and install rocThrust with CMake on either Windows or Linux.
 
-Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` depending on the compiler you'll be using, and set ``CMAKE_CXX_COMPILER`` to the compiler's absolute path. For example: 
+Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` depending on the compiler you'll be using, and set ``CMAKE_CXX_COMPILER`` to the compiler's absolute path. For example:
 
 .. code:: shell
 
@@ -24,7 +24,7 @@ After :doc:`cloning the project <./rocThrust-install-overview>`, create the ``bu
     mkdir build
     cd build
 
-Generate the rocThrust makefile using the ``cmake`` command: 
+Generate the rocThrust makefile using the ``cmake`` command:
 
 .. code:: shell
 
@@ -35,7 +35,7 @@ The available build options are:
 * ``BUILD_BENCHMARK``. Set this to ``ON`` to build rocThrust benchmarks. Off by default.
 * ``BUILD_EXAMPLE``. Set this to ``ON`` to build rocThrust examples. Off by default.
 * ``BUILD_TEST``. Set to ``ON`` to enable rocThrust tests. Off by default.
-* ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default. 
+* ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default.
 * ``DISABLE_WERROR``. Set this to ``OFF`` to pass ``-Werror`` to the compiler. On by default.
 * ``DOWNLOAD_ROCPRIM``. Set this to ``ON`` to download rocPRIM regardless of whether or not rocPRIM is already installed. Off by default.
 * ``SQLITE_USE_SYSTEM_PACKAGE``. Set to ``ON`` to use the ``SQLite`` libaray provided by the system. Off by default - a copy of the library will then be downloaded. ``SQLite`` is needed for bitwise-reproducibility tests. For this option to take effect, either ``BUILD_TEST`` or ``BUILD_HIPSTDPAR_TEST`` must be set to ``ON``.
@@ -47,7 +47,7 @@ Build rocThrust using the generated make file:
 .. code:: shell
 
     make -j4
-    
+
 After you've built rocThrust, you can optionally generate tar, zip, and deb packages:
 
 .. code:: shell
