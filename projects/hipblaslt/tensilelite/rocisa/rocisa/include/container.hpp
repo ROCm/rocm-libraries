@@ -482,19 +482,6 @@ namespace rocisa
         }
     };
 
-    struct OFF : public Container
-    {
-        std::shared_ptr<Container> clone() const override
-        {
-            return std::make_shared<OFF>(*this);
-        }
-
-        std::string toString() const override
-        {
-            return "off";
-        }
-    };
-
     struct EXEC : public Container
     {
         EXEC(bool setHi = false)
@@ -685,6 +672,7 @@ namespace rocisa
         bool                   isMinus;
         bool                   isAbs;
         bool                   isMacro;
+        bool                   isOff;
 
         RegisterContainer(const std::string&            regType,
                           const std::optional<RegName>& regName,
@@ -699,6 +687,7 @@ namespace rocisa
             , isMinus(false)
             , isAbs(false)
             , isMacro(false)
+            , isOff(false)
         {
         }
 
@@ -706,6 +695,7 @@ namespace rocisa
                           const std::optional<RegName>& regName,
                           bool                          isAbs,
                           bool                          isMacro,
+                          bool                          isOff,
                           int                           regIdx = 0,
                           float                         regNum = 1)
             : Container()
@@ -717,6 +707,7 @@ namespace rocisa
             , isMinus(false)
             , isAbs(isAbs)
             , isMacro(isMacro)
+            , isOff(isOff)
         {
         }
 
@@ -730,6 +721,7 @@ namespace rocisa
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
             , isMacro(other.isMacro)
+            , isOff(other.isOff)
         {
         }
 
@@ -753,6 +745,7 @@ namespace rocisa
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
             , isMacro(other.isMacro)
+            , isOff(other.isOff)
         {
         }
 
@@ -768,6 +761,7 @@ namespace rocisa
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
                 isMacro     = other.isMacro;
+                isOff       = other.isOff;
             }
             return *this;
         }
@@ -784,6 +778,7 @@ namespace rocisa
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
                 isMacro     = other.isMacro;
+                isOff       = other.isOff;
             }
             return *this;
         }
@@ -895,6 +890,11 @@ namespace rocisa
 
         std::string toString() const override
         {
+            if(isOff)
+            {
+                return "off";
+            }
+
             std::string minusStr = isMinus ? "-" : "";
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
             auto absStr          = isAbs ? ")" : "";
@@ -1156,8 +1156,11 @@ namespace rocisa
     // Overloaded functions to create specific GPR containers with default regNum = 1.f
     std::shared_ptr<RegisterContainer> vgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> vgpr(int idx, float regNum = 1.f);
-    std::shared_ptr<RegisterContainer>
-        vgpr(const std::string& name, float regNum = 1.f, bool isMacro = false, bool isAbs = false);
+    std::shared_ptr<RegisterContainer> vgpr(const std::string& name,
+                                            float              regNum  = 1.f,
+                                            bool               isMacro = false,
+                                            bool               isAbs   = false,
+                                            bool               isOff   = false);
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> sgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer>
