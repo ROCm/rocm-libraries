@@ -89,7 +89,7 @@ inline bool rocblas_gemvt_fat_n(rocblas_int m, rocblas_int n, int gfx_arch)
 {
     if(gfx_arch == 910)
     {
-        bool fat = n / 4 > m;
+        bool fat = n / 4 >= m;
         return fat
                && ((std::is_same_v<T, float> && m <= 768)
                    || ((std::is_same_v<T, double> || std::is_same_v<T, rocblas_float_complex>)&&m
@@ -98,7 +98,7 @@ inline bool rocblas_gemvt_fat_n(rocblas_int m, rocblas_int n, int gfx_arch)
     }
     else if(gfx_arch == 942)
     {
-        bool fat = n / 8 > m;
+        bool fat = n / 8 >= m;
         return fat && (std::is_same_v<T, float> && m <= 512);
     }
     else
