@@ -1359,7 +1359,7 @@ def generate_gfx950():
     yield from fp4_kernels()
 
 
-def fp8_target_128x256():
+def mxfp8_target_128x256():
     yield GEMMRun(
         M=4096,
         N=4096,
@@ -1406,7 +1406,7 @@ def fp8_target_128x256():
     )
 
 
-def fp8_target_256x128():
+def mxfp8_target_256x128():
     yield GEMMRun(
         M=4096,
         N=4096,
@@ -1453,7 +1453,7 @@ def fp8_target_256x128():
     )
 
 
-def fp8_target_d2lds_mi32x32x64_pf2x1():
+def mxfp8_target_d2lds_mi32x32x64_pf2x1():
     yield GEMMRun(
         M=4096,
         N=4096,
@@ -1500,11 +1500,11 @@ def fp8_target_d2lds_mi32x32x64_pf2x1():
     )
 
 
-def fp8_target_d2lds_mi32x32x64_pf2x1_wgm():
-    yield from add_wgm((0, 4), fp8_target_d2lds_mi32x32x64_pf2x1())
+def mxfp8_target_d2lds_mi32x32x64_pf2x1_wgm():
+    yield from add_wgm((0, 4), mxfp8_target_d2lds_mi32x32x64_pf2x1())
 
 
-def fp8_target_d2lds_mi32x32x64_pf4x1():
+def mxfp8_target_d2lds_mi32x32x64_pf4x1():
     yield GEMMRun(
         M=4096,
         N=4096,
@@ -1555,11 +1555,11 @@ def fp8_target_d2lds_mi32x32x64_pf4x1():
     )
 
 
-def fp8_target_d2lds_mi32x32x64_pf4x1_wgm():
-    yield from add_wgm((1, 2), fp8_target_d2lds_mi32x32x64_pf4x1())
+def mxfp8_target_d2lds_mi32x32x64_pf4x1_wgm():
+    yield from add_wgm((1, 2), mxfp8_target_d2lds_mi32x32x64_pf4x1())
 
 
-def fp8_target_d2lds_mi16x16x128_pf4x1():
+def mxfp8_target_d2lds_mi16x16x128_pf4x1():
     yield GEMMRun(
         M=4096,
         N=4096,
@@ -1610,11 +1610,11 @@ def fp8_target_d2lds_mi16x16x128_pf4x1():
     )
 
 
-def fp8_target_d2lds_mi16x16x128_pf4x1_wgm():
-    yield from add_wgm((1, 1), fp8_target_d2lds_mi16x16x128_pf4x1())
+def mxfp8_target_d2lds_mi16x16x128_pf4x1_wgm():
+    yield from add_wgm((1, 1), mxfp8_target_d2lds_mi16x16x128_pf4x1())
 
 
-def fp8_no_scale_target_d2lds_mi16x16x128_pf4x1():
+def fp8_target_d2lds_mi16x16x128_pf4x1():
     yield GEMMRun(
         M=4096,
         N=4096,
@@ -1660,49 +1660,54 @@ def fp8_no_scale_target_d2lds_mi16x16x128_pf4x1():
     )
 
 
-def fp8_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm():
-    yield from add_wgm((1, 2), fp8_no_scale_target_d2lds_mi16x16x128_pf4x1())
+def fp8_target_d2lds_mi16x16x128_pf4x1_wgm():
+    yield from add_wgm((1, 2), fp8_target_d2lds_mi16x16x128_pf4x1())
 
 
-def fp8_kernels_no_wgm():
-    yield from fp8_target_128x256()
-    yield from fp8_target_256x128()
-    yield from fp8_target_d2lds_mi32x32x64_pf2x1()
-    yield from fp8_target_d2lds_mi32x32x64_pf4x1()
-    yield from fp8_target_d2lds_mi16x16x128_pf4x1()
-    yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1()
+def mxfp8_kernels_no_wgm():
+    yield from mxfp8_target_128x256()
+    yield from mxfp8_target_256x128()
+    yield from mxfp8_target_d2lds_mi32x32x64_pf2x1()
+    yield from mxfp8_target_d2lds_mi32x32x64_pf4x1()
+    yield from mxfp8_target_d2lds_mi16x16x128_pf4x1()
 
 
-def fp8_kernels_wgm():
-    yield from fp8_target_d2lds_mi32x32x64_pf2x1_wgm()
-    yield from fp8_target_d2lds_mi32x32x64_pf4x1_wgm()
-    yield from fp8_target_d2lds_mi16x16x128_pf4x1_wgm()
-    yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
+def mxfp8_kernels_wgm():
+    yield from mxfp8_target_d2lds_mi32x32x64_pf2x1_wgm()
+    yield from mxfp8_target_d2lds_mi32x32x64_pf4x1_wgm()
+    yield from mxfp8_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
-def fp8_16x16x128_scale_options():
-    yield from fp8_target_d2lds_mi16x16x128_pf4x1_wgm()
-    yield from addSkipPermlane(fp8_target_d2lds_mi16x16x128_pf4x1_wgm())
+def mxfp8_16x16x128_scale_options():
+    yield from mxfp8_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from addSkipPermlane(mxfp8_target_d2lds_mi16x16x128_pf4x1_wgm())
 
 
-def fp8_32x32x64_scale_options():
-    yield from fp8_target_d2lds_mi32x32x64_pf4x1_wgm()
-    yield from addSkipPermlane(fp8_target_d2lds_mi32x32x64_pf4x1_wgm())
+def mxfp8_32x32x64_scale_options():
+    yield from mxfp8_target_d2lds_mi32x32x64_pf4x1_wgm()
+    yield from addSkipPermlane(mxfp8_target_d2lds_mi32x32x64_pf4x1_wgm())
+
+
+def mxfp8_target_sweep_wgms():
+    for wgm_dim in [0, 1]:
+        for wgm_value in range(
+            1, 9
+        ):  # All above *fp8*wgm optmized only for this sweep range
+            yield from add_wgm(
+                (wgm_dim, wgm_value), fp8_target_d2lds_mi16x16x128_pf4x1()
+            )
+
+
+def mxfp8_kernels():
+    yield from mxfp8_kernels_no_wgm()
+    yield from mxfp8_kernels_wgm()
+    yield from mxfp8_16x16x128_scale_options()
+    yield from mxfp8_32x32x64_scale_options()
 
 
 def fp8_kernels():
-    yield from fp8_kernels_no_wgm()
-    yield from fp8_kernels_wgm()
-    yield from fp8_16x16x128_scale_options()
-    yield from fp8_32x32x64_scale_options()
-
-
-def fp8_target_sweep_wgms():
-    for wgm_dim in [0, 1]:
-        for wgm_value in range(1, 9):
-            yield from add_wgm(
-                (wgm_dim, wgm_value), fp8_no_scale_target_d2lds_mi16x16x128_pf4x1()
-            )
+    yield from fp8_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp8_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
 def all():
@@ -1710,6 +1715,7 @@ def all():
         # TODO: Add here more GFX950 tests
         yield from fp4_kernels()
         yield from fp8_kernels()
+        yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
     yield from sgemm()
     yield from hgemm()
