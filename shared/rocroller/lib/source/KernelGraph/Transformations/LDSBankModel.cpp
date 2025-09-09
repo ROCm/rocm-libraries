@@ -241,20 +241,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return bankMapping;
     }
 
-    uint LDSBankModel::calculateBankConflicts(
-        const std::map<uint, std::vector<uint32_t>>& bankMapping)
-    {
-        if(bankMapping.empty())
-            return 0;
-
-        uint maxConflicts = 0;
-        for(const auto& [bank, addresses] : bankMapping)
-        {
-            maxConflicts = std::max(maxConflicts, static_cast<uint>(addresses.size()));
-        }
-        return maxConflicts;
-    }
-
     std::map<uint, std::vector<ThreadAccess>>
         LDSBankModel::makeBankMappingForThreads(const std::vector<ThreadAccess>& threads,
                                                 uint                             dwords,

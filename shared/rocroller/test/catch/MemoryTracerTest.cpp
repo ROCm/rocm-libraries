@@ -174,7 +174,7 @@ namespace MemoryTracerTest
         {
             std::vector<uint32_t> addresses;
             auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
-            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 0);
+            CHECK(bankMapping.empty()); // No banks accessed
         }
 
         SECTION("No conflicts - all different banks")
@@ -183,7 +183,11 @@ namespace MemoryTracerTest
             std::vector<uint32_t> addresses   = {0, 4, 8, 12};
             auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
             CHECK(bankMapping.size() == 4); // 4 different banks
-            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 1);
+            // Each bank should have exactly 1 address (no conflicts)
+            for(const auto& [bank, addrs] : bankMapping)
+            {
+                CHECK(addrs.size() == 1);
+            }
         }
 
         SECTION("Full conflicts - all same bank")
@@ -193,8 +197,7 @@ namespace MemoryTracerTest
             std::vector<uint32_t> addresses   = {0, 128, 256, 384};
             auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
             CHECK(bankMapping.size() == 1); // Only bank 0
-            CHECK(bankMapping.at(0).size() == 4); // All 4 addresses in bank 0
-            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 4);
+            CHECK(bankMapping.at(0).size() == 4); // All 4 addresses in bank 0 (4-way conflict)
         }
 
         SECTION("Partial conflicts")
@@ -205,8 +208,9 @@ namespace MemoryTracerTest
             std::vector<uint32_t> addresses   = {0, 4, 8, 128};
             auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 32);
             CHECK(bankMapping.size() == 3); // 3 different banks
-            CHECK(bankMapping.at(0).size() == 2); // Bank 0 has 2 addresses
-            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 2);
+            CHECK(bankMapping.at(0).size() == 2); // Bank 0 has 2 addresses (2-way conflict)
+            CHECK(bankMapping.at(1).size() == 1); // Bank 1 has 1 address
+            CHECK(bankMapping.at(2).size() == 1); // Bank 2 has 1 address
         }
 
         SECTION("Different bank configurations")
@@ -215,13 +219,13 @@ namespace MemoryTracerTest
             std::vector<uint32_t> addresses   = {0, 64, 128}; // All map to bank 0
             auto                  bankMapping = LDSBankModel::makeBankMapping(addresses, 4, 16);
             CHECK(bankMapping.size() == 1); // Only bank 0
-            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 3);
+            CHECK(bankMapping.at(0).size() == 3); // 3-way conflict
 
             // Test with different entry width (8 bytes)
             addresses   = {0, 256, 512}; // All map to bank 0
             bankMapping = LDSBankModel::makeBankMapping(addresses, 8, 32);
             CHECK(bankMapping.size() == 1); // Only bank 0
-            CHECK(LDSBankModel::calculateBankConflicts(bankMapping) == 3);
+            CHECK(bankMapping.at(0).size() == 3); // 3-way conflict
         }
 
         SECTION("Verify bank mapping contents")

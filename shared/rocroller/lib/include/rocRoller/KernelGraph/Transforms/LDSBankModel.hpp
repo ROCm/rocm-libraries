@@ -160,15 +160,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         static std::map<uint, std::vector<uint32_t>> makeBankMapping(
             const std::vector<uint32_t>& addresses, uint entryWidthInBytes, uint numBanks);
 
-        /**
-         * @brief Calculate the degree of bank conflicts from a bank mapping
-         * 
-         * @param bankMapping Map from bank index to vector of addresses
-         * @return Maximum number of addresses that map to the same bank
-         */
-        static uint
-            calculateBankConflicts(const std::map<uint, std::vector<uint32_t>>& bankMapping);
-
     private:
         uint m_entryWidthInBytes;
         uint m_numBanks;
