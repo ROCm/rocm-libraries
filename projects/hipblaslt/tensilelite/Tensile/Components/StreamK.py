@@ -23,7 +23,7 @@
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC,\
-    VOP3PModifiers, ContinuousRegister, OFF
+    VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SCmpGeU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
@@ -812,7 +812,7 @@ class StreamK(Component):
                     module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
                 else:
                     module.add(VMovB32(dst=vgpr(tmpVgpr), src=1, comment="move 1 to tmpVgpr"))
-                    module.add(self.bufferStoreFlag(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="set flag"))
+                    module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="set flag"))
                 module.add(skipFlagSet)
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
@@ -823,13 +823,13 @@ class StreamK(Component):
 
         return module
 
-    def bufferStoreFlag(self, writer, src, soffset, comment=""):
-        module = Module("Buffer Store Flag")
+    def setFlagValue(self, writer, src, soffset, comment=""):
+        module = Module("Buffer Store Flag Value")
         tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
         module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("AddressFlags", 2)))
         module.add(SMovB32(dst=sgpr(tmpSgprBuffer+2), src="BufferOOB"))
         module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
-        module.add(BufferStoreB32(src=src, vaddr=OFF(), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset, \
+        module.add(BufferStoreB32(src=src, vaddr=vgpr("off", isOff=True), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset, \
                                   mubuf=MUBUFModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV), \
                                   comment=comment))
         module.add(SWaitCnt(vscnt=0, comment="wait for data store")) #TODO: See if this wait is necessery

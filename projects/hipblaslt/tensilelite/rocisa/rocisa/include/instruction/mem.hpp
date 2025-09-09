@@ -1323,7 +1323,7 @@ namespace rocisa
     struct BufferStoreB32 : public MUBUFStoreInstruction
     {
         BufferStoreB32(const std::shared_ptr<RegisterContainer>& src,
-                       const std::shared_ptr<Container>&         vaddr,
+                       const std::shared_ptr<RegisterContainer>& vaddr,
                        const std::shared_ptr<RegisterContainer>& saddr,
                        const InstructionInput&                   soffset,
                        std::optional<MUBUFModifiers>             mubuf   = std::nullopt,

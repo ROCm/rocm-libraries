@@ -105,10 +105,12 @@ namespace rocisa
                                                  const std::string& name,
                                                  float              regNum  = 1.f,
                                                  bool               isMacro = false,
-                                                 bool               isAbs   = false)
+                                                 bool               isAbs   = false,
+                                                 bool               isOff   = false)
     {
         RegName regname = generateRegName(name);
-        return std::make_shared<RegisterContainer>(gprType, regname, isAbs, isMacro, -1, regNum);
+        return std::make_shared<RegisterContainer>(
+            gprType, regname, isAbs, isMacro, isOff, -1, regNum);
     }
 
     // Overloaded functions to create specific GPR containers with default regNum = 1.f
@@ -123,9 +125,9 @@ namespace rocisa
     }
 
     std::shared_ptr<RegisterContainer>
-        vgpr(const std::string& name, float regNum, bool isMacro, bool isAbs)
+        vgpr(const std::string& name, float regNum, bool isMacro, bool isAbs, bool isOff)
     {
-        return createGPR("v", name, regNum, isMacro, isAbs);
+        return createGPR("v", name, regNum, isMacro, isAbs, isOff);
     }
 
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum)
@@ -187,11 +189,12 @@ void init_containers(nb::module_ m)
               nb::arg("idx"),
               nb::arg("regNum") = 1.f);
     m_con.def("vgpr",
-              nb::overload_cast<const std::string&, float, bool, bool>(&rocisa::vgpr),
+              nb::overload_cast<const std::string&, float, bool, bool, bool>(&rocisa::vgpr),
               nb::arg("name"),
               nb::arg("regNum")  = 1.f,
               nb::arg("isMacro") = false,
-              nb::arg("isAbs")   = false);
+              nb::arg("isAbs")   = false,
+              nb::arg("isOff")   = false);
 
     m_con.def("sgpr",
               nb::overload_cast<const rocisa::Holder&, float>(&rocisa::sgpr),
@@ -452,14 +455,6 @@ void init_containers(nb::module_ m)
                 std::tuple<std::vector<int>, std::vector<int>, std::vector<int>> t) {
                  new(&self) rocisa::VOP3PModifiers(std::get<0>(t), std::get<1>(t), std::get<2>(t));
              });
-
-    nb::class_<rocisa::OFF, rocisa::Container>(m_con, "OFF")
-        .def(nb::init<>())
-        .def("__str__", &rocisa::OFF::toString)
-        .def("__deepcopy__",
-             [](const rocisa::OFF& self, nb::dict mamo) { return rocisa::OFF(self); })
-        .def("__getstate__", [](const rocisa::OFF& self) { return std::make_tuple(); })
-        .def("__setstate__", [](rocisa::OFF& self, std::tuple<> t) { new(&self) rocisa::OFF(); });
 
     nb::class_<rocisa::EXEC, rocisa::Container>(m_con, "EXEC")
         .def(nb::init<bool>(), nb::arg("setHi") = false)
