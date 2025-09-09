@@ -2575,7 +2575,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"])))
             swzBlkVWSizeVgpr = self.vgprPool.checkOut(1)
             module.add(SMovB32(dst=sgpr(swzBlkVWSizeSgpr), src=hex(swzBlockSize * vw), \
-              comment="swizzled block * VW = (MI_M(%u) * MI_K(%u) * kPack) * VW(%u)" %(swzMorN, int(swzStride / kPack), vw)))
+              comment="swizzled block * VW = (MI_MorN(%u) * MI_K(%u) * kPack) * VW(%u)" %(swzMorN, int(swzStride / kPack), vw)))
             module.add(VMovB32(dst=vgpr(swzBlkVWSizeVgpr), src=sgpr(swzBlkVWSizeSgpr)))
             module.add(VMulU32U24(dst=vgpr(v), src0=vgpr(v), src1=vgpr(swzBlkVWSizeVgpr)))
 
@@ -2590,7 +2590,7 @@ class KernelWriterAssembly(KernelWriter):
               # codes
               module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"], tmpVgprRes))
               module.add(vectorStaticDivide(wave_id, wave_id, numWaves, tmpVgprRes, comment="LSU offset: Get LSU wave_id"))
-              module.add(VLShiftLeftB32(dst=vgpr(wave_id), shiftHex=hex(log2(lsuStride*16)), src=vgpr(wave_id), comment="LSU offset: LSU_wave_id*MI_M(%u)*lsuStrideK(%u)"%(16, lsuStride)))
+              module.add(VLShiftLeftB32(dst=vgpr(wave_id), shiftHex=hex(log2(lsuStride*swzMorN)), src=vgpr(wave_id), comment="LSU offset: LSU_wave_id*MI_MorN(%u)*lsuStrideK(%u)"%(swzMorN, lsuStride)))
               module.add(VAddU32(dst=vgpr(v), src0=vgpr(wave_id), src1=vgpr(v), comment="tileOffset += LSU offset"))
               self.vgprPool.checkIn(wave_id)
 
@@ -3698,7 +3698,6 @@ class KernelWriterAssembly(KernelWriter):
         tmp = self.sgprPool.checkOut(1)
         numKr = sgpr(tmp)
         swzStride = tP["swizzleK"]
-        lsu = kernel["LocalSplitU"]
         module.addComment(f"Align to {swzStride}")
         module.add(SAddU32(numKr, sgpr("SizesSum"), swzStride-1))
         module.add(SLShiftRightB32(dst=numKr, shiftHex=hex(log2(swzStride)), src=numKr,  comment="%s: numKr = DimK / %s"%(swizzledOrTrName, swzStride)))
