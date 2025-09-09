@@ -18,7 +18,7 @@ template <class T, class = void>
 struct default_delete;
 
 template <class T>
-struct default_delete<T, typename thrust::detail::enable_if<thrust::detail::not_<std::is_array<T>>::value>::type>
+struct default_delete<T, typename std::enable_if<!std::is_array<T>::value>::type>
 {
   using pointer = thrust::device_ptr<T>;
 
@@ -27,7 +27,7 @@ struct default_delete<T, typename thrust::detail::enable_if<thrust::detail::not_
   template <class U>
   THRUST_HOST default_delete(
     const default_delete<U>&,
-    typename thrust::detail::enable_if<thrust::detail::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* =
+    typename std::enable_if<std::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* =
       nullptr) noexcept
   {}
 
@@ -45,7 +45,7 @@ struct default_delete<T, typename thrust::detail::enable_if<thrust::detail::not_
 template <class T>
 struct default_delete<
   T[],
-  typename thrust::detail::enable_if<thrust::detail::not_<std::is_trivially_destructible<T>>::value>::type>
+  typename std::enable_if<!std::is_trivially_destructible<T>::value>::type>
 {
   using pointer = thrust::device_ptr<T>;
 
@@ -55,7 +55,7 @@ struct default_delete<
   template <class U>
   THRUST_HOST
   default_delete(const default_delete<U[]>& other,
-              typename thrust::detail::enable_if<thrust::detail::is_convertible<U (*)[], T (*)[]>::value>::type* =
+              typename std::enable_if<std::is_convertible<U (*)[], T (*)[]>::value>::type* =
                 nullptr) noexcept
       : m_size(other.size())
   {}
@@ -80,7 +80,7 @@ private:
 };
 
 template <class T>
-struct default_delete<T[], typename thrust::detail::enable_if<std::is_trivially_destructible<T>::value>::type>
+struct default_delete<T[], typename std::enable_if<std::is_trivially_destructible<T>::value>::type>
 {
   using pointer = thrust::device_ptr<T>;
 
@@ -89,7 +89,7 @@ struct default_delete<T[], typename thrust::detail::enable_if<std::is_trivially_
   template <class U>
   THRUST_HOST default_delete(
     const default_delete<U>&,
-    typename thrust::detail::enable_if<thrust::detail::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* =
+    typename std::enable_if<std::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* =
       nullptr) noexcept
   {}
 
@@ -119,7 +119,7 @@ struct pointer_detector<T, D, std::void_t<typename D::pointer>>
 template <class Deleter>
 struct unique_ptr_deleter_sfinae
 {
-  static_assert(thrust::detail::not_<thrust::detail::is_reference<Deleter>>::value, "incorrect specialization");
+  static_assert(!std::is_reference<Deleter>::value, "incorrect specialization");
   using lval_ref_type        = const Deleter&;
   using good_rval_ref_type   = Deleter&&;
   using bad_rval_ref_type    = void;
@@ -169,28 +169,25 @@ private:
 
   template <bool Dummy,
             class Deleter = typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
-  using EnableIfDeleterDefaultConstructible = typename thrust::detail::enable_if<
-    thrust::detail::and_<std::is_default_constructible<Deleter>,
-                         thrust::detail::not_<thrust::detail::is_pointer<Deleter>>>::value>::type;
+  using EnableIfDeleterDefaultConstructible = typename std::enable_if< 
+    std::is_default_constructible<Deleter>::value && !std::is_pointer<Deleter>::value>::type;
 
   template <class ArgType>
   using EnableIfDeleterConstructible =
-    typename thrust::detail::enable_if<std::is_constructible<deleter_type, ArgType>::value>::type;
+    typename std::enable_if<std::is_constructible<deleter_type, ArgType>::value>::type;
 
   template <class U, class E>
-  using EnableIfMoveConvertible =
-    typename thrust::detail::enable_if<thrust::detail::and_<thrust::detail::is_convertible<typename U::pointer, pointer>,
-                                                            thrust::detail::not_<std::is_array<E>>>::value>::type;
+  using EnableIfMoveConvertible = typename std::enable_if<
+      std::is_convertible<typename U::pointer, pointer>::value && !std::is_array<E>::value>::type;
 
   template <class E>
-  using EnableIfDeleterConvertible = typename thrust::detail::enable_if<
-    thrust::detail::or_<thrust::detail::and_<thrust::detail::is_reference<D>, thrust::detail::is_same<D, E>>,
-                        thrust::detail::and_<thrust::detail::not_<thrust::detail::is_reference<D>>,
-                                             thrust::detail::is_convertible<E, D>>>::value>::type;
+  using EnableIfDeleterConvertible = 
+    typename std::enable_if<(std::is_reference<D>::value && std::is_same<D, E>::value) 
+                                      || (!std::is_reference<D>::value && std::is_convertible<E, D>::value)>::type;
 
   template <class E>
   using EnableIfDeleterAssignable =
-    typename thrust::detail::enable_if<thrust::detail::is_assignable<D&, E&&>::value>::type;
+    typename std::enable_if<std::is_assignable<D&, E&&>::value>::type;
 
 public:
   //==========================================================================
@@ -226,7 +223,7 @@ public:
         : m_ptr(p)
         , m_deleter(std::move(d))
     {
-      static_assert(thrust::detail::not_<thrust::detail::is_reference<deleter_type>>::value,
+      static_assert(!std::is_reference<deleter_type>::value,
                   "rvalue deleter bound to reference");
     }
 
@@ -352,7 +349,7 @@ template <class T, class D>
 class unique_ptr<T[], D>
 {};
 
-template <class T, class D, typename thrust::detail::enable_if<std::is_swappable<D>::value, void>::type>
+template <class T, class D, typename std::enable_if<std::is_swappable<D>::value, void>::type>
 inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T, D>& y) noexcept
 {
   x.swap(y);
@@ -502,8 +499,8 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(std::nullptr_t, 
 //==============================================================================
 template <class T,
           class... Args,
-          class = typename thrust::detail::enable_if<
-              thrust::detail::not_<std::is_array<T>>::value>::type>
+          class = typename std::enable_if<
+              !std::is_array<T>::value>::type>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&... args)
 {
   thrust::device_ptr<T> p = thrust::device_malloc<T>(1);
