@@ -836,6 +836,8 @@ namespace
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
+                    problem.useScaleCD() ? "--scaleC" : "",
+                    problem.useScaleCD() ? "--scaleD" : "",
                     "scaleAlpha_vector",
                     problem.useScaleAlphaVec() ? "true" : "false",
                     "gradient",
@@ -927,6 +929,8 @@ namespace
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
+                    problem.useScaleCD() ? "--scaleC" : "",
+                    problem.useScaleCD() ? "--scaleD" : "",
                     "scaleAlpha_vector",
                     problem.useScaleAlphaVec() ? "true" : "false",
                     "gradient",
@@ -1199,6 +1203,8 @@ namespace
             problem.gemms[0].useScaleAB().empty()
                 ? 0
                 : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            problem.gemms[0].useScaleCD() ? "--scaleC" : "",
+            problem.gemms[0].useScaleCD() ? "--scaleD" : "",
             "scaleAlpha_vector",
             problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
             "gradient",
@@ -1334,6 +1340,8 @@ namespace
             problem.gemms[0].useScaleAB().empty()
                 ? 0
                 : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            problem.gemms[0].useScaleCD() ? "--scaleC" : "",
+            problem.gemms[0].useScaleCD() ? "--scaleD" : "",
             "scaleAlpha_vector",
             problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
             "gradient",
@@ -2864,13 +2872,6 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             return rocblaslt_status_invalid_pointer;
         }
 
-        // Get the values of static member variables flush and rotating size from UserClientArguments
-        UserClientArguments ClientArguments;
-        bool                flush              = ClientArguments.GetFlushValue();
-        int32_t             rotatingBufferSize = ClientArguments.GetRotatingBufferSizeValue();
-        int32_t             hotIterations      = ClientArguments.GetHotIterationsValue();
-        int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
-
         hardware = TensileLite::hip::GetDevice(*deviceProp);
 
         int* solutionIndex = (int*)algo.data;
@@ -2922,45 +2923,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
         {
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
-            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-                || rocblaslt::Debug::Instance().printLogAsMarker()
-                || rocblaslt::Debug::Instance().benchPrintCommand())
-            {
-                logBenchFromTensileDataGemm(data->problem,
-                                            data->inputs,
-                                            data->algoIndex,
-                                            flush,
-                                            rotatingBufferSize,
-                                            coldIterations,
-                                            hotIterations,
-                                            true);
-            }
-            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
-            {
-                logProfileFromTensileDataGemm(data->problem,
-                                          data->inputs,
-                                          flush,
-                                          rotatingBufferSize,
-                                          coldIterations,
-                                          hotIterations,
-                                          false);
-            }
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
-            {
-                logExtendedProfileFromTensileDataGemm(data->problem,
-                                                    data->inputs,
-                                                    data->algoIndex,
-                                                    solution->kernelName,
-                                                    solution->solutionName,
-                                                    flush,
-                                                    rotatingBufferSize,
-                                                    coldIterations,
-                                                    hotIterations,
-                                                    false);
-            }
 
             if(tuning)
             {
@@ -3123,6 +3089,43 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
         {
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+                || rocblaslt::Debug::Instance().printLogAsMarker()
+                || rocblaslt::Debug::Instance().benchPrintCommand())
+            {
+                logBenchFromTensileDataGemm(data->problem,
+                                            data->inputs,
+                                            data->algoIndex,
+                                            flush,
+                                            rotatingBufferSize,
+                                            coldIterations,
+                                            hotIterations,
+                                            true);
+            }
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
+            {
+                logProfileFromTensileDataGemm(data->problem,
+                                          data->inputs,
+                                          flush,
+                                          rotatingBufferSize,
+                                          coldIterations,
+                                          hotIterations,
+                                          false);
+            }
+            auto     solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
+            {
+                logExtendedProfileFromTensileDataGemm(data->problem,
+                                                    data->inputs,
+                                                    data->algoIndex,
+                                                    solution->kernelName,
+                                                    solution->solutionName,
+                                                    flush,
+                                                    rotatingBufferSize,
+                                                    coldIterations,
+                                                    hotIterations,
+                                                    false);
+            }
             if(data->useUserArgs)
             {
                 log_error(__func__,
@@ -3241,14 +3244,58 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
             return rocblaslt_status_invalid_pointer;
         }
 
+        // Get the values of static member variables flush and rotating size from UserClientArguments
+        UserClientArguments ClientArguments;
+        bool                flush              = ClientArguments.GetFlushValue();
+        int32_t             rotatingBufferSize = ClientArguments.GetRotatingBufferSizeValue();
+        int32_t             hotIterations      = ClientArguments.GetHotIterationsValue();
+        int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
+
         if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
         {
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+                || rocblaslt::Debug::Instance().printLogAsMarker()
+                || rocblaslt::Debug::Instance().benchPrintCommand())
+            {
+                logBenchFromTensileDataGemm(data->problem,
+                                            data->inputs,
+                                            data->algoIndex,
+                                            flush,
+                                            rotatingBufferSize,
+                                            coldIterations,
+                                            hotIterations,
+                                            true);
+            }
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
+            {
+                logProfileFromTensileDataGemm(data->problem,
+                                          data->inputs,
+                                          flush,
+                                          rotatingBufferSize,
+                                          coldIterations,
+                                          hotIterations,
+                                          false);
+            }
+            auto     solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
+            {
+                logExtendedProfileFromTensileDataGemm(data->problem,
+                                                    data->inputs,
+                                                    data->algoIndex,
+                                                    solution->kernelName,
+                                                    solution->solutionName,
+                                                    flush,
+                                                    rotatingBufferSize,
+                                                    coldIterations,
+                                                    hotIterations,
+                                                    false);
+            }
+
             for(auto& it : data->kernels)
             {
                 uint8_t* arg      = it.args.rawdata();
-                auto     solution = library->getSolutionByIndex(*hardware, data->algoIndex);
                 if(solution->internalArgsSupport.useUniversalArgs)
                 {
                     if(deviceUserArgs != nullptr)
