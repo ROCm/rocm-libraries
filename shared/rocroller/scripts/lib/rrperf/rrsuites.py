@@ -1504,14 +1504,14 @@ def fp8_target_d2lds_mi32x32x64_pf2x1_wgm():
     yield from add_wgm((0, 4), fp8_target_d2lds_mi32x32x64_pf2x1())
 
 
-def fp8_target_128x256_d2lds_mi32x32x64_pf4x1():
+def fp8_target_d2lds_mi32x32x64_pf4x1():
     yield GEMMRun(
         M=4096,
         N=4096,
         K=32768,
         beta=0.0,
         mac_m=128,
-        mac_n=256,
+        mac_n=128,
         mac_k=128,
         wave_m=32,
         wave_n=32,
@@ -1607,18 +1607,18 @@ def fp8_target_256x128_d2lds_mi32x32x64_pf4x1():
 
 
 def fp8_target_d2lds_mi32x32x64_pf4x1_wgm():
-    yield from add_wgm((0, 2), fp8_target_128x256_d2lds_mi32x32x64_pf4x1())
+    yield from add_wgm((0, 2), fp8_target_d2lds_mi32x32x64_pf4x1())
     yield from add_wgm((0, 2), fp8_target_256x128_d2lds_mi32x32x64_pf4x1())
 
 
-def fp8_target_128x256_d2lds_mi16x16x128_pf4x1():
+def fp8_target_d2lds_mi16x16x128_pf4x1():
     yield GEMMRun(
         M=4096,
         N=4096,
         K=32768,
         beta=0.0,
         mac_m=128,
-        mac_n=256,
+        mac_n=128,
         mac_k=128,
         wave_m=16,
         wave_n=16,
@@ -1714,7 +1714,7 @@ def fp8_target_256x128_d2lds_mi16x16x128_pf4x1():
 
 
 def fp8_target_d2lds_mi16x16x128_pf4x1_wgm():
-    yield from add_wgm((0, 2), fp8_target_128x256_d2lds_mi16x16x128_pf4x1())
+    yield from add_wgm((0, 2), fp8_target_d2lds_mi16x16x128_pf4x1())
     yield from add_wgm((0, 2), fp8_target_256x128_d2lds_mi16x16x128_pf4x1())
 
 
@@ -1724,8 +1724,8 @@ def fp8_no_scale_target_d2lds_mi16x16x128_pf4x1():
         N=4096,
         K=32768,
         beta=0.0,
-        mac_m=256,
-        mac_n=256,
+        mac_m=128,
+        mac_n=128,
         mac_k=128,
         wave_m=16,
         wave_n=16,
@@ -1772,11 +1772,9 @@ def fp8_kernels_no_wgm():
     yield from fp8_target_128x256()
     yield from fp8_target_256x128()
     yield from fp8_target_d2lds_mi32x32x64_pf2x1()
-    # yield from fp8_target_128x256_d2lds_mi32x32x64_pf4x1()
-    # yield from fp8_target_256x128_d2lds_mi32x32x64_pf4x1()
-    # yield from fp8_target_128x256_d2lds_mi16x16x128_pf4x1()
-    # yield from fp8_target_256x128_d2lds_mi16x16x128_pf4x1()
-    # yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp8_target_d2lds_mi32x32x64_pf4x1()
+    yield from fp8_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp8_no_scale_target_d2lds_mi16x16x128_pf4x1()
 
 
 def fp8_kernels_wgm():
