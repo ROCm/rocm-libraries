@@ -10,13 +10,7 @@ trigger:
 variables:
   - group: internal
   - name: REPOSITORY_NAME
-    value: 'rocm/rocm-libraries'   
-  - name: HEAD_SHA
-    value: ''                       
-  - name: PR_NUM
-    value: '0'
-  - name: PR_URL
-    value: ''
+    value: 'rocm/rocm-libraries'
   - name: BASE_REF
     value: 'develop'              
   - name: EVENT_TYPE
@@ -53,9 +47,6 @@ jobs:
         bash -c "python3 jenkins_api.py \
           -ghr '$(REPOSITORY_NAME)' \
           -ghsha '$(HEAD_SHA)' \
-          -ghprn '$(PR_NUM)' \
-          -ghpru '$(PR_URL)' \
-          -ghprt '' \
           -ghpat '$(GH_PAT)' \
           -br   '$(BASE_REF)' \
           -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
