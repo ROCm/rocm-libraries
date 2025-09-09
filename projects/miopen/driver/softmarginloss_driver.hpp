@@ -76,6 +76,42 @@ int32_t mloSoftMarginLossForwardRunHost(miopenTensorDescriptor_t inputDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloSoftMarginLossForwardRunHost2(miopenTensorDescriptor_t inputDesc,
+                                         miopenTensorDescriptor_t targetDesc,
+                                         miopenTensorDescriptor_t outputDesc,
+                                         Tgpu* input,
+                                         Tgpu* target,
+                                         Tcheck* outputhost,
+                                         miopenLossReductionMode_t reduction_mode)
+{
+    auto input_numel = miopen::deref(inputDesc).GetElementSize();
+    auto i_tv        = miopen::get_inner_expanded_tv<5>(miopen::deref(inputDesc));
+    auto t_tv        = miopen::get_inner_expanded_tv<5>(miopen::deref(targetDesc));
+    auto o_tv        = miopen::get_inner_expanded_tv<5>(miopen::deref(outputDesc));
+
+    int32_t ret = miopenStatusSuccess;
+
+    std::atomic<double> sum_loss = 0;
+    par_ford(input_numel)([&](size_t gid) {
+        tensor_layout_t<5> idx(i_tv, gid);
+        double i    = input[i_tv.get_tensor_view_idx(idx)];
+        double t    = target[t_tv.get_tensor_view_idx(idx)];
+        double loss = log1p(exp(-i * t));
+        if(reduction_mode != MIOPEN_LOSS_REDUCTION_NONE)
+            sum_loss += loss;
+        else
+            outputhost[o_tv.get_tensor_view_idx(idx)] = static_cast<Tcheck>(loss);
+    });
+
+    if(reduction_mode == MIOPEN_LOSS_REDUCTION_MEAN)
+        outputhost[0] = static_cast<Tcheck>(sum_loss / input_numel);
+    else if(reduction_mode == MIOPEN_LOSS_REDUCTION_SUM)
+        outputhost[0] = static_cast<Tcheck>(sum_loss);
+
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloSoftMarginLossBackwardRunHost(miopenTensorDescriptor_t inputDesc,
                                          miopenTensorDescriptor_t targetDesc,
                                          miopenTensorDescriptor_t dODesc,
