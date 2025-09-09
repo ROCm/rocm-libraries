@@ -557,8 +557,10 @@ namespace rocRoller
         };
 
         template <typename T>
-        concept CNary = requires { requires std::derived_from<T, Nary>; };
-
+        concept CNary = requires
+        {
+            requires std::derived_from<T, Nary>;
+        };
         struct Concatenate : Nary
         {
             constexpr static inline auto            Type       = Category::Value;

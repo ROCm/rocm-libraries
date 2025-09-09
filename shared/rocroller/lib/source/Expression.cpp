@@ -481,8 +481,8 @@ namespace rocRoller
             bool        throwIfNotSupported = true;
 
             template <typename Expr>
-            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr> || CNary<Expr>)
-            void operator()(Expr& expr)
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr> || CNary<Expr>) void
+                operator()(Expr& expr)
             {
                 expr.comment = std::move(comment);
             }
