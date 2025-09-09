@@ -45,9 +45,9 @@ private:
     {
         Key  k1   = warp_swizzle_shuffle(k, xor_mask, VirtualWaveSize);
         bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
+        k         = swap ? k1 : k;
         if(swap)
         {
-            k = k1;
             v = warp_swizzle_shuffle(v, xor_mask, VirtualWaveSize);
         }
     }
@@ -60,15 +60,15 @@ private:
                   Key (&k)[ItemsPerThread],
                   V (&v)[ItemsPerThread])
     {
-        Key k1[ItemsPerThread];
         ROCPRIM_UNROLL
         for(unsigned int item = 0; item < ItemsPerThread; item++)
         {
-            k1[item]  = warp_swizzle_shuffle(k[item], xor_mask, VirtualWaveSize);
-            bool swap = compare_function(dir ? k[item] : k1[item], dir ? k1[item] : k[item]);
+            Key  k0   = k[item];
+            Key  k1   = warp_swizzle_shuffle(k0, xor_mask, VirtualWaveSize);
+            bool swap = compare_function(dir ? k0 : k1, dir ? k1 : k0);
+            k[item]   = swap ? k1 : k0;
             if(swap)
             {
-                k[item] = k1[item];
                 v[item] = warp_swizzle_shuffle(v[item], xor_mask, VirtualWaveSize);
             }
         }
@@ -81,10 +81,7 @@ private:
     {
         Key  k1   = warp_swizzle_shuffle(k, xor_mask, VirtualWaveSize);
         bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
-        if(swap)
-        {
-            k = k1;
-        }
+        k         = swap ? k1 : k;
     }
 
     template<class BinaryFunction, unsigned int ItemsPerThread>
@@ -94,73 +91,55 @@ private:
                   unsigned int   xor_mask,
                   Key (&k)[ItemsPerThread])
     {
-        Key k1[ItemsPerThread];
         ROCPRIM_UNROLL
         for(unsigned int item = 0; item < ItemsPerThread; item++)
         {
-            k1[item]  = warp_swizzle_shuffle(k[item], xor_mask, VirtualWaveSize);
-            bool swap = compare_function(dir ? k[item] : k1[item], dir ? k1[item] : k[item]);
-            if(swap)
-            {
-                k[item] = k1[item];
-            }
-        }
-    }
-
-    // Does a singular thread-level compare and swap for i-th and j-th element.
-    template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void tlev_cas_single(bool           dir,
-                         BinaryFunction compare_function,
-                         Key (&k)[ItemsPerThread],
-                         unsigned int i,
-                         unsigned int j)
-    {
-        bool swap = compare_function(k[i], k[j]) == dir;
-        if(swap)
-        {
-            Key k_temp = k[i];
-            k[i]       = k[j];
-            k[j]       = k_temp;
-            asm("");
-        }
-    }
-
-    // Does a singular thread-level compare and swap for i-th and j-th element.
-    template<unsigned int ItemsPerThread, class V, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-    void tlev_cas_single(bool           dir,
-                         BinaryFunction compare_function,
-                         Key (&k)[ItemsPerThread],
-                         V (&v)[ItemsPerThread],
-                         unsigned int i,
-                         unsigned int j)
-    {
-        bool swap = compare_function(k[i], k[j]) == dir;
-        if(swap)
-        {
-            Key k_temp = k[i];
-            k[i]       = k[j];
-            k[j]       = k_temp;
-            V v_temp   = v[i];
-            v[i]       = v[j];
-            v[j]       = v_temp;
-            asm("");
+            Key  k0   = k[item];
+            Key  k1   = warp_swizzle_shuffle(k0, xor_mask, VirtualWaveSize);
+            bool swap = compare_function(dir ? k0 : k1, dir ? k1 : k0);
+            k[item]   = swap ? k1 : k0;
         }
     }
 
     /// Applies the thread-level compare and swaps.
-    template<unsigned int ItemsPerThread, class BinaryFunction, class... KeyValue>
+    template<unsigned int ItemsPerThread, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void tlev_cas(bool           dir,
                   BinaryFunction compare_function,
                   unsigned int   group_size,
                   unsigned int   offset,
-                  KeyValue&... kv)
+                  Key (&k)[ItemsPerThread])
     {
-        // This is required. Otherwise the inliner and unroller will do *wacky* things.
-        asm("");
+        ROCPRIM_UNROLL
+        for(unsigned int base = 0; base < ItemsPerThread; base += 2 * offset)
+        {
+            const bool local_dir = ((base & group_size) > 0) != dir;
 
+            ROCPRIM_UNROLL
+            for(unsigned i = 0; i < offset; ++i)
+            {
+                unsigned int i_l  = base + i;
+                unsigned int i_r  = base + i + offset;
+                bool         swap = compare_function(k[i_l], k[i_r]) == local_dir;
+
+                Key k_l = k[i_l];
+                Key k_r = k[i_r];
+                k[i_l]  = swap ? k_r : k_l;
+                k[i_r]  = swap ? k_l : k_r;
+            }
+        }
+    }
+
+    /// Applies the thread-level compare and swaps.
+    template<unsigned int ItemsPerThread, class BinaryFunction, class V>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void tlev_cas(bool           dir,
+                  BinaryFunction compare_function,
+                  unsigned int   group_size,
+                  unsigned int   offset,
+                  Key (&k)[ItemsPerThread],
+                  V (&v)[ItemsPerThread])
+    {
         ROCPRIM_UNROLL
         for(unsigned int base = 0; base < ItemsPerThread; base += 2 * offset)
         {
@@ -171,34 +150,60 @@ private:
             ROCPRIM_UNROLL
             for(unsigned i = 0; i < offset; ++i)
             {
-                tlev_cas_single(local_dir, compare_function, kv..., base + i, base + i + offset);
+                unsigned int i_l = base + i;
+                unsigned int i_r = base + i + offset;
+
+                bool swap = compare_function(k[i_l], k[i_r]) == local_dir;
+
+                Key k_l = k[i_l];
+                Key k_r = k[i_r];
+                k[i_l]  = swap ? k_r : k_l;
+                k[i_r]  = swap ? k_l : k_r;
+
+                V v_l  = v[i_l];
+                V v_r  = v[i_r];
+                v[i_l] = swap ? v_r : v_l;
+                v[i_r] = swap ? v_l : v_r;
             }
         }
     }
 
-    template<unsigned int ItemsPerThread, class BinaryFunction, class... KeyValue>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void tlev_sort(bool dir, BinaryFunction compare_function, KeyValue&... kv)
-    {
-        ROCPRIM_UNROLL
-        for(unsigned int group_size = 2; group_size <= ItemsPerThread; group_size *= 2)
-        {
-            ROCPRIM_UNROLL
-            for(unsigned int offset = group_size / 2; offset > 0; offset /= 2)
-            {
-                tlev_cas<ItemsPerThread>(dir, compare_function, group_size, offset, kv...);
-            }
-        }
-    }
-
-    template<unsigned int ItemsPerThread, class BinaryFunction, class... KeyValue>
+    template<unsigned int ItemsPerThread,
+             class BinaryFunction,
+             int group_size = ItemsPerThread,
+             int offset     = group_size / 2,
+             class... KeyValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void tlev_pass(bool dir, BinaryFunction compare_function, KeyValue&... kv)
     {
-        ROCPRIM_UNROLL
-        for(unsigned int offset = ItemsPerThread / 2; offset > 0; offset /= 2)
+        // Implement the following loop using recursion:
+        //   for(unsigned int offset = group_size / 2; offset > 0; offset /= 2)
+        if constexpr(offset > 0)
         {
-            tlev_cas<ItemsPerThread>(dir, compare_function, ItemsPerThread, offset, kv...);
+            tlev_cas<ItemsPerThread>(dir, compare_function, group_size, offset, kv...);
+            // Recurse
+            tlev_pass<ItemsPerThread, BinaryFunction, group_size, offset / 2>(dir,
+                                                                              compare_function,
+                                                                              kv...);
+        }
+    }
+
+    template<unsigned int ItemsPerThread,
+             class BinaryFunction,
+             int group_size = 2,
+             class... KeyValue>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void tlev_sort(bool dir, BinaryFunction compare_function, KeyValue&... kv)
+    {
+        // Implement the following loop using recursion:
+        //   for(unsigned int group_size = 2; group_size <= ItemsPerThread; group_size *= 2)
+        if constexpr(group_size <= ItemsPerThread)
+        {
+            tlev_pass<ItemsPerThread, BinaryFunction, group_size>(dir, compare_function, kv...);
+            // Recurse
+            tlev_sort<ItemsPerThread, BinaryFunction, group_size * 2, KeyValue...>(dir,
+                                                                                   compare_function,
+                                                                                   kv...);
         }
     }
 
