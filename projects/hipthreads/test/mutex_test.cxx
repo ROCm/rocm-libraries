@@ -1,4 +1,4 @@
-#include "gpu/mutex"
+#include "hip/mutex"
 #include "hip/hip_runtime.h"
 #include <iostream>
 #include <cassert>

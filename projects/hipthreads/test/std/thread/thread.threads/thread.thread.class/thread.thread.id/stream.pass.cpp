@@ -30,7 +30,7 @@
 #include <format>
 #include <locale>
 #include <sstream>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "make_string.h"
 #include "platform_support.h" // locale name macros

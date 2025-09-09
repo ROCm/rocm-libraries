@@ -16,7 +16,7 @@
 // template <class Rep, class Period>
 //   shared_lock(mutex_type& m, const chrono::duration<Rep, Period>& rel_time);
 
-#include <gpu/thread>
+#include <hip/thread>
 
 #include <atomic>
 #include <cassert>

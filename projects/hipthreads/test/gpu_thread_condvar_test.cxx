@@ -1,7 +1,7 @@
-#include "gpu/thread"
-#include "gpu/mutex"
-#include "gpu/pseudo_mutex" // From gpu::thread library
-#include "gpu/pseudo_condition_variable"
+#include "hip/thread"
+#include "hip/mutex"
+#include "hip/pseudo_mutex" // From gpu::thread library
+#include "hip/pseudo_condition_variable"
 #include "hip/hip_runtime.h"
 #include <cassert>
 

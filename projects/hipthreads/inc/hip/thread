@@ -103,9 +103,9 @@ void sleep_for(const chrono::duration<Rep, Period>& rel_time);
 
 */
 
-#include "gpu/__config"
+#include "hip/thread_config"
 
-#include "gpu/__thread/thread.h"
-#include "gpu/__thread/this_thread.h"
+#include "hip/__thread/thread.h"
+#include "hip/__thread/this_thread.h"
 
 #endif // __GPU_THREAD__

@@ -14,7 +14,7 @@
 // <semaphore>
 
 #include <semaphore>
-#include <gpu/thread>
+#include <hip/thread>
 #include <hip/std/chrono>
 #include <cassert>
 

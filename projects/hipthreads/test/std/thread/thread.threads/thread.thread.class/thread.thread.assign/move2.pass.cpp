@@ -15,7 +15,7 @@
 
 // thread& operator=(thread&& t);
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <cassert>
 #include <cstdlib>
 #include <exception>

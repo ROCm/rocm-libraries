@@ -19,7 +19,7 @@
 #include <atomic>
 #include <cassert>
 #include <hip/std/chrono>
-#include <gpu/thread>
+#include <hip/thread>
 #include <vector>
 
 #include "make_test_thread.h"

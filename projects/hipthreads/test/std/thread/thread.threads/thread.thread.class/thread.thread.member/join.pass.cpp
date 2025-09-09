@@ -14,7 +14,7 @@
 
 // void join();
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <new>
 #include <cstdlib>
 #include <cassert>

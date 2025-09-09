@@ -15,7 +15,7 @@
 //       if decay<F>::type is the same type as gpu::thread.
 
 
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "force_include_hip.h"
 

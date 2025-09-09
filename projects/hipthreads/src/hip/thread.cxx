@@ -17,7 +17,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "gpu/thread"
+#include "hip/thread"
 
 #include <hip/atomic>
 // For cuda::std::__libcpp_thread_sleep_for

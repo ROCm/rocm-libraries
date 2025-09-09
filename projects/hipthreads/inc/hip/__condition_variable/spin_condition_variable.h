@@ -27,13 +27,13 @@
 #ifndef __GPU___CONDITION_VARIABLE_SPIN_CONDITION_VARIABLE_H__
 #define __GPU___CONDITION_VARIABLE_SPIN_CONDITION_VARIABLE_H__
 
-#include "gpu/__config"
+#include "hip/thread_config"
 
 #include "hip/hip_runtime_api.h"
 
-#include "gpu/__condition_variable/condition_variable_any.h"
-#include "gpu/__mutex/spin_mutex.h"
-#include "gpu/__mutex/unique_lock.h"
+#include "hip/__condition_variable/condition_variable_any.h"
+#include "hip/__mutex/spin_mutex.h"
+#include "hip/__mutex/unique_lock.h"
 
 namespace gpu {
 

@@ -14,7 +14,7 @@
 // <barrier>
 
 #include <barrier>
-#include <gpu/thread>
+#include <hip/thread>
 #include <cassert>
 
 #include "make_test_thread.h"

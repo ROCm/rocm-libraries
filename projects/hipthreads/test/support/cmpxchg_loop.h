@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "gpu/atomic"
+#include "hip/atomic"
 
 template <class A>
 __host__ __device__ bool cmpxchg_weak_loop(A& atomic, typename A::value_type& expected, typename A::value_type desired) {

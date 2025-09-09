@@ -18,7 +18,7 @@
 // hash specializations.
 
 #include <functional>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "poisoned_hash_helper.h"
 

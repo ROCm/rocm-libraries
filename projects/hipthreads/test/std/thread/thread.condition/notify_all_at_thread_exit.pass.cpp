@@ -17,7 +17,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <gpu/thread>
+#include <hip/thread>
 #include <hip/std/chrono>
 #include <cassert>
 

@@ -20,7 +20,7 @@
 // typedef pthread_mutex_t* native_handle_type;
 // native_handle_type native_handle();
 
-#include <gpu/mutex>
+#include <hip/mutex>
 #include <cassert>
 
 #include "test_macros.h"

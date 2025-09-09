@@ -11,7 +11,7 @@
 #ifndef TEST_SUPPORT_MAKE_TEST_THREAD_H
 #define TEST_SUPPORT_MAKE_TEST_THREAD_H
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <utility>
 
 namespace support {

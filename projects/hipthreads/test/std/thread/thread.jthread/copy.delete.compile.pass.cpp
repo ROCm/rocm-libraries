@@ -13,7 +13,7 @@
 // jthread(const jthread&) = delete;
 // jthread& operator=(const jthread&) = delete;
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <type_traits>
 
 static_assert(!std::is_copy_constructible_v<std::jthread>);

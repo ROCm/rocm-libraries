@@ -15,7 +15,7 @@
 
 // id get_id() const;
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <new>
 #include <cstdlib>
 #include <cassert>

@@ -14,7 +14,7 @@
 
 // id();
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <cassert>
 
 #include "test_macros.h"

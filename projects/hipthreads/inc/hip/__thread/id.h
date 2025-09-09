@@ -12,7 +12,7 @@
 
 #include <iostream>
 
-#include "gpu/__config"
+#include "hip/thread_config"
 
 namespace gpu {
 

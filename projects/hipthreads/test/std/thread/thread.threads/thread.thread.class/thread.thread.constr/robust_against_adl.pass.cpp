@@ -17,7 +17,7 @@
 
 // ADDITIONAL_COMPILE_FLAGS: -DTEST_USE_GPU_THREADS
 
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "test_macros.h"
 

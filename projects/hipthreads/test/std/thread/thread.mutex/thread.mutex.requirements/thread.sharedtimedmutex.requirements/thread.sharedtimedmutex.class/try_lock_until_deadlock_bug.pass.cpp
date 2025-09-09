@@ -17,7 +17,7 @@
 
 #include <atomic>
 #include <hip/std/chrono>
-#include <gpu/thread>
+#include <hip/thread>
 #include <cstdlib>
 #include <cassert>
 

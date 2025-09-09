@@ -15,7 +15,7 @@
 // template <class Rep, class Period>
 //   void sleep_for(const chrono::duration<Rep, Period>& rel_time);
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <cassert>
 #include <hip/std/chrono>
 

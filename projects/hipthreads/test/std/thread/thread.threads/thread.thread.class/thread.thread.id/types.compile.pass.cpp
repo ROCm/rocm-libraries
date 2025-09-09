@@ -32,7 +32,7 @@
 
 #include <concepts>
 #include <format>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "test_macros.h"
 

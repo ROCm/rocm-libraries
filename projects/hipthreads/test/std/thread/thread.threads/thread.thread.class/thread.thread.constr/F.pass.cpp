@@ -20,7 +20,7 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: sanitizer-new-delete
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <new>
 #include <atomic>
 #include <cstdlib>

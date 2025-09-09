@@ -17,7 +17,7 @@
 
 // native_handle_type native_handle();
 
-#include <gpu/thread>
+#include <hip/thread>
 #include <new>
 #include <cstdlib>
 #include <cassert>

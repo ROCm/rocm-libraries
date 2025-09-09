@@ -16,7 +16,7 @@
 // template <class Clock, class Duration>
 //   shared_lock(mutex_type& m, const chrono::time_point<Clock, Duration>& abs_time);
 
-#include <gpu/thread>
+#include <hip/thread>
 
 #include <atomic>
 #include <hip/std/chrono>

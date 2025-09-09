@@ -16,7 +16,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <gpu/thread>
+#include <hip/thread>
 #include <vector>
 #include <atomic>
 #include <cassert>

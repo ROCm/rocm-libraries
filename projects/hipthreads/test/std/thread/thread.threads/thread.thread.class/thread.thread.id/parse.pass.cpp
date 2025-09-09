@@ -30,7 +30,7 @@
 #include <concepts>
 #include <format>
 #include <memory>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "test_macros.h"
 #include "make_string.h"

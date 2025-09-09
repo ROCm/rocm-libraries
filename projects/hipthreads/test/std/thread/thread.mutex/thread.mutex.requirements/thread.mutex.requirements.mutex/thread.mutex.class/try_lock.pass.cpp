@@ -17,7 +17,7 @@
 
 #include <mutex>
 #include <cassert>
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "make_test_thread.h"
 

@@ -15,7 +15,7 @@
 // should compile without any warnings or errors even though this pattern is not
 // understood by the thread safety annotations.
 
-#include <gpu/mutex>
+#include <hip/mutex>
 
 #include "test_macros.h"
 

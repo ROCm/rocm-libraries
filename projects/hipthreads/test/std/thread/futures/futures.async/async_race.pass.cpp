@@ -24,7 +24,7 @@
 
 #include <future>
 #include <hip/std/chrono>
-#include <gpu/thread>
+#include <hip/thread>
 #include <memory>
 #include <cassert>
 

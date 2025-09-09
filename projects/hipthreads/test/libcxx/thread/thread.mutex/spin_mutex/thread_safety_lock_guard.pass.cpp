@@ -20,7 +20,7 @@
 
 // ADDITIONAL_COMPILE_FLAGS: -D_LIBGPU_ENABLE_THREAD_SAFETY_ANNOTATIONS
 
-#include <gpu/mutex>
+#include <hip/mutex>
 
 #include "test_macros.h"
 

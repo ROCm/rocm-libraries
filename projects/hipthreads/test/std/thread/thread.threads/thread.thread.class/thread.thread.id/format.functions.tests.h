@@ -9,7 +9,7 @@
 #ifndef TEST_STD_THREAD_THREAD_THREADS_THREAD_THREAD_CLASS_THREAD_THREAD_ID_FORMAT_FUNCTIONS_TESTS_H
 #define TEST_STD_THREAD_THREAD_THREADS_THREAD_THREAD_CLASS_THREAD_THREAD_ID_FORMAT_FUNCTIONS_TESTS_H
 
-#include <gpu/thread>
+#include <hip/thread>
 
 #include "format.functions.common.h"
 #include "test_macros.h"

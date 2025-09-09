@@ -27,7 +27,7 @@
 #ifndef __GPU_PSEUDO_CONDITION_VARIABLE__
 #define __GPU_PSEUDO_CONDITION_VARIABLE__
 
-#include "gpu/thread"
+#include "hip/thread"
 #include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
 
 namespace gpu {

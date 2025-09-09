@@ -21,7 +21,7 @@
 #include <atomic>
 #include <cassert>
 #include <shared_mutex>
-#include <gpu/thread>
+#include <hip/thread>
 #include <type_traits>
 #include <vector>
 
