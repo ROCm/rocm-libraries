@@ -72,15 +72,18 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     struct ThreadGroup
     {
-        uint                      groupIndex;
-        std::vector<ThreadAccess> threads;
+        uint                                   groupIndex;
+        std::vector<std::vector<ThreadAccess>> clockCycles; // Each inner vector is one clock cycle
     };
 
     struct InstructionAccesses
     {
-        MemoryOp                 memoryOp;
-        int                      dwords;
-        std::vector<ThreadGroup> threadGroups;
+        MemoryOp memoryOp;
+        int      dwords;
+        std::vector<ThreadAccess>
+            accesses; // Simply collect raw thread accesses (used during simulation)
+        std::vector<ThreadGroup>
+            threadGroups; // Thread groups with clock cycles (populated in detailedSummary)
     };
 
     struct OperationAccesses

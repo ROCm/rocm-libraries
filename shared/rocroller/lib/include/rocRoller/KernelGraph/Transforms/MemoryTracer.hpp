@@ -97,6 +97,8 @@ namespace rocRoller
              * `MemoryEventSimulated` for a collection of `Workgroup` and
              * `Workitem` values and create a "blown up" version of the
              * memory event that contains the actual byte offset.
+             * 
+             * Each event represents a single instruction with max 4 dwords (128 bits).
              */
             struct MemoryEventSimulated
             {
@@ -105,9 +107,11 @@ namespace rocRoller
                 int      destinationTag; //< Destination coordinate tag
                 MemoryOp memoryOp; //< Memory operation type
                 uint     byteOffset; //< Buffer offset in bytes
-                uint     bytesRequested; //< Number of bytes requested
+                uint     bytesRequested; //< Number of bytes requested (max 16 bytes/4 dwords)
                 uint     workGroup; //< Workgroup index
                 uint     workItem; //<Workitem index
+                uint     instructionIndex; //< Instruction index within the operation
+                uint     instructionCount; //< Total number of instructions for this operation
 
                 // XXX Consider adding SMEM vs VMEM, ie, if VMEM, this has a Workitem dependency
                 //
@@ -175,15 +179,66 @@ namespace rocRoller
                                     = Expression::evaluate(event.index, runtimeArguments);
                                 auto offset
                                     = std::visit([](auto x) { return (size_t)x; }, offsetValue);
-                                auto simulated = MemoryEventSimulated{event.operationTag,
-                                                                      event.sourceTag,
-                                                                      event.destinationTag,
-                                                                      event.memoryOp,
-                                                                      static_cast<uint>(offset),
-                                                                      event.bytesRequested,
-                                                                      wg,
-                                                                      wi};
-                                model.simulate(simulated);
+
+                                // Break down the event into instruction-level events
+                                // Each instruction can handle max 4 dwords (16 bytes)
+                                uint remainingBytes   = event.bytesRequested;
+                                uint currentOffset    = static_cast<uint>(offset);
+                                uint instructionIndex = 0;
+
+                                // Calculate total number of instructions needed
+                                uint instructionCount = 0;
+                                uint tempBytes        = event.bytesRequested;
+                                while(tempBytes > 0)
+                                {
+                                    uint instructionBytes = (tempBytes >= 16)  ? 16
+                                                            : (tempBytes >= 8) ? 8
+                                                            : (tempBytes >= 4) ? 4
+                                                                               : 4;
+                                    instructionCount++;
+                                    tempBytes -= std::min(tempBytes, instructionBytes);
+                                }
+
+                                // Generate instruction-level events
+                                while(remainingBytes > 0)
+                                {
+                                    // Determine instruction size (try to maximize width)
+                                    uint instructionBytes;
+                                    if(remainingBytes >= 16)
+                                    {
+                                        instructionBytes = 16; // 4 dwords (b128)
+                                    }
+                                    else if(remainingBytes >= 8)
+                                    {
+                                        instructionBytes = 8; // 2 dwords (b64)
+                                    }
+                                    else if(remainingBytes >= 4)
+                                    {
+                                        instructionBytes = 4; // 1 dword (b32)
+                                    }
+                                    else
+                                    {
+                                        // Round up to 1 dword for sub-dword accesses
+                                        instructionBytes = 4;
+                                    }
+
+                                    auto simulated = MemoryEventSimulated{event.operationTag,
+                                                                          event.sourceTag,
+                                                                          event.destinationTag,
+                                                                          event.memoryOp,
+                                                                          currentOffset,
+                                                                          instructionBytes,
+                                                                          wg,
+                                                                          wi,
+                                                                          instructionIndex,
+                                                                          instructionCount};
+                                    model.simulate(simulated);
+
+                                    // Move to next instruction
+                                    remainingBytes -= instructionBytes;
+                                    currentOffset += instructionBytes;
+                                    instructionIndex++;
+                                }
                             }
                         }
                     }
