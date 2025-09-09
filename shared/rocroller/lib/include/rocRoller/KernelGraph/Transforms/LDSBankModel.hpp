@@ -63,25 +63,37 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     std::ostream& operator<<(std::ostream& stream, Summary const& summary);
 
+    struct ThreadAccess
+    {
+        uint     workitem;
+        uint32_t address;
+        uint     bankIndex;
+    };
+
+    struct ThreadGroup
+    {
+        uint                      groupIndex;
+        std::vector<ThreadAccess> threads;
+    };
+
+    struct InstructionAccesses
+    {
+        MemoryOp                 memoryOp;
+        int                      dwords;
+        std::vector<ThreadGroup> threadGroups;
+    };
+
+    struct OperationAccesses
+    {
+        int                              operationTag;
+        int                              ldsTag;
+        std::vector<InstructionAccesses> instructions;
+    };
+
     struct DetailedSummary
     {
-        struct ThreadGroupConflict
-        {
-            uint                                  threadGroupIndex;
-            std::vector<uint>                     workitemIds;
-            uint                                  maxConflictDegree;
-            std::map<uint, std::vector<uint32_t>> bankToAddresses;
-        };
-
-        struct InstructionDetail
-        {
-            MemoryInstruction                instruction;
-            uint                             threadsPerClock;
-            std::vector<ThreadGroupConflict> conflictsPerClock;
-        };
-
-        std::map<int, std::vector<InstructionDetail>> operationDetails;
-        GPUArchitectureGFX                            gfx;
+        std::map<int, OperationAccesses> accesses;
+        GPUArchitectureGFX               gfx;
 
         std::string toString() const;
     };
@@ -95,12 +107,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         struct LDSBankAccess
         {
-            int               operationTag;
-            int               ldsTag;
-            Direction         direction;
-            uint              workitem;
-            uint              bankIndex;
-            MemoryInstruction instruction;
+            int       operationTag;
+            int       ldsTag;
+            Direction direction;
+            uint      workitem;
+            uint      bankIndex;
         };
 
         /**
@@ -160,7 +171,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
         uint m_numBanks;
         uint m_numEntriesPerBank;
 
-        std::map<int, std::vector<LDSBankAccess>> m_bankAccesses;
+        std::map<int, std::vector<LDSBankAccess>> m_bankAccesses; // Keep for backward compatibility
+        std::map<int, OperationAccesses>          m_hierarchicalAccesses;
     };
 
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel);

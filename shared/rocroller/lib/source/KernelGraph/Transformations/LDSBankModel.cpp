@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
 #include <fmt/format.h>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
@@ -52,93 +53,156 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     void LDSBankModel::simulate(MemoryEventSimulated event)
     {
-        AssertFatal(event.bytesRequested == 4,
-                    "MemoryTracer currently only supports 4-byte accesses");
+        // Only process LDS operations
+        auto ldsOp = std::get_if<MemoryOpLDS>(&event.memoryOp);
+        if(!ldsOp)
+            return;
 
-        auto ldsAddressInBytes = event.byteOffset;
-        auto bankIndex         = (ldsAddressInBytes / m_entryWidthInBytes) % m_numBanks;
+        // Get or create operation accesses for this operationTag
+        auto& opAccesses        = m_hierarchicalAccesses[event.operationTag];
+        opAccesses.operationTag = event.operationTag;
+        opAccesses.ldsTag       = event.sourceTag; // Assuming sourceTag is the LDS tag
 
-        // Get the LDS operation and check if it's a store
-        const auto& ldsOp = std::get<MemoryOpLDS>(event.memoryOp);
-        auto ldsTag = ldsOp.direction == Direction::Store ? event.destinationTag : event.sourceTag;
+        // Break up bytesRequested into instructions
+        uint remainingBytes = event.bytesRequested;
+        uint currentOffset  = event.byteOffset;
 
-        MemoryInstruction instruction{
-            event.memoryOp, 1, DataType::UInt32, {static_cast<uint32_t>(ldsAddressInBytes)}};
+        while(remainingBytes > 0)
+        {
+            // Determine instruction size (try to maximize width)
+            uint instructionBytes;
+            uint instructionDwords;
 
-        m_bankAccesses[event.operationTag].push_back(LDSBankAccess{
-            event.operationTag, ldsTag, ldsOp.direction, event.workItem, bankIndex, instruction});
+            if(remainingBytes >= 16)
+            {
+                instructionBytes  = 16;
+                instructionDwords = 4;
+            }
+            else if(remainingBytes >= 8)
+            {
+                instructionBytes  = 8;
+                instructionDwords = 2;
+            }
+            else if(remainingBytes >= 4)
+            {
+                instructionBytes  = 4;
+                instructionDwords = 1;
+            }
+            else
+            {
+                // Less than 4 bytes - round up to 4 bytes (1 dword)
+                instructionBytes  = 4;
+                instructionDwords = 1;
+            }
+
+            // Find or create instruction for this dword size
+            InstructionAccesses* targetInstruction = nullptr;
+            for(auto& instr : opAccesses.instructions)
+            {
+                if(instr.dwords == instructionDwords
+                   && std::holds_alternative<MemoryOpLDS>(instr.memoryOp))
+                {
+                    auto& instrLdsOp = std::get<MemoryOpLDS>(instr.memoryOp);
+                    if(instrLdsOp.direction == ldsOp->direction)
+                    {
+                        targetInstruction = &instr;
+                        break;
+                    }
+                }
+            }
+
+            if(!targetInstruction)
+            {
+                // Create new instruction
+                InstructionAccesses newInstr;
+                newInstr.memoryOp = event.memoryOp;
+                newInstr.dwords   = instructionDwords;
+                opAccesses.instructions.push_back(newInstr);
+                targetInstruction = &opAccesses.instructions.back();
+            }
+
+            // Calculate bank index for this access
+            uint bankIndex = (currentOffset / m_entryWidthInBytes) % m_numBanks;
+
+            // Create thread access
+            ThreadAccess threadAccess;
+            threadAccess.workitem  = event.workItem;
+            threadAccess.address   = currentOffset;
+            threadAccess.bankIndex = bankIndex;
+
+            // Add thread to the instruction
+            // For now, we'll add each thread as a separate group
+            // Later, we'll reorganize them based on threads per clock
+            ThreadGroup threadGroup;
+            threadGroup.groupIndex = event.workItem; // Temporary, will be reorganized
+            threadGroup.threads.push_back(threadAccess);
+            targetInstruction->threadGroups.push_back(threadGroup);
+
+            // Also update legacy m_bankAccesses for backward compatibility
+            LDSBankAccess bankAccess;
+            bankAccess.operationTag = event.operationTag;
+            bankAccess.ldsTag       = event.sourceTag;
+            bankAccess.direction    = ldsOp->direction;
+            bankAccess.workitem     = event.workItem;
+            bankAccess.bankIndex    = bankIndex;
+            m_bankAccesses[event.operationTag].push_back(bankAccess);
+
+            // Move to next instruction
+            remainingBytes -= instructionBytes;
+            currentOffset += instructionBytes;
+        }
     }
 
     Summary LDSBankModel::summary() const
     {
         Summary summary;
 
-        for(auto const& [tag, accesses] : m_bankAccesses)
+        // Process each operation
+        for(const auto& [operationTag, bankAccesses] : m_bankAccesses)
         {
-            auto ldsTag = accesses[0].ldsTag;
+            Summary::Access access;
 
-            std::map<uint, std::unordered_set<uint>> bankWorkitems;
-            for(auto access : accesses)
+            // Find the LDS tag from the first access
+            if(!bankAccesses.empty())
             {
-                bankWorkitems[access.bankIndex].insert(access.workitem);
+                access.ldsTag = bankAccesses[0].ldsTag;
             }
 
-            uint minWorkitemsPerBank = 0;
-            for(int bankIndex = 0; bankIndex < m_numBanks; ++bankIndex)
+            // Create a map from bank index to workitems
+            std::map<uint, std::vector<int>> bankToWorkitems;
+            for(const auto& bankAccess : bankAccesses)
             {
-                if(bankWorkitems.contains(bankIndex))
-                    minWorkitemsPerBank = std::min(
-                        minWorkitemsPerBank, static_cast<uint>(bankWorkitems[bankIndex].size()));
+                bankToWorkitems[bankAccess.bankIndex].push_back(bankAccess.workitem);
             }
 
-            bool anyImbalance = false;
-            for(auto const& [bankIndex, workitems] : bankWorkitems)
-                anyImbalance |= workitems.size() > minWorkitemsPerBank;
+            // Initialize banksToWorkitems vector with 32 banks
+            access.banksToWorkitems.resize(m_numBanks);
 
-            if(anyImbalance)
-                summary.imbalancedTags.insert(tag);
-
-            const auto workitemsInfo = [&]() {
-                decltype(Summary::Access::accessedBanks) workitemsInfo;
-                for(auto const& [bankIndex, workitems] : bankWorkitems)
-                {
-                    auto imbalanced = workitems.size() > minWorkitemsPerBank;
-                    workitemsInfo.emplace_back(bankIndex, workitems.size(), imbalanced);
-                }
-                return workitemsInfo;
-            }();
-
-            std::vector<std::vector<int>> banksToWorkitems;
-            if constexpr(Summary::echoBanks)
+            // Populate accessedBanks and banksToWorkitems
+            for(const auto& [bankIndex, workitems] : bankToWorkitems)
             {
-                const auto maxWorkitems = 256;
-                for(int bankIndex = 0; bankIndex < m_numBanks; ++bankIndex)
+                Summary::Banks bank;
+                bank.bankIndex         = bankIndex;
+                bank.workitemsAccessed = workitems.size();
+
+                // Check if imbalanced - comparing against average access per bank
+                size_t totalAccesses          = bankAccesses.size();
+                size_t averageAccessesPerBank = (totalAccesses + m_numBanks - 1) / m_numBanks;
+                bank.imbalanced               = bank.workitemsAccessed > averageAccessesPerBank * 2;
+
+                access.accessedBanks.push_back(bank);
+
+                // Copy workitems to the banksToWorkitems vector
+                access.banksToWorkitems[bankIndex] = workitems;
+
+                // Mark operation as imbalanced if any bank is imbalanced
+                if(bank.imbalanced)
                 {
-                    if(bankWorkitems.contains(bankIndex))
-                    {
-                        banksToWorkitems.emplace_back([&]() {
-                            std::vector<int> workitems;
-                            for(int workitem = 0; workitem < maxWorkitems; ++workitem)
-                            {
-                                if(bankWorkitems[bankIndex].contains(workitem))
-                                {
-                                    workitems.emplace_back(workitem);
-                                }
-                            }
-                            return workitems;
-                        }());
-                    }
-                    else
-                    {
-                        banksToWorkitems.emplace_back();
-                    }
+                    summary.imbalancedTags.insert(operationTag);
                 }
             }
 
-            summary.accesses.emplace(
-                std::piecewise_construct,
-                std::forward_as_tuple(tag),
-                std::forward_as_tuple(ldsTag, workitemsInfo, banksToWorkitems));
+            summary.accesses[operationTag] = access;
         }
 
         return summary;
@@ -158,10 +222,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                           uint               dwords,
                                           GPUArchitectureGFX gfx)
     {
-        // TODO: These numbers are only for aligned accesses
-        // (e.g. for 128-bit bottom 4 bits of address are zero)
-        // There's no obvious way to check,
-        // given the kernel graph only provides relative address offsets
+        // TODO: These numbers assume aligned accesses
+        // (e.g. for 128-bit bottom 4 bits of base address are zero)
+        // Is there a way to check? Given kernel graph provides relative addresses
         if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == Direction::Load)
         {
             switch(dwords)
@@ -223,7 +286,67 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
     {
-        return {};
+        DetailedSummary detailed;
+        detailed.gfx = gfx;
+
+        // Copy and reorganize hierarchical accesses
+        for(const auto& [operationTag, sourceOpAccesses] : m_hierarchicalAccesses)
+        {
+            OperationAccesses opAccesses;
+            opAccesses.operationTag = sourceOpAccesses.operationTag;
+            opAccesses.ldsTag       = sourceOpAccesses.ldsTag;
+
+            // Process each instruction type
+            for(const auto& sourceInstr : sourceOpAccesses.instructions)
+            {
+                InstructionAccesses instr;
+                instr.memoryOp = sourceInstr.memoryOp;
+                instr.dwords   = sourceInstr.dwords;
+
+                // Collect all threads from source thread groups
+                std::vector<ThreadAccess> allThreads;
+                for(const auto& threadGroup : sourceInstr.threadGroups)
+                {
+                    for(const auto& thread : threadGroup.threads)
+                    {
+                        allThreads.push_back(thread);
+                    }
+                }
+
+                // Sort threads by workitem ID for consistent grouping
+                std::sort(allThreads.begin(),
+                          allThreads.end(),
+                          [](const ThreadAccess& a, const ThreadAccess& b) {
+                              return a.workitem < b.workitem;
+                          });
+
+                // Get threads per clock for this instruction
+                const auto& ldsOp           = std::get<MemoryOpLDS>(sourceInstr.memoryOp);
+                uint        threadsPerClock = getThreadsPerClock(ldsOp, sourceInstr.dwords, gfx);
+
+                // Group threads based on threads per clock
+                uint groupIndex = 0;
+                for(size_t i = 0; i < allThreads.size(); i += threadsPerClock)
+                {
+                    ThreadGroup threadGroup;
+                    threadGroup.groupIndex = groupIndex++;
+
+                    // Add threads to this group (up to threadsPerClock)
+                    for(size_t j = i; j < i + threadsPerClock && j < allThreads.size(); ++j)
+                    {
+                        threadGroup.threads.push_back(allThreads[j]);
+                    }
+
+                    instr.threadGroups.push_back(threadGroup);
+                }
+
+                opAccesses.instructions.push_back(instr);
+            }
+
+            detailed.accesses[operationTag] = opAccesses;
+        }
+
+        return detailed;
     }
 
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)
@@ -266,70 +389,210 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         std::stringstream ss;
 
-        for(auto const& [operationTag, instructionDetails] : operationDetails)
+        ss << rocRoller::toString(gfx) << "\n";
+
+        for(const auto& [operationTag, opAccesses] : accesses)
         {
-            ss << fmt::format("Operation tag {}:\n", operationTag);
+            ss << fmt::format("Operation Tag: {}, LDS Tag: {}\n", operationTag, opAccesses.ldsTag);
 
-            // Print instructions
-            for(size_t i = 0; i < instructionDetails.size(); ++i)
+            uint operationTotalClocks = 0; // Track total clocks for the entire operation
+
+            for(const auto& instr : opAccesses.instructions)
             {
-                const auto& detail      = instructionDetails[i];
-                const auto& instruction = detail.instruction;
-                const auto& memOp       = instruction.memoryOp;
-
-                ss << fmt::format("\tInstruction {}: ", i);
-
-                if(std::holds_alternative<MemoryOpLDS>(memOp))
+                // Get instruction details
+                std::string instructionName = "unknown";
+                if(auto ldsOp = std::get_if<MemoryOpLDS>(&instr.memoryOp))
                 {
-                    const auto& ldsOp = std::get<MemoryOpLDS>(memOp);
-                    ss << fmt::format("LDS {} ({} dwords, {} threads/clock on {})\n",
-                                      ldsOp.direction == Direction::Load ? "Load" : "Store",
-                                      instruction.dwords,
-                                      detail.threadsPerClock,
-                                      rocRoller::toString(this->gfx));
-                }
-                else
-                {
-                    ss << "Non-LDS operation\n";
-                }
-
-                // Print thread group conflicts for this instruction
-                for(const auto& conflict : detail.conflictsPerClock)
-                {
-                    ss << fmt::format("\t\tThread group {} (workitems: ",
-                                      conflict.threadGroupIndex);
-
-                    // Print workitem IDs
-                    for(size_t j = 0; j < conflict.workitemIds.size(); ++j)
+                    if(ldsOp->direction == Direction::Load)
                     {
-                        if(j > 0)
-                            ss << ", ";
-                        ss << conflict.workitemIds[j];
-                    }
-                    ss << fmt::format(") - Max conflict degree: {}\n", conflict.maxConflictDegree);
-
-                    // Print bank conflicts details
-                    for(const auto& [bankIndex, addresses] : conflict.bankToAddresses)
-                    {
-                        ss << fmt::format(
-                            "\t\t\tBank {}: {} addresses [", bankIndex, addresses.size());
-
-                        // Print first few addresses
-                        size_t numToPrint = std::min(addresses.size(), size_t(16));
-                        for(size_t k = 0; k < numToPrint; ++k)
+                        switch(instr.dwords)
                         {
-                            if(k > 0)
-                                ss << ", ";
-                            ss << fmt::format("{}", addresses[k]);
+                        case 1:
+                            instructionName = "ds_read_b32";
+                            break;
+                        case 2:
+                            instructionName = "ds_read_b64";
+                            break;
+                        case 3:
+                            instructionName = "ds_read_b96";
+                            break;
+                        case 4:
+                            instructionName = "ds_read_b128";
+                            break;
+                        default:
+                            instructionName = fmt::format("ds_read_{}_dwords", instr.dwords);
+                            break;
                         }
-                        if(addresses.size() > 16)
+                    }
+                    else // Store
+                    {
+                        switch(instr.dwords)
                         {
-                            ss << ", ...";
+                        case 1:
+                            instructionName = "ds_write_b32";
+                            break;
+                        case 2:
+                            instructionName = "ds_write_b64";
+                            break;
+                        case 3:
+                            instructionName = "ds_write_b96";
+                            break;
+                        case 4:
+                            instructionName = "ds_write_b128";
+                            break;
+                        default:
+                            instructionName = fmt::format("ds_write_{}_dwords", instr.dwords);
+                            break;
+                        }
+                    }
+                }
+
+                ss << fmt::format("  Instruction: {}\n", instructionName);
+
+                uint instructionTotalClocks = 0; // Track total clocks for this instruction
+
+                // Process each thread group
+                for(const auto& threadGroup : instr.threadGroups)
+                {
+                    ss << fmt::format("    Thread Group {}: {} threads\n",
+                                      threadGroup.groupIndex,
+                                      threadGroup.threads.size());
+
+                    // Create a mapping of bank index to list of (address, thread) pairs
+                    // For multi-dword accesses, we need to track all banks touched
+                    std::map<uint, std::vector<std::pair<uint32_t, uint>>> bankToAccessInfo;
+
+                    // TODO: these should not be hardcoded
+                    const uint entryWidthInBytes = 4;
+                    const uint numBanks          = 64;
+
+                    for(const auto& thread : threadGroup.threads)
+                    {
+                        // Calculate all banks this access touches
+                        uint bytesPerAccess = instr.dwords * 4;
+                        for(uint offset = 0; offset < bytesPerAccess; offset += entryWidthInBytes)
+                        {
+                            uint currentAddr = thread.address + offset;
+                            uint bankIndex   = (currentAddr / entryWidthInBytes) % numBanks;
+                            bankToAccessInfo[bankIndex].push_back(
+                                std::make_pair(currentAddr, thread.workitem));
+                        }
+                    }
+
+                    // Calculate the maximum bank conflicts
+                    uint maxConflicts = 0;
+                    for(const auto& [bank, accessInfo] : bankToAccessInfo)
+                    {
+                        maxConflicts = std::max(maxConflicts, static_cast<uint>(accessInfo.size()));
+                    }
+
+                    // Simulate clock cycles needed to resolve bank conflicts
+                    uint                                                   clockCycle = 0;
+                    std::map<uint, std::vector<std::pair<uint32_t, uint>>> remainingAccesses
+                        = bankToAccessInfo;
+
+                    while(!remainingAccesses.empty())
+                    {
+                        ss << fmt::format("      Clock Cycle {}:\n", clockCycle);
+
+                        std::map<uint, std::pair<uint32_t, uint>> cycleAccesses;
+                        std::vector<uint>                         banksToRemove;
+
+                        // Process one access per bank for this clock cycle
+                        for(auto& [bankIndex, accessList] : remainingAccesses)
+                        {
+                            if(!accessList.empty())
+                            {
+                                // Take the first access for this bank
+                                auto [address, workitem] = accessList.front();
+                                cycleAccesses[bankIndex] = std::make_pair(address, workitem);
+                                accessList.erase(accessList.begin());
+
+                                if(accessList.empty())
+                                {
+                                    banksToRemove.push_back(bankIndex);
+                                }
+                            }
+                        }
+
+                        // Remove banks with no remaining accesses
+                        for(auto bank : banksToRemove)
+                        {
+                            remainingAccesses.erase(bank);
+                        }
+
+                        // Group addresses by work-item
+                        std::map<uint, std::vector<uint32_t>> workitemToAddresses;
+                        for(const auto& [bank, accessInfo] : cycleAccesses)
+                        {
+                            workitemToAddresses[accessInfo.second].push_back(accessInfo.first);
+                        }
+
+                        // Print work-item index: [addresses, ...]
+                        for(const auto& [workitem, addresses] : workitemToAddresses)
+                        {
+                            ss << fmt::format("        workitem {}: [", workitem);
+                            bool first = true;
+                            for(uint32_t addr : addresses)
+                            {
+                                if(!first)
+                                    ss << ", ";
+                                ss << addr;
+                                first = false;
+                            }
+                            ss << "]\n";
+                        }
+
+                        // Print banks used and unused
+                        std::vector<uint> usedBanks;
+                        std::vector<uint> unusedBanks;
+
+                        for(uint bankIdx = 0; bankIdx < numBanks; ++bankIdx)
+                        {
+                            if(cycleAccesses.find(bankIdx) != cycleAccesses.end())
+                            {
+                                usedBanks.push_back(bankIdx);
+                            }
+                            else
+                            {
+                                unusedBanks.push_back(bankIdx);
+                            }
+                        }
+
+                        ss << "        banks used: [";
+                        for(size_t i = 0; i < usedBanks.size(); ++i)
+                        {
+                            ss << usedBanks[i];
+                            if(i < usedBanks.size() - 1)
+                                ss << ", ";
                         }
                         ss << "]\n";
+
+                        ss << "        banks unused: [";
+                        for(size_t i = 0; i < unusedBanks.size(); ++i)
+                        {
+                            ss << unusedBanks[i];
+                            if(i < unusedBanks.size() - 1)
+                                ss << ", ";
+                        }
+                        ss << "]\n";
+
+                        clockCycle++;
                     }
+
+                    ss << fmt::format("      Total clock cycles: {}\n", clockCycle);
+                    instructionTotalClocks += clockCycle; // Add to instruction total
                 }
+
+                // Print instruction total after all thread groups
+                ss << fmt::format(
+                    "    Total clock cycles for {}: {}\n", instructionName, instructionTotalClocks);
+                operationTotalClocks += instructionTotalClocks; // Add to operation total
             }
+
+            // Print operation total after all instructions
+            ss << fmt::format("  Total clock cycles for operation: {}\n", operationTotalClocks);
+            ss << "\n";
         }
 
         return ss.str();

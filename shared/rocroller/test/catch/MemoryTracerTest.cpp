@@ -88,20 +88,21 @@ namespace MemoryTracerTest
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
 
-        std::ofstream file("lds_bank_conflicts.dot");
-        file << kgraph.toDOT() << std::endl;
-
         KernelInvocation inv{.workgroupSize = {64, 1, 1}};
 
-        auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
-
-        // All visited nodes only access 4 banks in this graph
-        for(const auto& [tag, access] : summary.accesses)
+        SECTION("Old Summary")
         {
-            CHECK(access.accessedBanks.size() == 4);
-        }
+            auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
 
-        std::cout << "\nSummary:\n" << summary.toString() << std::endl;
+            // All visited nodes only access 4 banks in this graph
+            for(const auto& [tag, access] : summary.accesses)
+            {
+                CHECK(access.accessedBanks.size() == 4);
+            }
+
+            if constexpr(true)
+                std::cout << "\nSummary:\n" << summary.toString() << std::endl;
+        }
 
         SECTION("Detailed summary of kernel graph")
         {
@@ -116,7 +117,8 @@ namespace MemoryTracerTest
 
             auto detailed = model.detailedSummary(GPUArchitectureGFX::GFX942);
 
-            std::cout << "\nDetailed Summary:\n" << detailed << std::endl;
+            if constexpr(true)
+                std::cout << "\nDetailed Summary:\n" << detailed << std::endl;
         }
     }
 
@@ -253,79 +255,54 @@ namespace MemoryTracerTest
         }
     }
 
-    TEST_CASE("LDS detailed summary", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS summary large", "[kernel-graph][lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph;
         using namespace rocRoller::KernelGraph::MemoryTracer;
 
-        SECTION("Basic detailed summary")
+        auto model   = LDSBankModel(4, 32, 512);
+        auto ldsRead = MemoryOpLDS{Direction::Load};
+
+        const int  operationTag   = 1;
+        const int  sourceTag      = 10;
+        const int  destinationTag = 20;
+        const uint workGroup      = 0;
+
+        for(uint32_t threadId = 0; threadId < 64; ++threadId)
         {
-            LDSBankModel model(4, 32, 512);
-
-            // Simulate some memory events
-            MemoryEventSimulated event;
-            event.bytesRequested = 4;
-            event.operationTag   = 100;
-            event.sourceTag      = 10;
-            event.destinationTag = 20;
-            event.memoryOp       = MemoryOpLDS{Direction::Load};
-
-            // Simulate accesses from multiple workitems
-            // With 32 threads per clock for b32 loads, thread groups will be:
-            // Group 0: workitems 0-31
-            // Group 1: workitems 32-63
-
-            // Group 0 - create some bank conflicts
-            event.workItem   = 0;
-            event.byteOffset = 0; // Bank 0
-            model.simulate(event);
-
-            event.workItem   = 1;
-            event.byteOffset = 128; // Bank 0 (conflict)
-            model.simulate(event);
-
-            event.workItem   = 2;
-            event.byteOffset = 4; // Bank 1
-            model.simulate(event);
-
-            // Group 1 - different pattern
-            event.workItem   = 32;
-            event.byteOffset = 8; // Bank 2
-            model.simulate(event);
-
-            event.workItem   = 33;
-            event.byteOffset = 12; // Bank 3
-            model.simulate(event);
-
-            auto detailed = model.detailedSummary(GPUArchitectureGFX::GFX942);
-
-            // TODO: add checks
-        }
-
-        SECTION("Detailed summary with GFX950")
-        {
-            LDSBankModel model(4, 32, 512);
-
-            MemoryEventSimulated event;
-            event.bytesRequested = 4;
-            event.operationTag   = 200;
-            event.sourceTag      = 30;
-            event.memoryOp       = MemoryOpLDS{Direction::Load};
-
-            // For GFX950 b32 loads, still 32 threads per clock
-            for(uint i = 0; i < 64; ++i)
+            const auto baseAddr = threadId * 32;
             {
-                event.workItem   = i;
-                event.byteOffset = (i % 4) * 4; // Distribute across banks 0-3
+                const auto event = MemoryEventSimulated{
+                    operationTag,
+                    sourceTag,
+                    destinationTag,
+                    ldsRead,
+                    baseAddr, // byteOffset
+                    16, // bytesRequested
+                    workGroup,
+                    threadId // workItem
+                };
                 model.simulate(event);
             }
-
-            auto detailed = model.detailedSummary(GPUArchitectureGFX::GFX950);
-
-            // TODO: add checks
-
-            std::cout << detailed.toString() << std::endl;
+            {
+                const auto event = MemoryEventSimulated{
+                    operationTag,
+                    sourceTag,
+                    destinationTag,
+                    ldsRead,
+                    baseAddr + 16, // byteOffset
+                    4, // bytesRequested
+                    workGroup,
+                    threadId // workItem
+                };
+                model.simulate(event);
+            }
         }
+        auto detailed = model.detailedSummary(GPUArchitectureGFX::GFX950);
+
+        std::string detailedStr = detailed.toString();
+        if constexpr(true)
+            std::cout << detailedStr << std::endl;
     }
 }

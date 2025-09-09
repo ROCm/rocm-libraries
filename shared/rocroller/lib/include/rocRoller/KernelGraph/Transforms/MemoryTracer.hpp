@@ -68,14 +68,6 @@ namespace rocRoller
 
             using MemoryOp = std::variant<MemoryOpGlobal, MemoryOpLDS>;
 
-            struct MemoryInstruction
-            {
-                MemoryOp              memoryOp;
-                int                   dwords; // 1 for b32, 2 for b64, 3 for b96, 4 for b128
-                DataType              dataType;
-                std::vector<uint32_t> addresses; // LDS/Global addresses accessed
-            };
-
             /**
              * @brief Memory event expression.
              *
