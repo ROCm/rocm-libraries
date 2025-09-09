@@ -18,6 +18,29 @@ struct PerfConfigTestCase
     std::string arch;
 };
 
+// helper functions to set and unset environment variables in a cross-platform way
+// if required by other tests, these can be moved to a common utility file
+#if defined(_WIN32)
+#include <Windows.h>
+inline void set_env_var(const char* name, const char* value)
+{
+    SetEnvironmentVariableA(name, value);
+}
+inline void unset_env_var(const char* name)
+{
+    SetEnvironmentVariableA(name, nullptr);
+}
+#else
+#include <cstdlib>
+inline void set_env_var(const char* name, const char* value)
+{
+    setenv(name, value, 1);
+}
+inline void unset_env_var(const char* name)
+{
+    unsetenv(name);
+}
+
 std::vector<PerfConfigTestCase> GetPerfConfigTestCases(miopenDataType_t data_type, std::string arch)
 {
     return {{{1, 128, 64, 32, {3, 28, 28}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
@@ -100,7 +123,7 @@ protected:
 
         // Test override with value 1 (should select index 1 if hardcoded heuristics don't trigger)
         {
-            setenv("MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE", "1", 1);
+            set_env_var"MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE", "1", 1);
 
             Config cfg;
             cfg.HeuristicInit(ctx, problem);
@@ -124,13 +147,13 @@ protected:
                 }
             }
 
-            unsetenv("MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE");
+            unset_env_var"MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE");
         }
 
         // Test hardcoded heuristics for BF16/FP16 with appropriate conditions
         if(will_use_hardcoded)
         {
-            setenv("MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE", "0", 1);
+            set_env_var"MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE", "0", 1);
 
             Config cfg;
             cfg.HeuristicInit(ctx, problem);
@@ -148,7 +171,7 @@ protected:
             EXPECT_TRUE(has_expected_pattern)
                 << "Selected kernel should match hardcoded heuristic pattern: " << cfg.kernel_id;
 
-            unsetenv("MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE");
+            unset_env_var"MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE");
         }
 
         // Test that override affects kernel selection by using a high index value
@@ -160,7 +183,7 @@ protected:
 
             // Use a high index that's less likely to trigger hardcoded heuristics
             // but still tests the override functionality
-            setenv("MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE", "50", 1);
+            set_env_var"MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE", "50", 1);
 
             Config cfg_override;
             cfg_override.HeuristicInit(ctx, problem);
@@ -190,7 +213,7 @@ protected:
                 }
             }
 
-            unsetenv("MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE");
+            unset_env_var"MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE");
         }
     }
 };
