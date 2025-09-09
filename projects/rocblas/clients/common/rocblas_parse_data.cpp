@@ -65,7 +65,7 @@ static std::string rocblas_parse_yaml(const std::string& yaml)
     if(status == -1)
         exit(EXIT_FAILURE);
 #else
-    int status = system(cmd.c_str());
+    int         status                  = system(cmd.c_str());
     if(status == -1 || !WIFEXITED(status) || WEXITSTATUS(status))
         exit(EXIT_FAILURE);
 #endif
