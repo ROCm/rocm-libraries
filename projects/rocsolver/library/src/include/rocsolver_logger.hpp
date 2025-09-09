@@ -91,7 +91,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define ROCSOLVER_LAUNCH_KERNEL(name, ...) \
     do { \
         if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
-            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name "_kernel"); \
+            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name); \
         hipLaunchKernelGGL((name), __VA_ARGS__); \
         if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
             rocsolver_logger::instance()->log_exit<T>(handle); \
