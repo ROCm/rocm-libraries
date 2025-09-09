@@ -214,7 +214,7 @@ namespace rocRoller
             static void mapping(IO& io, Expression::Concatenate& exp, Context& ctx)
             {
                 iot::mapRequired(io, "operands", exp.operands, ctx);
-                iot::mapRequired(io, "dataType", exp.destinationType, ctx);
+                iot::mapRequired(io, "dataType", exp.destinationType);
             }
 
             static void mapping(IO& io, Expression::Concatenate& val)
