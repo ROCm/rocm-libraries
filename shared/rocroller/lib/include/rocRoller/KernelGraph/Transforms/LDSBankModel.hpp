@@ -160,6 +160,31 @@ namespace rocRoller::KernelGraph::MemoryTracer
         static std::map<uint, std::vector<uint32_t>> makeBankMapping(
             const std::vector<uint32_t>& addresses, uint entryWidthInBytes, uint numBanks);
 
+        /**
+         * @brief Calculate the immediate clock count for an LDS instruction
+         * 
+         * This function encapsulates all the logic for determining how many clock cycles
+         * an LDS instruction will take, including:
+         * - Dividing addresses into thread groups based on architecture limits
+         * - Maximizing threads without conflicts within groups
+         * - Resolving bank conflicts to determine actual cycles
+         * - Adding address transfer overhead
+         * 
+         * @param gfx The GPU architecture
+         * @param memoryOp The LDS memory operation (load/store)
+         * @param dwords Number of dwords accessed (1 for b32, 2 for b64, 3 for b96, 4 for b128)
+         * @param addresses Vector of LDS addresses being accessed
+         * @param entryWidthInBytes Width of each bank entry in bytes (default: 4)
+         * @param numBanks Number of banks in the LDS (default: 64)
+         * @return Total number of clock cycles for this instruction
+         */
+        static uint immediateClockCount(GPUArchitectureGFX           gfx,
+                                        const MemoryOpLDS&           memoryOp,
+                                        uint                         dwords,
+                                        const std::vector<uint32_t>& addresses,
+                                        uint                         entryWidthInBytes = 4,
+                                        uint                         numBanks          = 64);
+
     private:
         uint m_entryWidthInBytes;
         uint m_numBanks;

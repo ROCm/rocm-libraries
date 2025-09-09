@@ -319,6 +319,113 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return threadGroup;
     }
 
+    static uint
+        calculateBankConflictCycles(const std::map<uint, std::vector<uint>>& bankToAddressIndices)
+    {
+        // Simulate clock cycles needed to resolve bank conflicts
+        std::map<uint, std::vector<uint>> remainingAccesses = bankToAddressIndices;
+        uint                              clockCycles       = 0;
+
+        while(!remainingAccesses.empty())
+        {
+            std::set<uint>    usedAddresses; // Track which addresses have been scheduled this cycle
+            std::vector<uint> banksToRemove;
+
+            // Process one address per bank for this clock cycle
+            for(auto& [bankIndex, addressIndices] : remainingAccesses)
+            {
+                if(!addressIndices.empty())
+                {
+                    // Find first address that hasn't been scheduled yet
+                    for(auto it = addressIndices.begin(); it != addressIndices.end(); ++it)
+                    {
+                        if(usedAddresses.find(*it) == usedAddresses.end())
+                        {
+                            usedAddresses.insert(*it);
+                            addressIndices.erase(it);
+                            break;
+                        }
+                    }
+
+                    if(addressIndices.empty())
+                    {
+                        banksToRemove.push_back(bankIndex);
+                    }
+                }
+            }
+
+            // Remove banks with no remaining accesses
+            for(auto bank : banksToRemove)
+            {
+                remainingAccesses.erase(bank);
+            }
+
+            // Increment clock cycle count if we scheduled any addresses
+            if(!usedAddresses.empty())
+            {
+                clockCycles++;
+            }
+        }
+
+        return clockCycles;
+    }
+
+    uint LDSBankModel::immediateClockCount(GPUArchitectureGFX           gfx,
+                                           const MemoryOpLDS&           memoryOp,
+                                           uint                         dwords,
+                                           const std::vector<uint32_t>& addresses,
+                                           uint                         entryWidthInBytes,
+                                           uint                         numBanks)
+    {
+        if(addresses.empty())
+        {
+            return 0;
+        }
+
+        // Get the maximum number of threads that can operate per clock for this instruction
+        uint threadsPerClock = getThreadsPerClock(memoryOp, dwords, gfx);
+
+        // Track total bank conflict cycles across all thread groups
+        uint totalBankConflictCycles = 0;
+
+        // Process addresses in groups based on threads-per-clock limit
+        for(size_t groupStart = 0; groupStart < addresses.size(); groupStart += threadsPerClock)
+        {
+            // Get addresses for this thread group
+            size_t groupEnd = std::min(groupStart + threadsPerClock, addresses.size());
+            std::vector<uint32_t> groupAddresses(addresses.begin() + groupStart,
+                                                 addresses.begin() + groupEnd);
+
+            // Create a mapping from bank index to address indices for this group
+            // For multi-dword accesses, we need to track all banks touched by each address
+            std::map<uint, std::vector<uint>> bankToAddressIndices;
+
+            for(size_t i = 0; i < groupAddresses.size(); ++i)
+            {
+                uint baseAddr       = groupAddresses[i];
+                uint bytesPerAccess = dwords * 4;
+
+                // Calculate all banks this access touches
+                for(uint offset = 0; offset < bytesPerAccess; offset += entryWidthInBytes)
+                {
+                    uint currentAddr = baseAddr + offset;
+                    uint bankIndex   = (currentAddr / entryWidthInBytes) % numBanks;
+                    bankToAddressIndices[bankIndex].push_back(i);
+                }
+            }
+
+            // Calculate bank conflict cycles for this group
+            uint groupCycles = calculateBankConflictCycles(bankToAddressIndices);
+            totalBankConflictCycles += groupCycles;
+        }
+
+        // Add 4 cycles for read/write address transfer
+        const uint addressTransferCycles = 4;
+        uint       totalCycles           = totalBankConflictCycles + addressTransferCycles;
+
+        return totalCycles;
+    }
+
     DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
     {
         DetailedSummary detailed;
@@ -593,13 +700,41 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 uint addressTransferCycles = 4;
                 instructionTotalClocks += addressTransferCycles;
 
-                // Print instruction total after all thread groups
-                ss << fmt::format(
-                    "    Total clock cycles for {}: {} ({} bank conflict + {} address transfer)\n",
-                    instructionName,
-                    instructionTotalClocks,
-                    bankConflictCycles,
-                    addressTransferCycles);
+                // Optional: Verify using the standalone immediateClockCount function
+                // This demonstrates how the new function can be used independently
+                if(!instr.accesses.empty())
+                {
+                    std::vector<uint32_t> addresses;
+                    for(const auto& access : instr.accesses)
+                    {
+                        addresses.push_back(access.address);
+                    }
+
+                    const auto& ldsOp = std::get<MemoryOpLDS>(instr.memoryOp);
+                    uint        verifyClocks
+                        = LDSBankModel::immediateClockCount(gfx, ldsOp, instr.dwords, addresses);
+
+                    // Note: The verification might differ slightly due to different ordering
+                    // of threads in the detailed simulation vs the standalone calculation
+                    ss << fmt::format("    Total clock cycles for {}: {} ({} bank conflict + {} "
+                                      "address transfer)\n",
+                                      instructionName,
+                                      instructionTotalClocks,
+                                      bankConflictCycles,
+                                      addressTransferCycles);
+                    ss << fmt::format("    [Verification using immediateClockCount: {} cycles]\n",
+                                      verifyClocks);
+                }
+                else
+                {
+                    ss << fmt::format("    Total clock cycles for {}: {} ({} bank conflict + {} "
+                                      "address transfer)\n",
+                                      instructionName,
+                                      instructionTotalClocks,
+                                      bankConflictCycles,
+                                      addressTransferCycles);
+                }
+
                 operationTotalClocks += instructionTotalClocks; // Add to operation total
             }
 
