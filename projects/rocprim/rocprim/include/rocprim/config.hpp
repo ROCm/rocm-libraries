@@ -140,7 +140,7 @@
 #endif
 
 // SPIR-V and unknown targets do not support 128-bit atomics.
-#if defined(ROCPRIM_TARGET_UKNOWN) || defined(ROCPRIM_TARGET_SPIRV)
+#if defined(ROCPRIM_TARGET_UNKNOWN) || defined(ROCPRIM_TARGET_SPIRV)
     #define ROCPRIM_MAX_ATOMIC_SIZE 8
 #else
     #define ROCPRIM_MAX_ATOMIC_SIZE 16
@@ -150,11 +150,13 @@
 // Only defined when support is present, in contrast to ROCPRIM_DETAIL_USE_DPP, which should be
 // always defined
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) \
-    && (!defined(__GFX6__) && !defined(__GFX7__))
+    && (!defined(__GFX6__) && !defined(__GFX7__))          \
+    && !(defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1)
     #define ROCPRIM_DETAIL_HAS_DPP 1
 #endif
 
-#if !defined(ROCPRIM_DISABLE_DPP) && defined(ROCPRIM_DETAIL_HAS_DPP) && !ROCPRIM_TARGET_SPIRV
+#if(!defined(ROCPRIM_DISABLE_DPP) || ROCPRIM_DISABLE_DPP == 0) \
+    && (defined(ROCPRIM_DETAIL_HAS_DPP) && ROCPRIM_DETAIL_HAS_DPP == 1)
     #define ROCPRIM_DETAIL_USE_DPP 1
 #else
     #define ROCPRIM_DETAIL_USE_DPP 0

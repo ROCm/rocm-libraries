@@ -116,8 +116,8 @@ constexpr const int MAX_PAYLOAD_SIZE = ROCPRIM_MAX_ATOMIC_SIZE - 1;
 ///
 /// \tparam T The accumulator type of the scan operation.
 /// \tparam UseSleep [optional] If true, the execution of a wavefront is paused for a short duration, allowing other threads or processes to execute during idle periods.
-/// \tparam IsSmall [optional] Dependent on the size of `T`. If it's smaller than 16 bytes, it's set to true.
-template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= 15)>
+/// \tparam IsSmall [optional] Dependent on the size of `T`. If it's smaller than 16 bytes (8 bytes if 16 byte atomics are possibly not supported), it's by default set to true.
+template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
 struct lookback_scan_state;
 
 /// Reduce lanes `0-valid_items` and return the result in lane 0.
@@ -1018,6 +1018,7 @@ hipError_t is_sleep_scan_state_used(const hipStream_t stream, bool& use_sleep)
 template<typename LookbackScanState>
 constexpr bool is_lookback_kernel_runnable()
 {
+#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
     if(device_target_arch() == target_arch::gfx908)
     {
         // For gfx908 kernels with both version of lookback_scan_state can run: with and without
@@ -1026,6 +1027,9 @@ constexpr bool is_lookback_kernel_runnable()
     }
     // For other GPUs only a kernel without sleep can run
     return !LookbackScanState::use_sleep;
+#else
+    return true;
+#endif
 }
 
 template<typename T>

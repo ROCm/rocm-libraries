@@ -24,9 +24,11 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/SwizzleScale.hpp>
+
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 namespace rocRoller
 {
@@ -44,8 +46,8 @@ namespace rocRoller
             auto root = graph.control.roots().only();
 
             std::unordered_set<int> scaleTiles;
-            for(auto multiplyTag : filter(graph.control.isElemType<Multiply>(),
-                                          graph.control.depthFirstVisit(root.value())))
+            for(auto const multiplyTag : filter(graph.control.isElemType<Multiply>(),
+                                                graph.control.depthFirstVisit(root.value())))
             {
                 auto [scaleMacTag, scaleMac] = graph.getDimension<MacroTile>(
                     multiplyTag, Connections::typeArgument<MacroTile>(arg));
@@ -58,7 +60,7 @@ namespace rocRoller
             };
 
             std::map<int, int> scaleLoads;
-            for(auto loadTag : filter(isLoad, graph.control.depthFirstVisit(root.value())))
+            for(auto const loadTag : filter(isLoad, graph.control.depthFirstVisit(root.value())))
             {
                 auto tileTag = graph.mapper.get<MacroTile>(loadTag);
                 if(scaleTiles.contains(tileTag))
@@ -73,6 +75,29 @@ namespace rocRoller
             return scaleLoads;
         }
 
+        void orderExchangesBeforeMultiplies(KernelGraph&       graph,
+                                            ContextPtr         context,
+                                            NaryArgument       arg,
+                                            std::map<int, int> tileExchangeMap)
+        {
+            auto root = graph.control.roots().only();
+
+            for(auto const multiplyTag : filter(graph.control.isElemType<Multiply>(),
+                                                graph.control.depthFirstVisit(root.value())))
+            {
+
+                auto [tileTag, tile] = graph.getDimension<MacroTile>(
+                    multiplyTag, Connections::typeArgument<MacroTile>(arg));
+
+                Log::debug("Adding exchange-before-multiply Sequence edge from {} to {} for {}",
+                           tileExchangeMap.at(tileTag),
+                           multiplyTag,
+                           toString(arg));
+
+                graph.control.addElement(Sequence(), {tileExchangeMap.at(tileTag)}, {multiplyTag});
+            }
+        }
+
         std::map<int, std::map<int, int>>
             filterLoadUnrollColouring(UnrollColouring const&    colouring,
                                       std::map<int, int> const& scaleLoads)
@@ -83,7 +108,7 @@ namespace rocRoller
             for(auto load = scaleLoads.cbegin(); load != scaleLoads.cend(); load++)
             {
                 auto unrollMap = colouring.operationColour.at(load->first);
-                for(auto u : unrollMap)
+                for(auto const u : unrollMap)
                     rv.insert(std::make_pair(load->first, unrollMap));
             }
 
@@ -466,7 +491,7 @@ namespace rocRoller
 
                 // (slowDimVal1, slowDimVal0, fastDimVal, load)
                 std::map<int, std::map<int, std::map<int, int>>> unrollLoadMap;
-                for(auto load : loadUnrollMap)
+                for(auto const load : loadUnrollMap)
                 {
                     auto unrollMap = loadUnrollMap[load.first];
                     AssertFatal(unrollMap.contains(fastDim), ShowValue(fastDim));
@@ -474,7 +499,7 @@ namespace rocRoller
                     AssertFatal(slowDim1 == -1 || unrollMap.contains(slowDim1),
                                 ShowValue(slowDim1));
                     int slowDimVal1 = (slowDim1 == -1) ? 0 : unrollMap[slowDim1];
-                    for(auto unroll : unrollMap)
+                    for(auto const unroll : unrollMap)
                     {
                         if(unroll.first == fastDim)
                         {
@@ -609,10 +634,12 @@ namespace rocRoller
             auto [loadConnections, exchangeConnections, unrollReindexMap]
                 = addSwizzleLoadCT(graph, context, sampleLoad, arg);
 
+            std::map<int, int> tileExchangeMap;
+
             for(auto const load : mergeables)
             {
                 // add coordinate connections for LoadTiled
-                for(auto& dc : loadConnections)
+                for(auto const& dc : loadConnections)
                 {
                     graph.mapper.connect(load.first, dc.coordinate, dc.connectionSpec);
                 }
@@ -625,10 +652,10 @@ namespace rocRoller
                 auto exchange
                     = graph.control.addElement(Exchange(getVariableType(graph, load.first)));
                 auto topOp = getTopSetCoordinate(graph, load.first);
-                insertAfter(graph, topOp, exchange, exchange);
+                graph.control.addElement(Sequence(), {topOp}, {exchange});
 
                 // add coordinate connections for Exchange
-                for(auto& dc : exchangeConnections)
+                for(auto const& dc : exchangeConnections)
                 {
                     graph.mapper.connect(exchange, dc.coordinate, dc.connectionSpec);
                 }
@@ -641,13 +668,27 @@ namespace rocRoller
                 graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
                 graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
-                auto destMacTileTag = graph.coordinates.addElement(MacroTile());
+                auto destMacTileTag = context->kernelOptions()->scaleSkipPermlane
+                                          ? exchangeTileTag
+                                          : graph.coordinates.addElement(MacroTile());
+
                 graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
+
+                auto createNode
+                    = [&context](int idx) -> rocRoller::KernelGraph::CoordinateGraph::Edge {
+                    if(context->kernelOptions()->scaleSkipPermlane)
+                        return Segment(idx);
+
+                    return Index(idx);
+                };
 
                 // add index edge to point to exchange output tile.
                 int index = 0;
+
                 graph.coordinates.addElement(
-                    Index(index++), {scaleLoads.at(load.first)}, {destMacTileTag});
+                    createNode(index++), {scaleLoads.at(load.first)}, {destMacTileTag});
+
+                tileExchangeMap[scaleLoads.at(load.first)] = exchange;
 
                 // merge the loads
                 for(auto const merge : load.second)
@@ -656,16 +697,17 @@ namespace rocRoller
                     auto ordering   = graph.control.compareNodes(
                         rocRoller::UseCacheIfAvailable, topOp, mergeTopOp);
                     AssertFatal(ordering == NodeOrdering::LeftFirst);
-                    int replaceOp = -1;
+                    auto replaceOp = graph.control.addElement(NOP());
                     if(merge.second > 0)
                     {
-                        replaceOp = graph.control.addElement(
+                        exchange = graph.control.addElement(
                             Exchange(getVariableType(graph, load.first)));
+                        graph.control.addElement(Sequence(), {replaceOp}, {exchange});
 
                         // add coordinate connections for Exchange
-                        for(auto& dc : exchangeConnections)
+                        for(auto const& dc : exchangeConnections)
                         {
-                            graph.mapper.connect(replaceOp, dc.coordinate, dc.connectionSpec);
+                            graph.mapper.connect(exchange, dc.coordinate, dc.connectionSpec);
                         }
 
                         // Since the load tile size (e.g. 64x4, 64x8, 64x12, 64x16) can be
@@ -674,23 +716,23 @@ namespace rocRoller
                         exchangeTileTag = graph.coordinates.addElement(MacroTile());
                         graph.coordinates.addElement(
                             Index(merge.second), {exchangeTileTag}, {tileTag});
-                        graph.mapper.connect<MacroTile>(replaceOp, exchangeTileTag);
+                        graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
-                        destMacTileTag = graph.coordinates.addElement(MacroTile());
-                        graph.mapper.connect(replaceOp, destMacTileTag, NaryArgument::DEST);
+                        destMacTileTag = context->kernelOptions()->scaleSkipPermlane
+                                             ? exchangeTileTag
+                                             : graph.coordinates.addElement(MacroTile());
+                        graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
 
                         // reset the index
                         index = 0;
-                    }
-                    else
-                    {
-                        replaceOp = graph.control.addElement(NOP());
                     }
                     replaceWith(graph, mergeTopOp, replaceOp, false);
                     purgeNodeAndChildren(graph, mergeTopOp);
 
                     graph.coordinates.addElement(
-                        Index(index++), {scaleLoads.at(merge.first)}, {destMacTileTag});
+                        createNode(index++), {scaleLoads.at(merge.first)}, {destMacTileTag});
+
+                    tileExchangeMap[scaleLoads.at(merge.first)] = exchange;
                 }
 
                 // update the SetCoordinate value and its Unroll coordinate connection
@@ -714,6 +756,8 @@ namespace rocRoller
                     maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
                 }
             }
+
+            orderExchangesBeforeMultiplies(graph, context, arg, tileExchangeMap);
         }
 
         KernelGraph SwizzleScale::apply(KernelGraph const& original)
@@ -726,7 +770,6 @@ namespace rocRoller
                             && !m_params->transposeMemoryAccess[LayoutType::MATRIX_B],
                         "Non-TN is not supported by SwizzleScale");
 
-            TIMER(t, "KernelGraph::SwizzleScale");
             auto newGraph = original;
 
             swizzleScaleLoads(newGraph, m_context, NaryArgument::LHS_SCALE);

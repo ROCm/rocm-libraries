@@ -80,33 +80,6 @@ inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type, void* a
     }
 }
 
-inline void setDefaultSwizzledBatchedStride(const rocblaslt_matrix_layout& matLayout,
-                                            int64_t&                       batch_stride)
-{
-    size_t MiM = 16, MiK = 0, MiKv = 0, PackK = 0;
-    if(matLayout->order == HIPBLASLT_ORDER_COL16_4R8)
-    {
-        //f16
-        MiK   = 16;
-        MiKv  = 4;
-        PackK = 16 / MiKv / 2;
-    }
-    else if(matLayout->order == HIPBLASLT_ORDER_COL16_4R16)
-    {
-        //f8
-        MiK   = 32;
-        MiKv  = 8;
-        PackK = 16 / MiKv / 1;
-    }
-    else
-        return;
-
-    size_t K_block = MiK * PackK;
-    //align to k for swizzleK and to m for 16
-    batch_stride = ((matLayout->n + MiM - 1) / MiM) * MiM * ((matLayout->m + K_block - 1) / K_block)
-                   * K_block;
-}
-
 inline void heuristicResult_copy(rocblaslt_matmul_heuristic_result* heuristicResultsDest,
                                  rocblaslt_matmul_heuristic_result* heuristicResultsSrc,
                                  size_t&                            maxWorkSpaceBytes,
@@ -355,12 +328,6 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     bool swizzleA = matA->order != HIPBLASLT_ORDER_COL && matA->order != HIPBLASLT_ORDER_ROW;
     bool swizzleB = matB->order != HIPBLASLT_ORDER_COL && matB->order != HIPBLASLT_ORDER_ROW;
 
-    if(swizzleA && matA->batch_stride == 0)
-    {
-        //If batch_stride has never been assigned for swizzle, set it to the default value
-        setDefaultSwizzledBatchedStride(matA, matA->batch_stride);
-    }
-
     rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            dummy_ptr,
                                                            dummy_ptr,
@@ -483,6 +450,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         amaxD,
                                         nullptr,
                                         maxWorkSpaceBytes,
+                                        matmul_descr->act0,
+                                        matmul_descr->act1,
                                         nullptr,
                                         handle->Synchronizer,
                                         swizzleA,
@@ -1244,6 +1213,24 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                 else
                 {
                     log_error(__func__, "invalid compute_input_typeB buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT:
+                if(sizeof(float) <= sizeInBytes)
+                    memcpy(&matmulDesc->act0, buf, sizeof(float));
+                else
+                {
+                    log_error(__func__, "invalid act arg0 buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT:
+                if(sizeof(float) <= sizeInBytes)
+                    memcpy(&matmulDesc->act1, buf, sizeof(float));
+                else
+                {
+                    log_error(__func__, "invalid act arg1 buf size", sizeInBytes);
                     return rocblaslt_status_invalid_value;
                 }
                 break;

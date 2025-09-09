@@ -49,9 +49,9 @@ from Tensile.Common import (
     state,
     tqdm,
     setVerbosity,
-    getVerbosity
+    getVerbosity,
 )
-from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX
+from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
@@ -505,7 +505,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     masterLibraries = {}
     nextSolIndex = 0
     splitGSU = False
-    printSolutionRejectionReason = False
+    printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
 
     fIter = zip(
@@ -572,13 +572,30 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             if key != "fallback":
                 value.merge(masterLibraries["fallback"])
         masterLibraries.pop("fallback")
+    solIndex = []
     for _, masterLibrary in masterLibraries.items():
         for _, sol in masterLibrary.solutions.items():
             solutions.append(sol.originalSolution)
+            solIndex.append(sol.index)
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
                 sol.originalSolution._state["codeObjectFile"] = name
                 solutions.append(sol.originalSolution)
+                solIndex.append(sol.index)
+
+    # Get the solution index and it's codeObjectFile name
+    codeObjectFilesIndex = {}
+    for solution, index in zip(solutions, solIndex):
+        if "codeObjectFile" in solution._state and solution._state["codeObjectFile"] is not None:
+            if solution._state["codeObjectFile"] in codeObjectFilesIndex:
+                codeObjectFilesIndex[solution._state["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution._state["codeObjectFile"]])
+            else:
+                codeObjectFilesIndex[solution._state["codeObjectFile"]] = index
+
+    # Reorder to int: name format
+    codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}
+    # Reorder to maintain ascending order by index
+    codeObjectFilesIndex = dict(sorted(codeObjectFilesIndex.items()))
 
     # remove duplicates while preserving order
     numSoln = len(solutions)
@@ -587,7 +604,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     print1(f"Number of solutions parsed: {numSoln}")
     print1(f"Number of unique solutions: {len(solutions)}")
 
-    return solutions, masterLibraries
+    return solutions, masterLibraries, codeObjectFilesIndex
 
 
 ################################################################################
@@ -618,6 +635,7 @@ def run():
     else:
         archs = arguments["Architecture"].split("_")
     archs = SUPPORTED_GFX if "all" in archs else archs
+    archs, requestedPredicateMap = splitArchsFromPredicates(archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
@@ -664,10 +682,10 @@ def run():
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
     )
     print1(f"# LogicFilter:       {globPattern}")
-    logicFiles = (
-        os.path.join(arguments["LogicPath"], file)
-        for file in glob.iglob(globPattern, recursive=True)
-    )
+    logicFiles = [
+        file for file in glob.iglob(globPattern, recursive=True)
+    ]
+
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]
 
     print1(f"# Experimental:      {arguments['Experimental']}")
@@ -676,13 +694,20 @@ def run():
             file for file in logicFiles if "experimental" not in map(str.lower, Path(file).parts)
         ]
 
-    print2(f"# LibraryLogicFiles: {len(logicFiles)}")
+    print1("# Archs: " + ' ,'.join(archs))
+    if requestedPredicateMap:
+        print1("# Predicates:\n" + "\n".join(f"#   {arch}: {', '.join(v) if v else 'all variants'}" for arch, v in requestedPredicateMap.items()))
+        numPrior = len(logicFiles)
+        logicFiles = filterLogicFilesByPredicates(logicFiles, requestedPredicateMap)
+        print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
+
+    print1(f"# LibraryLogicFiles: {len(logicFiles)}")
 
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
 
     start_glds = timer()
-    solutions, masterLibraries = generateLogicDataAndSolutions(
+    solutions, masterLibraries, libraryMapping = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
     stop_glds = timer()
@@ -730,6 +755,9 @@ def run():
         filename = os.path.join(newLibraryDir, name)
         lib.applyNaming(splitGSU)
         LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+
+    filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
+    LibraryIO.write(filename, libraryMapping, "msgpack")
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():

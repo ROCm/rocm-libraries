@@ -242,6 +242,10 @@
 #define xxTRD_xxTD2_SWITCHSIZE 256
 #endif
 
+#ifndef xxTD2_SSKER_MAX_N
+#define xxTD2_SSKER_MAX_N 192
+#endif
+
 /***************** sygs2/sygst and hegs2/hegst ********************************
 *******************************************************************************/
 /*! \brief Determines the size of the leading block that is reduced to standard form at each step

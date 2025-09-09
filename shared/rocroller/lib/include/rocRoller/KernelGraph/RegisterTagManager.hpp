@@ -99,6 +99,7 @@ namespace rocRoller
          */
         void addIndex(int src, int dst, int index);
 
+        void addSegment(int src, int dst, int index);
         /**
          * @brief Get the Register::Value associated with the provided tag.
          *
@@ -228,6 +229,8 @@ namespace rocRoller
          */
         std::optional<std::pair<int, int>> getIndex(int tag) const;
 
+        std::optional<std::pair<int, int>> getSegment(int tag) const;
+
     private:
         std::weak_ptr<Context>            m_context;
         std::map<int, Register::ValuePtr> m_registers;
@@ -240,6 +243,7 @@ namespace rocRoller
 
         std::map<int, int>                 m_aliases;
         std::map<int, std::pair<int, int>> m_indexes;
+        std::map<int, std::pair<int, int>> m_segments;
     };
 }
 

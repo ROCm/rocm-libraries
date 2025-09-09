@@ -61,6 +61,9 @@ struct KernelType
     size_t scaleBBlockRowSize = 1u;
     size_t scaleBBlockColSize = 32u;
 
+    rocRoller::DataType scaleTypeA = rocRoller::DataType::E8M0;
+    rocRoller::DataType scaleTypeB = rocRoller::DataType::E8M0;
+
     auto operator<=>(const KernelType& other) const = default;
 };
 
@@ -97,12 +100,41 @@ struct MachineInstructionSize
  * compile-time known.
  */
 
-constexpr std::array<WorkGroupTileSize, 23> possibleTileSizes = {{
-    {256, 256, 128}, {256, 128, 128}, {128, 256, 128}, {256, 64, 128}, {64, 256, 128},
-    {128, 128, 128}, {256, 32, 128},  {32, 256, 128},  {128, 64, 128}, {64, 128, 128},
-    {256, 16, 128},  {16, 256, 128},  {128, 32, 128},  {32, 128, 128}, {64, 64, 128},
-    {64, 32, 128},   {32, 64, 128},   {64, 16, 128},   {16, 64, 128},  {32, 32, 64},
-    {32, 16, 128},   {16, 32, 128},   {16, 16, 128}
+constexpr std::array<WorkGroupTileSize, 34> possibleTileSizes = {{
+    {256, 256, 128},
+    {256, 192, 128},
+    {256, 128, 128},
+    {256, 64, 128},
+    {256, 32, 128},
+    {256, 16, 128},
+    {192, 256, 128},
+    {192, 128, 128},
+    {192, 64, 128},
+    {192, 32, 128},
+    {128, 256, 128},
+    {128, 192, 128},
+    {128, 128, 128},
+    {128, 64, 128},
+    {128, 32, 128},
+    {64, 256, 128},
+    {64, 192, 128},
+    {64, 128, 128},
+    {64, 64, 128},
+    {64, 32, 128},
+    {32, 256, 128},
+    {32, 192, 128},
+    {32, 128, 128},
+    {32, 64, 128},
+    {32, 32, 128},
+    {32, 32, 64},
+    {16, 256, 128},
+    {64, 16, 128},
+    {16, 64, 128},
+    {32, 16, 128},
+    {16, 32, 128},
+    {16, 16, 128},
+    {16, 16, 256},
+    {16, 64, 256}
 }};
 
 constexpr MachineInstructionSize pickMI(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt) {
@@ -123,6 +155,16 @@ constexpr MachineInstructionSize pickMI(rocRoller::DataType typeA, rocRoller::Da
     }
 }
 
+constexpr int preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt) {
+    // Other datatypes run out of registers when prefetchInFlight is too
+    // large.
+    // There is an error with smaller tile sizes and larger prefetchInFlight.
+    if (typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32 && wgt.n > 32)
+        return 4;
+    else
+        return 2;
+}
+
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
 constexpr auto generateTileList() {
     std::array<TensileLite::analytical::TileTuple, possibleTileSizes.size()> tileList{};
@@ -136,8 +178,10 @@ constexpr auto generateTileList() {
             wgtk = 32;
         }
 
+        int unroll = preferredUnrolling(typeA, typeB, wgt);
+
         tileList[i] = std::make_tuple(
-            wgt.m, wgt.n, wgtk,
+            wgt.m, wgt.n, wgtk * unroll,
             MI.m, MI.n, MI.k,
             1 // occupancy
         );

@@ -181,7 +181,7 @@ You must allocate, initialize, and specify the input/output buffers that hold th
 For larger transforms, temporary work buffers might be needed. Because the library tries to minimize its own allocation of
 memory regions on the device, it expects you to manage the work buffers. The size of the buffer that is needed can be queried using
 :cpp:func:`rocfft_plan_get_work_buffer_size`. After allocation, it can be passed to the library using
-:cpp:func:`rocfft_execution_info_set_work_buffer`. The `GitHub repository <https://github.com/ROCm/rocFFT/tree/develop/clients/samples>`_
+:cpp:func:`rocfft_execution_info_set_work_buffer`. The `GitHub repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft/clients/samples>`_
 provide some samples and examples.
 
 Transform and array types 
@@ -316,8 +316,8 @@ reside on a different device and have its own layout parameters.
 
    The rocFFT APIs for declaring fields and bricks are currently experimental and
    subject to change in future releases. To submit feedback, questions, and comments
-   about these interfaces, use the `rocFFT issue tracker
-   <https://github.com/ROCmSoftwarePlatform/rocFFT/issues>`_.
+   about these interfaces, use the `rocm-libraries issue tracker
+   <https://github.com/ROCm/rocm-libraries/issues>`_.
 
 The workflow for using fields is as follows:
 

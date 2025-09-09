@@ -251,8 +251,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph ConstantPropagation::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::ConstantPropagation");
-
         auto kgraph = scalarIsZero(original);
 
         return kgraph;

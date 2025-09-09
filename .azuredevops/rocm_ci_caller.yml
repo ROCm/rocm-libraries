@@ -2,11 +2,13 @@ trigger: none
 pr:  
   branches:
     include:
+      - develop
       - release-staging/rocm-rel-*
   paths:  
     include:  
       - projects/*
       - shared/*
+  drafts: false
   
 variables:
   - group: internal

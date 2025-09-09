@@ -37,6 +37,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -59,7 +60,7 @@ namespace AssertTest
     {
         auto const& arch = m_context->targetArchitecture();
         auto        gpu  = arch.target();
-        if(gpu.isCDNA1GPU() || gpu.isRDNA4GPU())
+        if(gpu.isCDNA1GPU())
             GTEST_SKIP() << "Skipping GPU AssertTest for " << gpu.toString();
 
         AssertOpKind assertOpKind;
@@ -108,11 +109,14 @@ namespace AssertTest
             auto assertOp = kgraph.control.addElement(AssertOp{"Assert Test", testRegExpr == one});
 
             auto assignOne = kgraph.control.addElement(Assign{Register::Type::Scalar, one});
+            kgraph.mapper.connect(assignOne, testReg, NaryArgument::DEST);
 
             auto kernelNode = kgraph.control.addElement(Kernel());
             kgraph.control.addElement(Body(), {kernelNode}, {setToZero});
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
+
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
@@ -166,11 +170,11 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertPassed"));
                 if(arch.HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
                 {
-                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s3, 1"));
+                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s2, 1"));
                 }
                 else
                 {
-                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s4, 1"));
+                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s3, 1"));
                 }
             }
             else
@@ -188,6 +192,10 @@ namespace AssertTest
 
                 auto executableKernel = m_context->instructions()->getExecutableKernel();
 
+                const auto settings = Settings::getInstance();
+                const auto rocmDebugAgentPath{settings->ROCMPath.getValue()
+                                              + "/lib/librocm-debug-agent.so.2"};
+                setenv("HSA_TOOLS_LIB", rocmDebugAgentPath.c_str(), /*replace*/ 1);
                 const auto runTest = [&]() {
                     executableKernel->executeKernel(kargs, kinv);
                     // Need to wait for signal, otherwise child process may terminate before signal is sent
@@ -201,6 +209,7 @@ namespace AssertTest
                 {
                     runTest();
                 }
+                setenv("HSA_TOOLS_LIB", "", /*replace*/ 1);
             }
         }
     }
@@ -209,7 +218,7 @@ namespace AssertTest
     {
         auto const& arch = m_context->targetArchitecture();
         auto        gpu  = arch.target();
-        if(gpu.isCDNA1GPU() || gpu.isRDNA4GPU())
+        if(gpu.isCDNA1GPU())
             GTEST_SKIP() << "Skipping GPU AssertTest for " << gpu.toString();
 
         AssertOpKind assertOpKind;
@@ -247,16 +256,24 @@ namespace AssertTest
             m_context->schedule(k->prolog());
             k->setDynamicSharedMemBytes(zero);
 
+            auto                    testReg = kgraph.coordinates.addElement(Linear());
+            Expression::DataFlowTag testRegTag{testReg, Register::Type::Scalar, DataType::UInt32};
+
             int setToZero = kgraph.control.addElement(Assign{Register::Type::Scalar, zero});
 
             auto assertOp = kgraph.control.addElement(AssertOp{"Unconditional Assert"});
 
             auto assignOne = kgraph.control.addElement(Assign{Register::Type::Scalar, one});
 
+            kgraph.mapper.connect(setToZero, testReg, NaryArgument::DEST);
+            kgraph.mapper.connect(assignOne, testReg, NaryArgument::DEST);
+
             auto kernelNode = kgraph.control.addElement(Kernel());
             kgraph.control.addElement(Body(), {kernelNode}, {setToZero});
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
+
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
@@ -300,6 +317,10 @@ namespace AssertTest
 
                 auto executableKernel = m_context->instructions()->getExecutableKernel();
 
+                const auto settings = Settings::getInstance();
+                const auto rocmDebugAgentPath{settings->ROCMPath.getValue()
+                                              + "/lib/librocm-debug-agent.so.2"};
+                setenv("HSA_TOOLS_LIB", rocmDebugAgentPath.c_str(), /*replace*/ 1);
                 const auto runTest = [&]() {
                     executableKernel->executeKernel(kargs, kinv);
                     // Need to wait for signal, otherwise child process may terminate before signal is sent
@@ -313,6 +334,7 @@ namespace AssertTest
                 {
                     runTest();
                 }
+                setenv("HSA_TOOLS_LIB", "", /*replace*/ 1);
             }
         }
     }
@@ -322,8 +344,8 @@ namespace AssertTest
         GPU_AssertTest,
         ::testing::Combine(
             supportedISAValues(),
-            ::testing::Values(std::tuple(AssertOpKind::MemoryViolation, "Memory access fault"),
-                              std::tuple(AssertOpKind::STrap, "HSA_STATUS_ERROR_EXCEPTION"),
+            ::testing::Values(std::tuple(AssertOpKind::MemoryViolation, "MEMORY_VIOLATION"),
+                              std::tuple(AssertOpKind::STrap, "ASSERT_TRAP"),
                               std::tuple(AssertOpKind::NoOp, "AssertOpKind == NoOp"),
                               std::tuple(AssertOpKind::Count, "Invalid AssertOpKind"))));
 }

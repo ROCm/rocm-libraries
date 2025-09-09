@@ -421,6 +421,15 @@ namespace rocRoller
              */
             std::optional<int> findEdge(int tail, int head) const;
 
+            /**
+             * This function is called to disallow certain operations
+             * (add/delete certain elements).
+             */
+            virtual bool isModificationAllowed(int) const
+            {
+                return true;
+            }
+
             // clang-format off
         private:
             // clang-format on

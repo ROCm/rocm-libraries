@@ -114,7 +114,7 @@ auto _clippedrelu = [](auto in, auto arg1, auto arg2) -> decltype(in) {
     if(in > arg1)
         return static_cast<decltype(in)>(std::min(in, arg2));
     else
-        return static_cast<decltype(in)>(0);
+        return static_cast<decltype(in)>(std::min(static_cast<decltype(in)>(0.0), arg2));
 };
 
 auto _gelu = [](auto in, auto arg1, auto /*arg2*/) -> decltype(in) {
@@ -974,6 +974,11 @@ void testing_spmm(const Arguments& arg)
         {
             hipsparselt_error = std::abs(
                 norm_check_general<To>('F', tM, tN, ldd, stride_d, hD_gold, hD_1, num_batches));
+
+            if(arg.norm_check_assert)
+            {
+                CHECK_SUCCESS(norm_check<To>(hipsparselt_error));
+            }
         }
 
         // Debug
@@ -1528,4 +1533,14 @@ void testing_aux_plan_assign(const Arguments& arg)
     }
 
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
+}
+
+template <typename Ti,
+          typename To,
+          typename Tc,
+          typename TBias>
+void testing_spmm_logging(const Arguments& arg)
+{
+    Logger logger(arg.logging);
+    testing_spmm<Ti, To, Tc, TBias>(arg);
 }

@@ -66,31 +66,13 @@
 #include <utility>
 #include <vector>
 
-struct default_config_helper
-{
-    template<bool /* ByKey */>
-    using type = ::rocprim::default_config;
-};
-
 template<unsigned int SizeLimit>
-struct size_limit_config_helper
-{
-    template<bool ByKey>
-    using type = std::conditional_t<
-        ByKey,
-        rocprim::scan_by_key_config<256,
-                                    16,
-                                    rocprim::block_load_method::block_load_transpose,
-                                    rocprim::block_store_method::block_store_transpose,
-                                    rocprim::block_scan_algorithm::using_warp_scan,
-                                    SizeLimit>,
-        rocprim::scan_config<256,
-                             16,
-                             rocprim::block_load_method::block_load_transpose,
-                             rocprim::block_store_method::block_store_transpose,
-                             rocprim::block_scan_algorithm::using_warp_scan,
-                             SizeLimit>>;
-};
+using size_limit_config = rocprim::scan_config<256,
+                                               16,
+                                               rocprim::block_load_method::block_load_transpose,
+                                               rocprim::block_store_method::block_store_transpose,
+                                               rocprim::block_scan_algorithm::using_warp_scan,
+                                               SizeLimit>;
 
 // Params for tests
 template<class InputType,
@@ -99,7 +81,7 @@ template<class InputType,
          // Tests output iterator with void value_type (OutputIterator concept)
          // scan-by-key primitives don't support output iterator with void value_type
          bool UseIdentityIteratorIfSupported = false,
-         typename ConfigHelper               = default_config_helper,
+         typename ConfigHelper               = rocprim::default_config,
          bool UseGraphs                      = false,
          bool Deterministic                  = false,
          bool UseInitialValue                = false>
@@ -141,32 +123,6 @@ constexpr hipError_t invoke_exclusive_scan(Args&&... args)
     }
 }
 
-template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
-constexpr hipError_t invoke_inclusive_scan_by_key(Args&&... args)
-{
-    if(Deterministic)
-    {
-        return rocprim::deterministic_inclusive_scan_by_key<Config>(std::forward<Args>(args)...);
-    }
-    else
-    {
-        return rocprim::inclusive_scan_by_key<Config>(std::forward<Args>(args)...);
-    }
-}
-
-template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
-constexpr hipError_t invoke_exclusive_scan_by_key(Args&&... args)
-{
-    if(Deterministic)
-    {
-        return rocprim::deterministic_exclusive_scan_by_key<Config>(std::forward<Args>(args)...);
-    }
-    else
-    {
-        return rocprim::exclusive_scan_by_key<Config>(std::forward<Args>(args)...);
-    }
-}
-
 // ---------------------------------------------------------
 // Test for scan ops taking single input value
 // ---------------------------------------------------------
@@ -192,18 +148,18 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
     DeviceScanParams<unsigned short>,
     DeviceScanParams<short, int>,
     DeviceScanParams<int>,
-    DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config_helper<512>>,
+    DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config<512>>,
     DeviceScanParams<float, float, rocprim::maximum<float>>,
-    DeviceScanParams<float, float, rocprim::plus<float>, false, size_limit_config_helper<1024>>,
+    DeviceScanParams<float, float, rocprim::plus<float>, false, size_limit_config<1024>>,
     DeviceScanParams<float,
                      float,
                      rocprim::plus<float>,
                      false,
-                     size_limit_config_helper<1024>,
+                     size_limit_config<1024>,
                      false,
                      true>,
-    DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config_helper<524288>>,
-    DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config_helper<1048576>>,
+    DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config<524288>>,
+    DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config<1048576>>,
     DeviceScanParams<int8_t, int8_t, rocprim::maximum<int8_t>>,
     DeviceScanParams<uint8_t, uint8_t, rocprim::maximum<uint8_t>, false>,
     DeviceScanParams<rocprim::half, rocprim::half, rocprim::maximum<rocprim::half>>,
@@ -211,7 +167,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      float,
                      rocprim::plus<float>,
                      false,
-                     default_config_helper,
+                     rocprim::default_config,
                      false,
                      true>,
     DeviceScanParams<rocprim::bfloat16, rocprim::bfloat16, rocprim::maximum<rocprim::bfloat16>>,
@@ -219,7 +175,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      float,
                      rocprim::plus<float>,
                      false,
-                     default_config_helper,
+                     rocprim::default_config,
                      false,
                      true>,
     // Large
@@ -233,7 +189,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      double,
                      rocprim::plus<double>,
                      false,
-                     default_config_helper,
+                     rocprim::default_config,
                      true,
                      true>,
     DeviceScanParams<signed char, long, rocprim::plus<long>>,
@@ -247,19 +203,19 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      common::custom_type<double, double, true>,
                      rocprim::plus<common::custom_type<double, double, true>>,
                      false,
-                     default_config_helper,
+                     rocprim::default_config,
                      true>,
     DeviceScanParams<common::custom_type<int, int, true>>,
     DeviceScanParams<test_utils::custom_test_array_type<long long, 5>>,
     DeviceScanParams<test_utils::custom_test_array_type<int, 10>>,
     // With graphs
-    DeviceScanParams<int, int, rocprim::plus<int>, false, default_config_helper, true>,
+    DeviceScanParams<int, int, rocprim::plus<int>, false, rocprim::default_config, true>,
     // With initial values
     DeviceScanParams<int,
                      int,
                      rocprim::plus<int>,
                      false,
-                     size_limit_config_helper<524288>,
+                     size_limit_config<524288>,
                      false,
                      true,
                      true>,
@@ -267,7 +223,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      int,
                      rocprim::maximum<int>,
                      false,
-                     size_limit_config_helper<524288>,
+                     size_limit_config<524288>,
                      false,
                      true,
                      true>,
@@ -275,7 +231,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      int,
                      rocprim::minimum<int>,
                      false,
-                     size_limit_config_helper<524288>,
+                     size_limit_config<524288>,
                      false,
                      true,
                      true>,
@@ -283,7 +239,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      float,
                      rocprim::plus<float>,
                      false,
-                     size_limit_config_helper<524288>,
+                     size_limit_config<524288>,
                      false,
                      true,
                      true>,
@@ -291,7 +247,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      rocprim::half,
                      rocprim::minimum<rocprim::half>,
                      false,
-                     size_limit_config_helper<524288>,
+                     size_limit_config<524288>,
                      false,
                      true,
                      true>,
@@ -299,7 +255,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      float,
                      rocprim::plus<float>,
                      false,
-                     size_limit_config_helper<524288>,
+                     size_limit_config<524288>,
                      false,
                      true,
                      true>,
@@ -307,7 +263,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      rocprim::bfloat16,
                      rocprim::minimum<rocprim::bfloat16>,
                      false,
-                     size_limit_config_helper<524288>,
+                     size_limit_config<524288>,
                      false,
                      true,
                      true>,
@@ -315,7 +271,7 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      float,
                      rocprim::plus<float>,
                      false,
-                     size_limit_config_helper<524288>,
+                     size_limit_config<524288>,
                      false,
                      true,
                      true>>;
@@ -348,7 +304,7 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
     const bool deterministic     = TestFixture::deterministic;
     const bool use_initial_value = TestFixture::use_initial_value;
 
-    using Config = typename TestFixture::config_helper::template type<false>;
+    using Config = typename TestFixture::config_helper;
     using config = rocprim::detail::wrapped_scan_config<Config, acc_type>;
 
     hipStream_t stream = hipStreamDefault;
@@ -356,7 +312,7 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
     rocprim::detail::target_arch target_arch;
     HIP_CHECK(host_target_arch(stream, target_arch));
     const rocprim::detail::scan_config_params params
-        = rocprim::detail::dispatch_target_arch<config>(target_arch);
+        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
 
     // For non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -472,7 +428,7 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
             // Call the provided function with either scan_state or scan_state_with_sleep based on
             // the value of use_sleep
             bool use_sleep;
-            HIP_CHECK(rocprim::detail::is_sleep_scan_state_used(stream, use_sleep))
+            HIP_CHECK(rocprim::detail::is_sleep_scan_state_used(stream, use_sleep));
             auto with_scan_state = [use_sleep, scan_state, scan_state_with_sleep](
                                        auto&& func) mutable -> decltype(auto)
             {
@@ -509,33 +465,34 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
 
             grid_size = number_of_blocks;
 
-            with_scan_state(
+            const auto launch_err = with_scan_state(
                 [&](const auto scan_state)
                 {
-                    rocprim::detail::lookback_scan_kernel<
-                        deterministic
-                            ? rocprim::detail::lookback_scan_determinism::deterministic
-                            : rocprim::detail::lookback_scan_determinism::nondeterministic,
-                        Exclusive,
-                        use_initial_value,
-                        config,
-                        decltype(input_iterator),
-                        U*,
-                        scan_op_type,
-                        acc_type,
-                        acc_type>
-                        <<<dim3(grid_size), dim3(block_size), 0, stream>>>(input_iterator,
-                                                                           d_output.get(),
-                                                                           size,
-                                                                           initial_value,
-                                                                           scan_op,
-                                                                           scan_state,
-                                                                           number_of_blocks,
-                                                                           previous_last_element,
-                                                                           new_last_element,
-                                                                           false,
-                                                                           false);
+                    return rocprim::detail::launch_lookback_scan < config,
+                           deterministic
+                               ? rocprim::detail::lookback_scan_determinism::deterministic
+                               : rocprim::detail::lookback_scan_determinism::nondeterministic,
+                           Exclusive, use_initial_value, decltype(input_iterator), U*, scan_op_type,
+                           acc_type,
+                           acc_type > (target_arch,
+                                       input_iterator,
+                                       d_output.get(),
+                                       size,
+                                       initial_value,
+                                       scan_op,
+                                       scan_state,
+                                       number_of_blocks,
+                                       dim3(grid_size),
+                                       dim3(block_size),
+                                       0,
+                                       stream,
+                                       previous_last_element,
+                                       new_last_element,
+                                       false,
+                                       false);
                 });
+
+            ASSERT_EQ(hipSuccess, launch_err);
 
             if(TestFixture::use_graphs)
             {
@@ -561,6 +518,245 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
     }
 }
 
+template<class T, class scan_state_type>
+__global__
+void complete_value(T* values, scan_state_type scan_state)
+{
+    values[blockIdx.x] = scan_state.get_complete_value(blockIdx.x);
+}
+
+TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
+{
+    using T            = typename TestFixture::input_type;
+    using U            = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
+    // If scan_op_type is rocprim::plus and input_type is bfloat16 or half,
+    // use float as device-side accumulator and double as host-side accumulator
+    using is_plus_op                 = test_utils::is_plus_operator<scan_op_type>;
+    using acc_type                   = typename accum_type<U, scan_op_type>::type;
+    using scan_state_type            = rocprim::detail::lookback_scan_state<acc_type>;
+    using scan_state_with_sleep_type = rocprim::detail::lookback_scan_state<acc_type, true>;
+
+    const bool deterministic     = TestFixture::deterministic;
+    const bool use_initial_value = TestFixture::use_initial_value;
+
+    using Config = typename TestFixture::config_helper;
+    using config = rocprim::detail::wrapped_scan_config<Config, acc_type>;
+
+    hipStream_t stream = hipStreamDefault;
+
+    rocprim::detail::target_arch target_arch;
+    HIP_CHECK(host_target_arch(stream, target_arch));
+    const rocprim::detail::scan_config_params params
+        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
+
+    // For non-associative operations in inclusive scan
+    // intermediate results use the type of input iterator, then
+    // as all conversions in the tests are to more precise types,
+    // intermediate results use the same or more precise acc_type,
+    // all scan operations use the same acc_type,
+    // and all output types are the same acc_type,
+    // therefore the only source of error is precision of operation itself
+    constexpr float single_op_precision = is_plus_op::value ? test_utils::precision<acc_type> : 0;
+
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        const unsigned int block_size       = params.kernel_config.block_size;
+        const unsigned int items_per_thread = params.kernel_config.items_per_thread;
+        const auto         items_per_block  = block_size * items_per_thread;
+        const auto         size             = items_per_block;
+
+        unsigned int number_of_blocks = (size + items_per_block - 1) / items_per_block;
+
+        if(single_op_precision * size > 0.5)
+        {
+            std::cout << "Test is skipped from size " << size
+                      << " on, potential error of summation is more than 0.5 of the result "
+                         "with current or larger size"
+                      << std::endl;
+            break;
+        }
+        hipStream_t stream = hipStreamDefault;
+        if(TestFixture::use_graphs)
+        {
+            // Default stream does not support hipGraph stream capture, so create one
+            HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+        }
+
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 1, 10, seed_value);
+
+        common::device_ptr<T> d_input(input);
+        common::device_ptr<U> d_output(input.size());
+
+        // Scan function
+        scan_op_type scan_op;
+
+        // Calculate expected results on host
+        std::vector<U> expected(input.size());
+        acc_type       initial_value;
+        if(use_initial_value)
+        {
+            initial_value = test_utils::get_random_value<acc_type>(1, 10, seed_value);
+            test_utils::host_inclusive_scan(input.begin(),
+                                            input.end(),
+                                            expected.begin(),
+                                            scan_op,
+                                            initial_value);
+        }
+        else
+        {
+            test_utils::host_inclusive_scan(input.begin(), input.end(), expected.begin(), scan_op);
+        }
+        SCOPED_TRACE(use_initial_value
+                         ? (testing::Message() << "with initial_value = " << initial_value)
+                         : (testing::Message() << "without initial_value"));
+
+        auto input_iterator
+            = rocprim::make_transform_iterator(d_input.get(),
+                                               [](T in) { return static_cast<acc_type>(in); });
+
+        // Pointer to array with block_prefixes
+        acc_type* previous_last_element;
+        acc_type* new_last_element;
+
+        rocprim::detail::temp_storage::layout layout{};
+        HIP_CHECK(scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
+
+        size_t storage_size;
+        HIP_CHECK(scan_state_type::get_storage_size(number_of_blocks, stream, storage_size));
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(storage_size, 0);
+
+        // Allocate temporary storage
+        common::device_ptr<void> d_temp_storage(storage_size);
+        common::device_ptr<U>    d_save_dest(std::vector<U>(1));
+
+        scan_state_type scan_state{};
+        HIP_CHECK(
+            scan_state_type::create(scan_state, d_temp_storage.get(), number_of_blocks, stream));
+        scan_state_with_sleep_type scan_state_with_sleep{};
+        HIP_CHECK(scan_state_with_sleep_type::create(scan_state_with_sleep,
+                                                     d_temp_storage.get(),
+                                                     number_of_blocks,
+                                                     stream));
+
+        // Call the provided function with either scan_state or scan_state_with_sleep based on
+        // the value of use_sleep
+        bool use_sleep;
+        HIP_CHECK(rocprim::detail::is_sleep_scan_state_used(stream, use_sleep));
+        auto with_scan_state
+            = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
+        {
+            if(use_sleep)
+            {
+                return func(scan_state_with_sleep);
+            }
+            else
+            {
+                return func(scan_state);
+            }
+        };
+        auto grid_size = (number_of_blocks + block_size - 1) / block_size;
+        with_scan_state(
+            [&](const auto scan_state)
+            {
+                rocprim::detail::init_lookback_scan_state_kernel<<<dim3(grid_size),
+                                                                   dim3(block_size),
+                                                                   0,
+                                                                   stream>>>(scan_state,
+                                                                             number_of_blocks);
+            });
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        test_utils::GraphHelper gHelper;
+        if(TestFixture::use_graphs)
+        {
+            gHelper.startStreamCapture(stream);
+        }
+
+        static constexpr bool Exclusive = false;
+
+        grid_size = number_of_blocks;
+
+        const auto launch_err = with_scan_state(
+            [&](const auto scan_state)
+            {
+                return rocprim::detail::launch_lookback_scan < config,
+                       deterministic ? rocprim::detail::lookback_scan_determinism::deterministic
+                                     : rocprim::detail::lookback_scan_determinism::nondeterministic,
+                       Exclusive, use_initial_value, decltype(input_iterator), U*, scan_op_type,
+                       acc_type,
+                       acc_type > (target_arch,
+                                   input_iterator,
+                                   d_output.get(),
+                                   size,
+                                   initial_value,
+                                   scan_op,
+                                   scan_state,
+                                   number_of_blocks,
+                                   dim3(grid_size),
+                                   dim3(block_size),
+                                   0,
+                                   stream,
+                                   previous_last_element,
+                                   new_last_element,
+                                   false,
+                                   false);
+            });
+
+        ASSERT_EQ(hipSuccess, launch_err);
+
+        if(TestFixture::use_graphs)
+        {
+            gHelper.createAndLaunchGraph(stream, true, false);
+        }
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        const auto output = d_output.load();
+
+        // Check if output values are as expected
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_near(output, expected, single_op_precision * size));
+
+        common::device_ptr<U> d_output_complete(grid_size);
+        with_scan_state(
+            [&](const auto scan_state) {
+                complete_value<<<dim3(grid_size), dim3(1), 0, stream>>>(d_output_complete.get(),
+                                                                        scan_state);
+            });
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        const auto output_complete = d_output_complete.load();
+
+        test_utils::assert_near(output_complete[0], output[size - 1], single_op_precision * size);
+
+        if(TestFixture::use_graphs)
+        {
+            gHelper.cleanupGraphHelper();
+            HIP_CHECK(hipStreamDestroy(stream));
+        }
+    }
+}
+
 TYPED_TEST_SUITE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 
 TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
@@ -577,7 +773,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     // Default
     hipStream_t stream = 0;
     if(TestFixture::use_graphs)
@@ -600,49 +796,25 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
         = rocprim::make_transform_iterator(rocprim::make_constant_iterator<T>(T(345)),
                                            [](T in) { return static_cast<acc_type>(in); });
 
-    // Get size of d_temp_storage
-    size_t temp_storage_size_bytes;
-    HIP_CHECK(invoke_inclusive_scan<deterministic>(nullptr,
-                                                   temp_storage_size_bytes,
-                                                   input_iterator,
-                                                   d_checking_output,
-                                                   0,
-                                                   scan_op,
-                                                   stream,
-                                                   debug_synchronous));
-
-    // Allocate temporary storage
-    common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-
-    test_utils::GraphHelper gHelper;
-    if(TestFixture::use_graphs)
-    {
-        gHelper.startStreamCapture(stream);
-    }
-
-    // Run
-    HIP_CHECK(invoke_inclusive_scan<deterministic>(d_temp_storage.get(),
-                                                   temp_storage_size_bytes,
-                                                   input_iterator,
-                                                   d_checking_output,
-                                                   0,
-                                                   scan_op,
-                                                   stream,
-                                                   debug_synchronous));
-
-    if(TestFixture::use_graphs)
-    {
-        gHelper.createAndLaunchGraph(stream, true, false);
-    }
-
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    test_utils::test_kernel_wrapper(
+        [&](void* temp_storage, size_t& storage_bytes)
+        {
+            return invoke_inclusive_scan<deterministic>(temp_storage,
+                                                        storage_bytes,
+                                                        input_iterator,
+                                                        d_checking_output,
+                                                        0,
+                                                        scan_op,
+                                                        stream,
+                                                        debug_synchronous);
+        },
+        stream,
+        TestFixture::use_graphs);
 
     ASSERT_FALSE(out_of_bounds.get());
 
     if(TestFixture::use_graphs)
     {
-        gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
     }
 }
@@ -668,8 +840,18 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
     constexpr float single_op_precision = is_plus_op::value ? test_utils::precision<acc_type> : 0;
 
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
-    const bool            deterministic         = TestFixture::deterministic;
-    using Config = typename TestFixture::config_helper::template type<false>;
+    static constexpr bool deterministic         = TestFixture::deterministic;
+    static constexpr bool use_initial_value     = TestFixture::use_initial_value;
+
+    using Config = typename TestFixture::config_helper;
+
+    // Default
+    hipStream_t stream = 0;
+    if(TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -692,14 +874,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                 break;
             }
 
-            // Default
-            hipStream_t stream = 0;
-            if(TestFixture::use_graphs)
-            {
-                // Default stream does not support hipGraph stream capture, so create one
-                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-            }
-
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
@@ -714,7 +888,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             // Calculate expected results on host
             std::vector<U> expected(input.size());
             acc_type       initial_value;
-            if(TestFixture::use_initial_value)
+            if(use_initial_value)
             {
                 initial_value = test_utils::get_random_value<acc_type>(1, 10, seed_value);
                 test_utils::host_inclusive_scan(input.begin(),
@@ -730,7 +904,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                                                 expected.begin(),
                                                 scan_op);
             }
-            SCOPED_TRACE(TestFixture::use_initial_value
+            SCOPED_TRACE(use_initial_value
                              ? (testing::Message() << "with initial_value = " << initial_value)
                              : (testing::Message() << "without initial_value"));
 
@@ -738,80 +912,39 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                 = rocprim::make_transform_iterator(d_input.get(),
                                                    [](T in) { return static_cast<acc_type>(in); });
 
-            // Get size of d_temp_storage
-            size_t temp_storage_size_bytes;
-            if(TestFixture::use_initial_value)
-            {
-                HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
-                    nullptr,
-                    temp_storage_size_bytes,
-                    input_iterator,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
-                    initial_value,
-                    input.size(),
-                    scan_op,
-                    stream,
-                    TestFixture::debug_synchronous)));
-            }
-            else
-            {
-                HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
-                    nullptr,
-                    temp_storage_size_bytes,
-                    input_iterator,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
-                    input.size(),
-                    scan_op,
-                    stream,
-                    TestFixture::debug_synchronous)));
-            }
-
-            // temp_storage_size_bytes must be >0
-            ASSERT_GT(temp_storage_size_bytes, 0);
-
-            // Allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            // Run
-            if(TestFixture::use_initial_value)
-            {
-                HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
-                    d_temp_storage.get(),
-                    temp_storage_size_bytes,
-                    input_iterator,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
-                    initial_value,
-                    input.size(),
-                    scan_op,
-                    stream,
-                    TestFixture::debug_synchronous)));
-            }
-            else
-            {
-                HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
-                    d_temp_storage.get(),
-                    temp_storage_size_bytes,
-                    input_iterator,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
-                    input.size(),
-                    scan_op,
-                    stream,
-                    TestFixture::debug_synchronous)));
-            }
-
-            if(TestFixture::use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream, true, false);
-            }
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
+            test_utils::test_kernel_wrapper(
+                [&](void* temp_storage, size_t& storage_bytes)
+                {
+                    if constexpr(use_initial_value)
+                    {
+                        return invoke_inclusive_scan<deterministic, Config>(
+                            temp_storage,
+                            storage_bytes,
+                            input_iterator,
+                            test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                                d_output.get()),
+                            initial_value,
+                            input.size(),
+                            scan_op,
+                            stream,
+                            TestFixture::debug_synchronous);
+                    }
+                    else
+                    {
+                        return invoke_inclusive_scan<deterministic, Config>(
+                            temp_storage,
+                            storage_bytes,
+                            input_iterator,
+                            test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                                d_output.get()),
+                            input.size(),
+                            scan_op,
+                            stream,
+                            TestFixture::debug_synchronous);
+                    }
+                },
+                stream,
+                TestFixture::use_graphs);
 
             // Copy output to host
             const auto output = d_output.load();
@@ -825,13 +958,12 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                         test_utils::assert_near(output[i], expected[i], single_op_precision * i));
                 }
             }
-
-            if(TestFixture::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-                HIP_CHECK(hipStreamDestroy(stream));
-            }
         }
+    }
+
+    if(TestFixture::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -858,8 +990,17 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
 
     const bool            debug_synchronous     = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
-    const bool            deterministic         = TestFixture::deterministic;
-    using Config = typename TestFixture::config_helper::template type<false>;
+    static constexpr bool deterministic         = TestFixture::deterministic;
+
+    using Config = typename TestFixture::config_helper;
+
+    // Default
+    hipStream_t stream = 0;
+    if(TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -880,14 +1021,6 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                              "with current or larger size"
                           << std::endl;
                 break;
-            }
-
-            // Default
-            hipStream_t stream = 0;
-            if(TestFixture::use_graphs)
-            {
-                // Default stream does not support hipGraph stream capture, so create one
-                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
             }
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -914,50 +1047,23 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                 = rocprim::make_transform_iterator(d_input.get(),
                                                    [](T in) { return static_cast<acc_type>(in); });
 
-            // Get size of d_temp_storage
-            size_t temp_storage_size_bytes;
-            HIP_CHECK((invoke_exclusive_scan<deterministic, Config>(
-                nullptr,
-                temp_storage_size_bytes,
-                input_iterator,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
-                initial_value,
-                input.size(),
-                scan_op,
+            test_utils::test_kernel_wrapper(
+                [&](void* temp_storage, size_t& storage_bytes)
+                {
+                    return invoke_exclusive_scan<deterministic, Config>(
+                        temp_storage,
+                        storage_bytes,
+                        input_iterator,
+                        test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                            d_output.get()),
+                        initial_value,
+                        input.size(),
+                        scan_op,
+                        stream,
+                        debug_synchronous);
+                },
                 stream,
-                debug_synchronous)));
-
-            // temp_storage_size_bytes must be >0
-            ASSERT_GT(temp_storage_size_bytes, 0);
-
-            // Allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            // Run
-            HIP_CHECK((invoke_exclusive_scan<deterministic, Config>(
-                d_temp_storage.get(),
-                temp_storage_size_bytes,
-                input_iterator,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
-                initial_value,
-                input.size(),
-                scan_op,
-                stream,
-                debug_synchronous)));
-
-            if(TestFixture::use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream, true, false);
-            }
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
+                TestFixture::use_graphs);
 
             // Copy output to host
             const auto output = d_output.load();
@@ -971,322 +1077,19 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                         test_utils::assert_near(output[i], expected[i], single_op_precision * i));
                 }
             }
-
-            if(TestFixture::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-                HIP_CHECK(hipStreamDestroy(stream));
-            }
         }
     }
-}
 
-TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
-{
-    // scan-by-key does not support output iterator with void value_type
-    using T = typename TestFixture::input_type;
-    using K = unsigned int; // Key type
-    using U = typename TestFixture::output_type;
-
-    using scan_op_type = typename TestFixture::scan_op_type;
-    // If scan_op_type is rocprim::plus and input_type is bfloat16 or half,
-    // use float as device-side accumulator and double as host-side accumulator
-    using is_plus_op = test_utils::is_plus_operator<scan_op_type>;
-    using acc_type   = typename accum_type<T, scan_op_type>::type;
-
-    constexpr float single_op_precision = is_plus_op::value ? test_utils::precision<acc_type> : 0;
-
-    const bool debug_synchronous = TestFixture::debug_synchronous;
-    const bool deterministic     = TestFixture::deterministic;
-    using Config                 = typename TestFixture::config_helper::template type<true>;
-
-    int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
-    HIP_CHECK(hipSetDevice(device_id));
-
-    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    if(TestFixture::use_graphs)
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-
-        for(auto size : test_utils::get_sizes(seed_value))
-        {
-            if(single_op_precision * (size - 1) > 0.5)
-            {
-                std::cout << "Test is skipped from size " << size
-                          << " on, potential error of summation is more than 0.5 of the result "
-                             "with current or larger size"
-                          << std::endl;
-                break;
-            }
-
-            // Default
-            hipStream_t stream = 0;
-            if(TestFixture::use_graphs)
-            {
-                // Default stream does not support hipGraph stream capture, so create one
-                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-            }
-
-            SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-            const bool use_unique_keys = bool(test_utils::get_random_value<int>(0, 1, seed_value));
-
-            // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, 0, 9, seed_value);
-            std::vector<K> keys;
-            if(use_unique_keys)
-            {
-                keys = test_utils::get_random_data<K>(size, 0, 16, seed_value);
-                std::sort(keys.begin(), keys.end());
-            }
-            else
-            {
-                keys = test_utils::get_random_data<K>(size, 0, 3, seed_value);
-            }
-
-            common::device_ptr<T> d_input(input);
-            common::device_ptr<K> d_keys(keys);
-            common::device_ptr<U> d_output(input.size());
-
-            // Scan function
-            scan_op_type scan_op;
-            // Key compare function
-            rocprim::equal_to<K> keys_compare_op;
-
-            // Calculate expected results on host
-            std::vector<U> expected(input.size());
-            test_utils::host_inclusive_scan_by_key(input.begin(),
-                                                   input.end(),
-                                                   keys.begin(),
-                                                   expected.begin(),
-                                                   scan_op,
-                                                   keys_compare_op);
-
-            auto input_iterator
-                = rocprim::make_transform_iterator(d_input.get(),
-                                                   [](T in) { return static_cast<acc_type>(in); });
-
-            // Get size of d_temp_storage
-            size_t temp_storage_size_bytes;
-            HIP_CHECK((invoke_inclusive_scan_by_key<deterministic, Config>(nullptr,
-                                                                           temp_storage_size_bytes,
-                                                                           d_keys.get(),
-                                                                           input_iterator,
-                                                                           d_output.get(),
-                                                                           input.size(),
-                                                                           scan_op,
-                                                                           keys_compare_op,
-                                                                           stream,
-                                                                           debug_synchronous)));
-
-            // temp_storage_size_bytes must be >0
-            ASSERT_GT(temp_storage_size_bytes, 0);
-
-            // Allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            // Run
-            HIP_CHECK((invoke_inclusive_scan_by_key<deterministic, Config>(d_temp_storage.get(),
-                                                                           temp_storage_size_bytes,
-                                                                           d_keys.get(),
-                                                                           input_iterator,
-                                                                           d_output.get(),
-                                                                           input.size(),
-                                                                           scan_op,
-                                                                           keys_compare_op,
-                                                                           stream,
-                                                                           debug_synchronous)));
-
-            if(TestFixture::use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream, true, false);
-            }
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
-
-            // Copy output to host
-            const auto output = d_output.load();
-
-            // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(
-                test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
-
-            if(TestFixture::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-                HIP_CHECK(hipStreamDestroy(stream));
-            }
-        }
-    }
-}
-
-TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
-{
-    // scan-by-key does not support output iterator with void value_type
-    using T = typename TestFixture::input_type;
-    using K = unsigned int; // Key type
-    using U = typename TestFixture::output_type;
-
-    using scan_op_type = typename TestFixture::scan_op_type;
-    // If scan_op_type is rocprim::plus and input_type is bfloat16 or half,
-    // use float as device-side accumulator and double as host-side accumulator
-    using is_plus_op = test_utils::is_plus_operator<scan_op_type>;
-    using acc_type   = typename accum_type<T, scan_op_type>::type;
-
-    acc_type        initial_value;
-    constexpr float single_op_precision = is_plus_op::value ? test_utils::precision<acc_type> : 0;
-
-    const bool debug_synchronous = TestFixture::debug_synchronous;
-    const bool deterministic     = TestFixture::deterministic;
-    using Config                 = typename TestFixture::config_helper::template type<true>;
-
-    int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
-    HIP_CHECK(hipSetDevice(device_id));
-
-    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
-    {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-
-        for(auto size : test_utils::get_sizes(seed_value))
-        {
-            if(single_op_precision * (size - 1) > 0.5)
-            {
-                std::cout << "Test is skipped from size " << size
-                          << " on, potential error of summation is more than 0.5 of the result "
-                             "with current or larger size"
-                          << std::endl;
-                break;
-            }
-
-            // Default
-            hipStream_t stream = 0;
-            if(TestFixture::use_graphs)
-            {
-                // Default stream does not support hipGraph stream capture, so create one
-                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-            }
-
-            SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-            const bool use_unique_keys = bool(test_utils::get_random_value<int>(0, 1, seed_value));
-
-            // Generate data
-            initial_value        = test_utils::get_random_value<acc_type>(1, 100, seed_value);
-            std::vector<T> input = test_utils::get_random_data<T>(size, 0, 9, seed_value);
-            std::vector<K> keys;
-            if(use_unique_keys)
-            {
-                keys = test_utils::get_random_data<K>(size, 0, 16, seed_value);
-                std::sort(keys.begin(), keys.end());
-            }
-            else
-            {
-                keys = test_utils::get_random_data<K>(size, 0, 3, seed_value);
-            }
-
-            common::device_ptr<T> d_input(input);
-            common::device_ptr<K> d_keys(keys);
-            common::device_ptr<U> d_output(input.size());
-
-            // Scan function
-            scan_op_type scan_op;
-
-            // Key compare function
-            rocprim::equal_to<K> keys_compare_op;
-
-            // Calculate expected results on host
-            std::vector<U> expected(input.size());
-            test_utils::host_exclusive_scan_by_key(input.begin(),
-                                                   input.end(),
-                                                   keys.begin(),
-                                                   initial_value,
-                                                   expected.begin(),
-                                                   scan_op,
-                                                   keys_compare_op);
-
-            auto input_iterator
-                = rocprim::make_transform_iterator(d_input.get(),
-                                                   [](T in) { return static_cast<acc_type>(in); });
-
-            // Get size of d_temp_storage
-            size_t temp_storage_size_bytes;
-            HIP_CHECK((invoke_exclusive_scan_by_key<deterministic, Config>(nullptr,
-                                                                           temp_storage_size_bytes,
-                                                                           d_keys.get(),
-                                                                           input_iterator,
-                                                                           d_output.get(),
-                                                                           initial_value,
-                                                                           input.size(),
-                                                                           scan_op,
-                                                                           keys_compare_op,
-                                                                           stream,
-                                                                           debug_synchronous)));
-
-            // temp_storage_size_bytes must be >0
-            ASSERT_GT(temp_storage_size_bytes, 0);
-
-            // Allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(TestFixture::use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            // Run
-            HIP_CHECK((invoke_exclusive_scan_by_key<deterministic, Config>(d_temp_storage.get(),
-                                                                           temp_storage_size_bytes,
-                                                                           d_keys.get(),
-                                                                           input_iterator,
-                                                                           d_output.get(),
-                                                                           initial_value,
-                                                                           input.size(),
-                                                                           scan_op,
-                                                                           keys_compare_op,
-                                                                           stream,
-                                                                           debug_synchronous)));
-
-            if(TestFixture::use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream, true, false);
-            }
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
-
-            // Copy output to host
-            const auto output = d_output.load();
-
-            // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(
-                test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
-
-            if(TestFixture::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-                HIP_CHECK(hipStreamDestroy(stream));
-            }
-        }
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
 template<typename T>
 class single_index_iterator
 {
-private:
+public:
     class conditional_discard_value
     {
     public:
@@ -1394,81 +1197,42 @@ void testLargeIndicesInclusiveScan()
 
             OutputIterator output_it{d_output.get(), size - 1};
 
-            // Get temporary array size
             size_t initial_value = 0;
-            size_t temp_storage_size_bytes;
-            if constexpr(UseInitialValue)
-            {
-                initial_value = test_utils::get_random_value<size_t>(0, 10000, seed_value);
-                HIP_CHECK(rocprim::inclusive_scan(nullptr,
-                                                  temp_storage_size_bytes,
-                                                  input_begin,
-                                                  output_it,
-                                                  initial_value,
-                                                  size,
-                                                  ::rocprim::plus<T>(),
-                                                  stream,
-                                                  debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::inclusive_scan(nullptr,
-                                                  temp_storage_size_bytes,
-                                                  input_begin,
-                                                  output_it,
-                                                  size,
-                                                  ::rocprim::plus<T>(),
-                                                  stream,
-                                                  debug_synchronous));
-            }
 
-            // temp_storage_size_bytes must be >0
-            ASSERT_GT(temp_storage_size_bytes, 0);
+            test_utils::test_kernel_wrapper(
+                [&](void* temp_storage, size_t& storage_bytes)
+                {
+                    if constexpr(UseInitialValue)
+                    {
+                        initial_value = test_utils::get_random_value<size_t>(0, 10000, seed_value);
+                        return rocprim::inclusive_scan(temp_storage,
+                                                       storage_bytes,
+                                                       input_begin,
+                                                       output_it,
+                                                       initial_value,
+                                                       size,
+                                                       ::rocprim::plus<T>(),
+                                                       stream,
+                                                       debug_synchronous);
+                    }
+                    else
+                    {
+                        return rocprim::inclusive_scan(temp_storage,
+                                                       storage_bytes,
+                                                       input_begin,
+                                                       output_it,
+                                                       size,
+                                                       ::rocprim::plus<T>(),
+                                                       stream,
+                                                       debug_synchronous);
+                    }
+                },
+                stream,
+                UseGraphs);
 
-            // Allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(UseGraphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            // Run
-            if constexpr(UseInitialValue)
-            {
-                HIP_CHECK(rocprim::inclusive_scan(d_temp_storage.get(),
-                                                  temp_storage_size_bytes,
-                                                  input_begin,
-                                                  output_it,
-                                                  initial_value,
-                                                  size,
-                                                  ::rocprim::plus<T>(),
-                                                  stream,
-                                                  debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::inclusive_scan(d_temp_storage.get(),
-                                                  temp_storage_size_bytes,
-                                                  input_begin,
-                                                  output_it,
-                                                  size,
-                                                  ::rocprim::plus<T>(),
-                                                  stream,
-                                                  debug_synchronous));
-            }
             SCOPED_TRACE(UseInitialValue
                              ? (testing::Message() << "with initial_value = " << initial_value)
                              : (testing::Message() << "without initial_value"));
-
-            if(UseGraphs)
-            {
-                gHelper.createAndLaunchGraph(stream, true, false);
-            }
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
             const auto output = d_output.load()[0];
@@ -1483,11 +1247,6 @@ void testLargeIndicesInclusiveScan()
                   + initial_value;
 
             ASSERT_EQ(output, expected_output);
-
-            if(UseGraphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
         }
     }
 
@@ -1558,48 +1317,21 @@ void testLargeIndicesExclusiveScan()
 
             OutputIterator output_it{d_output.get(), size - 1};
 
-            // Get temporary array size
-            size_t temp_storage_size_bytes;
-            HIP_CHECK(rocprim::exclusive_scan(nullptr,
-                                              temp_storage_size_bytes,
-                                              input_begin,
-                                              output_it,
-                                              initial_value,
-                                              size,
-                                              ::rocprim::plus<T>(),
-                                              stream,
-                                              debug_synchronous));
-
-            // temp_storage_size_bytes must be >0
-            ASSERT_GT(temp_storage_size_bytes, 0);
-
-            // Allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(UseGraphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            // Run
-            HIP_CHECK(rocprim::exclusive_scan(d_temp_storage.get(),
-                                              temp_storage_size_bytes,
-                                              input_begin,
-                                              output_it,
-                                              initial_value,
-                                              size,
-                                              ::rocprim::plus<T>(),
-                                              stream,
-                                              debug_synchronous));
-
-            if(UseGraphs)
-            {
-                gHelper.createAndLaunchGraph(stream, true, false);
-            }
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
+            test_utils::test_kernel_wrapper(
+                [&](void* temp_storage, size_t& storage_bytes)
+                {
+                    return rocprim::exclusive_scan(temp_storage,
+                                                   storage_bytes,
+                                                   input_begin,
+                                                   output_it,
+                                                   initial_value,
+                                                   size,
+                                                   ::rocprim::plus<T>(),
+                                                   stream,
+                                                   debug_synchronous);
+                },
+                stream,
+                UseGraphs);
 
             // Copy output to host
             const auto output = d_output.load()[0];
@@ -1615,11 +1347,6 @@ void testLargeIndicesExclusiveScan()
             const T expected_output = initial_value + product;
 
             ASSERT_EQ(output, expected_output);
-
-            if(UseGraphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
         }
     }
 
@@ -1791,181 +1518,6 @@ struct check_value_exclusive
     }
 };
 
-using check_run_inclusive_iterator
-    = check_run_iterator<check_value_inclusive, size_t, unsigned int*>;
-using check_run_exclusive_iterator
-    = check_run_iterator<check_value_exclusive, size_t, size_t, unsigned int*>;
-
-/// \p brief Provides a skeleton to both the inclusive and exclusive scan large indices tests.
-/// The call to the appropriate scan function must be implemented in \p scan_by_key_fun.
-template<class ScanByKeyFun, bool UseGraphs = false>
-void large_indices_scan_by_key_test(ScanByKeyFun scan_by_key_fun)
-{
-    const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
-    HIP_CHECK(hipSetDevice(device_id));
-
-    constexpr bool debug_synchronous = false;
-    hipStream_t    stream            = 0;
-    if(UseGraphs)
-    {
-        // Default stream does not support hipGraph stream capture, so create one
-        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-    }
-
-    const int seed_value = rand();
-    SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-
-    const auto size = test_utils::get_large_sizes(seed_value).back();
-    SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-    common::device_ptr<unsigned int> d_incorrect_flag(1);
-    HIP_CHECK(hipMemset(d_incorrect_flag.get(), 0, sizeof(unsigned int)));
-
-    const size_t run_length = test_utils::get_random_value<size_t>(1, 10000, seed_value);
-    SCOPED_TRACE(testing::Message() << "with run_length = " << run_length);
-
-    const auto keys_input = rocprim::make_transform_iterator(rocprim::counting_iterator<size_t>(0),
-                                                             [run_length](const auto value)
-                                                             { return value / run_length; });
-    const auto values_input = rocprim::counting_iterator<size_t>(0);
-
-    size_t temp_storage_size_bytes;
-    HIP_CHECK(scan_by_key_fun(nullptr,
-                              temp_storage_size_bytes,
-                              keys_input,
-                              values_input,
-                              run_length,
-                              d_incorrect_flag.get(),
-                              size,
-                              stream,
-                              debug_synchronous,
-                              seed_value));
-
-    ASSERT_GT(temp_storage_size_bytes, 0);
-
-    common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-
-    test_utils::GraphHelper gHelper;
-    if(UseGraphs)
-    {
-        gHelper.startStreamCapture(stream);
-    }
-
-    HIP_CHECK(scan_by_key_fun(d_temp_storage.get(),
-                              temp_storage_size_bytes,
-                              keys_input,
-                              values_input,
-                              run_length,
-                              d_incorrect_flag.get(),
-                              size,
-                              stream,
-                              debug_synchronous,
-                              seed_value));
-
-    if(UseGraphs)
-    {
-        gHelper.createAndLaunchGraph(stream);
-    }
-
-    HIP_CHECK(hipGetLastError());
-
-    const auto incorrect_flag = d_incorrect_flag.load()[0];
-
-    ASSERT_EQ(0, incorrect_flag);
-
-    if(UseGraphs)
-    {
-        gHelper.cleanupGraphHelper();
-        HIP_CHECK(hipStreamDestroy(stream));
-    }
-}
-
-template<bool UseGraphs = false>
-void testLargeIndicesInclusiveScanByKey()
-{
-    auto inclusive_scan_by_key = [](void*         d_temp_storage,
-                                    size_t&       temp_storage_size_bytes,
-                                    auto          keys_input,
-                                    auto          values_input,
-                                    size_t        run_length,
-                                    unsigned int* d_incorrect_flag,
-                                    size_t        size,
-                                    hipStream_t   stream,
-                                    bool          debug_synchronous,
-                                    int /*seed_value*/) -> hipError_t
-    {
-        const check_run_inclusive_iterator output_it(
-            rocprim::make_tuple(run_length, d_incorrect_flag));
-
-        return rocprim::inclusive_scan_by_key(d_temp_storage,
-                                              temp_storage_size_bytes,
-                                              keys_input,
-                                              values_input,
-                                              output_it,
-                                              size,
-                                              rocprim::plus<size_t>{},
-                                              rocprim::equal_to<size_t>{},
-                                              stream,
-                                              debug_synchronous);
-    };
-    large_indices_scan_by_key_test<decltype(inclusive_scan_by_key), UseGraphs>(
-        inclusive_scan_by_key);
-}
-
-TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanByKey)
-{
-    testLargeIndicesInclusiveScanByKey();
-}
-
-TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanByKeyWithGraphs)
-{
-    testLargeIndicesInclusiveScanByKey<true>();
-}
-
-template<bool UseGraphs = false>
-void testLargeIndicesExclusiveScanByKey()
-{
-    auto exclusive_scan_by_key = [](void*         d_temp_storage,
-                                    size_t&       temp_storage_size_bytes,
-                                    auto          keys_input,
-                                    auto          values_input,
-                                    size_t        run_length,
-                                    unsigned int* d_incorrect_flag,
-                                    size_t        size,
-                                    hipStream_t   stream,
-                                    bool          debug_synchronous,
-                                    int           seed_value) -> hipError_t
-    {
-        const size_t initial_value = test_utils::get_random_value<size_t>(0, 10000, seed_value);
-        const check_run_exclusive_iterator output_it(
-            rocprim::make_tuple(run_length, initial_value, d_incorrect_flag));
-        return rocprim::exclusive_scan_by_key(d_temp_storage,
-                                              temp_storage_size_bytes,
-                                              keys_input,
-                                              values_input,
-                                              output_it,
-                                              initial_value,
-                                              size,
-                                              rocprim::plus<size_t>{},
-                                              rocprim::equal_to<size_t>{},
-                                              stream,
-                                              debug_synchronous);
-    };
-    large_indices_scan_by_key_test<decltype(exclusive_scan_by_key), UseGraphs>(
-        exclusive_scan_by_key);
-}
-
-TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanByKey)
-{
-    testLargeIndicesExclusiveScanByKey();
-}
-
-TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanByKeyWithGraphs)
-{
-    testLargeIndicesExclusiveScanByKey<true>();
-}
-
 using RocprimDeviceScanFutureTestsParams = ::testing::Types<
     DeviceScanParams<char>,
     DeviceScanParams<int>,
@@ -1973,7 +1525,7 @@ using RocprimDeviceScanFutureTestsParams = ::testing::Types<
     DeviceScanParams<double, double, rocprim::plus<double>, true>,
     DeviceScanParams<common::custom_type<int, int, true>>,
     DeviceScanParams<test_utils::custom_test_array_type<long long, 5>>,
-    DeviceScanParams<int, int, ::rocprim::plus<int>, false, default_config_helper, true>>;
+    DeviceScanParams<int, int, ::rocprim::plus<int>, false, rocprim::default_config, true>>;
 
 template<typename Params>
 class RocprimDeviceScanFutureTests : public RocprimDeviceScanTests<Params>
@@ -1993,7 +1545,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
     const bool            debug_synchronous     = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool            deterministic         = TestFixture::deterministic;
-    using Config = typename TestFixture::config_helper::template type<false>;
+    using Config                                = typename TestFixture::config_helper;
 
     const int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);

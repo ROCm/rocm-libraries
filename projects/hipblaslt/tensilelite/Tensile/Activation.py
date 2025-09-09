@@ -182,6 +182,9 @@ class ActivationType:
                           ('swish', { \
                             'instance': ActivationTypeRegister('swish', False, 1,        True,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE}), \
+                          ('clamp', { \
+                            'instance': ActivationTypeRegister('clamp', False, 2, True,  True,  True,   False, False, False,  True), \
+                            'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('hipblaslt_all', { \
                             'instance': ActivationTypeRegister('hipblaslt_all', False, 0), \
                             'supported_by': SupportedBy.HIPBLASLT}), \
@@ -372,6 +375,8 @@ class ActivationModule:
             module = self.getSiluModule(cDataType, vgprIn, vgprOut)
         elif (activationType == 'swish'):
             module = self.getSwishModule(cDataType, vgprIn, vgprOut, "activationAlpha")
+        elif (activationType == 'clamp'):
+            module = self.getClampModule(cDataType, vgprIn, vgprOut, "activationAlpha", "activationBeta")
         elif (activationType == 'none'):
             return Module("No activation")
         else:
@@ -494,6 +499,7 @@ class ActivationModule:
     def getClippedReluModule(self, cDataType, vgprIn, vgprOut, activationAlpha, activationBeta):
         module = Module("ClippedRelu")
         if cDataType.isHalf():
+            vgprTemp = self.getVgpr(1)
             for i in range(0, 2):
                 select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
                 module.add(VCmpGTF16(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), \
@@ -502,24 +508,34 @@ class ActivationModule:
                            sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
                                               src0_sel=select_bit, src1_sel=select_bit), \
                            comment="min(x, beta)"))
-                module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=0.0, src1=self.vgprPrefix(vgprOut), \
+                module.add(VMinF16(dst=vgpr(Holder(idx=vgprTemp)), src0=sgpr(activationBeta), src1=0.0, \
                            sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
                                               src0_sel=select_bit, src1_sel=select_bit), \
-                           comment="set x to 0 if <= alpha"))
+                           comment="min(0, beta)"))                
+                module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=vgpr(Holder(idx=vgprTemp)), src1=self.vgprPrefix(vgprOut), \
+                           sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
+                                              src0_sel=select_bit, src1_sel=select_bit), \
+                           comment="set x to min(0, beta) if <= alpha"))
             module.add(SNop(waitState=0, comment="1 wait states")) # workaround for emulator
         elif cDataType.isSingle():
             module.add(VCmpGTF32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), comment="x > alpha ?"))
             module.add(VMinF32(dst=self.vgprPrefix(vgprIn), src0=sgpr(activationBeta), src1=self.vgprPrefix(vgprIn), comment="min(x, beta)"))
-            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn), src0=0.0, src1=self.vgprPrefix(vgprIn), comment="set x to 0 if <= alpha"))
+            vgprTemp = self.getVgpr(1)
+            module.add(VMinF32(dst=vgpr(Holder(idx=vgprTemp)), src0=sgpr(activationBeta), src1=0.0, comment="min(0, beta)"))
+            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn), src0=vgpr(Holder(idx=vgprTemp)), src1=self.vgprPrefix(vgprIn), comment="set x to min(0, beta) if <= alpha"))
         elif cDataType.isDouble():
             module.add(VCmpGTF64(dst=VCC(), src0=self.vgprPrefix(vgprIn, 2), src1=sgpr(activationAlpha, 2), comment="x > alpha ?"))
             module.add(VMinF64(dst=self.vgprPrefix(vgprIn, 2), src0=sgpr(activationBeta, 2), src1=self.vgprPrefix(vgprIn, 2), comment="min(x, beta)"))
-            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn), src0=0, src1=self.vgprPrefix(vgprIn), comment="set x to 0 if <= alpha"))
-            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn+1), src0=0, src1=self.vgprPrefix(vgprIn+1), comment="set x to 0 if <= alpha"))
+            vgprTemp = self.getVgpr(2)
+            module.add(VMinF64(dst=vgpr(Holder(idx=vgprTemp), 2), src0=sgpr(activationBeta, 2), src1=0.0, comment="min(0, beta)"))
+            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn), src0=vgpr(Holder(idx=vgprTemp)), src1=self.vgprPrefix(vgprIn), comment="set x to min(0, beta) if <= alpha"))
+            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn+1), src0=vgpr(Holder(idx=vgprTemp+1)), src1=self.vgprPrefix(vgprIn+1), comment="set x to min(0, beta) if <= alpha"))
         elif cDataType.isInt32():
             module.add(VCmpGTI32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), comment="x > alpha ?"))
             module.add(VMinI32(dst=self.vgprPrefix(vgprIn), src0=sgpr(activationBeta), src1=self.vgprPrefix(vgprIn), comment="min(x, beta)"))
-            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn), src0=0.0, src1=self.vgprPrefix(vgprIn), comment="set x to 0 if <= alpha"))
+            vgprTemp = self.getVgpr(1)
+            module.add(VMinI32(dst=vgpr(Holder(idx=vgprTemp)), src0=sgpr(activationBeta), src1=0, comment="min(0, beta)"))
+            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn), src0=vgpr(Holder(idx=vgprTemp)), src1=self.vgprPrefix(vgprIn), comment="set x to min(0, beta) if <= alpha"))
         return module
 
     def getExpModule(self, cDataType, vgprIn, vgprOut):
@@ -865,6 +881,35 @@ class ActivationModule:
         module.add(mulFunction(dst=self.vgprPrefix(Holder(idx=vgprTempIn)), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), comment="x * beta"))
         module.addModuleAsFlatItems(self.getSigmoidModule(cDataType, Holder(idx=vgprTempIn), Holder(idx=vgprTempOut)))
         module.add(mulFunction(dst=self.vgprPrefix(vgprOut), src0=self.vgprPrefix(vgprIn), src1=self.vgprPrefix(Holder(idx=vgprTempOut)), comment="x / (1 + exp(-x * beta))"))
+        return module
+
+    def getClampModule(self, cDataType, vgprIn, vgprOut, activationAlpha, activationBeta):
+        module = Module("Clamp")
+        if cDataType.isDouble():
+            Vin, Vout = self.vgprPrefix(vgprIn, 2), self.vgprPrefix(vgprOut, 2)
+            alpha, beta = sgpr(activationAlpha, 2), sgpr(activationBeta, 2)
+        else:
+            Vin, Vout = self.vgprPrefix(vgprIn), self.vgprPrefix(vgprOut)
+            alpha, beta = sgpr(activationAlpha), sgpr(activationBeta)
+        if cDataType.isHalf():
+            MIN, MAX = VMinF16, VMaxF16
+        elif cDataType.isSingle():
+            MIN, MAX = VMinF32, VMaxF32
+        elif cDataType.isDouble():
+            MIN, MAX = VMinF64, VMaxF64
+        elif cDataType.isInt32():
+            MIN, MAX = VMinI32, VMaxI32
+
+        if cDataType.isHalf():
+            for i in range(0, 2):
+                select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
+                sdwa = SDWAModifiers(dst_sel = select_bit, dst_unused = UnusedBit.UNUSED_PRESERVE,
+                                     src0_sel = select_bit, src1_sel = select_bit)
+                module.add(MIN(dst = Vout, src0 = beta, src1 = Vin, sdwa = sdwa, comment = "min(x, beta)"))
+                module.add(MAX(dst = Vout, src0 = alpha, src1 = Vout, sdwa = sdwa, comment = "max(alpha, min(x, beta))"))
+        else:
+            module.add(MIN(dst = Vout, src0 = beta, src1 = Vin, comment = "min(x, beta)"))
+            module.add(MAX(dst = Vout, src0 = alpha, src1 = Vout, comment = "max(alpha, min(x, beta))"))
         return module
 
     ################################################################################
@@ -1294,9 +1339,9 @@ class ActivationInline:
         raise RuntimeError("Unrecognized data type %s."%self.dataType)
     elif (activationType == 'clippedrelu'):
       if (self.dataType.isSingle() or self.dataType.isHalf() or self.dataType.isDouble()):
-        kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : 0.0;\n")
+        kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : min(0.0, beta);\n")
       elif self.dataType.isInt32():
-        kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : 0;\n")
+        kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : min(0, beta);\n")
     elif (activationType == 'exp'):
       kStr += (asm + " // Exp\n")
       module = activation.getExpModule(self.dataType, 0, 0)
@@ -1360,6 +1405,8 @@ class ActivationInline:
       kStr += self.getActivationAsmStr(activation, module, (len(asm) * " "))
       kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha)\n")
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter)
+    elif (activationType == 'clamp'):
+      kStr += (padSpacesStr + "value = max(alpha, min(value, beta));\n")
     else:
       if (activationType != 'none'):
         raise RuntimeError("Unrecognized type %s."%activationType)

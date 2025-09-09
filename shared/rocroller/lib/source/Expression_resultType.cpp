@@ -149,6 +149,9 @@ namespace rocRoller
                 else if constexpr(std::same_as<T, MagicShiftAndSign>)
                     return {argVal.regType, DataType::UInt32};
 
+                if constexpr(std::same_as<T, ToScalar>)
+                    return {Register::Type::Scalar, argVal.varType};
+
                 return argVal;
             }
 
@@ -359,7 +362,7 @@ namespace rocRoller
 
             ResultType operator()(PositionalArgument const& expr)
             {
-                Throw<FatalError>("Can not get result type of PositionalArgument.");
+                return {expr.regType, expr.varType};
             }
 
             ResultType operator()(WaveTilePtr const& expr)

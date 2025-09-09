@@ -45,9 +45,9 @@ else
 fi
 
 if [[ "$1" == "--reformat" ]]; then
-    files=$(git ls-files --exclude-standard)
+    files=$(git ls-files --exclude-standard -- shared/rocroller/)
 else
-    files=$(git diff-index --cached --name-only $against)
+    files=$(git diff-index --cached --name-only $against -- shared/rocroller/)
 fi
 
 [[ -z "$files" ]] && exit

@@ -122,8 +122,8 @@ TEST(RocprimConfigDispatchTests, DeviceIdFromStream)
     HIP_CHECK(get_device_from_stream(hipStreamPerThread, result));
     ASSERT_EQ(result, device_id);
 
-    // hipStreamLegacy support was added in ROCm 6.1.0
-#if (HIP_VERSION_MAJOR >= 6 && HIP_VERSION_MINOR >= 1)
+    // hipStreamLegacy support was added in ROCm 6.2.0
+#if (HIP_VERSION_MAJOR >= 6 && HIP_VERSION_MINOR >= 2)
     HIP_CHECK(get_device_from_stream(hipStreamLegacy, result));
     ASSERT_EQ(result, device_id);
 #endif
