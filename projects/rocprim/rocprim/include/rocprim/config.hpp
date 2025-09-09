@@ -139,6 +139,39 @@
     #define ROCPRIM_TARGET_UNKNOWN 1
 #endif
 
+#ifdef ROCPRIM_TARGET_SPIRV
+    #define ROCPRIM_CONSTEXPR
+#else
+    #define ROCPRIM_CONSTEXPR constexpr
+#endif
+
+#define IS_CDNA3()                                                                     \
+    __builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950")
+#define IS_CDNA2() __builtin_amdgcn_processor_is("gfx90a")
+#define IS_CDNA1() __builtin_amdgcn_processor_is("gfx908")
+#define IS_GCN5()                                                                             \
+    __builtin_amdgcn_processor_is("gfx900") || __builtin_amdgcn_processor_is("gfx902")        \
+        || __builtin_amdgcn_processor_is("gfx904") || __builtin_amdgcn_processor_is("gfx906") \ \
+        || __builtin_amdgcn_processor_is("gfx90c") \                                            \
+        || __builtin_amdgcn_processor_is("gfx9-generic")
+#define IS_RDNA4() __builtin_amdgcn_processor_is("gfx1201")
+#define IS_RDNA3()                                                                              \
+    __builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101") \        \
+        || __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") \ \
+        || __builtin_amdgcn_processor_is("gfx11-generic")
+#define IS_RDNA2()                                                                              \
+    __builtin_amdgcn_processor_is("gfx1030") || __builtin_amdgcn_processor_is("gfx1031") \        \
+        || __builtin_amdgcn_processor_is("gfx1032") || __builtin_amdgcn_processor_is("gfx1033") \ \
+        || __builtin_amdgcn_processor_is("gfx1034") || __builtin_amdgcn_processor_is("gfx1035") \ \
+        || __builtin_amdgcn_processor_is("gfx1036") \                                             \
+        || __builtin_amdgcn_processor_is("gfx10-3-generic")
+#define IS_RDNA1() \
+    __builtin_amdgcn_processor_is("gfx1012") || __builtin_amdgcn_processor_is("gfx1013")
+#define IS_GCN3()                                                                             \
+    __builtin_amdgcn_processor_is("gfx801") || __builtin_amdgcn_processor_is("gfx802")        \
+        || __builtin_amdgcn_processor_is("gfx803") || __builtin_amdgcn_processor_is("gfx805") \
+        || __builtin_amdgcn_processor_is("gfx810")
+
 // SPIR-V and unknown targets do not support 128-bit atomics.
 #if defined(ROCPRIM_TARGET_UNKNOWN) || defined(ROCPRIM_TARGET_SPIRV)
     #define ROCPRIM_MAX_ATOMIC_SIZE 8
