@@ -77,7 +77,7 @@ namespace GEMMDriverTest
                                  const std::vector<uint8_t>& hostScaleB)
     {
         static const SettingsOption<int> WriteOnFail{
-            "ROCROLLER_WRITE_ON_FAIL",
+            "ROCROLLER_WRITE_ON_GEMM_TEST_FAIL",
             "Write input/output matrices to file when GEMM tests fail (0 = disabled, >0 = "
             "max "
             "files)",

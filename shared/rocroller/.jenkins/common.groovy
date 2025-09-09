@@ -86,7 +86,7 @@ def runTestCommand (platform, project)
 
                 pushd build
                 echo Using ${numThreads} out of `nproc` threads for testing.
-                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ROCROLLER_WRITE_ON_FAIL=8 ctest -j ${numThreads} --output-on-failure ${testExclude}
+                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ROCROLLER_WRITE_ON_GEMM_TEST_FAIL=8 ctest -j ${numThreads} --output-on-failure ${testExclude}
                 export ROCROLLER_BUILD_DIR="\$(pwd)"
                 popd
                 scripts/rrperf generate --suite generate_gfx950 --arch gfx950
