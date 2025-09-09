@@ -41,6 +41,7 @@
 
 #include "fmt_rocblas_types.hpp"
 #include "rocblas_utility.hpp"
+#include "rocsolver_datatype2string.hpp"
 
 #ifdef ROCSOLVER_LIBRARY
 ROCSOLVER_BEGIN_NAMESPACE
