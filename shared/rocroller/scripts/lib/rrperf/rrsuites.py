@@ -1679,12 +1679,10 @@ def mxfp8_kernels_wgm():
 
 
 def mxfp8_16x16x128_scale_options():
-    yield from mxfp8_target_d2lds_mi16x16x128_pf4x1_wgm()
     yield from addSkipPermlane(mxfp8_target_d2lds_mi16x16x128_pf4x1_wgm())
 
 
 def mxfp8_32x32x64_scale_options():
-    yield from mxfp8_target_d2lds_mi32x32x64_pf4x1_wgm()
     yield from addSkipPermlane(mxfp8_target_d2lds_mi32x32x64_pf4x1_wgm())
 
 
