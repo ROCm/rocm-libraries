@@ -1,4 +1,4 @@
-# Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
 add_library(isa-spec-manager OBJECT)
