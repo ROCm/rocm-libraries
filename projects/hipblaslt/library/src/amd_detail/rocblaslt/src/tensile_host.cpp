@@ -1313,7 +1313,7 @@ namespace
             }
         }
         log_profile(
-            "matmu",
+            "matmul",
             "grouped_gemm",
             grouped_gemm_profile_string.str(),
             "alpha",
