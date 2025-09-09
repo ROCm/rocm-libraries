@@ -255,6 +255,84 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return maxConflicts;
     }
 
+    std::map<uint, std::vector<ThreadAccess>>
+        LDSBankModel::makeBankMappingForThreads(const std::vector<ThreadAccess>& threads,
+                                                uint                             dwords,
+                                                uint                             entryWidthInBytes,
+                                                uint                             numBanks)
+    {
+        std::map<uint, std::vector<ThreadAccess>> bankMapping;
+
+        for(const auto& thread : threads)
+        {
+            // Calculate all banks this access touches
+            uint bytesPerAccess = dwords * 4;
+            for(uint offset = 0; offset < bytesPerAccess; offset += entryWidthInBytes)
+            {
+                uint currentAddr = thread.address + offset;
+                uint bankIndex   = (currentAddr / entryWidthInBytes) % numBanks;
+                bankMapping[bankIndex].push_back(thread);
+            }
+        }
+
+        return bankMapping;
+    }
+
+    ThreadGroup LDSBankModel::buildThreadGroupWithClockCycles(
+        const std::map<uint, std::vector<ThreadAccess>>& bankToThreads, uint groupIndex)
+    {
+        ThreadGroup threadGroup;
+        threadGroup.groupIndex = groupIndex;
+
+        // Simulate clock cycles needed to resolve bank conflicts
+        std::map<uint, std::vector<ThreadAccess>> remainingAccesses = bankToThreads;
+
+        while(!remainingAccesses.empty())
+        {
+            std::vector<ThreadAccess> clockCycleThreads;
+            std::set<uint>    usedThreads; // Track which threads have been scheduled this cycle
+            std::vector<uint> banksToRemove;
+
+            // Process one thread per bank for this clock cycle
+            for(auto& [bankIndex, threadList] : remainingAccesses)
+            {
+                if(!threadList.empty())
+                {
+                    // Find first thread that hasn't been scheduled yet
+                    for(auto it = threadList.begin(); it != threadList.end(); ++it)
+                    {
+                        if(usedThreads.find(it->workitem) == usedThreads.end())
+                        {
+                            clockCycleThreads.push_back(*it);
+                            usedThreads.insert(it->workitem);
+                            threadList.erase(it);
+                            break;
+                        }
+                    }
+
+                    if(threadList.empty())
+                    {
+                        banksToRemove.push_back(bankIndex);
+                    }
+                }
+            }
+
+            // Remove banks with no remaining accesses
+            for(auto bank : banksToRemove)
+            {
+                remainingAccesses.erase(bank);
+            }
+
+            // Add this clock cycle to the thread group
+            if(!clockCycleThreads.empty())
+            {
+                threadGroup.clockCycles.push_back(clockCycleThreads);
+            }
+        }
+
+        return threadGroup;
+    }
+
     DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
     {
         DetailedSummary detailed;
@@ -311,68 +389,14 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
                     // Create a mapping of bank index to list of thread accesses
                     // For multi-dword accesses, we need to track all banks touched
-                    std::map<uint, std::vector<ThreadAccess>> bankToThreads;
+                    auto bankToThreads = makeBankMappingForThreads(
+                        groupThreads, instr.dwords, entryWidthInBytes, numBanks);
 
-                    for(const auto& thread : groupThreads)
-                    {
-                        // Calculate all banks this access touches
-                        uint bytesPerAccess = instr.dwords * 4;
-                        for(uint offset = 0; offset < bytesPerAccess; offset += entryWidthInBytes)
-                        {
-                            uint currentAddr = thread.address + offset;
-                            uint bankIndex   = (currentAddr / entryWidthInBytes) % numBanks;
-                            bankToThreads[bankIndex].push_back(thread);
-                        }
-                    }
+                    // Build thread group with clock cycles based on bank conflict resolution
+                    auto threadGroupWithCycles
+                        = buildThreadGroupWithClockCycles(bankToThreads, groupIndex - 1);
 
-                    // Simulate clock cycles needed to resolve bank conflicts
-                    std::map<uint, std::vector<ThreadAccess>> remainingAccesses = bankToThreads;
-
-                    while(!remainingAccesses.empty())
-                    {
-                        std::vector<ThreadAccess> clockCycleThreads;
-                        std::set<uint>
-                            usedThreads; // Track which threads have been scheduled this cycle
-                        std::vector<uint> banksToRemove;
-
-                        // Process one thread per bank for this clock cycle
-                        for(auto& [bankIndex, threadList] : remainingAccesses)
-                        {
-                            if(!threadList.empty())
-                            {
-                                // Find first thread that hasn't been scheduled yet
-                                for(auto it = threadList.begin(); it != threadList.end(); ++it)
-                                {
-                                    if(usedThreads.find(it->workitem) == usedThreads.end())
-                                    {
-                                        clockCycleThreads.push_back(*it);
-                                        usedThreads.insert(it->workitem);
-                                        threadList.erase(it);
-                                        break;
-                                    }
-                                }
-
-                                if(threadList.empty())
-                                {
-                                    banksToRemove.push_back(bankIndex);
-                                }
-                            }
-                        }
-
-                        // Remove banks with no remaining accesses
-                        for(auto bank : banksToRemove)
-                        {
-                            remainingAccesses.erase(bank);
-                        }
-
-                        // Add this clock cycle to the thread group
-                        if(!clockCycleThreads.empty())
-                        {
-                            threadGroup.clockCycles.push_back(clockCycleThreads);
-                        }
-                    }
-
-                    instr.threadGroups.push_back(threadGroup);
+                    instr.threadGroups.push_back(threadGroupWithCycles);
                 }
 
                 opAccesses.instructions.push_back(instr);
