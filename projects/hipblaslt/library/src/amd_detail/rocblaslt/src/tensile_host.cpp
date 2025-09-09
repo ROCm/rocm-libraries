@@ -2925,7 +2925,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
-            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench))
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+                || rocblaslt::Debug::Instance().printLogAsMarker()
+                || rocblaslt::Debug::Instance().benchPrintCommand())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
