@@ -33,8 +33,10 @@
 #if !defined(_CCCL_COMPILER_HIPRTC)
 #include <cstdint>
 #else
-// NOTE(HIPRTC): Define intptr_t.
-typedef int64_t intptr_t;
+// NOTE(AMD/HIP): We need to define these types here because 
+// they are not defined in hiprtc. libhipcxx issue #104.
+typedef __hip_internal::int64_t intptr_t;
+typedef __hip_internal::uint32_t uint32_t;
 #endif
 template<class _Type, class _Scope, typename _CUDA_VSTD::enable_if<sizeof(_Type) <= 2, int>::type = 0>
 bool __device__ __atomic_compare_exchange_cuda(_Type volatile *__ptr, _Type *__expected, const _Type __desired, bool, int __success_memorder, int __failure_memorder, _Scope __s) {

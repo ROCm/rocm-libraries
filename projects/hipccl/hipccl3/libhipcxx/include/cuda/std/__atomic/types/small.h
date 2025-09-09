@@ -29,6 +29,13 @@
 #include <cuda/std/__type_traits/is_arithmetic.h>
 #include <cuda/std/__type_traits/is_signed.h>
 
+#if defined(_CCCL_COMPILER_HIPRTC)
+// NOTE(AMD/HIP): We need to define these types here because 
+// they are not defined in hiprtc. libhipcxx issue #104.
+typedef __hip_internal::uint32_t uint32_t;
+typedef __hip_internal::int32_t int32_t;
+#endif
+
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
 // manipulated by PTX without any performance overhead
