@@ -862,4 +862,3 @@ template<typename InputIterator1,
 
 
 THRUST_NAMESPACE_END
-

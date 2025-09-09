@@ -62,4 +62,3 @@ template<typename T, typename System, typename Pointer>
 
 } // end detail
 THRUST_NAMESPACE_END
-

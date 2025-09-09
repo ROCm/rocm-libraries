@@ -13,7 +13,7 @@ rocThrust is a parallel algorithm library that has been ported to `HIP <https://
 The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocthrust.
 
 .. grid:: 2
-  :gutter: 3  
+  :gutter: 3
 
   .. grid-item-card:: Installation
 

@@ -122,7 +122,7 @@ function(add_rocthrust_test TEST)
         add_custom_command( TARGET ${TEST_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/test )
       endforeach( file_i )
     endif()
-    
+
     # Check for per-test script. Script will be included in the current scope
     # to allow custom property modifications.
     set(TEST_CMAKE_SCRIPT "${TEST}.cmake")
