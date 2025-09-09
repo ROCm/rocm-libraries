@@ -1666,7 +1666,8 @@ class StreamKBasic(StreamK):
 
     def computeStoreSrdStart(self, writer, kernel):
         module = Module("StreamK Basic computeStoreSrdStart")
-        module.add(self.computeStoreSrdStartCommon(writer, kernel))
+        # Parallel reduction currently only available for two-tile kernel
+        # module.add(self.computeStoreSrdStartCommon(writer, kernel))
         return module
 
     def graAddresses(self, writer, kernel, tP, vTmp):
