@@ -38,7 +38,8 @@ The available build options are:
 * ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default.
 * ``DISABLE_WERROR``. Set this to ``OFF`` to pass ``-Werror`` to the compiler. On by default.
 * ``DOWNLOAD_ROCPRIM``. Set this to ``ON`` to download rocPRIM regardless of whether or not rocPRIM is already installed. Off by default.
-* ``SQLITE_USE_SYSTEM_PACKAGE``. Set to ``ON`` to use the ``SQLite`` libaray provided by the system. Off by default - a copy of the library will then be downloaded. ``SQLite`` is needed for bitwise-reproducibility tests. For this option to take effect, either ``BUILD_TEST`` or ``BUILD_HIPSTDPAR_TEST`` must be set to ``ON``.
+* ``SQLITE_USE_SYSTEM_PACKAGE``. Set to ``ON`` to use the ``SQLite`` library provided by the system. Off by default - a copy of the library will then be downloaded. ``SQLite`` is needed for bitwise-reproducibility tests. For this option to take effect, either ``BUILD_TEST`` or ``BUILD_HIPSTDPAR_TEST`` must be set to ``ON``.
+* ``USE_SYSTEM_LIB``. Set to ``ON`` to use the installed ``ROCm`` libraries when building the tests. Off by default. For this option to take effect, ``BUILD_TEST`` must be ``ON`` and the ``rocprim`` and ``rocthrust`` install must be compatible with the version of the tests.
 * ``RNG_SEED_COUNT``. Set this to the non-repeatable random dataset count. Set to 0 by default.
 * ``PRNG_SEEDS``. Set this to the RNG seeds. The seeds are passed as a semicolon-delimited array of 32-bit unsigned integers. To avoid command line parsing errors, enclose the entire option in quotation marks. For example, ``cmake "-DPRNG_SEEDS=1;2;3;4"``. Set to 1 by default.
 
