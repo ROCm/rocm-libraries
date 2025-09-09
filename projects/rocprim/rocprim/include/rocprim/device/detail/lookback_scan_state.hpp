@@ -625,7 +625,7 @@ public:
         {
             v.words[i] = ::rocprim::detail::atomic_load(&values[padding + block_id].words[i]);
         }
-        __builtin_memcpy(&value, &v, sizeof(value));
+        __builtin_memcpy(reinterpret_cast<void*>(&value), &v, sizeof(value));
 #else
         ::rocprim::detail::memory_fence_device();
 
@@ -654,7 +654,7 @@ public:
         {
             v.words[i] = ::rocprim::detail::atomic_load(&values[padding + block_id].words[i]);
         }
-        __builtin_memcpy(&value, &v, sizeof(value));
+        __builtin_memcpy(reinterpret_cast<void*>(&value), &v, sizeof(value));
         return value;
 #else
         const auto* values = static_cast<const T*>(prefixes_complete_values);
@@ -675,7 +675,7 @@ public:
         {
             v.words[i] = ::rocprim::detail::atomic_load(&values[padding + block_id].words[i]);
         }
-        __builtin_memcpy(&value, &v, sizeof(value));
+        __builtin_memcpy(reinterpret_cast<void*>(&value), &v, sizeof(value));
         return value;
 #else
         const auto* values = static_cast<const T*>(prefixes_partial_values);
@@ -796,7 +796,7 @@ private:
             flag == lookback_scan_prefix_flag::partial ? prefixes_partial_values
                                                        : prefixes_complete_values);
         value_underlying_type v;
-        __builtin_memcpy(&v, &value, sizeof(value));
+        __builtin_memcpy(&v, reinterpret_cast<const void*>(&value), sizeof(value));
         for(unsigned int i = 0; i < value_underlying_type::words_no; ++i)
         {
             ::rocprim::detail::atomic_store(&values[padding + block_id].words[i], v.words[i]);
