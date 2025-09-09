@@ -304,8 +304,48 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return threadGroup;
     }
 
-    static uint
-        calculateBankConflictCycles(const std::map<uint, std::vector<uint>>& bankToAddressIndices)
+    std::vector<std::vector<uint32_t>>
+        LDSBankModel::divideIntoThreadGroups(const std::vector<uint32_t>& addresses,
+                                             uint                         threadsPerClock)
+    {
+        std::vector<std::vector<uint32_t>> threadGroups;
+
+        // Process addresses in groups based on threads-per-clock limit
+        for(size_t groupStart = 0; groupStart < addresses.size(); groupStart += threadsPerClock)
+        {
+            size_t groupEnd = std::min(groupStart + threadsPerClock, addresses.size());
+            std::vector<uint32_t> group(addresses.begin() + groupStart,
+                                        addresses.begin() + groupEnd);
+            threadGroups.push_back(group);
+        }
+
+        return threadGroups;
+    }
+
+    std::map<uint, std::vector<uint>> LDSBankModel::createBankToAddressIndices(
+        const std::vector<uint32_t>& addresses, uint dwords, uint entryWidthInBytes, uint numBanks)
+    {
+        std::map<uint, std::vector<uint>> bankToAddressIndices;
+
+        for(size_t i = 0; i < addresses.size(); ++i)
+        {
+            uint baseAddr       = addresses[i];
+            uint bytesPerAccess = dwords * 4;
+
+            // Calculate all banks this access touches
+            for(uint offset = 0; offset < bytesPerAccess; offset += entryWidthInBytes)
+            {
+                uint currentAddr = baseAddr + offset;
+                uint bankIndex   = (currentAddr / entryWidthInBytes) % numBanks;
+                bankToAddressIndices[bankIndex].push_back(i);
+            }
+        }
+
+        return bankToAddressIndices;
+    }
+
+    uint LDSBankModel::calculateBankConflictCycles(
+        const std::map<uint, std::vector<uint>>& bankToAddressIndices)
     {
         // Simulate clock cycles needed to resolve bank conflicts
         std::map<uint, std::vector<uint>> remainingAccesses = bankToAddressIndices;
@@ -370,34 +410,18 @@ namespace rocRoller::KernelGraph::MemoryTracer
         // Get the maximum number of threads that can operate per clock for this instruction
         uint threadsPerClock = getThreadsPerClock(memoryOp, dwords, gfx);
 
+        // Divide addresses into thread groups
+        auto threadGroups = divideIntoThreadGroups(addresses, threadsPerClock);
+
         // Track total bank conflict cycles across all thread groups
         uint totalBankConflictCycles = 0;
 
-        // Process addresses in groups based on threads-per-clock limit
-        for(size_t groupStart = 0; groupStart < addresses.size(); groupStart += threadsPerClock)
+        // Process each thread group
+        for(const auto& groupAddresses : threadGroups)
         {
-            // Get addresses for this thread group
-            size_t groupEnd = std::min(groupStart + threadsPerClock, addresses.size());
-            std::vector<uint32_t> groupAddresses(addresses.begin() + groupStart,
-                                                 addresses.begin() + groupEnd);
-
-            // Create a mapping from bank index to address indices for this group
-            // For multi-dword accesses, we need to track all banks touched by each address
-            std::map<uint, std::vector<uint>> bankToAddressIndices;
-
-            for(size_t i = 0; i < groupAddresses.size(); ++i)
-            {
-                uint baseAddr       = groupAddresses[i];
-                uint bytesPerAccess = dwords * 4;
-
-                // Calculate all banks this access touches
-                for(uint offset = 0; offset < bytesPerAccess; offset += entryWidthInBytes)
-                {
-                    uint currentAddr = baseAddr + offset;
-                    uint bankIndex   = (currentAddr / entryWidthInBytes) % numBanks;
-                    bankToAddressIndices[bankIndex].push_back(i);
-                }
-            }
+            // Create bank to address indices mapping for this group
+            auto bankToAddressIndices
+                = createBankToAddressIndices(groupAddresses, dwords, entryWidthInBytes, numBanks);
 
             // Calculate bank conflict cycles for this group
             uint groupCycles = calculateBankConflictCycles(bankToAddressIndices);
@@ -541,20 +565,69 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 ss << fmt::format(
                     "  Instruction: {} ({} addresses)\n", instructionName, instr.addresses.size());
 
-                // Use immediateClockCount to calculate cycles directly
+                // Show detailed calculation steps
                 if(!instr.addresses.empty())
                 {
-                    const auto& ldsOp       = std::get<MemoryOpLDS>(instr.memoryOp);
-                    uint        totalClocks = LDSBankModel::immediateClockCount(
-                        gfx, ldsOp, instr.dwords, instr.addresses);
+                    const auto& ldsOp = std::get<MemoryOpLDS>(instr.memoryOp);
 
-                    // The immediateClockCount already includes the 4-cycle address transfer
-                    uint bankConflictCycles = totalClocks - 4;
+                    // Step 1: Get threads per clock
+                    uint threadsPerClock
+                        = LDSBankModel::getThreadsPerClock(ldsOp, instr.dwords, gfx);
+                    ss << fmt::format("    Threads per clock: {}\n", threadsPerClock);
+
+                    // Step 2: Divide into thread groups
+                    auto threadGroups
+                        = LDSBankModel::divideIntoThreadGroups(instr.addresses, threadsPerClock);
+                    ss << fmt::format("    Thread groups: {}\n", threadGroups.size());
+
+                    // Step 3: Process each group and show details
+                    uint totalBankConflictCycles = 0;
+                    for(size_t groupIdx = 0; groupIdx < threadGroups.size(); ++groupIdx)
+                    {
+                        const auto& groupAddresses = threadGroups[groupIdx];
+                        ss << fmt::format(
+                            "      Group {} ({} addresses):\n", groupIdx, groupAddresses.size());
+
+                        // Create bank mapping for this group
+                        auto bankToAddressIndices = LDSBankModel::createBankToAddressIndices(
+                            groupAddresses, instr.dwords, 4, 64);
+
+                        // Show bank conflicts
+                        ss << "        Bank conflicts: ";
+                        bool first = true;
+                        for(const auto& [bankIndex, addressIndices] : bankToAddressIndices)
+                        {
+                            if(addressIndices.size() > 1)
+                            {
+                                if(!first)
+                                    ss << ", ";
+                                ss << fmt::format(
+                                    "bank {} ({} addresses)", bankIndex, addressIndices.size());
+                                first = false;
+                            }
+                        }
+                        if(first)
+                        {
+                            ss << "none";
+                        }
+                        ss << "\n";
+
+                        // Calculate cycles for this group
+                        uint groupCycles
+                            = LDSBankModel::calculateBankConflictCycles(bankToAddressIndices);
+                        ss << fmt::format("        Cycles for group: {}\n", groupCycles);
+                        totalBankConflictCycles += groupCycles;
+                    }
+
+                    // Calculate total cycles
+                    const uint addressTransferCycles = 4;
+                    uint       totalClocks = totalBankConflictCycles + addressTransferCycles;
 
                     ss << fmt::format(
-                        "    Total clock cycles: {} ({} bank conflict + 4 address transfer)\n",
+                        "    Total clock cycles: {} ({} bank conflict + {} address transfer)\n",
                         totalClocks,
-                        bankConflictCycles);
+                        totalBankConflictCycles,
+                        addressTransferCycles);
 
                     operationTotalClocks += totalClocks;
                 }

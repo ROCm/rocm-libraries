@@ -80,7 +80,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         MemoryOp              memoryOp;
         int                   dwords;
-        std::vector<uint32_t> addresses; // Only store addresses for immediateClockCount
+        std::vector<uint32_t> addresses;
     };
 
     struct OperationAccesses
@@ -181,6 +181,47 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                         const std::vector<uint32_t>& addresses,
                                         uint                         entryWidthInBytes = 4,
                                         uint                         numBanks          = 64);
+
+        /**
+         * @brief Divide addresses into thread groups based on threads-per-clock limit
+         * 
+         * @param addresses Vector of LDS addresses
+         * @param threadsPerClock Maximum number of threads that can operate per clock
+         * @return Vector of thread groups, each containing addresses for that group
+         */
+        static std::vector<std::vector<uint32_t>>
+            divideIntoThreadGroups(const std::vector<uint32_t>& addresses, uint threadsPerClock);
+
+        /**
+         * @brief Create a mapping from bank indices to address indices for conflict resolution
+         * 
+         * For multi-dword accesses, tracks all banks touched by each address.
+         * The resulting map has bank indices as keys and vectors of address indices as values.
+         * 
+         * @param addresses Vector of LDS addresses
+         * @param dwords Number of dwords accessed per address
+         * @param entryWidthInBytes Width of each bank entry in bytes
+         * @param numBanks Number of banks in the LDS
+         * @return Map from bank index to vector of address indices that access that bank
+         */
+        static std::map<uint, std::vector<uint>>
+            createBankToAddressIndices(const std::vector<uint32_t>& addresses,
+                                       uint                         dwords,
+                                       uint                         entryWidthInBytes,
+                                       uint                         numBanks);
+
+        /**
+         * @brief Calculate the number of clock cycles needed to resolve bank conflicts
+         * 
+         * Simulates the bank conflict resolution process where only one address per bank
+         * can be serviced per clock cycle. Addresses are scheduled to avoid conflicts,
+         * with each address being processed exactly once.
+         * 
+         * @param bankToAddressIndices Map from bank index to vector of address indices
+         * @return Number of clock cycles needed to process all addresses
+         */
+        static uint calculateBankConflictCycles(
+            const std::map<uint, std::vector<uint>>& bankToAddressIndices);
 
     private:
         uint m_entryWidthInBytes;
