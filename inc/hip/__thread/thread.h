@@ -184,7 +184,7 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
 } // namespace cuda
 
 namespace cuda::std {
-    __host__ __device__ inline _LIBGPU_HIDE_FROM_ABI void swap(hip::thread& __x, hip::thread& __y) _NOEXCEPT { __x.swap(__y); }
+    __host__ __device__ inline _LIBHIPTHREADS_HIDE_FROM_ABI void swap(hip::thread& __x, hip::thread& __y) _NOEXCEPT { __x.swap(__y); }
 }
 
 #endif // __GPU___THREAD_THREAD_H__

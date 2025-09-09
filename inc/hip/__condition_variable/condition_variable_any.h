@@ -33,47 +33,47 @@
 
 namespace cuda {
 
-class _LIBGPU_TYPE_VIS condition_variable_any {
+class _LIBHIPTHREADS_TYPE_VIS condition_variable_any {
     uint64_t wait_counter = 0;
     uint64_t notify_counter = 0;
 
   public:
-    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR condition_variable_any() _NOEXCEPT = default;
+    __device__ _LIBHIPTHREADS_HIDE_FROM_ABI _LIBHIPTHREADS_CONSTEXPR condition_variable_any() _NOEXCEPT = default;
 
     __device__ condition_variable_any(const condition_variable_any &) = delete;
     __device__ condition_variable_any &operator=(const condition_variable_any &) = delete;
 
-    __device__ _LIBGPU_HIDE_FROM_ABI void notify_one() _NOEXCEPT;
-    __device__ _LIBGPU_HIDE_FROM_ABI void notify_all() _NOEXCEPT;
+    __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void notify_one() _NOEXCEPT;
+    __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void notify_all() _NOEXCEPT;
 
     template <class _Lock>
-    __device__ _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS void wait(_Lock &__lock);
+    __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS void wait(_Lock &__lock);
     template <class _Lock, class _Predicate>
-    __device__ _LIBGPU_HIDE_FROM_ABI void wait(_Lock &__lock, _Predicate __pred);
+    __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void wait(_Lock &__lock, _Predicate __pred);
 
     // TODO: uncomment these once we implement chrono
     // template <class _Lock, class _Clock, class _Duration>
-    //     _LIBGPU_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
+    //     _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
     //     ::std::cv_status
     //     wait_until(_Lock& __lock,
     //                const chrono::time_point<_Clock, _Duration>& __t);
 
     // template <class _Lock, class _Clock, class _Duration, class _Predicate>
     //     bool
-    //     __device__ _LIBGPU_HIDE_FROM_ABI
+    //     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI
     //     wait_until(_Lock& __lock,
     //                const chrono::time_point<_Clock, _Duration>& __t,
     //                _Predicate __pred);
 
     // template <class _Lock, class _Rep, class _Period>
     //     ::std::cv_status
-    //     __device__ _LIBGPU_HIDE_FROM_ABI
+    //     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI
     //     wait_for(_Lock& __lock,
     //              const chrono::duration<_Rep, _Period>& __d);
 
     // template <class _Lock, class _Rep, class _Period, class _Predicate>
     //     bool
-    //     __device__ _LIBGPU_HIDE_FROM_ABI
+    //     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI
     //     wait_for(_Lock& __lock,
     //              const chrono::duration<_Rep, _Period>& __d,
     //              _Predicate __pred);
