@@ -866,35 +866,35 @@ namespace
     inline void hipfftw_exception_handler(const char* user_facing_function) noexcept
     try
     {
-        throw;
-    }
-    catch(const hipfftw_invalid_arg& e)
-    {
-        if(hipfftw_handler_is_verbose())
+        if(!hipfftw_handler_is_verbose())
+            return;
+
+        // log failure-specific information
+        try
+        {
+            throw;
+        }
+        catch(const hipfftw_invalid_arg& e)
+        {
             std::cerr << "Invalid argument reported by " << user_facing_function
                       << ". Details: " << e.what() << std::endl;
-    }
-    catch(const hipfftw_unsupported& e)
-    {
-        if(hipfftw_handler_is_verbose())
+        }
+        catch(const hipfftw_unsupported& e)
+        {
             std::cerr << "Unsupported usage reported by " << user_facing_function
                       << ". Details: " << e.what() << std::endl;
-    }
-    catch(const hipfftw_internal_logic_error& e)
-    {
-        if(hipfftw_handler_is_verbose())
+        }
+        catch(const hipfftw_internal_logic_error& e)
+        {
             std::cerr << "A logic error internal to hipfftw was detected and reported by "
                       << user_facing_function << ". Details: " << e.what() << std::endl;
-    }
-    catch(const rocfft_failure& e)
-    {
-        if(hipfftw_handler_is_verbose())
+        }
+        catch(const rocfft_failure& e)
+        {
             std::cerr << "A rocfft failure was detected and reported by " << user_facing_function
                       << ". Details: " << e.what() << std::endl;
-    }
-    catch(const hipfftw_bad_gpu_alloc& e)
-    {
-        if(hipfftw_handler_is_verbose())
+        }
+        catch(const hipfftw_bad_gpu_alloc& e)
         {
             std::cerr << "A GPU allocation failure was detected and reported by "
                       << user_facing_function << ". Details: " << e.what();
@@ -902,10 +902,7 @@ namespace
                 std::cerr << "\nThe hip error code was " << e.hip_error << ".";
             std::cerr << "\nThe attempted size was " << e.attempted_size << " bytes" << std::endl;
         }
-    }
-    catch(const hipfftw_bad_alloc& e)
-    {
-        if(hipfftw_handler_is_verbose())
+        catch(const hipfftw_bad_alloc& e)
         {
             std::cerr << "An allocation failure was detected and reported by "
                       << user_facing_function << ". Details: " << e.what();
@@ -913,10 +910,7 @@ namespace
                 std::cerr << "\nThe hip error code was " << e.hip_error << ".";
             std::cerr << "\nThe attempted size was " << e.attempted_size << " bytes" << std::endl;
         }
-    }
-    catch(const hipfftw_runtime_error& e)
-    {
-        if(hipfftw_handler_is_verbose())
+        catch(const hipfftw_runtime_error& e)
         {
             std::cerr << "A hip-specific runtime error was detected and reported by "
                       << user_facing_function << ". Details: " << e.what();
@@ -924,18 +918,21 @@ namespace
                 std::cerr << "\nThe hip error code was " << e.hip_error << ".";
             std::cerr << std::endl;
         }
-    }
-    catch(const std::runtime_error& e)
-    {
-        if(hipfftw_handler_is_verbose())
+        catch(const std::runtime_error& e)
+        {
             std::cerr << "A runtime error was detected and reported by " << user_facing_function
                       << ". Details: " << e.what() << std::endl;
+        }
+        catch(...)
+        {
+            std::cerr << "An unidentified exception was detected and reported by "
+                      << user_facing_function << "." << std::endl;
+        }
     }
     catch(...)
     {
-        if(hipfftw_handler_is_verbose())
-            std::cerr << "An unidentified exception was detected and reported by "
-                      << user_facing_function << "." << std::endl;
+        // one of the above catch blocks threw as it attempted to log failure-related information...
+        // ignore (std::terminate invoked otherwise...)
     }
 
     template <hipMemoryType type>
