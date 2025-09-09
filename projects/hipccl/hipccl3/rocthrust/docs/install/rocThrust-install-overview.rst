@@ -1,9 +1,9 @@
 .. meta::
-  :description: rocThrust installation overview 
+  :description: rocThrust installation overview
   :keywords: install, rocThrust, AMD, ROCm, installation, overview, general
 
 *********************************
-rocThrust installation overview 
+rocThrust installation overview
 *********************************
 
 The rocThrust source code is available from the `ROCm libraries GitHub Repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocthrust>`_. Use sparse checkout when cloning the rocThrust project:
@@ -26,7 +26,7 @@ rocThrust can be built and installed with |install|_ on Linux, |rmake|_ on Windo
 .. |install| replace:: ``install``
 .. _install: ./rocThrust-install-script.html
 
-.. |rmake| replace:: ``rmake.py`` 
+.. |rmake| replace:: ``rmake.py``
 .. _rmake: ./rocThrust-rmake-install.html
 
 CMake provides the most flexibility in building and installing rocThrust.

@@ -151,4 +151,3 @@ thrust::pair<OutputIterator1,OutputIterator2>
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

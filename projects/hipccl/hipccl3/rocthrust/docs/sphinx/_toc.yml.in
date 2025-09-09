@@ -16,7 +16,7 @@ subtrees:
     title: Installing on Windows
   - file: install/rocThrust-install-with-cmake
     title: Installing on Linux and Windows with CMake
-  
+
 
 - caption: How to
   entries:

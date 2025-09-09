@@ -115,7 +115,7 @@ To specify an option, add it to your camke command, prefixed with the `-D` switc
 
 ### HIP on Windows
 
-We've added initial support for HIP on Windows. 
+We've added initial support for HIP on Windows.
 To install, first clone rocThrust using the steps described in [obtaining the source code](#obtaining-the-source-code).
 Then, use the provided `rmake.py` Python script:
 
