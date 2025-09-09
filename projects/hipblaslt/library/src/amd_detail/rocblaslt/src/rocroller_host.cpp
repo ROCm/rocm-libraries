@@ -686,7 +686,6 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize, //Handle A vs B block size.
         0.8,
         false,
-        false,
         WGM);
 
     for(auto const& selected_tile : selected_tiles)

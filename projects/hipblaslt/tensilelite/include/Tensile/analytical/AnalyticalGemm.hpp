@@ -59,8 +59,7 @@ namespace TensileLite
                                                   size_t          MT_K,
                                                   size_t          MI_M,
                                                   size_t          MI_N,
-                                                  size_t          MI_K,
-                                                  bool            debug);
+                                                  size_t          MI_K);
 
         // Determine the compute latency per MT_MxMT_NxMT_K Macro Tile (L_MT).
         size_t compute_mt_compute_latency(const Hardware& hardware,
@@ -77,8 +76,7 @@ namespace TensileLite
                                           size_t          MI_K,
                                           size_t          element_size_A, //In bits
                                           size_t          element_size_B, //In bits,
-                                          DataType        miDataType,
-                                          bool            debug);
+                                          DataType        miDataType);
 
         /* ---------------------------------------------------------------------------------------- */
         /* Memory-related functions                                                                 */
@@ -88,18 +86,17 @@ namespace TensileLite
                                 size_t          MT_M,
                                 size_t          MT_N,
                                 size_t          MT_K,
-                                size_t          element_size,
-                                bool            debug);
+                                size_t          element_size);
 
         // Compute the amount of data loaded from A to produce a MT_MxMT_NxMT_K tile.
-        size_t compute_A_loads(size_t MT_M, size_t MT_K, bool debug);
+        size_t compute_A_loads(size_t MT_M, size_t MT_K);
 
         // Compute the amount of data loaded from B to produce a MT_MxMT_NxMT_K tile.
-        size_t compute_B_loads(size_t MT_N, size_t MT_K, bool debug);
+        size_t compute_B_loads(size_t MT_N, size_t MT_K);
 
         // Computes total data loads per CU per MT from A and B
         // Reads happen every MT, Writes happen every K-complete tile.
-        size_t compute_CU_loads(size_t MT_M, size_t MT_N, size_t MT_K, bool debug);
+        size_t compute_CU_loads(size_t MT_M, size_t MT_N, size_t MT_K);
 
         // Estimates the l2 hit-rate
         double estimate_l2_hit(const Hardware& hardware,
@@ -141,8 +138,7 @@ namespace TensileLite
                                       size_t          mx_block_size,
                                       int             WGM,
                                       size_t          numActiveCUs,
-                                      size_t          splittingFactor,
-                                      bool            debug);
+                                      size_t          splittingFactor);
 
         /* ---------------------------------------------------------------------------------------- */
         /* Tile-related functions                                                                   */
@@ -168,8 +164,7 @@ namespace TensileLite
                                     size_t          mx_block_size,
                                     int             WGM,
                                     size_t          numActiveCUs,
-                                    size_t          splittingFactor,
-                                    bool            debug);
+                                    size_t          splittingFactor);
 
         // Computes the latency per K-complete MT wave.
         // A wave is defined as : The time it takes for one CU to complete one K-complete output tile
@@ -193,8 +188,7 @@ namespace TensileLite
                                     size_t          mx_block_size,
                                     int             WGM,
                                     size_t          numActiveCUs,
-                                    size_t          splittingFactor,
-                                    bool            debug);
+                                    size_t          splittingFactor);
 
         // Compute the total latency of a gemm based on the latency of one wave multiplied by the number of waves
         // A wave is defined as : The time it takes for one CU to complete one K-complete output tile
@@ -217,8 +211,7 @@ namespace TensileLite
                                      DataType        miDataType,
                                      size_t          mx_block_size,
                                      int             WGM,
-                                     size_t          split = 0,
-                                     bool            debug = false);
+                                     size_t          split = 0);
 
 
         // Compute the performance from the latency.
@@ -238,7 +231,6 @@ namespace TensileLite
                                    size_t          element_size_A,
                                    size_t          element_size_B,
                                    size_t          element_size_out,
-                                   int             WGM,
-                                   bool            debug);
+                                   int             WGM);
     } // namespace analytical
 } // namespace TensileLite

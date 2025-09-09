@@ -235,7 +235,6 @@ def main():
             origami.string_to_datatype(args.type_compute),
             args.scale_block_size,
             0.8,
-            args.debug,
             args.print,
             args.wgm,
         )
