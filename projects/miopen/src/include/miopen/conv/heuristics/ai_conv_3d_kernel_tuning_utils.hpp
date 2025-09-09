@@ -63,7 +63,7 @@ bool RunParameterPredictionModel(
         fill_valid_kernels,
     std::string solver_name);
 
-extern template bool RunParameterPredictionModel<float>(
+MIOPEN_INTERNALS_EXPORT extern template bool RunParameterPredictionModel<float>(
     const miopen::ExecutionContext&,
     const miopen::conv::ProblemDescription&,
     std::vector<std::string>&,
