@@ -194,9 +194,24 @@ public:
             }
             for(size_t step_id = 0; step_id < num_steps; step_id++)
             {
+#ifdef __HIP_PLATFORM_NVIDIA__
+                size_t stream_start_idx_real = 0;
+#endif
                 for(size_t stream_id = 0; stream_id < num_streams; stream_id++)
                 {
+#ifdef __HIP_PLATFORM_NVIDIA__
+                    if(stream_start_idx_real % 2)
+                        throw unsupported_case("Unaligned I/O data for cuFFT backend");
+#endif
+
                     auto sub_dft = make_sub_dft_params(step_id, stream_id);
+#ifdef __HIP_PLATFORM_NVIDIA__
+                    if(sub_dft.is_real())
+                    {
+                        const auto real_dist = is_inverse() ? sub_dft.odist : sub_dft.idist;
+                        stream_start_idx_real += real_dist * sub_dft.nbatch;
+                    }
+#endif
                 }
             }
         }
