@@ -413,8 +413,8 @@ void testing_gemm(const Arguments& arg)
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
         //releasing already used host memory
-        //hA = host_matrix<T>();
-        //hB = host_matrix<T>();
+        hA = host_matrix<T>();
+        hB = host_matrix<T>();
 
         auto compare_to_gold = [&] {
             if(arg.unit_check)
