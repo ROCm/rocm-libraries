@@ -939,6 +939,17 @@ namespace rocRoller
             return subset<std::initializer_list<T>>(indices);
         }
 
+        inline ValuePtr Value::subset(int start, int length) const
+        {
+            std::vector<int> coords;
+            coords.reserve(length);
+            for(int i = 0; i < length; ++i)
+            {
+                coords.push_back(start + i);
+            }
+            return subset(coords);
+        }
+
         template <std::ranges::forward_range T>
         inline ValuePtr Value::element(T const& indices) const
         {

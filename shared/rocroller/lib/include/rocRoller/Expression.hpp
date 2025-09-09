@@ -543,6 +543,37 @@ namespace rocRoller
             int      width          = 0;
         };
 
+        struct Nary
+        {
+            std::vector<ExpressionPtr> operands;
+            std::string                comment = "";
+
+            template <typename T>
+            requires std::derived_from<T, Nary>
+            inline T& copyParams(const T& other)
+            {
+                return static_cast<T&>(*this);
+            }
+        };
+
+        template <typename T>
+        concept CNary = requires { requires std::derived_from<T, Nary>; };
+
+        struct Concatenate : Nary
+        {
+            constexpr static inline auto            Type       = Category::Value;
+            constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int             Complexity = 1;
+
+            DataType destinationType = DataType::None;
+
+            inline Concatenate& copyParams(const Concatenate& other)
+            {
+                destinationType = other.destinationType;
+                return Nary::copyParams(other);
+            }
+        };
+
         /**
          * @brief Register value from the coordinate graph.
          *

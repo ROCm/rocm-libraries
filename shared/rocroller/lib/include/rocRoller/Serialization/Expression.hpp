@@ -32,6 +32,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/Serialization/Base.hpp>
+#include <rocRoller/Serialization/Containers.hpp>
 #include <rocRoller/Serialization/Enum.hpp>
 #include <rocRoller/Serialization/HasTraits.hpp>
 #include <rocRoller/Serialization/Variant.hpp>
@@ -176,6 +177,47 @@ namespace rocRoller
             }
 
             static void mapping(IO& io, TExp& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        ROCROLLER_SERIALIZE_VECTOR(false, Expression::ExpressionPtr);
+
+        template <Expression::CNary Expr, typename IO, typename Context>
+        struct MappingTraits<Expr, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, Expr& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "operands", exp.operands, ctx);
+            }
+
+            static void mapping(IO& io, Expr& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::Concatenate, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, Expression::Concatenate& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "operands", exp.operands, ctx);
+                iot::mapRequired(io, "dataType", exp.destinationType, ctx);
+            }
+
+            static void mapping(IO& io, Expression::Concatenate& val)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 

@@ -325,6 +325,48 @@ namespace rocRoller
                 return {Register::Type::Scalar, varType};
             }
 
+            ResultType operator()(Concatenate const& expr)
+            {
+                auto         registerType = Register::Type::Literal;
+                VariableType variableType{expr.destinationType};
+
+                auto expectedNumRegister   = DataTypeInfo::Get(expr.destinationType).registerCount;
+                unsigned actualNumRegister = 0;
+
+                for(auto const& operand : expr.operands)
+                {
+                    auto&& [operandRegisterType, operandVariableType] = call(operand);
+                    switch(operandRegisterType)
+                    {
+                    case Register::Type::Literal:
+                    case Register::Type::Scalar:
+                    case Register::Type::Vector:
+                        break;
+                    default:
+                        Throw<FatalError>("Invalid register type for for combine",
+                                          ShowValue(operand));
+                    }
+
+                    registerType = Register::PromoteType(registerType, operandRegisterType);
+                    actualNumRegister
+                        = actualNumRegister
+                          + DataTypeInfo::Get(operandVariableType.dataType).registerCount;
+                }
+
+                if(expectedNumRegister != actualNumRegister)
+                {
+                    Throw<FatalError>("Length mismatch. ",
+                                      ShowValue(expr.destinationType),
+                                      " expects ",
+                                      ShowValue(expectedNumRegister),
+                                      " registers but ",
+                                      ShowValue(actualNumRegister),
+                                      " is provided");
+                }
+
+                return {registerType, variableType};
+            }
+
             ResultType operator()(CommandArgumentPtr const& expr)
             {
                 if(expr == nullptr)
