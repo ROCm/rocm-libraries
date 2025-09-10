@@ -158,17 +158,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         static uint getNumLDSBanks(GPUArchitectureGFX gfx);
 
         /**
-         * @brief Create a mapping from bank indices to addresses
-         * 
-         * @param addresses Vector of LDS addresses
-         * @param entryWidthInBytes Width of each bank entry in bytes
-         * @param numBanks Number of banks in the LDS
-         * @return Map from bank index to vector of addresses that map to that bank
-         */
-        static std::map<uint, std::vector<uint32_t>> makeBankMapping(
-            const std::vector<uint32_t>& addresses, uint entryWidthInBytes, uint numBanks);
-
-        /**
          * @brief Calculate the immediate clock count for an LDS instruction
          * 
          * This function encapsulates all the logic for determining how many clock cycles
@@ -240,31 +229,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         std::map<int, std::vector<LDSBankAccess>> m_bankAccesses; // Keep for backward compatibility
         std::map<int, OperationAccesses>          m_hierarchicalAccesses;
-
-        /**
-         * @brief Create a mapping from bank indices to thread accesses
-         * 
-         * @param threads Vector of thread accesses
-         * @param dwords Number of dwords accessed per thread
-         * @param entryWidthInBytes Width of each bank entry in bytes
-         * @param numBanks Number of banks in the LDS
-         * @return Map from bank index to vector of thread accesses that map to that bank
-         */
-        static std::map<uint, std::vector<ThreadAccess>>
-            makeBankMappingForThreads(const std::vector<ThreadAccess>& threads,
-                                      uint                             dwords,
-                                      uint                             entryWidthInBytes,
-                                      uint                             numBanks);
-
-        /**
-         * @brief Build a ThreadGroup with clock cycles from bank mapping
-         * 
-         * @param bankToThreads Map from bank index to vector of thread accesses
-         * @param groupIndex The index of this thread group
-         * @return ThreadGroup with clock cycles populated based on bank conflict resolution
-         */
-        static ThreadGroup buildThreadGroupWithClockCycles(
-            const std::map<uint, std::vector<ThreadAccess>>& bankToThreads, uint groupIndex);
     };
 
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel);
