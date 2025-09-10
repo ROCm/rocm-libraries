@@ -222,6 +222,21 @@ namespace rocRoller::KernelGraph::MemoryTracer
          */
         static uint calculateBankConflictCycles(const std::map<uint, uint>& bankToAddressCounts);
 
+        /**
+         * @brief Generate a detailed analysis string for an LDS instruction
+         * 
+         * This function generates the instruction name and computes cycle counts,
+         * showing detailed bank contention information for each thread group.
+         * 
+         * @param instr The instruction access information
+         * @param gfx The GPU architecture
+         * @param[out] totalCycles Output parameter for the total instruction cycles
+         * @return Formatted string containing the detailed analysis
+         */
+        static std::string instructionDetailedAnalysis(const InstructionAccesses& instr,
+                                                       GPUArchitectureGFX         gfx,
+                                                       uint&                      totalCycles);
+
     private:
         uint m_entryWidthInBytes;
         uint m_numBanks;
