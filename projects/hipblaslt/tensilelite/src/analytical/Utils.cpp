@@ -308,7 +308,7 @@ namespace TensileLite
             size_t tie_breaker_threshold = tf32_emu ? 5 : 10;
             for(const auto& res : valid_results)
             {
-                double diff = static_cast<double>(std::fabs(std::get<0>(res) - best_latency));
+                double diff = std::fabs(std::get<0>(res) - best_latency);
                 diff /= best_latency;
                 // If it's within 1%, include it.
                 if(diff < 0.01)

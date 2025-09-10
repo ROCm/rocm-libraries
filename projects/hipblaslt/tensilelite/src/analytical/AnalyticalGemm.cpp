@@ -434,9 +434,9 @@ namespace TensileLite
             int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
 
             // Distribute CUs per XCD
-            int cu_per_xcd = safe_ceil_div(grid_m * grid_n, hardware.NUM_XCD);
             // Modify cu_per_xcd to only take into account the CUs that might share same K-tiles
             // This is to factor in the effect of splitting on L2
+            int cu_per_xcd = safe_ceil_div(grid_m * grid_n, hardware.NUM_XCD);
             cu_per_xcd /= splittingFactor;
 
             // N dimension of mem1 tile is divided by whichever is smaller between WGM and grid
@@ -499,8 +499,8 @@ namespace TensileLite
 
             if(Hardware::is_debug_enabled())
             {
-                hardware.log_debug("L2Tile_M)", l2_m);
-                hardware.log_debug("L2Tile_N)", l2_n);
+                hardware.log_debug("L2Tile_M", l2_m);
+                hardware.log_debug("L2Tile_N", l2_n);
             }
 
             return l2_hit;
@@ -555,8 +555,8 @@ namespace TensileLite
 
             if(Hardware::is_debug_enabled())
             {
-                hardware.log_debug("MallTile_M)", mall_m);
-                hardware.log_debug("MallTile_N)", mall_n);
+                hardware.log_debug("MallTile_M", mall_m);
+                hardware.log_debug("MallTile_N", mall_n);
             }
 
             return mall_hit;
@@ -800,19 +800,10 @@ namespace TensileLite
             // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N tiles to coherent memory
             if(splittingFactor > 1)
             {
-                size_t n_partials         = splittingFactor - 1;
-
-                // Only the reduction CU reads from all splits.
-                double partial_read_bytes = n_partials * 
-                                            MT_M * MT_N *       
-                                            safe_ceil_div(element_size_out, 8);
-
-                // All CUs write (once for each partial, and once by the reduction CU for the output.)
-                double partial_write_bytes = numActiveCUs
-                                            * MT_M * MT_N * safe_ceil_div(element_size_out, 8);
-
-                double partial_readwrite_bytes = partial_read_bytes + partial_write_bytes;
-
+                size_t n_partials              = splittingFactor - 1;
+                double partial_readwrite_bytes = (2 * numActiveCUs
+                                                  * MT_M * MT_N * safe_ceil_div(element_size_out, 8)
+                                                  * n_partials);
                 double L_reduce = partial_readwrite_bytes / (hardware.mem3_perf_ratio);
                 L_epilogue += L_reduce * 1;
             }
@@ -1038,19 +1029,65 @@ namespace TensileLite
             // TODO These are quantifying effects that don't work in the current math.
             // TODO THESE SHOULD BE TEMPORARY FIXES AND BE MORE SOLIDLY INTEGRATED LATER
             bool heuristics = Hardware::is_heuristics_enabled();
-            if(heuristics)
+
+            // Heuristics for TF32
+            bool tf32_emu = ((miDataType == DataType::XFloat32)
+                         && (hardware.arch == Hardware::Architecture::gfx950));
+            if(heuristics && tf32_emu)
+            {
+                // The kernel for this is more optimized (Custom kernel)
+                if(MT_M == 256 && MT_N == 256 && MT_K == 32)
+                {
+                    total_latency = total_latency * 0.7;
+                }
+
+                // Large K prefers large DU in TF32
+                if((K >= M*16) && (K >= N*16) && (MT_K >= 128))
+                {
+                    total_latency = total_latency * 0.5;
+                }
+            }
+
+            if(heuristics && !tf32_emu)
             {
                 // Penalize tiles that lead to edge waste
                 const size_t numMT_M = safe_ceil_div(M, MT_M);
                 const size_t numMT_N = safe_ceil_div(N, MT_N);
                 const double waste = static_cast<double>(numMT_M * MT_M * numMT_N * MT_N) / (M * N);
-                double penalty = waste;
+                double edge_penalty = std::pow(waste, 0.8);
                 if(batch > 10)
-                    penalty *= std::log10((double)batch) * std::sqrt((double)numMT_M * numMT_N);
-                total_latency = total_latency * penalty;
+                    edge_penalty = std::pow(waste, 1.2) * std::log10((double)batch) * std::pow((double)numMT_M * numMT_N, 0.2);
+                total_latency = total_latency * edge_penalty;
 
-                // There is no case where a kernel with MT_K > K wins unless K < MI_K.                
-                if(K < MT_K)
+                // Penalize K iterations 
+                size_t K_iters = safe_ceil_div(K, MT_K);
+                if(K_iters == 1)
+                {
+                    total_latency = total_latency * 16;
+                }
+                else if(K_iters == 2)
+                {
+                    total_latency = total_latency * 8;
+                }
+                else if(K_iters <= 4)
+                {
+                    total_latency = total_latency * 4;
+                }
+                else if(K_iters <= 8)
+                {
+                    total_latency = total_latency * 2.1;
+                }
+
+                // Bias toward not splitting for small K values
+                // This should actually come from SK grid prediction
+                if(splittingFactor > 1 && K < 2048)
+                {
+                    total_latency = total_latency * splittingFactor;
+                }
+
+                // There is no case where a kernel with MT_K > K wins unless K < MI_K.
+                // Unless it is Dot2.
+                if(K < MT_K && MI_M != 1)
                     total_latency = total_latency * (MT_K - K);
 
                 // Bias Model towards at least one dim being power of 2
@@ -1067,46 +1104,21 @@ namespace TensileLite
                     total_latency = total_latency * 0.9;
                 }
 
-                // Bias towards having enough K iterations, penalize tiles with too few K iterations.
-                size_t K_iters = safe_ceil_div(K, MT_K);
-                if(K_iters == 1)
-                {
-                    total_latency = total_latency * 16;
-                }
-                else if(K_iters == 2)
-                {
-                    total_latency = total_latency * 8;
-                }
-                else if(K_iters <= 4)
-                {
-                    total_latency = total_latency * 4;
-                }
-                else if(K_iters <= 8)
-                {
-                    total_latency = total_latency * 2;
-                }
+                // // Bias towards minimizing tile quantization in each dimension
+                // if(K < MI_K && MT_K != MI_K)
+                // {
+                //     total_latency = total_latency * safe_ceil_div(MT_K, MI_K);
+                // }
 
-                // Bias toward not splitting for small K values
-                if(K < 2048 && splittingFactor > 1)
-                {
-                    total_latency = total_latency * splittingFactor;
-                }
+                // if(M < MI_M && MT_M != MI_M)
+                // {
+                //     total_latency = total_latency * 4;
+                // }
 
-                // Bias towards minimizing tile quantization in each dimension
-                if(K < MI_K && MT_K != MI_K)
-                {
-                    total_latency = total_latency * safe_ceil_div(MT_K, MI_K);
-                }
-
-                if(M < MI_M && MT_M != MI_M)
-                {
-                    total_latency = total_latency * 4;
-                }
-
-                if(N < MI_N && MT_N != MI_N)
-                {
-                    total_latency = total_latency * 4;
-                }
+                // if(N < MI_N && MT_N != MI_N)
+                // {
+                //     total_latency = total_latency * 4;
+                // }
 
                 // Bias toward 512 tiles for sizes "very skinny" sizes
                 // "very skinny" definition: either N or M less than 16 (1 tile) and the other one requires
@@ -1130,21 +1142,16 @@ namespace TensileLite
                     }
                 }
 
-                // Heuristics for TF32
-                bool tf32_emu = ((miDataType == DataType::XFloat32)
-                             && (hardware.arch == Hardware::Architecture::gfx950));
-                if(tf32_emu)
-                {
-                    // The kernel for this is more optimized (Custom kernel)
-                    if(!transA && transB && MT_M == 256 && MT_N == 256 && MT_K == 32)
-                    {
-                        total_latency = total_latency * 0.3;
-                    }
-                }
-
                 // Heuristics for FP16
                 if(element_size_A == 16)
                 {
+                    // These kernels are more optimized (Custom kernels)
+                    // All layouts
+                    if(MT_M == 256 && MT_N == 256 && MT_K == 64)
+                    {
+                        total_latency = total_latency * 0.85;
+                    }
+
                     // The kernel for this is less optimized, for some reason
                     if(MT_M == 256 && MT_N == 16 && MT_K == 128)
                     {
