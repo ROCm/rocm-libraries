@@ -469,13 +469,13 @@ ComputeDynamicIGemmWrwKernelArgs(const ProblemDescription& problem,
     const auto stride_h = problem.GetKernelStrideH();
     const auto stride_w = problem.GetKernelStrideW();
 #else
-    const auto stride_h = ProblemInterpreter::GetAdjustedConvolutionAsmStrideH(problem);
-    const auto stride_w = ProblemInterpreter::GetAdjustedConvolutionAsmStrideW(problem);
+    const auto stride_h = ProblemInterpreter::GetAdjustedAsmInputStrideH(problem);
+    const auto stride_w = ProblemInterpreter::GetAdjustedAsmInputStrideW(problem);
 #endif
-    const auto dilation_h = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
-    const auto dilation_w = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
     const auto pad_h      = ProblemInterpreter::GetInputLeftPadH(problem);
     const auto pad_w      = ProblemInterpreter::GetInputLeftPadW(problem);
+    const auto dilation_h = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
+    const auto dilation_w = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
     const int y           = ProblemInterpreter::GetFilterHeightY(problem);
     const int x           = ProblemInterpreter::GetFilterWidthX(problem);
     const auto group      = ProblemInterpreter::GetGroupCountG(problem);
@@ -559,13 +559,13 @@ FindImplicitGemmWrwGTCDynamicXdlopsKernel(const ProblemDescription& problem)
     const auto stride_h = problem.GetKernelStrideH();
     const auto stride_w = problem.GetKernelStrideW();
 #else
-    const auto stride_h = ProblemInterpreter::GetAdjustedConvolutionAsmStrideH(problem);
-    const auto stride_w = ProblemInterpreter::GetAdjustedConvolutionAsmStrideW(problem);
+    const auto stride_h = ProblemInterpreter::GetAdjustedAsmInputStrideH(problem);
+    const auto stride_w = ProblemInterpreter::GetAdjustedAsmInputStrideW(problem);
 #endif
-    const auto dilation_h = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
-    const auto dilation_w = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
     const auto pad_h      = ProblemInterpreter::GetInputLeftPadH(problem);
     const auto pad_w      = ProblemInterpreter::GetInputLeftPadW(problem);
+    const auto dilation_h = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
+    const auto dilation_w = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
     const auto precision  = problem.IsFp16() ? miopenHalf : miopenFloat;
 
     const auto gemm_n  = c * y * x;

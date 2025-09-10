@@ -198,18 +198,6 @@ struct ProblemInterpreter
         return GetOutputWidthWo(problem) > 1 ? problem.GetKernelStrideW() : 1;
     }
 
-    // adjust conv_asm_stride_h to 1 if Hi is 1
-    static auto GetAdjustedConvolutionAsmStrideH(const miopen::conv::ProblemDescription& problem)
-    {
-        return GetInputHeightHi(problem) > 1 ? problem.GetKernelStrideH() : 1;
-    }
-
-    // adjust conv_asm_stride_w to 1 if Wi is 1
-    static auto GetAdjustedConvolutionAsmStrideW(const miopen::conv::ProblemDescription& problem)
-    {
-        return GetInputWidthWi(problem) > 1 ? problem.GetKernelStrideW() : 1;
-    }
-
     // adjust conv_dilation_d to 1 if Z is 1
     static auto GetAdjustedConvolutionDilationD(const miopen::conv::ProblemDescription& problem)
     {
@@ -309,6 +297,54 @@ struct ProblemInterpreter
             wi_padded > (in_left_pad_w + wi) ? wi_padded - (in_left_pad_w + wi) : 0;
 
         return in_right_pad_w;
+    }
+
+    /// @brief Get adjusted stride for ASM
+    /// @param problem Convolution problem description
+    /// @return Adjusted stride value
+    /// @note If the output dim is greater than 1, return the original kernel stride. Otherwise,
+    /// calculate the total padding and right padding, and return the adjusted stride if the
+    /// right padding is non-negative (valid).
+    static auto GetAdjustedAsmInputStrideH(const miopen::conv::ProblemDescription& problem)
+    {
+        const int ho = GetOutputHeightHo(problem);
+
+        if(ho > 1)
+            return problem.GetKernelStrideH();
+
+        const int hi              = GetInputHeightHi(problem);
+        const int y               = GetFilterHeightY(problem);
+        const int conv_stride_h   = GetAdjustedConvolutionStrideH(problem);
+        const int conv_dilation_h = GetAdjustedConvolutionDilationH(problem);
+
+        const int hi_tot_pad   = (ho - 1) * conv_stride_h - hi + conv_dilation_h * (y - 1) + 1;
+        const int hi_right_pad = hi_tot_pad - problem.GetPadH();
+
+        return (hi_right_pad >= 0) ? conv_stride_h : problem.GetKernelStrideH();
+    }
+
+    /// @brief Get adjusted stride for ASM
+    /// @param problem Convolution problem description
+    /// @return Adjusted stride value
+    /// @note If the output dim is greater than 1, return the original kernel stride. Otherwise,
+    /// calculate the total padding and right padding, and return the adjusted stride if the
+    /// right padding is non-negative (valid).
+    static auto GetAdjustedAsmInputStrideW(const miopen::conv::ProblemDescription& problem)
+    {
+        const int wo = GetOutputWidthWo(problem);
+
+        if(wo > 1)
+            return problem.GetKernelStrideW();
+
+        const int wi              = GetInputWidthWi(problem);
+        const int x               = GetFilterWidthX(problem);
+        const int conv_stride_w   = GetAdjustedConvolutionStrideW(problem);
+        const int conv_dilation_w = GetAdjustedConvolutionDilationW(problem);
+
+        const int wi_tot_pad   = (wo - 1) * conv_stride_w - wi + conv_dilation_w * (x - 1) + 1;
+        const int wi_right_pad = wi_tot_pad - problem.GetPadW();
+
+        return (wi_right_pad >= 0) ? conv_stride_w : problem.GetKernelStrideW();
     }
 };
 
