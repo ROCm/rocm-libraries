@@ -1690,7 +1690,7 @@ def mxfp8_target_sweep_wgms():
     for wgm_dim in [0, 1]:
         for wgm_value in range(
             1, 9
-        ):  # All above *fp8*wgm optmized only for this sweep range
+        ):  # All above *fp8*wgm optimized only for this sweep range
             yield from add_wgm(
                 (wgm_dim, wgm_value), fp8_target_d2lds_mi16x16x128_pf4x1()
             )
