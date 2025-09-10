@@ -54,7 +54,7 @@
 
 #include <rocRoller/Utilities/Comparison.hpp>
 #include <rocRoller/Utilities/Error.hpp>
-#include <rocRoller/Utilities/Utils.hpp>
+#include <rocRoller/Utilities/LazySingleton.hpp>
 
 namespace rocRoller
 {
@@ -198,115 +198,31 @@ namespace rocRoller
     std::string   toString(NaryArgument n);
     std::ostream& operator<<(std::ostream& stream, NaryArgument n);
 
-    inline constexpr DataType getIntegerType(bool isSigned, int sizeBytes)
-    {
-        if(isSigned)
-        {
-            switch(sizeBytes)
-            {
-            case 1:
-                return DataType::Int8;
-            case 2:
-                return DataType::Int16;
-            case 4:
-                return DataType::Int32;
-            case 8:
-                return DataType::Int64;
-            }
-        }
-        else
-        {
-            switch(sizeBytes)
-            {
-            case 1:
-                return DataType::UInt8;
-            case 2:
-                return DataType::UInt16;
-            case 4:
-                return DataType::UInt32;
-            case 8:
-                return DataType::UInt64;
-            }
-        }
-
-        auto prefix = isSigned ? "signed" : "unsigned";
-
-        Throw<FatalError>(
-            "No enumeration for ", prefix, " integer with size ", sizeBytes, " bytes.");
-
-        // cppcheck doesn't seem to notice that Throw<>() is marked [[noreturn]] so it will
-        // complain if this isn't here.
-        return DataType::None;
-    }
+    inline constexpr DataType getIntegerType(bool isSigned, int sizeBytes);
 
     // Case insensitive and with special cases
     template <>
-    inline DataType fromString<DataType>(std::string const& str)
-    {
-        using myInt   = std::underlying_type_t<DataType>;
-        auto maxValue = static_cast<myInt>(DataType::Count);
-        for(myInt i = 0; i < maxValue; ++i)
-        {
-            auto        val     = static_cast<DataType>(i);
-            std::string testStr = toString(val);
+    inline DataType fromString<DataType>(std::string const& str);
 
-            if(std::equal(
-                   str.begin(), str.end(), testStr.begin(), testStr.end(), [](auto a, auto b) {
-                       return std::tolower(a) == std::tolower(b);
-                   }))
-                return val;
-        }
-
-        // Special cases
-        std::string strCopy = str;
-        std::transform(strCopy.begin(), strCopy.end(), strCopy.begin(), ::tolower);
-
-        if(strCopy == "fp16")
-        {
-            return DataType::Half;
-        }
-        if(strCopy == "bf16")
-        {
-            return DataType::BFloat16;
-        }
-
-        Throw<FatalError>(
-            "Invalid fromString: type name: ", typeName<DataType>(), ", string input: ", str);
-
-        // Unreachable code
-        return DataType::None;
-    }
+    /**
+     * For types that we have given a name within rocRoller, this will return that.
+     * For other types it will defer to the RTTI name.
+     */
+    template <typename T>
+    std::string friendlyTypeName();
 
     /**
      * VariableType
      */
     struct VariableType
     {
-        constexpr VariableType()
-            : dataType()
-        {
-        }
-        constexpr VariableType(VariableType const& v)
-            : dataType(v.dataType)
-            , pointerType(v.pointerType)
-        {
-        }
+        constexpr VariableType();
+        constexpr VariableType(VariableType const& v);
+
         // cppcheck-suppress noExplicitConstructor
-        constexpr VariableType(DataType d)
-            : dataType(d)
-            , pointerType(PointerType::Value)
-        {
-        }
-        constexpr VariableType(DataType d, PointerType p)
-            : dataType(d)
-            , pointerType(p)
-        {
-        }
-        explicit constexpr VariableType(PointerType p)
-            : dataType()
-            , pointerType(p)
-        {
-        }
+        constexpr VariableType(DataType d);
+        constexpr VariableType(DataType d, PointerType p);
+        explicit constexpr VariableType(PointerType p);
 
         DataType    dataType;
         PointerType pointerType = PointerType::Value;
@@ -316,50 +232,21 @@ namespace rocRoller
          */
         size_t getElementSize() const;
 
-        inline bool isPointer() const
-        {
-            return pointerType != PointerType::Value;
-        }
-        inline bool isGlobalPointer() const
-        {
-            return pointerType == PointerType::PointerGlobal;
-        }
+        bool isPointer() const;
+        bool isGlobalPointer() const;
 
-        inline VariableType getDereferencedType() const
-        {
-            return VariableType(dataType);
-        }
+        VariableType getDereferencedType() const;
 
-        inline VariableType getPointer() const
-        {
-            AssertFatal(pointerType == PointerType::Value, ShowValue(pointerType));
-            return VariableType(dataType, PointerType::PointerGlobal);
-        }
+        inline VariableType getPointer() const;
 
-        inline DataType getArithmeticType() const
-        {
-            if(pointerType == PointerType::Value)
-                return dataType;
-
-            return getIntegerType(false, getElementSize());
-        }
+        inline DataType getArithmeticType() const;
 
         /**
          * Returns the register alignment for storing `count` values
         */
         int registerAlignment(Register::Type regType, int count, GPUArchitecture const& gpuArch);
 
-        auto                  operator<=>(VariableType const&) const = default;
-        inline constexpr bool operator==(const VariableType& rhs) const
-        {
-            return (dataType == rhs.dataType) && (pointerType == rhs.pointerType);
-        }
-        inline bool operator<(const VariableType& rhs) const
-        {
-            return pointerType < rhs.pointerType
-                   || (pointerType == rhs.pointerType && pointerType == PointerType::Value
-                       && dataType < rhs.dataType);
-        }
+        auto operator<=>(VariableType const&) const = default;
 
         /**
          * Returns a VariableType representing the result of an arithmetic operation
@@ -371,6 +258,15 @@ namespace rocRoller
          * Does no conversion between different categories (float, integral, bool).
          */
         static VariableType Promote(VariableType lhs, VariableType rhs);
+    };
+
+    /**
+     * Allows DataTypeInfo to give correct info while only having a single entry
+     * shared between pointer types.
+     */
+    struct CompareVariableTypesPointersEqual
+    {
+        bool operator()(VariableType const& lhs, VariableType const& rhs) const;
     };
 
     std::string   toString(PointerType const& p);
@@ -416,16 +312,27 @@ namespace rocRoller
         bool isSigned;
 
     private:
-        static void registerAllTypeInfo();
-        static void registerAllTypeInfoOnce();
+        class Data : public LazySingleton<Data>
+        {
+        public:
+            Data();
 
-        template <typename T>
-        static void registerTypeInfo();
+            void registerAllTypeInfo();
 
-        static void addInfoObject(DataTypeInfo const& info);
+            template <typename T>
+            void registerTypeInfo();
 
-        static std::map<VariableType, DataTypeInfo> data;
-        static std::map<std::string, VariableType>  typeNames;
+            void addInfoObject(DataTypeInfo const& info);
+
+            using Compare = CompareVariableTypesPointersEqual;
+
+            std::map<VariableType, DataTypeInfo, Compare> const& data() const;
+            std::map<std::string, VariableType> const&           typeNames() const;
+
+        private:
+            std::map<VariableType, DataTypeInfo, Compare> m_data;
+            std::map<std::string, VariableType>           m_typeNames;
+        };
     };
 
     /**
@@ -480,729 +387,10 @@ namespace rocRoller
         }
     };
 
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr VariableType BaseTypeInfo<T,
-                                        T_DEnum,
-                                        T_SegmentType,
-                                        T_PEnum,
-                                        T_Packing,
-                                        T_RegCount,
-                                        T_Bits,
-                                        T_IsComplex,
-                                        T_IsIntegral,
-                                        T_IsSigned>::Var;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr VariableType BaseTypeInfo<T,
-                                        T_DEnum,
-                                        T_SegmentType,
-                                        T_PEnum,
-                                        T_Packing,
-                                        T_RegCount,
-                                        T_Bits,
-                                        T_IsComplex,
-                                        T_IsIntegral,
-                                        T_IsSigned>::SegmentVariableType;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr size_t BaseTypeInfo<T,
-                                  T_DEnum,
-                                  T_SegmentType,
-                                  T_PEnum,
-                                  T_Packing,
-                                  T_RegCount,
-                                  T_Bits,
-                                  T_IsComplex,
-                                  T_IsIntegral,
-                                  T_IsSigned>::ElementBytes;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr size_t BaseTypeInfo<T,
-                                  T_DEnum,
-                                  T_SegmentType,
-                                  T_PEnum,
-                                  T_Packing,
-                                  T_RegCount,
-                                  T_Bits,
-                                  T_IsComplex,
-                                  T_IsIntegral,
-                                  T_IsSigned>::ElementBits;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr size_t BaseTypeInfo<T,
-                                  T_DEnum,
-                                  T_SegmentType,
-                                  T_PEnum,
-                                  T_Packing,
-                                  T_RegCount,
-                                  T_Bits,
-                                  T_IsComplex,
-                                  T_IsIntegral,
-                                  T_IsSigned>::Packing;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr size_t BaseTypeInfo<T,
-                                  T_DEnum,
-                                  T_SegmentType,
-                                  T_PEnum,
-                                  T_Packing,
-                                  T_RegCount,
-                                  T_Bits,
-                                  T_IsComplex,
-                                  T_IsIntegral,
-                                  T_IsSigned>::RegisterCount;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr bool BaseTypeInfo<T,
-                                T_DEnum,
-                                T_SegmentType,
-                                T_PEnum,
-                                T_Packing,
-                                T_RegCount,
-                                T_Bits,
-                                T_IsComplex,
-                                T_IsIntegral,
-                                T_IsSigned>::IsComplex;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr bool BaseTypeInfo<T,
-                                T_DEnum,
-                                T_SegmentType,
-                                T_PEnum,
-                                T_Packing,
-                                T_RegCount,
-                                T_Bits,
-                                T_IsComplex,
-                                T_IsIntegral,
-                                T_IsSigned>::IsIntegral;
-
-#define DeclareDefaultValueTypeInfo(dtype, enumVal)                         \
-    template <>                                                             \
-    struct TypeInfo<dtype> : public BaseTypeInfo<dtype,                     \
-                                                 DataType::enumVal,         \
-                                                 DataType::enumVal,         \
-                                                 PointerType::Value,        \
-                                                 1,                         \
-                                                 1,                         \
-                                                 sizeof(dtype) * 8,         \
-                                                 false,                     \
-                                                 std::is_integral_v<dtype>, \
-                                                 std::is_signed_v<dtype>>   \
-    {                                                                       \
-    }
-
-    DeclareDefaultValueTypeInfo(float, Float);
-
-    DeclareDefaultValueTypeInfo(int8_t, Int8);
-    DeclareDefaultValueTypeInfo(int16_t, Int16);
-    DeclareDefaultValueTypeInfo(int32_t, Int32);
-
-    DeclareDefaultValueTypeInfo(uint8_t, UInt8);
-    DeclareDefaultValueTypeInfo(uint16_t, UInt16);
-    DeclareDefaultValueTypeInfo(uint32_t, UInt32);
-
-#undef DeclareDefaultValueTypeInfo
-
-    template <>
-    struct TypeInfo<uint64_t> : public BaseTypeInfo<uint64_t,
-                                                    DataType::UInt64,
-                                                    DataType::UInt64,
-                                                    PointerType::Value,
-                                                    1,
-                                                    2,
-                                                    64,
-                                                    false,
-                                                    true,
-                                                    false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<int64_t> : public BaseTypeInfo<int64_t,
-                                                   DataType::Int64,
-                                                   DataType::Int64,
-                                                   PointerType::Value,
-                                                   1,
-                                                   2,
-                                                   64,
-                                                   false,
-                                                   true,
-                                                   true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<double> : public BaseTypeInfo<double,
-                                                  DataType::Double,
-                                                  DataType::Double,
-                                                  PointerType::Value,
-                                                  1,
-                                                  2,
-                                                  64,
-                                                  false,
-                                                  false,
-                                                  true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<std::complex<float>> : public BaseTypeInfo<std::complex<float>,
-                                                               DataType::ComplexFloat,
-                                                               DataType::ComplexFloat,
-                                                               PointerType::Value,
-                                                               1,
-                                                               2,
-                                                               64,
-                                                               true,
-                                                               false,
-                                                               true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<std::complex<double>> : public BaseTypeInfo<std::complex<double>,
-                                                                DataType::ComplexDouble,
-                                                                DataType::ComplexDouble,
-                                                                PointerType::Value,
-                                                                1,
-                                                                4,
-                                                                128,
-                                                                true,
-                                                                false,
-                                                                true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<Int8x4> : public BaseTypeInfo<Int8x4,
-                                                  DataType::Int8x4,
-                                                  DataType::Int8,
-                                                  PointerType::Value,
-                                                  4,
-                                                  1,
-                                                  32,
-                                                  false,
-                                                  true,
-                                                  true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<UInt8x4> : public BaseTypeInfo<UInt8x4,
-                                                   DataType::UInt8x4,
-                                                   DataType::UInt8,
-                                                   PointerType::Value,
-                                                   4,
-                                                   1,
-                                                   32,
-                                                   false,
-                                                   true,
-                                                   false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<Half> : public BaseTypeInfo<Half,
-                                                DataType::Half,
-                                                DataType::Half,
-                                                PointerType::Value,
-                                                1,
-                                                1,
-                                                16,
-                                                false,
-                                                false,
-                                                true>
-    {
-    };
-
-    struct Halfx2 : public DistinctType<uint32_t, Halfx2>
-    {
-    };
-
-    template <>
-    struct TypeInfo<Halfx2> : public BaseTypeInfo<Halfx2,
-                                                  DataType::Halfx2,
-                                                  DataType::Half,
-                                                  PointerType::Value,
-                                                  2,
-                                                  1,
-                                                  32,
-                                                  false,
-                                                  false,
-                                                  true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<FP8> : public BaseTypeInfo<FP8,
-                                               DataType::FP8,
-                                               DataType::FP8,
-                                               PointerType::Value,
-                                               1,
-                                               1,
-                                               8,
-                                               false,
-                                               false,
-                                               true>
-    {
-    };
-
-    struct FP8x4 : public DistinctType<uint32_t, FP8x4>
-    {
-    };
-
-    template <>
-    struct TypeInfo<FP8x4> : public BaseTypeInfo<FP8x4,
-                                                 DataType::FP8x4,
-                                                 DataType::FP8,
-                                                 PointerType::Value,
-                                                 4,
-                                                 1,
-                                                 32,
-                                                 false,
-                                                 false,
-                                                 true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<BF8> : public BaseTypeInfo<BF8,
-                                               DataType::BF8,
-                                               DataType::BF8,
-                                               PointerType::Value,
-                                               1,
-                                               1,
-                                               8,
-                                               false,
-                                               false,
-                                               true>
-    {
-    };
-
-    struct BF8x4 : public DistinctType<uint32_t, BF8x4>
-    {
-    };
-
-    template <>
-    struct TypeInfo<BF8x4> : public BaseTypeInfo<BF8x4,
-                                                 DataType::BF8x4,
-                                                 DataType::BF8,
-                                                 PointerType::Value,
-                                                 4,
-                                                 1,
-                                                 32,
-                                                 false,
-                                                 false,
-                                                 true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<FP6> : public BaseTypeInfo<FP6,
-                                               DataType::FP6,
-                                               DataType::FP6,
-                                               PointerType::Value,
-                                               1,
-                                               1,
-                                               6,
-                                               false,
-                                               false,
-                                               true>
-    {
-    };
-
-    struct FP6x16
-    {
-        uint32_t a;
-        uint32_t b;
-        uint32_t c;
-    };
-
-    template <>
-    struct TypeInfo<FP6x16> : public BaseTypeInfo<FP6x16,
-                                                  DataType::FP6x16,
-                                                  DataType::FP6,
-                                                  PointerType::Value,
-                                                  16,
-                                                  3,
-                                                  96,
-                                                  false,
-                                                  false,
-                                                  false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<BF6> : public BaseTypeInfo<BF6,
-                                               DataType::BF6,
-                                               DataType::BF6,
-                                               PointerType::Value,
-                                               1,
-                                               1,
-                                               6,
-                                               false,
-                                               false,
-                                               true>
-    {
-    };
-
-    struct BF6x16
-    {
-        uint32_t a;
-        uint32_t b;
-        uint32_t c;
-    };
-
-    template <>
-    struct TypeInfo<BF6x16> : public BaseTypeInfo<BF6x16,
-                                                  DataType::BF6x16,
-                                                  DataType::BF6,
-                                                  PointerType::Value,
-                                                  16,
-                                                  3,
-                                                  96,
-                                                  false,
-                                                  false,
-                                                  false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<FP4> : public BaseTypeInfo<FP4,
-                                               DataType::FP4,
-                                               DataType::FP4,
-                                               PointerType::Value,
-                                               1,
-                                               1,
-                                               4,
-                                               false,
-                                               false,
-                                               true>
-    {
-    };
-
-    struct FP4x8 : public DistinctType<uint32_t, FP4x8>
-    {
-    };
-
-    template <>
-    struct TypeInfo<FP4x8> : public BaseTypeInfo<FP4x8,
-                                                 DataType::FP4x8,
-                                                 DataType::FP4,
-                                                 PointerType::Value,
-                                                 8,
-                                                 1,
-                                                 32,
-                                                 false,
-                                                 false,
-                                                 false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<BFloat16> : public BaseTypeInfo<BFloat16,
-                                                    DataType::BFloat16,
-                                                    DataType::BFloat16,
-                                                    PointerType::Value,
-                                                    1,
-                                                    1,
-                                                    16,
-                                                    false,
-                                                    false,
-                                                    true>
-    {
-    };
-
-    struct BFloat16x2 : public DistinctType<uint32_t, BFloat16x2>
-    {
-    };
-
-    template <>
-    struct TypeInfo<BFloat16x2> : public BaseTypeInfo<BFloat16x2,
-                                                      DataType::BFloat16x2,
-                                                      DataType::BFloat16,
-                                                      PointerType::Value,
-                                                      2,
-                                                      1,
-                                                      32,
-                                                      false,
-                                                      false,
-                                                      true>
-    {
-    };
-
-    struct Raw32 : public DistinctType<uint32_t, Raw32>
-    {
-    };
-
-    template <>
-    struct TypeInfo<Raw32> : public BaseTypeInfo<Raw32,
-                                                 DataType::Raw32,
-                                                 DataType::Raw32,
-                                                 PointerType::Value,
-                                                 1,
-                                                 1,
-                                                 32,
-                                                 false,
-                                                 true,
-                                                 false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<bool> : public BaseTypeInfo<bool,
-                                                DataType::Bool,
-                                                DataType::Bool,
-                                                PointerType::Value,
-                                                1,
-                                                1,
-                                                1,
-                                                false,
-                                                true,
-                                                false>
-    {
-    };
-
-    struct Bool32 : public DistinctType<uint32_t, Bool32>
-    {
-    };
-
-    template <>
-    struct TypeInfo<Bool32> : public BaseTypeInfo<Bool32,
-                                                  DataType::Bool32,
-                                                  DataType::Bool32,
-                                                  PointerType::Value,
-                                                  1,
-                                                  1,
-                                                  32,
-                                                  false,
-                                                  false,
-                                                  false>
-    {
-    };
-
-    struct Bool64 : public DistinctType<uint64_t, Bool64>
-    {
-    };
-
-    template <>
-    struct TypeInfo<Bool64> : public BaseTypeInfo<Bool64,
-                                                  DataType::Bool64,
-                                                  DataType::Bool64,
-                                                  PointerType::Value,
-                                                  1,
-                                                  2,
-                                                  64,
-                                                  false,
-                                                  false,
-                                                  false>
-    {
-    };
-
-    struct PointerLocal : public DistinctType<uint32_t, PointerLocal>
-    {
-    };
-
-    template <>
-    struct TypeInfo<PointerLocal> : public BaseTypeInfo<PointerLocal,
-                                                        DataType::None,
-                                                        DataType::None,
-                                                        PointerType::PointerLocal,
-                                                        1,
-                                                        1,
-                                                        32,
-                                                        false,
-                                                        true,
-                                                        false>
-    {
-    };
-
-    struct PointerGlobal : public DistinctType<uint64_t, PointerGlobal>
-    {
-    };
-
-    template <>
-    struct TypeInfo<PointerGlobal> : public BaseTypeInfo<PointerGlobal,
-                                                         DataType::None,
-                                                         DataType::None,
-                                                         PointerType::PointerGlobal,
-                                                         1,
-                                                         2,
-                                                         64,
-                                                         false,
-                                                         true,
-                                                         false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<E8M0> : public BaseTypeInfo<E8M0,
-                                                DataType::E8M0,
-                                                DataType::E8M0,
-                                                PointerType::Value,
-                                                1,
-                                                1,
-                                                8,
-                                                false,
-                                                true,
-                                                false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<E8M0x4> : public BaseTypeInfo<E8M0x4,
-                                                  DataType::E8M0x4,
-                                                  DataType::E8M0,
-                                                  PointerType::Value,
-                                                  4,
-                                                  1,
-                                                  32,
-                                                  false,
-                                                  false,
-                                                  false>
-    {
-    };
-
-    struct Buffer
-    {
-        uint32_t desc0;
-        uint32_t desc1;
-        uint32_t desc2;
-        uint32_t desc3;
-    };
-
-    template <>
-    struct TypeInfo<Buffer> : public BaseTypeInfo<Buffer,
-                                                  DataType::None,
-                                                  DataType::None,
-                                                  PointerType::Buffer,
-                                                  1,
-                                                  4,
-                                                  128,
-                                                  false,
-                                                  true,
-                                                  false>
-    {
-    };
-
     template <DataType T_DataType>
     struct EnumTypeInfo
     {
     };
-
-#define DeclareEnumTypeInfo(typeEnum, dtype)                         \
-    template <>                                                      \
-    struct EnumTypeInfo<DataType::typeEnum> : public TypeInfo<dtype> \
-    {                                                                \
-    }
-
-    DeclareEnumTypeInfo(Float, float);
-    DeclareEnumTypeInfo(Double, double);
-    DeclareEnumTypeInfo(ComplexFloat, std::complex<float>);
-    DeclareEnumTypeInfo(ComplexDouble, std::complex<double>);
-    DeclareEnumTypeInfo(Half, Half);
-    DeclareEnumTypeInfo(Halfx2, Halfx2);
-    DeclareEnumTypeInfo(FP8, FP8);
-    DeclareEnumTypeInfo(FP8x4, FP8x4);
-    DeclareEnumTypeInfo(BF8, BF8);
-    DeclareEnumTypeInfo(BF8x4, BF8x4);
-    DeclareEnumTypeInfo(FP6, FP6);
-    DeclareEnumTypeInfo(FP6x16, FP6x16);
-    DeclareEnumTypeInfo(BF6, BF6);
-    DeclareEnumTypeInfo(BF6x16, BF6x16);
-    DeclareEnumTypeInfo(FP4, FP4);
-    DeclareEnumTypeInfo(FP4x8, FP4x8);
-    DeclareEnumTypeInfo(Int8x4, Int8x4);
-    DeclareEnumTypeInfo(Int8, int8_t);
-    DeclareEnumTypeInfo(Int16, int16_t);
-    DeclareEnumTypeInfo(Int32, int32_t);
-    DeclareEnumTypeInfo(Int64, int64_t);
-    DeclareEnumTypeInfo(BFloat16, BFloat16);
-    DeclareEnumTypeInfo(BFloat16x2, BFloat16x2);
-    DeclareEnumTypeInfo(Raw32, Raw32);
-    DeclareEnumTypeInfo(UInt8x4, UInt8x4);
-    DeclareEnumTypeInfo(UInt8, uint8_t);
-    DeclareEnumTypeInfo(UInt16, uint16_t);
-    DeclareEnumTypeInfo(UInt32, uint32_t);
-    DeclareEnumTypeInfo(UInt64, uint64_t);
-    DeclareEnumTypeInfo(Bool, bool);
-    DeclareEnumTypeInfo(Bool32, Bool32);
-    DeclareEnumTypeInfo(Bool64, Bool64);
-    DeclareEnumTypeInfo(E8M0, E8M0);
-
-#undef DeclareEnumTypeInfo
 
     template <typename T>
     concept CArithmeticType = std::integral<T> || std::floating_point<T>;
@@ -1222,6 +410,75 @@ namespace rocRoller
             TypeInfo<T>::Name()
             } -> std::convertible_to<std::string>;
     };
+
+    struct Halfx2 : public DistinctType<uint32_t, Halfx2>
+    {
+    };
+
+    struct FP8x4 : public DistinctType<uint32_t, FP8x4>
+    {
+    };
+
+    struct BF8x4 : public DistinctType<uint32_t, BF8x4>
+    {
+    };
+
+    struct FP6x16
+    {
+        uint32_t a;
+        uint32_t b;
+        uint32_t c;
+    };
+
+    struct BF6x16
+    {
+        uint32_t a;
+        uint32_t b;
+        uint32_t c;
+    };
+
+    struct FP4x8 : public DistinctType<uint32_t, FP4x8>
+    {
+    };
+
+    struct BFloat16x2 : public DistinctType<uint32_t, BFloat16x2>
+    {
+    };
+
+    struct Raw32 : public DistinctType<uint32_t, Raw32>
+    {
+    };
+
+    struct Bool32 : public DistinctType<uint32_t, Bool32>
+    {
+    };
+
+    struct Bool64 : public DistinctType<uint64_t, Bool64>
+    {
+    };
+
+    struct PointerLocal : public DistinctType<uint32_t, PointerLocal>
+    {
+    };
+
+    struct PointerGlobal : public DistinctType<uint64_t, PointerGlobal>
+    {
+    };
+
+    struct Buffer
+    {
+        uint32_t desc0;
+        uint32_t desc1;
+        uint32_t desc2;
+        uint32_t desc3;
+    };
+
+}
+
+#include "DataTypes_impl.hpp"
+
+namespace rocRoller
+{
 
     template <CArithmeticType T>
     using similar_integral_type = typename EnumTypeInfo<getIntegerType(

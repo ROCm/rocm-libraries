@@ -60,8 +60,16 @@ add_library(hipsparselt ${hipsparselt_source} ${hipsparselt_headers_public})
 add_library(roc::hipsparselt ALIAS hipsparselt)
 
 if( BUILD_CODE_COVERAGE )
-  target_compile_options(hipsparselt PRIVATE -fprofile-arcs -ftest-coverage)
-  target_link_libraries(hipsparselt PRIVATE --coverage -lgcov)
+  set(COVERAGE_CXX_FLAGS
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+  set(COVERAGE_LINK_FLAGS
+    -fprofile-instr-generate
+  )
+
+  target_compile_options(hipsparselt PRIVATE ${COVERAGE_CXX_FLAGS})
+  target_link_libraries(hipsparselt PRIVATE ${COVERAGE_LINK_FLAGS})
 endif()
 
 # Target compile definitions

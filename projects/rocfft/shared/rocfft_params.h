@@ -170,6 +170,7 @@ public:
     rocfft_execution_info   info = nullptr;
     rocfft_plan_description desc = nullptr;
     gpubuf_t<void>          wbuffer;
+    size_t                  workbuffersize = 0;
 
     explicit rocfft_params_base() = default;
 
@@ -410,7 +411,8 @@ public:
         {
             return ret;
         }
-        if(workbuffersize > 0)
+        // default behavior is to feed rocfft with a work area if it needs one
+        if(workbuffersize > 0 && auto_allocate != fft_auto_allocation_on)
         {
             hipError_t hip_status = hipSuccess;
             hip_status            = wbuffer.alloc(workbuffersize);
@@ -429,7 +431,7 @@ public:
                 {
                     oss << "hipMemGetInfo also failed";
                 }
-                throw work_buffer_alloc_failure(oss.str());
+                throw work_buffer_alloc_failure(oss.str(), workbuffersize);
             }
 
             auto rocret
@@ -443,20 +445,22 @@ public:
         return ret;
     }
 
-    fft_status set_callbacks(void* load_cb_host,
-                             void* load_cb_data,
-                             void* store_cb_host,
-                             void* store_cb_data) override
+    fft_status set_callbacks(void*  load_cb_host,
+                             void*  load_cb_data,
+                             void*  store_cb_host,
+                             void*  store_cb_data,
+                             size_t load_cb_shared_mem_bytes  = 0,
+                             size_t store_cb_shared_mem_bytes = 0) override
     {
         if(run_callbacks)
         {
-            auto roc_status
-                = rocfft.execution_info_set_load_callback(info, &load_cb_host, &load_cb_data, 0);
+            auto roc_status = rocfft.execution_info_set_load_callback(
+                info, &load_cb_host, &load_cb_data, load_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
 
-            roc_status
-                = rocfft.execution_info_set_store_callback(info, &store_cb_host, &store_cb_data, 0);
+            roc_status = rocfft.execution_info_set_store_callback(
+                info, &store_cb_host, &store_cb_data, store_cb_shared_mem_bytes);
             if(roc_status != rocfft_status_success)
                 return fft_status_from_rocfftparams(roc_status);
         }

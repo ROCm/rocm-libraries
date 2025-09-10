@@ -100,7 +100,8 @@ namespace rocsparse
             rocsparse::wfreduce_min<WF_SEGMENT_SIZE>(&min_block_col_index);
 
             // broadcast min_block_col_index from last thread in segment to all threads in segment
-            min_block_col_index = __shfl(min_block_col_index, WF_SEGMENT_SIZE - 1, WF_SEGMENT_SIZE);
+            min_block_col_index
+                = rocsparse::shfl(min_block_col_index, WF_SEGMENT_SIZE - 1, WF_SEGMENT_SIZE);
 
             // update block_col for all threads in segment
             block_col = min_block_col_index + 1;
@@ -211,10 +212,10 @@ namespace rocsparse
             }
 
             // broadcast CSR minimum column index from last thread in segment to all threads in segment
-            min_block_col = __shfl(min_block_col, WF_SEGMENT_SIZE - 1, WF_SEGMENT_SIZE);
+            min_block_col = rocsparse::shfl(min_block_col, WF_SEGMENT_SIZE - 1, WF_SEGMENT_SIZE);
 
             // broadcast nnzb_per_row from last thread in segment to all threads in segment
-            nnzb_per_row = __shfl(nnzb_per_row, WF_SEGMENT_SIZE - 1, WF_SEGMENT_SIZE);
+            nnzb_per_row = rocsparse::shfl(nnzb_per_row, WF_SEGMENT_SIZE - 1, WF_SEGMENT_SIZE);
 
             rocsparse_int k
                 = row_block_dim_C * col_block_dim_C * (bsr_row_start + nnzb_per_row - 1);

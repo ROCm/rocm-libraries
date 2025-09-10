@@ -322,6 +322,8 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         return true;
     }
 
+    IS_VALID_COMPILATION_PARAMETER_IMPL(EDataType)
+
     template <typename AGridDesc_M_K,
               typename BGridDesc_N_K,
               typename DsGridDesc_M_N,
@@ -337,6 +339,7 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         static_assert((MPerBlock % (MPerXdl * MXdlPerWave) == 0) &&
                           (NPerBlock % (NXdlPerWave * NPerXdl)) == 0,
                       "Invalid tuning param!");
+
         static_assert(KPerBlock % AK1Value == 0 && KPerBlock % BK1Value == 0,
                       "KPerBlock must be divisible by AK1Value and BK1Value!");
 
@@ -657,11 +660,11 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         constexpr auto is_scale_mfma = false;
         constexpr index_t KPack      = math::max(lcm_AK1_BK1,
                                             MfmaSelector<AComputeDataType,
-                                                         MPerXdl,
-                                                         NPerXdl,
-                                                         BComputeDataType,
-                                                         is_single_rate_mfma,
-                                                         is_scale_mfma>::selected_mfma.k_per_blk);
+                                                              MPerXdl,
+                                                              NPerXdl,
+                                                              BComputeDataType,
+                                                              is_single_rate_mfma,
+                                                              is_scale_mfma>::selected_mfma.k_per_blk);
 
         auto blockwise_gemm = BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_Selector<
             BlockSize,
@@ -856,18 +859,16 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
             // tuple of reference to C/Ds tensor descriptors
             const auto c_ds_desc_refs = concat_tuple_of_reference(
                 tie(c_shuffle_block_desc_mblock_mperblock_nblock_nperblock),
-                generate_tie(
-                    [&](auto i) -> const auto& // return type should be reference
-                    { return ds_grid_desc_mblock_mperblock_nblock_nperblock[i]; },
-                    Number<NumDTensor>{}));
+                generate_tie([&](auto i) -> const auto& // return type should be reference
+                             { return ds_grid_desc_mblock_mperblock_nblock_nperblock[i]; },
+                             Number<NumDTensor>{}));
 
             // tuple of reference to C/Ds tensor descriptors
             const auto c_ds_buf_refs = concat_tuple_of_reference(
                 tie(c_shuffle_block_buf),
-                generate_tie(
-                    [&](auto i) -> const auto& // return type should be reference
-                    { return ds_grid_buf[i]; },
-                    Number<NumDTensor>{}));
+                generate_tie([&](auto i) -> const auto& // return type should be reference
+                             { return ds_grid_buf[i]; },
+                             Number<NumDTensor>{}));
 
             // tuple of starting index of C/Ds blockwise copy
             const auto idx_c_ds_block_begin = container_concat(

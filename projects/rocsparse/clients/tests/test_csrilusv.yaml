@@ -53,7 +53,6 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mc2depi,
-             ASIC_320k,
              nos1,
              nos3,
              nos7]
@@ -108,3 +107,15 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
+
+- name: csrilusv_file
+  category: stress
+  function: csrilusv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k]

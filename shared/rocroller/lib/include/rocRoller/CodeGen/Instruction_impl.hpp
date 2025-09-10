@@ -249,24 +249,22 @@ namespace rocRoller
         return rv;
     }
 
-    inline Instruction Instruction::Lock(Scheduling::Dependency const& dependency,
-                                         std::string                   comment = "")
+    inline Instruction Instruction::Lock(Scheduling::Dependency dependency, std::string comment)
     {
-        AssertFatal(dependency != Scheduling::Dependency::Unlock
-                        && dependency != Scheduling::Dependency::Count,
-                    "Can not create lock instruction with Unlock or Count dependency");
-
         Instruction rv;
-        rv.m_dependency = dependency;
-        rv.addComment(comment);
+        rv.lock(dependency, std::move(comment));
         return rv;
     }
 
-    inline Instruction Instruction::Unlock(std::string comment = "")
+    inline Instruction Instruction::Unlock(std::string comment)
+    {
+        return Unlock(Scheduling::Dependency::None, std::move(comment));
+    }
+
+    inline Instruction Instruction::Unlock(Scheduling::Dependency dependency, std::string comment)
     {
         Instruction rv;
-        rv.m_dependency = Scheduling::Dependency::Unlock;
-        rv.addComment(comment);
+        rv.unlock(dependency, std::move(comment));
         return rv;
     }
 
@@ -355,7 +353,8 @@ namespace rocRoller
             && m_label.empty()
             && m_waitCount == WaitCount()
             && m_opcode.empty()
-            && m_dependency == Scheduling::Dependency::None;
+            && m_dependency == Scheduling::Dependency::None
+        && m_lockOp == Scheduling::LockOperation::None;
         // clang-format on
     }
 
@@ -608,42 +607,43 @@ namespace rocRoller
         throw std::runtime_error("Too many allocations!");
     }
 
-    inline Instruction Instruction::lock(Scheduling::Dependency const& dependency,
-                                         std::string                   comment = "")
+    inline Instruction& Instruction::lock(Scheduling::Dependency dependency, std::string comment)
     {
-        AssertFatal(dependency != Scheduling::Dependency::Unlock
+        AssertFatal(m_lockOp == Scheduling::LockOperation::None,
+                    "An instruction can only lock or unlock once.");
+
+        AssertFatal(dependency != Scheduling::Dependency::None
                         && dependency != Scheduling::Dependency::Count,
                     "Can not create lock instruction with Unlock or Count dependency");
 
+        m_lockOp     = Scheduling::LockOperation::Lock;
         m_dependency = dependency;
-        addComment(comment);
+        addComment(std::move(comment));
         return *this;
     }
 
-    inline Instruction Instruction::unlock(std::string comment = "")
+    inline Instruction& Instruction::unlock(std::string comment)
     {
-        m_dependency = Scheduling::Dependency::Unlock;
-        addComment(comment);
+        return unlock(Scheduling::Dependency::None, std::move(comment));
+    }
+
+    inline Instruction& Instruction::unlock(Scheduling::Dependency dependency, std::string comment)
+    {
+        AssertFatal(m_lockOp == Scheduling::LockOperation::None,
+                    "An instruction can only lock or unlock once.");
+
+        m_lockOp     = Scheduling::LockOperation::Unlock;
+        m_dependency = dependency;
+        addComment(std::move(comment));
         return *this;
     }
 
-    inline constexpr int Instruction::getLockValue() const
+    inline constexpr Scheduling::LockOperation Instruction::getLockValue() const
     {
-        if(m_dependency == Scheduling::Dependency::Unlock)
-        {
-            return -1;
-        }
-        else if(m_dependency == Scheduling::Dependency::None)
-        {
-            return 0;
-        }
-        else
-        {
-            return 1;
-        }
+        return m_lockOp;
     }
 
-    inline Scheduling::Dependency Instruction::getDependency() const
+    inline constexpr Scheduling::Dependency Instruction::getDependency() const
     {
         return m_dependency;
     }

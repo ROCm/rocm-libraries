@@ -57,7 +57,7 @@ if( NOT ROCmCMakeBuildTools_FOUND )
   include( FetchContent )
 
   FetchContent_Declare( rocm_cmake_local
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake-build-tools
+    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake
     GIT_TAG rocm-6.4.1
     GIT_SHALLOW ON
   )
@@ -85,7 +85,7 @@ if( ROCM_PATH )
 endif()
 
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.34" )
+set ( VERSION_STRING "1.0.35" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for

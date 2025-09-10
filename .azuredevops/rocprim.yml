@@ -40,8 +40,11 @@ trigger:
 
 pr: none
 
-jobs:
+stages:
+- stage: rocprim
+  jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: projects/rocprim
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml

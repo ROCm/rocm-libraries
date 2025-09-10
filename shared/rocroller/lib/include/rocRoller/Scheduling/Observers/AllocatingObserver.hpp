@@ -87,9 +87,9 @@ namespace rocRoller
                                 = std::max(myHWM, rv.highWaterMarkRegistersDelta.at(regIdx));
                         }
 
-                        rv.outOfRegisters[alloc->regType()]
-                            = rv.outOfRegisters[alloc->regType()]
-                              || alloc->registerCount() > 0 && newRegs.empty();
+                        rv.outOfRegisters.set(alloc->regType(),
+                                              rv.outOfRegisters[alloc->regType()]
+                                                  || alloc->registerCount() > 0 && newRegs.empty());
                         rv.remainingRegisters[regIdx] -= alloc->registerCount();
                     }
                 }

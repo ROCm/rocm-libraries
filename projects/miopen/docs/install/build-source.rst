@@ -151,7 +151,7 @@ You can build the library from the ``build`` directory using the ``Release`` con
 .. code:: shell
 
    cmake --build . --config Release
-   
+
 or
 
 .. code:: shell
@@ -183,7 +183,7 @@ To build the driver, use the ``MIOpenDriver`` target:
 .. code:: shell
 
    cmake --build . --config Release --target MIOpenDriver
-   
+
 or
 
 .. code:: shell
@@ -198,7 +198,7 @@ To run tests, use the ``check`` target:
 .. code:: shell
 
    cmake --build . --config Release --target check
-   
+
 or
 
 .. code:: shell
@@ -219,7 +219,7 @@ To format the code using ``clang-format``, use this command:
 
 .. code:: shell
 
-  clang-format-10 -style=file -i <path-to-source-file>
+  clang-format -style=file -i <path-to-source-file>
 
 To format the code per commit, install githooks:
 
@@ -254,7 +254,7 @@ To pull all files or a single large file, use:
 .. code:: shell
 
    git lfs pull --exclude=
- 
+
 or
 
 .. code:: shell

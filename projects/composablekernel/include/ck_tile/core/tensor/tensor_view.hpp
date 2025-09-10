@@ -161,7 +161,8 @@ struct tensor_view
     CK_TILE_HOST_DEVICE constexpr void
     async_get_vectorized_elements(CK_TILE_LDS_ADDR remove_cvref_t<DataType>* smem,
                                   const TensorCoord& coord,
-                                  index_t linear_offset) const
+                                  index_t linear_offset,
+                                  bool_constant<oob_conditional_check> = {}) const
     {
         return buf_.template async_get<X>(
             smem,
@@ -181,7 +182,8 @@ struct tensor_view
     async_get_vectorized_elements(CK_TILE_LDS_ADDR remove_cvref_t<DataType>* smem,
                                   const TensorCoord& coord,
                                   index_t linear_offset,
-                                  bool is_valid_element) const
+                                  bool is_valid_element,
+                                  bool_constant<oob_conditional_check> = {}) const
     {
         return buf_.template async_get<X>(smem,
                                           coord.get_offset() / PackedSize,
@@ -443,10 +445,11 @@ struct null_tensor_view
 };
 
 template <address_space_enum BufferAddressSpace = address_space_enum::generic,
+          memory_operation_enum DstInMemOp      = memory_operation_enum::set,
           amd_buffer_coherence_enum Coherence   = amd_buffer_coherence_enum::coherence_default,
           typename DataType,
           typename... Ts>
-CK_TILE_HOST_DEVICE constexpr auto make_tensor_view(DataType* p,
+CK_TILE_HOST_DEVICE constexpr auto make_tensor_view(DataType* __restrict__ p,
                                                     const tensor_descriptor<Ts...>& desc)
 {
     auto buffer_view =
@@ -465,7 +468,7 @@ template <address_space_enum BufferAddressSpace = address_space_enum::generic,
           index_t GuaranteedLastDimensionVectorStride                                   = -1,
           typename std::enable_if<sizeof...(Lengths) == sizeof...(Strides), bool>::type = false>
 CK_TILE_HOST_DEVICE constexpr auto
-make_naive_tensor_view(DataType* p,
+make_naive_tensor_view(DataType* __restrict__ p,
                        const tuple<Lengths...>& lengths,
                        const tuple<Strides...>& strides,
                        number<GuaranteedLastDimensionVectorLength> = number<-1>{},
@@ -488,7 +491,7 @@ template <address_space_enum BufferAddressSpace = address_space_enum::generic,
           typename... Lengths,
           index_t GuaranteedLastDimensionVectorLength = -1>
 CK_TILE_HOST_DEVICE constexpr auto
-make_naive_tensor_view_packed(DataType* p,
+make_naive_tensor_view_packed(DataType* __restrict__ p,
                               const tuple<Lengths...>& lengths,
                               number<GuaranteedLastDimensionVectorLength> = number<-1>{})
 {

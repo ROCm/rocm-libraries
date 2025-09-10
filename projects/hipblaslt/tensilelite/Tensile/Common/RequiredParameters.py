@@ -42,6 +42,8 @@ def getRequiredParametersMin() -> set:
         'ConvertAfterDS',
         'DirectToVgprA',
         'DirectToVgprB',
+        'DirectToLdsA',
+        'DirectToLdsB',
         'ExpandPointerSwap',
         'ForceDisableShadowInit',
         'GlobalReadPerMfma',

@@ -30,14 +30,7 @@
 #error "HIP_PACKAGE_VERSION_FLAT undefined"
 #endif
 
-// LLVM buffer intrinsics llvm.amdgcn.buffer.* have been removed in HIP 6.4
-#define WORKAROUND_SWDEV_498660 (HIP_PACKAGE_VERSION_FLAT >= 6004000000)
-
-#if WORKAROUND_SWDEV_498660
-#define SOLVER_NAME DISABLED_ConvHipImplicitGemmWrwV4R4Xdlops
-#else
 #define SOLVER_NAME ConvHipImplicitGemmWrwV4R4Xdlops
-#endif
 
 namespace {
 
@@ -59,7 +52,7 @@ const auto& GetTestParams()
         Gpu supported_gpus = Gpu::gfx908 | Gpu::gfx90A;
         if constexpr(datatype != miopenBFloat16)
         {
-            supported_gpus = supported_gpus | Gpu::gfx94X;
+            supported_gpus = supported_gpus | Gpu::gfx94X | Gpu::gfx950;
         }
         auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
         p.EnableDeprecatedSolvers();

@@ -47,9 +47,9 @@ namespace detail
 {
 
 // Single kernel scan (performs scan on one thread block only)
-template<bool Exclusive,
+template<class ArchConfig,
+         bool Exclusive,
          bool UseInitialValue,
-         class Config,
          class InputIterator,
          class OutputIterator,
          class BinaryFunction,
@@ -60,7 +60,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void single_scan_kernel_impl(InputIterator  
                                                                  OutputIterator output,
                                                                  BinaryFunction scan_op)
 {
-    static constexpr scan_config_params params = device_params<Config>();
+    static constexpr scan_config_params params = ArchConfig::params;
 
     constexpr unsigned int block_size       = params.kernel_config.block_size;
     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -94,66 +94,83 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void single_scan_kernel_impl(InputIterator  
     block_store_type().store(output, values, input_size, storage.store);
 }
 
-template<bool Exclusive,
+template<class Config,
+         bool Exclusive,
          bool UseInitialValue,
-         class Config,
          class InputIterator,
          class OutputIterator,
          class BinaryFunction,
          class InitValueType,
          class AccType>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    single_scan_kernel(InputIterator       input,
-                       const size_t        size,
-                       const InitValueType initial_value,
-                       OutputIterator      output,
-                       BinaryFunction      scan_op)
+inline hipError_t launch_single_scan(detail::target_arch arch,
+                                     InputIterator       input,
+                                     const size_t        size,
+                                     const InitValueType initial_value,
+                                     OutputIterator      output,
+                                     BinaryFunction      scan_op,
+                                     dim3                grid,
+                                     dim3                block,
+                                     size_t              shmem,
+                                     hipStream_t         stream)
 {
-    single_scan_kernel_impl<Exclusive, UseInitialValue, Config>(
-        input,
-        size,
-        static_cast<AccType>(get_input_value(initial_value)),
-        output,
-        scan_op);
+    auto kernel = [=](auto arch_config)
+    {
+        single_scan_kernel_impl<decltype(arch_config), Exclusive, UseInitialValue>(
+            input,
+            size,
+            static_cast<AccType>(get_input_value(initial_value)),
+            output,
+            scan_op);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 // Single pass (look-back kernels)
-
-template<lookback_scan_determinism Determinism,
+template<class Config,
+         lookback_scan_determinism Determinism,
          bool                      Exclusive,
          bool                      UseInitialValue,
-         class Config,
          class InputIterator,
          class OutputIterator,
          class BinaryFunction,
          class InitValueType,
          class AccType,
          class LookBackScanState>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    lookback_scan_kernel(InputIterator      input,
-                         OutputIterator     output,
-                         const size_t       size,
-                         InitValueType      initial_value,
-                         BinaryFunction     scan_op,
-                         LookBackScanState  lookback_scan_state,
-                         const unsigned int number_of_blocks,
-                         AccType*           previous_last_element = nullptr,
-                         AccType*           new_last_element      = nullptr,
-                         bool               override_first_value  = false,
-                         bool               save_last_value       = false)
+inline hipError_t launch_lookback_scan(detail::target_arch arch,
+                                       InputIterator       input,
+                                       OutputIterator      output,
+                                       const size_t        size,
+                                       InitValueType       initial_value,
+                                       BinaryFunction      scan_op,
+                                       LookBackScanState   lookback_scan_state,
+                                       const unsigned int  number_of_blocks,
+                                       dim3                grid,
+                                       dim3                block,
+                                       size_t              shmem,
+                                       hipStream_t         stream,
+                                       AccType*            previous_last_element = nullptr,
+                                       AccType*            new_last_element      = nullptr,
+                                       bool                override_first_value  = false,
+                                       bool                save_last_value       = false)
 {
-    lookback_scan_kernel_impl<Determinism, Exclusive, UseInitialValue, Config>(
-        input,
-        output,
-        size,
-        static_cast<AccType>(get_input_value(initial_value)),
-        scan_op,
-        lookback_scan_state,
-        number_of_blocks,
-        previous_last_element,
-        new_last_element,
-        override_first_value,
-        save_last_value);
+    auto kernel = [=](auto arch_config)
+    {
+        lookback_scan_kernel_impl<decltype(arch_config), Determinism, Exclusive, UseInitialValue>(
+            input,
+            output,
+            size,
+            static_cast<AccType>(get_input_value(initial_value)),
+            scan_op,
+            lookback_scan_state,
+            number_of_blocks,
+            previous_last_element,
+            new_last_element,
+            override_first_value,
+            save_last_value);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<lookback_scan_determinism Determinism,
@@ -183,7 +200,7 @@ inline auto scan_impl(void*               temporary_storage,
     {
         return result;
     }
-    const scan_config_params params = dispatch_target_arch<config>(target_arch);
+    const scan_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     using scan_state_type            = detail::lookback_scan_state<AccType>;
     using scan_state_with_sleep_type = detail::lookback_scan_state<AccType, true>;
@@ -318,30 +335,34 @@ inline auto scan_impl(void*               temporary_storage,
                 std::cout << "items_per_block " << items_per_block << '\n';
             }
 
-            with_scan_state(
+            ROCPRIM_RETURN_ON_ERROR(with_scan_state(
                 [&](const auto scan_state)
                 {
-                    lookback_scan_kernel<Determinism,
-                                         Exclusive,
-                                         UseInitialValue,
-                                         config,
-                                         InputIterator,
-                                         OutputIterator,
-                                         BinaryFunction,
-                                         InitValueType,
-                                         AccType>
-                        <<<dim3(grid_size), dim3(block_size), 0, stream>>>(input + offset,
-                                                                           output + offset,
-                                                                           current_size,
-                                                                           initial_value,
-                                                                           scan_op,
-                                                                           scan_state,
-                                                                           number_of_blocks,
-                                                                           previous_last_element,
-                                                                           new_last_element,
-                                                                           i != size_t(0),
-                                                                           number_of_launch > 1);
-                });
+                    return launch_lookback_scan<config,
+                                                Determinism,
+                                                Exclusive,
+                                                UseInitialValue,
+                                                InputIterator,
+                                                OutputIterator,
+                                                BinaryFunction,
+                                                InitValueType,
+                                                AccType>(target_arch,
+                                                         input + offset,
+                                                         output + offset,
+                                                         current_size,
+                                                         initial_value,
+                                                         scan_op,
+                                                         scan_state,
+                                                         number_of_blocks,
+                                                         dim3(grid_size),
+                                                         dim3(block_size),
+                                                         0,
+                                                         stream,
+                                                         previous_last_element,
+                                                         new_last_element,
+                                                         i != size_t(0),
+                                                         number_of_launch > 1);
+                }));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel",
                                                         current_size,
                                                         start);
@@ -349,14 +370,12 @@ inline auto scan_impl(void*               temporary_storage,
             // Swap the last_elements
             if(number_of_launch > 1)
             {
-                hipError_t error = ::rocprim::transform(new_last_element,
-                                                        previous_last_element,
-                                                        1,
-                                                        ::rocprim::identity<AccType>(),
-                                                        stream,
-                                                        debug_synchronous);
-                if(error != hipSuccess)
-                    return error;
+                ROCPRIM_RETURN_ON_ERROR(::rocprim::transform(new_last_element,
+                                                             previous_last_element,
+                                                             1,
+                                                             ::rocprim::identity<AccType>(),
+                                                             stream,
+                                                             debug_synchronous));
             }
         }
     }
@@ -371,15 +390,23 @@ inline auto scan_impl(void*               temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        single_scan_kernel<Exclusive, // flag for exclusive scan operation
-                           UseInitialValue,
-                           config,
-                           InputIterator,
-                           OutputIterator,
-                           BinaryFunction,
-                           InitValueType,
-                           AccType>
-            <<<dim3(1), dim3(block_size), 0, stream>>>(input, size, initial_value, output, scan_op);
+        ROCPRIM_RETURN_ON_ERROR(launch_single_scan<config,
+                                                   Exclusive, // flag for exclusive scan operation
+                                                   UseInitialValue,
+                                                   InputIterator,
+                                                   OutputIterator,
+                                                   BinaryFunction,
+                                                   InitValueType,
+                                                   AccType>(target_arch,
+                                                            input,
+                                                            size,
+                                                            initial_value,
+                                                            output,
+                                                            scan_op,
+                                                            dim3(1),
+                                                            dim3(block_size),
+                                                            0,
+                                                            stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
     }
     return hipSuccess;
@@ -520,7 +547,8 @@ inline hipError_t inclusive_scan(void*             temporary_storage,
 {
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
-    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+    using safe_acc_type =
+        typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
 
     // input_type() is a dummy initial value (not used)
     return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
@@ -727,7 +755,8 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
 {
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
-    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+    using safe_acc_type =
+        typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
 
     return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
                              false,
@@ -855,7 +884,7 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
 ///
 /// // custom scan function
 /// auto min_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };
@@ -905,7 +934,8 @@ inline hipError_t exclusive_scan(void*               temporary_storage,
 {
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
-    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+    using safe_acc_type =
+        typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
 
     return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
                              true,
@@ -953,7 +983,8 @@ inline hipError_t deterministic_exclusive_scan(void*               temporary_sto
 {
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
-    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+    using safe_acc_type =
+        typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
 
     return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
                              true,

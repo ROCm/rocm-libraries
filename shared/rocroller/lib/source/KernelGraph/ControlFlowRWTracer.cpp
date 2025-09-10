@@ -178,6 +178,17 @@ namespace rocRoller::KernelGraph
         if(control < 0 || coordinate < 0)
             return;
         m_trace.push_back({control, coordinate, rw});
+
+        if(m_graph.coordinates.getElementType(coordinate) == Graph::ElementType::Node)
+        {
+            for(auto indexCoord :
+                m_graph.coordinates.getOutputNodeIndices(coordinate, CT::isEdge<CT::Index>))
+                trackRegister(control, indexCoord, rw);
+
+            for(auto segmentCoord :
+                m_graph.coordinates.getOutputNodeIndices(coordinate, CT::isEdge<CT::Segment>))
+                trackRegister(control, segmentCoord, rw);
+        }
     }
 
     void ControlFlowRWTracer::trackConnections(int                            control,
@@ -267,7 +278,13 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
-    void ControlFlowRWTracer::operator()(Barrier const& op, int tag) {}
+    void ControlFlowRWTracer::operator()(Barrier const& op, int tag)
+    {
+        for(auto const& c : m_graph.mapper.getConnections(tag))
+        {
+            m_trace.push_back({tag, c.coordinate, ReadWrite::READ});
+        }
+    }
 
     void ControlFlowRWTracer::operator()(ComputeIndex const& op, int tag)
     {
@@ -442,8 +459,6 @@ namespace rocRoller::KernelGraph
         {
             auto aScale = m_graph.mapper.get(
                 tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
-            aScale = only(m_graph.coordinates.getOutputNodeIndices(aScale, CT::isEdge<CT::Index>))
-                         .value_or(aScale);
             trackRegister(tag, aScale, ReadWrite::READ);
         }
         else if(op.scaleA == Operations::ScaleMode::SingleScale)
@@ -460,8 +475,6 @@ namespace rocRoller::KernelGraph
         {
             auto bScale = m_graph.mapper.get(
                 tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
-            bScale = only(m_graph.coordinates.getOutputNodeIndices(bScale, CT::isEdge<CT::Index>))
-                         .value_or(bScale);
             trackRegister(tag, bScale, ReadWrite::READ);
         }
         else if(op.scaleB == Operations::ScaleMode::SingleScale)
@@ -562,8 +575,6 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::operator()(Exchange const& op, int tag)
     {
         auto src = m_graph.mapper.get<MacroTile>(tag);
-        src      = only(m_graph.coordinates.getOutputNodeIndices(src, CT::isEdge<CT::Index>))
-                  .value_or(src);
         trackRegister(tag, src, ReadWrite::READ);
 
         auto dst

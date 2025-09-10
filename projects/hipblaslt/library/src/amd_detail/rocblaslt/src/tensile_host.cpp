@@ -132,6 +132,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          void*                  amaxD,
                                                          void*                  workspace,
                                                          size_t                 workspaceSize,
+                                                         float                  act0,
+                                                         float                  act1,
                                                          hipStream_t            stream,
                                                          void*                  Synchronizer,
                                                          bool                   swizzleA,
@@ -196,6 +198,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , amaxD(amaxD)
     , workspace(workspace)
     , workspaceSize(workspaceSize)
+    , act0(act0)
+    , act1(act1)
     , stream(stream)
     , Synchronizer(Synchronizer)
     , swizzleA(swizzleA)
@@ -287,26 +291,14 @@ namespace
         }
     }
 
-    inline bool gpu_arch_match(std::string_view gpu_arch, std::string_view pattern)
-    {
-        if(!pattern.length())
-        {
-            return true;
-        }
-
-        constexpr char    prefix[]   = "gfx";
-        const std::size_t prefix_len = std::string_view(prefix).length();
-        gpu_arch.remove_prefix(prefix_len);
-        std::regex arch_regex(pattern.data());
-        return std::regex_search(gpu_arch.data(), arch_regex);
-    }
-
     inline TensileLite::ActivationType getTensileActivationType(rocblaslt_epilogue epilogue)
     {
         switch(epilogue)
         {
         case ROCBLASLT_EPILOGUE_RELU:
         case ROCBLASLT_EPILOGUE_RELU_BIAS:
+        case ROCBLASLT_EPILOGUE_RELU_AUX:
+        case ROCBLASLT_EPILOGUE_RELU_AUX_BIAS:
             return TensileLite::ActivationType::Relu;
             break;
         case ROCBLASLT_EPILOGUE_GELU:
@@ -321,6 +313,11 @@ namespace
         case ROCBLASLT_EPILOGUE_SWISH_EXT:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
             return TensileLite::ActivationType::Silu;
+        case ROCBLASLT_EPILOGUE_CLAMP_EXT:
+        case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
+        case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
+        case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
+            return TensileLite::ActivationType::Clamp;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
         case ROCBLASLT_EPILOGUE_BGRADA:
@@ -358,6 +355,7 @@ namespace
         case ROCBLASLT_EPILOGUE_BGRADA:
         case ROCBLASLT_EPILOGUE_BGRADB:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+        case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
             return true;
             break;
         default:
@@ -664,6 +662,8 @@ namespace
         case TensileLite::ActivationType::Silu:
         case TensileLite::ActivationType::Swish:
             return "swish";
+        case TensileLite::ActivationType::Clamp:
+            return "clamp";
         case TensileLite::ActivationType::None:
         default:
             return "none";
@@ -788,6 +788,11 @@ namespace
             rocblaslt::Debug::Instance().logMarkerStart(s.c_str());
             rocblaslt::Debug::Instance().logMarkerStop();
         }
+        if(rocblaslt::Debug::Instance().benchPrintCommand())
+        {
+            std::cout << s << std::endl;
+            rocblaslt::Debug::Instance().setBenchPrint(false);
+        }
     }
 
     inline void logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGemm& problem,
@@ -835,6 +840,8 @@ namespace
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
+                    problem.useScaleCD() ? "--scaleC" : "",
+                    problem.useScaleCD() ? "--scaleD" : "",
                     "scaleAlpha_vector",
                     problem.useScaleAlphaVec() ? "true" : "false",
                     "gradient",
@@ -926,6 +933,8 @@ namespace
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
+                    problem.useScaleCD() ? "--scaleC" : "",
+                    problem.useScaleCD() ? "--scaleD" : "",
                     "scaleAlpha_vector",
                     problem.useScaleAlphaVec() ? "true" : "false",
                     "gradient",
@@ -1102,6 +1111,11 @@ namespace
             rocblaslt::Debug::Instance().logMarkerStart(s.c_str());
             rocblaslt::Debug::Instance().logMarkerStop();
         }
+        if(rocblaslt::Debug::Instance().benchPrintCommand())
+        {
+            std::cout << s << std::endl;
+            rocblaslt::Debug::Instance().setBenchPrint(false);
+        }
     }
 
     inline void
@@ -1193,6 +1207,8 @@ namespace
             problem.gemms[0].useScaleAB().empty()
                 ? 0
                 : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            problem.gemms[0].useScaleCD() ? "--scaleC" : "",
+            problem.gemms[0].useScaleCD() ? "--scaleD" : "",
             "scaleAlpha_vector",
             problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
             "gradient",
@@ -1235,6 +1251,149 @@ namespace
             coldIterations,
             "iters",
             hotIterations);
+    }
+    inline void
+        logExtendedProfileFromTensileDataGemm(const TensileLite::ContractionProblemGroupedGemm& problem,
+                                              const TensileLite::ContractionGroupedInputs&      inputs,
+                                              const int&         solutionIndex,
+                                              const std::string& kernelName,
+                                              const std::string& solutionName,
+                                              bool               flush,
+                                              const int32_t&     rotatingBufferSize,
+                                              const int32_t&     coldIterations,
+                                              const int32_t&     hotIterations,
+                                              bool               isCpp)
+    {
+        size_t            gemmCount = problem.gemms.size();
+        std::stringstream grouped_gemm_profile_string;
+        for(int i = 0; i < gemmCount; ++i)
+        {
+            grouped_gemm_profile_string << " m: " << problem.gemms[i].c().sizes()[0] << ",";
+            grouped_gemm_profile_string << " n: " << problem.gemms[i].c().sizes()[1] << ",";
+            grouped_gemm_profile_string
+                << " k: " << problem.gemms[i].a().sizes()[problem.gemms[i].boundIndices()[0].a]
+                << ",";
+            grouped_gemm_profile_string << " lda: " << problem.gemms[i].a().strides()[1] << ",";
+            grouped_gemm_profile_string << " ldb: " << problem.gemms[i].b().strides()[1] << ",";
+            grouped_gemm_profile_string << " ldc: " << problem.gemms[i].c().strides()[1] << ",";
+            grouped_gemm_profile_string << " ldd: " << problem.gemms[i].d().strides()[1] << ",";
+            if(problem.gemms[i]
+                   .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                   .strides()
+                   .size())
+                grouped_gemm_profile_string
+                    << " lde: "
+                    << problem.gemms[i]
+                           .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                           .strides()[1]
+                    << ",";
+            grouped_gemm_profile_string << " stride_a: " << problem.gemms[i].a().strides()[2]
+                                        << ",";
+            grouped_gemm_profile_string << " stride_b: " << problem.gemms[i].b().strides()[2]
+                                        << ",";
+            grouped_gemm_profile_string << " stride_c: " << problem.gemms[i].c().strides()[2]
+                                        << ",";
+            if(i != (gemmCount - 1))
+            {
+                grouped_gemm_profile_string << " stride_d: " << problem.gemms[i].d().strides()[2]
+                                            << ",";
+                if(problem.gemms[i]
+                       .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                       .strides()
+                       .size())
+                    grouped_gemm_profile_string
+                        << " stride_e: "
+                        << problem.gemms[i]
+                               .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                               .strides()[2]
+                        << ",";
+            }
+            else
+            {
+                grouped_gemm_profile_string << " stride_d: " << problem.gemms[i].d().strides()[2];
+                if(problem.gemms[i]
+                       .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                       .strides()
+                       .size())
+                    grouped_gemm_profile_string
+                        << " stride_e: "
+                        << problem.gemms[i]
+                               .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
+                               .strides()[2];
+            }
+        }
+        log_profile(
+            "matmul",
+            "grouped_gemm",
+            grouped_gemm_profile_string.str(),
+            "alpha",
+            ToString(inputs.grouped[0].alpha),
+            "beta",
+            ToString(inputs.grouped[0].beta),
+            "transA",
+            problem.gemms[0].transA() ? "T" : "N",
+            "transB",
+            problem.gemms[0].transB() ? "T" : "N",
+            "batch_count",
+            problem.gemms[0].batchSize(0),
+            "scaleA",
+            problem.gemms[0].useScaleAB().empty()
+                ? 0
+                : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            "scaleB",
+            problem.gemms[0].useScaleAB().empty()
+                ? 0
+                : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            problem.gemms[0].useScaleCD() ? "--scaleC" : "",
+            problem.gemms[0].useScaleCD() ? "--scaleD" : "",
+            "scaleAlpha_vector",
+            problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
+            "gradient",
+            problem.gemms[0].useGradient() ? "true" : "false",
+            "use_e",
+            problem.gemms[0].useE() ? "true" : "false",
+            "bias_vector",
+            problem.gemms[0].useBias() ? "true" : "false",
+            "bias_source",
+            problem.gemms[0].useBias()
+                ? problem.gemms[0].tensor(problem.gemms[0].biasSrc()).getName()
+                : "d",
+            "a_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].a().dataType())),
+            "b_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].b().dataType())),
+            "c_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].c().dataType())),
+            "d_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].d().dataType())),
+            "scale_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].alphaType())),
+            "bias_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].bias().dataType())),
+            "aux_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].e().dataType())),
+            "compute_type",
+            tensileComputeInputType_to_profile_string(problem.gemms[0].computeType(),
+                                                      problem.gemms[0].f32XdlMathOp(),
+                                                      problem.gemms[0].computeInputType(),
+                                                      problem.gemms[0].a().dataType(),
+                                                      problem.gemms[0].b().dataType()),
+            "activation_type",
+            tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
+            "flush",
+            flush ? "true" : "false",
+            "rotating",
+            rotatingBufferSize,
+            "cold_iters",
+            coldIterations,
+            "iters",
+            hotIterations,
+            "solution_index",
+            solutionIndex,
+            "solution_Name",
+            solutionName,
+            "kernel_name",
+            kernelName);
     }
 #undef GEN_BENCH_ARG
 
@@ -1699,8 +1858,8 @@ namespace
         // push 2 activation arguments
         std::visit(
             [&inputs, &prob](auto val) {
-                inputs.activationArgs.push_back(val);
-                inputs.activationArgs.push_back(val);
+                inputs.activationArgs.push_back((decltype(val))prob.act0);
+                inputs.activationArgs.push_back((decltype(val))prob.act1);
                 if(prob.k)
                     inputs.alpha = *(decltype(val)*)(prob.alpha);
                 else
@@ -1712,7 +1871,7 @@ namespace
         // convert alpha and beta to float if compute type is half
         if(prob.compute_type == rocblaslt_compute_f16)
         {
-            inputs.activationArgs = {0.0f, 0.0f};
+            inputs.activationArgs = {prob.act0, prob.act1};
             inputs.alpha          = static_cast<float>(std::get<hipblasLtHalf>(inputs.alpha));
             inputs.beta           = static_cast<float>(std::get<hipblasLtHalf>(inputs.beta));
         }
@@ -2054,7 +2213,13 @@ namespace
                 {
                     using MSL
                         = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
-                    m_library        = std::dynamic_pointer_cast<MSL>(lib);
+                    m_library = std::dynamic_pointer_cast<MSL>(lib);
+                    if(!m_library->initLibraryMapping(tensileLibPath.string()))
+                    {
+                        std::cerr << "\nrocblaslt error: Could not initialize Tensile library "
+                                     "mapping"
+                                  << std::endl;
+                    }
                     m_tensileLibPath = tensileLibPath.string();
                 }
                 return 0;
@@ -2068,19 +2233,6 @@ namespace
                 // rocblaslt_abort();
             }
         }
-
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-        // A workaround for getSolutionsFromIndex and isSolutionSupported with lazy_lib_load.
-        // preload() shouldn't be called more than once.
-        void preload()
-        {
-            auto lib = TensileLite::LoadLibraryFilePreload<TensileLite::ContractionProblemGemm>(
-                m_tensileLibPath,
-                std::vector<TensileLite::LazyLoadingInit>{m_deviceSet.begin(), m_deviceSet.end()});
-            using MSL = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
-            m_library = std::dynamic_pointer_cast<MSL>(lib);
-        }
-#endif
     };
 
     // Return the library and adapter for the current HIP device
@@ -2089,12 +2241,7 @@ namespace
             library
         = nullptr,
         std::shared_ptr<hipDeviceProp_t>* deviceProp = nullptr,
-        int                               device     = -1
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-        ,
-        bool isPreload = false
-#endif
-    )
+        int                               device     = -1)
     try
     {
         // TensileHost is initialized on the first call
@@ -2127,16 +2274,6 @@ namespace
             }
         }
 
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-        // A workaround for getSolutionsFromIndex and isSolutionSupported when lazy_lib_load is on.
-        // preload() shouldn't be called more than once.
-        if(isPreload)
-            static int once = [&] {
-                host.preload();
-                *library = host.get_library();
-                return 0;
-            }();
-#endif
         // If an adapter is found, it is assumed that the library is initialized
         if(library)
             *library = host.get_library();
@@ -2389,7 +2526,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         data->inputs       = GetTensileInputs(prob);
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-           || rocblaslt::Debug::Instance().printLogAsMarker())
+           || rocblaslt::Debug::Instance().printLogAsMarker()
+           || rocblaslt::Debug::Instance().benchPrintCommand())
         {
             logBenchFromTensileDataGemm(data->problem,
                                         data->inputs,
@@ -2430,6 +2568,18 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
 
         auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
+        {
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            {
+                std::ostringstream msg;
+                msg << "Input workspace size " << prob.workspaceSize
+                    << " is less than the required workspace size ";
+                msg << solution->requiredWorkspaceSize(data->problem, *hardware) << std::endl;
+                log_info(__func__, msg.str());
+            }
+            return rocblaslt_status_invalid_value;
+        }
 
         if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
            || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)
@@ -2915,7 +3065,8 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-               || rocblaslt::Debug::Instance().printLogAsMarker())
+               || rocblaslt::Debug::Instance().printLogAsMarker()
+               || rocblaslt::Debug::Instance().benchPrintCommand())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -2948,8 +3099,10 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                           "GG is initialized with useUserArgs = true, workspace has no arguments.");
                 return rocblaslt_status_not_initialized;
             }
+
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-               || rocblaslt::Debug::Instance().printLogAsMarker())
+                || rocblaslt::Debug::Instance().printLogAsMarker()
+                || rocblaslt::Debug::Instance().benchPrintCommand())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -2960,11 +3113,31 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                                             hotIterations,
                                             true);
             }
-            //TODO: add profile logging for grouped gemm
-            /*if(get_logger_layer_mode() & rocblaslt_layer_mode_log_profile)
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
             {
-                logProfileFromTensileDataGemm(data->problem, data->inputs, true);
-            }*/
+                logProfileFromTensileDataGemm(data->problem,
+                                          data->inputs,
+                                          flush,
+                                          rotatingBufferSize,
+                                          coldIterations,
+                                          hotIterations,
+                                          false);
+            }
+            auto     solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
+            {
+                logExtendedProfileFromTensileDataGemm(data->problem,
+                                                    data->inputs,
+                                                    data->algoIndex,
+                                                    solution->kernelName,
+                                                    solution->solutionName,
+                                                    flush,
+                                                    rotatingBufferSize,
+                                                    coldIterations,
+                                                    hotIterations,
+                                                    false);
+            }
+
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
         }
         else
@@ -3076,14 +3249,58 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
             return rocblaslt_status_invalid_pointer;
         }
 
+        // Get the values of static member variables flush and rotating size from UserClientArguments
+        UserClientArguments ClientArguments;
+        bool                flush              = ClientArguments.GetFlushValue();
+        int32_t             rotatingBufferSize = ClientArguments.GetRotatingBufferSizeValue();
+        int32_t             hotIterations      = ClientArguments.GetHotIterationsValue();
+        int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
+
         if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
         {
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+                || rocblaslt::Debug::Instance().printLogAsMarker()
+                || rocblaslt::Debug::Instance().benchPrintCommand())
+            {
+                logBenchFromTensileDataGemm(data->problem,
+                                            data->inputs,
+                                            data->algoIndex,
+                                            flush,
+                                            rotatingBufferSize,
+                                            coldIterations,
+                                            hotIterations,
+                                            true);
+            }
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_profile))
+            {
+                logProfileFromTensileDataGemm(data->problem,
+                                          data->inputs,
+                                          flush,
+                                          rotatingBufferSize,
+                                          coldIterations,
+                                          hotIterations,
+                                          false);
+            }
+            auto     solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
+            {
+                logExtendedProfileFromTensileDataGemm(data->problem,
+                                                    data->inputs,
+                                                    data->algoIndex,
+                                                    solution->kernelName,
+                                                    solution->solutionName,
+                                                    flush,
+                                                    rotatingBufferSize,
+                                                    coldIterations,
+                                                    hotIterations,
+                                                    false);
+            }
+
             for(auto& it : data->kernels)
             {
                 uint8_t* arg      = it.args.rawdata();
-                auto     solution = library->getSolutionByIndex(*hardware, data->algoIndex);
                 if(solution->internalArgsSupport.useUniversalArgs)
                 {
                     if(deviceUserArgs != nullptr)
@@ -3285,8 +3502,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
-        return getRocRollerBestSolutions(
-            handle, prob, requestedAlgoCount, heuristicResultsArray, returnAlgoCount);
+        return getRocRollerBestSolutions(handle,
+                                         prob,
+                                         requestedAlgoCount,
+                                         heuristicResultsArray,
+                                         maxWorkSpaceBytes,
+                                         returnAlgoCount);
 #endif
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
@@ -3484,12 +3705,7 @@ rocblaslt_status
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-    // isPreload = true is to load placeholder libraries except code objects
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device, true);
-#else
     auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
-#endif
 
     if(!library)
     {
@@ -3498,9 +3714,8 @@ rocblaslt_status
 
     hardware = TensileLite::hip::GetDevice(*deviceProp);
 
-    int  lastSolutionIndex = library->solutions.rbegin()->first;
-    bool isOutOfBound      = true;
-    int  i                 = 0;
+    bool isOutOfBound = false;
+    int  i            = 0;
     for(auto index : solutionIndex)
     {
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -3512,10 +3727,12 @@ rocblaslt_status
         }
 
 #endif
-        isOutOfBound  = isOutOfBound && (index > lastSolutionIndex);
         auto solution = library->getSolutionByIndex(*hardware, index);
         if(!solution)
+        {
+            isOutOfBound = true;
             continue;
+        }
         rocblaslt_matmul_heuristic_result result;
         memset(&result, 0, sizeof(rocblaslt_matmul_heuristic_result));
         memset(result.algo.data, 0, sizeof(result.algo.data));
@@ -3546,12 +3763,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-    // isPreload = true is a workaround for lazy_lib_load
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device, true);
-#else
     auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
-#endif
 
     if(!library)
     {

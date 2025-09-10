@@ -39,6 +39,8 @@ Counting
      23
      ...
 
+.. _transform:
+
 Transform
 ============
 

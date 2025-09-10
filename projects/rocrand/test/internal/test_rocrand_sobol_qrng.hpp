@@ -41,10 +41,10 @@
 template<class Params>
 struct sobol_qrng_tests : public ::testing::Test
 {
-    using generator_t = typename Params::generator_t;
+    using generator_t                                 = typename Params::generator_t;
     static inline constexpr rocrand_ordering ordering = Params::ordering;
-    using constant_t  = typename generator_t::constant_type;
-    using engine_t    = typename generator_t::engine_type;
+    using constant_t                                  = typename generator_t::constant_type;
+    using engine_t                                    = typename generator_t::engine_type;
 
     auto get_generator() const
     {
@@ -139,7 +139,7 @@ TYPED_TEST_SUITE_P(sobol_qrng_tests);
 template<class Generator, rocrand_ordering Ordering>
 struct sobol_qrng_tests_params
 {
-    using generator_t = Generator;
+    using generator_t                                 = Generator;
     static inline constexpr rocrand_ordering ordering = Ordering;
 };
 

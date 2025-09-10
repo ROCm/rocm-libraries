@@ -37,7 +37,7 @@ Tests:
   precision: *single_double_precisions
   M: [3, 8, 13, 64, 256]
   N: [3, 8, 13, 64, 256]
-  denseld: [-8, 64, 512]
+  denseld: [256, 512]
   percentage: [0.0, 10.0, 20.0, 50.0, 100.0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -47,7 +47,7 @@ Tests:
   precision: *single_double_precisions
   M: [531, 1000]
   N: [241, 1000]
-  denseld: [100, 1000, 2000]
+  denseld: [1000, 2000]
   percentage: [0.1, 33.0, 100.0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -77,7 +77,7 @@ Tests:
   precision: *single_double_precisions
   M: [500, 872]
   N: [242, 623]
-  denseld: [500]
+  denseld: [900]
   percentage: [0.0, 55.0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 

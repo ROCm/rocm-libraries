@@ -81,7 +81,12 @@ if (NOT WIN32)
   if (CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
     list( APPEND COMMON_LINK_LIBS "-lgfortran") # for lapack
   else()
-    list( APPEND COMMON_LINK_LIBS "-lflang_rt.runtime") # for lapack
+    find_library(FortranRuntime NAMES FortranRuntime PATH ${HIP_CLANG_ROOT}/lib)
+    if ( ${FortranRuntime} STREQUAL "FortranRuntime-NOTFOUND" )
+      list( APPEND COMMON_LINK_LIBS "-lflang_rt.runtime") # for lapack
+    else()
+      list( APPEND COMMON_LINK_LIBS "-lFortranRuntime -lFortranDecimal") # for lapack
+    endif()
   endif()
 else()
   list( APPEND COMMON_LINK_LIBS "libomp")
@@ -90,6 +95,11 @@ target_link_libraries( hipsparselt-bench PRIVATE ${COMMON_LINK_LIBS} )
 
 set_target_properties( hipsparselt-bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+)
+set_target_properties( hipsparselt-bench PROPERTIES BUILD_RPATH_USE_ORIGIN TRUE)
+set_target_properties( hipsparselt-bench PROPERTIES
+  BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN/../llvm/lib"
 )
 
 add_dependencies( hipsparselt-bench hipsparselt-common )

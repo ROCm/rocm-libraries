@@ -61,7 +61,7 @@ option(ROCSOLVER_EMBED_FMT "Hide libfmt symbols" ON)
 option(OPTIMAL "Build specialized kernels for small matrix sizes" ON)
 option(ROCSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(ROCSOLVER_USE_INTERNAL_BLAS "Use internal implementation of GEMM and TRSM for debugging." OFF)
-option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like implementation of secular equations solver" OFF)
+option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like implementation of secular equations solver" ON)
 
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -92,7 +92,7 @@ get_os_id(OS_ID)
 message(STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set(VERSION_STRING "3.30.0")
+set(VERSION_STRING "3.31.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Workaround until llvm and hip CMake modules fix symlink logic in their config files
@@ -152,18 +152,6 @@ option(BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
 check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
 cmake_dependent_option(BUILD_OFFLOAD_COMPRESS "Build with offload compression" ON CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS OFF)
 
-cmake_dependent_option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY
-  "Build with file/folder reorg backward compatibility enabled" OFF "NOT WIN32" OFF)
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include/rocsolver
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
-  )
-endif()
-
-
 message(STATUS "Tests: ${BUILD_CLIENTS_TESTS}")
 message(STATUS "Benchmarks: ${BUILD_CLIENTS_BENCHMARKS}")
 message(STATUS "Samples: ${BUILD_CLIENTS_SAMPLES}")
@@ -218,7 +206,7 @@ find_package(hip REQUIRED CONFIG PATHS ${ROCM_PATH} /opt/rocm)
 find_package(rocblas REQUIRED CONFIG PATHS ${ROCM_PATH})
 get_imported_target_location(location roc::rocblas)
 message(STATUS "Found rocBLAS: ${location}")
-set(rocblas_minimum 4.4)
+set(rocblas_minimum 5.1)
 rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}")
 rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}")
 rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}")

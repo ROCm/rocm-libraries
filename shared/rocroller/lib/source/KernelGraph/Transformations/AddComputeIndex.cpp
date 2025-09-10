@@ -127,14 +127,15 @@ namespace rocRoller::KernelGraph
                          int          buffer,
                          bool         forward,
                          DataType     valueType,
-                         DataType     offsetType = DataType::UInt64,
-                         DataType     strideType = DataType::UInt64)
+                         DataType     offsetType,
+                         DataType     strideType,
+                         bool         isDirect2LDS)
     {
         using CCI = Connections::ComputeIndex;
         using CCA = Connections::ComputeIndexArgument;
 
-        auto ci
-            = graph.control.addElement(ComputeIndex(forward, valueType, offsetType, strideType));
+        auto ci = graph.control.addElement(
+            ComputeIndex{forward, isDirect2LDS, valueType, offsetType, strideType});
 
         if(base > 0)
             graph.mapper.connect(ci, base, CCI{CCA::BASE});
@@ -298,12 +299,13 @@ namespace rocRoller::KernelGraph
      * generating `op`.
      */
     DataType getOffsetDataType(int op, KernelGraph const& graph, bool direct2LDS)
-
     {
         DataType rv = DataType::UInt64;
+        auto     s  = graph.control.get<StoreTiled>(op);
+        auto     l  = graph.control.get<LoadTiled>(op);
         auto     ll = graph.control.get<LoadLDSTile>(op);
         auto     sl = graph.control.get<StoreLDSTile>(op);
-        if(ll || sl || direct2LDS)
+        if(s || l || ll || sl || direct2LDS)
         {
             rv = DataType::UInt32;
         }
@@ -359,8 +361,10 @@ namespace rocRoller::KernelGraph
 
             int base = (info.base == -1) ? -1 : offsetOfCoord.at(info.base);
 
+            // For future: choose type based on buffer or non-buffer
             auto offsetDataType = getOffsetDataType(op, graph, isDirect2LDS);
             auto strideDataType = DataType::UInt64;
+
             if(info.isUnroll)
             {
                 offsetDataType = DataType::Int64;
@@ -376,7 +380,8 @@ namespace rocRoller::KernelGraph
                                              direction == Graph::Direction::Upstream,
                                              dtype,
                                              offsetDataType,
-                                             strideDataType));
+                                             strideDataType,
+                                             isDirect2LDS));
 
             // Add connections for register allocate, and so tracer
             // can determine correct lifetimes
@@ -390,16 +395,17 @@ namespace rocRoller::KernelGraph
             if(info.needsUpdate)
             {
                 auto offsetExpr = std::make_shared<Expression::Expression>(
-                    Expression::DataFlowTag{offset, Register::Type::Vector, DataType::UInt64});
+                    Expression::DataFlowTag{offset, Register::Type::Vector, offsetDataType});
                 auto strideExpr = std::make_shared<Expression::Expression>(
                     Expression::DataFlowTag{stride, Register::Type::Scalar, DataType::UInt64});
 
                 if(step == nullptr)
-                    update = graph.control.addElement(
-                        Assign{Register::Type::Vector, offsetExpr + strideExpr});
+                    update = graph.control.addElement(Assign{
+                        Register::Type::Vector, convert(offsetDataType, offsetExpr + strideExpr)});
                 else
                     update = graph.control.addElement(
-                        Assign{Register::Type::Vector, offsetExpr + step * strideExpr});
+                        Assign{Register::Type::Vector,
+                               convert(offsetDataType, offsetExpr + step * strideExpr)});
                 graph.mapper.connect(update, offset, NaryArgument::DEST);
             }
         }
@@ -701,8 +707,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddComputeIndex::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::AddComputeIndex");
-
         AddComputeIndexer indexer;
 
         for(auto candidate :

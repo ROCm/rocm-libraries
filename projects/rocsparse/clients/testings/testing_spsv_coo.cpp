@@ -135,8 +135,8 @@ void testing_spsv_coo(const Arguments& arg)
     host_vector<T> hy_gold(M);
 
     // Initialize data on CPU
-    rocsparse_init<T>(hx, M, 1, 1);
-    rocsparse_init<T>(hy_1, M, 1, 1);
+    rocsparse_init<T>(hx, M, 1, 1, arg.convert_to_int);
+    rocsparse_init<T>(hy_1, M, 1, 1, arg.convert_to_int);
 
     hy_2    = hy_1;
     hy_gold = hy_1;
@@ -194,6 +194,11 @@ void testing_spsv_coo(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
     CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
         handle, trans_A, dalpha, A, x, y2, ttype, alg, preprocess, nullptr, dbuffer));
+
+    //
+    // Set the buffer to some values.
+    //
+    CHECK_HIP_ERROR(hipMemset(dbuffer, 143, buffer_size));
 
     if(arg.unit_check)
     {

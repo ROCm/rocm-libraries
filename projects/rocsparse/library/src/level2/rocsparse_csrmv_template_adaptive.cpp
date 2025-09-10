@@ -393,10 +393,9 @@ rocsparse_status
                                m,
                                false);
 
-        // Create row blocks, workgroup flag, and workgroup data structures
-        std::vector<I>        row_blocks(csrmv_info->adaptive.size, 0);
-        std::vector<uint32_t> wg_flags(csrmv_info->adaptive.size, 0);
-        std::vector<J>        wg_ids(csrmv_info->adaptive.size, 0);
+        // Create row blocks and workgroup data structures
+        std::vector<I> row_blocks(csrmv_info->adaptive.size, 0);
+        std::vector<J> wg_ids(csrmv_info->adaptive.size, 0);
 
         ComputeRowBlocks<I, J>(row_blocks.data(),
                                wg_ids.data(),
@@ -433,10 +432,9 @@ rocsparse_status
                                                sizeof(I) * csrmv_info->adaptive.size,
                                                hipMemcpyHostToDevice,
                                                stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.wg_flags,
-                                               wg_flags.data(),
+            RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->adaptive.wg_flags,
+                                               0,
                                                sizeof(uint32_t) * csrmv_info->adaptive.size,
-                                               hipMemcpyHostToDevice,
                                                stream));
             RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.wg_ids,
                                                wg_ids.data(),
@@ -781,6 +779,9 @@ INSTANTIATE(int64_t, int64_t, int8_t);
 INSTANTIATE(int32_t, int32_t, _Float16);
 INSTANTIATE(int64_t, int32_t, _Float16);
 INSTANTIATE(int64_t, int64_t, _Float16);
+INSTANTIATE(int32_t, int32_t, rocsparse_bfloat16);
+INSTANTIATE(int64_t, int32_t, rocsparse_bfloat16);
+INSTANTIATE(int64_t, int64_t, rocsparse_bfloat16);
 
 #undef INSTANTIATE
 
@@ -856,6 +857,9 @@ INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
 INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
             int32_t,

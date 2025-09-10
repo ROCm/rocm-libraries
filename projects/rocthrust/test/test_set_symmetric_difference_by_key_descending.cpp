@@ -19,7 +19,9 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(SetSymmetricDifferenceByKeyDescendingTests, FullTestsParams);
 TESTS_DEFINE(SetSymmetricDifferenceByKeyDescendingPrimitiveTests, NumericalTestsParams);
@@ -27,51 +29,18 @@ TESTS_DEFINE(SetSymmetricDifferenceByKeyDescendingPrimitiveTests, NumericalTests
 TYPED_TEST(SetSymmetricDifferenceByKeyDescendingTests, TestSetSymmetricDifferenceByKeyDescendingSimple)
 {
   using Vector   = typename TestFixture::input_type;
-  using Policy   = typename TestFixture::execution_policy;
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a_key(4), b_key(5);
-  Vector a_val(4), b_val(5);
+  Vector a_key{6, 4, 2, 0}, b_key{7, 4, 3, 3, 0};
+  Vector a_val(4, 0), b_val(5, 1);
 
-  a_key[0] = 6;
-  a_key[1] = 4;
-  a_key[2] = 2;
-  a_key[3] = 0;
-  a_val[0] = 0;
-  a_val[1] = 0;
-  a_val[2] = 0;
-  a_val[3] = 0;
-
-  b_key[0] = 7;
-  b_key[1] = 4;
-  b_key[2] = 3;
-  b_key[3] = 3;
-  b_key[4] = 0;
-  b_val[0] = 1;
-  b_val[1] = 1;
-  b_val[2] = 1;
-  b_val[3] = 1;
-  b_val[4] = 1;
-
-  Vector ref_key(5), ref_val(5);
-  ref_key[0] = 7;
-  ref_key[1] = 6;
-  ref_key[2] = 3;
-  ref_key[3] = 3;
-  ref_key[4] = 2;
-  ref_val[0] = 1;
-  ref_val[1] = 0;
-  ref_val[2] = 1;
-  ref_val[3] = 1;
-  ref_val[4] = 0;
-
+  Vector ref_key{7, 6, 3, 3, 2}, ref_val{1, 0, 1, 1, 0};
   Vector result_key(5), result_val(5);
 
   thrust::pair<Iterator, Iterator> end = thrust::set_symmetric_difference_by_key(
-    Policy{},
     a_key.begin(),
     a_key.end(),
     b_key.begin(),
@@ -82,8 +51,8 @@ TYPED_TEST(SetSymmetricDifferenceByKeyDescendingTests, TestSetSymmetricDifferenc
     result_val.begin(),
     thrust::greater<T>());
 
-  EXPECT_EQ(result_key.end(), end.first);
-  EXPECT_EQ(result_val.end(), end.second);
+  ASSERT_EQ_QUIET(result_key.end(), end.first);
+  ASSERT_EQ_QUIET(result_val.end(), end.second);
   ASSERT_EQ(ref_key, result_key);
   ASSERT_EQ(ref_val, result_val);
 }
@@ -104,7 +73,6 @@ TYPED_TEST(SetSymmetricDifferenceByKeyDescendingPrimitiveTests, TestSetSymmetric
 
       thrust::host_vector<T> temp =
         get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + size);
       thrust::host_vector<T> h_b_key(temp.begin() + size, temp.end());
 

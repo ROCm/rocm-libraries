@@ -576,12 +576,6 @@ void unit_check_garray(rocsparse_datatype val_type,
         unit_check_segments<_Float16>(size, (const _Float16*)source, (const _Float16*)t);
         break;
     }
-    case rocsparse_datatype_bf16_r:
-    {
-        unit_check_segments<rocsparse_bfloat16>(
-            size, (const rocsparse_bfloat16*)source, (const rocsparse_bfloat16*)t);
-        break;
-    }
     case rocsparse_datatype_i8_r:
     {
         unit_check_segments<int8_t>(size, (const int8_t*)s, (const int8_t*)t);
@@ -590,6 +584,12 @@ void unit_check_garray(rocsparse_datatype val_type,
     case rocsparse_datatype_u8_r:
     {
         unit_check_segments<uint8_t>(size, (const uint8_t*)source, (const uint8_t*)target);
+        break;
+    }
+    case rocsparse_datatype_bf16_r:
+    {
+        unit_check_segments<rocsparse_bfloat16>(
+            size, (const rocsparse_bfloat16*)source, (const rocsparse_bfloat16*)t);
         break;
     }
     }

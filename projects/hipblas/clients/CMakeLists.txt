@@ -58,6 +58,25 @@ function( get_cblas cblas_libs cblas_inc )
   set( ${cblas_libs} ${libs} PARENT_SCOPE )
 endfunction( )
 
+function( apply_omp_settings lib_target_ )
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
+    set_target_properties( ${lib_target_} PROPERTIES
+      BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+    )
+    set_target_properties( ${lib_target_} PROPERTIES
+      INSTALL_RPATH "$ORIGIN/../llvm/lib"
+    )
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+    set_target_properties( ${lib_target_} PROPERTIES
+      BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
+    )
+    set_target_properties( ${lib_target_} PROPERTIES
+      INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
+    )
+  endif()
+endfunction()
+
+
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
 if( WIN32 )
@@ -90,19 +109,34 @@ if( NOT WIN32 )
     set(hipblas_f90_source_clients_solver
       include/hipblas_fortran_module.f90
     )
+
+    set (hipblas_f90_source
+      ../library/src/hipblas_module.f90
+    )
 endif()
 
 if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_SAMPLES )
+  # Create hipBLAS Fortran module
+  if(NOT WIN32)
+      # Set Fortran module output directory
+      set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/hipblas)
+      add_library(hipblas_fortran OBJECT ${hipblas_f90_source})
+  endif()
+
   if( NOT WIN32 )
     if( BUILD_WITH_SOLVER )
-      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver})
+      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver} $<TARGET_OBJECTS:hipblas_fortran>)
     else()
-      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_no_solver})
+      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_no_solver} $<TARGET_OBJECTS:hipblas_fortran>)
     endif()
-    add_dependencies(hipblas_fortran_client hipblas_fortran)
   endif()
-  include_directories(${CMAKE_BINARY_DIR}/include/hipblas)
-  include_directories(${CMAKE_BINARY_DIR}/include)
+
+  if(SKIP_LIBRARY)
+    include_directories(${HIPBLAS_LIBRARY_DIR}/include/hipblas)
+  else()
+    include_directories(${CMAKE_BINARY_DIR}/include/hipblas)
+    include_directories(${CMAKE_BINARY_DIR}/include)
+  endif()
 endif( )
 
 if( BUILD_CLIENTS_SAMPLES )
@@ -114,19 +148,20 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
 
-  # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
-  # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
-  find_package(OpenMP)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR
+    find_package(OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake")
+  endif()
 
-  if (TARGET OpenMP::OpenMP_CXX)
-    set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
-    if(HIP_PLATFORM STREQUAL amd)
-      list( APPEND COMMON_LINK_LIBS "-L\"${HIP_CLANG_ROOT}/lib\"")
-      if (NOT WIN32)
-        list( APPEND COMMON_LINK_LIBS "-Wl,-rpath=${HIP_CLANG_ROOT}/lib -lomp")
-      else()
-        list( APPEND COMMON_LINK_LIBS "libomp")
-      endif()
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+    set( COMMON_LINK_LIBS "OpenMP::omp")
+    message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
+  else()
+    # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
+    # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
+    find_package(OpenMP)
+    if (TARGET OpenMP::OpenMP_CXX)
+      set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
     endif()
   endif()
 
@@ -184,7 +219,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
                     NO_DEFAULT_PATH
                   )
       if (NOT BLAS_LIBRARY)
-        find_package( OPENBLAS CONFIG REQUIRED )
+        find_package( OpenBLAS CONFIG REQUIRED )
         set( BLAS_LIBRARY OpenBLAS::OpenBLAS )
         set( BLAS_INCLUDE_DIR "" )
       endif()
@@ -202,6 +237,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
 
   message(STATUS "Build Dir: ${BUILD_DIR}")
   message(STATUS "Linking Ref. Libs: ${BLAS_LIBRARY}")
+
+  if( NOT TARGET hipblas )
+    find_package( hipblas REQUIRED CONFIG PATHS ${HIPBLAS_LIBRARY_DIR} )
+  endif( )
 
   if( BUILD_CLIENTS_TESTS )
     add_subdirectory( gtest )

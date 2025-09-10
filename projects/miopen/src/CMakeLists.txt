@@ -191,7 +191,7 @@ set( MIOpen_Source
     rope_api.cpp
     rope/problem_description.cpp
     scalar.cpp
-    softmarginloss/problem_description.cpp 
+    softmarginloss/problem_description.cpp
     softmarginloss_api.cpp
     softmax.cpp
     softmax_api.cpp
@@ -297,6 +297,7 @@ set( MIOpen_Source
     solver/groupnorm/forward_groupnorm.cpp
     solver/getitem/backward_getitem.cpp
     solver/kthvalue/forward_kthvalue.cpp
+    solver/layernorm/backward_layernorm.cpp
     solver/layernorm/backward_t5layernorm.cpp
     solver/layernorm/forward_addlayernorm.cpp
     solver/layernorm/forward_layernorm.cpp
@@ -345,6 +346,7 @@ set( MIOpen_Source
     tensor_api.cpp
     transformers_adam_w_api.cpp
     seq_tensor.cpp
+    api/tuning.cpp
 )
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
@@ -860,9 +862,16 @@ target_include_directories(MIOpen PUBLIC
 
 if(MIOPEN_USE_COMPOSABLEKERNEL)
     if(MIOPEN_BUILD_CK )
-        # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased target only is not 
-        # global when you build it so we dont have access to it. 
+        # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased target only is not
+        # global when you build it so we dont have access to it.
         set(MIOPEN_CK_LINK_FLAGS device_conv_operations hip::host)
+
+        # The include directories also dont propagate correctly when using the non aliased targets.
+        # Manually including them fixes this problem for inline builds.
+        target_include_directories(MIOpen SYSTEM PRIVATE
+            ${MIOPEN_CK_INCLUDE_DIR}
+            ${MIOPEN_CK_BUILD_INCLUDE_DIR}
+            ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
     else()
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)

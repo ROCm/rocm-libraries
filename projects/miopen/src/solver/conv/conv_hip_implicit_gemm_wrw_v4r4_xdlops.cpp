@@ -978,8 +978,11 @@ ConvSolution ConvHipImplicitGemmWrwV4R4Xdlops::GetSolution(
         std::string(" -DCK_USE_AMD_XDLOPS=") + std::to_string(IsXdlopsSupport(ctx) ? 1 : 0) +
         std::string(" -DCK_USE_AMD_XDLOPS_INLINE_ASM=") + (env::enabled(MIOPEN_DEBUG_IMPLICIT_GEMM_XDLOPS_INLINE_ASM) ? '1' : '0') +
         std::string(" -DCK_USE_AMD_XDLOPS_EMULATE=") + (env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_XDLOPS_EMULATE) ? '1' : '0') +
+#if HIP_PACKAGE_VERSION_FLAT >= 6004000000
+        std::string(" -DCK_USE_AMD_BUFFER_PTR_TYPE=1") +
+#endif
         static_ck::get_static_ck_common_compiler_flag(ctx) +
-        ctx.general_compile_options;
+        ctx.general_compile_options + " --std=c++17";
     // clang-format on
 
     result.construction_params.push_back(construction_parameters);
@@ -1043,10 +1046,6 @@ ConvSolution ConvHipImplicitGemmWrwV4R4Xdlops::GetSolution(
 bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
                                                     const ProblemDescription& problem) const
 {
-#if WORKAROUND_SWDEV_498660
-    if(!env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R4_XDLOPS))
-        return false;
-#endif
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R4_XDLOPS))
         return false;
 
@@ -1062,13 +1061,9 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
     if(!static_ck::IsComposableKernelSupportedHardware(ctx))
         return false;
 
-    if(problem.IsBfp16())
-    {
-        // Missing intrinsic: llvm.amdgcn.mfma.f32.16x16x8bf16
-        const auto dev_name = ctx.GetStream().GetDeviceName();
-        if(dev_name == "gfx942")
-            return false;
-    }
+    // Missing intrinsic: llvm.amdgcn.mfma.f32.16x16x8bf16
+    if(problem.IsBfp16() && static_ck::GfxHasMissingBf16Intrinsics(ctx.GetStream().GetDeviceName()))
+        return false;
 
     if(!IsXdlopsSupport(ctx))
         return false;

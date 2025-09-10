@@ -125,6 +125,7 @@ Arguments:
   - devices: c_uint8
   - norm_check: c_int8
   - unit_check: c_int8
+  - norm_check_assert: c_bool
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -145,6 +146,8 @@ Arguments:
   - orderB: c_char
   - orderC: c_char
   - orderD: c_char
+  - inEqualOut: c_bool
+  - logging: c_int32
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
 # test arguments in a structured way. The dictionaries are applied to the test
@@ -199,6 +202,7 @@ Defaults:
   gpu_arch: ''
   norm_check: 0
   unit_check: 1
+  norm_check_assert: true
   timing: 0
   iters: 10
   cold_iters: 2
@@ -227,4 +231,6 @@ Defaults:
   orderB: C
   orderC: C
   orderD: C
+  inEqualOut: false
+  logging: -1
 
