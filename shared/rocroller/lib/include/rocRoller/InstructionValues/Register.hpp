@@ -236,19 +236,12 @@ namespace rocRoller
              *   v->subset({1})
              *
              * would give v1, a single 32-bit register.
-             *
-             *   v->subset(1, 2)
-             *
-             * would give v2, a multi-register value consisting of two 32-bit registers and
-             * starting from the 2nd register. 
              */
             template <std::ranges::forward_range T>
             ValuePtr subset(T const& indices) const;
 
             template <std::integral T>
             ValuePtr subset(std::initializer_list<T> indices) const;
-
-            ValuePtr subset(int start, int length) const;
 
             /**
              * Splits the registers allocated into individual values.

@@ -1056,8 +1056,9 @@ namespace rocRoller
                     auto        length
                         = DataTypeInfo::Get(operandResultType.varType.dataType).registerCount;
 
-                    auto operandDest = dest->subset(offset, length);
-                    offset           = offset + length;
+                    auto operandDest
+                        = dest->subset(iota<int>(offset, offset + length).to<std::vector>());
+                    offset = offset + length;
 
                     co_yield call(operandDest, operand);
                 }
