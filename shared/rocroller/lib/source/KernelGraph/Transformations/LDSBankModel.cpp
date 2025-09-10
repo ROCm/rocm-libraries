@@ -214,6 +214,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
         Throw<FatalError>("Unsupported dword count: ", dwords);
     }
 
+    uint LDSBankModel::getNumLDSBanks(GPUArchitectureGFX gfx)
+    {
+        return (gfx == GPUArchitectureGFX::GFX950) ? 64 : 32;
+    }
+
     std::map<uint, std::vector<uint32_t>> LDSBankModel::makeBankMapping(
         const std::vector<uint32_t>& addresses, uint entryWidthInBytes, uint numBanks)
     {
@@ -401,8 +406,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                            const MemoryOpLDS&           memoryOp,
                                            uint                         dwords,
                                            const std::vector<uint32_t>& addresses,
-                                           uint                         entryWidthInBytes,
-                                           uint                         numBanks)
+                                           uint                         numBanks,
+                                           uint                         entryWidthInBytes)
     {
         if(addresses.empty())
         {
@@ -556,8 +561,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                           lowestThread,
                                           highestThread);
 
+                        uint numBanks             = LDSBankModel::getNumLDSBanks(gfx);
                         auto bankToAddressIndices = LDSBankModel::createBankToAddressIndices(
-                            groupAddresses, instr.dwords, 4, 64);
+                            groupAddresses, instr.dwords, 4, numBanks);
 
                         ss << "        Bank index to mapped addresses (relative):\n";
                         for(const auto& [bankIndex, addresses] : bankToAddressIndices)
@@ -595,13 +601,14 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 {
                     ss << "    No addresses to process\n";
                 }
+                uint       numBanks = LDSBankModel::getNumLDSBanks(gfx);
                 const auto reference
                     = LDSBankModel::immediateClockCount(gfx,
                                                         std::get<MemoryOpLDS>(instr.memoryOp),
                                                         instr.dwords,
                                                         instr.addresses,
-                                                        4,
-                                                        64);
+                                                        numBanks,
+                                                        4);
                 AssertFatal(
                     reference == instructionTotalClocks,
                     fmt::format("Immediate clock count {} does not match detailed calculation {}",

@@ -1,3 +1,5 @@
+
+
 /*******************************************************************************
  *
  * MIT License
@@ -148,6 +150,14 @@ namespace rocRoller::KernelGraph::MemoryTracer
             getThreadsPerClock(const MemoryOpLDS& memoryOp, uint dwords, GPUArchitectureGFX gfx);
 
         /**
+         * @brief Get the number of LDS banks for a given GPU architecture
+         * 
+         * @param gfx The GPU architecture
+         * @return Number of LDS banks: 64 for GFX950, 32 for all other architectures
+         */
+        static uint getNumLDSBanks(GPUArchitectureGFX gfx);
+
+        /**
          * @brief Create a mapping from bank indices to addresses
          * 
          * @param addresses Vector of LDS addresses
@@ -172,16 +182,16 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @param memoryOp The LDS memory operation (load/store)
          * @param dwords Number of dwords accessed (1 for b32, 2 for b64, 3 for b96, 4 for b128)
          * @param addresses Vector of LDS addresses being accessed
+         * @param numBanks Number of banks in the LDS
          * @param entryWidthInBytes Width of each bank entry in bytes (default: 4)
-         * @param numBanks Number of banks in the LDS (default: 64)
          * @return Total number of clock cycles for this instruction
          */
         static uint immediateClockCount(GPUArchitectureGFX           gfx,
                                         const MemoryOpLDS&           memoryOp,
                                         uint                         dwords,
                                         const std::vector<uint32_t>& addresses,
-                                        uint                         entryWidthInBytes = 4,
-                                        uint                         numBanks          = 64);
+                                        uint                         numBanks,
+                                        uint                         entryWidthInBytes = 4);
 
         /**
          * @brief Divide addresses into thread groups based on threads-per-clock limit
