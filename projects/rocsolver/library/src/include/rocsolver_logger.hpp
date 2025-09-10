@@ -106,14 +106,12 @@ struct rocsolver_log_entry
     std::vector<std::string> callers;
     std::string name;
     int level;
-    double start_time;
 
     hipEvent_t start_evt = nullptr;
     hipEvent_t stop_evt = nullptr;
 
     rocsolver_log_entry()
         : level(0)
-        , start_time(0)
         , start_evt(nullptr)
         , stop_evt(nullptr)
     {

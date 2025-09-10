@@ -101,7 +101,6 @@ rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std
     rocsolver_log_entry& result = stack.back();
     result.name = std::move(name);
     result.level = stack.size() - 1;
-    result.start_time = get_time_us_no_sync();
 
     // HIP event-based timing: create and record a start event
     hipStream_t stream = nullptr;
