@@ -81,7 +81,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     struct InstructionAccesses
     {
-        MemoryOp              memoryOp;
+        MemoryOpLDS           memoryOp;
         int                   dwords;
         std::vector<uint32_t> baseAddresses;
     };

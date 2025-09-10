@@ -66,22 +66,17 @@ namespace rocRoller::KernelGraph::MemoryTracer
         InstructionAccesses* targetInstruction = nullptr;
         for(auto& instr : opAccesses.instructions)
         {
-            if(instr.dwords == instructionDwords
-               && std::holds_alternative<MemoryOpLDS>(instr.memoryOp))
+            if(instr.dwords == instructionDwords && instr.memoryOp.direction == ldsOp->direction)
             {
-                auto& instrLdsOp = std::get<MemoryOpLDS>(instr.memoryOp);
-                if(instrLdsOp.direction == ldsOp->direction)
-                {
-                    targetInstruction = &instr;
-                    break;
-                }
+                targetInstruction = &instr;
+                break;
             }
         }
 
         if(!targetInstruction)
         {
             InstructionAccesses newInstr;
-            newInstr.memoryOp = event.memoryOp;
+            newInstr.memoryOp = *ldsOp;
             newInstr.dwords   = instructionDwords;
             opAccesses.instructions.push_back(newInstr);
             targetInstruction = &opAccesses.instructions.back();
@@ -249,13 +244,16 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         for(size_t i = 0; i < baseAddresses.size(); ++i)
         {
-            uint baseAddr       = baseAddresses[i];
-            uint bytesPerAccess = dwords * 4;
+            AssertFatal(baseAddresses[i] % 4 == 0,
+                        "Base address {} is not dword aligned",
+                        baseAddresses[i]);
+            uint baseAddr = baseAddresses[i] / 4; // in dwords
 
-            for(uint offset = 0; offset < bytesPerAccess; offset += entryWidthInBytes)
+            // Note this address arithmetic is operating on dwords units
+            for(uint offset = 0; offset < dwords; offset += 1)
             {
                 uint currentAddr = baseAddr + offset;
-                uint bankIndex   = (currentAddr / entryWidthInBytes) % numBanks;
+                uint bankIndex   = currentAddr % numBanks;
                 bankToAddressCounts[bankIndex]++;
             }
         }
@@ -288,25 +286,22 @@ namespace rocRoller::KernelGraph::MemoryTracer
         std::stringstream ss;
 
         // Generate instruction name
-        std::string instructionName = "unknown";
-        if(auto ldsOp = std::get_if<MemoryOpLDS>(&instr.memoryOp))
+        std::string instructionName;
+        if(instr.memoryOp.direction == Direction::Load)
         {
-            if(ldsOp->direction == Direction::Load)
-            {
-                instructionName = fmt::format("ds_read_b{}", instr.dwords * 32);
-            }
-            else
-            {
-                instructionName = fmt::format("ds_write_b{}", instr.dwords * 32);
-            }
+            instructionName = fmt::format("ds_read_b{}", instr.dwords * 32);
+        }
+        else
+        {
+            instructionName = fmt::format("ds_write_b{}", instr.dwords * 32);
         }
         ss << fmt::format("  Instruction: {}\n", instructionName);
 
         // Follows immediateClockCount
         uint cycles = 0;
         {
-            const auto threadsPerClock = LDSBankModel::getThreadsPerClock(
-                std::get<MemoryOpLDS>(instr.memoryOp), instr.dwords, gfx);
+            const auto threadsPerClock
+                = LDSBankModel::getThreadsPerClock(instr.memoryOp, instr.dwords, gfx);
             uint i = 0;
             for(const auto& groupAddresses :
                 LDSBankModel::divideIntoThreadGroups(instr.baseAddresses, threadsPerClock))
@@ -353,14 +348,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
         cycles += 4;
 
-        uint       numBanks = LDSBankModel::getNumLDSBanks(gfx);
-        const auto instructionTotalClocks
-            = LDSBankModel::immediateClockCount(gfx,
-                                                std::get<MemoryOpLDS>(instr.memoryOp),
-                                                instr.dwords,
-                                                instr.baseAddresses,
-                                                numBanks,
-                                                4);
+        uint       numBanks               = LDSBankModel::getNumLDSBanks(gfx);
+        const auto instructionTotalClocks = LDSBankModel::immediateClockCount(
+            gfx, instr.memoryOp, instr.dwords, instr.baseAddresses, numBanks, 4);
 
         AssertFatal(cycles == instructionTotalClocks, "Cycle count mismatch");
         ss << fmt::format("    Instruction cycles: {}\n", instructionTotalClocks);
