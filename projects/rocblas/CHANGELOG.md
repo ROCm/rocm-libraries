@@ -45,6 +45,7 @@ rocBLAS documentation is available at
 * Reduced the default verbosity level for internal GEMM backend information
 * Updated from the deprecated rocm-cmake to ROCmCMakeBuildTools
 * Corrected AlmaLinux gfortran package dependencies
+* Included upgrade of `packaging` in addition to `pip` in Tensile Virtual Environment to stabilize `setuptools` from failures
 
 ### Upcoming changes
 
