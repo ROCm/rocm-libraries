@@ -143,8 +143,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @param dwords Number of dwords (1 for b32, 2 for b64, 3 for b96, 4 for b128)
          * @param gfx The GPU architecture
          * @return Number of threads that can operate per clock
-         *         - GFX950 reads: 32 for b32/b64, 16 for b128, 8 for b96
-         *         - All other cases: 32 for b32, 16 for b64, 8 for b96/b128
          */
         static uint
             getThreadsPerClock(const MemoryOpLDS& memoryOp, uint dwords, GPUArchitectureGFX gfx);

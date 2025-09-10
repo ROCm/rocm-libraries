@@ -215,4 +215,59 @@ namespace MemoryTracerTest
         if constexpr(true)
             std::cout << detailedStr << std::endl;
     }
+
+    TEST_CASE("createBankToAddressCounts", "[kernel-graph][lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        SECTION("Bank conflicts")
+        {
+            // Test multiple addresses accessing the same bank
+            std::vector<uint32_t> addresses         = {0, 128, 256}; // All map to bank 0
+            uint                  dwords            = 1;
+            uint                  entryWidthInBytes = 4;
+            uint                  numBanks          = 32;
+
+            auto bankCounts = LDSBankModel::createBankToAddressCounts(
+                addresses, dwords, entryWidthInBytes, numBanks);
+
+            // All 3 addresses should map to bank 0
+            CHECK(bankCounts.size() == 1);
+            CHECK(bankCounts[0] == 3);
+
+            // Test conflicts with multi-dword accesses
+            addresses = {0, 4, 124}; // With dwords=2, addresses 0 and 124 both touch bank 0
+            dwords    = 2;
+
+            bankCounts = LDSBankModel::createBankToAddressCounts(
+                addresses, dwords, entryWidthInBytes, numBanks);
+
+            // Address 0 touches banks 0-1
+            // Address 4 touches banks 1-2
+            // Address 124 touches banks 31-0 (wraparound)
+            CHECK(bankCounts[0] == 2); // Accessed by addresses 0 and 124
+            CHECK(bankCounts[1] == 2); // Accessed by addresses 0 and 4
+            CHECK(bankCounts[2] == 1); // Accessed by address 4
+            CHECK(bankCounts[31] == 1); // Accessed by address 124
+        }
+
+        SECTION("Wrap around")
+        {
+            // Test wraparound behavior when multi-dword access extends past last bank
+            uint                  numBanks          = 8;
+            std::vector<uint32_t> addresses         = {28};
+            uint                  dwords            = 4; // Banks 7, 0, 1, 2
+            uint                  entryWidthInBytes = 4;
+
+            auto bankCounts = LDSBankModel::createBankToAddressCounts(
+                addresses, dwords, entryWidthInBytes, numBanks);
+
+            CHECK(bankCounts.size() == 4);
+            CHECK(bankCounts[7] == 1);
+            CHECK(bankCounts[0] == 1);
+            CHECK(bankCounts[1] == 1);
+            CHECK(bankCounts[2] == 1);
+        }
+    }
 }
