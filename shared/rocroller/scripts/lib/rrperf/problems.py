@@ -180,8 +180,8 @@ class GEMMSolution:
     wave_k: int = -1
     wave_b: int = -1
 
-    workgroup_size_x: int = 64 * 2
-    workgroup_size_y: int = 2
+    workgroup_size_x: int = -1
+    workgroup_size_y: int = -1
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
