@@ -55,6 +55,8 @@ namespace rocRoller
             static const bool flow = true;
         };
 
+        ROCROLLER_SERIALIZE_VECTOR(false, Expression::ExpressionPtr);
+
         template <Expression::CBinary TExp, typename IO, typename Context>
         struct MappingTraits<TExp, IO, Context>
         {
@@ -184,8 +186,6 @@ namespace rocRoller
                 mapping(io, val, ctx);
             }
         };
-
-        ROCROLLER_SERIALIZE_VECTOR(false, Expression::ExpressionPtr);
 
         template <Expression::CNary Expr, typename IO, typename Context>
         struct MappingTraits<Expr, IO, Context>
