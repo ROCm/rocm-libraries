@@ -322,10 +322,10 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return threadGroups;
     }
 
-    std::map<uint, std::vector<uint>> LDSBankModel::createBankToAddressIndices(
+    std::map<uint, std::deque<uint32_t>> LDSBankModel::createBankToAddressIndices(
         const std::vector<uint32_t>& addresses, uint dwords, uint entryWidthInBytes, uint numBanks)
     {
-        std::map<uint, std::vector<uint>> bankToAddressIndices;
+        std::map<uint, std::deque<uint32_t>> bankToAddressIndices;
 
         for(size_t i = 0; i < addresses.size(); ++i)
         {
@@ -337,7 +337,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
             {
                 uint currentAddr = baseAddr + offset;
                 uint bankIndex   = (currentAddr / entryWidthInBytes) % numBanks;
-                bankToAddressIndices[bankIndex].push_back(i);
+                // Store the actual base address (not the index)
+                bankToAddressIndices[bankIndex].push_back(baseAddr);
             }
         }
 
@@ -345,50 +346,51 @@ namespace rocRoller::KernelGraph::MemoryTracer
     }
 
     uint LDSBankModel::calculateBankConflictCycles(
-        const std::map<uint, std::vector<uint>>& bankToAddressIndices)
+        const std::map<uint, std::deque<uint32_t>>& bankToAddressIndices)
     {
-        // Simulate clock cycles needed to resolve bank conflicts
-        std::map<uint, std::vector<uint>> remainingAccesses = bankToAddressIndices;
-        uint                              clockCycles       = 0;
+        std::map<uint, std::deque<uint32_t>> remainingAccesses = bankToAddressIndices;
+        uint                                 clockCycles       = 0;
 
         while(!remainingAccesses.empty())
         {
-            std::set<uint>    usedAddresses; // Track which addresses have been scheduled this cycle
-            std::vector<uint> banksToRemove;
+            std::set<uint32_t> usedAddresses;
+            std::vector<uint>  banksToRemove;
 
-            // Process one address per bank for this clock cycle
-            for(auto& [bankIndex, addressIndices] : remainingAccesses)
+            // Process one address per bank
+            for(auto& [bankIndex, addresses] : remainingAccesses)
             {
-                if(!addressIndices.empty())
+                if(!addresses.empty())
                 {
-                    // Find first address that hasn't been scheduled yet
-                    for(auto it = addressIndices.begin(); it != addressIndices.end(); ++it)
-                    {
-                        if(usedAddresses.find(*it) == usedAddresses.end())
-                        {
-                            usedAddresses.insert(*it);
-                            addressIndices.erase(it);
-                            break;
-                        }
-                    }
-
-                    if(addressIndices.empty())
-                    {
-                        banksToRemove.push_back(bankIndex);
-                    }
+                    uint32_t address = addresses.front();
+                    usedAddresses.insert(address);
+                    addresses.pop_front();
+                }
+                if(addresses.empty())
+                {
+                    banksToRemove.push_back(bankIndex);
                 }
             }
-
-            // Remove banks with no remaining accesses
             for(auto bank : banksToRemove)
             {
                 remainingAccesses.erase(bank);
             }
 
-            // Increment clock cycle count if we scheduled any addresses
             if(!usedAddresses.empty())
             {
                 clockCycles++;
+                if constexpr(false)
+                {
+                    std::cout << "Clock cycle " << clockCycles << ": addresses [";
+                    size_t i = 0;
+                    for(auto addr : usedAddresses)
+                    {
+                        if(i > 0)
+                            std::cout << ", ";
+                        std::cout << fmt::format("0x{:x}", addr);
+                        i++;
+                    }
+                    std::cout << "]\n";
+                }
             }
         }
 
@@ -514,130 +516,101 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
             for(const auto& instr : opAccesses.instructions)
             {
-                // Get instruction details
+                uint instructionTotalClocks = 0;
+
                 std::string instructionName = "unknown";
                 if(auto ldsOp = std::get_if<MemoryOpLDS>(&instr.memoryOp))
                 {
                     if(ldsOp->direction == Direction::Load)
                     {
-                        switch(instr.dwords)
-                        {
-                        case 1:
-                            instructionName = "ds_read_b32";
-                            break;
-                        case 2:
-                            instructionName = "ds_read_b64";
-                            break;
-                        case 3:
-                            instructionName = "ds_read_b96";
-                            break;
-                        case 4:
-                            instructionName = "ds_read_b128";
-                            break;
-                        default:
-                            instructionName = fmt::format("ds_read_{}_dwords", instr.dwords);
-                            break;
-                        }
+                        instructionName = fmt::format("ds_read_b{}", instr.dwords * 32);
                     }
-                    else // Store
+                    else
                     {
-                        switch(instr.dwords)
-                        {
-                        case 1:
-                            instructionName = "ds_write_b32";
-                            break;
-                        case 2:
-                            instructionName = "ds_write_b64";
-                            break;
-                        case 3:
-                            instructionName = "ds_write_b96";
-                            break;
-                        case 4:
-                            instructionName = "ds_write_b128";
-                            break;
-                        default:
-                            instructionName = fmt::format("ds_write_{}_dwords", instr.dwords);
-                            break;
-                        }
+                        instructionName = fmt::format("ds_write_b{}", instr.dwords * 32);
                     }
                 }
 
-                ss << fmt::format(
-                    "  Instruction: {} ({} addresses)\n", instructionName, instr.addresses.size());
+                ss << fmt::format("  Instruction: {}\n", instructionName);
 
                 // Show detailed calculation steps
                 if(!instr.addresses.empty())
                 {
                     const auto& ldsOp = std::get<MemoryOpLDS>(instr.memoryOp);
 
-                    // Step 1: Get threads per clock
                     uint threadsPerClock
                         = LDSBankModel::getThreadsPerClock(ldsOp, instr.dwords, gfx);
-                    ss << fmt::format("    Threads per clock: {}\n", threadsPerClock);
+                    ss << fmt::format("    Threads processed per clock: {}\n", threadsPerClock);
 
-                    // Step 2: Divide into thread groups
                     auto threadGroups
                         = LDSBankModel::divideIntoThreadGroups(instr.addresses, threadsPerClock);
-                    ss << fmt::format("    Thread groups: {}\n", threadGroups.size());
 
-                    // Step 3: Process each group and show details
                     uint totalBankConflictCycles = 0;
                     for(size_t groupIdx = 0; groupIdx < threadGroups.size(); ++groupIdx)
                     {
                         const auto& groupAddresses = threadGroups[groupIdx];
-                        ss << fmt::format(
-                            "      Group {} ({} addresses):\n", groupIdx, groupAddresses.size());
+                        const auto  lowestThread   = groupIdx * threadsPerClock;
+                        const auto  highestThread  = lowestThread + groupAddresses.size() - 1;
+                        ss << fmt::format("      Thread group {} [{}, {}]:\n",
+                                          groupIdx,
+                                          lowestThread,
+                                          highestThread);
 
-                        // Create bank mapping for this group
                         auto bankToAddressIndices = LDSBankModel::createBankToAddressIndices(
                             groupAddresses, instr.dwords, 4, 64);
 
-                        // Show bank conflicts
-                        ss << "        Bank conflicts: ";
-                        bool first = true;
-                        for(const auto& [bankIndex, addressIndices] : bankToAddressIndices)
+                        ss << "        Bank index to mapped addresses (relative):\n";
+                        for(const auto& [bankIndex, addresses] : bankToAddressIndices)
                         {
-                            if(addressIndices.size() > 1)
+                            ss << fmt::format("          bank {}: [", bankIndex);
+                            size_t i = 0;
+                            for(const auto& address : addresses)
                             {
-                                if(!first)
+                                if(i > 0)
                                     ss << ", ";
-                                ss << fmt::format(
-                                    "bank {} ({} addresses)", bankIndex, addressIndices.size());
-                                first = false;
+                                // Show actual address value
+                                ss << fmt::format("0x{:x}", address);
+                                i++;
                             }
+                            ss << "]\n";
                         }
-                        if(first)
-                        {
-                            ss << "none";
-                        }
-                        ss << "\n";
-
-                        // Calculate cycles for this group
-                        uint groupCycles
+                        auto cycleNum
                             = LDSBankModel::calculateBankConflictCycles(bankToAddressIndices);
-                        ss << fmt::format("        Cycles for group: {}\n", groupCycles);
-                        totalBankConflictCycles += groupCycles;
+                        ss << fmt::format("        Thread group data cycles: {}\n", cycleNum);
+                        totalBankConflictCycles += cycleNum;
                     }
 
                     // Calculate total cycles
                     const uint addressTransferCycles = 4;
                     uint       totalClocks = totalBankConflictCycles + addressTransferCycles;
 
-                    ss << fmt::format(
-                        "    Total clock cycles: {} ({} bank conflict + {} address transfer)\n",
-                        totalClocks,
-                        totalBankConflictCycles,
-                        addressTransferCycles);
+                    ss << fmt::format("    Instruction cycles: {} ({} data + {} address)\n",
+                                      totalClocks,
+                                      totalBankConflictCycles,
+                                      addressTransferCycles);
 
-                    operationTotalClocks += totalClocks;
+                    instructionTotalClocks += totalClocks;
                 }
                 else
                 {
                     ss << "    No addresses to process\n";
                 }
+                const auto reference
+                    = LDSBankModel::immediateClockCount(gfx,
+                                                        std::get<MemoryOpLDS>(instr.memoryOp),
+                                                        instr.dwords,
+                                                        instr.addresses,
+                                                        4,
+                                                        64);
+                AssertFatal(
+                    reference == instructionTotalClocks,
+                    fmt::format("Immediate clock count {} does not match detailed calculation {}",
+                                reference,
+                                instructionTotalClocks));
+                operationTotalClocks += instructionTotalClocks;
             }
 
-            ss << fmt::format("  Total clock cycles for operation: {}\n", operationTotalClocks);
+            ss << fmt::format("  Operation cycles: {}\n", operationTotalClocks);
             ss << "\n";
         }
 

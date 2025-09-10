@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <deque>
 #include <map>
 #include <ostream>
 #include <string>
@@ -193,18 +194,18 @@ namespace rocRoller::KernelGraph::MemoryTracer
             divideIntoThreadGroups(const std::vector<uint32_t>& addresses, uint threadsPerClock);
 
         /**
-         * @brief Create a mapping from bank indices to address indices for conflict resolution
+         * @brief Create a mapping from bank indices to addresses for conflict resolution
          * 
          * For multi-dword accesses, tracks all banks touched by each address.
-         * The resulting map has bank indices as keys and vectors of address indices as values.
+         * The resulting map has bank indices as keys and deques of actual addresses as values.
          * 
          * @param addresses Vector of LDS addresses
          * @param dwords Number of dwords accessed per address
          * @param entryWidthInBytes Width of each bank entry in bytes
          * @param numBanks Number of banks in the LDS
-         * @return Map from bank index to vector of address indices that access that bank
+         * @return Map from bank index to deque of addresses that access that bank
          */
-        static std::map<uint, std::vector<uint>>
+        static std::map<uint, std::deque<uint32_t>>
             createBankToAddressIndices(const std::vector<uint32_t>& addresses,
                                        uint                         dwords,
                                        uint                         entryWidthInBytes,
@@ -217,11 +218,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * can be serviced per clock cycle. Addresses are scheduled to avoid conflicts,
          * with each address being processed exactly once.
          * 
-         * @param bankToAddressIndices Map from bank index to vector of address indices
+         * @param bankToAddressIndices Map from bank index to deque of addresses
          * @return Number of clock cycles needed to process all addresses
          */
         static uint calculateBankConflictCycles(
-            const std::map<uint, std::vector<uint>>& bankToAddressIndices);
+            const std::map<uint, std::deque<uint32_t>>& bankToAddressIndices);
 
     private:
         uint m_entryWidthInBytes;
