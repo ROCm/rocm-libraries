@@ -864,12 +864,11 @@ pushd .
     fi
   fi
 
-  echo $cmake_common_options ${cmake_client_options}
   # Build library with AMD toolchain because of existense of device kernels
   if [[ "${build_relocatable}" == true ]]; then
-    echo cmake command relocatable: CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${rocm_path} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DROCM_DISABLE_LDCONFIG=ON -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
+    echo cmake command relocatable: FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${rocm_path} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DROCM_DISABLE_LDCONFIG=ON -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
 
-    CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF \
+    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF \
       -DCMAKE_INSTALL_PREFIX=${rocm_path} \
       -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} \
       -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" \
@@ -879,9 +878,9 @@ pushd .
       -DCMAKE_INSTALL_LIBDIR="lib" \
       -DROCM_PATH="${rocm_path}" ${root_path}
   else
-    echo cmake command: CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
+    echo cmake command: FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
 
-    CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
+    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
   fi
   check_exit_code "$?"
 
