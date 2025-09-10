@@ -691,8 +691,7 @@ def writeClientConfig(
       filename = os.path.join(sourceDir, "%s.ini"%configBase)
 
     if len(newLibrary.solutions)==0:
-      print("No valid solutions found")
-      return None
+      raise RuntimeError ("No valid solutions found")
 
     resultsFileName = None
     if tileAwareSelection:

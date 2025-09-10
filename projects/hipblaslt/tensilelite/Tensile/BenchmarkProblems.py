@@ -305,9 +305,7 @@ def writeBenchmarkFiles(
                           newLibrary, codeObjectFiles, False, deviceId, gfxName, probSolMap=probSolMap)
 
     if len(solutions) == 0:
-        # printExit("write solutions and kernels results 0 valid solution.")
-        print("No valid solutions found for configuration group")
-        return None
+        printExit("write solutions and kernels results 0 valid soultion.")
 
     return codeObjectFiles
 
@@ -419,7 +417,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 else:
                     msg += "\nYou should re-run with \"PrintSolutionRejectionReason: True\"" \
                             "to see why each parameter combination was rejected."
-                print(msg)
+                printExit(msg)
 
             for solution in solutions:
                 print2("#    ({}:{}) {}".format(0, 0, getSolutionNameMin(solution, debugConfig.splitGSU)))
@@ -427,19 +425,12 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
             # write benchmarkFiles
             prevCount = len(solutions)
-            
-            if len(solutions) == 0:
-                continue
-            
             codeObjectFiles = writeBenchmarkFiles(stepBaseDir, solutions, \
                     benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                     benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
                     sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
             # ^ this mutates solutions
-            
-            if not codeObjectFiles:
-                continue
 
             # write cache data
             cacheData = {
@@ -571,9 +562,6 @@ def main(
                             probSolMap
                         )
                 totalTestFails += benchmarkErrors
-                
-                if not resultsFileBaseFinal:
-                    continue
 
                 print("clientExit={} {} for {}" \
                         .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
@@ -584,8 +572,6 @@ def main(
                 resultsFileName = resultsFileBase + ".csv"
                 solutionsFileName = resultsFileBase + ".yaml"
                 granularityFileName = resultsFileBase + "_Granularity.csv"
-                if not os.path.exists(resultsFileName) or not os.path.exists(solutionsFileName):
-                    continue
                 shutil.copy(resultsFileName, newResultsFileName)
                 shutil.copy(solutionsFileName, newSolutionsFileName)
                 if os.path.isfile(granularityFileName):
