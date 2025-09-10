@@ -76,22 +76,16 @@ namespace rocRoller
             template <CNary Expr>
             std::string operator()(Expr const& expr) const
             {
-                std::string result = concatenate(ExpressionInfo<Expr>::name(), "(");
-                bool        first  = true;
-                for(auto const& operand : expr.operands)
-                {
-                    if(first)
-                    {
-                        result = concatenate(result, call(operand));
-                        first  = false;
-                    }
-                    else
-                    {
-                        result = concatenate(result, ", ", call(operand));
-                    }
-                }
-                result = concatenate(result, ")");
-                return result;
+                std::ostringstream stream;
+                stream << ExpressionInfo<Expr>::name() << '(';
+
+                auto operandToStrings = std::ranges::views::transform(
+                    expr.operands, [this](auto const& operand) { return call(operand); });
+                streamJoin(stream, operandToStrings, ", ");
+
+                stream << ')';
+
+                return stream.str();
             }
 
             std::string operator()(BitFieldExtract const& expr) const
