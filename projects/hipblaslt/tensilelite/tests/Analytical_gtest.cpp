@@ -31,10 +31,76 @@
 #include <iostream>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#include <limits.h>
+#else
+#include <windows.h>
+#endif
+
+// Returns the directory path where the current executable resides.
+// Adds a trailing slash ('/' on Linux, '\' on Windows) for easy file concatenation.
+std::string getExecutableDir() {
+#ifndef _WIN32
+    // Linux branch
+
+    char result[PATH_MAX];  // Buffer to store the path
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);  
+    // readlink reads the symbolic link /proc/self/exe, which points to the current executable
+
+    if (count == -1) {
+        // If readlink fails, return empty string
+        return "";
+    }
+
+    result[count] = '\0'; // Null-terminate the buffer
+    std::string fullPath(result); // Convert to std::string
+
+    // Find the position of the last slash ('/') in the path
+    // This separates the directory from the binary name
+    size_t pos = fullPath.find_last_of('/');
+
+    // Extract the directory portion
+    std::string dir = (pos != std::string::npos) ? fullPath.substr(0, pos) : fullPath;
+
+    // Ensure the directory string ends with a slash
+    if (!dir.empty() && dir.back() != '/')
+        dir += '/';
+
+    return dir;
+
+#else
+    // Windows branch
+
+    char path[MAX_PATH];  // Buffer to store the path
+    DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);  
+    // GetModuleFileNameA returns the full path of the current executable
+
+    if (length == 0) {
+        // Failed to get the executable path
+        return "";
+    }
+
+    std::string fullPath(path, length);  // Convert to std::string
+
+    // Find the position of the last backslash ('\') or forward slash ('/')
+    size_t pos = fullPath.find_last_of("\\/");
+
+    // Extract the directory portion
+    std::string dir = (pos != std::string::npos) ? fullPath.substr(0, pos) : fullPath;
+
+    // Ensure the directory string ends with a backslash
+    if (!dir.empty() && dir.back() != '\\' && dir.back() != '/')
+        dir += '\\';
+
+    return dir;
+#endif
+}
+
 // Parse Analytical_gtest.yaml to get the test data
 std::vector<MyTestData> parseYamlManually(const std::string& filename)
 {
-    std::string   YamlfullPath = std::string(YAML_PATH) + "/tensilelite/tests/" + filename;
+    std::string   YamlfullPath = getExecutableDir() + filename;
     std::ifstream file(YamlfullPath);
     if(!file)
     {
