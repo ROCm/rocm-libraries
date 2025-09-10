@@ -270,4 +270,25 @@ namespace MemoryTracerTest
             CHECK(bankCounts[2] == 1);
         }
     }
+
+    TEST_CASE("calculateBankConflictCycles", "[kernel-graph][lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        std::map<uint, uint> bankToAddressCounts = {};
+        CHECK(LDSBankModel::calculateBankConflictCycles(bankToAddressCounts) == 0);
+
+        bankToAddressCounts = {{0, 1}};
+        CHECK(LDSBankModel::calculateBankConflictCycles(bankToAddressCounts) == 1);
+
+        bankToAddressCounts = {
+            {0, 2},
+            {1, 3},
+            {2, 1},
+            {5, 3},
+            {10, 2},
+        };
+        CHECK(LDSBankModel::calculateBankConflictCycles(bankToAddressCounts) == 3);
+    }
 }
