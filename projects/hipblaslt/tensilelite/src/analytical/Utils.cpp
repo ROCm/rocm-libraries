@@ -303,9 +303,7 @@ namespace TensileLite
             double best_latency = std::get<0>(valid_results.front());
             size_t num_the_same = 0;
 
-            // TODO: Experiment on what the threshold should be.
-            // Likely can be replaced with 5.
-            size_t tie_breaker_threshold = tf32_emu ? 5 : 10;
+            // Count the number of similar latencies
             for(const auto& res : valid_results)
             {
                 double diff = std::fabs(std::get<0>(res) - best_latency);

@@ -417,94 +417,94 @@ namespace TensileLite
         }
 
         // Estimate L2 hit-rate
-        double estimate_l2_hit(const Hardware& hardware,
-                               size_t          M,
-                               size_t          N,
-                               size_t          K,
-                               size_t          batch,
-                               size_t          MT_M,
-                               size_t          MT_N,
-                               size_t          MT_K,
-                               size_t          element_size,
-                               int             WGM,
-                               size_t          splittingFactor)
-        {
-            // Compute grid dimensions
-            int grid_m = static_cast<int>(safe_ceil_div(M, MT_M));
-            int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
-
-            // Distribute CUs per XCD
-            // Modify cu_per_xcd to only take into account the CUs that might share same K-tiles
-            // This is to factor in the effect of splitting on L2
-            int cu_per_xcd = safe_ceil_div(grid_m * grid_n, hardware.NUM_XCD);
-            cu_per_xcd /= splittingFactor;
-
-            // N dimension of mem1 tile is divided by whichever is smaller between WGM and grid
-            int l2_n = std::min(WGM, grid_n);
-            int l2_m = cu_per_xcd / l2_n;
-
-            // If a single mem1 tile is larger than the grid, extend M dimension
-            if(l2_m > grid_m)
+            double estimate_l2_hit(const Hardware& hardware,
+                                size_t          M,
+                                size_t          N,
+                                size_t          K,
+                                size_t          batch,
+                                size_t          MT_M,
+                                size_t          MT_N,
+                                size_t          MT_K,
+                                size_t          element_size,
+                                int             WGM,
+                                size_t          splittingFactor)
             {
-                int num_wraps   = (l2_m / grid_m) - 1; // how many times we wrap
-                l2_n += (num_wraps * WGM);
-                l2_m = grid_m;
-            }
+                // Compute grid dimensions
+                int grid_m = static_cast<int>(safe_ceil_div(M, MT_M));
+                int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
 
-            // Clamp mem1 tile dimensions to at least 1 and at most grid size
-            l2_m = std::max(std::min(grid_m, l2_m), 1);
-            l2_n = std::max(std::min(grid_n, l2_n), 1);
+                // Distribute CUs per XCD
+                // Modify cu_per_xcd to only take into account the CUs that might share same K-tiles
+                // This is to factor in the effect of splitting on L2
+                int cu_per_xcd = safe_ceil_div(grid_m * grid_n, hardware.NUM_XCD);
+                cu_per_xcd /= splittingFactor;
 
-            // Compute "uncached" reads based on mem1 tile dimensions
-            long long l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
-            long long l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
-            long long uncached_read       = l2_A_uncached_reads + l2_B_uncached_reads;
+                // N dimension of mem1 tile is divided by whichever is smaller between WGM and grid
+                int l2_n = std::min(WGM, grid_n);
+                int l2_m = cu_per_xcd / l2_n;
 
-            // If bigger than cache capacity, reduce mem1 tile size and recompute uncached reads
-            while(l2_A_uncached_reads + l2_B_uncached_reads
-                  > hardware.L2_capacity / safe_ceil_div(element_size, 8))
-            {
-                // Reduce M dimension by 1
-                l2_m -= 1;
-                if(l2_m < 1)
+                // If a single mem1 tile is larger than the grid, extend M dimension
+                if(l2_m > grid_m)
                 {
-                    // We cannot shrink any more without going to zero or negative
-                    l2_m = 1;
-                    break;
+                    int num_wraps   = (l2_m / grid_m) - 1; // how many times we wrap
+                    l2_n += (num_wraps * WGM);
+                    l2_m = grid_m;
                 }
-                l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
-                l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
+
+                // Clamp mem1 tile dimensions to at least 1 and at most grid size
+                l2_m = std::max(std::min(grid_m, l2_m), 1);
+                l2_n = std::max(std::min(grid_n, l2_n), 1);
+
+                // Compute "uncached" reads based on mem1 tile dimensions
+                long long l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
+                long long l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
+                long long uncached_read       = l2_A_uncached_reads + l2_B_uncached_reads;
+
+                // If bigger than cache capacity, reduce mem1 tile size and recompute uncached reads
+                while(l2_A_uncached_reads + l2_B_uncached_reads
+                    > hardware.L2_capacity / safe_ceil_div(element_size, 8))
+                {
+                    // Reduce M dimension by 1
+                    l2_m -= 1;
+                    if(l2_m < 1)
+                    {
+                        // We cannot shrink any more without going to zero or negative
+                        l2_m = 1;
+                        break;
+                    }
+                    l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
+                    l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
+                }
+
+                // Total reads considering repeated usage
+                long long l2_A_reads = static_cast<long long>(l2_m) * l2_n * MT_M * MT_K;
+                long long l2_B_reads = static_cast<long long>(l2_n) * l2_m * MT_N * MT_K;
+
+                long long total_reads         = std::max(l2_A_reads + l2_B_reads, 1LL);
+                long long total_uncached_read = l2_A_uncached_reads + l2_B_uncached_reads;
+                long long cached_reads        = total_reads - total_uncached_read;
+
+                double l2_hit = static_cast<double>(cached_reads) / static_cast<double>(total_reads);
+
+                // Guard against numeric anomalies
+                if(l2_hit > 1.0)
+                {
+                    std::cerr << "mem1 hit was greater than 1, which isn't possible.\n"
+                            << "Problem Size: " << M << "x" << N << "x" << K << "\n"
+                            << "Macro-Tile:  " << MT_M << "x" << MT_N << "x" << MT_K << "\n"
+                            << "cu_per_xcd:  " << cu_per_xcd << "\n"
+                            << "l2_m: " << l2_m << ", l2_n: " << l2_n << ", l2_hit: " << l2_hit
+                            << "\n";
+                }
+
+                if(Hardware::is_debug_enabled())
+                {
+                    hardware.log_debug("L2Tile_M", l2_m);
+                    hardware.log_debug("L2Tile_N", l2_n);
+                }
+
+                return l2_hit;
             }
-
-            // Total reads considering repeated usage
-            long long l2_A_reads = static_cast<long long>(l2_m) * l2_n * MT_M * MT_K;
-            long long l2_B_reads = static_cast<long long>(l2_n) * l2_m * MT_N * MT_K;
-
-            long long total_reads         = std::max(l2_A_reads + l2_B_reads, 1LL);
-            long long total_uncached_read = l2_A_uncached_reads + l2_B_uncached_reads;
-            long long cached_reads        = total_reads - total_uncached_read;
-
-            double l2_hit = static_cast<double>(cached_reads) / static_cast<double>(total_reads);
-
-            // Guard against numeric anomalies
-            if(l2_hit > 1.0)
-            {
-                std::cerr << "mem1 hit was greater than 1, which isn't possible.\n"
-                          << "Problem Size: " << M << "x" << N << "x" << K << "\n"
-                          << "Macro-Tile:  " << MT_M << "x" << MT_N << "x" << MT_K << "\n"
-                          << "cu_per_xcd:  " << cu_per_xcd << "\n"
-                          << "l2_m: " << l2_m << ", l2_n: " << l2_n << ", l2_hit: " << l2_hit
-                          << "\n";
-            }
-
-            if(Hardware::is_debug_enabled())
-            {
-                hardware.log_debug("L2Tile_M", l2_m);
-                hardware.log_debug("L2Tile_N", l2_n);
-            }
-
-            return l2_hit;
-        }
 
         // Estimate MALL hit-rate
         double estimate_mall_hit(const Hardware& hardware,
@@ -812,7 +812,7 @@ namespace TensileLite
             double L_cvt    = 0;
             bool   tf32_emu = ((miDataType == DataType::XFloat32)
                              && (hardware.arch == Hardware::Architecture::gfx950));
-            if(tf32_emu && !(MT_M == 256 && MT_N == 256))
+            if(tf32_emu)
             {
                 L_cvt = compute_cvt_overhead(hardware,
                                              MT_M,
@@ -1033,16 +1033,28 @@ namespace TensileLite
             // Heuristics for TF32
             bool tf32_emu = ((miDataType == DataType::XFloat32)
                          && (hardware.arch == Hardware::Architecture::gfx950));
-            if(heuristics && tf32_emu)
+            if(tf32_emu && heuristics)
             {
-                // The kernel for this is more optimized (Custom kernel)
-                if(MT_M == 256 && MT_N == 256 && MT_K == 32)
+                // The kernel for this is more optimized (Custom kernel NT)
+                if((!transA && transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
                 {
-                    total_latency = total_latency * 0.7;
+                    total_latency = total_latency * 0.6;
                 }
 
-                // Large K prefers large DU in TF32
-                if((K >= M*16) && (K >= N*16) && (MT_K >= 128))
+                // The kernel for this is more optimized (Custom kernel NN)
+                if((!transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
+                {
+                    total_latency = total_latency * 0.8;
+                }
+
+                // The kernel for this is more optimized (Custom kernel TN)
+                if((transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
+                {
+                    total_latency = total_latency * 0.8;
+                }
+
+                // Bias large DU where K-dimension is large and M and N are small.
+                if((K >= (M * 16) && K >= (N * 16)) && (MT_K >= 128))
                 {
                     total_latency = total_latency * 0.5;
                 }
@@ -1056,16 +1068,12 @@ namespace TensileLite
                 const double waste = static_cast<double>(numMT_M * MT_M * numMT_N * MT_N) / (M * N);
                 double edge_penalty = std::pow(waste, 0.8);
                 if(batch > 10)
-                    edge_penalty = std::pow(waste, 1.2) * std::log10((double)batch) * std::pow((double)numMT_M * numMT_N, 0.2);
+                    edge_penalty = std::pow(waste, 1.5) * std::log10((double)batch) * std::pow((double)numMT_M * numMT_N, 0.2);
                 total_latency = total_latency * edge_penalty;
 
                 // Penalize K iterations 
                 size_t K_iters = safe_ceil_div(K, MT_K);
-                if(K_iters == 1)
-                {
-                    total_latency = total_latency * 16;
-                }
-                else if(K_iters == 2)
+                if(K_iters <= 2)
                 {
                     total_latency = total_latency * 8;
                 }
@@ -1095,7 +1103,7 @@ namespace TensileLite
                 bool MT_N_is_power_two = (MT_N > 0) && (MT_N & (MT_N - 1)) == 0;
                 if(!MT_M_is_power_two && !MT_N_is_power_two)
                 {
-                    total_latency = total_latency * 1.5;
+                    total_latency = total_latency * 1.1;
                 }
 
                 // Bias Model towards both dims being a power of 2
@@ -1103,22 +1111,6 @@ namespace TensileLite
                 {
                     total_latency = total_latency * 0.9;
                 }
-
-                // // Bias towards minimizing tile quantization in each dimension
-                // if(K < MI_K && MT_K != MI_K)
-                // {
-                //     total_latency = total_latency * safe_ceil_div(MT_K, MI_K);
-                // }
-
-                // if(M < MI_M && MT_M != MI_M)
-                // {
-                //     total_latency = total_latency * 4;
-                // }
-
-                // if(N < MI_N && MT_N != MI_N)
-                // {
-                //     total_latency = total_latency * 4;
-                // }
 
                 // Bias toward 512 tiles for sizes "very skinny" sizes
                 // "very skinny" definition: either N or M less than 16 (1 tile) and the other one requires
@@ -1162,22 +1154,6 @@ namespace TensileLite
                     if(MT_M == 16 && MT_N == 256 && MT_K == 128)
                     {
                         total_latency = total_latency * 2;
-                    }
-
-                    // Bias towards dimensions divisible by 32 for 16-bit datatypes
-                    if((MT_M > 32) && (MT_M % 32 != 0))
-                    {
-                        total_latency = total_latency * 1.5;
-                    }
-                    if((MT_N > 32) && (MT_N % 32 != 0))
-                    {
-                        total_latency = total_latency * 1.5;
-                    }
-
-                    // Bias towards dimensions 32 or larger for 16-bit datatypes
-                    if((MT_M >= 32) || (MT_N >= 32))
-                    {
-                        total_latency = total_latency * 0.9;
                     }
                 }
 
