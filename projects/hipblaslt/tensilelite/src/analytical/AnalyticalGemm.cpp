@@ -606,7 +606,7 @@ namespace TensileLite
             if(element_size_B < 8 && mx_block_size != 0)
             {
                 // Number of scales per tile
-                size_t num_scales_B = safe_ceil_div(MT_M * MT_K, mx_block_size);
+                size_t num_scales_B = safe_ceil_div(MT_N * MT_K, mx_block_size);
                 Ld_CU_bytes += num_scales_B; //One Byte per scale
             }
 
@@ -954,7 +954,7 @@ namespace TensileLite
                 // When problem dimensions are small enough that we can fit them in one tile, we should do so.
                 // This short circuit condition also decreases selection latency when problems are very small :)
                 // TODO 256 and 256 here should be largest M and N tile dimensions in library
-                if(M <= 256 && N <= 256 && K < 1024 && batch != 1 &&(MT_M < M || MT_N < N))
+                if(M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N))
                     return std::numeric_limits<double>::max();
 
                  // Override dot2 instruction with vector lane widths

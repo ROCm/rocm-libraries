@@ -305,7 +305,7 @@ def writeBenchmarkFiles(
                           newLibrary, codeObjectFiles, False, deviceId, gfxName, probSolMap=probSolMap)
 
     if len(solutions) == 0:
-        # printExit("write solutions and kernels results 0 valid soultion.")
+        # printExit("write solutions and kernels results 0 valid solution.")
         print("No valid solutions found for configuration group")
         return None
 
