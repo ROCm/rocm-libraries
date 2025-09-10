@@ -78,7 +78,6 @@ warp_shuffle_op(const T& input, ShuffleOp&& op)
     }
 
     return output;
-
 }
 
 template<class T, int dpp_ctrl, int row_mask = 0xf, int bank_mask = 0xf, bool bound_ctrl = false>

@@ -583,6 +583,39 @@ public:
     }
 };
 
+template<auto init, auto cond, auto inc, class F>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+constexpr void constexpr_for_lt(F&& f)
+{
+    if constexpr(init < cond)
+    {
+        f(std::integral_constant<decltype(init), init>());
+        constexpr_for_lt<init + inc, cond, inc>(f);
+    }
+}
+
+template<auto init, auto cond, auto inc, class F>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+constexpr void constexpr_for_lte(F&& f)
+{
+    if constexpr(init <= cond)
+    {
+        f(std::integral_constant<decltype(init), init>());
+        constexpr_for_lte<init + inc, cond, inc>(f);
+    }
+}
+
+template<auto init, auto cond, auto inc, class F>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+constexpr void constexpr_for_gte(F&& f)
+{
+    if constexpr(init >= cond)
+    {
+        f(std::integral_constant<decltype(init), init>());
+        constexpr_for_gte<init + inc, cond, inc>(f);
+    }
+}
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 
