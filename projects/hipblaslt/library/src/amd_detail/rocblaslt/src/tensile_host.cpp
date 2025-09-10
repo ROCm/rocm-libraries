@@ -3089,6 +3089,13 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
         {
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+            if(data->useUserArgs)
+            {
+                log_error(__func__,
+                          "GG is initialized with useUserArgs = true, workspace has no arguments.");
+                return rocblaslt_status_not_initialized;
+            }
+
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
                 || rocblaslt::Debug::Instance().printLogAsMarker()
                 || rocblaslt::Debug::Instance().benchPrintCommand())
@@ -3125,12 +3132,6 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                                                     coldIterations,
                                                     hotIterations,
                                                     false);
-            }
-            if(data->useUserArgs)
-            {
-                log_error(__func__,
-                          "GG is initialized with useUserArgs = true, workspace has no arguments.");
-                return rocblaslt_status_not_initialized;
             }
 
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
