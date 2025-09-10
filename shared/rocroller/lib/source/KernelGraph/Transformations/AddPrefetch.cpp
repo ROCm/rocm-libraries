@@ -1289,6 +1289,9 @@ namespace rocRoller
             // segment can be moved into (prefetched) the current
             // segment.
             //
+            // The value of prefetchLDSFactor can range from
+            // 0 to macK/waveK
+            //
             int splitLDSPrefetchFactor = m_params->prefetchLDSFactor;
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {

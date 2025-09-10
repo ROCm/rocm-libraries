@@ -292,6 +292,42 @@ namespace rocRoller
             insertInLoopCopies(graph, inLoopCopies);
         }
 
+        std::vector<int> getExchangesForLoad(int loadTag, KernelGraph const& graph)
+        {
+            auto isExchangePredicate = [&](int operation) -> bool {
+                auto maybeExchange = graph.control.get<Exchange>(operation);
+                return maybeExchange.has_value();
+            };
+
+            auto findConnections = [&](int coordinate) -> std::vector<int> {
+                std::vector<int> exchanges;
+                for(auto c : graph.mapper.getCoordinateConnections(coordinate))
+                    if(isExchangePredicate(c.control))
+                        exchanges.push_back(c.control);
+                return exchanges;
+            };
+
+            auto tileTag = graph.mapper.get<MacroTile>(loadTag);
+
+            if(auto exchanges = findConnections(tileTag); !exchanges.empty())
+                return exchanges;
+
+            std::vector<int> exchanges;
+            for(auto edge : graph.coordinates.getNeighbours<GD::Upstream>(tileTag))
+            {
+                auto maybeIndex = graph.coordinates.get<Index>(edge);
+                if(!maybeIndex)
+                    continue;
+
+                auto indexTileTag
+                    = only(graph.coordinates.getNeighbours<GD::Upstream>(edge)).value();
+
+                if(auto temp = findConnections(indexTileTag); !temp.empty())
+                    exchanges.insert(exchanges.end(), temp.begin(), temp.end());
+            }
+            return exchanges;
+        }
+
         void prefetchScaleLoadsPerUnroll(KernelGraph& graph, ContextPtr context)
         {
             auto root = graph.control.roots().only().value();
@@ -310,9 +346,12 @@ namespace rocRoller
             auto colouring = colourByUnrollValue(graph);
 
             std::vector<int>                prefetchPosition;
+            std::vector<int>                exchangePosition;
+            std::optional<int>              prevPosition;
             std::optional<int>              unrollKVal;
             std::optional<int>              numInFlight;
             std::map<int, std::vector<int>> nextIterPrefetch;
+            std::map<int, std::vector<int>> exchangePrefetch;
             auto                            isInsideLoop = false;
 
             for(auto const loadTag : loads)
@@ -340,6 +379,21 @@ namespace rocRoller
                     auto topOp = getTopSetCoordinate(graph, loadTag);
                     replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
                     nextIterPrefetch[subiter].push_back(topOp);
+
+                    auto exchanges   = getExchangesForLoad(loadTag, graph);
+                    auto unrollKSize = getUnrollSize(graph, unrollKDim);
+                    for(auto const exchange : exchanges)
+                    {
+                        std::cout << loadTag << " : " << exchange << std::endl;
+                        replaceWith(graph, exchange, graph.control.addElement(NOP()), false);
+                        exchangePrefetch[subiter].push_back(exchange);
+
+                        if(subiter == 0)
+                        {
+                            auto exchangeDup = duplicateControlNode(graph, exchange);
+                            exchangePrefetch[unrollKSize].push_back(exchangeDup);
+                        }
+                    }
 
                     if(subiter < numInFlight.value())
                     {
@@ -382,19 +436,33 @@ namespace rocRoller
                 {
                     auto maybeForLoop = findContainingOperation<ForLoopOp>(loadTag, graph);
                     // entered the loop
-                    if(maybeForLoop.has_value())
+                    if(!isInsideLoop && maybeForLoop.has_value())
                         isInsideLoop = true;
                     // exited the loop
                     if(isInsideLoop && !maybeForLoop.has_value())
+                    {
+                        // stage last position for exchange prefetch
+                        if(prevPosition.has_value())
+                            exchangePosition.push_back(prevPosition.value());
+
                         break;
+                    }
 
                     auto unrollMap  = colouring.operationColour.at(loadTag);
                     auto unrollKDim = graph.mapper.get<Unroll>(loadTag, 2);
+                    auto topOp      = getTopSetCoordinate(graph, loadTag);
+
                     if(!unrollKVal.has_value() || unrollKVal.value() != unrollMap.at(unrollKDim))
                     {
                         unrollKVal = unrollMap.at(unrollKDim);
-                        auto topOp = getTopSetCoordinate(graph, loadTag);
+                        // stage positions for scale load prefetch
                         prefetchPosition.push_back(topOp);
+
+                        // stage positions for exchange prefetch
+                        if(isInsideLoop && prevPosition.has_value())
+                            exchangePosition.push_back(prevPosition.value());
+
+                        prevPosition = topOp;
                     }
                 }
             }
@@ -409,6 +477,20 @@ namespace rocRoller
                     prev = next;
                 }
                 insertBefore(graph, prefetchPosition[subiter], preNOP, prev);
+            }
+
+            std::cout << exchangePosition.size() << std::endl;
+            std::cout << exchangePrefetch.size() << std::endl;
+            for(auto const [subiter, exchangeNodes] : exchangePrefetch)
+            {
+                auto preNOP = graph.control.addElement(NOP());
+                auto prev   = preNOP;
+                for(auto const next : exchangeNodes)
+                {
+                    graph.control.addElement(Sequence(), {prev}, {next});
+                    prev = next;
+                }
+                insertBefore(graph, exchangePosition[subiter], preNOP, prev);
             }
         }
 
