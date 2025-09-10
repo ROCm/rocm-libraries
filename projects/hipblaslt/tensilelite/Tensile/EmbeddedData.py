@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .Common import CHeader 
+from .Common import CHeader
 
 import itertools
 import os
@@ -209,4 +209,3 @@ class EmbeddedDataFile:
         with open(filename, 'rb') as f:
           byteArray = bytearray(f.read())
         self.embed_data(assocType, byteArray, nullTerminated, os.path.basename(filename), key)
-

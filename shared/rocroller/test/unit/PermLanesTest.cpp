@@ -179,7 +179,7 @@ namespace PermLanesTest
                         + lane * waveK
                         + vgprBlock * miK
                         + vgprIndex;
-            
+
             auto resultIdx = wave * waveK * nLanes * waveK
                              + vgprIndex * factor * nLanes * waveK
                              + simdIndex * nLanes * waveK
