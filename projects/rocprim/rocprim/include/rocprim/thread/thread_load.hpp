@@ -76,39 +76,45 @@ T asm_thread_load(void* ptr)
     return retval;
 }
 
-// Important for syncing. Check section 9.2.2 or 7.3 in the following document
-// http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
-#define ROCPRIM_ASM_THREAD_LOAD(cache_modifier, type, interim_type, asm_operator, output_modifier) \
-    template<>                                                                                     \
-    ROCPRIM_DEVICE ROCPRIM_INLINE type asm_thread_load<cache_modifier, type>(void* ptr)            \
-    {                                                                                              \
-        interim_type retval;                                                                       \
-        if ROCPRIM_CONSTEXPR(IS_RDNA4())                                                           \
-        {                                                                                          \
-            asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"                 \
-                                       "s_wait_loadcnt_dscnt(%2)"                                  \
-                         : "=" #output_modifier(retval)                                            \
-                         : "v"(ptr), "I"(0x00));                                                   \
-        }                                                                                          \
-        else if ROCPRIM_CONSTEXPR(IS_CDNA3())                                                      \
-        {                                                                                          \
-            asm volatile(#asm_operator " %0, %1 sc0 nt\n\t"                                        \
-                                       "s_waitcnt(%2)"                                             \
-                         : "=" #output_modifier(retval)                                            \
-                         : "v"(ptr), "I"(0x00));                                                   \
-        }                                                                                          \
-        else                                                                                       \
-        {                                                                                          \
-            asm volatile(#asm_operator " %0, %1 glc slc\n\t"                                       \
-                                       "s_waitcnt(%2)"                                             \
-                         : "=" #output_modifier(retval)                                            \
-                         : "v"(ptr), "I"(0x00));                                                   \
-        }                                                                                          \
-        return *bit_cast<type*>(&retval);                                                          \
-    }
+#if ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS == 1
 
-// TODO Add specialization for custom larger data types
-// clang-format off
+    // Important for syncing. Check section 9.2.2 or 7.3 in the following document
+    // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
+    #define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                         \
+                                    type,                                                   \
+                                    interim_type,                                           \
+                                    asm_operator,                                           \
+                                    output_modifier)                                        \
+        template<>                                                                          \
+        ROCPRIM_DEVICE ROCPRIM_INLINE type asm_thread_load<cache_modifier, type>(void* ptr) \
+        {                                                                                   \
+            interim_type retval;                                                            \
+            if ROCPRIM_CONSTEXPR(IS_RDNA4())                                                \
+            {                                                                               \
+                asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"      \
+                                           "s_wait_loadcnt_dscnt(%2)"                       \
+                             : "=" #output_modifier(retval)                                 \
+                             : "v"(ptr), "I"(0x00));                                        \
+            }                                                                               \
+            else if ROCPRIM_CONSTEXPR(IS_CDNA3())                                           \
+            {                                                                               \
+                asm volatile(#asm_operator " %0, %1 sc0 nt\n\t"                             \
+                                           "s_waitcnt(%2)"                                  \
+                             : "=" #output_modifier(retval)                                 \
+                             : "v"(ptr), "I"(0x00));                                        \
+            }                                                                               \
+            else                                                                            \
+            {                                                                               \
+                asm volatile(#asm_operator " %0, %1 glc slc\n\t"                            \
+                                           "s_waitcnt(%2)"                                  \
+                             : "=" #output_modifier(retval)                                 \
+                             : "v"(ptr), "I"(0x00));                                        \
+            }                                                                               \
+            return *bit_cast<type*>(&retval);                                               \
+        }
+
+    // TODO Add specialization for custom larger data types
+    // clang-format off
 #define ROCPRIM_ASM_THREAD_LOAD_GROUP(cache_modifier)                                  \
     ROCPRIM_ASM_THREAD_LOAD(cache_modifier, int8_t,   int32_t,  flat_load_sbyte,   v); \
     ROCPRIM_ASM_THREAD_LOAD(cache_modifier, int16_t,  int32_t,  flat_load_sshort,  v); \
@@ -121,6 +127,8 @@ T asm_thread_load(void* ptr)
 // clang-format on
 
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg);
+
+#endif
 
 } // namespace detail
 

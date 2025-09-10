@@ -154,7 +154,7 @@
         || __builtin_amdgcn_processor_is("gfx904") || __builtin_amdgcn_processor_is("gfx906") \ \
         || __builtin_amdgcn_processor_is("gfx90c") \                                            \
         || __builtin_amdgcn_processor_is("gfx9-generic")
-#define IS_RDNA4() __builtin_amdgcn_processor_is("gfx1201")
+#define IS_RDNA4() __builtin_amdgcn_processor_is("gfx1201") || __builtin_amdgcn_processor_is("gfx1200")
 #define IS_RDNA3()                                                                              \
     __builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101") \        \
         || __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") \ \
@@ -200,12 +200,8 @@
     #define ROCPRIM_DETAIL_USE_DPP 0
 #endif
 
-#if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS) && !defined(ROCPRIM_TARGET_SPIRV)
+#if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS)
     #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
-#endif
-
-#if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS) && !defined(ROCPRIM_TARGET_SPIRV)
-    #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
 #endif
 
 #ifndef ROCPRIM_NAVI
