@@ -343,8 +343,9 @@ namespace rocRoller
                     case Register::Type::Vector:
                         break;
                     default:
-                        Throw<FatalError>("Invalid register type for for combine",
-                                          ShowValue(operand));
+                        Throw<FatalError>(
+                            "Invalid register type for concatenate expression operands",
+                            ShowValue(operand));
                     }
 
                     registerType = Register::PromoteType(registerType, operandRegisterType);
