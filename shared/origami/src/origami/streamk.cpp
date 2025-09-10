@@ -4,6 +4,7 @@
 #include "origami/hardware.hpp"
 #include "origami/streamk.hpp"
 #include "origami/utils.hpp"
+// #include <algorithm>
 
 namespace origami
 {
@@ -229,6 +230,67 @@ namespace origami
             return min_grid_runtime_v2.first;
         }
 
+        size_t get_streamk_workspace(
+            size_t x,
+            size_t y,
+            size_t mt_m,
+            size_t mt_n,
+            size_t bpe_c,
+            size_t grid,
+            size_t tiles,
+            ReductionType reduction)
+        {
+            size_t size = 0;
+            if(reduction == ReductionType::Tree)
+            {
+                if(tiles % grid == 0)
+                {
+                    size_t tileSize = mt_m * mt_n * bpe_c;
+                    size += tileSize * grid;
+                }
+            }
+            else if(reduction == ReductionType::Parallel)
+            {
+                size_t splitSize = x * y * bpe_c;
+                size_t splitCount = grid / tiles;
+                size += splitSize * splitCount;
+            }
+            return size;
+        }
+
+        ReductionType select_streamk_reduction(
+            size_t x,
+            size_t y,
+            size_t z,
+            size_t batch,
+            size_t mt_m,
+            size_t mt_n,
+            size_t mt_k,
+            const hardware_t& analytical_hardware,
+            int dynamic_grid_version)
+        {
+            ReductionType reductionStrat = ReductionType::Tree;
+
+            if(dynamic_grid_version == 6)
+            {
+                size_t tiles = number_of_output_tiles(mt_m, mt_n, x, y, batch);
+                size_t cu_count = analytical_hardware.N_CU;
+                size_t iters_per_tile = std::max(size_t(1), math::safe_ceil_div(z, mt_k));
+
+                if (tiles < cu_count)
+                {
+                    // For problems with large k and low number of tiles, use parallel reduction
+                    // TODO Benchmark to check if limits are correct
+                    constexpr int MinItersForParallel = 64;
+                    constexpr int MaxTilesForParallel = 16;
+                    if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
+                        reductionStrat = ReductionType::Parallel;
+                }
+            }
+
+            return reductionStrat;
+        }
+
         size_t select_grid(
             size_t x,
             size_t y,
@@ -239,7 +301,7 @@ namespace origami
             size_t          element_size_A,
             size_t          element_size_B,
             size_t          element_size_out,
-            data_type_t        mi_datatype,
+            data_type_t     mi_datatype,
             size_t          workspace_size,
             size_t          mt_m,
             size_t          mt_n,
@@ -251,7 +313,8 @@ namespace origami
             size_t          workspace_size_per_elem_c,
             int             occupancy,
             const hardware_t& analytical_hardware,
-            int dynamic_grid_version)
+            int dynamic_grid_version,
+            ReductionType reduction_strategy)
         {
             size_t cu_count = analytical_hardware.N_CU;
             size_t tiles = number_of_output_tiles(mt_m, mt_n, x, y, batch);
@@ -368,15 +431,40 @@ namespace origami
                 // Max splitting is currently constant, but should be dependant on K dimension
                 else if (tiles < cu_count)
                 {
-                    const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
-                    for(size_t frac: tile_fractions)
+                    // For problems with large k and low number of tiles, use parallel reduction
+                    // TODO Benchmark to check if limits are correct
+                    // constexpr int MinItersForParallel = 64;
+                    // constexpr int MaxTilesForParallel = 16;
+                    constexpr int MinItersPerCU = 8;
+                    // if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
+                    if(reduction_strategy == ReductionType::Parallel)
                     {
-                        size_t splitGrid = tiles * frac;
-                        size_t itersPerCU = iters_per_tile / frac;
-                        if(splitGrid <= cu_count && itersPerCU >= 8)
+                        size_t virt_cu_count = cu_count;
+                        // TODO check if using occupancy info makes workspace too large
+                        // if (occupancy > 1)
+                        //     virt_cu_count *= occupancy;
+
+                        // Find max splitting factor to use as much of GPU as possible
+                        size_t maxSplitsForTiles = virt_cu_count / tiles;
+
+                        // Find max splitting factor to ensure each CU has a minimum number of iterations to do
+                        size_t maxSplitsForIters = iters_per_tile / MinItersPerCU;
+
+                        size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
+                        sk_grid = tiles * maxSplits;
+                    }
+                    else
+                    {
+                        const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
+                        for(size_t frac: tile_fractions)
                         {
-                            sk_grid = splitGrid;
-                            break;
+                            size_t splitGrid = tiles * frac;
+                            size_t itersPerCU = iters_per_tile / frac;
+                            if(splitGrid <= cu_count && itersPerCU >= 8)
+                            {
+                                sk_grid = splitGrid;
+                                break;
+                            }
                         }
                     }
                 }

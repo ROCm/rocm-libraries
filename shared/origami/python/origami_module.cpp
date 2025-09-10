@@ -51,6 +51,15 @@ NB_MODULE(origami, m)
           &origami::int_to_data_type,
           "Convert int to data_type_t.");
 
+    nanobind::enum_<origami::streamk::ReductionType>(m, "ReductionType")
+        .value("Tree", origami::streamk::ReductionType::Tree)
+        .value("Parallel", origami::streamk::ReductionType::Parallel)
+        .export_values();
+
+    m.def("intToReductionType",
+          &origami::streamk::intToReductionType,
+          "Convert int to ReductionType.");
+
     nanobind::class_<Hardware>(m, "Hardware")
         .def(nanobind::init<Hardware::architecture_t,
                             size_t,
@@ -86,6 +95,7 @@ NB_MODULE(origami, m)
     m.def("select_best_macro_tile_size",
           &origami::select_best_macro_tile_size,
           "Get best macro tile sizes.");
+    m.def("select_streamk_reduction", &origami::streamk::select_streamk_reduction, "Select best StreamK reduction strategy");
     m.def("select_grid", &origami::streamk::select_grid, "Select Best StreamK Grid Size");
     m.def("compute_total_latency", &origami::compute_total_latency, "compute_total_latency");
     m.def("select_best_wgm", &origami::select_best_wgm, "Get best workgroup mapping.");
