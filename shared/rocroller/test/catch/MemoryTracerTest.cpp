@@ -291,4 +291,37 @@ namespace MemoryTracerTest
         };
         CHECK(LDSBankModel::calculateBankConflictCycles(bankToAddressCounts) == 3);
     }
+
+    TEST_CASE("divideIntoThreadGroups", "[kernel-graph][lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        // Test when addresses divide evenly into groups
+        std::vector<uint32_t> addresses       = {0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44};
+        uint                  threadsPerClock = 4;
+
+        auto groups = LDSBankModel::divideIntoThreadGroups(addresses, threadsPerClock);
+
+        // Should have 3 groups of 4 addresses each
+        CHECK(groups.size() == 3);
+        CHECK(groups[0].size() == 4);
+        CHECK(groups[1].size() == 4);
+        CHECK(groups[2].size() == 4);
+
+        CHECK(groups[0][0] == 0);
+        CHECK(groups[0][1] == 4);
+        CHECK(groups[0][2] == 8);
+        CHECK(groups[0][3] == 12);
+
+        CHECK(groups[1][0] == 16);
+        CHECK(groups[1][1] == 20);
+        CHECK(groups[1][2] == 24);
+        CHECK(groups[1][3] == 28);
+
+        CHECK(groups[2][0] == 32);
+        CHECK(groups[2][1] == 36);
+        CHECK(groups[2][2] == 40);
+        CHECK(groups[2][3] == 44);
+    }
 }

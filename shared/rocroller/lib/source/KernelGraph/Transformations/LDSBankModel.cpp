@@ -221,6 +221,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
         LDSBankModel::divideIntoThreadGroups(const std::vector<uint32_t>& addresses,
                                              uint                         threadsPerClock)
     {
+        AssertFatal(addresses.size() % threadsPerClock == 0,
+                    "Number of addresses {} is not a multiple of threads per clock {}",
+                    addresses.size(),
+                    threadsPerClock);
+
         std::vector<std::vector<uint32_t>> threadGroups;
 
         for(size_t groupStart = 0; groupStart < addresses.size(); groupStart += threadsPerClock)
