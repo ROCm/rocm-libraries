@@ -116,10 +116,8 @@ endif()
 if(HIPBLASLT_ENABLE_CLIENT)
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
-    else()
-        find_package(BLAS REQUIRED)
-        #find_package(cblas REQUIRED) # is this actually required
     endif()
+    # There is an implicit find_package(BLAS) when finding lapack
     find_package(LAPACK REQUIRED)
 endif()
 

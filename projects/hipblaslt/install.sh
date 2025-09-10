@@ -169,12 +169,12 @@ install_packages( )
   fi
 
   # dependencies needed for library and clients to build
-  local library_dependencies_ubuntu=( "gfortran" "make" "pkg-config" "libnuma1" "git")
+  local library_dependencies_ubuntu=( "make" "pkg-config" "libnuma1" "git")
   local library_dependencies_centos=( "epel-release" "make" "gcc-c++" "rpm-build" )
   local library_dependencies_centos8=( "epel-release" "make" "gcc-c++" "rpm-build" "numactl-libs" )
-  local library_dependencies_fedora=( "gcc-gfortran" "make" "gcc-c++" "libcxx-devel" "rpm-build" "numactl-libs" )
-  local library_dependencies_sles=( "gcc-fortran" "make" "gcc-c++" "libcxxtools9" "rpm-build" )
-  local library_dependencies_mariner=( "gfortran" "make" "rpm-build" )
+  local library_dependencies_fedora=( "make" "gcc-c++" "libcxx-devel" "rpm-build" "numactl-libs" )
+  local library_dependencies_sles=( "make" "gcc-c++" "libcxxtools9" "rpm-build" )
+  local library_dependencies_mariner=( "make" "rpm-build" )
 
   local client_dependencies_ubuntu=( "python3" "python3-yaml" "libopenblas-dev")
   local client_dependencies_centos=( "python36" "python3-pip")
@@ -197,6 +197,14 @@ install_packages( )
         library_dependencies_centos8+=("msgpack-devel")
         library_dependencies_fedora+=("msgpack-devel")
       fi
+  fi
+
+  if [[ "${build_clients}" == true ]]; then
+    library_dependencies_ubuntu+=( "gfortran" )
+    library_dependencies_centos+=( "devtoolset-7-gcc-gfortran" )
+    library_dependencies_centos8+=( "gcc-gfortran" )
+    library_dependencies_fedora+=( "gcc-gfortran" )
+    library_dependencies_sles+=( "gcc-fortran" "pkg-config" "dpkg" )
   fi
 
   if [[ "${use_rocroller}" == true ]]; then
@@ -239,14 +247,6 @@ install_packages( )
     else
       client_dependencies_centos8+=( "PyYAML" )
     fi
-  fi
-
-  if [[ "${build_clients}" == true ]]; then
-    library_dependencies_ubuntu+=( "gfortran" )
-    library_dependencies_centos+=( "devtoolset-7-gcc-gfortran" )
-    library_dependencies_centos8+=( "gcc-gfortran" )
-    library_dependencies_fedora+=( "gcc-gfortran" )
-    library_dependencies_sles+=( "gcc-fortran" "pkg-config" "dpkg" )
   fi
 
   case "${ID}" in
@@ -604,10 +604,10 @@ while true; do
     esac
 done
 
-if [[ "${cpu_ref_lib}" == blis ]]; then
-  LINK_BLIS=true
-elif [[ "${cpu_ref_lib}" == lapack ]]; then
-  LINK_BLIS=false
+if [[ "${cpu_ref_lib}" == "blis" ]]; then
+  cmake_client_options=" -DHIPBLASLT_ENABLE_BLIS=ON"
+elif [[ "${cpu_ref_lib}" == "lapack" ]]; then
+  cmake_client_options=" -DHIPBLASLT_ENABLE_BLIS=OFF"
 else
   echo "Currently the only CPU library options are blis and lapack"
       exit 2
@@ -709,7 +709,7 @@ if [[ "${install_dependencies}" == true ]]; then
   pushd .
     printf "\033[32mBuilding \033[33mgoogletest\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} -DBUILD_LAPACK=${build_lapack} ${root_path}/deps
+    ${cmake_executable} -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_LAPACK=${build_lapack} ${root_path}/deps
     make -j$(nproc)
     elevate_if_not_root make install
   popd
@@ -779,7 +779,9 @@ pushd .
   if [[ "${build_clients}" == true ]]; then
     pushd .
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    install_blis
+    if [[ "${cpu_ref_lib}" == "blis" ]]; then
+      install_blis
+    fi
     popd
   fi
 
@@ -858,11 +860,10 @@ pushd .
     cmake_client_options="HIPBLASLT_ENABLE_CLIENTS=OFF"
   else
     if [[ ( "${use_system_packages}" == false ) && ( "${install_dependencies}" == true ) ]]; then
-        cmake_client_options=" -DBLAS_LIBRARIES=/usr/local/lib64/libblas.a -DBLA_STATIC=ON -DBLAS_VENDOR=Generic"
+        cmake_client_options=" -DBLAS_LIBRARIES=/usr/local/lib/libblas.a -DBLA_STATIC=ON"
     fi
   fi
 
-  echo $cmake_common_options ${cmake_client_options}
   # Build library with AMD toolchain because of existense of device kernels
   if [[ "${build_relocatable}" == true ]]; then
     echo cmake command relocatable: FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${rocm_path} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DROCM_DISABLE_LDCONFIG=ON -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
