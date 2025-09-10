@@ -41,7 +41,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Known issues
 
-* The '__half' template specializations of SimdMin are currently disabled due to possible build issues with PyTorch.
+* The '__half' template specializations of Simd operators are currently disabled due to possible build issues with PyTorch.
 
 ## hipCUB-4.0.0 for ROCm 7.0
 
