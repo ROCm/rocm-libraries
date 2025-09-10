@@ -40,6 +40,7 @@ inline void unset_env_var(const char* name)
 {
     unsetenv(name);
 }
+#endif
 
 std::vector<PerfConfigTestCase> GetPerfConfigTestCases(miopenDataType_t data_type, std::string arch)
 {
