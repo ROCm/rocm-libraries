@@ -353,16 +353,10 @@ namespace rocRoller
                           + DataTypeInfo::Get(operandVariableType.dataType).registerCount;
                 }
 
-                if(expectedNumRegister != actualNumRegister)
-                {
-                    Throw<FatalError>("Length mismatch. ",
-                                      ShowValue(expr.destinationType),
-                                      " expects ",
-                                      ShowValue(expectedNumRegister),
-                                      " registers but ",
-                                      ShowValue(actualNumRegister),
-                                      " is provided");
-                }
+                AssertFatal(expectedNumRegister == actualNumRegister,
+                            ShowValue(expr.destinationType),
+                            ShowValue(expectedNumRegister),
+                            ShowValue(actualNumRegister));
 
                 return {registerType, variableType};
             }
