@@ -561,6 +561,17 @@ namespace rocRoller
         {
             requires std::derived_from<T, Nary>;
         };
+
+        /**
+         * @brief Perform bitwise concatenation among all operands.
+         * 
+         * Each operand must be dword aligned and the total number of operands'
+         * registers must be equal to the number of registers for
+         * 'destinationType'.
+         *
+         * All operands should have register type of literal, scalar or
+         * vector.
+         */
         struct Concatenate : Nary
         {
             constexpr static inline auto            Type       = Category::Value;
