@@ -83,7 +83,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         MemoryOp              memoryOp;
         int                   dwords;
-        std::vector<uint32_t> addresses;
+        std::vector<uint32_t> baseAddresses;
     };
 
     struct OperationAccesses
@@ -160,7 +160,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * 
          * This function encapsulates all the logic for determining how many clock cycles
          * an LDS instruction will take, including:
-         * - Dividing addresses into thread groups based on architecture limits
+         * - Dividing base addresses into thread groups based on architecture limits
          * - Maximizing threads without conflicts within groups
          * - Resolving bank conflicts to determine actual cycles
          * - Adding address transfer overhead
@@ -168,7 +168,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @param gfx The GPU architecture
          * @param memoryOp The LDS memory operation (load/store)
          * @param dwords Number of dwords accessed (1 for b32, 2 for b64, 3 for b96, 4 for b128)
-         * @param addresses Vector of LDS addresses being accessed
+         * @param baseAddresses Vector of base LDS addresses being accessed. For multi-dword accesses,
+         *                      the actual addresses accessed are calculated from these base addresses.
          * @param numBanks Number of banks in the LDS
          * @param entryWidthInBytes Width of each bank entry in bytes (default: 4)
          * @return Total number of clock cycles for this instruction
@@ -176,7 +177,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         static uint immediateClockCount(GPUArchitectureGFX           gfx,
                                         const MemoryOpLDS&           memoryOp,
                                         uint                         dwords,
-                                        const std::vector<uint32_t>& addresses,
+                                        const std::vector<uint32_t>& baseAddresses,
                                         uint                         numBanks,
                                         uint                         entryWidthInBytes = 4);
 
@@ -193,17 +194,18 @@ namespace rocRoller::KernelGraph::MemoryTracer
         /**
          * @brief Create a mapping from bank indices to address counts
          * 
-         * For multi-dword accesses, tracks all banks touched by each address.
+         * For multi-dword accesses, tracks all banks touched by each base address.
          * The resulting map has bank indices as keys and counts of addresses accessing that bank as values.
          * 
-         * @param addresses Vector of LDS addresses
+         * @param baseAddresses Vector of base LDS addresses. For multi-dword accesses, the actual
+         *                      addresses accessed are calculated from these base addresses.
          * @param dwords Number of dwords accessed per address
          * @param entryWidthInBytes Width of each bank entry in bytes
          * @param numBanks Number of banks in the LDS
          * @return Map from bank index to count of addresses that access that bank
          */
         static std::map<uint, uint>
-            createBankToAddressCounts(const std::vector<uint32_t>& addresses,
+            createBankToAddressCounts(const std::vector<uint32_t>& baseAddresses,
                                       uint                         dwords,
                                       uint                         entryWidthInBytes,
                                       uint                         numBanks);

@@ -87,7 +87,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
             targetInstruction = &opAccesses.instructions.back();
         }
 
-        targetInstruction->addresses.push_back(event.byteOffset);
+        targetInstruction->baseAddresses.push_back(event.byteOffset);
 
         // Update legacy m_bankAccesses for backward compatibility with summary
         std::set<uint> banksAccessed;
@@ -239,14 +239,17 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return threadGroups;
     }
 
-    std::map<uint, uint> LDSBankModel::createBankToAddressCounts(
-        const std::vector<uint32_t>& addresses, uint dwords, uint entryWidthInBytes, uint numBanks)
+    std::map<uint, uint>
+        LDSBankModel::createBankToAddressCounts(const std::vector<uint32_t>& baseAddresses,
+                                                uint                         dwords,
+                                                uint                         entryWidthInBytes,
+                                                uint                         numBanks)
     {
         std::map<uint, uint> bankToAddressCounts;
 
-        for(size_t i = 0; i < addresses.size(); ++i)
+        for(size_t i = 0; i < baseAddresses.size(); ++i)
         {
-            uint baseAddr       = addresses[i];
+            uint baseAddr       = baseAddresses[i];
             uint bytesPerAccess = dwords * 4;
 
             for(uint offset = 0; offset < bytesPerAccess; offset += entryWidthInBytes)
@@ -281,13 +284,13 @@ namespace rocRoller::KernelGraph::MemoryTracer
     uint LDSBankModel::immediateClockCount(GPUArchitectureGFX           gfx,
                                            const MemoryOpLDS&           memoryOp,
                                            uint                         dwords,
-                                           const std::vector<uint32_t>& addresses,
+                                           const std::vector<uint32_t>& baseAddresses,
                                            uint                         numBanks,
                                            uint                         entryWidthInBytes)
     {
         uint cycles = 0;
         for(const auto& groupAddresses :
-            divideIntoThreadGroups(addresses, getThreadsPerClock(memoryOp, dwords, gfx)))
+            divideIntoThreadGroups(baseAddresses, getThreadsPerClock(memoryOp, dwords, gfx)))
         {
             cycles += calculateBankConflictCycles(
                 createBankToAddressCounts(groupAddresses, dwords, entryWidthInBytes, numBanks));
@@ -311,9 +314,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
             for(const auto& sourceInstr : sourceOpAccesses.instructions)
             {
                 InstructionAccesses instr;
-                instr.memoryOp  = sourceInstr.memoryOp;
-                instr.dwords    = sourceInstr.dwords;
-                instr.addresses = sourceInstr.addresses;
+                instr.memoryOp      = sourceInstr.memoryOp;
+                instr.dwords        = sourceInstr.dwords;
+                instr.baseAddresses = sourceInstr.baseAddresses;
 
                 opAccesses.instructions.push_back(instr);
             }
@@ -395,7 +398,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
                         std::get<MemoryOpLDS>(instr.memoryOp), instr.dwords, gfx);
                     uint i = 0;
                     for(const auto& groupAddresses :
-                        LDSBankModel::divideIntoThreadGroups(instr.addresses, threadsPerClock))
+                        LDSBankModel::divideIntoThreadGroups(instr.baseAddresses, threadsPerClock))
                     {
                         const auto bankToAddressCounts = LDSBankModel::createBankToAddressCounts(
                             groupAddresses, instr.dwords, 4, LDSBankModel::getNumLDSBanks(gfx));
@@ -445,7 +448,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
                     = LDSBankModel::immediateClockCount(gfx,
                                                         std::get<MemoryOpLDS>(instr.memoryOp),
                                                         instr.dwords,
-                                                        instr.addresses,
+                                                        instr.baseAddresses,
                                                         numBanks,
                                                         4);
 

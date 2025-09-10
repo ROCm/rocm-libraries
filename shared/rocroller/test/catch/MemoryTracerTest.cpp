@@ -297,7 +297,6 @@ namespace MemoryTracerTest
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
 
-        // Test when addresses divide evenly into groups
         std::vector<uint32_t> addresses       = {0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44};
         uint                  threadsPerClock = 4;
 
