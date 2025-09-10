@@ -137,6 +137,7 @@ class AMaxKernelGenerator:
         self.vgpr_pool.add(0, 39) #TODO: estimate this
         self.debug_label = True
         self.arch = arch
+        self.isa = isa
         self.is_scale = is_scale
         self.op = 'AMax'
         self.sgprs  = collections.OrderedDict()
@@ -352,6 +353,18 @@ class AMaxKernelGenerator:
         mod.addSpaceLine()
         return mod
 
+    def shiftSrd(self, srdStr):
+        module = Module()
+        if self.isa[0] == 12 and self.isa[1] == 5:
+            stmp = self.sgpr_pool.checkOutAligned(1, 1)
+            module.add(ri.SAndB32(sgpr(stmp), sgpr(srdStr+"+2"), 0x7F))
+            module.add(ri.SLShiftLeftB32(sgpr(stmp), 25, sgpr(stmp)))
+            module.add(ri.SAndB32(sgpr(srdStr+"+1"), sgpr(srdStr+"+1"), 0x1FFFFFF))
+            module.add(ri.SOrB32(sgpr(srdStr+"+1"), sgpr(srdStr+"+1"), sgpr(stmp)))
+            module.add(ri.SLShiftRightB32(sgpr(srdStr+"+2"), 7, sgpr(srdStr+"+2")))
+            self.sgpr_pool.checkIn(stmp)
+        return module
+
     def init_param(self) -> Module:
         mod = Module("init_param")
         mod.addComment0("init_param")
@@ -362,6 +375,7 @@ class AMaxKernelGenerator:
         mod.add(ri.SMovB32(sgpr("Dst+1"), sgpr("AddressOut+1")))
         mod.add(ri.SMovB32(sgpr("Dst+2"), int(self.o_type.numBytes())))
         mod.add(ri.SMovB32(sgpr("Dst+3"), "Srd127_96"))
+        mod.add(self.shiftSrd("Dst"))
         mod.addSpaceLine()
 
         if self.is_scale: # init inputScale
@@ -373,6 +387,7 @@ class AMaxKernelGenerator:
         mod.add(ri.SMovB32(sgpr("Src+1"), sgpr("AddressIn+1")))
         mod.add(ri.SMovB32(sgpr("Src+2"), sgpr("Tmp")))
         mod.add(ri.SMovB32(sgpr("Src+3"), "Srd127_96"))
+        mod.add(self.shiftSrd("Src"))
         mod.addSpaceLine()
 
         mod.add(ri.VMovB32(vgpr("Output"), 0))
@@ -396,6 +411,7 @@ class AMaxKernelGenerator:
             mod.add(ri.SMovB32(sgpr("DstD+1"), sgpr("AddressOutD+1")))
             mod.add(ri.SMovB32(sgpr("DstD+2"), sgpr("SizeLength")))
             mod.add(ri.SMovB32(sgpr("DstD+3"), "Srd127_96"))
+            mod.add(self.shiftSrd("DstD"))
             for i in range(self.num_load_count * self.num_load_size):
                 mod.add(ri.VMovB32(vgpr(f"OutputD+{i}"), 0))
 
