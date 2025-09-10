@@ -344,7 +344,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 i++;
             }
         }
-        cycles += 4;
+        // Add 4 cycles for address transfer (only for writes)
+        if(instr.memoryOp.direction == Direction::Store)
+        {
+            cycles += 4;
+        }
 
         uint       numBanks               = LDSBankModel::getNumLDSBanks(gfx);
         const auto instructionTotalClocks = LDSBankModel::immediateClockCount(
@@ -371,9 +375,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
             cycles += calculateBankConflictCycles(
                 createBankToAddressCounts(groupAddresses, dwords, gfx));
         }
-        // Add 4 cycles for address transfer
-        // TODO: this should only be for writes
-        return cycles + 4;
+        // Add 4 cycles for address transfer (only for writes)
+        if(memoryOp.direction == Direction::Store)
+        {
+            cycles += 4;
+        }
+        return cycles;
     }
 
     DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
