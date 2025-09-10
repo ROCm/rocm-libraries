@@ -30,6 +30,8 @@
 
 #include <Tensile/analytical/StreamK.hpp>
 
+const int DEFAULT_DYNAMIC_MODE = 6;
+
 int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
                           const RocblasltContractionProblem& prob)
 {
@@ -45,6 +47,12 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
         dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeB);
     else
         dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA);
+
+    auto reduction_type = TensileLite::analytical::streamk::select_streamk_reduction(prob.m, prob.n, prob.k, prob.batch_count,
+        gemm->params->workgroupTile.m, gemm->params->workgroupTile.n, gemm->params->workgroupTile.k, analaytical_hardware, DEFAULT_DYNAMIC_MODE);
+    // Override reduction type to tree reduction for now.
+    // When Parallel reduction is available, this line can be removed
+    reduction_type = TensileLite::analytical::streamk::ReductionType::Tree;
 
     auto result = TensileLite::analytical::streamk::select_streamk_grid(prob.m,
         prob.n,
@@ -67,7 +75,8 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
         elementSizeAcc,
         gemm->occupancy,
         analaytical_hardware,
-        6);
+        DEFAULT_DYNAMIC_MODE,
+        reduction_type);
 
     return result;
 }
