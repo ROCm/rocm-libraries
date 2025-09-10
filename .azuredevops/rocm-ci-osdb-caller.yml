@@ -36,9 +36,8 @@ jobs:
     displayName: Get HEAD_SHA using git ls-remote   
   - script: |
       cd $(repo_name)
+      LOG_FILE="~/azure-logs/$(date +'%Y%m%d_%H%M%S').txt"
       set -e
-      mkdir -p azure-logs
-      LOG_FILE="azure-logs/$(date +'%Y%m%d_%H%M%S').txt"
       docker run \
         -v "$PWD:/src" \
         -w /src \
