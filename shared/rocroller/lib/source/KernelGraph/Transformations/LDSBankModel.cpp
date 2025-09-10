@@ -479,23 +479,51 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 // Follows immediateClockCount
                 uint cycles = 0;
                 {
+                    const auto threadsPerClock = LDSBankModel::getThreadsPerClock(
+                        std::get<MemoryOpLDS>(instr.memoryOp), instr.dwords, gfx);
                     uint i = 0;
-                    for(const auto& groupAddresses : LDSBankModel::divideIntoThreadGroups(
-                            instr.addresses,
-                            LDSBankModel::getThreadsPerClock(
-                                std::get<MemoryOpLDS>(instr.memoryOp), instr.dwords, gfx)))
+                    for(const auto& groupAddresses :
+                        LDSBankModel::divideIntoThreadGroups(instr.addresses, threadsPerClock))
                     {
-                        i++;
                         const auto bankToAddressCounts = LDSBankModel::createBankToAddressCounts(
                             groupAddresses, instr.dwords, 4, LDSBankModel::getNumLDSBanks(gfx));
                         uint groupCycles
                             = LDSBankModel::calculateBankConflictCycles(bankToAddressCounts);
-                        ss << fmt::format("    Group {}: {} cycles\n", i, groupCycles);
+                        ss << fmt::format("    Group {}: threads {}-{}\n",
+                                          i,
+                                          i * threadsPerClock,
+                                          (i + 1) * threadsPerClock - 1);
+                        // Find banks with maximum address counts
+                        uint maxCount = 0;
                         for(const auto& [bankIndex, count] : bankToAddressCounts)
                         {
-                            ss << fmt::format("      Bank {}: {} addresses\n", bankIndex, count);
+                            maxCount = std::max(maxCount, count);
                         }
+                        std::vector<uint> maxBanks;
+                        for(const auto& [bankIndex, count] : bankToAddressCounts)
+                        {
+                            if(count == maxCount)
+                            {
+                                maxBanks.push_back(bankIndex);
+                            }
+                        }
+                        if(!maxBanks.empty())
+                        {
+                            ss << "      Max bank contention: " << maxCount
+                               << " addresses/bank for bank(s) ";
+                            for(size_t j = 0; j < maxBanks.size(); ++j)
+                            {
+                                if(j > 0)
+                                {
+                                    ss << ", ";
+                                }
+                                ss << maxBanks[j];
+                            }
+                            ss << "\n";
+                        }
+                        ss << fmt::format("      Group cycles: {}\n", groupCycles);
                         cycles += groupCycles;
+                        i++;
                     }
                 }
                 cycles += 4;
