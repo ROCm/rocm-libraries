@@ -30,6 +30,8 @@
 #include "lib_device_helpers.hpp"
 #include "lib_macros.hpp"
 #include "rocsolver/rocsolver.h"
+#include "rocsolver_logger.hpp"
+#include "rocsolver_run_specialized_kernels.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -803,7 +805,7 @@ __device__ void iamax(const I tid, const I n, T* A, const I incA, S* sval, I* si
 }
 
 /** NRM2 finds the euclidean norm of a given vector.
-    MAX_THDS should be 64, 128, 256, 512, or 1024, and sval should
+    MAX_THDS should be 128, 256, 512, or 1024, and sval should
     be a shared array of size MAX_THDS. **/
 template <int MAX_THDS, typename T>
 __device__ void nrm2(const rocblas_int tid, const rocblas_int n, T* A, const rocblas_int incA, T* sval)
@@ -887,48 +889,32 @@ __device__ void dot(const rocblas_int tid,
     // (each thread reduce as many elements as needed to cover the original array)
     for(int i = tid; i < n; i += MAX_THDS)
         val = val + x[i * incX] * (CONJY ? conj(y[i * incY]) : y[i * incY]);
-    sval[tid] = val;
-    __syncthreads();
 
     if(n <= 1)
-        return;
-
-        /** <========= Next do the reduction on the shared memory array =========>
-        (We halve the number of active threads at each step
-        reducing two elements in the shared array. **/
-
-#pragma unroll
-    for(int i = MAX_THDS / 2; i > warpSize; i /= 2)
     {
-        if(tid < i)
-            val = val + sval[tid + i];
-        __syncthreads();
-        if(tid < i)
-            sval[tid] = val;
-        __syncthreads();
+        if(tid == 0)
+            sval[0] = val;
+        return;
     }
 
-    // from this point, as all the active threads will form a single wavefront
-    // and work in lock-step, there is no need for synchronizations and barriers
-    if(tid < warpSize)
+    /** <========= Next do the reduction on the shared memory array =========> **/
+
+    val += shift_left(val, 1);
+    val += shift_left(val, 2);
+    val += shift_left(val, 4);
+    val += shift_left(val, 8);
+    val += shift_left(val, 16);
+    if(warpSize > 32)
+        val += shift_left(val, 32);
+    if(tid % warpSize == 0)
+        sval[tid / warpSize] = val;
+    __syncthreads();
+    if(tid == 0)
     {
-        if(warpSize >= 64 && MAX_THDS >= 128)
-        {
-            sval[tid] = sval[tid] + sval[tid + 64];
-            __threadfence();
-        }
-        sval[tid] = sval[tid] + sval[tid + 32];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 16];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 8];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 4];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 2];
-        __threadfence();
-        sval[tid] = sval[tid] + sval[tid + 1];
-        __threadfence();
+        for(int k = 1; k < MAX_THDS / warpSize; k++)
+            val += sval[k];
+
+        sval[0] = val;
     }
 
     // after the reduction, the dot product is in sval[0]
@@ -2410,6 +2396,679 @@ __device__ I slaed4(I n,
     }
 
     return info;
+}
+
+#define MAXITERS 50 // Max number of iterations for root finding method
+
+/** SEQ_EVAL evaluates the secular equation at a given point. It accumulates the
+    corrections to the elements in D so that distance to poles are computed
+   accurately **/
+template <typename S>
+__device__ void seq_eval(const rocblas_int type,
+                         const rocblas_int k,
+                         const rocblas_int dd,
+                         S* D,
+                         const S* z,
+                         const S p,
+                         const S cor,
+                         S* pt_fx,
+                         S* pt_fdx,
+                         S* pt_gx,
+                         S* pt_gdx,
+                         S* pt_hx,
+                         S* pt_hdx,
+                         S* pt_er,
+                         bool modif)
+{
+    S er, fx, gx, hx, fdx, gdx, hdx, zz, tmp;
+    rocblas_int gout, hout;
+
+    // prepare computations
+    // if type = 0: evaluate secular equation
+    if(type == 0)
+    {
+        gout = k + 1;
+        hout = k;
+    }
+    // if type = 1: evaluate secular equation without the k-th pole
+    else if(type == 1)
+    {
+        if(modif)
+        {
+            tmp = D[k] - cor;
+            D[k] = tmp;
+        }
+        gout = k;
+        hout = k;
+    }
+    // if type = 2: evaluate secular equation without the k-th and (k+1)-th poles
+    else if(type == 2)
+    {
+        if(modif)
+        {
+            tmp = D[k] - cor;
+            D[k] = tmp;
+            tmp = D[k + 1] - cor;
+            D[k + 1] = tmp;
+        }
+        gout = k;
+        hout = k + 1;
+    }
+    else
+    {
+        // unexpected value for type, something is wrong
+        assert(false);
+    }
+
+    // computations
+    gx = 0;
+    gdx = 0;
+    er = 0;
+    for(int i = 0; i < gout; ++i)
+    {
+        tmp = D[i] - cor;
+        if(modif)
+            D[i] = tmp;
+        zz = z[i];
+        tmp = zz / tmp;
+        gx += zz * tmp;
+        gdx += tmp * tmp;
+        er += gx;
+    }
+    er = abs(er);
+
+    hx = 0;
+    hdx = 0;
+    for(int i = dd - 1; i > hout; --i)
+    {
+        tmp = D[i] - cor;
+        if(modif)
+            D[i] = tmp;
+        zz = z[i];
+        tmp = zz / tmp;
+        hx += zz * tmp;
+        hdx += tmp * tmp;
+        er += hx;
+    }
+
+    fx = p + gx + hx;
+    fdx = gdx + hdx;
+
+    // return results
+    *pt_fx = fx;
+    *pt_fdx = fdx;
+    *pt_gx = gx;
+    *pt_gdx = gdx;
+    *pt_hx = hx;
+    *pt_hdx = hdx;
+    *pt_er = er;
+}
+
+//--------------------------------------------------------------------------------------//
+/** SEQ_SOLVE solves secular equation at point k (i.e. computes kth eigenvalue
+   that is within an internal interval). We use rational interpolation and fixed
+   weights method between the 2 poles of the interval. (TODO: In the future, we
+   could consider using 3 poles for those cases that may need it to reduce the
+   number of required iterations to converge. The performance improvements are
+   expected to be marginal, though) **/
+template <typename S>
+__device__ rocblas_int seq_solve(const rocblas_int dd,
+                                 S* D,
+                                 const S* z,
+                                 const S p,
+                                 rocblas_int k,
+                                 S* ev,
+                                 const S tol,
+                                 const S ssfmin,
+                                 const S ssfmax)
+{
+    bool converged = false;
+    bool up, fixed;
+    S lowb, uppb, aa, bb, cc, x;
+    S nx, er, fx, fdx, gx, gdx, hx, hdx, oldfx;
+    S tau, eta;
+    S dk, dk1, ddk, ddk1;
+    rocblas_int kk;
+    rocblas_int k1 = k + 1;
+
+    // initialize
+    dk = D[k];
+    dk1 = D[k1];
+    x = (dk + dk1) / 2; // midpoint of interval
+    tau = (dk1 - dk);
+    S pinv = 1 / p;
+
+    // find bounds and initial guess; translate origin
+    seq_eval(2, k, dd, D, z, pinv, x, &cc, &fdx, &gx, &gdx, &hx, &hdx, &er, false);
+    gdx = z[k] * z[k];
+    hdx = z[k1] * z[k1];
+    fx = cc + 2 * (hdx - gdx) / tau;
+    if(fx > 0)
+    {
+        // if the secular eq at the midpoint is positive, the root is in between
+        // D[k] and the midpoint take D[k] as the origin, i.e. x = D[k] + tau with
+        // tau in (0, uppb)
+        lowb = 0;
+        uppb = tau / 2;
+        up = true;
+        kk = k; // origin remains the same
+        aa = cc * tau + gdx + hdx;
+        bb = gdx * tau;
+        eta = sqrt(abs(aa * aa - 4 * bb * cc));
+        if(aa > 0)
+            tau = 2 * bb / (aa + eta);
+        else
+            tau = (aa - eta) / (2 * cc);
+        x = dk + tau; // initial guess
+    }
+    else
+    {
+        // otherwise, the root is in between the midpoint and D[k+1]
+        // take D[k+1] as the origin, i.e. x = D[k+1] + tau with tau in (lowb, 0)
+        lowb = -tau / 2;
+        uppb = 0;
+        up = false;
+        kk = k + 1; // translate the origin
+        aa = cc * tau - gdx - hdx;
+        bb = hdx * tau;
+        eta = sqrt(abs(aa * aa + 4 * bb * cc));
+        if(aa < 0)
+            tau = 2 * bb / (aa - eta);
+        else
+            tau = -(aa + eta) / (2 * cc);
+        x = dk1 + tau; // initial guess
+    }
+
+    // evaluate secular eq and get input values to calculate step correction
+    seq_eval(0, kk, dd, D, z, pinv, (up ? dk : dk1), &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+    seq_eval(1, kk, dd, D, z, pinv, tau, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+    bb = z[kk];
+    aa = bb / D[kk];
+    fdx += aa * aa;
+    bb *= aa;
+    fx += bb;
+
+    // calculate tolerance er for convergence test
+    er += 8 * (hx - gx) + 2 * pinv + 3 * abs(bb) + abs(tau) * fdx;
+
+    // if the value of secular eq is small enough, no point to continue;
+    // converged!!!
+    if(abs(fx) <= tol * er)
+        converged = true;
+
+    // otherwise...
+    else
+    {
+        // update bounds
+        lowb = (fx <= 0) ? std::max(lowb, tau) : lowb;
+        uppb = (fx > 0) ? std::min(uppb, tau) : uppb;
+
+        // calculate first step correction with fixed weight method
+        ddk = D[k];
+        ddk1 = D[k1];
+        if(up)
+            cc = fx - ddk1 * fdx - (dk - dk1) * z[k] * z[k] / ddk / ddk;
+        else
+            cc = fx - ddk * fdx - (dk1 - dk) * z[k1] * z[k1] / ddk1 / ddk1;
+        aa = (ddk + ddk1) * fx - ddk * ddk1 * fdx;
+        bb = ddk * ddk1 * fx;
+        if(cc == 0)
+        {
+            if(aa == 0)
+            {
+                if(up)
+                    aa = z[k] * z[k] + ddk1 * ddk1 * (gdx + hdx);
+                else
+                    aa = z[k1] * z[k1] + ddk * ddk * (gdx + hdx);
+            }
+            eta = bb / aa;
+        }
+        else
+        {
+            eta = sqrt(abs(aa * aa - 4 * bb * cc));
+            if(aa <= 0)
+                eta = (aa - eta) / (2 * cc);
+            else
+                eta = (2 * bb) / (aa + eta);
+        }
+
+        // verify that the correction eta will get x closer to the root
+        // i.e. eta*fx should be negative. If not the case, take a Newton step
+        // instead
+        if(fx * eta >= 0)
+            eta = -fx / fdx;
+
+        // now verify that applying the correction won't get the process out of
+        // bounds if that is the case, bisect the interval instead
+        if(tau + eta > uppb || tau + eta < lowb)
+        {
+            if(fx < 0)
+                eta = (uppb - tau) / 2;
+            else
+                eta = (lowb - tau) / 2;
+        }
+
+        // take the step
+        tau += eta;
+        x = (up ? dk : dk1) + tau;
+
+        // evaluate secular eq and get input values to calculate step correction
+        oldfx = fx;
+        seq_eval(1, kk, dd, D, z, pinv, eta, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+        bb = z[kk];
+        aa = bb / D[kk];
+        fdx += aa * aa;
+        bb *= aa;
+        fx += bb;
+
+        // calculate tolerance er for convergence test
+        er += 8 * (hx - gx) + 2 * pinv + 3 * abs(bb) + abs(tau) * fdx;
+
+        // from now on, further step corrections will be calculated either with
+        // fixed weights method or with normal interpolation depending on the value
+        // of boolean fixed
+        cc = up ? -1 : 1;
+        fixed = (cc * fx) > (abs(oldfx) / 10);
+
+        // MAIN ITERATION LOOP
+        // ==============================================
+        for(int i = 1; i < MAXITERS; ++i)
+        {
+            // if the value of secular eq is small enough, no point to continue;
+            // converged!!!
+            if(abs(fx) <= tol * er)
+            {
+                converged = true;
+                break;
+            }
+
+            // update bounds
+            lowb = (fx <= 0) ? std::max(lowb, tau) : lowb;
+            uppb = (fx > 0) ? std::min(uppb, tau) : uppb;
+
+            // calculate next step correction with either fixed weight method or
+            // simple interpolation
+            ddk = D[k];
+            ddk1 = D[k1];
+            if(fixed)
+            {
+                if(up)
+                    cc = fx - ddk1 * fdx - (dk - dk1) * z[k] * z[k] / ddk / ddk;
+                else
+                    cc = fx - ddk * fdx - (dk1 - dk) * z[k1] * z[k1] / ddk1 / ddk1;
+            }
+            else
+            {
+                if(up)
+                    gdx += aa * aa;
+                else
+                    hdx += aa * aa;
+                cc = fx - ddk * gdx - ddk1 * hdx;
+            }
+            aa = (ddk + ddk1) * fx - ddk * ddk1 * fdx;
+            bb = ddk * ddk1 * fx;
+            if(cc == 0)
+            {
+                if(aa == 0)
+                {
+                    if(fixed)
+                    {
+                        if(up)
+                            aa = z[k] * z[k] + ddk1 * ddk1 * (gdx + hdx);
+                        else
+                            aa = z[k1] * z[k1] + ddk * ddk * (gdx + hdx);
+                    }
+                    else
+                        aa = ddk * ddk * gdx + ddk1 * ddk1 * hdx;
+                }
+                eta = bb / aa;
+            }
+            else
+            {
+                eta = sqrt(abs(aa * aa - 4 * bb * cc));
+                if(aa <= 0)
+                    eta = (aa - eta) / (2 * cc);
+                else
+                    eta = (2 * bb) / (aa + eta);
+            }
+
+            // verify that the correction eta will get x closer to the root
+            // i.e. eta*fx should be negative. If not the case, take a Newton step
+            // instead
+            if(fx * eta >= 0)
+                eta = -fx / fdx;
+
+            // now verify that applying the correction won't get the process out of
+            // bounds if that is the case, bisect the interval instead
+            if(tau + eta > uppb || tau + eta < lowb)
+            {
+                if(fx < 0)
+                    eta = (uppb - tau) / 2;
+                else
+                    eta = (lowb - tau) / 2;
+            }
+
+            // take the step
+            tau += eta;
+            x = (up ? dk : dk1) + tau;
+
+            // evaluate secular eq and get input values to calculate step correction
+            oldfx = fx;
+            seq_eval(1, kk, dd, D, z, pinv, eta, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+            bb = z[kk];
+            aa = bb / D[kk];
+            fdx += aa * aa;
+            bb *= aa;
+            fx += bb;
+
+            // calculate tolerance er for convergence test
+            er += 8 * (hx - gx) + 2 * pinv + 3 * abs(bb) + abs(tau) * fdx;
+
+            // update boolean fixed if necessary
+            if(fx * oldfx > 0 && abs(fx) > abs(oldfx) / 10)
+                fixed = !fixed;
+        }
+    }
+
+    *ev = x;
+    return converged ? 0 : 1;
+}
+
+//--------------------------------------------------------------------------------------//
+/** SEQ_SOLVE_EXT solves secular equation at point n (i.e. computes last
+   eigenvalue). We use rational interpolation and fixed weights method between
+   the (n-1)th and nth poles. (TODO: In the future, we could consider using 3
+   poles for those cases that may need it to reduce the number of required
+   iterations to converge. The performance improvements are expected to be
+   marginal, though) **/
+template <typename S>
+__device__ rocblas_int seq_solve_ext(const rocblas_int dd,
+                                     S* D,
+                                     const S* z,
+                                     const S p,
+                                     S* ev,
+                                     const S tol,
+                                     const S ssfmin,
+                                     const S ssfmax)
+{
+    bool converged = false;
+    S lowb, uppb, aa, bb, cc, x;
+    S er, fx, fdx, gx, gdx, hx, hdx;
+    S tau, eta;
+    S dk, dkm1, ddk, ddkm1;
+    rocblas_int k = dd - 1;
+    rocblas_int km1 = dd - 2;
+
+    // initialize
+    dk = D[k];
+    dkm1 = D[km1];
+    x = dk + p / 2;
+    S pinv = 1 / p;
+
+    // find bounds and initial guess
+    seq_eval(2, km1, dd, D, z, pinv, x, &cc, &fdx, &gx, &gdx, &hx, &hdx, &er, false);
+    gdx = z[km1] * z[km1];
+    hdx = z[k] * z[k];
+    fx = cc + gdx / (dkm1 - x) - 2 * hdx * pinv;
+    if(fx > 0)
+    {
+        // if the secular eq at the midpoint is positive, the root is in between
+        // D[k] and the midpoint take D[k] as the origin, i.e. x = D[k] + tau with
+        // tau in (0, uppb)
+        lowb = 0;
+        uppb = p / 2;
+        tau = dk - dkm1;
+        aa = -cc * tau + gdx + hdx;
+        bb = hdx * tau;
+        eta = sqrt(aa * aa + 4 * bb * cc);
+        if(aa < 0)
+            tau = 2 * bb / (eta - aa);
+        else
+            tau = (aa + eta) / (2 * cc);
+    }
+    else
+    {
+        // otherwise, the root is in between the midpoint and D[k+1]
+        // take D[k+1] as the origin, i.e. x = D[k+1] + tau with tau in (lowb, 0)
+        lowb = p / 2;
+        uppb = p;
+        eta = gdx / (dk - dkm1 + p) + hdx / p;
+        if(cc <= eta)
+            tau = p;
+        else
+        {
+            tau = dk - dkm1;
+            aa = -cc * tau + gdx + hdx;
+            bb = hdx * tau;
+            eta = sqrt(aa * aa + 4 * bb * cc);
+            if(aa < 0)
+                tau = 2 * bb / (eta - aa);
+            else
+                tau = (aa + eta) / (2 * cc);
+        }
+    }
+    x = dk + tau; // initial guess
+
+    // evaluate secular eq and get input values to calculate step correction
+    seq_eval(0, km1, dd, D, z, pinv, dk, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+    seq_eval(0, km1, dd, D, z, pinv, tau, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+
+    // calculate tolerance er for convergence test
+    er += abs(tau) * (hdx + gdx) - 8 * (hx + gx) - hx + pinv;
+
+    // if the value of secular eq is small enough, no point to continue;
+    // converged!!!
+    if(abs(fx) <= tol * er)
+        converged = true;
+
+    // otherwise...
+    else
+    {
+        // update bounds
+        lowb = (fx <= 0) ? std::max(lowb, tau) : lowb;
+        uppb = (fx > 0) ? std::min(uppb, tau) : uppb;
+
+        // calculate first step correction with fixed weight method
+        ddk = D[k];
+        ddkm1 = D[km1];
+        cc = abs(fx - ddkm1 * gdx - ddk * hdx);
+        aa = (ddk + ddkm1) * fx - ddk * ddkm1 * (gdx + hdx);
+        bb = ddk * ddkm1 * fx;
+        if(cc == 0)
+        {
+            eta = uppb - tau;
+        }
+        else
+        {
+            eta = sqrt(abs(aa * aa - 4 * bb * cc));
+            if(aa >= 0)
+                eta = (aa + eta) / (2 * cc);
+            else
+                eta = (2 * bb) / (aa - eta);
+        }
+
+        // verify that the correction eta will get x closer to the root
+        // i.e. eta*fx should be negative. If not the case, take a Newton step
+        // instead
+        if(fx * eta > 0)
+            eta = -fx / (gdx + hdx);
+
+        // now verify that applying the correction won't get the process out of
+        // bounds if that is the case, bisect the interval instead
+        if(tau + eta > uppb || tau + eta < lowb)
+        {
+            if(fx < 0)
+                eta = (uppb - tau) / 2;
+            else
+                eta = (lowb - tau) / 2;
+        }
+
+        // take the step
+        tau += eta;
+        x = dk + tau;
+
+        // evaluate secular eq and get input values to calculate step correction
+        seq_eval(0, km1, dd, D, z, pinv, eta, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+
+        // calculate tolerance er for convergence test
+        er += abs(tau) * (hdx + gdx) - 8 * (hx + gx) - hx + pinv;
+
+        // MAIN ITERATION LOOP
+        // ==============================================
+        for(int i = 1; i < MAXITERS; ++i)
+        {
+            // if the value of secular eq is small enough, no point to continue;
+            // converged!!!
+            if(abs(fx) <= tol * er)
+            {
+                converged = true;
+                break;
+            }
+
+            // update bounds
+            lowb = (fx <= 0) ? std::max(lowb, tau) : lowb;
+            uppb = (fx > 0) ? std::min(uppb, tau) : uppb;
+
+            // calculate step correction
+            ddk = D[k];
+            ddkm1 = D[km1];
+            cc = fx - ddkm1 * gdx - ddk * hdx;
+            aa = (ddk + ddkm1) * fx - ddk * ddkm1 * (gdx + hdx);
+            bb = ddk * ddkm1 * fx;
+            eta = sqrt(abs(aa * aa - 4 * bb * cc));
+            if(aa >= 0)
+                eta = (aa + eta) / (2 * cc);
+            else
+                eta = (2 * bb) / (aa - eta);
+
+            // verify that the correction eta will get x closer to the root
+            // i.e. eta*fx should be negative. If not the case, take a Newton step
+            // instead
+            if(fx * eta > 0)
+                eta = -fx / (gdx + hdx);
+
+            // now verify that applying the correction won't get the process out of
+            // bounds if that is the case, bisect the interval instead
+            if(tau + eta > uppb || tau + eta < lowb)
+            {
+                if(fx < 0)
+                    eta = (uppb - tau) / 2;
+                else
+                    eta = (lowb - tau) / 2;
+            }
+
+            // take the step
+            tau += eta;
+            x = dk + tau;
+
+            // evaluate secular eq and get input values to calculate step correction
+            seq_eval(0, km1, dd, D, z, pinv, eta, &fx, &fdx, &gx, &gdx, &hx, &hdx, &er, true);
+
+            // calculate tolerance er for convergence test
+            er += abs(tau) * (hdx + gdx) - 8 * (hx + gx) - hx + pinv;
+        }
+    }
+
+    *ev = x;
+    return converged ? 0 : 1;
+}
+
+/** This local gemm adapts rocblas_gemm to multiply complex*real, and
+    overwrite result: A = A*B **/
+template <bool BATCHED,
+          bool STRIDED,
+          typename T,
+          typename S,
+          typename U,
+          std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+void local_gemm(rocblas_handle handle,
+                const rocblas_int n,
+                U A,
+                const rocblas_int shiftA,
+                const rocblas_int lda,
+                const rocblas_stride strideA,
+                S* B,
+                S* temp,
+                S* work,
+                const rocblas_int shiftV,
+                const rocblas_int ldv,
+                const rocblas_stride strideV,
+                const rocblas_int batch_count,
+                S** workArr)
+{
+    S one = 1.0;
+    S zero = 0.0;
+
+    // Execute A*B -> temp -> A
+    // temp = A*B
+    rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n, &one, A, shiftA,
+                   lda, strideA, B, shiftV, ldv, strideV, &zero, temp, shiftV, ldv, strideV,
+                   batch_count, workArr);
+
+    // A = temp
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+    rocblas_int blocks = (n - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
+                            stream, copymat_from_buffer, n, n, A, shiftA, lda, strideA, temp);
+}
+
+template <bool BATCHED,
+          bool STRIDED,
+          typename T,
+          typename S,
+          typename U,
+          std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+void local_gemm(rocblas_handle handle,
+                const rocblas_int n,
+                U A,
+                const rocblas_int shiftA,
+                const rocblas_int lda,
+                const rocblas_stride strideA,
+                S* B,
+                S* temp,
+                S* work,
+                const rocblas_int shiftV,
+                const rocblas_int ldv,
+                const rocblas_stride strideV,
+                const rocblas_int batch_count,
+                S** workArr)
+{
+    S one = 1.0;
+    S zero = 0.0;
+
+    // Execute A -> work; work*B -> temp -> A
+
+    // work = real(A)
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+    rocblas_int blocks = (n - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, true>), dim3(blocks, blocks, batch_count), dim3(BS2, BS2),
+                            0, stream, copymat_to_buffer, n, n, A, shiftA, lda, strideA, work);
+
+    // temp = work*B
+    rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n, &one, work,
+                   shiftV, ldv, strideV, B, shiftV, ldv, strideV, &zero, temp, shiftV, ldv, strideV,
+                   batch_count, workArr);
+
+    // real(A) = temp
+    ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, true>), dim3(blocks, blocks, batch_count), dim3(BS2, BS2),
+                            0, stream, copymat_from_buffer, n, n, A, shiftA, lda, strideA, temp);
+
+    // work = imag(A)
+    ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, false>), dim3(blocks, blocks, batch_count),
+                            dim3(BS2, BS2), 0, stream, copymat_to_buffer, n, n, A, shiftA, lda,
+                            strideA, work);
+
+    // temp = work*B
+    rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, n, n, n, &one, work,
+                   shiftV, ldv, strideV, B, shiftV, ldv, strideV, &zero, temp, shiftV, ldv, strideV,
+                   batch_count, workArr);
+
+    // imag(A) = temp
+    ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, false>), dim3(blocks, blocks, batch_count),
+                            dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, n, A, shiftA, lda,
+                            strideA, temp);
 }
 
 ROCSOLVER_END_NAMESPACE

@@ -37,6 +37,12 @@ set(REGRESSION_TESTS
     test_grouped_convnd_bwd_data_xdl
     test_conv_tensor_rearrange
     test_gemm_mx
+    test_ck_tile_batched_transpose
+    test_ck_tile_fmha_bwd_bf16
+    test_ck_tile_fmha_bwd_fp16
+    test_ck_tile_fmha_fwd_bf16
+    test_ck_tile_fmha_fwd_fp16
+    test_ck_tile_fmha_fwd_fp8
 )
 
 function(add_test_executable TEST_NAME)
@@ -239,6 +245,7 @@ add_subdirectory(gemm_add)
 add_subdirectory(gemm_layernorm)
 add_subdirectory(gemm_split_k)
 add_subdirectory(gemm_universal)
+add_subdirectory(gemm_b_scale)
 add_subdirectory(gemm_universal_streamk)
 add_subdirectory(gemm_reduce)
 add_subdirectory(batched_gemm)

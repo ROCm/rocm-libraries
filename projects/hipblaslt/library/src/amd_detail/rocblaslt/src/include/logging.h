@@ -168,6 +168,7 @@ public:
  *              will stream to log_ofs. Else it will stream to std::cerr.
  */
 
+#ifndef CODE_COVERAGE
 inline void open_log_stream(std::ostream** log_os,
                             std::ofstream* log_ofs,
                             std::string    environment_variable_name)
@@ -204,6 +205,7 @@ inline void open_log_stream(std::ostream** log_os,
         }
     }
 }
+#endif
 
 class LoggerSingleton
 {
@@ -257,11 +259,13 @@ private:
             }
         }
 
+#ifndef CODE_COVERAGE
         // Open log file
         if(env_layer_mode != rocblaslt_layer_mode_none)
         {
             open_log_stream(&log_os, &log_file_ofs, "HIPBLASLT_LOG_FILE");
         }
+#endif
     }
 
     ~LoggerSingleton()

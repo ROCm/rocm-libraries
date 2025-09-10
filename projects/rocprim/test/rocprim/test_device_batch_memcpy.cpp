@@ -264,7 +264,7 @@ TYPED_TEST(RocprimDeviceBatchMemcpyTests, SizeAndTypeVariation)
     ASSERT_EQ(success, hipSuccess);
 
     const rocprim::detail::batch_memcpy_config_params params
-        = rocprim::detail::dispatch_target_arch<config>(target_arch);
+        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
 
     const int32_t wlev_min_size = params.wlev_size_threshold;
     const int32_t blev_min_size = params.blev_size_threshold;
@@ -326,12 +326,15 @@ TYPED_TEST(RocprimDeviceBatchMemcpyTests, SizeAndTypeVariation)
         common::device_ptr<value_type*>      d_buffer_dsts(num_buffers);
         common::device_ptr<buffer_size_type> d_buffer_sizes(num_buffers);
 
+        // Test if batch_copy also supports ptr-to-const type output.
+        const auto dsts = d_buffer_dsts.get();
+
         // Calculate temporary storage
         size_t temp_storage_bytes = 0;
         batch_copy<isMemCpy>(nullptr,
                              temp_storage_bytes,
                              d_buffer_srcs.get(),
-                             d_buffer_dsts.get(),
+                             dsts,
                              d_buffer_sizes.get(),
                              num_buffers,
                              hipStreamDefault,
@@ -547,7 +550,7 @@ TYPED_TEST(RocprimDeviceBatchMemcpyTests, IteratorTest)
         hipMemcpy(h_data_out.data(), d_data_out, sizeof(int) * num_outputs, hipMemcpyDeviceToHost));
 
     std::vector<unsigned int> expected = {4, 4, 2, 2, 2, 7, 3, 3, 3, 1, 1, 1, 1, 1};
-    test_utils::assert_eq(expected, h_data_out);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(expected, h_data_out));
 
     // Clean up
     HIP_CHECK(hipFree(d_temp_storage));

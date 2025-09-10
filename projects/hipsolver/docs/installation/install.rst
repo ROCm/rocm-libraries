@@ -13,7 +13,7 @@ This topic explains how to install and build the hipSOLVER library on Linux.
 Install using prebuilt packages
 ===============================
 
-Download the ROCm packages from the package servers following the :doc:`ROCm installation dcocumentation <rocm-install-on-linux:index>`.
+Download the ROCm packages from the package servers following the :doc:`ROCm installation guide <rocm-install-on-linux:index>`.
 Run the following command to install hipSOLVER using the package manager.
 
 .. code-block:: shell

@@ -120,7 +120,30 @@
         ASSERT_TRUE(absDiff / (absA + absB + bf16One) < static_cast<hip_bfloat16>(0.1f));         \
     } while(0)
 
-#define ASSERT_F8_EQ(a, b) ASSERT_FLOAT_EQ(float(a), float(b))
+#define ASSERT_FP8_EQ(a, b)                                                 \
+    do                                                                      \
+    {                                                                       \
+        const float f32A = static_cast<float>(a);                           \
+        const float f32B = static_cast<float>(b);                           \
+        float absA    = (f32A > 0.0f) ? f32A : negate(f32A);                \
+        float absB    = (f32B > 0.0f) ? f32B : negate(f32B);                \
+        float absDiff = (f32A - f32B > 0.0f) ? f32A - f32B : f32B - f32A;   \
+        ASSERT_TRUE(absDiff / (absA + absB + 1.0f) < 0.125f);               \
+        /*tolerance * eps = 2 * 0.0625; 2*eps needed for SR*/               \
+    } while(0)
+
+    
+#define ASSERT_BF8_EQ(a, b)                                                 \
+    do                                                                      \
+    {                                                                       \
+        const float f32A = static_cast<float>(a);                           \
+        const float f32B = static_cast<float>(b);                           \
+        float absA    = (f32A > 0.0f) ? f32A : negate(f32A);                \
+        float absB    = (f32B > 0.0f) ? f32B : negate(f32B);                \
+        float absDiff = (f32A - f32B > 0.0f) ? f32A - f32B : f32B - f32A;   \
+        ASSERT_TRUE(absDiff / (absA + absB + 1.0f) < 0.25f);                \
+        /*tolerance * eps= 2 * 0.125; 2*eps needed for SR*/                 \
+    } while(0)
 
 // Compare float to hip_bfloat16
 // Allow the hip_bfloat16 to match the rounded or truncated value of float
@@ -208,19 +231,19 @@ inline void
     UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_EQ);
 }
 
-#ifdef HIP_FP8_TYPE_OCP
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 template <>
 inline void unit_check_general(
-    int64_t M, int64_t N, int64_t lda, const __hip_fp8_e4m3* hCPU, const __hip_fp8_e4m3* hGPU)
+    int64_t M, int64_t N, int64_t lda, const hipsparselt_fp8_e4m3* hCPU, const hipsparselt_fp8_e4m3* hGPU)
 {
-    UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_F8_EQ);
+    UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_FP8_EQ);
 }
 
 template <>
 inline void unit_check_general(
-    int64_t M, int64_t N, int64_t lda, const __hip_fp8_e5m2* hCPU, const __hip_fp8_e5m2* hGPU)
+    int64_t M, int64_t N, int64_t lda, const hipsparselt_fp8_e5m2* hCPU, const hipsparselt_fp8_e5m2* hGPU)
 {
-    UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_F8_EQ);
+    UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_BF8_EQ);
 }
 #endif
 
@@ -317,17 +340,17 @@ inline void unit_check_general(int64_t       M,
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_EQ);
 }
 
-#ifdef HIP_FP8_TYPE_OCP
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 template <>
 inline void unit_check_general(int64_t               M,
                                int64_t               N,
                                int64_t               lda,
                                int64_t               strideA,
-                               const __hip_fp8_e4m3* hCPU,
-                               const __hip_fp8_e4m3* hGPU,
+                               const hipsparselt_fp8_e4m3* hCPU,
+                               const hipsparselt_fp8_e4m3* hGPU,
                                int64_t               batch_count)
 {
-    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_F8_EQ);
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_FP8_EQ);
 }
 
 template <>
@@ -335,11 +358,11 @@ inline void unit_check_general(int64_t               M,
                                int64_t               N,
                                int64_t               lda,
                                int64_t               strideA,
-                               const __hip_fp8_e5m2* hCPU,
-                               const __hip_fp8_e5m2* hGPU,
+                               const hipsparselt_fp8_e5m2* hCPU,
+                               const hipsparselt_fp8_e5m2* hGPU,
                                int64_t               batch_count)
 {
-    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_F8_EQ);
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
 }
 #endif
 
@@ -513,13 +536,13 @@ inline void unit_check_general(int64_t             M,
     UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_DOUBLE_EQ);
 }
 
-#ifdef HIP_FP8_TYPE_OCP
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 template <>
 inline void unit_check_general(int64_t                     M,
                                int64_t                     N,
                                int64_t                     lda,
-                               const __hip_fp8_e4m3* const hCPU[],
-                               const __hip_fp8_e4m3* const hGPU[],
+                               const hipsparselt_fp8_e4m3* const hCPU[],
+                               const hipsparselt_fp8_e4m3* const hGPU[],
                                int64_t                     batch_count)
 {
     unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
@@ -529,8 +552,8 @@ template <>
 inline void unit_check_general(int64_t                     M,
                                int64_t                     N,
                                int64_t                     lda,
-                               const __hip_fp8_e5m2* const hCPU[],
-                               const __hip_fp8_e5m2* const hGPU[],
+                               const hipsparselt_fp8_e5m2* const hCPU[],
+                               const hipsparselt_fp8_e5m2* const hGPU[],
                                int64_t                     batch_count)
 {
     unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
@@ -556,8 +579,8 @@ inline int64_t unit_check_diff(
     int64_t M, int64_t N, int64_t lda, int64_t stride, T* hCPU, T* hGPU, int64_t batch_count)
 {
     using c_type  = std::conditional_t<std::is_same<__half, T>::value
-#ifdef HIP_FP8_TYPE_OCP
-	    || std::is_same<__hip_fp8_e4m3, T>::value || std::is_same<__hip_fp8_e5m2, T>::value
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+	    || std::is_same<hipsparselt_fp8_e4m3, T>::value || std::is_same<hipsparselt_fp8_e5m2, T>::value
 #endif
 	    , float, T>;
     int64_t error = 0;

@@ -20,6 +20,7 @@
 
 #include "../../shared/accuracy_test.h"
 #include "../../shared/gpubuf.h"
+#include "../../shared/params_gen.h"
 #include "../../shared/rocfft_params.h"
 #include "../samples/rocfft/examplekernels.h"
 #include "../samples/rocfft/exampleutils.h"
@@ -171,12 +172,24 @@ void run_1D_hermitian_test(size_t length)
 // test a case that's small enough that it only needs one kernel
 TEST(rocfft_UnitTest, 1D_hermitian_single_small)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     run_1D_hermitian_test(8);
 }
 
 // test a case that's big enough that it needs multiple kernels
 TEST(rocfft_UnitTest, 1D_hermitian_single_large)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     run_1D_hermitian_test(8192);
 }
 
@@ -198,6 +211,12 @@ std::string str(T begin, T end)
 // Test that the GPU Hermitian symmetrizer code produces the correct results.
 TEST(rocfft_UnitTest, gpu_symmetrizer)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     std::vector<std::vector<size_t>> lengths = {{4, 4, 3},
                                                 {5},
                                                 {8},
