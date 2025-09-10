@@ -297,6 +297,8 @@ namespace
         {
         case ROCBLASLT_EPILOGUE_RELU:
         case ROCBLASLT_EPILOGUE_RELU_BIAS:
+        case ROCBLASLT_EPILOGUE_RELU_AUX:
+        case ROCBLASLT_EPILOGUE_RELU_AUX_BIAS:
             return TensileLite::ActivationType::Relu;
             break;
         case ROCBLASLT_EPILOGUE_GELU:
@@ -313,6 +315,8 @@ namespace
             return TensileLite::ActivationType::Silu;
         case ROCBLASLT_EPILOGUE_CLAMP_EXT:
         case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
+        case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
+        case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
             return TensileLite::ActivationType::Clamp;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
@@ -3285,8 +3289,12 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
-        return getRocRollerBestSolutions(
-            handle, prob, requestedAlgoCount, heuristicResultsArray, maxWorkSpaceBytes, returnAlgoCount);
+        return getRocRollerBestSolutions(handle,
+                                         prob,
+                                         requestedAlgoCount,
+                                         heuristicResultsArray,
+                                         maxWorkSpaceBytes,
+                                         returnAlgoCount);
 #endif
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;

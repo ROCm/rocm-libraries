@@ -27,7 +27,7 @@ To find and use the best GEMM kernel for a problem, follow these steps:
 
       export HIPBLASLT_LOG_MASK=32
 
-#. The following command uses `sample_hipblaslt_gemm.cpp <https://github.com/ROCm/hipBLASLt/blob/develop/clients/samples/01_basic_gemm/sample_hipblaslt_gemm.cpp>`_ as an example:
+#. The following command uses `sample_hipblaslt_gemm.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/clients/samples/01_hipblaslt_gemm/sample_hipblaslt_gemm.cpp>`_ as an example:
 
    .. code-block:: bash
 
