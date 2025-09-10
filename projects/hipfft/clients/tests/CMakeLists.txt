@@ -218,7 +218,7 @@ foreach( target ${TEST_TARGETS} )
   rocm_install(TARGETS ${target} COMPONENT tests)
 endforeach()
 
-find_package( GTest )
+find_package( GTest 1.11.0 )
 
 if( GTest_FOUND )
   target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
