@@ -121,6 +121,11 @@ namespace rocisa
             // In Quad-Cycle
             return 1;
         }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
+        }
     };
 
     struct GlobalReadInstruction : public ReadWriteInstruction
@@ -1744,6 +1749,11 @@ namespace rocisa
         {
             return 2;
         }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
+        }
     };
 
     struct DSLoad2B32 : public DSLoadInstruction
@@ -1820,6 +1830,11 @@ namespace rocisa
         static int issueLatency()
         {
             return 2;
+        }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
         }
     };
 
@@ -1946,6 +1961,11 @@ namespace rocisa
         {
             return 2;
         }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
+        }
     };
 
     struct DSStoreB64 : public DSStoreInstruction
@@ -1974,6 +1994,11 @@ namespace rocisa
         static int issueLatency()
         {
             return 3;
+        }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
         }
     };
 
@@ -2004,6 +2029,11 @@ namespace rocisa
         {
             return 5;
         }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
+        }
     };
 
     struct DSStoreB256 : public DSStoreInstruction
@@ -2032,6 +2062,11 @@ namespace rocisa
         static int issueLatency()
         {
             return 10;
+        }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
         }
 
         std::string getArgStr2(bool upper = false) const
@@ -2093,6 +2128,11 @@ namespace rocisa
         {
             return 3;
         }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
+        }
     };
 
     struct DSStore2B64 : public DSStoreInstruction
@@ -2122,6 +2162,11 @@ namespace rocisa
         static int issueLatency()
         {
             return 3;
+        }
+
+        int getIssueLatency() const override
+        {
+            return issueLatency();
         }
     };
 

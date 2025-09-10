@@ -675,13 +675,34 @@ Tests:
   transB: N
   alpha: 1
   beta: 0
-  activation_type: [leakyrelu, gelu]
+  activation_type: [leakyrelu]
   activation_arg1 : [-1.0, 0.0, 0.5, 1.0]
   sparse_b: [ true, false]
   orderA: [R]
   orderB: [R]
   orderC: [R]
   orderD: [R]
+
+- name: spmm_128_activation_gelu
+  category: pre_checkin
+  function:
+    spmm: *real_precisions_2b
+  M: 128
+  N: 128
+  K: 128
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 0
+  activation_type: [gelu]
+  activation_arg1 : [-1.0, 0.0, 0.5, 1.0]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+  unit_check: 0
+  norm_check: 1
 
 - name: spmm_128_activation_clippedrelu
   category: pre_checkin

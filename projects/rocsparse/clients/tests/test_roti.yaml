@@ -81,10 +81,6 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
 
-
-
-### DESACTIVATING THESE TESTS UNTIL INVESTIGATION ON GFX942 AND GFX90A
-
 - name: roti_graph_test
   category: pre_checkin
   function: roti
@@ -93,7 +89,6 @@ Tests:
   nnz: [500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
-  skip_hardware: gfx942, gfx90a
 
 - name: roti
   category: quick
@@ -102,4 +97,3 @@ Tests:
   M: [12000]
   nnz: [500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  skip_hardware: gfx942, gfx90a

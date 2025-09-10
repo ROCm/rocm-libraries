@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "common/matrix_utils/matrix_utils.hpp"
 #include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
 #include "common/misc/lapack_host_reference.hpp"
@@ -94,19 +95,348 @@ void testing_stedc_bad_arg()
     stedc_checkBadArgs(handle, evect, n, dD.data(), dE.data(), dC.data(), ldc, dInfo.data());
 }
 
+// For `n > 1`, creates a symmetrized `n` by `n` tridiagonal, Clement matrix T of the following form:
+//
+//             (   sqrt(n - 1)   sqrt(2(n - 2))     sqrt((n - 2)2)   sqrt(n - 1)   )
+// T = tridiag ( 0             0                ...                0             0 )
+//             (   sqrt(n - 1)   sqrt(2(n - 2))     sqrt((n - 2)2)   sqrt(n - 1)   )
+//
+// were the `i-th` off-diagonal entry is sqrt(i(n - i)), 1 <= i < n.
+//
 template <bool CPU, bool GPU, typename T, typename Sd, typename Td, typename Ud, typename Sh, typename Th, typename Uh>
-void stedc_initData(const rocblas_handle handle,
-                    const rocblas_evect evect,
-                    const rocblas_int n,
-                    Sd& dD,
-                    Sd& dE,
-                    Td& dC,
-                    const rocblas_int ldc,
-                    Ud& dInfo,
-                    Sh& hD,
-                    Sh& hE,
-                    Th& hC,
-                    Uh& hInfo)
+void stedc_clement_initData(const rocblas_handle handle,
+                            const rocblas_evect evect,
+                            const rocblas_int n,
+                            Sd& dD,
+                            Sd& dE,
+                            Td& dC,
+                            const rocblas_int ldc,
+                            Ud& /* dInfo */,
+                            Sh& hD,
+                            Sh& hE,
+                            Th& hC,
+                            Uh& /* hInfo */)
+{
+    using S = decltype(std::real(T{}));
+    rocblas_int bc = 1;
+
+    if(CPU)
+    {
+        rocblas_init<T>(hC, true);
+
+        for(rocblas_int b = 0; b < bc; ++b)
+        {
+            // New matrix initialization
+            using HMatT = HostMatrix<T, rocblas_int>;
+            using HMatS = HostMatrix<S, rocblas_int>;
+            using BDesc = typename HMatT::BlockDescriptor;
+
+            auto hCw = HMatT::Wrap(hC[b], ldc, n);
+            hCw->set_to_zero();
+            auto hDw = HMatS::Wrap(hD[b], n, 1);
+            hDw->set_to_zero();
+            auto hEw = HMatS::Wrap(hE[b], n, 1);
+            hEw->set_to_zero();
+
+            if(hCw && hDw && hEw) // update matrices if n >= 1
+            {
+                auto C = HMatT::Eye(n, n);
+                auto D = HMatS::Zeros(n, 1);
+                auto E = HMatS::Ones(n - 1, 1);
+
+                for(rocblas_int i = 1; i < n; ++i)
+                {
+                    E[i - 1] = std::sqrt(i * (n - i));
+                }
+
+                hCw->copy_data_from(C);
+                hDw->copy_data_from(D);
+                hEw->copy_data_from(E);
+            }
+        }
+    }
+
+    if(GPU)
+    {
+        // now copy to the GPU
+        CHECK_HIP_ERROR(dD.transfer_from(hD));
+        CHECK_HIP_ERROR(dE.transfer_from(hE));
+
+        if(evect == rocblas_evect_original)
+            CHECK_HIP_ERROR(dC.transfer_from(hC));
+    }
+}
+
+// Creates an `n` by `n` tridiagonal, Toeplitz matrix T of the following form:
+//
+//             (   1         1         1    )
+// T = tridiag ( 2   2 ... 2   2 ... 2    2 )
+//             (   1         1         1    )
+//
+template <bool CPU, bool GPU, typename T, typename Sd, typename Td, typename Ud, typename Sh, typename Th, typename Uh>
+void stedc_toeplitz_initData(const rocblas_handle handle,
+                             const rocblas_evect evect,
+                             const rocblas_int n,
+                             Sd& dD,
+                             Sd& dE,
+                             Td& dC,
+                             const rocblas_int ldc,
+                             Ud& /* dInfo */,
+                             Sh& hD,
+                             Sh& hE,
+                             Th& hC,
+                             Uh& /* hInfo */)
+{
+    using S = decltype(std::real(T{}));
+    rocblas_int bc = 1;
+
+    if(CPU)
+    {
+        rocblas_init<T>(hC, true);
+
+        for(rocblas_int b = 0; b < bc; ++b)
+        {
+            // New matrix initialization
+            using HMatT = HostMatrix<T, rocblas_int>;
+            using HMatS = HostMatrix<S, rocblas_int>;
+            using BDesc = typename HMatT::BlockDescriptor;
+
+            auto hCw = HMatT::Wrap(hC[b], ldc, n);
+            hCw->set_to_zero();
+            auto hDw = HMatS::Wrap(hD[b], n, 1);
+            hDw->set_to_zero();
+            auto hEw = HMatS::Wrap(hE[b], n, 1);
+            hEw->set_to_zero();
+
+            if(hCw && hDw && hEw) // update matrices if n >= 1
+            {
+                auto C = HMatT::Eye(n, n);
+                auto D = 2 * HMatS::Ones(n, 1);
+                auto E = HMatS::Ones(n - 1, 1);
+
+                hCw->copy_data_from(C);
+                hDw->copy_data_from(D);
+                hEw->copy_data_from(E);
+            }
+        }
+    }
+
+    if(GPU)
+    {
+        // now copy to the GPU
+        CHECK_HIP_ERROR(dD.transfer_from(hD));
+        CHECK_HIP_ERROR(dE.transfer_from(hE));
+
+        if(evect == rocblas_evect_original)
+            CHECK_HIP_ERROR(dC.transfer_from(hC));
+    }
+}
+
+// Creates an `n` by `n` identity matrix.
+//
+template <bool CPU, bool GPU, typename T, typename Sd, typename Td, typename Ud, typename Sh, typename Th, typename Uh>
+void stedc_identity_initData(const rocblas_handle handle,
+                             const rocblas_evect evect,
+                             const rocblas_int n,
+                             Sd& dD,
+                             Sd& dE,
+                             Td& dC,
+                             const rocblas_int ldc,
+                             Ud& /* dInfo */,
+                             Sh& hD,
+                             Sh& hE,
+                             Th& hC,
+                             Uh& /* hInfo */)
+{
+    using S = decltype(std::real(T{}));
+    rocblas_int bc = 1;
+
+    if(CPU)
+    {
+        rocblas_init<T>(hC, true);
+
+        for(rocblas_int b = 0; b < bc; ++b)
+        {
+            // New matrix initialization
+            using HMatT = HostMatrix<T, rocblas_int>;
+            using HMatS = HostMatrix<S, rocblas_int>;
+            using BDesc = typename HMatT::BlockDescriptor;
+
+            auto hCw = HMatT::Wrap(hC[b], ldc, n);
+            hCw->set_to_zero();
+            auto hDw = HMatS::Wrap(hD[b], n, 1);
+            hDw->set_to_zero();
+            auto hEw = HMatS::Wrap(hE[b], n, 1);
+            hEw->set_to_zero();
+
+            if(hCw && hDw && hEw) // update matrices if n >= 1
+            {
+                auto C = HMatT::Eye(n, n);
+                auto D = HMatS::Ones(n, 1);
+                auto E = HMatS::Zeros(n - 1, 1);
+
+                hCw->copy_data_from(C);
+                hDw->copy_data_from(D);
+                hEw->copy_data_from(E);
+            }
+        }
+    }
+
+    if(GPU)
+    {
+        // now copy to the GPU
+        CHECK_HIP_ERROR(dD.transfer_from(hD));
+        CHECK_HIP_ERROR(dE.transfer_from(hE));
+
+        if(evect == rocblas_evect_original)
+            CHECK_HIP_ERROR(dC.transfer_from(hC));
+    }
+}
+
+// Creates an `n` by `n` tridiagonal, Wilkinson matrix, which is formed as follows:
+//
+// 1. If `n` is even:
+//                      (   1          1            1          1   )
+// W_{2m + 1} = tridiag ( m   (m - 1) ... 0.5 0.5 ... (m - 1)    m )
+//                      (   1          1            1          1   )
+//
+// 2. If `n` is odd:
+//                      (   1          1         1          1   )
+// W_{2m + 1} = tridiag ( m   (m - 1) ... 1 0 1 ... (m - 1)   m )
+//                      (   1          1         1          1   )
+//
+// where `n = 2m + 1`.
+//
+template <bool CPU, bool GPU, typename T, typename Sd, typename Td, typename Ud, typename Sh, typename Th, typename Uh>
+void stedc_wilkinson_initData(const rocblas_handle handle,
+                              const rocblas_evect evect,
+                              const rocblas_int n,
+                              Sd& dD,
+                              Sd& dE,
+                              Td& dC,
+                              const rocblas_int ldc,
+                              Ud& /* dInfo */,
+                              Sh& hD,
+                              Sh& hE,
+                              Th& hC,
+                              Uh& /* hInfo */)
+{
+    using S = decltype(std::real(T{}));
+    rocblas_int bc = 1;
+
+    if(CPU)
+    {
+        rocblas_init<T>(hC, true);
+
+        for(rocblas_int b = 0; b < bc; ++b)
+        {
+            // New matrix initialization
+            using HMatT = HostMatrix<T, rocblas_int>;
+            using HMatS = HostMatrix<S, rocblas_int>;
+            using BDesc = typename HMatT::BlockDescriptor;
+
+            auto hCw = HMatT::Wrap(hC[b], ldc, n);
+            hCw->set_to_zero();
+            auto hDw = HMatS::Wrap(hD[b], n, 1);
+            hDw->set_to_zero();
+            auto hEw = HMatS::Wrap(hE[b], n, 1);
+            hEw->set_to_zero();
+
+            if(hCw && hDw && hEw) // update matrices if n >= 1
+            {
+                S m = (n - 1) / S(2);
+                auto C = HMatT::Eye(n, n);
+                auto D = HMatS::Zeros(n, 1);
+                auto E = HMatS::Ones(n - 1, 1);
+
+                for(rocblas_int i = 0; i < n / 2; ++i)
+                {
+                    D[i] = m - i;
+                    D[n - 1 - i] = m - i;
+                }
+
+                hCw->copy_data_from(C);
+                hDw->copy_data_from(D);
+                hEw->copy_data_from(E);
+            }
+        }
+    }
+
+    if(GPU)
+    {
+        // now copy to the GPU
+        CHECK_HIP_ERROR(dD.transfer_from(hD));
+        CHECK_HIP_ERROR(dE.transfer_from(hE));
+
+        if(evect == rocblas_evect_original)
+            CHECK_HIP_ERROR(dC.transfer_from(hC));
+    }
+}
+
+template <bool CPU, bool GPU, typename T, typename Sd, typename Td, typename Ud, typename Sh, typename Th, typename Uh>
+void stedc_random_initData(const rocblas_handle handle,
+                           const rocblas_evect evect,
+                           const rocblas_int n,
+                           Sd& dD,
+                           Sd& dE,
+                           Td& dC,
+                           const rocblas_int ldc,
+                           Ud& dInfo,
+                           Sh& hD,
+                           Sh& hE,
+                           Th& hC,
+                           Uh& hInfo)
+{
+    if(CPU)
+    {
+        using S = decltype(std::real(T{}));
+
+        rocblas_init<S>(hD, true);
+        rocblas_init<S>(hE, true);
+
+        for(int i = 0; i < n - 1; ++i)
+            hE[0][i] -= 4;
+
+        // initialize C to the identity matrix
+        if(evect == rocblas_evect_original)
+        {
+            for(rocblas_int j = 0; j < n; j++)
+            {
+                for(rocblas_int i = 0; i < n; i++)
+                {
+                    if(i == j)
+                        hC[0][i + j * ldc] = 1;
+                    else
+                        hC[0][i + j * ldc] = 0;
+                }
+            }
+        }
+    }
+
+    if(GPU)
+    {
+        // now copy to the GPU
+        CHECK_HIP_ERROR(dD.transfer_from(hD));
+        CHECK_HIP_ERROR(dE.transfer_from(hE));
+
+        if(evect == rocblas_evect_original)
+            CHECK_HIP_ERROR(dC.transfer_from(hC));
+    }
+}
+
+template <bool CPU, bool GPU, typename T, typename Sd, typename Td, typename Ud, typename Sh, typename Th, typename Uh>
+void stedc_default_initData(const rocblas_handle handle,
+                            const rocblas_evect evect,
+                            const rocblas_int n,
+                            Sd& dD,
+                            Sd& dE,
+                            Td& dC,
+                            const rocblas_int ldc,
+                            Ud& /* dInfo */,
+                            Sh& hD,
+                            Sh& hE,
+                            Th& hC,
+                            Uh& /* hInfo */)
 {
     if(CPU)
     {
@@ -240,6 +570,57 @@ void stedc_initData(const rocblas_handle handle,
     }
 }
 
+template <bool CPU, bool GPU, typename T, typename Sd, typename Td, typename Ud, typename Sh, typename Th, typename Uh>
+void stedc_initData(const rocblas_handle handle,
+                    const rocblas_evect evect,
+                    const rocblas_int n,
+                    Sd& dD,
+                    Sd& dE,
+                    Td& dC,
+                    const rocblas_int ldc,
+                    Ud& dInfo,
+                    Sh& hD,
+                    Sh& hE,
+                    Th& hC,
+                    Uh& hInfo)
+{
+    if((std::getenv("TEST_WILKINSON") != nullptr) || (std::getenv("STEDC_TEST_WILKINSON") != nullptr))
+    {
+        stedc_wilkinson_initData<CPU, GPU, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
+                                              hInfo);
+    }
+    else if((std::getenv("TEST_CLEMENT") != nullptr)
+            || (std::getenv("STEDC_TEST_CLEMENT") != nullptr))
+    {
+        stedc_clement_initData<CPU, GPU, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
+                                            hInfo);
+    }
+    else if((std::getenv("TEST_TOEPLITZ") != nullptr)
+            || (std::getenv("STEDC_TEST_TOEPLITZ") != nullptr))
+    {
+        stedc_toeplitz_initData<CPU, GPU, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
+                                             hInfo);
+    }
+    else if((std::getenv("TEST_IDENTITY") != nullptr)
+            || (std::getenv("STEDC_TEST_IDENTITY") != nullptr))
+    {
+        stedc_identity_initData<CPU, GPU, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
+                                             hInfo);
+    }
+    else if((std::getenv("TEST_RANDOM") != nullptr) || (std::getenv("STEDC_TEST_RANDOM") != nullptr))
+    {
+        stedc_random_initData<CPU, GPU, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
+                                           hInfo);
+    }
+    else
+    {
+        stedc_default_initData<CPU, GPU, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
+                                            hInfo);
+    }
+
+    return;
+}
+
 template <typename T, typename Sd, typename Td, typename Ud, typename Sh, typename Th, typename Uh>
 void stedc_getError(const rocblas_handle handle,
                     const rocblas_evect evect,
@@ -262,6 +643,11 @@ void stedc_getError(const rocblas_handle handle,
 {
     constexpr bool COMPLEX = rocblas_is_complex<T>;
     using S = decltype(std::real(T{}));
+
+    using HMatT = HostMatrix<T, rocblas_int>;
+    using HMatS = HostMatrix<S, rocblas_int>;
+    using BDescT = typename HMatT::BlockDescriptor;
+    using BDescS = typename HMatS::BlockDescriptor;
 
     int lgn = floor(log(n - 1) / log(2)) + 1;
     size_t lwork = (COMPLEX) ? n * n : 0;
@@ -308,6 +694,29 @@ void stedc_getError(const rocblas_handle handle,
     cpu_stedc(evect, n, hD[0], hE[0], hC[0], ldc, work.data(), lwork, rwork.data(), lrwork,
               iwork.data(), liwork, hInfo[0]);
 
+    // Depending on `evect`, stedc can return the eigenvectors of the original
+    // matrix (A) or the eigenvectors of the tridiagonal matrix (T).  Thus,
+    // given a pair U, D of eigenvectors and eigenvalues computed by stedc the
+    // reconstructed matrix
+    //
+    // U * D * adjoint(U)
+    //
+    // can be either A or T.  The following code uses lapack to compute
+    //
+    // AorT = U * D * adjoint(U),
+    //
+    // which will be later used to compare with the eigenvectors and
+    // eigenvalues computed by rocSOLVER.
+    //
+    auto AorT = HMatT::Empty();
+    if((evect != rocblas_evect_none) && (n > 0))
+    {
+        auto C = HMatT::Wrap(hC[0], ldc, n)->block(BDescT().nrows(n).ncols(n));
+        auto d = HMatT::Convert(hD[0], 1, n)->block(BDescT().nrows(1).ncols(n));
+        auto D = HMatT::Zeros(n, n).diag(d);
+        AorT = C * D * adjoint(C);
+    }
+
     // check info
     EXPECT_EQ(hInfo[0][0], hInfoRes[0][0]);
     if(hInfo[0][0] != hInfoRes[0][0])
@@ -316,8 +725,9 @@ void stedc_getError(const rocblas_handle handle,
         *max_err = 0;
 
     double err;
+    *max_errv = 0;
 
-    if(hInfo[0][0] == 0)
+    if((hInfo[0][0] == 0) && (n > 0))
     {
         // check that eigenvalues are correct and in order
         // error is ||hD - hDRes|| / ||hD||
@@ -328,23 +738,22 @@ void stedc_getError(const rocblas_handle handle,
         // check eigenvectors if required
         if(evect != rocblas_evect_none)
         {
-            // both eigenvalues and eigenvectors needed; need to implicitly test
-            // eigenvectors due to non-uniqueness of eigenvectors under scaling
+            // Input matrix
+            auto C = HMatT::Wrap(hCRes[0], ldc, n)->block(BDescT().nrows(n).ncols(n));
+            // Computed eigenvalues
+            auto d = HMatT::Convert(hDRes[0], 1, n)->block(BDescT().nrows(1).ncols(n));
+            // Diagonal matrix of size n by n with computed eigenvalues
+            auto D = HMatT::Zeros(n, n).diag(d);
 
-            // multiply A with each of the n eigenvectors and divide by corresponding
-            // eigenvalues
-            T alpha;
-            T beta = 0;
-            for(int j = 0; j < n; j++)
-            {
-                alpha = T(1) / hDRes[0][j];
-                cpu_symv_hemv(rocblas_fill_upper, n, alpha, hA[0], lda, hCRes[0] + j * ldc, 1, beta,
-                              hC[0] + j * ldc, 1);
-            }
+            // Orthogonal error
+            auto OE = C * adjoint(C) - HMatT::Eye(n, n);
+            err = OE.max_col_norm();
+            *max_errv = err > *max_err ? err : *max_err;
 
-            // error is ||hC - hCRes|| / ||hC||
-            // using frobenius norm
-            *max_errv = norm_error('F', n, n, ldc, hCRes[0], hC[0]);
+            // Residual error
+            auto RE = AorT - C * D * adjoint(C);
+            err = RE.norm() / AorT.norm();
+            *max_err = err > *max_err ? err : *max_err;
         }
     }
 }
@@ -522,7 +931,7 @@ void testing_stedc(Arguments& argus)
                           hInfo, hInfoRes, &max_err, &max_errv);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         stedc_getPerfData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
                              &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                              argus.profile_kernels, argus.perf);
@@ -533,7 +942,7 @@ void testing_stedc(Arguments& argus)
     {
         ROCSOLVER_TEST_CHECK(T, max_err, n);
         if(evect != rocblas_evect_none)
-            ROCSOLVER_TEST_CHECK(T, max_errv, n * n);
+            ROCSOLVER_TEST_CHECK(T, max_errv, n);
     }
 
     // output results for rocsolver-bench

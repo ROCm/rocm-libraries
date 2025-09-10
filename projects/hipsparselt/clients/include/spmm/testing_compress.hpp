@@ -104,9 +104,9 @@ void self_validate(T*             A,
     // n1, n2, n3 are matrix dimensions, sometimes called m, n, batch_count
     // s1, s1, s3 are matrix strides, sometimes called 1, lda, stride_a
     using c_type = std::conditional_t<std::is_same<__half, T>::value
-#ifdef HIP_FP8_TYPE_OCP
-                                          || std::is_same<__hip_fp8_e4m3, T>::value
-                                          || std::is_same<__hip_fp8_e5m2, T>::value
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+                                          || std::is_same<hipsparselt_fp8_e4m3, T>::value
+                                          || std::is_same<hipsparselt_fp8_e5m2, T>::value
 #endif
                                       ,float,
                                       T>;
@@ -179,9 +179,9 @@ void compress(const Ti*      in,
 {
     constexpr int tiles_y = 8;
     using c_type          = std::conditional_t<std::is_same<__half, Ti>::value
-#ifdef HIP_FP8_TYPE_OCP
-                                          || std::is_same<__hip_fp8_e4m3, Ti>::value
-                                          || std::is_same<__hip_fp8_e5m2, Ti>::value
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+                                          || std::is_same<hipsparselt_fp8_e4m3, Ti>::value
+                                          || std::is_same<hipsparselt_fp8_e5m2, Ti>::value
 #endif
                                       ,float,
                                       Ti>;
