@@ -277,7 +277,17 @@ option( WORKAROUND_ISSUE_1187 "" ${WORKAROUND_ISSUE_1187_DEFAULT})
 set_var_to_condition(WORKAROUND_ISSUE_1148_DEFAULT (MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X) AND MIOPEN_TEST_FLOAT)
 option( WORKAROUND_ISSUE_1148 "" ${WORKAROUND_ISSUE_1148_DEFAULT})
 
-set(SKIP_ALL_EXCEPT_TESTS miopen_gtest_shard1 miopen_gtest_shard2 miopen_gtest_shard3 miopen_gtest_shard4)
+if(MIOPEN_TEST_INT8)
+    set(SKIP_ALL_EXCEPT_TESTS
+              test_tensor_vec test_tensor_trans test_tensor_transform test_conv2d test_conv2d_find2)
+elseif(MIOPEN_TEST_BFLOAT16)
+    set(SKIP_ALL_EXCEPT_TESTS
+              test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d
+              test_check_numerics_test test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
+              test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
+              test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
+              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
+endif()
 
 if(MIOPEN_NO_GPU)
     set(SKIP_ALL_EXCEPT_TESTS
@@ -288,18 +298,6 @@ endif()
 #TODO WORKAROUND_ISSUE_1424
 if(MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908)
     list(APPEND SKIP_TESTS test_bn_3d_spatial_test)
-endif()
-
-if(MIOPEN_TEST_GFX115X)
-    list(APPEND SKIP_TESTS test_bn_3d_spatial_test)
-    list(APPEND SKIP_TESTS test_bn_spatial_test)
-    list(APPEND SKIP_TESTS test_gru_dropout)
-    list(APPEND SKIP_TESTS test_handle_test)
-    list(APPEND SKIP_TESTS test_lstm_dropout)
-    list(APPEND SKIP_TESTS test_na_train_find2)
-    list(APPEND SKIP_TESTS test_rnn_vanilla_dropout)
-    list(APPEND SKIP_TESTS test_ctc)
-    list(APPEND SKIP_TESTS test_rnn_seq_api)
 endif()
 
 #Don't run db verification by default

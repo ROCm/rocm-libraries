@@ -103,7 +103,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     # NONE datatype is explicitly enabled for all the state, all the NONE tests take 4 seconds to complete.
-    set(MIOPEN_GTEST_FILTER "Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64:FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1:Full/GPU_LayerNormTest_FP32.LayerNormTestFw/61")
+    set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
 
     #it prints the message only once
     set(TMPFNAME _dummy_static_variable_${name})
@@ -152,10 +152,21 @@ function(add_gtest TEST_NAME TEST_CPP)
     if(MIOPEN_NO_GPU)
         add_gtest_negative_filter("*GPU*")
     endif()
+    
+    # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
+    if(MIOPEN_TEST_GFX115X)
+        add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64")
+    endif()
+
+    # Temporarily disabled until gfx90a order-dependent test failures are fixed on ROCm 7.1 upgrade
+    if(MIOPEN_TEST_GFX90A)
+        add_gtest_negative_filter("FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1")
+        add_gtest_negative_filter("Full/GPU_LayerNormTest_FP32.LayerNormTestFw/61")
+    endif()
 
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
-    set(MIOPEN_GTEST_FILTER "FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1:Full/GPU_LayerNormTest_FP32.LayerNormTestFw/61:Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64")
+    set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
 
     message(STATUS "MIOPEN_GTEST_FILTER ${MIOPEN_GTEST_FILTER}")
 
