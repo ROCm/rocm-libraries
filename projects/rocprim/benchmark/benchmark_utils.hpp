@@ -1178,7 +1178,7 @@ private:
     // Zeros a 256 MiB buffer, used to clear the cache before each kernel call.
     // 256 MiB is the size of the largest cache on any AMD GPU.
     // It is currently not possible to fetch the L3 cache size from the runtime.
-    inline void clear_gpu_cache(hipStream_t stream)
+    inline void clear_gpu_cache(hipStream_t stream) const
     {
         constexpr size_t buf_size = 256 * MiB;
         static void*     buf      = nullptr;
@@ -1189,7 +1189,7 @@ private:
         HIP_CHECK(hipMemsetAsync(buf, 0, buf_size, stream));
     }
 
-    void output_statistics()
+    void output_statistics() const
     {
         double mean   = get_mean();
         double median = get_median();
@@ -1202,22 +1202,27 @@ private:
         gbench_state.counters["cv"]     = cv;
     }
 
-    double get_mean()
+    double get_mean() const
     {
         return std::reduce(times.begin(), times.end()) / times.size();
     }
 
-    // Technically when times.size() is even, the median is the arithmetic mean
-    // of the elements k=N/2 and k=N/2+1. This would be overkill here,
-    // as times.size() is large enough, and recorded times are similar enough.
-    double get_median()
+    double get_median() const
     {
-        size_t center_index = times.size() / 2;
-        std::nth_element(times.begin(), times.begin() + center_index, times.end());
-        return times[center_index];
+        auto tmp = times; // Copy, so we don’t mutate *this.
+        std::sort(tmp.begin(), tmp.end());
+
+        size_t n = tmp.size();
+        if (n % 2 == 1) {
+            // Middle element.
+            return tmp[n / 2];
+        } else {
+            // Average of two middle elements.
+            return (tmp[n / 2 - 1] + tmp[n / 2]) / 2.0;
+        }
     }
 
-    double get_stddev(double mean)
+    double get_stddev(double mean) const
     {
         auto SumSquares = [](const std::vector<double>& v)
         { return std::transform_reduce(v.begin(), v.end(), v.begin(), 0.0); };
@@ -1233,12 +1238,12 @@ private:
         return stddev;
     }
 
-    double get_cv(double stddev, double mean)
+    double get_cv(double stddev, double mean) const
     {
         return times.size() >= 2 ? stddev / mean : 0.0;
     }
 
-    void output_iteration_times()
+    void output_iteration_times() const
     {
         // Compose the key: benchmark name + "/manual_time"
         std::string key = gbench_state.name();
@@ -1298,7 +1303,7 @@ private:
     }
 
     std::string update_iteration_times(const std::string&        escaped_key,
-                                       const std::ostringstream& value_stream)
+                                       const std::ostringstream& value_stream) const
     {
         std::string content;
 
