@@ -200,15 +200,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @param baseAddresses Vector of base LDS addresses. For multi-dword accesses, the actual
          *                      addresses accessed are calculated from these base addresses.
          * @param dwords Number of dwords accessed per address
-         * @param entryWidthInBytes Width of each bank entry in bytes
-         * @param numBanks Number of banks in the LDS
+         * @param gfx The GPU architecture to determine number of banks
          * @return Map from bank index to count of addresses that access that bank
          */
-        static std::map<uint, uint>
-            createBankToAddressCounts(const std::vector<uint32_t>& baseAddresses,
-                                      uint                         dwords,
-                                      uint                         entryWidthInBytes,
-                                      uint                         numBanks);
+        static std::map<uint, uint> createBankToAddressCounts(
+            const std::vector<uint32_t>& baseAddresses, uint dwords, GPUArchitectureGFX gfx);
 
         /**
          * @brief Calculate the number of clock cycles needed to resolve bank conflicts

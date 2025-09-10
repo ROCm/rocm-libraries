@@ -173,7 +173,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         // TODO: These numbers assume aligned accesses
         // (e.g. for 128-bit bottom 4 bits of base address are zero)
-        // Is there a way to check? Given kernel graph provides relative addresses
+        // At codegen, can check allocation's alignment
         if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == Direction::Load)
         {
             switch(dwords)
@@ -234,13 +234,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return threadGroups;
     }
 
-    std::map<uint, uint>
-        LDSBankModel::createBankToAddressCounts(const std::vector<uint32_t>& baseAddresses,
-                                                uint                         dwords,
-                                                uint                         entryWidthInBytes,
-                                                uint                         numBanks)
+    std::map<uint, uint> LDSBankModel::createBankToAddressCounts(
+        const std::vector<uint32_t>& baseAddresses, uint dwords, GPUArchitectureGFX gfx)
     {
         std::map<uint, uint> bankToAddressCounts;
+        uint                 numBanks = getNumLDSBanks(gfx);
 
         for(size_t i = 0; i < baseAddresses.size(); ++i)
         {
@@ -249,7 +247,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
                         baseAddresses[i]);
             uint baseAddr = baseAddresses[i] / 4; // in dwords
 
-            // Note this address arithmetic is operating on dwords units
+            // Note: address arithmetic is operating on dword (instead of byte) units
             for(uint offset = 0; offset < dwords; offset += 1)
             {
                 uint currentAddr = baseAddr + offset;
@@ -306,8 +304,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
             for(const auto& groupAddresses :
                 LDSBankModel::divideIntoThreadGroups(instr.baseAddresses, threadsPerClock))
             {
-                const auto bankToAddressCounts = LDSBankModel::createBankToAddressCounts(
-                    groupAddresses, instr.dwords, 4, LDSBankModel::getNumLDSBanks(gfx));
+                const auto bankToAddressCounts
+                    = LDSBankModel::createBankToAddressCounts(groupAddresses, instr.dwords, gfx);
                 uint groupCycles = LDSBankModel::calculateBankConflictCycles(bankToAddressCounts);
                 ss << fmt::format("    Group {}: threads {}-{}\n",
                                   i,
@@ -371,7 +369,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
             divideIntoThreadGroups(baseAddresses, getThreadsPerClock(memoryOp, dwords, gfx)))
         {
             cycles += calculateBankConflictCycles(
-                createBankToAddressCounts(groupAddresses, dwords, entryWidthInBytes, numBanks));
+                createBankToAddressCounts(groupAddresses, dwords, gfx));
         }
         // Add 4 cycles for address transfer
         // TODO: this should only be for writes

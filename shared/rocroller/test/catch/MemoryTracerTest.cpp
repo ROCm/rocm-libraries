@@ -224,13 +224,11 @@ namespace MemoryTracerTest
         SECTION("Bank conflicts")
         {
             // Test multiple addresses accessing the same bank
-            std::vector<uint32_t> addresses         = {0, 128, 256}; // All map to bank 0
-            uint                  dwords            = 1;
-            uint                  entryWidthInBytes = 4;
-            uint                  numBanks          = 32;
+            std::vector<uint32_t> addresses = {0, 128, 256}; // All map to bank 0
+            uint                  dwords    = 1;
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
-                addresses, dwords, entryWidthInBytes, numBanks);
+                addresses, dwords, GPUArchitectureGFX::GFX942);
 
             // All 3 addresses should map to bank 0
             CHECK(bankCounts.size() == 1);
@@ -241,7 +239,7 @@ namespace MemoryTracerTest
             dwords    = 2;
 
             bankCounts = LDSBankModel::createBankToAddressCounts(
-                addresses, dwords, entryWidthInBytes, numBanks);
+                addresses, dwords, GPUArchitectureGFX::GFX942);
 
             // Address 0 touches banks 0-1
             // Address 4 touches banks 1-2
@@ -255,16 +253,15 @@ namespace MemoryTracerTest
         SECTION("Wrap around")
         {
             // Test wraparound behavior when multi-dword access extends past last bank
-            uint                  numBanks          = 8;
-            std::vector<uint32_t> addresses         = {28};
-            uint                  dwords            = 4; // Banks 7, 0, 1, 2
-            uint                  entryWidthInBytes = 4;
+            // For GFX942 with 32 banks, test a scenario that wraps around
+            std::vector<uint32_t> addresses = {124}; // Banks 31, 0, 1, 2 for dwords=4
+            uint                  dwords    = 4;
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
-                addresses, dwords, entryWidthInBytes, numBanks);
+                addresses, dwords, GPUArchitectureGFX::GFX942);
 
             CHECK(bankCounts.size() == 4);
-            CHECK(bankCounts[7] == 1);
+            CHECK(bankCounts[31] == 1);
             CHECK(bankCounts[0] == 1);
             CHECK(bankCounts[1] == 1);
             CHECK(bankCounts[2] == 1);
