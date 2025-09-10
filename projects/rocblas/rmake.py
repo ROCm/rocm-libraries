@@ -167,7 +167,7 @@ def parse_args():
                         help='Use a local path for HipBLASLt (optional)')
 
     general_opts.add_argument(      '--upgrade_tensile_venv_pip', required=False, default=False, action='store_true',
-                        help='Upgrade python pip version during Tensile installation (optional, default: False)')
+                        help='Upgrade python pip and packaging versions during Tensile installation (optional, default: False)')
 
     experimental_opts.add_argument('-u', '--use-custom-version', dest='tensile_version', type=str, required=False, default="",
                         help='Ignore Tensile version and just use the Tensile tag (optional)')
