@@ -169,9 +169,7 @@ namespace TensileLite
             {
                 analaytical_hardware.print();
             }
-            // int WGM
-            //     = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
-            int defaultWGM = 6;
+            int defaultWGM = std::ceil(std::sqrt(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
             analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
                 miDataType = analytical::DataType::XFloat32;
