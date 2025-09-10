@@ -204,35 +204,34 @@ namespace rocRoller::KernelGraph::MemoryTracer
             divideIntoThreadGroups(const std::vector<uint32_t>& addresses, uint threadsPerClock);
 
         /**
-         * @brief Create a mapping from bank indices to addresses for conflict resolution
+         * @brief Create a mapping from bank indices to address counts
          * 
          * For multi-dword accesses, tracks all banks touched by each address.
-         * The resulting map has bank indices as keys and deques of actual addresses as values.
+         * The resulting map has bank indices as keys and counts of addresses accessing that bank as values.
          * 
          * @param addresses Vector of LDS addresses
          * @param dwords Number of dwords accessed per address
          * @param entryWidthInBytes Width of each bank entry in bytes
          * @param numBanks Number of banks in the LDS
-         * @return Map from bank index to deque of addresses that access that bank
+         * @return Map from bank index to count of addresses that access that bank
          */
-        static std::map<uint, std::deque<uint32_t>>
-            createBankToAddressIndices(const std::vector<uint32_t>& addresses,
-                                       uint                         dwords,
-                                       uint                         entryWidthInBytes,
-                                       uint                         numBanks);
+        static std::map<uint, uint>
+            createBankToAddressCounts(const std::vector<uint32_t>& addresses,
+                                      uint                         dwords,
+                                      uint                         entryWidthInBytes,
+                                      uint                         numBanks);
 
         /**
          * @brief Calculate the number of clock cycles needed to resolve bank conflicts
          * 
          * Simulates the bank conflict resolution process where only one address per bank
-         * can be serviced per clock cycle. Addresses are scheduled to avoid conflicts,
-         * with each address being processed exactly once.
+         * can be serviced per clock cycle. The calculation is based on the maximum
+         * number of addresses that access any single bank.
          * 
-         * @param bankToAddressIndices Map from bank index to deque of addresses
+         * @param bankToAddressCounts Map from bank index to count of addresses accessing that bank
          * @return Number of clock cycles needed to process all addresses
          */
-        static uint calculateBankConflictCycles(
-            const std::map<uint, std::deque<uint32_t>>& bankToAddressIndices);
+        static uint calculateBankConflictCycles(const std::map<uint, uint>& bankToAddressCounts);
 
     private:
         uint m_entryWidthInBytes;
