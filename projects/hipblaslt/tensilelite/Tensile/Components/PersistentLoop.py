@@ -126,6 +126,8 @@ class PersistentLoopOn(PersistentLoop):
 
     def closePersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop On closePersistentLoop")
+        skCloseLoopLabel = Label("SK_CloseLoop", "")
+        module.add(skCloseLoopLabel)
         # endIter = "StreamKIterEnd" if kernel["StreamK"] == 1 else "TotalIters"
         endIter = "TotalIters" if kernel["StreamK"] == 2 else "StreamKIterEnd"
         module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr(endIter), comment="Check if done all StreamK iterations"))

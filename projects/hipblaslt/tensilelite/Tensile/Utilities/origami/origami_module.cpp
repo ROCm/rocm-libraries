@@ -51,6 +51,15 @@ PYBIND11_MODULE(origami, m)
           &Origami::intToDataType,
           "Convert int to DataType.");
 
+    pybind11::enum_<Origami::streamk::ReductionType>(m, "ReductionType")
+        .value("Tree", Origami::streamk::ReductionType::Tree)
+        .value("Parallel", Origami::streamk::ReductionType::Parallel)
+        .export_values();
+
+    m.def("intToReductionType",
+          &Origami::streamk::intToReductionType,
+          "Convert int to ReductionType.");
+
     pybind11::class_<Hardware>(m, "Hardware")
         .def(pybind11::init<Hardware::Architecture,
                             size_t,
@@ -86,6 +95,7 @@ PYBIND11_MODULE(origami, m)
     m.def("select_best_macro_tile_size",
           &Origami::select_best_macro_tile_size,
           "Get best macro tile sizes.");
+    m.def("select_streamk_reduction", &Origami::streamk::select_streamk_reduction, "Select best StreamK reduction strategy");
     m.def("select_streamk_grid", &Origami::streamk::select_streamk_grid, "Select Best StreamK Grid Size");
     m.def("compute_total_latency", &Origami::compute_total_latency, "compute_total_latency");
     m.def("select_best_wgm", &Origami::select_best_wgm, "Get best workgroup mapping.");
