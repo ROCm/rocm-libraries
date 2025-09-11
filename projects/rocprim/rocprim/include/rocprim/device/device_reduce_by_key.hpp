@@ -38,6 +38,7 @@
 #include "../intrinsics/thread.hpp"
 #include "../iterator/constant_iterator.hpp"
 #include "../type_traits.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 
 #include <chrono>
 #include <iostream>
@@ -58,8 +59,11 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
                               const bool             is_first_launch,
                               const unsigned int     block_save_idx,
                               std::size_t* const     global_head_count,
-                              AccumulatorType* const previous_accumulated)
+                              AccumulatorType* const previous_accumulated,
+                              ordered_block_id<>     ordered_bid)
 {
+    // 'ordered_bid' gets reset by 'init_lookback_scan_state'.
+
     const unsigned int block_id        = ::rocprim::detail::block_id<0>();
     const unsigned int block_size      = ::rocprim::detail::block_size<0>();
     const unsigned int block_thread_id = ::rocprim::detail::block_thread_id<0>();
@@ -89,7 +93,7 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
                                       update_func);
     }
 
-    init_lookback_scan_state(lookback_scan_state, number_of_blocks, flat_thread_id);
+    init_lookback_scan_state(lookback_scan_state, number_of_blocks, ordered_bid, flat_thread_id);
 }
 
 template<typename Config,
@@ -103,24 +107,25 @@ template<typename Config,
          typename CompareFunction,
          typename BinaryOp,
          typename LookbackScanState>
-inline hipError_t launch_reduce_by_key(detail::target_arch          arch,
-                                       const KeyIterator            keys_input,
-                                       const ValueIterator          values_input,
-                                       const UniqueIterator         unique_keys,
-                                       const ReductionIterator      reductions,
-                                       const UniqueCountIterator    unique_count,
-                                       const BinaryOp               reduce_op,
-                                       const CompareFunction        compare,
-                                       const LookbackScanState      scan_state,
-                                       const std::size_t            starting_block,
-                                       const std::size_t            total_number_of_blocks,
-                                       const std::size_t            size,
-                                       const std::size_t* const     global_head_count,
-                                       const AccumulatorType* const previous_accumulated,
-                                       dim3                         grid,
-                                       dim3                         block,
-                                       size_t                       shmem,
-                                       hipStream_t                  stream)
+inline hipError_t launch_reduce_by_key(detail::target_arch            arch,
+                                       const KeyIterator              keys_input,
+                                       const ValueIterator            values_input,
+                                       const UniqueIterator           unique_keys,
+                                       const ReductionIterator        reductions,
+                                       const UniqueCountIterator      unique_count,
+                                       const BinaryOp                 reduce_op,
+                                       const CompareFunction          compare,
+                                       const LookbackScanState        scan_state,
+                                       const std::size_t              starting_block,
+                                       const std::size_t              total_number_of_blocks,
+                                       const std::size_t              size,
+                                       const std::size_t* const       global_head_count,
+                                       const AccumulatorType* const   previous_accumulated,
+                                       ordered_block_id<unsigned int> ordered_bid,
+                                       dim3                           grid,
+                                       dim3                           block,
+                                       size_t                         shmem,
+                                       hipStream_t                    stream)
 {
     auto kernel = [=](auto arch_config)
     {
@@ -136,7 +141,8 @@ inline hipError_t launch_reduce_by_key(detail::target_arch          arch,
                                                                        total_number_of_blocks,
                                                                        size,
                                                                        global_head_count,
-                                                                       previous_accumulated);
+                                                                       previous_accumulated,
+                                                                       ordered_bid);
     };
 
     return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
@@ -166,11 +172,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
 {
     using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
     detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
     const reduce_by_key_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     using scan_state_type
@@ -199,13 +201,13 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
     accumulator_type* d_previous_accumulated = nullptr;
 
     detail::temp_storage::layout layout{};
-    result = scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    ROCPRIM_RETURN_ON_ERROR(
+        scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
 
-    result = detail::temp_storage::partition(
+    using ordered_bid_type = ordered_block_id<unsigned int>;
+    ordered_bid_type::id_type* ordered_bid_storage;
+
+    auto result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
         detail::temp_storage::make_linear_partition(
@@ -213,33 +215,25 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
             detail::temp_storage::make_partition(&scan_state_storage, layout),
             detail::temp_storage::ptr_aligned_array(&d_global_head_count, use_limited_size ? 1 : 0),
             detail::temp_storage::ptr_aligned_array(&d_previous_accumulated,
-                                                    use_limited_size ? 1 : 0)));
+                                                    use_limited_size ? 1 : 0),
+            detail::temp_storage::make_partition(&ordered_bid_storage,
+                                                 ordered_bid_type::get_temp_storage_layout())));
     if(result != hipSuccess || temporary_storage == nullptr)
     {
         return result;
     }
 
     bool use_sleep;
-    result = detail::is_sleep_scan_state_used(stream, use_sleep);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    ROCPRIM_RETURN_ON_ERROR(detail::is_sleep_scan_state_used(stream, use_sleep));
     scan_state_type scan_state{};
-    result = scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    ROCPRIM_RETURN_ON_ERROR(
+        scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream));
     scan_state_with_sleep_type scan_state_with_sleep{};
-    result = scan_state_with_sleep_type::create(scan_state_with_sleep,
-                                                scan_state_storage,
-                                                number_of_blocks,
-                                                stream);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    ROCPRIM_RETURN_ON_ERROR(scan_state_with_sleep_type::create(scan_state_with_sleep,
+                                                               scan_state_storage,
+                                                               number_of_blocks,
+                                                               stream));
+    auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
 
     auto with_scan_state
         = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
@@ -309,7 +303,8 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                     i == 0,
                     number_of_blocks - 1,
                     d_global_head_count,
-                    d_previous_accumulated);
+                    d_previous_accumulated,
+                    ordered_bid);
             });
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_init_kernel",
                                                     number_of_blocks_launch,
@@ -333,6 +328,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                     size,
                     i > 0 ? d_global_head_count : nullptr,
                     i > 0 ? d_previous_accumulated : nullptr,
+                    ordered_bid,
                     dim3(number_of_blocks_launch),
                     dim3(block_size),
                     0,

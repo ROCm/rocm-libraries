@@ -38,21 +38,21 @@ template<class T /* id type */ = unsigned int>
 struct ordered_block_id
 {
     // It's a bit confusing on how this API *should* be used. So here is how it should be initialized:
-    //   using ordered_bid_type = ordered_block_id<unsigned int>;
+    //   using ordered_bid_type = ordered_block_id<>;
     //   ordered_bid_type::id_type* ordered_bid_storage;
-    //  
+    //
     //   detail::temp_storage::make_linear_partition(
     //     detail::temp_storage::make_partition(&ordered_bid_storage, ordered_bid_type::get_temp_storage_layout())
     //   );
-    //  
+    //
     //   auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
-    //  
+    //
     //   my_kernel<<<x, y>>>(ordered_bid);
     //
     // On the kernel side it should be:
-    //   __globbal__ my_kernel(ordered_bid_type ordered_bid)
+    //   __globbal__ my_kernel(ordered_block_id<> ordered_bid)
     //   {
-    //     __shared__ ordered_bid_type::storage ordered_bid_storage;
+    //     __shared__ ordered_block_id<>::storage ordered_bid_storage;
     //
     //     auto tid      = threadIdx.x;
     //     auto block_id = ordered_bid.get(tid, ordered_bid_storage);
