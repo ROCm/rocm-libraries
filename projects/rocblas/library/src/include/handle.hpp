@@ -95,6 +95,7 @@ enum class Processor : int
     gfx1100 = 1100,
     gfx1101 = 1101,
     gfx1102 = 1102,
+    gfx1150 = 1150,
     gfx1151 = 1151,
     gfx1200 = 1200,
     gfx1201 = 1201
@@ -108,6 +109,10 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     rocblas_internal_set_data_ptr(rocblas_handle handle, std::shared_ptr<void>& data_ptr);
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     rocblas_internal_get_data_ptr(rocblas_handle handle, std::shared_ptr<void>& data_ptr);
+
+// cached device properties for handle device
+ROCBLAS_INTERNAL_EXPORT_NOINLINE const hipDeviceProp_t*
+                                       rocblas_internal_get_device_prop(rocblas_handle handle);
 
 /*******************************************************************************
  * \brief rocblas_handle is a structure holding the rocblas library context.
@@ -251,6 +256,7 @@ public:
 
     int getMaxSharedMemPerBlock()
     {
+        // TODO review sharedMemPerBlockOptin or use cached device_properties
         int max_mem = -1;
         THROW_IF_HIP_ERROR(hipDeviceGetAttribute(
             &max_mem, hipDeviceAttribute_t(hipDeviceAttributeMaxSharedMemoryPerBlock), device));
@@ -545,6 +551,10 @@ private:
     bool ROCBLAS_EXPORT device_allocator(size_t size);
 #endif
 
+public:
+    hipDeviceProp_t device_properties;
+
+private:
     // Device ID is created at handle creation time and remains in effect for the life of the handle.
     const int device;
 
@@ -553,11 +563,15 @@ private:
     int       archMajor;
     int       archMajorMinor;
 
-    int mWarpSize;
+    const int mWarpSize;
 
     // hipBLASLt handle is created at handle creation time and remains in effect for the life of the handle.
     std::shared_ptr<hipblasLtHandle_t> hipblasLtHandle;
     int                                hipblasltEnvVar = -1;
+
+    // used in constructor initialization list
+    int       getActiveDevice();
+    Processor getActiveArch();
 
     // Opaque smart allocator class to perform device memory allocations
     // clang-format off
