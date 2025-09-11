@@ -37,6 +37,7 @@
 #include "detail/device_scan_common.hpp"
 #include "device_scan_config.hpp"
 #include "device_transform.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -137,22 +138,23 @@ template<class Config,
          class InitValueType,
          class AccType,
          class LookBackScanState>
-inline hipError_t launch_lookback_scan(detail::target_arch arch,
-                                       InputIterator       input,
-                                       OutputIterator      output,
-                                       const size_t        size,
-                                       InitValueType       initial_value,
-                                       BinaryFunction      scan_op,
-                                       LookBackScanState   lookback_scan_state,
-                                       const unsigned int  number_of_blocks,
-                                       dim3                grid,
-                                       dim3                block,
-                                       size_t              shmem,
-                                       hipStream_t         stream,
-                                       AccType*            previous_last_element = nullptr,
-                                       AccType*            new_last_element      = nullptr,
-                                       bool                override_first_value  = false,
-                                       bool                save_last_value       = false)
+inline hipError_t launch_lookback_scan(detail::target_arch            arch,
+                                       InputIterator                  input,
+                                       OutputIterator                 output,
+                                       const size_t                   size,
+                                       InitValueType                  initial_value,
+                                       BinaryFunction                 scan_op,
+                                       LookBackScanState              lookback_scan_state,
+                                       const unsigned int             number_of_blocks,
+                                       dim3                           grid,
+                                       dim3                           block,
+                                       size_t                         shmem,
+                                       hipStream_t                    stream,
+                                       AccType*                       previous_last_element,
+                                       AccType*                       new_last_element,
+                                       bool                           override_first_value,
+                                       bool                           save_last_value,
+                                       ordered_block_id<unsigned int> ordered_bid)
 {
     auto kernel = [=](auto arch_config)
     {
@@ -167,7 +169,8 @@ inline hipError_t launch_lookback_scan(detail::target_arch arch,
             previous_last_element,
             new_last_element,
             override_first_value,
-            save_last_value);
+            save_last_value,
+            ordered_bid);
     };
 
     return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
@@ -223,12 +226,10 @@ inline auto scan_impl(void*               temporary_storage,
     AccType* new_last_element;
 
     detail::temp_storage::layout layout{};
-    hipError_t                   layout_result
-        = scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout);
-    if(layout_result != hipSuccess)
-    {
-        return layout_result;
-    }
+    ROCPRIM_RETURN_ON_ERROR(scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
+
+    using ordered_bid_type = ordered_block_id<unsigned int>;
+    ordered_bid_type::id_type* ordered_bid_storage;
 
     const hipError_t partition_result = detail::temp_storage::partition(
         temporary_storage,
@@ -238,39 +239,38 @@ inline auto scan_impl(void*               temporary_storage,
             detail::temp_storage::make_partition(&scan_state_storage, layout),
             detail::temp_storage::ptr_aligned_array(&previous_last_element,
                                                     use_limited_size ? 1 : 0),
-            detail::temp_storage::ptr_aligned_array(&new_last_element, use_limited_size ? 1 : 0)));
+            detail::temp_storage::ptr_aligned_array(&new_last_element, use_limited_size ? 1 : 0),
+            detail::temp_storage::make_partition(&ordered_bid_storage,
+                                                 ordered_bid_type::get_temp_storage_layout())));
     if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
         return partition_result;
     }
 
+    if(number_of_blocks == 0u)
+    {
+        return hipSuccess;
+    }
+
     // Start point for time measurements
     std::chrono::steady_clock::time_point start;
-
-    if(number_of_blocks == 0u)
-        return hipSuccess;
 
     if(number_of_blocks > 1 || use_limited_size)
     {
         bool use_sleep;
-        if(const hipError_t error = is_sleep_scan_state_used(stream, use_sleep))
-        {
-            return error;
-        }
+        ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleep));
 
         // Create and initialize lookback_scan_state obj
-        scan_state_type scan_state{};
-        hipError_t      result
-            = scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream);
+        scan_state_type            scan_state{};
         scan_state_with_sleep_type scan_state_with_sleep{};
-        result = scan_state_with_sleep_type::create(scan_state_with_sleep,
-                                                    scan_state_storage,
-                                                    number_of_blocks,
-                                                    stream);
-        if(result != hipSuccess)
-        {
-            return result;
-        }
+        ROCPRIM_RETURN_ON_ERROR(
+            scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream));
+        ROCPRIM_RETURN_ON_ERROR(scan_state_with_sleep_type::create(scan_state_with_sleep,
+                                                                   scan_state_storage,
+                                                                   number_of_blocks,
+                                                                   stream));
+
+        auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
 
         // Call the provided function with either scan_state or scan_state_with_sleep based on
         // the value of use_sleep
@@ -288,7 +288,9 @@ inline auto scan_impl(void*               temporary_storage,
         };
 
         if(debug_synchronous)
+        {
             start = std::chrono::steady_clock::now();
+        }
 
         size_t number_of_launch = (size + limited_size - 1) / limited_size;
         for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
@@ -315,14 +317,18 @@ inline auto scan_impl(void*               temporary_storage,
                     init_lookback_scan_state_kernel<<<dim3(grid_size),
                                                       dim3(block_size),
                                                       0,
-                                                      stream>>>(scan_state, number_of_blocks);
+                                                      stream>>>(scan_state,
+                                                                number_of_blocks,
+                                                                ordered_bid);
                 });
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
                                                         number_of_blocks,
                                                         start);
 
             if(debug_synchronous)
+            {
                 start = std::chrono::steady_clock::now();
+            }
             grid_size = number_of_blocks;
 
             if(debug_synchronous)
@@ -361,7 +367,8 @@ inline auto scan_impl(void*               temporary_storage,
                                                          previous_last_element,
                                                          new_last_element,
                                                          i != size_t(0),
-                                                         number_of_launch > 1);
+                                                         number_of_launch > 1,
+                                                         ordered_bid);
                 }));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel",
                                                         current_size,
