@@ -54,6 +54,7 @@ namespace rocRoller
         BF6,
         FP4,
         bool,
+        Raw32,
         // int16_t*,
         int32_t*,
         int64_t*,
@@ -71,8 +72,7 @@ namespace rocRoller
         BF6*,
         FP4*,
         E8M0,
-        E8M0*,
-        Raw32>;
+        E8M0*>;
 
     template <typename T>
     concept CCommandArgumentValue = requires(T& val)
