@@ -60,13 +60,12 @@ int mloGLUForwardContiguousDim0RunHost(const Tgpu* input,
 
     int ret = 0;
 
-    for(size_t o = 0; o < output_numel; o++)
-    {
+    par_for(output_numel, 1<<17, [&](const size_t& o){
         Tcheck valA   = static_cast<Tcheck>(inputFirstHalf[o]);
         Tcheck valB   = static_cast<Tcheck>(inputSecondHalf[o]);
         Tcheck val    = valA * sigmoid(valB);
         outputHost[o] = val;
-    }
+    });
 
     return ret;
 }
@@ -85,7 +84,7 @@ int mloGLUBackwardCongiguousDim0RunHost(const Tgpu* input,
     auto inputFistHalf_grad   = inputGradHost;
     auto inputSecondHalf_grad = inputGradHost + outputGrad_numel;
 
-    for(size_t o = 0; o < outputGrad_numel; o++)
+    par_for(outputGrad_numel, 1<<17, [&](const auto& o)
     {
         Tcheck inputFirstHalf_v = static_cast<Tcheck>(inputFirstHalf[o]);
         Tcheck sigmoid_v        = sigmoid(static_cast<Tcheck>(inputSecondHalf[o]));
@@ -93,7 +92,7 @@ int mloGLUBackwardCongiguousDim0RunHost(const Tgpu* input,
 
         inputFistHalf_grad[o]   = sigmoid_v * grad_v;
         inputSecondHalf_grad[o] = (1 - sigmoid_v) * sigmoid_v * grad_v * inputFirstHalf_v;
-    }
+    });
 
     return ret;
 }
