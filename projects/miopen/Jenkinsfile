@@ -69,7 +69,7 @@ def runBuildAndSingleGtestJob(def utils, def flags, def build_timeout_minutes=42
             utils.buildHipClangJobAndReboot(
                 lfs_pull:true, 
                 setup_flags: single_gtest_flags + flags, 
-                build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=1 AMD_LOG_LEVEL=4 make -j\$(nproc) install miopen_gtest check", 
+                build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=1 make -j\$(nproc) install miopen_gtest check", 
                 needs_reboot:false, 
                 build_install:true,
                 build_timeout:build_timeout_minutes)
@@ -138,7 +138,7 @@ pipeline {
             description: "Navi3 currently fails to build with instruction not supported on this GPU error")
         booleanParam(
             name: "TARGET_NAVI35",
-            defaultValue: true, //env.BRANCH_NAME == "develop" ? true : false,
+            defaultValue: env.BRANCH_NAME == "develop" ? true : false,
             description: "Navi3.5 Strix Halo")
         booleanParam(
             name: "TARGET_NAVI4",
@@ -307,10 +307,6 @@ pipeline {
             }
             parallel{
                 stage('Hip Tidy') {
-                    when {
-                        beforeAgent true
-                        expression { params.BUILD_PACKAGE_AND_CHECKS } //temp disable so I can test other job
-                    }
                     agent{ label rocmnode("nogpu") }
                     environment{
                         setup_cmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
