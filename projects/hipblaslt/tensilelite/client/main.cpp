@@ -286,6 +286,8 @@ namespace TensileLite
                 ("problem-size,p",           vector_default_empty<std::string>(), "Specify a problem size.  Comma-separated list of "
                                                                                   "sizes, in the order of the Einstein notation.")
 
+                ("prob-sol-map",             vector_default_empty<std::string>(), "[probIdx, solIdx]")
+
                 ("a-strides",                vector_default_empty<std::string>(), "Unspecified means default stride "
                                                                                   "(prev_dim_stride*prev_dim_size)"
                                                                                   "specifying once applies to all problem sizes, "
@@ -511,6 +513,29 @@ namespace TensileLite
             args.at(name).value() = boost::any(type);
         }
 
+        template <typename T>
+        void parse_arg_nums_map(po::variables_map& args, std::string const& name)
+        {
+            auto inValue = args[name].as<std::vector<std::string>>();
+
+            std::map<int, int> outValue;
+            for(auto const& str : inValue)
+            {
+                auto vec         = split_nums<T>(str);
+                outValue[vec[0]] = vec[1];
+                // std::cout << "map: [" << vec[0] << "," << vec[1] << "]" << std::endl;
+            }
+
+            boost::any v(outValue);
+
+            args.at(name).value() = v;
+        }
+
+        void parse_arg_ints_map(po::variables_map& args, std::string const& name)
+        {
+            parse_arg_nums_map<int>(args, name);
+        }
+
         void fix_data_types(po::variables_map& args)
         {
             auto type = args["type"].as<rocisa::DataType>();
@@ -571,6 +596,8 @@ namespace TensileLite
             parse_activation_enum_args(args, "activation-enum-args");
             parse_arg_double(args, "activation-additional-args");
             parse_arg_bools(args, "icache-flush-args");
+            // std::cout << "Pasring parse_arg_ints_map()" << std::endl;
+            parse_arg_ints_map(args, "prob-sol-map");
             return args;
         }
 

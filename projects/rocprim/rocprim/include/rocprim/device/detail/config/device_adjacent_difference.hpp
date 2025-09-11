@@ -592,6 +592,84 @@ struct default_adjacent_difference_config<
                       && (sizeof(value_type) <= 1))>> : adjacent_difference_config<128, 19>
 {};
 
+// Based on value_type = double
+template<class value_type>
+struct default_adjacent_difference_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
+    : adjacent_difference_config<32, 31>
+{};
+
+// Based on value_type = float
+template<class value_type>
+struct default_adjacent_difference_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
+    : adjacent_difference_config<1024, 5>
+{};
+
+// Based on value_type = rocprim::half
+template<class value_type>
+struct default_adjacent_difference_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 2))>> : adjacent_difference_config<256, 17>
+{};
+
+// Based on value_type = rocprim::int128_t
+template<class value_type>
+struct default_adjacent_difference_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
+    : adjacent_difference_config<128, 3>
+{};
+
+// Based on value_type = int64_t
+template<class value_type>
+struct default_adjacent_difference_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
+    : adjacent_difference_config<128, 1>
+{};
+
+// Based on value_type = int
+template<class value_type>
+struct default_adjacent_difference_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
+    : adjacent_difference_config<128, 29>
+{};
+
+// Based on value_type = short
+template<class value_type>
+struct default_adjacent_difference_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
+    : adjacent_difference_config<128, 17>
+{};
+
+// Based on value_type = int8_t
+template<class value_type>
+struct default_adjacent_difference_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
+                      && (sizeof(value_type) <= 1))>> : adjacent_difference_config<1024, 3>
+{};
+
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE

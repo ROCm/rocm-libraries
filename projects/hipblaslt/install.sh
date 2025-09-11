@@ -170,12 +170,12 @@ install_packages( )
   local library_dependencies_sles=( "gcc-fortran" "make" "gcc-c++" "libcxxtools9" "rpm-build" )
   local library_dependencies_mariner=( "gfortran" "make" "rpm-build" )
 
-  local client_dependencies_ubuntu=( "python3" "python3-yaml" libopenblas-dev)
-  local client_dependencies_centos=( "python36" "python3-pip" openblas-devel)
-  local client_dependencies_centos8=( "python39" "python3-virtualenv" openblas-devel)
-  local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" openblas-devel)
-  local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" openblas-devel)
-  local client_dependencies_mariner=( "python3" "python3-yaml" openblas-devel)
+  local client_dependencies_ubuntu=( "python3" "python3-yaml" "libopenblas-dev")
+  local client_dependencies_centos=( "python36" "python3-pip" "epel-release" "openblas-devel --enablerepo=crb")
+  local client_dependencies_centos8=( "python39" "python3-virtualenv" "epel-release" "openblas-devel --enablerepo=crb")
+  local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" "openblas-devel")
+  local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" "openblas-devel")
+  local client_dependencies_mariner=( "python3" "python3-yaml" "openblas-devel")
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
     library_dependencies_ubuntu+=("libmsgpack-dev")
@@ -320,7 +320,7 @@ install_msgpack_from_source( )
       pushd .
       mkdir -p ${build_dir}/deps
       cd ${build_dir}/deps
-      git clone -b cpp-3.0.1 https://github.com/msgpack/msgpack-c.git --depth 1
+      git clone -b cpp-3.1.0 https://github.com/msgpack/msgpack-c.git --depth 1
       cd msgpack-c
       git fetch --unshallow
       CXX=${cxx} CC=${cc} ${cmake_executable} -DMSGPACK_BUILD_TESTS=OFF -DMSGPACK_BUILD_EXAMPLES=OFF .
@@ -764,7 +764,7 @@ pushd .
     tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_DEVICE=OFF"
   else
     if [[ -n "${tensile_logic}" ]]; then
-      tensile_opt="${tensile_opt} -D{HIPBLASLT_LIBLOGIC_PATH}=${tensile_logic}"
+      tensile_opt="${tensile_opt} -D{TENSILELITE_LIBLOGIC_PATH}=${tensile_logic}"
     fi
     # tensile_opt="${tensile_opt} -DTensile_CODE_OBJECT_VERSION=${tensile_cov}"
     if [[ ${tensile_threads} != $(nproc) ]]; then
@@ -844,9 +844,10 @@ pushd .
       -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
       -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
       -DROCM_DISABLE_LDCONFIG=ON \
+      -DCMAKE_INSTALL_LIBDIR="lib" \
       -DROCM_PATH="${rocm_path}" ${root_path}
   else
-    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DROCM_PATH="${rocm_path}" ${root_path}
+    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
   fi
   check_exit_code "$?"
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,7 +62,9 @@ namespace TensileLite
             , m_flushTimeUs(flushTimeUs)
             , m_skip_slow_solution_ratio(args["skip-slow-solution-ratio"].as<float>())
             , m_skip_slow_solution(0)
+            , m_skiprun_from_map(0)
             , m_numSolutionSkip(0)
+            , m_prob_sol_map(args["prob-sol-map"].as<prob_sol_map>())
         {
         }
 
@@ -71,27 +73,47 @@ namespace TensileLite
             return m_numBenchmarksRun < m_numBenchmarks;
         }
 
-        void BenchmarkTimer::preBenchmarkRun() {}
+        void BenchmarkTimer::preBenchmarkRun()
+        {
+            m_currProblemIdx = -1; // init
+        }
 
         void BenchmarkTimer::postBenchmarkRun()
         {
             m_numBenchmarksRun++;
+            m_currProblemIdx = -1; // reset
         }
 
         void BenchmarkTimer::preProblem(ContractionProblem* const problem)
         {
+            ++m_currProblemIdx; // update current prob-idx
+
+            // test if we only have a specific solution to run (When restore-from-log)
+            m_probOnlyRunSolIdx = -1;
+            if(m_prob_sol_map.count(m_currProblemIdx) != 0)
+                m_probOnlyRunSolIdx = m_prob_sol_map.at(m_currProblemIdx);
+
             m_problem               = problem;
             m_currentBestWarmUpTime = double_millis(std::numeric_limits<double>::max());
             m_numSolutionSkip       = 0;
+            m_currSolutionIdx       = -1; // init
         }
 
         void BenchmarkTimer::postProblem()
         {
+            m_currSolutionIdx = -1; // reset
             if(m_numSolutionSkip)
+            {
                 std::cout << "########################## " << m_numSolutionSkip
                           << " solutions were skipped in total. (Skip Ratio: "
                           << m_skip_slow_solution_ratio << ")##########################"
                           << std::endl;
+            }
+            else
+            {
+                // print this as an indication of end-of-problem
+                std::cout << "########################## " << std::endl;
+            }
         }
 
         void BenchmarkTimer::preSolution(ContractionSolution const& solution)
@@ -99,6 +121,12 @@ namespace TensileLite
             m_numEnqueuesInSolution = 0;
             m_timeInSolution        = double_millis::zero();
             m_skip_slow_solution    = false;
+
+            ++m_currSolutionIdx; // update current sol-idx
+            // When restore-from-log: check if this solution is skipped if it's not the specified one, init this flag as false
+            m_skiprun_from_map = false;
+            if((m_probOnlyRunSolIdx != -1) && (m_probOnlyRunSolIdx != m_currSolutionIdx))
+                m_skiprun_from_map = true;
 
             ContractionSolution::ProjectedPerformance pp;
 
@@ -132,11 +160,11 @@ namespace TensileLite
 
         void BenchmarkTimer::postSolution()
         {
-            double timePerEnqueue_us
-                = !m_skip_slow_solution
-                      ? double_micros(m_timeInSolution).count() / m_numEnqueuesInSolution
-                            - m_flushTimeUs
-                      : std::numeric_limits<double>::quiet_NaN();
+            bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
+            double timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
+                                                                 / m_numEnqueuesInSolution
+                                                             - m_flushTimeUs
+                                                       : std::numeric_limits<double>::quiet_NaN();
 
             ContractionSolution::ProjectedPerformance pp;
             double                                    flopCount = 0;
@@ -156,9 +184,9 @@ namespace TensileLite
                     "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
             }
 
-            double gflops  = !m_skip_slow_solution ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
-            int    tiles   = pp.granularities.tilesPerCu * perf.CUs;
-            int    usedCus = std::min(tiles, perf.CUs);
+            double gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
+            int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
+            int    usedCus     = std::min(tiles, perf.CUs);
             double gflopsPerCu = gflops / usedCus;
 
             m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
@@ -171,7 +199,8 @@ namespace TensileLite
 
         bool BenchmarkTimer::needMoreRunsInSolution() const
         {
-            return m_numEnqueuesInSolution < m_numEnqueuesPerSolution && !m_skip_slow_solution;
+            bool sol_is_skipped = (m_skiprun_from_map || m_skip_slow_solution);
+            return m_numEnqueuesInSolution < m_numEnqueuesPerSolution && !sol_is_skipped;
         }
 
         size_t BenchmarkTimer::numWarmupRuns()
@@ -186,13 +215,21 @@ namespace TensileLite
                     "Expected at least", m_numWarmups, " warmup runs, got ", count, "."));
         }
 
-        void BenchmarkTimer::preWarmup() {}
+        void BenchmarkTimer::preWarmup()
+        {
+            // When restore-from-log, we only run on the specified solution
+            if(m_skiprun_from_map)
+                return;
+        }
 
         void BenchmarkTimer::postWarmup(TimingEvents const& startEvents,
                                         TimingEvents const& stopEvents,
                                         hipStream_t const&  stream)
         {
-            if(!m_skip_slow_solution_ratio)
+            // no need to do the warmup test when:
+            // 1. skip_from_map (When restore-from-log) or
+            // 2. skip_slow_solution_ratio is not set
+            if(m_skiprun_from_map || !m_skip_slow_solution_ratio)
                 return;
 
             double_millis totalTime(0.0);
@@ -241,7 +278,10 @@ namespace TensileLite
 
         size_t BenchmarkTimer::numEnqueuesPerSync()
         {
-            if(m_skip_slow_solution)
+            // No need to run when
+            // 1. this solution is skip_from_map (restore-from-log) or
+            // 2. m_skip_slow_solution
+            if(m_skiprun_from_map || m_skip_slow_solution)
                 return 0;
             size_t enqueuesByFlops = 0;
             if(m_minFlopsPerSync > 0)
