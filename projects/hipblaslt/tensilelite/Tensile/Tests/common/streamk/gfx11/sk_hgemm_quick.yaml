@@ -281,8 +281,8 @@ BenchmarkProblems:
         # - StoreVectorWidth: [4]
         - StreamK: [3]
         - TransposeLDS: [0]
-        # - VectorWidthA: [4]
-        # - VectorWidthB: [4]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
         - WorkGroupMapping: [1]
 
       BenchmarkForkParameters:
