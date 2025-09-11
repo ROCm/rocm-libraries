@@ -33,34 +33,58 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Helper struct for generating ordered unique ids for blocks in a grid.
+/// Helper struct for generating ordered unique ids for blocks in a grid.
 template<class T /* id type */ = unsigned int>
 struct ordered_block_id
 {
+    // It's a bit confusing on how this API *should* be used. So here is how it should be initialized:
+    //   using ordered_bid_type = ordered_block_id<unsigned int>;
+    //   ordered_bid_type::id_type* ordered_bid_storage;
+    //  
+    //   detail::temp_storage::make_linear_partition(
+    //     detail::temp_storage::make_partition(&ordered_bid_storage, ordered_bid_type::get_temp_storage_layout())
+    //   );
+    //  
+    //   auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+    //  
+    //   my_kernel<<<x, y>>>(ordered_bid);
+    //
+    // On the kernel side it should be:
+    //   __globbal__ my_kernel(ordered_bid_type ordered_bid)
+    //   {
+    //     __shared__ ordered_bid_type::storage ordered_bid_storage;
+    //
+    //     auto tid      = threadIdx.x;
+    //     auto block_id = ordered_bid.get(tid, ordered_bid_storage);
+    //   }
     static_assert(std::is_integral<T>::value, "T must be integer");
     using id_type = T;
 
-    // shared memory temporary storage type
+    /// Pointer to global memory that contains the atomic counter for block id.
+    id_type* id;
+
+    /// Shared memory for sharing the received block id to other threads in the block.
     struct storage_type
     {
         id_type id;
     };
 
-    ROCPRIM_HOST static inline
-    ordered_block_id create(id_type * id)
+    ROCPRIM_HOST
+    static inline ordered_block_id create(id_type* ordered_bid_storage)
     {
         ordered_block_id ordered_id;
-        ordered_id.id = id;
+        ordered_id.id = ordered_bid_storage;
         return ordered_id;
     }
 
-    ROCPRIM_HOST static inline
-    size_t get_storage_size()
+    ROCPRIM_HOST
+    static inline size_t get_storage_size()
     {
         return sizeof(id_type);
     }
 
-    ROCPRIM_HOST static inline detail::temp_storage::layout get_temp_storage_layout()
+    ROCPRIM_HOST
+    static inline detail::temp_storage::layout get_temp_storage_layout()
     {
         return detail::temp_storage::layout{get_storage_size(), alignof(id_type)};
     }
@@ -82,14 +106,13 @@ struct ordered_block_id
         return storage.id;
     }
 
-    /// Resets the ordered block id from host.
+    /// Resets the ordered block id from host. Don't use this if we have an init kernel!
+    /// Call `ordered_block_id::reset()` from that kernel instead.
     ROCPRIM_HOST ROCPRIM_INLINE
     hipError_t host_reset()
     {
         return hipMemset(id, 0, sizeof(id_type));
     }
-
-    id_type* id;
 };
 
 template<class T = unsigned int, bool UsingOrderedBlockId = false>
