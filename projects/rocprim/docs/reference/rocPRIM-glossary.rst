@@ -41,7 +41,7 @@ This glossary is to help users understand the basic concepts or terminologies us
         The number of threads per block.
 
     Tile
-        A group of warps that run on the same streaming multiprocessor (SM). Threads in the block can be indexed using one dimension, {X}, two dimensions, {X, Y}, or three dimensions, {X, Y, Z}. 
+        A group of warps that run on the same streaming multiprocessor (SM). Threads in the block can be indexed using one dimension, {X}, two dimensions, {X, Y}, or three dimensions, {X, Y, Z}. In rocPRIM the tile size is always the same as the block size. 
 
     Grid
         A group of blocks that all run the same kernel call.
