@@ -18,7 +18,7 @@ Functions:
 
 Variables set:
   OPENMP_RPM - OpenMP package name for RPM-based systems
-  OPENMP_DEB - OpenMP package name for DEB-based systems  
+  OPENMP_DEB - OpenMP package name for DEB-based systems
   GFORTRAN_RPM - GFortran package name for RPM-based systems
   GFORTRAN_DEB - GFortran package name for DEB-based systems
 #]=======================================================================]
@@ -35,10 +35,10 @@ endmacro()
 # Set up OpenMP package variables for current OS
 macro(rocm_setup_posix_openmp_packages)
     _rocm_detect_os()
-    
+
     set(OPENMP_RPM "libgomp")
     set(OPENMP_DEB "libomp-dev")
-    
+
     # OS-specific overrides
     if(HOST_OS STREQUAL "sles")
         set(OPENMP_RPM "libgomp1")
@@ -48,10 +48,10 @@ endmacro()
 # Set up GFortran package variables for current OS
 macro(rocm_setup_posix_gfortran_packages)
     _rocm_detect_os()
-    
+
     set(GFORTRAN_RPM "libgfortran4")
     set(GFORTRAN_DEB "libgfortran4")
-    
+
     if(HOST_OS STREQUAL "centos" OR HOST_OS STREQUAL "rhel" OR HOST_OS STREQUAL "almalinux")
         if(HOST_OS_VERSION VERSION_GREATER_EQUAL "8")
             set(GFORTRAN_RPM "libgfortran")
@@ -67,10 +67,10 @@ endmacro()
 macro(rocm_setup_client_packages)
     _rocm_detect_os()
     message(STATUS "Detected OS: ${HOST_OS} ${HOST_OS_VERSION}")
-    
+
     rocm_setup_posix_openmp_packages()
     rocm_setup_posix_gfortran_packages()
-    
+
     message(STATUS "OpenMP packages: RPM=${OPENMP_RPM}, DEB=${OPENMP_DEB}")
     message(STATUS "GFortran packages: RPM=${GFORTRAN_RPM}, DEB=${GFORTRAN_DEB}")
 endmacro()
@@ -80,4 +80,4 @@ function(rocm_setup_client_components component_name client_component_name)
     rocm_setup_client_packages()
     rocm_package_setup_component(${component_name})
     rocm_package_setup_client_component(${client_component_name})
-endfunction() 
+endfunction()

@@ -245,7 +245,7 @@ namespace rocisa
         module->addT<Label>(noBranchLabel);
         return module;
     }
-    
+
     //////////////////////////////////////////////////////////////////////////////
     // longBranchVccnz - 32 bit offset
     // Conditional branch to label when VCC != 0

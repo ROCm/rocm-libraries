@@ -42,4 +42,3 @@ def test_cnhw_defaults(tensile_state, run_convolution_level):
         assert(conv.solutionParms["AssertSizeEqual"] == {})
 
     run_convolution_level.func(conv, z, run_convolution_level.solution)
-

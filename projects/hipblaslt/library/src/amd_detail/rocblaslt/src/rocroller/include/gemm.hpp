@@ -77,7 +77,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
 /**
  * @brief Return the amount of workspace that is required to execute a kernel.
- * 
+ *
  * Note: This only takes into account the workspace required for StreamK kernels.
  */
 size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob);

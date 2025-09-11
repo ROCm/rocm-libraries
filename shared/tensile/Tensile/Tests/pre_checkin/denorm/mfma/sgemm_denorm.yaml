@@ -51,4 +51,3 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [ [128], [128], [1], [128] ]
           #- Range: [ [1024], [1024], [1], [1024] ]
-

@@ -114,7 +114,7 @@ std::shared_ptr<SolutionParameters>
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
-    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate || 
+    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate ||
         kernelType.scaleBMode != rocRoller::Operations::ScaleMode::Separate)
     {
         gemm->swizzleScale = false;
