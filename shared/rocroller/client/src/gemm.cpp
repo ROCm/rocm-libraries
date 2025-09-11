@@ -762,6 +762,12 @@ namespace rocRoller::Client::GEMMClient
             Settings::getInstance()->set(Settings::Scheduler, schedulerValue);
         }
 
+        if(solution.schedulerCost != "")
+        {
+            auto cost = fromString<Scheduling::CostFunction>(solution.schedulerCost);
+            Settings::getInstance()->set(Settings::SchedulerCost, cost);
+        }
+
         auto context
             = Context::ForTarget(arch,
                                  solution.generateKernelName(),
@@ -1303,6 +1309,7 @@ int main(int argc, const char* argv[])
     app.add_flag(
         "--betaInFma", solution.betaInFma, "Use beta in FMA instruction instead of alpha.");
     app.add_option("--scheduler", solution.scheduler, "Which scheduler to use.");
+    app.add_option("--schedulerCost", solution.schedulerCost, "Which scheduler cost function to use.");
     app.add_flag("--matchMemoryAccess",
                  solution.matchMemoryAccess,
                  "Match memory access to transpose.  Currently decreases performance.");

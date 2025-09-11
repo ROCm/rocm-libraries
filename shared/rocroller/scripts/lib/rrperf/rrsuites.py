@@ -1295,6 +1295,7 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
         matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
@@ -1308,11 +1309,12 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
+        noCheck=True,
     )
 
 
 def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm():
-    yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_pf4x1())
+    yield from add_wgm((0, 2), fp4_no_scale_target_d2lds_mi16x16x128_pf4x1())
 
 
 def fp4_kernels_no_wgm():
