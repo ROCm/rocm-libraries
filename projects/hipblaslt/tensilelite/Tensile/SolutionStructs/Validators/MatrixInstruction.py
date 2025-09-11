@@ -125,17 +125,21 @@ def matrixInstructionToMIParameters(
     hasWMMA = isaInfoMap[isa].asmCaps["HasWMMA"]
 
     result['MIInputPerThread'] = mi[0] * mi[2] * mi[3] // wavefrontSize
+    result['MIInputPerThreadA'] = mi[0] * mi[2] * mi[3] // wavefrontSize
+    result['MIInputPerThreadB'] = mi[1] * mi[2] * mi[3] // wavefrontSize
     if (not hasMFMA) and hasWMMA and (isa[0] == 10 or isa[0] == 11):
       result['MIInputPerThread'] = mi[2]
+      result['MIInputPerThreadA'] = mi[2]
+      result['MIInputPerThreadB'] = mi[2]
 
     sparseA = False if not isSparse else False if isSparse == 2 else True
     sparseB = False if not isSparse else True if isSparse == 2 else False
-    result['MIInputPerThreadA'] = result['MIInputPerThread'] if not sparseA else result['MIInputPerThread'] // 2
+    result['MIInputPerThreadA'] = result['MIInputPerThreadA'] if not sparseA else result['MIInputPerThreadA'] // 2
     if problemType["MXBlockA"]:
-      result['MIInputPerThreadMXSA'] = result['MIInputPerThread'] // problemType["MXBlockA"] * 2
-    result['MIInputPerThreadB'] = result['MIInputPerThread'] if not sparseB else result['MIInputPerThread'] // 2
+      result['MIInputPerThreadMXSA'] = result['MIInputPerThreadA'] // problemType["MXBlockA"] * 2
+    result['MIInputPerThreadB'] = result['MIInputPerThreadB'] if not sparseB else result['MIInputPerThreadB'] // 2
     if problemType["MXBlockB"]:
-      result['MIInputPerThreadMXSB'] = result['MIInputPerThread'] // problemType["MXBlockB"] * 2
+      result['MIInputPerThreadMXSB'] = result['MIInputPerThreadB'] // problemType["MXBlockB"] * 2
     result['MIInputPerThreadMetadata'] = result['MIInputPerThread'] if not isSparse else result['MIInputPerThread'] // 8
 
     print2(f">> MI Parameters: {pprint.pformat(result)}")
@@ -289,16 +293,6 @@ def validateMIParameters(
         assert miInputPerThread == mi4[2], elineno()
     else:
         assert miInputPerThread == mi4[0] * mi4[2] * mi4[3] // wfsize, f"{elineno()} MIInputPerThread: {miInputPerThread} != {mi4[0]} * {mi4[2]} * {mi4[3]} / {wfsize} = {mi4[0] * mi4[2] * mi4[3] // wfsize}"
-
-    if "MIInputPerThreadA" in solution:
-        miInputPerThreadA = solution["MIInputPerThreadA"]
-        sparseA = False if not isSparse else False if isSparse == 2 else True
-        assert miInputPerThreadA == miInputPerThread if not sparseA else miInputPerThread // 2, elineno()
-
-    if "MIInputPerThreadB" in solution:
-        miInputPerThreadB = solution["MIInputPerThreadB"]
-        sparseB = False if not isSparse else True if isSparse == 2 else False
-        assert miInputPerThreadB == miInputPerThread if not sparseB else miInputPerThread // 2, elineno()
 
     if "MIInputPerThreadMetadata" in solution:
         miInutPerThreadMeta = solution["MIInputPerThreadMetadata"]

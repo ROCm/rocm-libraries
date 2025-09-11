@@ -131,6 +131,8 @@ namespace rocisa
         std::string typeConvert(InstType iType) const
         {
             size_t f8f6f4_k = getAsmCaps()["HasWMMA_V3"] ? 128 : 64;
+            size_t f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
+
             switch(iType)
             {
             case InstType::INST_F16:
@@ -162,7 +164,7 @@ namespace rocisa
             case InstType::INST_BF6:
                 return "f8f6f4";
             case InstType::INST_F4:
-                return "f8f6f4";
+                return ((variant[0] < f4_t) && (variant[1] < f4_t)) ? "f8f6f4" : "f4";
             default:
                 std::string msg("Type not found");
                 msg += std::to_string(int(iType));
@@ -205,6 +207,7 @@ namespace rocisa
 
         std::string getArgStr() const
         {
+            size_t f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             std::string inputPermuteStr = "";
@@ -252,8 +255,11 @@ namespace rocisa
                     inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
                     break;
                 case InstType::INST_F4:
-                    inputPermuteStr = (variant[2] > 64) ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                {
+                    bool useModifier = ((variant[0] < f4_t) && (variant[1] < f4_t));
+                    inputPermuteStr = useModifier ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
                     break;
+                }
                 default:
                     break;
                 }

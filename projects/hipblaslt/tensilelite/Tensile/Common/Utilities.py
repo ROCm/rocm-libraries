@@ -404,7 +404,7 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
         return (2, 16, 2, 8)
     elif wmma == (16, 16, 64, 1):
         return (2, 16, 2, 16)
-    elif wmma == (16, 16, 128, 1):
+    elif wmma == (16, 16, 128, 1) or wmma == (32, 16, 128, 1):
         assert dtypeBitWidth
         if dtypeBitWidth == 8:
             return (4, 16, 2, 16)

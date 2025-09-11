@@ -83,7 +83,7 @@ def makeValidWorkGroups():
     return validWorkGroups
 
 def makeValidWMMA():
-    return [[16, 16, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1]]
+    return [[16, 16, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]]
 
 def makeValidSWMMAC():
     return [[16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1]]
@@ -177,6 +177,7 @@ def makeValidSMFMA():
 def makeValidMatrixInstructions():
     mfma = makeValidMFMA()
     smfma = makeValidSMFMA()
+    wmma = makeValidWMMA()
     validMatrixInstructions = (
         [[], [-1]]
         + mfma["H"]
@@ -188,6 +189,7 @@ def makeValidMatrixInstructions():
         + smfma["H"]
         + smfma["B"]
         + smfma["4xi8"]
+        + wmma
     )
     return validMatrixInstructions + mfma["_format9"] + smfma["_format9"]
 
