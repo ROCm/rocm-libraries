@@ -26,6 +26,7 @@
 #include "../../detail/temp_storage.hpp"
 #include "../../intrinsics/atomic.hpp"
 #include "../../intrinsics/thread.hpp"
+#include "rocprim/config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -79,6 +80,13 @@ struct ordered_block_id
         }
         ::rocprim::syncthreads();
         return storage.id;
+    }
+
+    /// Resets the ordered block id from host.
+    ROCPRIM_HOST ROCPRIM_INLINE
+    hipError_t host_reset()
+    {
+        return hipMemset(id, 0, sizeof(id_type));
     }
 
     id_type* id;

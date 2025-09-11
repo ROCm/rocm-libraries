@@ -228,13 +228,6 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
     return hipSuccess;
 }
 
-template<class T>
-ROCPRIM_KERNEL
-void init_onesweep_iteration_kernel(ordered_block_id<T> ordered_bid)
-{
-    ordered_bid.reset();
-}
-
 template<class Config,
          bool Descending,
          class KeysInputIterator,
@@ -361,12 +354,11 @@ hipError_t radix_sort_onesweep_iteration(
         const unsigned int num_lookback_states = radix_size_per_place * blocks;
 
         // Reset lookback scan states to zero, indicating empty prefix.
-        hipError_t error = hipMemsetAsync(lookback_states,
-                                          0,
-                                          sizeof(onesweep_lookback_state) * num_lookback_states,
-                                          stream);
-        if(error != hipSuccess)
-            return error;
+        ROCPRIM_RETURN_ON_ERROR(
+            hipMemsetAsync(lookback_states,
+                           0,
+                           sizeof(onesweep_lookback_state) * num_lookback_states,
+                           stream));
 
         std::chrono::steady_clock::time_point start;
         if(debug_synchronous)
@@ -386,13 +378,7 @@ hipError_t radix_sort_onesweep_iteration(
             start = std::chrono::steady_clock::now();
         }
 
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(init_onesweep_iteration_kernel),
-                           1,
-                           1,
-                           0,
-                           stream,
-                           ordered_bid);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_onesweep_iteration_kernel", size, start);
+        ROCPRIM_RETURN_ON_ERROR(ordered_bid.host_reset());
 
         if(from_input && to_output)
         {
