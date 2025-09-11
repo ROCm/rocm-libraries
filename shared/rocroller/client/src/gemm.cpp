@@ -50,6 +50,7 @@
 #include "client/GEMMParameters_serialization.hpp"
 #include "client/PreSwizzle.hpp"
 #include "client/StreamKGEMMSolution.hpp"
+#include "client/RotatingBuffer.hpp"
 
 #include <CLI/CLI.hpp>
 
