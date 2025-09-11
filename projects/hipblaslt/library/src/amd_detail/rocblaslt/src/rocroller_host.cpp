@@ -35,6 +35,7 @@
 #include "utility.hpp"
 
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/CommandParameters.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
