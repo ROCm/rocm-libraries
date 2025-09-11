@@ -7667,9 +7667,13 @@ class KernelWriterAssembly(KernelWriter):
       rStart = periodParam[8] if doTailOpt == 2 else 0
       rEnd = periodParam[9] if doTailOpt == 2 else 0
 
+      requiredSgprs = min(self.sgprPool.size() + 5, self.states.regCaps["MaxSgpr"])
+      maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
+                                                      self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+
       tmpVgprPool = []
       packInst = Module()
-      numTempToUse = self.states.regCaps["MaxVgpr"] - self.vgprPool.size()
+      maxNumTempToUse = max(maxVgprs - self.vgprPool.size(), 1)
 
       for perp in range(perpStart, perpEnd):
         for sPerp in range(sPerpStart, sPerpEnd):
@@ -8051,7 +8055,7 @@ class KernelWriterAssembly(KernelWriter):
                     if doTailOpt == 0 and is16b:
                       if r % 2 == 1:
                         packInst.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
-                        if len(tmpVgprPool) == numTempToUse:
+                        if len(tmpVgprPool) == maxNumTempToUse:
                           module.add(SWaitCnt(vlcnt=0, comment="Wait for previous GR to finish"))
                           module.add(packInst)
                           packInst = Module()
@@ -8077,7 +8081,7 @@ class KernelWriterAssembly(KernelWriter):
                     module.add(SBranch(labelName=jumpLabel.getLabelName(), comment=""))
                 # For half (bf16). Note: for int8, we will checkin after loading all components
                 if (destVgprHi != None) and (not dataIsByte):
-                  if len(tmpVgprPool) == numTempToUse and doTailOpt == 0:
+                  if len(tmpVgprPool) == maxNumTempToUse and doTailOpt == 0:
                     for v in tmpVgprPool:
                       self.vgprPool.checkIn(v)
                     tmpVgprPool = []
