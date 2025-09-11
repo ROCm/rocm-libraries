@@ -295,7 +295,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
         ss << fmt::format("  Instruction: {}\n", instructionName);
 
-        // Follows immediateClockCount
+        // Follows getClockCount
         uint cycles = 0;
         {
             const auto threadsPerClock
@@ -351,7 +351,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
 
         uint       numBanks               = LDSBankModel::getNumLDSBanks(gfx);
-        const auto instructionTotalClocks = LDSBankModel::immediateClockCount(
+        const auto instructionTotalClocks = LDSBankModel::getClockCount(
             gfx, instr.memoryOp, instr.dwords, instr.baseAddresses, numBanks, 4);
 
         AssertFatal(cycles == instructionTotalClocks, "Cycle count mismatch");
@@ -361,12 +361,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
-    uint LDSBankModel::immediateClockCount(GPUArchitectureGFX           gfx,
-                                           const MemoryOpLDS&           memoryOp,
-                                           uint                         dwords,
-                                           const std::vector<uint32_t>& baseAddresses,
-                                           uint                         numBanks,
-                                           uint                         entryWidthInBytes)
+    uint LDSBankModel::getClockCount(GPUArchitectureGFX           gfx,
+                                     const MemoryOpLDS&           memoryOp,
+                                     uint                         dwords,
+                                     const std::vector<uint32_t>& baseAddresses,
+                                     uint                         numBanks,
+                                     uint                         entryWidthInBytes)
     {
         uint cycles = 0;
         for(const auto& groupAddresses :

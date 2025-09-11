@@ -174,12 +174,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @param entryWidthInBytes Width of each bank entry in bytes (default: 4)
          * @return Total number of clock cycles for this instruction
          */
-        static uint immediateClockCount(GPUArchitectureGFX           gfx,
-                                        const MemoryOpLDS&           memoryOp,
-                                        uint                         dwords,
-                                        const std::vector<uint32_t>& baseAddresses,
-                                        uint                         numBanks,
-                                        uint                         entryWidthInBytes = 4);
+        static uint getClockCount(GPUArchitectureGFX           gfx,
+                                  const MemoryOpLDS&           memoryOp,
+                                  uint                         dwords,
+                                  const std::vector<uint32_t>& baseAddresses,
+                                  uint                         numBanks,
+                                  uint                         entryWidthInBytes = 4);
 
         /**
          * @brief Divide addresses into thread groups based on threads-per-clock limit
