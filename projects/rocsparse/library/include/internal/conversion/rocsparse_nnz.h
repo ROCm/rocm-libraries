@@ -34,9 +34,9 @@ extern "C" {
 
 /*! \ingroup conv_module
 *  \details
-*  This function computes the number of nonzero elements per row or column and the total number of nonzero elements 
+*  This function computes the number of nonzero elements per row or column and the total number of nonzero elements
 *  in a dense matrix.
-*  
+*
 *  \note
 *  The routine does support asynchronous execution if the pointer mode is set to device.
 *
@@ -46,7 +46,7 @@ extern "C" {
 *  @param[in]
 *  handle                  handle to the rocsparse library context queue.
 *  @param[in]
-*  dir                     direction that specified whether to count nonzero elements by \ref rocsparse_direction_row or by 
+*  dir                     direction that specified whether to count nonzero elements by \ref rocsparse_direction_row or by
 *                          \ref rocsparse_direction_column.
 *  @param[in]
 *  m                       number of rows of the dense matrix \p A.

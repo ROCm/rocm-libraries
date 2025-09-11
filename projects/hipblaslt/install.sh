@@ -191,13 +191,14 @@ install_packages( )
       client_dependencies_sles=( "openblas-devel")
       client_dependencies_mariner=("openblas-devel")
 
-      if [[ "${tensile_msgpack_backend}" == true ]]; then
-        library_dependencies_ubuntu+=("libmsgpack-dev")
-        library_dependencies_centos+=("msgpack-devel")
-        library_dependencies_centos8+=("msgpack-devel")
-        library_dependencies_fedora+=("msgpack-devel")
-      fi
+     if [[ "${tensile_msgpack_backend}" == true ]]; then
+       library_dependencies_centos+=("msgpack-devel")
+       library_dependencies_centos8+=("msgpack-devel")
+       library_dependencies_fedora+=("msgpack-devel")
+     fi
   fi
+
+  library_dependencies_ubuntu+=("libmsgpack-dev")
 
   if [[ "${build_clients}" == true ]]; then
     library_dependencies_ubuntu+=( "gfortran" )
@@ -860,7 +861,7 @@ pushd .
     cmake_client_options="HIPBLASLT_ENABLE_CLIENTS=OFF"
   else
     if [[ ( "${use_system_packages}" == false ) && ( "${install_dependencies}" == true ) ]]; then
-        cmake_client_options=" -DBLAS_LIBRARIES=/usr/local/lib/libblas.a -DBLA_STATIC=ON"
+        cmake_client_options=" -DBLAS_LIBRARIES=/usr/local/lib/libblas.a -DLAPACK_LIBRARIES='/usr/local/lib/liblapack.a;/usr/local/lib/libblas.a' -DBLA_STATIC=ON"
     fi
   fi
 

@@ -97,7 +97,7 @@ if(HIPBLASLT_ENABLE_HOST)
     else()
         set(hipblas_target hipblas-common)
     endif()
-    if(NOT ROCM_LIBS_SUPERBUILD) 
+    if(NOT ROCM_LIBS_SUPERBUILD)
         find_package(${hipblas_target} REQUIRED)
     endif()
     if(HIPBLASLT_ENABLE_MARKER)
@@ -226,7 +226,7 @@ if(HIPBLASLT_ENABLE_HOST)
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
-    
+
     if(HIPBLASLT_ENABLE_ASAN)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
     endif()
@@ -398,7 +398,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
         string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
         rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
     endif()
-    
+
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
     rocm_package_setup_client_component(benchmarks

@@ -218,4 +218,3 @@ BenchmarkProblems:
         - ProblemSizes:
           #- Exact: [ M, N, B, K, ldc, ldc, lda, ldb ]
           - Exact: [1022, 1022, 1, 2050]
-

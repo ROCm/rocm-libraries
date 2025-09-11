@@ -13728,7 +13728,7 @@ class KernelWriterAssembly(KernelWriter):
           self.labels.getUniqueNamePrefix("NoBranch"), \
           self.labels.getUniqueNamePrefix("Positive"),
           posNeg, comment)
-      
+
 ##############################################################################
   # longBranchVccnz - 32 bit offset
   # Conditional branch to label when VCC != 0
