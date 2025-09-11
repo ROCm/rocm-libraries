@@ -29,7 +29,7 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
-#include "rocroller/client/include/RotatingBuffer.hpp"
+#include "client/RotatingBuffer.hpp"
 
 using namespace rocRoller;
 
@@ -131,4 +131,33 @@ TEST_CASE("Out-of-bounds offset throws FatalError", "[RotatingBuffer]") {
     // The constructor should fall back to single instance,
     // but .next() will sanity-check bounds and throw.
     REQUIRE_THROWS_AS(buf.next(), FatalError);
+}
+
+TEST_CASE("Odd cache size wraps correctly without overflow", "[RotatingBuffer]") {
+    std::vector<int> hostData(8);
+    for (int i = 0; i < 8; i++) hostData[i] = i;
+
+    size_t cacheBytes = 67; 
+
+    RotatingBuffer<int> buf(hostData, cacheBytes);
+
+    auto span1 = buf.next();
+    auto span2 = buf.next(); // should advance by 8 elements (wrap to second copy)
+    auto span3 = buf.next(); // wraps back to first copy
+
+    REQUIRE(span1.size() == 8);
+    REQUIRE(span2.size() == 8);
+    REQUIRE(span3.size() == 8);
+
+    // span2 should be offset from span1 by exactly numElems (8 ints)
+    REQUIRE(span2.data() == span1.data() + 8);
+    // span3 wraps back to start
+    REQUIRE(span3.data() == span1.data());
+
+    // All values should remain consistent
+    for (int i = 0; i < 8; i++) {
+        REQUIRE(span1[i] == hostData[i]);
+        REQUIRE(span2[i] == hostData[i]);
+        REQUIRE(span3[i] == hostData[i]);
+    }
 }
