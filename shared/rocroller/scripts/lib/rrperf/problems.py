@@ -286,7 +286,7 @@ class GEMM(GEMMProblem, GEMMSolution):
 class GEMMRun(GEMM):
     """GEMM run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
