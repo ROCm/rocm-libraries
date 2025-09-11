@@ -184,7 +184,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         /**
          * @brief Divide addresses into thread groups based on threads-per-clock limit
          * 
-         * @param addresses Vector of LDS addresses
+         * @param addresses Vector of base addresses to divide into groups
          * @param threadsPerClock Maximum number of threads that can operate per clock
          * @return Vector of thread groups, each containing addresses for that group
          */
@@ -192,15 +192,14 @@ namespace rocRoller::KernelGraph::MemoryTracer
             divideIntoThreadGroups(const std::vector<uint32_t>& addresses, uint threadsPerClock);
 
         /**
-         * @brief Create a mapping from bank indices to address counts
+         * @brief Determines how many addresses accesses each bank
          * 
-         * For multi-dword accesses, tracks all banks touched by each base address.
-         * The resulting map has bank indices as keys and counts of addresses accessing that bank as values.
-         * 
-         * @param baseAddresses Vector of base LDS addresses. For multi-dword accesses, the actual
-         *                      addresses accessed are calculated from these base addresses.
-         * @param dwords Number of dwords accessed per address
-         * @param gfx The GPU architecture to determine number of banks
+         * For multi-dword accesses, includes addresses at starting at the baseAddress and
+         * extending for dwords number of dwords.
+         *
+         * @param baseAddresses Vector of base addresses.
+         * @param dwords Number of dwords accessed at each address
+         * @param gfx The GPU architecture (for determining number of banks)
          * @return Map from bank index to count of addresses that access that bank
          */
         static std::map<uint, uint> createBankToAddressCounts(

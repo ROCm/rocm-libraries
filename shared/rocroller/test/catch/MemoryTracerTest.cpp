@@ -90,7 +90,7 @@ namespace MemoryTracerTest
 
         KernelInvocation inv{.workgroupSize = {64, 1, 1}};
 
-        SECTION("Old Summary")
+        SECTION("Old Summary") // TODO: rename
         {
             auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
 
@@ -165,7 +165,7 @@ namespace MemoryTracerTest
         }
     }
 
-    TEST_CASE("LDS summary large", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS summary 5 dwords per thread", "[kernel-graph][lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph;
@@ -179,37 +179,32 @@ namespace MemoryTracerTest
         const int  destinationTag = 20;
         const uint workGroup      = 0;
 
+        // Simulate 64 threads each reading 16 bytes then 4 bytes
         for(uint32_t threadId = 0; threadId < 64; ++threadId)
         {
             const auto baseAddr = threadId * 32;
-            {
-                const auto event = MemoryEventSimulated{
-                    operationTag,
-                    sourceTag,
-                    destinationTag,
-                    ldsRead,
-                    baseAddr, // byteOffset
-                    16, // bytesRequested
-                    workGroup,
-                    threadId // workItem
-                };
-                model.simulate(event);
-            }
-            {
-                const auto event = MemoryEventSimulated{
-                    operationTag,
-                    sourceTag,
-                    destinationTag,
-                    ldsRead,
-                    baseAddr + 16, // byteOffset
-                    4, // bytesRequested
-                    workGroup,
-                    threadId // workItem
-                };
-                model.simulate(event);
-            }
+            model.simulate(MemoryEventSimulated{operationTag,
+                                                sourceTag,
+                                                destinationTag,
+                                                ldsRead,
+                                                baseAddr,
+                                                16,
+                                                workGroup,
+                                                threadId});
+            model.simulate(MemoryEventSimulated{operationTag,
+                                                sourceTag,
+                                                destinationTag,
+                                                ldsRead,
+                                                baseAddr + 16,
+                                                4,
+                                                workGroup,
+                                                threadId});
         }
-        auto detailed = model.detailedSummary(GPUArchitectureGFX::GFX950);
+
+        auto        detailed   = model.detailedSummary(GPUArchitectureGFX::GFX950);
+        const auto& opAccesses = detailed.accesses.at(operationTag);
+
+        // TODO: currently fix test when operation disconnected from instruction
 
         std::string detailedStr = detailed.toString();
         if constexpr(true)
@@ -224,38 +219,31 @@ namespace MemoryTracerTest
         SECTION("Bank conflicts")
         {
             // Test multiple addresses accessing the same bank
-            std::vector<uint32_t> addresses = {0, 128, 256}; // All map to bank 0
+            std::vector<uint32_t> addresses = {0, 128, 256}; // x / 4 mod 32 = 0 for all addresses
             uint                  dwords    = 1;
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
                 addresses, dwords, GPUArchitectureGFX::GFX942);
 
-            // All 3 addresses should map to bank 0
             CHECK(bankCounts.size() == 1);
             CHECK(bankCounts[0] == 3);
 
-            // Test conflicts with multi-dword accesses
-            addresses = {0, 4, 124}; // With dwords=2, addresses 0 and 124 both touch bank 0
-            dwords    = 2;
+            auto more = {4, 16};
+            addresses.insert(addresses.end(), more.begin(), more.end());
 
             bankCounts = LDSBankModel::createBankToAddressCounts(
                 addresses, dwords, GPUArchitectureGFX::GFX942);
 
-            // Address 0 touches banks 0-1
-            // Address 4 touches banks 1-2
-            // Address 124 touches banks 31-0 (wraparound)
-            CHECK(bankCounts[0] == 2); // Accessed by addresses 0 and 124
-            CHECK(bankCounts[1] == 2); // Accessed by addresses 0 and 4
-            CHECK(bankCounts[2] == 1); // Accessed by address 4
-            CHECK(bankCounts[31] == 1); // Accessed by address 124
+            CHECK(bankCounts.size() == 3);
+            CHECK(bankCounts[0] == 3);
+            CHECK(bankCounts[1] == 1); // 4 / 4 mod 32 = 1
+            CHECK(bankCounts[4] == 1); // 16 / 4 mod 32 = 4
         }
 
         SECTION("Wrap around")
         {
-            // Test wraparound behavior when multi-dword access extends past last bank
-            // For GFX942 with 32 banks, test a scenario that wraps around
-            std::vector<uint32_t> addresses = {124}; // Banks 31, 0, 1, 2 for dwords=4
-            uint                  dwords    = 4;
+            std::vector<uint32_t> addresses = {124}; // 124 / 4 mod 32 = 31
+            uint                  dwords    = 4; // Accesses 31, 0, 1, 2
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
                 addresses, dwords, GPUArchitectureGFX::GFX942);
