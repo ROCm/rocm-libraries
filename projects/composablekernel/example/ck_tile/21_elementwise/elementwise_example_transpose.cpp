@@ -4,7 +4,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/elementwise.hpp"
 #include "ck_tile/host/reference/reference_transpose.hpp"
-#include "json_dump.hpp"
+#include "ck_tile/utility/json_dump.hpp"
 #include "elementwise_common.hpp"
 
 auto create_args(int argc, char* argv[])
@@ -89,8 +89,7 @@ bool run(const ck_tile::ArgParser& arg_parser)
 
     ck_tile::index_t total_elements = M * N;
 
-    constexpr ck_tile::index_t kBlockSize =
-        ck_tile::get_warp_size() * BlockWarps::at(ck_tile::number<0>{});
+    const ck_tile::index_t kBlockSize             = Kernel::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu        = 1;
     constexpr ck_tile::index_t elements_per_block = BlockTile::at(ck_tile::number<0>{});
     ck_tile::index_t kGridSize = (total_elements + elements_per_block - 1) / elements_per_block;

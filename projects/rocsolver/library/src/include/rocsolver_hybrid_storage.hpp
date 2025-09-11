@@ -62,6 +62,7 @@ template <typename T,
 struct rocsolver_hybrid_storage
 {
     I dim, batch_count;
+    rocblas_stride shift;
     rocblas_stride stride;
 
     U src_array;
@@ -107,7 +108,11 @@ struct rocsolver_hybrid_storage
 
     /* Used to read device pointers from a batched array for use on the host; no other data is read from the
        device. */
-    rocblas_status init_pointers_only(U array, rocblas_stride stride, I batch_count, hipStream_t stream)
+    rocblas_status init_pointers_only(U array,
+                                      rocblas_stride shift,
+                                      rocblas_stride stride,
+                                      I batch_count,
+                                      hipStream_t stream)
     {
         if(val_array)
         {
@@ -132,6 +137,7 @@ struct rocsolver_hybrid_storage
 
         this->dim = -1;
         this->src_array = array;
+        this->shift = shift;
         this->stride = stride;
         this->batch_count = batch_count;
 
@@ -172,7 +178,12 @@ struct rocsolver_hybrid_storage
     }
     /* Used to read device data into a host buffer, which is managed by this class. Data for all batch instances
        will be read into the buffer. */
-    rocblas_status init_async(I dim, U array, rocblas_stride stride, I batch_count, hipStream_t stream)
+    rocblas_status init_async(I dim,
+                              U array,
+                              rocblas_stride shift,
+                              rocblas_stride stride,
+                              I batch_count,
+                              hipStream_t stream)
     {
         if(val_array)
         {
@@ -201,6 +212,7 @@ struct rocsolver_hybrid_storage
         {
             this->dim = 0;
             this->src_array = 0;
+            this->shift = 0;
             this->stride = 0;
             this->batch_count = 0;
             return rocblas_status_success;
@@ -208,6 +220,7 @@ struct rocsolver_hybrid_storage
 
         this->dim = dim;
         this->src_array = array;
+        this->shift = shift;
         this->stride = stride;
         this->batch_count = batch_count;
 
@@ -236,15 +249,16 @@ struct rocsolver_hybrid_storage
                 // read data to val_array
                 if(batch_count == 1 || stride == dim)
                 {
-                    HIP_CHECK(hipMemcpyAsync(val_array, src_array, val_bytes, hipMemcpyDeviceToHost,
-                                             stream));
+                    HIP_CHECK(hipMemcpyAsync(val_array, src_array + shift, val_bytes,
+                                             hipMemcpyDeviceToHost, stream));
                 }
                 else
                 {
                     for(I bid = 0; bid < batch_count; bid++)
                     {
-                        HIP_CHECK(hipMemcpyAsync(val_array + bid * dim, src_array + bid * stride,
-                                                 dim_bytes, hipMemcpyDeviceToHost, stream));
+                        HIP_CHECK(hipMemcpyAsync(val_array + bid * dim,
+                                                 src_array + shift + bid * stride, dim_bytes,
+                                                 hipMemcpyDeviceToHost, stream));
                     }
                 }
             }
@@ -268,8 +282,8 @@ struct rocsolver_hybrid_storage
                 // read data to val_array
                 for(I bid = 0; bid < batch_count; bid++)
                 {
-                    HIP_CHECK(hipMemcpyAsync(val_array + bid * dim, batch_array[bid], dim_bytes,
-                                             hipMemcpyDeviceToHost, stream));
+                    HIP_CHECK(hipMemcpyAsync(val_array + bid * dim, batch_array[bid] + shift,
+                                             dim_bytes, hipMemcpyDeviceToHost, stream));
                 }
             }
         }
@@ -341,9 +355,9 @@ struct rocsolver_hybrid_storage
         else
         {
             if(batch_array)
-                return batch_array[bid];
+                return batch_array[bid] + shift;
             else
-                return (T*)(src_array + bid * stride);
+                return (T*)(src_array + shift + bid * stride);
         }
     }
 };

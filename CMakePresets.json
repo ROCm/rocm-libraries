@@ -7,7 +7,7 @@
     },
     "configurePresets": [
         {
-            "name": "opt-rocm:all",
+            "name": "release:all",
             "displayName": "Release build (all libraries)",
             "description": "Configure preset for release builds with installation to /opt/rocm",
             "toolchainFile": "${sourceDir}/cmake/toolchains/linux-amdclang.cmake",
@@ -19,28 +19,28 @@
         },
         {
             "name": "mxdatagenerator",
-            "inherits": ["opt-rocm:all"],
+            "inherits": ["release:all"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator"
             }
         },
         {
             "name": "rocroller",
-            "inherits": ["opt-rocm:all"],
+            "inherits": ["release:all"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller"
             }
         },
         {
             "name": "rocprim",
-            "inherits": ["opt-rocm:all"],
+            "inherits": ["release:all"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "rocprim"
             }
         },
         {
             "name": "rocrand",
-            "inherits": ["opt-rocm:all"],
+            "inherits": ["release:all"],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "rocrand"
             }
@@ -51,7 +51,7 @@
             "name": "default",
             "displayName": "Default build preset",
             "description": "Build using the default preset",
-            "configurePreset": "opt-rocm:all"
+            "configurePreset": "release:all"
         }
     ]
 }
