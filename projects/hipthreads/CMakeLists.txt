@@ -39,6 +39,10 @@ endif()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix" FORCE)
+endif()
+
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/inc/gpu/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gpu
 )
