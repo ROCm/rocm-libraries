@@ -104,6 +104,68 @@ int32_t mloAddLayerNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
     return ret;
 }
 
+template <typename Tgpu, typename Tcheck>
+int32_t mloAddLayerNormForwardRunHost2(miopenTensorDescriptor_t inputDesc,
+                                       Tgpu* input,
+                                       Tgpu* input2,
+                                       Tgpu* weight,
+                                       Tgpu* bias,
+                                       Tcheck* outputhost,
+                                       Tcheck* meanhost,
+                                       Tcheck* rstdhost,
+                                       float eps,
+                                       int32_t normalized_dim,
+                                       miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(inputDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = 1;
+    size_t norm_dim   = static_cast<size_t>(normalized_dim);
+
+    for(size_t i = 0ULL; i < dims.size(); ++i)
+    {
+        if(i < norm_dim)
+            outer_size *= dims[i];
+        else
+            inner_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    par_ford(outer_size)([&](int32_t o) {
+        Tcheck pmean = 0.0f;
+        Tcheck pvar  = 0.0f;
+
+        ford(inner_size)([&](int32_t i) {
+            Tcheck tmp = static_cast<Tcheck>(input[o * inner_size + i]) +
+                         static_cast<Tcheck>(input2[o * inner_size + i]);
+            pmean += tmp;
+            pvar += tmp * tmp;
+        });
+
+        pmean        = pmean / inner_size;
+        pvar         = pvar / inner_size - pmean * pmean;
+        Tcheck prstd = 1.0f / sqrt(pvar + eps);
+
+        meanhost[o] = pmean;
+        rstdhost[o] = prstd;
+
+        ford(inner_size)([&](int32_t i) {
+            Tcheck pweight =
+                (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD) ? 1 : static_cast<Tcheck>(weight[i]);
+            Tcheck pbias =
+                (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD) ? 0 : static_cast<Tcheck>(bias[i]);
+            outputhost[o * inner_size + i] =
+                (static_cast<Tcheck>(input[o * inner_size + i]) +
+                 static_cast<Tcheck>(input2[o * inner_size + i]) - pmean) *
+                    prstd * pweight +
+                pbias;
+        });
+    });
+
+    return ret;
+}
+
 template <typename Tgpu, typename Tref>
 class AddLayerNormDriver : public Driver
 {

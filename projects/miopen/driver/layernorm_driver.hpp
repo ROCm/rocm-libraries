@@ -98,6 +98,61 @@ int32_t mloLayerNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloLayerNormForwardRunHost2(miopenTensorDescriptor_t inputDesc,
+                                    Tgpu* input,
+                                    Tgpu* weight,
+                                    Tgpu* bias,
+                                    Tcheck* outputhost,
+                                    Tcheck* meanhost,
+                                    Tcheck* rstdhost,
+                                    float eps,
+                                    int32_t normalized_dim,
+                                    miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(inputDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = 1;
+    size_t norm_dim   = static_cast<size_t>(normalized_dim);
+
+    for(size_t i = 0ULL; i < dims.size(); ++i)
+    {
+        if(i < norm_dim)
+            outer_size *= dims[i];
+        else
+            inner_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    par_ford(outer_size)([&](size_t o) {
+        Tcheck pmean = 0.0f;
+        Tcheck pvar  = 0.0f;
+
+        ford(inner_size)([&](size_t i) {
+            Tcheck tmp = static_cast<Tcheck>(input[o * inner_size + i]);
+            pmean += tmp;
+            pvar += tmp * tmp;
+        });
+
+        pmean        = pmean / inner_size;
+        pvar         = pvar / inner_size - pmean * pmean;
+        Tcheck prstd = 1.0f / sqrt(pvar + eps);
+
+        meanhost[o] = pmean;
+        rstdhost[o] = prstd;
+
+        ford(inner_size)([&](size_t i) {
+            Tcheck pweight =
+                (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
+            Tcheck pbias = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 0 : static_cast<Tcheck>(bias[i]);
+            outputhost[o * inner_size + i] =
+                (static_cast<Tcheck>(input[o * inner_size + i]) - pmean) * prstd * pweight + pbias;
+        });
+    });
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloLayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                     Tgpu* dy,
                                     Tgpu* x,
@@ -125,15 +180,15 @@ int32_t mloLayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
 
     for(int o = 0; o < outer_size; ++o)
     {
-        Tcheck sum_dy_weight = 0;
+        Tcheck sum_dy_weight   = 0;
         Tcheck sum_dy_weight_x = 0;
 
         for(int i = 0; i < inner_size; ++i)
         {
             Tcheck pweight =
                 (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
-            Tcheck pdy     = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
-            Tcheck px      = static_cast<Tcheck>(x[o * inner_size + i]);
+            Tcheck pdy = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
+            Tcheck px  = static_cast<Tcheck>(x[o * inner_size + i]);
             sum_dy_weight += pdy * pweight;
             sum_dy_weight_x += pdy * px * pweight;
         }
@@ -148,7 +203,7 @@ int32_t mloLayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
         {
             Tcheck pweight =
                 (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
-            Tcheck pdy     = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
+            Tcheck pdy = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
 
             Tcheck val = prstd * pdy * pweight - a * static_cast<Tcheck>(x[o * inner_size + i]) - b;
             dxhost[o * inner_size + i] = static_cast<Tcheck>(val);
@@ -159,14 +214,72 @@ int32_t mloLayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloLayerNormBackwardRunHost2(miopenTensorDescriptor_t dyDesc,
+                                     Tgpu* dy,
+                                     Tgpu* x,
+                                     Tgpu* weight,
+                                     Tcheck* meanhost,
+                                     Tcheck* rstdhost,
+                                     Tcheck* dxhost,
+                                     int32_t normalized_dim,
+                                     miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(dyDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = 1;
+    size_t norm_dim   = static_cast<size_t>(normalized_dim);
+
+    for(size_t i = 0ULL; i < dims.size(); ++i)
+    {
+        if(i < norm_dim)
+            outer_size *= dims[i];
+        else
+            inner_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    par_ford(outer_size)([&](int32_t o) {
+        Tcheck sum_dy_weight   = 0;
+        Tcheck sum_dy_weight_x = 0;
+
+        ford(inner_size)([&](int32_t i) {
+            Tcheck pweight =
+                (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
+            Tcheck pdy = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
+            Tcheck px  = static_cast<Tcheck>(x[o * inner_size + i]);
+            sum_dy_weight += pdy * pweight;
+            sum_dy_weight_x += pdy * px * pweight;
+        });
+
+        Tcheck scale = 1.0f / static_cast<Tcheck>(inner_size);
+        Tcheck prstd = static_cast<Tcheck>(rstdhost[o]);
+        Tcheck pmean = static_cast<Tcheck>(meanhost[o]);
+        Tcheck a     = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
+        Tcheck b     = prstd * sum_dy_weight * scale - a * pmean;
+
+        ford(inner_size)([&](int32_t i) {
+            Tcheck pweight =
+                (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
+            Tcheck pdy = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
+
+            Tcheck val = prstd * pdy * pweight - a * static_cast<Tcheck>(x[o * inner_size + i]) - b;
+            dxhost[o * inner_size + i] = static_cast<Tcheck>(val);
+        });
+    });
+
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloLayerNormBackwardWeightBiasRunHost(miopenTensorDescriptor_t dyDesc,
-                                             Tgpu* dy,
-                                             Tgpu* x,
-                                             Tcheck* meanhost,
-                                             Tcheck* rstdhost,
-                                             Tcheck* dwhost,
-                                             Tcheck* dbhost,
-                                             int32_t normalized_dim)
+                                              Tgpu* dy,
+                                              Tgpu* x,
+                                              Tcheck* meanhost,
+                                              Tcheck* rstdhost,
+                                              Tcheck* dwhost,
+                                              Tcheck* dbhost,
+                                              int32_t normalized_dim)
 {
     auto dims         = miopen::deref(dyDesc).GetLengths();
     size_t outer_size = 1;
@@ -202,6 +315,52 @@ int32_t mloLayerNormBackwardWeightBiasRunHost(miopenTensorDescriptor_t dyDesc,
         dwhost[i] = sum_dw;
         dbhost[i] = sum_db;
     }
+
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+int32_t mloLayerNormBackwardWeightBiasRunHost2(miopenTensorDescriptor_t dyDesc,
+                                               Tgpu* dy,
+                                               Tgpu* x,
+                                               Tcheck* meanhost,
+                                               Tcheck* rstdhost,
+                                               Tcheck* dwhost,
+                                               Tcheck* dbhost,
+                                               int32_t normalized_dim)
+{
+    auto dims         = miopen::deref(dyDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = 1;
+    size_t norm_dim   = static_cast<size_t>(normalized_dim);
+
+    int32_t ret = 0;
+
+    for(size_t i = 0ULL; i < dims.size(); ++i)
+    {
+        if(i < norm_dim)
+            outer_size *= dims[i];
+        else
+            inner_size *= dims[i];
+    }
+
+    par_ford(inner_size)([&](int32_t i) {
+        Tcheck sum_dw = 0;
+        Tcheck sum_db = 0;
+
+        ford(outer_size)([&](int32_t o) {
+            Tcheck prstd = static_cast<Tcheck>(rstdhost[o]);
+            Tcheck pmean = static_cast<Tcheck>(meanhost[o]);
+            Tcheck pdy   = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : 0;
+            Tcheck px    = static_cast<Tcheck>(x[o * inner_size + i]);
+
+            sum_dw += pdy * (px - pmean) * prstd;
+            sum_db += pdy;
+        });
+
+        dwhost[i] = sum_dw;
+        dbhost[i] = sum_db;
+    });
 
     return ret;
 }
@@ -405,34 +564,44 @@ int LayerNormDriver<Tgpu, Tref>::AddCmdLineArgs()
 template <typename Tgpu, typename Tref>
 int LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 {
-    const Tgpu Tgpu0val = static_cast<Tgpu>(0.0);
-    const Tgpu Tgpu1val = static_cast<Tgpu>(1.0);
+    const Tgpu Tgpu0val      = static_cast<Tgpu>(0.0);
+    const Tgpu Tgpu1val      = static_cast<Tgpu>(1.0);
     const Tgpu Tgpuminus1val = static_cast<Tgpu>(-1.0);
-    const Tref Tref0ref = static_cast<Tref>(0.0);
-    size_t in_sz        = GetTensorSize(inputDesc);
-    size_t weight_sz    = GetTensorSize(weightDesc);
-    size_t bias_sz      = GetTensorSize(biasDesc);
-    size_t out_sz       = GetTensorSize(outputDesc);
-    size_t mean_sz      = GetTensorSize(meanDesc);
-    size_t rstd_sz      = GetTensorSize(rstdDesc);
+    const Tref Tref0ref      = static_cast<Tref>(0.0);
+    size_t in_sz             = GetTensorSize(inputDesc);
+    size_t weight_sz         = GetTensorSize(weightDesc);
+    size_t bias_sz           = GetTensorSize(biasDesc);
+    size_t out_sz            = GetTensorSize(outputDesc);
+    size_t mean_sz           = GetTensorSize(meanDesc);
+    size_t rstd_sz           = GetTensorSize(rstdDesc);
     size_t dy_sz             = GetTensorSize(dyDesc);
     size_t dx_sz             = GetTensorSize(dxDesc);
     size_t dw_sz             = GetTensorSize(dwDesc);
     size_t db_sz             = GetTensorSize(dbDesc);
 
-    auto status = miopenGetLayerNormBackwardWorkspaceSize(
-        GetHandle(), mode, dyDesc, inputDesc, weightDesc, meanDesc, rstdDesc, dim, dxDesc, dwDesc, dbDesc, &ws_sizeInBytes);
+    auto status = miopenGetLayerNormBackwardWorkspaceSize(GetHandle(),
+                                                          mode,
+                                                          dyDesc,
+                                                          inputDesc,
+                                                          weightDesc,
+                                                          meanDesc,
+                                                          rstdDesc,
+                                                          dim,
+                                                          dxDesc,
+                                                          dwDesc,
+                                                          dbDesc,
+                                                          &ws_sizeInBytes);
     if(status != miopenStatusSuccess)
         return miopenStatusAllocFailed;
 
     uint32_t ctx = 0;
 
-    in_dev     = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_sz, sizeof(Tgpu)));
-    weight_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, weight_sz, sizeof(Tgpu)));
-    bias_dev   = std::unique_ptr<GPUMem>(new GPUMem(ctx, bias_sz, sizeof(Tgpu)));
-    out_dev    = std::unique_ptr<GPUMem>(new GPUMem(ctx, out_sz, sizeof(Tgpu)));
-    mean_dev   = std::unique_ptr<GPUMem>(new GPUMem(ctx, mean_sz, sizeof(Tgpu)));
-    rstd_dev   = std::unique_ptr<GPUMem>(new GPUMem(ctx, rstd_sz, sizeof(Tgpu)));
+    in_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_sz, sizeof(Tgpu)));
+    weight_dev    = std::unique_ptr<GPUMem>(new GPUMem(ctx, weight_sz, sizeof(Tgpu)));
+    bias_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, bias_sz, sizeof(Tgpu)));
+    out_dev       = std::unique_ptr<GPUMem>(new GPUMem(ctx, out_sz, sizeof(Tgpu)));
+    mean_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, mean_sz, sizeof(Tgpu)));
+    rstd_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, rstd_sz, sizeof(Tgpu)));
     dy_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dy_sz, sizeof(Tgpu)));
     dx_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dx_sz, sizeof(Tgpu)));
     dw_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dw_sz, sizeof(Tgpu)));
@@ -658,11 +827,24 @@ int LayerNormDriver<Tgpu, Tref>::RunBackwardGPU()
 template <typename Tgpu, typename Tref>
 int LayerNormDriver<Tgpu, Tref>::RunBackwardCPU()
 {
-    mloLayerNormBackwardRunHost<Tgpu, Tref>(
-        dyDesc, dy.data(), in.data(), weight.data(), meanhost.data(), rstdhost.data(), dxhost.data(), dim, mode);
+    mloLayerNormBackwardRunHost<Tgpu, Tref>(dyDesc,
+                                            dy.data(),
+                                            in.data(),
+                                            weight.data(),
+                                            meanhost.data(),
+                                            rstdhost.data(),
+                                            dxhost.data(),
+                                            dim,
+                                            mode);
 
-    mloLayerNormBackwardWeightBiasRunHost<Tgpu, Tref>(
-        dyDesc, dy.data(), in.data(), meanhost.data(), rstdhost.data(), dwhost.data(), dbhost.data(), dim);
+    mloLayerNormBackwardWeightBiasRunHost<Tgpu, Tref>(dyDesc,
+                                                      dy.data(),
+                                                      in.data(),
+                                                      meanhost.data(),
+                                                      rstdhost.data(),
+                                                      dwhost.data(),
+                                                      dbhost.data(),
+                                                      dim);
 
     return miopenStatusSuccess;
 }
@@ -749,8 +931,7 @@ int LayerNormDriver<Tgpu, Tref>::VerifyBackward()
     auto dwerror = miopen::rms_range(dwhost, dw);
     if(!std::isfinite(dwerror) || dwerror > tolerance)
     {
-        std::cout << "Backward LayerNorm dw FAILED: " << dwerror << " > " << tolerance
-                  << std::endl;
+        std::cout << "Backward LayerNorm dw FAILED: " << dwerror << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
@@ -762,8 +943,7 @@ int LayerNormDriver<Tgpu, Tref>::VerifyBackward()
     auto dberror = miopen::rms_range(dbhost, db);
     if(!std::isfinite(dberror) || dberror > tolerance)
     {
-        std::cout << "Backward LayerNorm db FAILED: " << dberror << " > " << tolerance
-                  << std::endl;
+        std::cout << "Backward LayerNorm db FAILED: " << dberror << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
