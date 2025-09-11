@@ -63,7 +63,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         uint instructionDwords = (event.bytesRequested + 3) / 4; // Round up to dwords
 
-        InstructionAccesses* targetInstruction = nullptr;
+        RuntimeLDSInstruction* targetInstruction = nullptr;
         for(auto& instr : opAccesses.instructions)
         {
             if(instr.dwords == instructionDwords && instr.memoryOp.direction == ldsOp->direction)
@@ -75,7 +75,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         if(!targetInstruction)
         {
-            InstructionAccesses newInstr;
+            RuntimeLDSInstruction newInstr;
             newInstr.memoryOp = *ldsOp;
             newInstr.dwords   = instructionDwords;
             opAccesses.instructions.push_back(newInstr);
@@ -277,9 +277,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return maxAddressesPerBank;
     }
 
-    std::string LDSBankModel::instructionDetailedAnalysis(const InstructionAccesses& instr,
-                                                          GPUArchitectureGFX         gfx,
-                                                          uint&                      totalCycles)
+    std::string LDSBankModel::instructionDetailedAnalysis(const RuntimeLDSInstruction& instr,
+                                                          GPUArchitectureGFX           gfx,
+                                                          uint&                        totalCycles)
     {
         std::stringstream ss;
 
@@ -350,9 +350,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
             cycles += 4;
         }
 
-        uint       numBanks               = LDSBankModel::getNumLDSBanks(gfx);
-        const auto instructionTotalClocks = LDSBankModel::getClockCount(
-            gfx, instr.memoryOp, instr.dwords, instr.baseAddresses, numBanks, 4);
+        const auto instructionTotalClocks
+            = LDSBankModel::getClockCount(gfx, instr.memoryOp, instr.dwords, instr.baseAddresses);
 
         AssertFatal(cycles == instructionTotalClocks, "Cycle count mismatch");
         ss << fmt::format("    Instruction cycles: {}\n", instructionTotalClocks);
@@ -364,9 +363,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     uint LDSBankModel::getClockCount(GPUArchitectureGFX           gfx,
                                      const MemoryOpLDS&           memoryOp,
                                      uint                         dwords,
-                                     const std::vector<uint32_t>& baseAddresses,
-                                     uint                         numBanks,
-                                     uint                         entryWidthInBytes)
+                                     const std::vector<uint32_t>& baseAddresses)
     {
         uint cycles = 0;
         for(const auto& groupAddresses :
@@ -396,7 +393,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
             for(const auto& sourceInstr : sourceOpAccesses.instructions)
             {
-                InstructionAccesses instr;
+                RuntimeLDSInstruction instr;
                 instr.memoryOp      = sourceInstr.memoryOp;
                 instr.dwords        = sourceInstr.dwords;
                 instr.baseAddresses = sourceInstr.baseAddresses;

@@ -79,7 +79,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         std::vector<std::vector<ThreadAccess>> clockCycles; // Each inner vector is one clock cycle
     };
 
-    struct InstructionAccesses
+    struct RuntimeLDSInstruction
     {
         MemoryOpLDS           memoryOp;
         int                   dwords;
@@ -88,9 +88,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     struct OperationAccesses
     {
-        int                              operationTag;
-        int                              ldsTag;
-        std::vector<InstructionAccesses> instructions;
+        int                                operationTag;
+        int                                ldsTag;
+        std::vector<RuntimeLDSInstruction> instructions;
     };
 
     struct DetailedSummary
@@ -170,16 +170,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @param dwords Number of dwords accessed (1 for b32, 2 for b64, 3 for b96, 4 for b128)
          * @param baseAddresses Vector of base LDS addresses being accessed. For multi-dword accesses,
          *                      the actual addresses accessed are calculated from these base addresses.
-         * @param numBanks Number of banks in the LDS
-         * @param entryWidthInBytes Width of each bank entry in bytes (default: 4)
          * @return Total number of clock cycles for this instruction
          */
         static uint getClockCount(GPUArchitectureGFX           gfx,
                                   const MemoryOpLDS&           memoryOp,
                                   uint                         dwords,
-                                  const std::vector<uint32_t>& baseAddresses,
-                                  uint                         numBanks,
-                                  uint                         entryWidthInBytes = 4);
+                                  const std::vector<uint32_t>& baseAddresses);
 
         /**
          * @brief Divide addresses into thread groups based on threads-per-clock limit
@@ -228,9 +224,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
          * @param[out] totalCycles Output parameter for the total instruction cycles
          * @return Formatted string containing the detailed analysis
          */
-        static std::string instructionDetailedAnalysis(const InstructionAccesses& instr,
-                                                       GPUArchitectureGFX         gfx,
-                                                       uint&                      totalCycles);
+        static std::string instructionDetailedAnalysis(const RuntimeLDSInstruction& instr,
+                                                       GPUArchitectureGFX           gfx,
+                                                       uint&                        totalCycles);
 
     private:
         uint m_entryWidthInBytes;
