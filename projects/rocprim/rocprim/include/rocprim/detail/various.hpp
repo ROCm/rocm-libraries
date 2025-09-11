@@ -583,6 +583,8 @@ public:
     }
 };
 
+/// Implements statically unrolled loop:
+/// `for (auto i = init; i < cond; i += inc) f(i);`
 template<auto init, auto cond, auto inc, class F>
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 constexpr void constexpr_for_lt(F&& f)
@@ -594,6 +596,8 @@ constexpr void constexpr_for_lt(F&& f)
     }
 }
 
+/// Implements statically unrolled loop:
+/// `for (auto i = init; i <= cond; i += inc) f(i);`
 template<auto init, auto cond, auto inc, class F>
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 constexpr void constexpr_for_lte(F&& f)
@@ -605,6 +609,21 @@ constexpr void constexpr_for_lte(F&& f)
     }
 }
 
+/// Implements statically unrolled loop:
+/// `for (auto i = init; i > cond; i += inc) f(i);`
+template<auto init, auto cond, auto inc, class F>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+constexpr void constexpr_for_gt(F&& f)
+{
+    if constexpr(init > cond)
+    {
+        f(std::integral_constant<decltype(init), init>());
+        constexpr_for_gt<init + inc, cond, inc>(f);
+    }
+}
+
+/// Implements statically unrolled loop:
+/// `for (auto i = init; i >= cond; i += inc) f(i);`
 template<auto init, auto cond, auto inc, class F>
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 constexpr void constexpr_for_gte(F&& f)

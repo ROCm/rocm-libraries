@@ -26,7 +26,7 @@
 
 #include "../../functional.hpp"
 #include "../../intrinsics/warp_shuffle.hpp"
-#include "rocprim/intrinsics/thread.hpp"
+#include "../../intrinsics/thread.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
