@@ -220,6 +220,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
+  startVgprCvt: int                      = -1
 
   numSgprSizesSum: int                   = 0
   numSgprSizesFree: int                  = 0
@@ -282,8 +283,7 @@ class StateValues:
   numGlobalReadInsPerMfma: int           = 0
   numLocalWriteModPerMfma: int           = 0
   HHH_WMMA: bool                         = False
-
-  perIterLocalWriteCanSkip: List[int]    = field(init=False)
+  tmpvgpr: List[int]                     = field(init=False) # vgpr storage for localread
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
 
@@ -314,6 +314,7 @@ class StateValues:
     self.nonPostLoopSgpr = []
 
     self.preloadGuard = []
+    self.tmpvgpr = {}
 
 @dataclass
 class StateVgprs:
@@ -952,16 +953,30 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
-          # 26 is the instruction count for the TF32 emulation sequence in LocalRead.py
-          instPerPackA = 24 if kernel["UseDot2F32XEmulation"] else 26 #len(packAItems)
-          instPerPackB = 24 if kernel["UseDot2F32XEmulation"] else 26 #len(packBItems)
+          if kernel["UseDirect32XEmulation"]:
+            instPerPackA = 0
+            instPerPackB = 0
+          else:
+            instPerPackA = 26
+            instPerPackB = 26
           while packAItems or packBItems:
-            for n in range(instPerPackA):
-              if packAItems:
-                packItems.append(packAItems.pop(0))
-            for n in range(instPerPackB):
-              if packBItems:
-                packItems.append(packBItems.pop(0))
+            found = False
+            for n in range(128):
+              if packAItems and not found:
+                item = packAItems.pop(0)
+                itemStr = str(item)
+                if "__TF32_1" in itemStr or "__TF32_2" in itemStr:
+                  found = True
+                packItems.append(item)
+            
+            found = False
+            for n in range(128):
+              if packBItems and not found:
+                item = packBItems.pop(0)
+                itemStr = str(item)
+                if "__TF32_1" in itemStr or "__TF32_2" in itemStr:
+                  found = True
+                packItems.append(item)
         else:
           while packAItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
@@ -1425,20 +1440,44 @@ class KernelWriter(metaclass=abc.ABCMeta):
             iterCode.addComment0("pack scheduling: packAIdx:%u, packBIdx:%u" %(packAIdx,packBIdx))
 
           if not schedulePackConsiderMetadata:
-              # we put 2 pack in each mfma
-              for j in range(instPerPackA):
-                if packItems:
-                  iterCode.add(packItems.pop(0))
-                  curPackIdx += 1
+              if kernel["UseF32XEmulation"]:
+                numPacks = 128
+                found = False
+                for j in range(numPacks):
+                  if packItems and not found:
+                    item = packItems.pop(0)
+                    iterCode.add(item)
+                    itemStr = str(item)
+                    if "__TF32_1_A" in itemStr or "__TF32_2_A" in itemStr:
+                      found = True
+                    curPackIdx += 1
+              else:
+                # we put 2 pack in each mfma
+                for j in range(instPerPackA):
+                  if packItems:
+                    iterCode.add(packItems.pop(0))
+                    curPackIdx += 1
               if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
                 for j in range(ceil(instPerPackM)):
                   if packItems:
                     iterCode.add(packItems.pop(0))
                     curPackIdx += 1
-              for j in range(instPerPackB):
-                if packItems:
-                  iterCode.add(packItems.pop(0))
-                  curPackIdx += 1
+              if kernel["UseF32XEmulation"]:
+                numPacks = 128
+                found = False
+                for j in range(numPacks):
+                  if packItems and not found:
+                    item = packItems.pop(0)
+                    iterCode.add(item)
+                    itemStr = str(item)
+                    if "__TF32_1_B" in itemStr or "__TF32_2_B" in itemStr:
+                      found = True
+                    curPackIdx += 1
+              else:
+                for j in range(instPerPackB):
+                  if packItems:
+                    iterCode.add(packItems.pop(0))
+                    curPackIdx += 1
               # since packed register need to wait 2 quad cycle to finish packing
               # we insert pack instruction if we can, or s_nop
               while curPackIdx < numPack+2:
@@ -3307,9 +3346,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.localReadInc(kernel, iuiParam, tensorParametersB))
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, "4wait for local read"))
 
-        module.add(pack[0])
-        pack[0] = Module()
-
         if kernel["EnableMatrixInstruction"]:
           # always use vregSetIdx=0 for DirectToVgpr + tail loop
           vregSetIdxMFMA = 0
@@ -4586,6 +4622,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # code doesn't have to deal with fragmentation
     self.states.startVgprSerial = vgprIdx
     vgprIdx += 1 # for vgpr serial id
+
+    if kernel["UseDirect32XEmulation"]:
+      numVgprsEmu = (self.states.a.numVgprValu + self.states.b.numVgprValu) // 2
+      if (vgprIdx >= (self.states.regCaps["MaxVgpr"] - numVgprsEmu)):
+        kernel["UseDirect32XEmulation"] = False
+      else:
+        #align 64 bit
+        vgprIdx = ((vgprIdx+1)//2)*2
+        self.states.startVgprCvt = vgprIdx
+        vgprIdx += numVgprsEmu # for vgpr 32XEmulation
 
     self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
     if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:

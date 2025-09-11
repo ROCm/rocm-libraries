@@ -147,6 +147,7 @@ class LocalReadVALU(LocalRead):
 
         return imod, pack
 
+
 class LocalReadMFMA(LocalRead):
     kernel = {"EnableMatrixInstruction": True}
 
@@ -166,6 +167,8 @@ class LocalReadMFMA(LocalRead):
     """
     def __call__(self, writer, kernel, bufferIdx, iui, epsi, tP):
         imod = Module("LocalReadDo%s_I%s" % (tP["tensorChar"],iui))
+        tmpvgprFP32 = []
+        tmpvgprForReads = []
 
         tc = tP["tensorChar"]
         if tc == "A":
@@ -276,7 +279,7 @@ class LocalReadMFMA(LocalRead):
                     if needPack or numSplitMetadata:
                         packCode = pack.add(Module("packCode"))
 
-                    tmpvgprHI = []
+                    tmpvgpr = []
                     for rIdx in range(0, numReadsPerUnroll):
                         valuiIdx = int(valufIdx)
                         baseLRVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx), numVgpr)
@@ -286,82 +289,163 @@ class LocalReadMFMA(LocalRead):
 
                         if needPack or numSplitMetadata:
                             if kernel["UseF32XEmulation"]:
+                                vectorWidthA  = kernel["VectorWidthA"]
+
+                                def pack4HiBits(tct, index):
+                                    valOffset = baseValuiIdx + index
+                                    v0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset))
+                                    v1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tct, bufferIdx, iui, valOffset))
+                                    v2 = vgpr("Valu%s_X%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset))
+                                    v3 = vgpr("Valu%s_X%u_I%u+%u+3"%(tct, bufferIdx, iui, valOffset))
+                                    src0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset), 2)
+                                    src1 = vgpr("Valu%s_X%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset), 2)
+                                    dst0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tct, bufferIdx, iui, baseValuiIdx + index/2))
+                                    dst1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tct, bufferIdx, iui, baseValuiIdx + index/2))
+                                    if index % 8 == 0:
+                                        if not kernel["UseDirect32XEmulation"]:
+                                            overlap = True
+                                            while overlap == True:
+                                                val1 = writer.vgprPool.checkOutAligned(2, 2)
+                                                val2 = writer.vgprPool.checkOutAligned(2, 2)
+                                                overlap = False
+                                                if baseValuiIdx not in writer.states.tmpvgpr:
+                                                    writer.states.tmpvgpr[baseValuiIdx] = []
+                                                if tc == "B":
+                                                    overlap |= val1 in writer.states.tmpvgpr[baseValuiIdx]
+                                                    overlap |= val2 in writer.states.tmpvgpr[baseValuiIdx]
+                                                tmpvgprFP32.append(val1)
+                                                tmpvgprFP32.append(val2)
+                                            tmpvgprForReads.append(val1)
+                                            packCode.add(VMovB64(dst=vgpr(val1, 2), src=src0))
+                                            packCode.add(VMovB64(dst=vgpr(val2, 2), src=src1))
+                                        else:
+                                            v0 = vgpr("Valu%s_T%u_I%u+%u+0"%(tct, bufferIdx, iui, valOffset/2))
+                                            v1 = vgpr("Valu%s_T%u_I%u+%u+1"%(tct, bufferIdx, iui, valOffset/2))
+                                            v2 = vgpr("Valu%s_T%u_I%u+%u+2"%(tct, bufferIdx, iui, valOffset/2))
+                                            v3 = vgpr("Valu%s_T%u_I%u+%u+3"%(tct, bufferIdx, iui, valOffset/2))
+                                    packCode.add(VCvtPkF32toBF16(dst=dst0, src0=v0, src1=v1))
+                                    commentStr = ""
+                                    if (index % 8) == 4:
+                                        commentStr = "__TF32_1_"+tc
+                                    packCode.add(VCvtPkF32toBF16(dst=dst1, src0=v2, src1=v3, comment=commentStr))
+
                                 if valuiIdx % 4 == 0:
-                                    tmpvgprIDx = (valuiIdx % 8) // 4
-                                    tmpvgprHI.append(writer.vgprPool.checkOutAligned(2, 2))
+                                    if valuiIdx % 8 == 0:
+                                        pack4HiBits(tc, 0)
+                                        pack4HiBits(tc, 4)
                                     numTmpForCVTSubTF32 = 1
                                     tmpvgpr =[]
                                     for i in range(numTmpForCVTSubTF32):
-                                        tmpvgpr.append(writer.vgprPool.checkOut(1))
+                                        val = writer.vgprPool.checkOut(1)
+                                        tmpvgpr.append(val)
+                                        if kernel["UseDirect32XEmulation"]:
+                                            if not baseValuiIdx in writer.states.tmpvgpr:
+                                                writer.states.tmpvgpr[baseValuiIdx] = []
+                                        if tc == "B":
+                                            while val in writer.states.tmpvgpr[baseValuiIdx]:
+                                                val = writer.vgprPool.checkOut(1)
+                                                tmpvgpr.append(val)
+                                        else:
+                                            if not val in writer.states.tmpvgpr[baseValuiIdx]:
+                                                writer.states.tmpvgpr[baseValuiIdx].append(val)
 
-                                    v0 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx))
-                                    v1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, valuiIdx))
-                                    v2 = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, valuiIdx))
-                                    v3 = vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, valuiIdx))
-
-                                    packCode.add(VCvtPkF32toBF16(dst=vgpr(tmpvgprHI[tmpvgprIDx]), src0=v0, src1=v1))
+                                    offset = baseValuiIdx
+                                    vgprCvtOffset = 0
+                                    if (valuiIdx % 8) == 0:
+                                        if kernel["UseDirect32XEmulation"]:
+                                            tmpIdx = len(tmpvgprFP32) - 4
+                                            v0t = vgpr("Valu%s_T%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx // 2))
+                                            v1t = vgpr("Valu%s_T%u_I%u+%u+1"%(tc, bufferIdx, iui, valuiIdx // 2))
+                                            v2t = vgpr("Valu%s_T%u_I%u+%u+2"%(tc, bufferIdx, iui, valuiIdx // 2))
+                                            v3t = vgpr("Valu%s_T%u_I%u+%u+3"%(tc, bufferIdx, iui, valuiIdx // 2))
+                                        else:
+                                            tmpIdx = len(tmpvgprFP32) - 2
+                                            v0t = vgpr(tmpvgprFP32[tmpIdx + 0])
+                                            v1t = vgpr(tmpvgprFP32[tmpIdx] + 1)
+                                            v2t = vgpr(tmpvgprFP32[tmpIdx + 1])
+                                            v3t = vgpr(tmpvgprFP32[tmpIdx + 1] + 1)
+                                    else:
+                                        v0t = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx))
+                                        v1t = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, valuiIdx))
+                                        v2t = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, valuiIdx))
+                                        v3t = vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, valuiIdx))
+                                    vHi0 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + offset))
+                                    vHi1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + offset))
 
                                     if kernel["UseDot2F32XEmulation"]:
-                                        packCode.add(VDot2CF32BF16(dst=v0, src0=hex(0x8000bf80), src1=vgpr(tmpvgprHI[tmpvgprIDx])))
-                                        packCode.add(VDot2CF32BF16(dst=v1, src0=hex(0xbf800000), src1=vgpr(tmpvgprHI[tmpvgprIDx])))
+                                        packCode.add(VDot2CF32BF16(dst=v0t, src0=hex(0x8000bf80), src1=vgpr(vHi0)))
+                                        packCode.add(VDot2CF32BF16(dst=v1t, src0=hex(0xbf800000), src1=vgpr(vHi0)))
                                     else:
-                                        packCode.add(PVCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vgpr(tmpvgprHI[tmpvgprIDx])))
-                                        packCode.add(VSubF32(dst=v0, src0=v0, src1=vgpr(tmpvgpr[0])))
-                                        packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vgpr(tmpvgprHI[tmpvgprIDx]), vgprMask=None, vi=1))
-                                        packCode.add(VSubF32(dst=v1, src0=v1, src1=vgpr(tmpvgpr[0])))
-
-                                    packCode.add(VCvtPkF32toBF16(dst=vgpr(tmpvgprHI[tmpvgprIDx]+1), src0=v2, src1=v3))
+                                        packCode.add(PVCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi0, comment="begin"+str(valuiIdx)))
+                                        packCode.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmpvgpr[0])))
+                                        packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi0, vgprMask=None, vi=1))
+                                        packCode.add(VSubF32(dst=v1t, src0=v1t, src1=vgpr(tmpvgpr[0])))
 
                                     if kernel["UseDot2F32XEmulation"]:
-                                        packCode.add(VDot2CF32BF16(dst=v2, src0=hex(0x8000bf80), src1=vgpr(tmpvgprHI[tmpvgprIDx]+1)))
+                                        packCode.add(VDot2CF32BF16(dst=v2t, src0=hex(0x8000bf80), src1=vHi1))
                                     else:
-                                        packCode.add(PVCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vgpr(tmpvgprHI[tmpvgprIDx]+1)))
-                                        packCode.add(VSubF32(dst=v2, src0=v2, src1=vgpr(tmpvgpr[0])))
+                                        packCode.add(PVCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi1))
+                                        packCode.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmpvgpr[0])))
 
                                     # We use cvt+sub pair since dot2 requires adding 4 wait states.
-                                    packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vgpr(tmpvgprHI[tmpvgprIDx]+1), vgprMask=None, vi=1))
-                                    packCode.add(VSubF32(dst=v3, src0=v3, src1=vgpr(tmpvgpr[0])))
+                                    packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr[0]), src=vHi1, vgprMask=None, vi=1))
+                                    packCode.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmpvgpr[0]), comment="end"))
 
                                     if kernel["UseDot2F32XEmulation"]:
                                         packCode.add(VMovB32(dst=vgpr(tmpvgpr[0]), src=0))
                                         packCode.add(VMovB32(dst=vgpr(tmpvgpr[0]), src=0))
 
-                                    for i in range(numTmpForCVTSubTF32):
-                                        writer.vgprPool.checkIn(tmpvgpr[i])
+                                    for tmp in tmpvgpr:
+                                        writer.vgprPool.checkIn(tmp)
+                                    tmpvgpr = []
 
                                 if rIdx == numReadsPerUnroll - 1: # Last iteration
                                     if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
-                                        v0 = vgpr("Valu%s_X%u_I%u+%u+0"%(tc, bufferIdx, iui, baseValuiIdx))
-                                        v1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, baseValuiIdx))
-                                        v2 = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, baseValuiIdx))
-                                        v3 = vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, baseValuiIdx))
+                                        if kernel["UseDirect32XEmulation"]:
+                                            v0 = vgpr("Valu%s_T%u_I%u+%u+0"%(tc, bufferIdx, iui, baseValuiIdx // 2))
+                                            v1 = vgpr("Valu%s_T%u_I%u+%u+1"%(tc, bufferIdx, iui, baseValuiIdx // 2))
+                                            v2 = vgpr("Valu%s_T%u_I%u+%u+2"%(tc, bufferIdx, iui, baseValuiIdx // 2))
+                                            v3 = vgpr("Valu%s_T%u_I%u+%u+3"%(tc, bufferIdx, iui, baseValuiIdx // 2))
+                                        else:
+                                            tmpIdx = len(tmpvgprFP32) - 2
+                                            v0 = vgpr(tmpvgprFP32[tmpIdx + 0])
+                                            v1 = vgpr(tmpvgprFP32[tmpIdx + 0] + 1)
+                                            v2 = vgpr(tmpvgprFP32[tmpIdx + 1])
+                                            v3 = vgpr(tmpvgprFP32[tmpIdx + 1] + 1)
                                         v4 = vgpr("Valu%s_X%u_I%u+%u+4"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v5 = vgpr("Valu%s_X%u_I%u+%u+5"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v6 = vgpr("Valu%s_X%u_I%u+%u+6"%(tc, bufferIdx, iui, baseValuiIdx))
                                         v7 = vgpr("Valu%s_X%u_I%u+%u+7"%(tc, bufferIdx, iui, baseValuiIdx))
-                                        packCode.add(VCvtPkF32toBF16(dst=v7, src0=v6, src1=v7))
+                                        packCode.add(VCvtPkF32toBF16(dst=v7, src0=v6, src1=v7, comment="pack tail begin"))
                                         packCode.add(VCvtPkF32toBF16(dst=v6, src0=v4, src1=v5))
                                         packCode.add(VCvtPkF32toBF16(dst=v5, src0=v2, src1=v3))
-                                        packCode.add(VCvtPkF32toBF16(dst=v4, src0=v0, src1=v1))
-                                        tmpvgprHI064  = vgpr(tmpvgprHI[0], 2)
-                                        tmpvgprHI164  = vgpr(tmpvgprHI[1], 2)
-                                        valuvgprHI064 = vgpr("Valu%s_X%u_I%u+%u+0"%(tc, bufferIdx, iui, baseValuiIdx), 2)
-                                        valuvgprHI164 = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, baseValuiIdx), 2)
-                                        packCode.add(VMovB64(dst=valuvgprHI064, src=tmpvgprHI064))
-                                        packCode.add(VMovB64(dst=valuvgprHI164, src=tmpvgprHI164))
-                                        for i in range(len(tmpvgprHI)):
-                                            writer.vgprPool.checkIn(tmpvgprHI[i])
-
-                                    # layout:
-                                    # Val+0: bf16 high (0,1)
-                                    # Val+1: bf16 high (2,3)
-                                    # Val+2: bf16 high (4,5)
-                                    # Val+3: bf16 high (6,7)
-                                    # Val+4: bf16 low  (0,1)
-                                    # Val+5: bf16 low  (2,3)
-                                    # Val+6: bf16 low  (4,5)
-                                    # Val+7: bf16 low  (6,7)
-
+                                        commentStr ="__TF32_2_" + tc + " pack tail end"
+                                        packCode.add(VCvtPkF32toBF16(dst=v4, src0=v0, src1=v1, comment=commentStr))
+                                        if kernel["UseDirect32XEmulation"]:
+                                            index = len(tmpvgprFP32) - 1
+                                            while index >= 0:
+                                                tmp = tmpvgprFP32[index]
+                                                index -= 1
+                                                if tc == "A":
+                                                    if baseValuiIdx not in writer.states.tmpvgpr:
+                                                        writer.states.tmpvgpr[baseValuiIdx] = []
+                                                    if tmp not in writer.states.tmpvgpr[baseValuiIdx]:
+                                                        writer.states.tmpvgpr[baseValuiIdx].append(tmp)
+                                            if tc == "B":
+                                                if baseValuiIdx in writer.states.tmpvgpr:
+                                                    writer.states.tmpvgpr[baseValuiIdx] = []
+                                        else:
+                                            while len(tmpvgprFP32):
+                                                tmp = tmpvgprFP32.pop()
+                                                writer.vgprPool.checkIn(tmp)
+                                            if tc == "A":
+                                                if baseValuiIdx not in writer.states.tmpvgpr:
+                                                    writer.states.tmpvgpr[baseValuiIdx] = []
+                                                if tmp not in writer.states.tmpvgpr[baseValuiIdx]:
+                                                    writer.states.tmpvgpr[baseValuiIdx].append(tmp)
+                                            elif tc == "B":
+                                                if baseValuiIdx in writer.states.tmpvgpr:
+                                                    writer.states.tmpvgpr[baseValuiIdx] = []
 
                             if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
                                 if tP["bpe"] == 2 and tP["bpeDS"] == 4:
@@ -731,7 +815,10 @@ class LocalReadMFMA(LocalRead):
                         else:
                             ds = DSModifiers(na=2, offset0=paramList[0], offset1=paramList[1])
                         LocalReadX = instruction.getInst(highBits)
-                        localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
+                        if kernel["UseF32XEmulation"] and kernel["UseDirect32XEmulation"] and (valuiIdx % 8) < 4:
+                            index = baseValuiIdx // 2 + rIdx
+                            destVgpr      = vgpr("Valu%s_T%u_I%u+%u"%(tc, bufferIdx, iui, index), blockWidth)
+                        localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds))
                         # TODO - handle vector-load
                         with writer.allocTmpSgpr(1) as tmpSgprInfo:
                             tmpSgpr = tmpSgprInfo.idx
@@ -782,5 +869,10 @@ class LocalReadMFMA(LocalRead):
         # DTV and Tr Load case, do not return pack code
         if (tP["isA"] or tP["isB"]) and kernel["enableGLTr%s"%tc]:
             pack = Module("Pack%s_I%s (Empty)" % (tP["tensorChar"],iui))
+
+        if kernel["UseDirect32XEmulation"]:
+            while len(tmpvgprFP32):
+                tmp = tmpvgprFP32.pop()
+                writer.vgprPool.checkIn(tmp)
 
         return imod, pack
