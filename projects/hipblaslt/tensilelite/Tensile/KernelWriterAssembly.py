@@ -1150,7 +1150,6 @@ class KernelWriterAssembly(KernelWriter):
     self.moduleVgprMacroValuBPack = moduleVgprMacroValuBPack
     self.moduleVgprMacroValuM = moduleVgprMacroValuM
     self.moduleVgprMacroValuMPack = moduleVgprMacroValuMPack
-    self.moduleVgprMacroValuA = moduleVgprMacroValuA
     self.moduleVgprMacroG2LA = moduleVgprMacroG2LA
     self.moduleVgprMacroG2LB = moduleVgprMacroG2LB
     module.addComment2("VGPR Macro Assignments")
@@ -7283,7 +7282,13 @@ class KernelWriterAssembly(KernelWriter):
           elif is_wmma_v2 and vgprPerInputA > 2:
             vgprPerSet0Group = 4
           else:
-            vgprPerSet0Group = 2
+            vgprPerSet0Group = 2 if not kernel["ProblemType"]["DataType"].is6bitFloat() else 3
+
+          if not tPA["isSwizzled"] and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
+            for a in range(0, kernel["MIWaveTileA"]):
+              for iui in range(0, innerUnroll):
+                aStr = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a)
+                shiftK.add(_shiftLrElements(aStr, vgprPerInputA, a))
 
           numSet0GroupA = vgprPerInputA // vgprPerSet0Group
           for group in range(0, numSet0GroupA):
@@ -7345,7 +7350,13 @@ class KernelWriterAssembly(KernelWriter):
           else:
             shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
             shiftK.add(vectorStaticDivide(kReg_first, kReg_first, dividerFortidInK, tmpVgpr))
-            vgprPerSet0Group = 2
+            vgprPerSet0Group = 2 if not kernel["ProblemType"]["DataType"].is6bitFloat() else 3
+
+          if tPB["bpe"] == 0.75 and kernel["enableLDSTrB"]:
+            for b in range(0, kernel["MIWaveTileB"]):
+              for iui in range(0, innerUnroll):
+                bStr = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b)
+                shiftK.add(_shiftLrElements(bStr, vgprPerInputB, b))
 
           numSet0GroupB = vgprPerInputB//vgprPerSet0Group
           for group in range(0, numSet0GroupB):
@@ -7392,7 +7403,7 @@ class KernelWriterAssembly(KernelWriter):
                   shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
 
           # replace elements with 0 for same thread, this conducting shift and mask between numElementsPerRead
-          if numMIInput > 1 and kernel["AssertSummationElementMultiple"] < 32:
+          if numMIInput > 1 and kernel["AssertSummationElementMultiple"] < 32 and tPA["bpe"] != 0.75 and tPB["bpe"] != 0.75:
             alignment = vgprPerInput if is_wmma_v2 else (2 if vgprPerInput > 1 else 1)
             abReg   = self.vgprPool.checkOutAligned(vgprPerInput, alignment, "abReg")
             if (vgprPerInput < 4 and is_mfma) or is_wmma_v2:
@@ -7713,27 +7724,14 @@ class KernelWriterAssembly(KernelWriter):
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
 
-          #TODO: remove this once upcoming compiler changes applied
-          def shiftLrElements(dstVgprStr: str, numVgprPerInput: int, tIdx: int) -> Module:
-            mod = Module("FP6 element shift")
-            paddedNumVgprs = 16
-            vgprPad = paddedNumVgprs - numVgprPerInput % paddedNumVgprs
-            startVgpr = 0 if tIdx else 4
-            offset = 0 if tIdx else 1
-
-            for i, r in enumerate(range(startVgpr, paddedNumVgprs, 4)):
-              for k in range(3):
-                mod.add(VMovB32(vgpr(f"{dstVgprStr}+{r+k-(i+offset)}"), vgpr(f"{dstVgprStr}+{tIdx*vgprPad+r+k}")))
-            return mod
-
-          if tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
+          if not tail and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
             if idxInner not in shiftedIndicesA:
-              imod.add(shiftLrElements(aStr_base, vgprPerInputA, idxInner))
+              imod.add(_shiftLrElements(aStr_base, vgprPerInputA, idxInner))
               shiftedIndicesA.add(idxInner)
 
-          if tPB["bpe"] == 0.75 and kernel["enableLDSTrB"]:
+          if not tail and tPB["bpe"] == 0.75 and kernel["enableLDSTrB"]:
             if idxOuter not in shiftedIndicesB:
-              imod.add(shiftLrElements(bStr_base, vgprPerInputB, idxOuter))
+              imod.add(_shiftLrElements(bStr_base, vgprPerInputB, idxOuter))
               shiftedIndicesB.add(idxOuter)
 
           Str0     = aStr if tPB["tile01Idx"] else bStr
@@ -8627,6 +8625,10 @@ class KernelWriterAssembly(KernelWriter):
 
               graIdx = i * self.states.rpgo if kernel["BufferLoad"] else i * self.states.rpga
               g2lIdx = i * loadWidth * tP["bpeRatio"]
+              if loadWidth == 3:
+                g2lIdx  = i * (loadWidth + 1) * tP["bpeRatio"]
+              if loadWidth == 6:
+                g2lIdx  = i * (loadWidth + 2) * tP["bpeRatio"]
               if (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc] and kernel["ConvertAfterDS"] and not isTr:
                 # DTV + ConvertAfterDS case, if bpe > bpeGR, we need to shift g2lIdx for conversion
                 if tP["bpe"] > tP["bpeGR"]:
@@ -8737,6 +8739,9 @@ class KernelWriterAssembly(KernelWriter):
                 elif dataType.isFloat4():
                   numElementsPerLoad = 8
                   regIdx = r // 8
+                elif dataType.is6bitFloat():
+                  numElementsPerLoad = 16
+                  regIdx = r // 4
                 elif dataType.isInt8x4() or dataType.isSingle():
                   # Only supported for buffer loads since it has OOB checks
                   if kernel["BufferLoad"]:
@@ -8860,6 +8865,9 @@ class KernelWriterAssembly(KernelWriter):
                       # Pack 8 FP4 elements into a single load dword
                       r += numElementsPerLoad-1 # skip next (numElementsPerLoad-1) element since we loaded dword here
                       comment = "Load 8 elements for Float4 in single VGPR."
+                  if dataType.is6bitFloat() and not tP["isM"]:
+                    r += numElementsPerLoad-1
+                    comment = f"Load {numElementsPerLoad} elements for 6 bits"
 
                   useBuffer = not isTr
                   bpl = numElementsPerLoad*(tP["bpeGR"] if not tP["isM"] else tP["bpe"]) # bytesPerLoad
@@ -9466,7 +9474,7 @@ class KernelWriterAssembly(KernelWriter):
                 i = sPara + (tP["nrcv"]//tP["nrcvpi"]) * (para + tP["nrc"] * (sPerp + tP["nrpv"] * perp))
               loopCnt += 1
               graIdx = i * self.states.rpgo if kernel["BufferLoad"] else i * self.states.rpga
-              g2lIdx = i * loadWidth * tP["bpeRatio"]
+              g2lIdx = i * loadWidth * tP["bpeRatio"] if loadWidth != 3 else i * (loadWidth + 1) * tP["bpeRatio"]
 
               #TODO: remove this if upcoming compiler changes getting merged
               if loadWidth == 3:
@@ -10883,15 +10891,15 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.inTailLoop:
       if kernel["UseDotInstruction"]:
         # dot2
-        inc = int(self.states.lrvwUnrollA * kernel["NumWaveSplitK"] * tP["bpeDS"])
+        inc = self.states.lrvwUnrollA * kernel["NumWaveSplitK"] * tP["bpeDS"]
         comment = "(LocalReadVectorWidth*NumWaveSplitK*bpeDS)"
       else:
-        inc = int((kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad) * tP["bpeDS"])
+        inc = (kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad) * tP["bpeDS"]
         comment = " ((MT+PAD)*bpeDS)"
       if kernel["EnableMatrixInstruction"]:
         matrixInstK = kernel["MatrixInstK"]
         if kernel["UnrollMajorLDS%s" % tc]:
-          inc = int(tP["bpeDS"] * max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB))
+          inc = tP["bpeDS"] * max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB)
           comment = " (bpeDS)"
         inc *= matrixInstK
         if kernel["ProblemType"]["Sparse"]:
@@ -10913,6 +10921,7 @@ class KernelWriterAssembly(KernelWriter):
             * kernel["LdsPad%s"%tc] * tP["bpeDS"]
           module.addComment0("Adding additional %u pad since cumulative inc has reached %u"\
                              %(padd, kernel["LdsBlockSizePerPad%s"%tc]))
+      inc = int(inc)
 
       with self.allocTmpSgpr(1) as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
@@ -15669,6 +15678,34 @@ class KernelWriterAssembly(KernelWriter):
 
     return module
 
+  def shiftVgpr6bitFloat(self, tPA, tPB):
+      module = Module("shiftVgpr6bitFloat")
+      tPList = []
+      tPList.append(tPA) if tPA["glvw"] == 32 else None
+      tPList.append(tPB) if tPB["glvw"] == 32 else None
+      for tP in tPList:
+        tc = tP["tensorChar"]
+        loadWidth = tP["globalReadInstruction"].totalWidth
+        for perp in range(0, tP["nrp"]):
+          for sPerp in range(0, tP["nrpv"]):
+            for para in range(0, tP["nrc"]):
+              for sPara in range(0, tP["nrcv"]//tP["nrcvpi"]):
+                i = sPara + (tP["nrcv"] // tP["nrcvpi"]) * (para + tP["nrc"] * (sPerp + tP["nrpv"] * perp))
+                g2lIdx  = i * (loadWidth + 2) * tP["bpeRatio"]
+                numLoadVectorComp = int(loadWidth * self.states.bpr // tP["bpeGR"])
+                r = 0
+                regIdx = 0
+                while r < numLoadVectorComp:
+                  regIdx = r // 4
+                  idx = g2lIdx + regIdx
+                  iter = idx / 4
+                  if iter > 0:
+                    for shift_cnt in range(0, 3):
+                      srcVgpr  = f"G2L{tc}+{idx+shift_cnt}"
+                      destVgpr = f"G2L{tc}+{idx+shift_cnt-iter}"
+                      module.add(VMovB32(dst=vgpr(destVgpr), src=vgpr(srcVgpr), comment="shift vgpr for 6 bits"))
+                  r += 16
+      return module
 
 def _getEccOffset(totalWidth, bpr, bpe, glvw, idx, numVgprG2L):
   if totalWidth < 1: # Need extra offset if global read < 1
@@ -15677,3 +15714,16 @@ def _getEccOffset(totalWidth, bpr, bpe, glvw, idx, numVgprG2L):
     return numVgprG2L * left
   else:
     return 0
+
+#TODO: remove this once upcoming compiler changes applied
+def _shiftLrElements(dstVgprStr: str, numVgprPerInput: int, tIdx: int) -> Module:
+  mod = Module("BF6/FP6 element shift")
+  paddedNumVgprs = 16
+  vgprPad = paddedNumVgprs - numVgprPerInput % paddedNumVgprs
+  startVgpr = 0 if tIdx else 4
+  offset = 0 if tIdx else 1
+
+  for i, r in enumerate(range(startVgpr, paddedNumVgprs, 4)):
+    for k in range(3):
+      mod.add(VMovB32(vgpr(f"{dstVgprStr}+{r+k-(i+offset)}"), vgpr(f"{dstVgprStr}+{tIdx*vgprPad+r+k}")))
+  return mod

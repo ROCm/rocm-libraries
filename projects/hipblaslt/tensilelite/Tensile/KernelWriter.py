@@ -4083,6 +4083,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.oriLwaM = None
       if not kernel["NoLdsWriteCode"] or kernel["NonDTLTailLoopA"] or kernel["NonDTLTailLoopB"]:
         # tail: local write
+        if kernel["ProblemType"]["DataType"].is6bitFloat():
+          module.add(self.shiftVgpr6bitFloat(tensorParametersA, tensorParametersB))
         module.addComment1("local write a")
         tempLWCodeModA = self.localWriteDo(kernel, tensorParametersA)
         module.add(tempLWCodeModA)
@@ -5067,11 +5069,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
       self.states.a.numVgprG2L = statesANumVgprG2L
       self.states.a.numVgprG2LAllocated = statesANumVgprG2LAllocated
-      self.states.a.numVgprG2LTailloopAllocated = self.states.a.numVgprG2LAllocated
+      self.states.a.numVgprG2LTailloopAllocated = statesANumVgprG2LAllocated if tensorParametersA["globalReadInstruction"].blockWidth != 6 else roundUp(statesANumVgprG2LAllocated * 4 / 3)
     else:
       self.states.a.numVgprG2L = 0
       self.states.a.numVgprG2LAllocated = 0
-      self.states.a.numVgprG2LTailloopAllocated = statesANumVgprG2LAllocated
+      self.states.a.numVgprG2LTailloopAllocated = statesANumVgprG2LAllocated if tensorParametersA["globalReadInstruction"].blockWidth != 6 else roundUp(statesANumVgprG2LAllocated * 4 / 3)
     # using _ds_store_b8: need one more vgpr space to do lshr
     if tensorParametersA["localWriteInstruction"].blockWidth == 0.25:
       self.states.a.numVgprG2L = self.states.a.numVgprG2L * 2
@@ -5116,11 +5118,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]:
       self.states.b.numVgprG2L = statesBNumVgprG2L
       self.states.b.numVgprG2LAllocated = statesBNumVgprG2LAllocated
-      self.states.b.numVgprG2LTailloopAllocated = self.states.b.numVgprG2LAllocated
+      self.states.b.numVgprG2LTailloopAllocated = statesBNumVgprG2LAllocated if tensorParametersB["globalReadInstruction"].blockWidth != 6 else roundUp(statesBNumVgprG2LAllocated * 4 / 3)
     else:
       self.states.b.numVgprG2L = 0
       self.states.b.numVgprG2LAllocated = 0
-      self.states.b.numVgprG2LTailloopAllocated = statesBNumVgprG2LAllocated
+      self.states.b.numVgprG2LTailloopAllocated = statesBNumVgprG2LAllocated if tensorParametersB["globalReadInstruction"].blockWidth != 6 else roundUp(statesBNumVgprG2LAllocated * 4 / 3)
     # using _ds_store_b8: need one more vgpr space to do lshr
     if tensorParametersB["localWriteInstruction"].blockWidth == 0.25:
       self.states.b.numVgprG2L = self.states.b.numVgprG2L * 2
