@@ -37,7 +37,7 @@ from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUI
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
                         vectorStaticMultiplyAdd, scalarStaticMultiply64, BranchIfZero, BranchIfNotZero, DSInit, \
-                        ArgumentLoader
+                        ArgumentLoader, scalarMultiplyBpe, scalarMultiply64Bpe, vectorMultiplyBpe, vectorMultiply64Bpe
 from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
@@ -93,93 +93,6 @@ from typing import List, NamedTuple, Optional, Tuple, Union
 
 import os
 
-########################################
-# Scaler Multiply Bpe
-# product sgpr, operand sgpr, bpe float
-########################################
-def scalarMultiplyBpe(product, operand, bpe, comment=""):
-    module = Module("scalarMultiplyBpe")
-
-    comment = comment + f" (multiple bpe {bpe})"
-
-    if bpe == 0.5:
-        module.add(SLShiftRightB32(dst=sgpr(product), shiftHex=hex(1), src=sgpr(operand), comment=comment))
-    elif bpe == 0.75:
-        module.add(SMulI32(dst=sgpr(product), src0=hex(6), src1=sgpr(operand), comment=comment))
-        module.add(SLShiftRightB32(dst=sgpr(product), shiftHex=hex(3), src=sgpr(product), comment=comment))
-    else:
-        bpe_log2 = log2(bpe)
-        if (bpe_log2 == 0) and (product == operand):
-            module.addCommentAlign(comment + " (bpe is 1, do nothing)")
-        else:
-            module.add(SLShiftLeftB32(dst=sgpr(product), shiftHex=hex(bpe_log2), src=sgpr(operand), comment=comment))
-
-    return module
-
-########################################
-# Scaler Multiply Bpe
-# product sgpr, operand sgpr, bpe float
-########################################
-def scalarMultiply64Bpe(product, operand, bpe, tmpSgpr=None, comment=""):
-    module = Module("scalarMultiplyBpe")
-
-    comment = comment + f" (multiple bpe {bpe})"
-
-    if bpe == 0.5:
-        module.add(SLShiftRightB64(dst=sgpr(product, 2), shiftHex=hex(1), src=sgpr(operand, 2), comment=comment))
-    elif bpe == 0.75:
-        if isinstance(product, str):
-          product1 = product + "+1"
-        elif isinstance(product, int):
-          product1 = product + 1
-        else:
-          raise RuntimeError("invalid product type")
-
-        if isinstance(operand, str):
-          operand1 = operand + "+1"
-        elif isinstance(operand, int):
-          operand1 = operand + 1
-        else:
-          raise RuntimeError("invalid operand type")
-
-        module.add(SMovB32(dst=sgpr(tmpSgpr), src=sgpr(operand1), comment=comment))
-        module.add(SMulHIU32(dst=sgpr(product1), src0=hex(6), src1=sgpr(operand), comment=comment))
-        module.add(SMulI32(dst=sgpr(product), src0=hex(6), src1=sgpr(operand), comment=comment))
-        module.add(SMulI32(dst=sgpr(tmpSgpr), src0=hex(6), src1=sgpr(tmpSgpr), comment=comment))
-        module.add(SAddU32(dst=sgpr(product1), src0=sgpr(product1), src1=sgpr(tmpSgpr), comment=comment))
-        module.add(SLShiftRightB64(dst=sgpr(product, 2), shiftHex=hex(3), src=sgpr(product, 2), comment=comment))
-    else:
-        bpe_log2 = log2(bpe)
-        if (bpe_log2 == 0) and (product == operand):
-            module.addCommentAlign(comment + " (bpe is 1, do nothing)")
-        else:
-            module.add(SLShiftLeftB64(dst=sgpr(product, 2), shiftHex=hex(bpe_log2), src=sgpr(operand, 2), comment=comment))
-
-    return module
-
-########################################
-# Multiply
-# product vgpr, operand vgpr, bpe
-########################################
-
-def vectorMultiplyBpe(product, operand, bpe, comment=""):
-    module = Module("vectorMultiplyBpe")
-
-    comment = comment + f" (multiple bpe {bpe})"
-
-    if bpe == 0.5:
-        module.add(VLShiftRightB32(dst=vgpr(product), shiftHex=hex(1), src=vgpr(operand), comment=comment))
-    elif bpe == 0.75:
-        module.add(VMulLOU32(dst=vgpr(product), src0=hex(6), src1=vgpr(operand), comment=comment))
-        module.add(VLShiftRightB32(dst=vgpr(product), shiftHex=hex(3), src=vgpr(product), comment=comment))
-    else:
-        bpe_log2 = log2(bpe)
-        if (bpe_log2 == 0) and (product == operand):
-            module.addCommentAlign(comment + " (bpe is 1, do nothing)")
-        else:
-            module.add(VLShiftLeftB32(dst=vgpr(product), shiftHex=hex(bpe_log2), src=vgpr(operand), comment=comment))
-
-    return module
 @dataclass
 class TailOptParams:
   idx:                 int         = 0
@@ -665,7 +578,7 @@ class KernelWriterAssembly(KernelWriter):
         module.addComment("Shift num records for gfx125x")
         module.add(SAndB32(sgpr(stmpRes.idx), sgpr("Srd%s+2"%tc), 0x7F))
         module.add(SLShiftLeftB32(sgpr(stmpRes.idx), 25, sgpr(stmpRes.idx)))
-        module.add(SAndB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), 0x1FFFFFFF))
+        module.add(SAndB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), 0x1FFFFFF))
         module.add(SOrB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), sgpr(stmpRes.idx)))
         module.add(SLShiftRightB32(sgpr("Srd%s+2"%tc), 7, sgpr("Srd%s+2"%tc)))
     return module

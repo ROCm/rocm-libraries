@@ -122,7 +122,9 @@ struct alignas(16) BufferResource
         uint32_t tmp = desc_.d32[2] & 0x7F;
         tmp = tmp << 25;
         desc_.d32[2] = desc_.d32[2] >> 7;
-        desc_.d32[1] = desc_.d32[1] | tmp;
+        uint32_t srd1 = desc_.d32[1];
+        srd1 = srd1 & 0x1FFFFFF;
+        desc_.d32[1] = srd1 | tmp;
 #endif
     }
 
