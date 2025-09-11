@@ -566,7 +566,7 @@ validParameters = {
     # Chooses how to do GlobalSplitU:
     # - SingleBuffer: uses atomic operation to accumulate on one buffer
     # - MultipleBuffer: each GSU group writes to its own buffer and the postGSU accumulates the buffer
-    # if GlobalSplitU=1, this parameter will be ignored (and will be set to SingleBuffer if it is 
+    # if GlobalSplitU=1, this parameter will be ignored (and will be set to SingleBuffer if it is
     # MultipleBuffer for consistency in lib logics).
     # GSU/GSUAlo can be used with all gemm types, except for I8II.
     # When GSU>1, we need extra kernels (other than the main assembly kernel) to do the computations. The language of these
@@ -808,7 +808,7 @@ validParameters = {
     #   - Optimizations enabled by AssertSummationElementMultiple>1 will be adjusted as follows.
     #     ASEM%GSU == 0 and ASEM//GSU will be used for optimizations instead of ASEM
     #     For example, if ASEM is 8 and GSU is 2, K is multiple of 8 but K is divided by GSU.
-    #     In that case, we can still guarantee K/GSU is multiple of 4 (= ASEM/GSU) and 
+    #     In that case, we can still guarantee K/GSU is multiple of 4 (= ASEM/GSU) and
     #     we can use ASEM//GSU=4 for optimizations
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
@@ -1175,7 +1175,7 @@ validParameters = {
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
     "StreamK": [0, 1, 2, 3],
-    
+
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -1488,7 +1488,7 @@ validParameters = {
     "MinVgprNumber":                list(range(0,256)),
 
     "MaxVgprNumber":                list(range(0,257)),
-    # min K size to use GlobalSplitU algorithm 
+    # min K size to use GlobalSplitU algorithm
     "MinKForGSU":                   [16,32,64,128,256]
     }
 
@@ -1750,7 +1750,7 @@ defaultProblemType = {
     "DataType":                 0,                # data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DestDataType":             0,                # destination data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "ComputeDataType":          0,                # compute data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
-    
+
     "UseBeta":                  True,             # =True use beta parameter (asm will check for B=0 and optimize the write for that), =False don't use beta parameter
     "HighPrecisionAccumulate":  False,            # f32 += f16*f16
     "SilentHighPrecisionAccumulate": False,       # Keep kernel names the same for HPA mode.  Useful for testing.
@@ -1871,12 +1871,12 @@ defaultProblemType = {
     # FP16 Alternate Implementation
     "Fp16AltImpl":              False,
     "Fp16AltImplRound":         False,
-    
-    # Use unpack version of up-conversion instruction for f8/b8. 
+
+    # Use unpack version of up-conversion instruction for f8/b8.
     "Fp8NoPackUpConversion" :   False,
 
-    # S/W clipping of f32 to f8/b8 down conversion. When it is set, the kernel clips any value which is greater 
-    # than max_f8_value (e.g., 240.0 for f8) to max_f8_value in down conversion. NaN and +/-INF are propagated. 
+    # S/W clipping of f32 to f8/b8 down conversion. When it is set, the kernel clips any value which is greater
+    # than max_f8_value (e.g., 240.0 for f8) to max_f8_value in down conversion. NaN and +/-INF are propagated.
     # By default, it is set for f8 kernels.
     "Fp32toFp8SWClip" :         True,
 
@@ -1885,11 +1885,11 @@ defaultProblemType = {
 
     # Rounding mode for f32 to f8 down conversion
     # TODO in Future:
-    # There are two different rounding modes for f32 to f8 down conversion: [0]: IEEE RNE mode and [1/2]: stochastic mode. 
-    # For stochastic mode, there are two implementations to use random numbers in H/W instruction: 
+    # There are two different rounding modes for f32 to f8 down conversion: [0]: IEEE RNE mode and [1/2]: stochastic mode.
+    # For stochastic mode, there are two implementations to use random numbers in H/W instruction:
     #   In-device [1]: we need to pass the seed of random number and kernel will generate the pseudo-random numbers
-    #   RND-table [2]: we need to pass a table of random numbers to the kernel, NOT implemented yet  
-    #"StochasticRounding" :     0  # [0,1,2]   0=NA, 1=in-device, 2=RND Table. By default, IEEE RNE rounding    
+    #   RND-table [2]: we need to pass a table of random numbers to the kernel, NOT implemented yet
+    #"StochasticRounding" :     0  # [0,1,2]   0=NA, 1=in-device, 2=RND Table. By default, IEEE RNE rounding
     }
 
 defaultProblemSizes = [{"Range": [ [2880], 0, 0 ]}]
@@ -2109,8 +2109,8 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
     if len(hipVersion) >= 2:
       ignoreCacheCheck = ignoreCacheCheck or \
                          hipVersion.major < 5 or \
-                         (hipVersion.major == 5 and hipVersion.minor <= 2) 
-    
+                         (hipVersion.major == 5 and hipVersion.minor <= 2)
+
     if not derivedAsmCaps["SupportedISA"] and cachedAsmCaps[isaVersion]["SupportedISA"]:
       printWarning("Architecture {} not supported by ROCm {}".format(isaVersion, globalParameters['HipClangVersion']), DeveloperWarning)
       ignoreCacheCheck = True
@@ -2151,7 +2151,7 @@ def GetArchCaps(isaVersion):
   rv["CrosslaneWait"]      = (isaVersion==(9,4,2) or isaVersion==(9,5,0))
   rv["ForceStoreSC1"]      = False
   rv["HasDTLx4"]           = isaVersion==(9,5,0)
-  
+
   return rv
 
 def tryAssembler(isaVersion, asmString, debug=False, *options):
@@ -2354,7 +2354,7 @@ def populateCapabilities(
     """
     supportedISA = globalParameters["SupportedISA"]
     to_remove = []
-   
+
     emptyCache = not bool(globalParameters["AsmCaps"])
 
     for v in supportedISA + [(0, 0, 0)]:
@@ -2413,7 +2413,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
       tPrint(3, " %24s: %8s (unspecified)" % (key, defaultValue))
 
   if "KeepBuildTmp" in config:
-    globalParameters["KeepBuildTmp"] = config["KeepBuildTmp"] 
+    globalParameters["KeepBuildTmp"] = config["KeepBuildTmp"]
 
   globalParameters["ROCmPath"] = "/opt/rocm"
   if "ROCM_PATH" in os.environ:
@@ -2440,7 +2440,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
   else:
     raise ValueError("CxxCompiler not specified in config")
   if "CCompiler" in config:
-    globalParameters["CCompiler"] = config["CCompiler"]    
+    globalParameters["CCompiler"] = config["CCompiler"]
   else:
     raise ValueError("CCompiler not specified in config")
   if "Assembler" in config:
@@ -2472,7 +2472,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
 
   if "IgnoreAsmCapCache" in config:
     globalParameters["IgnoreAsmCapCache"] = config["IgnoreAsmCapCache"]
-    
+
   globalParameters["CacheAsmCaps"] = True if capabilitiesCache is not None else False
   globalParameters["AsmCaps"] = capabilitiesCache if globalParameters["CacheAsmCaps"] else {}
   globalParameters["ArchCaps"] = {}

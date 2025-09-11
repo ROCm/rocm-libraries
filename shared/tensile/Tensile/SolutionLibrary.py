@@ -154,7 +154,7 @@ class DecisionTreeLibrary:
     def FromOriginalState(cls, d, solutions):
         features = d["features"]
         origTrees = d["trees"]
-        
+
         # Support for legacy implementation of the dtree which has no fallback.
         if "fallback" in d:
             fallbackIndex = d["fallback"]
@@ -255,11 +255,11 @@ class MasterSolutionLibrary:
         """Maps hex characters from gfx name to an index.
 
         Given a gfx name of the form gfx[0-9a-f]*, map the characters following
-        gfx from hex to int and left shift the integer by 18.   
+        gfx from hex to int and left shift the integer by 18.
 
         Args:
             architectureName: The gfx name (or fallback).
-        
+
         Returns:
             An integer representing the index for the given gfx architecture.
 
@@ -518,12 +518,12 @@ class MasterSolutionLibrary:
             newSolutions[curIndex] = soln
             curIndex += 1
         return newSolutions, reIndexMap
-    
+
     def remapSolutionIndicesStartingFrom(self, startingIndex) -> None:
         """Remap all the solution indexes for a given library.
 
         Given a starting index, remap all indexes for a given library
-        including the lazy libraries if enabled. If a library has five 
+        including the lazy libraries if enabled. If a library has five
         solutions and the starting index is 222, the solution.index fields
         would be 222, 223, 224, 225 and 226 respectively. If there are two
         lazy libraries and each have two solutions, the solution.index
@@ -539,7 +539,7 @@ class MasterSolutionLibrary:
                 lib.library.remapSolutionIndices(reIndexMap)
                 lazyLibrary[name] = lib
             self.lazyLibraries = lazyLibrary
-            
+
         self.solutions, reIndexMap =  self._remapSolutionIndicesStartingFrom(self.library, self.solutions, startingIndex)
         self.library.remapSolutionIndices(reIndexMap)
 

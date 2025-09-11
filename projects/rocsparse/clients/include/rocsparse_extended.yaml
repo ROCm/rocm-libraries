@@ -355,4 +355,3 @@ Tests:
     - gtsv_interleaved_batch: *conversion_shared
     - gtsv_no_pivot: *conversion_shared
     - gtsv_no_pivot_strided_batch: *conversion_shared
-

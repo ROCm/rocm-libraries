@@ -67,7 +67,7 @@ def build_client(c, clean=False, configure=True, build=True, build_type="Release
 
     if configure:
         os.makedirs(client_build_dir, exist_ok=True)
-        
+
         cmake_cmd = [
             "cmake",
             "-S", "next-cmake",
