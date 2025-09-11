@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Adds a subdirectory to the build with a status message, 
+# Adds a subdirectory to the build with a status message,
 # and optionally checks for an expected target.
 #
 # Usage:

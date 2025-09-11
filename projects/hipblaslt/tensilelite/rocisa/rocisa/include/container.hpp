@@ -161,6 +161,38 @@ namespace rocisa
         bool isStore;
     };
 
+    struct GLOBALModifiers : public Container
+    {
+        GLOBALModifiers(int offset = 0)
+            : Container()
+            , offset(offset)
+        {
+        }
+
+        GLOBALModifiers(const GLOBALModifiers& other)
+            : Container()
+            , offset(other.offset)
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<GLOBALModifiers>(*this);
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr;
+            if(offset != 0)
+            {
+                kStr += " offset:" + std::to_string(offset);
+            }
+            return kStr;
+        }
+
+        int  offset;
+    };
+
     struct MUBUFModifiers : public Container
     {
         MUBUFModifiers(bool offen    = false,

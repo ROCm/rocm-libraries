@@ -18,8 +18,6 @@ add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
-else()
-    target_link_libraries(hipblaslt-clients-common PUBLIC ${BLAS_LIBRARIES})
 endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
@@ -106,7 +104,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(rocm_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
     endif()
-    target_link_libraries(hipblaslt-test 
+    target_link_libraries(hipblaslt-test
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common

@@ -34,14 +34,14 @@ extern "C" {
 *  \p hipsparseXdense2csc converts the matrix A in dense format into a sparse matrix in CSC format.
 *
 *  \details
-*  Given a dense, column ordered, matrix \p A with leading dimension \p ld where \p ld>=m, 
+*  Given a dense, column ordered, matrix \p A with leading dimension \p ld where \p ld>=m,
 *  \p hipsparseXdense2csc converts the matrix to a sparse CSC format matrix.
 *  All the parameters are assumed to have been pre-allocated by the user and the arrays
-*  are filled in based on number of nonzeros per row, which can be pre-computed with 
-*  \ref hipsparseSnnz "hipsparseXnnz()". We can set the desired index base in the output CSC 
-*  matrix by setting it in the \ref hipsparseMatDescr_t. See \ref hipsparseSetMatIndexBase(). 
+*  are filled in based on number of nonzeros per row, which can be pre-computed with
+*  \ref hipsparseSnnz "hipsparseXnnz()". We can set the desired index base in the output CSC
+*  matrix by setting it in the \ref hipsparseMatDescr_t. See \ref hipsparseSetMatIndexBase().
 *
-*  As an example, if using index base zero (i.e. the default) and the dense 
+*  As an example, if using index base zero (i.e. the default) and the dense
 *  matrix:
 *
 *  \f[
@@ -67,7 +67,7 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  This function works very similar to \ref hipsparseSdense2csr "hipsparseXdense2csr()". 
+*  This function works very similar to \ref hipsparseSdense2csr "hipsparseXdense2csr()".
 &  See hipsparseSdense2csr() for a code example.
 *
 *  \note
@@ -81,7 +81,7 @@ extern "C" {
 *  @param[in]
 *  n            number of columns of the dense matrix \p A.
 *  @param[in]
-*  descr        the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also 
+*  descr        the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
 *               any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  A            array of dimensions (\p ld, \p n)
@@ -97,7 +97,7 @@ extern "C" {
 *  cscColPtr    integer array of \p n+1 elements that contains the start of every column and the end of the last column plus one.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p nnzPerColumn or \p cscVal \p cscColPtr 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p nnzPerColumn or \p cscVal \p cscColPtr
 *              or \p cscRowInd pointer is invalid.
 */
 /**@{*/

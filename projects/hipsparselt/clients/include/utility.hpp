@@ -664,7 +664,7 @@ public:
         {
             if(this->pre_log_level == -1)
                 unsetenv("HIPSPARSELT_LOG_LEVEL");
-            else 
+            else
                 setenv("HIPSPARSELT_LOG_LEVEL", std::to_string(this->pre_log_level).c_str(), 1);
         }
     }
