@@ -1077,10 +1077,10 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMBeta0StreamK test";
-        }
+        // if(m_context->targetArchitecture().target().isCDNA1GPU())
+        // {
+        //     GTEST_SKIP() << "Skipping GPU_BasicGEMMBeta0StreamK test";
+        // }
 
         GEMMProblem gemm;
 
@@ -1116,10 +1116,10 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
+        // if(m_context->targetArchitecture().target().isCDNA1GPU())
+        // {
+        //     GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        // }
 
         GEMMProblem gemm;
 
@@ -1173,10 +1173,10 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
+        // if(m_context->targetArchitecture().target().isCDNA1GPU())
+        // {
+        //     GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        // }
 
         GEMMProblem gemm;
 
@@ -1228,10 +1228,10 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
+        // if(m_context->targetArchitecture().target().isCDNA1GPU())
+        // {
+        //     GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        // }
 
         GEMMProblem gemm;
 

@@ -606,10 +606,10 @@ namespace TransposeLoadsTest
 
         auto wavetile = GENERATE(std::make_pair(16, 128), std::make_pair(32, 64));
         auto context  = TestContext::ForTestDevice();
-        if(context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX950)
-        {
-            SKIP("Test only supported on GFX950");
-        }
+        // if(context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX950)
+        // {
+        //     SKIP("Test only supported on GFX950");
+        // }
 
         SECTION("For each datatype and unalignedVGPRs option")
         {

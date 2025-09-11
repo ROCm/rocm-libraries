@@ -47,8 +47,8 @@ namespace largerLDSTest
             , m_numLoads(numLoads)
         {
             auto const& arch = m_context->targetArchitecture().target();
-            if(!arch.isCDNA35GPU())
-                SKIP("Test not yet supported on " << arch);
+            // if(!arch.isCDNA35GPU())
+            //     SKIP("Test not yet supported on " << arch);
 
             auto maxLDS  = context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
             auto ldsSize = m_numBytes * m_numLoads;
