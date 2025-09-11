@@ -45,6 +45,7 @@
 #include <rocRoller/DataTypes/DataTypes_Half.hpp>
 #include <rocRoller/DataTypes/DataTypes_Int8.hpp>
 #include <rocRoller/DataTypes/DataTypes_Int8x4.hpp>
+#include <rocRoller/DataTypes/DataTypes_Raw32.hpp>
 #include <rocRoller/DataTypes/DataTypes_Scale_Utils.hpp>
 #include <rocRoller/DataTypes/DataTypes_UInt8x4.hpp>
 
@@ -444,66 +445,6 @@ namespace rocRoller
     struct BFloat16x2 : public DistinctType<uint32_t, BFloat16x2>
     {
     };
-
-    struct Raw32 : public DistinctType<uint32_t, Raw32>
-    {
-        Raw32() = default;
-
-        template <std::integral T>
-        Raw32(T t)
-            : DistinctType<uint32_t, Raw32>(t)
-        {
-        }
-
-        template <std::floating_point T>
-        Raw32(T t)
-            : DistinctType<uint32_t, Raw32>(std::bit_cast<uint32_t>(static_cast<float>(t)))
-        {
-        }
-
-        friend std::ostream& operator<<(std::ostream& os, const Raw32& obj);
-
-        Raw32 operator~() const
-        {
-            return Raw32(~value);
-        }
-
-        bool operator!() const
-        {
-            return value == 0u;
-        }
-
-        template <std::integral T>
-        explicit operator T() const
-        {
-            return static_cast<T>(value);
-        }
-
-        template <std::floating_point T>
-        explicit operator T() const
-        {
-            return static_cast<T>(std::bit_cast<float>(value));
-        }
-
-        template <typename T>
-        bool operator==(T const& other) const
-        {
-            if constexpr(std::is_same_v<T, Raw32>)
-                return other.value == value;
-            else if constexpr(std::integral<T>)
-                return other == value;
-            else if constexpr(std::floating_point<T>)
-                return static_cast<float>(other) == std::bit_cast<float>(value);
-            else
-                return false;
-        }
-    };
-
-    inline std::ostream& operator<<(std::ostream& os, const Raw32& obj)
-    {
-        os << static_cast<uint32_t>(obj);
-        return os;
-    }
 
     struct Bool32 : public DistinctType<uint32_t, Bool32>
     {

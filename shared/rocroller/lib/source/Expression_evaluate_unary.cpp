@@ -237,8 +237,7 @@ namespace rocRoller::Expression::EvaluateDetail
     struct OperationEvaluatorVisitor<BitwiseNegate> : public UnaryEvaluatorVisitor<BitwiseNegate>
     {
         template <typename T>
-        requires(CIntegral<T> or std::is_same_v<T, rocRoller::Raw32>) constexpr T
-            evaluate(T const& arg) const
+        requires(CIntegral<T> or std::is_same_v<T, Raw32>) constexpr T evaluate(T const& arg) const
         {
             return ~arg;
         }

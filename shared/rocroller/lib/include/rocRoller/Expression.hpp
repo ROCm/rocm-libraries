@@ -262,7 +262,7 @@ namespace rocRoller
             constexpr static inline int                 Complexity = 1;
         };
 
-        struct BitfieldCombine final : Binary
+        struct BitfieldCombine : Binary
         {
             unsigned srcOffset = 0u;
             unsigned dstOffset = 0u;
@@ -274,7 +274,7 @@ namespace rocRoller
             std::optional<bool> dstIsZero = std::nullopt;
 
             constexpr static inline auto                Type = Category::Arithmetic;
-            constexpr static inline EvaluationTimes     EvalTimes{EvaluationTime::Count};
+            constexpr static inline EvaluationTimes     EvalTimes{};
             constexpr static inline AlgebraicProperties Properties{};
             constexpr static inline int                 Complexity = 4;
         };

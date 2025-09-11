@@ -2544,6 +2544,77 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Raw32 expression and evaluation", "[expression][raw32]")
+    {
+        using Expression::literal;
+
+        auto raw32One    = literal(rocRoller::Raw32(1u));
+        auto unsignedOne = literal(uint32_t(1u));
+        auto floatOne    = literal(1.0f);
+
+        CHECK_THROWS_AS(unsignedOne << raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne >> raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne + raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne - raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne * raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne % raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne >= raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne <= raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne > raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne < raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne == raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne != raw32One, FatalError);
+        CHECK_THROWS_AS(Expression::exp(raw32One), FatalError);
+        CHECK_THROWS_AS(Expression::exp2(raw32One), FatalError);
+
+        auto raw32Two = literal(rocRoller::Raw32(2u));
+        CHECK_NOTHROW(raw32Two == raw32One);
+        CHECK_NOTHROW(raw32Two != raw32One);
+
+        {
+            // Test shift left
+            auto expr = raw32One << unsignedOne;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test shift right
+            auto expr = raw32One >> unsignedOne;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test bitwise OR
+            auto expr = unsignedOne | raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+
+            auto expr2 = raw32One | unsignedOne;
+            CHECK_NOTHROW(evaluate(expr2));
+        }
+
+        {
+            // Test bitwise AND
+            auto expr = unsignedOne & raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+
+            auto expr2 = raw32One & unsignedOne;
+            CHECK_NOTHROW(evaluate(expr2));
+        }
+
+        {
+            // Test bitwise negate
+            auto expr = ~raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test conversion
+            auto expr = std::make_shared<Expression::Expression>(
+                Expression::Convert{raw32One, "", rocRoller::DataType::UInt32});
+            CHECK_NOTHROW(evaluate(expr + unsignedOne));
+        }
+    }
+
     TEST_CASE("Code gen for BitfieldCombine", "[expression][codegen]")
     {
         auto context = TestContext::ForDefaultTarget();

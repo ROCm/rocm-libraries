@@ -123,19 +123,7 @@ namespace rocRoller
         if(value->regType() != Register::Type::Literal)
             return false;
 
-        return std::visit(
-            [this](auto val) -> bool {
-                using T = std::decay_t<decltype(val)>;
-                if constexpr(std::is_pointer_v<
-                                 T> || std::is_same_v<bool, T> || std::is_same_v<Raw32, T>)
-                {
-                    return false;
-                }
-                else
-                {
-                    return this->isSupportedConstantValue(val);
-                }
-            },
-            value->getLiteralValue());
+        return std::visit([this](auto val) -> bool { return this->isSupportedConstantValue(val); },
+                          value->getLiteralValue());
     }
 }
