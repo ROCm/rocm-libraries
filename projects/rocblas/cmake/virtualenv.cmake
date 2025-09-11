@@ -58,10 +58,10 @@ function(virtualenv_install)
             message(FATAL_ERROR ${rc})
         endif()
 
-        message("${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install --upgrade packaging")
+        message("${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install --upgrade packaging setuptools")
         execute_process(
             RESULT_VARIABLE rc
-            COMMAND ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install --upgrade packaging
+            COMMAND ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install --upgrade packaging setuptools
         )
         if(rc)
             message(FATAL_ERROR ${rc})

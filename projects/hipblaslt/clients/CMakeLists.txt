@@ -104,7 +104,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(rocm_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
     endif()
-    target_link_libraries(hipblaslt-test 
+    target_link_libraries(hipblaslt-test
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common

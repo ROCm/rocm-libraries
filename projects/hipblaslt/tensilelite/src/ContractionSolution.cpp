@@ -1224,7 +1224,11 @@ namespace TensileLite
             if(sizeMapping.streamK != 0)
             {
                 AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-                if(pAMDGPU->skDynamicWGM == 1)
+                if(pAMDGPU->fixedWGM >= -1024 && pAMDGPU->fixedWGM <= 1024)
+                {
+                    defaultWGM = pAMDGPU->fixedWGM;
+                }
+                else if(pAMDGPU->skDynamicWGM == 1)
                 {
                     hip::HipAMDGPU const* hipAMDGPU
                         = dynamic_cast<hip::HipAMDGPU const*>(&hardware);

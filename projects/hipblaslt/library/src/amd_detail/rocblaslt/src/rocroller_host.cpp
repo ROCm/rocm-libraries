@@ -855,7 +855,7 @@ std::shared_ptr<SolutionParameters>
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
-    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate || 
+    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate ||
         kernelType.scaleBMode != rocRoller::Operations::ScaleMode::Separate)
     {
         gemm->swizzleScale = false;
@@ -1483,7 +1483,7 @@ rocblaslt_status
 
 /**
  * @brief Return the amount of workspace that is required to execute a kernel.
- * 
+ *
  * Note: This only takes into account the workspace required for StreamK kernels.
  */
 size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)

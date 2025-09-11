@@ -34,14 +34,14 @@ extern "C" {
 *  \p hipsparseXdense2csr converts the matrix A in dense format into a sparse matrix in CSR format.
 *
 *  \details
-*  Given a dense, column ordered, matrix \p A with leading dimension \p ld where \p ld>=m, 
-*  \p hipsparseXdense2csr converts the matrix to a sparse CSR format matrix. All the parameters 
-*  are assumed to have been pre-allocated by the user and the arrays are filled in based on number 
-*  of nonzeros per row, which can be pre-computed with \ref hipsparseSnnz "hipsparseXnnz()". The 
-*  desired index base in the output CSR matrix is set in the \ref hipsparseMatDescr_t. See 
-*  \ref hipsparseSetMatIndexBase(). 
+*  Given a dense, column ordered, matrix \p A with leading dimension \p ld where \p ld>=m,
+*  \p hipsparseXdense2csr converts the matrix to a sparse CSR format matrix. All the parameters
+*  are assumed to have been pre-allocated by the user and the arrays are filled in based on number
+*  of nonzeros per row, which can be pre-computed with \ref hipsparseSnnz "hipsparseXnnz()". The
+*  desired index base in the output CSR matrix is set in the \ref hipsparseMatDescr_t. See
+*  \ref hipsparseSetMatIndexBase().
 *
-*  As an example, if using index base zero (i.e. the default) and the dense 
+*  As an example, if using index base zero (i.e. the default) and the dense
 *  matrix:
 *
 *  \f[
@@ -73,7 +73,7 @@ extern "C" {
 *  @param[in]
 *  n            number of columns of the dense matrix \p A.
 *  @param[in]
-*  descr        the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also 
+*  descr        the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
 *               any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  A            array of dimensions (\p ld, \p n)
