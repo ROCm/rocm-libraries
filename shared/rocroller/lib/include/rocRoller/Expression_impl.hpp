@@ -122,6 +122,8 @@ namespace rocRoller
 
         inline bool isRaw32Literal(ExpressionPtr const& exprPtr)
         {
+            if(not exprPtr)
+                return false;
             return isRaw32Literal(*exprPtr);
         }
 
