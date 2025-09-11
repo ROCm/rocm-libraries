@@ -2189,4 +2189,30 @@ Tests:
   requested_solution_num: 3
   gpu_arch: '950'
 
+- name: matmul_relu_clamp_useE
+  category: pre_checkin
+  function:
+    matmul:
+    - {a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
+    - {a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r }
+    - {a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
+    - {a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r }
+    - {a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  activation_type: [relu, clamp]
+  activation_arg1: -1.5
+  activation_arg2: 1.5
+  bias_vector: [0, 1]
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '942'
+
 ...

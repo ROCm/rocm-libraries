@@ -60,7 +60,7 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(HIPBLASLT_ENABLE_LLVM "Use OpenMP to improve performance." OFF)
+    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -97,7 +97,7 @@ if(HIPBLASLT_ENABLE_HOST)
     else()
         set(hipblas_target hipblas-common)
     endif()
-    if(NOT ROCM_LIBS_SUPERBUILD) 
+    if(NOT ROCM_LIBS_SUPERBUILD)
         find_package(${hipblas_target} REQUIRED)
     endif()
     if(HIPBLASLT_ENABLE_MARKER)
@@ -116,10 +116,8 @@ endif()
 if(HIPBLASLT_ENABLE_CLIENT)
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
-    else()
-        find_package(BLAS REQUIRED)
-        #find_package(cblas REQUIRED) # is this actually required
     endif()
+    # There is an implicit find_package(BLAS) when finding lapack
     find_package(LAPACK REQUIRED)
 endif()
 
@@ -228,7 +226,7 @@ if(HIPBLASLT_ENABLE_HOST)
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
-    
+
     if(HIPBLASLT_ENABLE_ASAN)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
     endif()
@@ -400,7 +398,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
         string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
         rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
     endif()
-    
+
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
     rocm_package_setup_client_component(benchmarks

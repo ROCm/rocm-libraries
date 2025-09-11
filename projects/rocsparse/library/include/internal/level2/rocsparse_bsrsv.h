@@ -70,8 +70,8 @@ rocsparse_status rocsparse_bsrsv_zero_pivot(rocsparse_handle   handle,
 /*! \ingroup level2_module
 *  \details
 *  \p rocsparse_bsrsv_buffer_size returns the size of the temporary storage buffer that
-*  is required by \ref rocsparse_sbsrsv_analysis "rocsparse_Xbsrsv_analysis()" and 
-*  \ref rocsparse_sbsrsv_solve "rocsparse_Xbsrsv_solve()". The temporary storage buffer 
+*  is required by \ref rocsparse_sbsrsv_analysis "rocsparse_Xbsrsv_analysis()" and
+*  \ref rocsparse_sbsrsv_solve "rocsparse_Xbsrsv_solve()". The temporary storage buffer
 *  must be allocated by the user.
 *
 *  \note
@@ -182,13 +182,13 @@ rocsparse_status rocsparse_zbsrsv_buffer_size(rocsparse_handle                ha
 
 /*! \ingroup level2_module
 *  \details
-*  \p rocsparse_bsrsv_analysis performs the analysis step for \ref rocsparse_sbsrsv_solve "rocsparse_sbsrsv_solve()". 
-*  It is expected that this function will be executed only once for a given matrix and particular operation type. 
+*  \p rocsparse_bsrsv_analysis performs the analysis step for \ref rocsparse_sbsrsv_solve "rocsparse_sbsrsv_solve()".
+*  It is expected that this function will be executed only once for a given matrix and particular operation type.
 *  The analysis meta data can be cleared by \ref rocsparse_bsrsv_clear().
 *
 *  \p rocsparse_bsrsv_analysis can share its meta data with \ref rocsparse_sbsrsm_analysis "rocsparse_Xbsrsm_analysis()",
-*  \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()", and 
-*  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()". Selecting \ref rocsparse_analysis_policy_reuse policy 
+*  \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()", and
+*  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()". Selecting \ref rocsparse_analysis_policy_reuse policy
 *  can greatly improve computation performance of meta data. However, the user needs to make sure that the sparsity
 *  pattern remains unchanged. If this cannot be assured, \ref rocsparse_analysis_policy_force has to be used.
 *
@@ -313,10 +313,10 @@ rocsparse_status rocsparse_zbsrsv_analysis(rocsparse_handle                handl
 /*! \ingroup level2_module
 *  \details
 *  \p rocsparse_bsrsv_clear deallocates all memory that was allocated by
-*  \ref rocsparse_sbsrsv_analysis "rocsparse_sbsrsv_analysis()". This is especially useful, 
-*  if memory is an issue and the analysis data is not required for further computation, e.g. 
-*  when switching to another sparse matrix format. Calling \p rocsparse_bsrsv_clear is optional. 
-*  All allocated resources will be cleared when the opaque \ref rocsparse_mat_info struct is 
+*  \ref rocsparse_sbsrsv_analysis "rocsparse_sbsrsv_analysis()". This is especially useful,
+*  if memory is an issue and the analysis data is not required for further computation, e.g.
+*  when switching to another sparse matrix format. Calling \p rocsparse_bsrsv_clear is optional.
+*  All allocated resources will be cleared when the opaque \ref rocsparse_mat_info struct is
 *  destroyed using \ref rocsparse_destroy_mat_info().
 *
 *  \note
@@ -357,30 +357,30 @@ rocsparse_status rocsparse_bsrsv_clear(rocsparse_handle handle, rocsparse_mat_in
 *    \right.
 *  \f]
 *
-*  Performing the above operation requires three steps. First, the user calls 
-*  \ref rocsparse_sbsrsv_buffer_size "rocsparse_Xbsrsv_buffer_size()" which will determine the size of the required 
-*  temporary storage buffer. The user then allocates this buffer and calls 
-*  \ref rocsparse_sbsrsv_analysis "rocsparse_Xbsrsv_analysis()" which will perform analysis on the sparse matrix 
-*  \f$op(A)\f$. Finally, the user completes the computation by calling \p rocsparse_bsrsv_solve. The buffer size, 
-*  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$ while the 
-*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. Once all calls to 
-*  \p rocsparse_bsrsv_solve are complete, the temporary buffer can be deallocated. 
+*  Performing the above operation requires three steps. First, the user calls
+*  \ref rocsparse_sbsrsv_buffer_size "rocsparse_Xbsrsv_buffer_size()" which will determine the size of the required
+*  temporary storage buffer. The user then allocates this buffer and calls
+*  \ref rocsparse_sbsrsv_analysis "rocsparse_Xbsrsv_analysis()" which will perform analysis on the sparse matrix
+*  \f$op(A)\f$. Finally, the user completes the computation by calling \p rocsparse_bsrsv_solve. The buffer size,
+*  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$ while the
+*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. Once all calls to
+*  \p rocsparse_bsrsv_solve are complete, the temporary buffer can be deallocated.
 *
-*  Solving a triangular system involves inverting the diagonal blocks. This means that if the sparse matrix is 
-*  missing the diagonal block (referred to as a structural zero) or the diagonal block is not invertible (referred 
-*  to as a numerical zero) then a solution is not possible. \p rocsparse_bsrsv_solve tracks the location of the first 
-*  zero pivot (either numerical or structural zero). The zero pivot status can be checked calling \ref rocsparse_bsrsv_zero_pivot(). 
-*  If \ref rocsparse_bsrsv_zero_pivot() returns \ref rocsparse_status_success, then no zero pivot was found and therefore 
+*  Solving a triangular system involves inverting the diagonal blocks. This means that if the sparse matrix is
+*  missing the diagonal block (referred to as a structural zero) or the diagonal block is not invertible (referred
+*  to as a numerical zero) then a solution is not possible. \p rocsparse_bsrsv_solve tracks the location of the first
+*  zero pivot (either numerical or structural zero). The zero pivot status can be checked calling \ref rocsparse_bsrsv_zero_pivot().
+*  If \ref rocsparse_bsrsv_zero_pivot() returns \ref rocsparse_status_success, then no zero pivot was found and therefore
 *  the matrix does not have a structural or numerical zero.
 *
-*  The user can specify that the sparse matrix should be interpreted as having identity blocks on the diagonal by setting the diagonal 
-*  type on the descriptor \p descr to \ref rocsparse_diag_type_unit using \ref rocsparse_set_mat_diag_type. If 
-*  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be reported, even if the diagonal block \f$A_{j,j}\f$ 
+*  The user can specify that the sparse matrix should be interpreted as having identity blocks on the diagonal by setting the diagonal
+*  type on the descriptor \p descr to \ref rocsparse_diag_type_unit using \ref rocsparse_set_mat_diag_type. If
+*  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be reported, even if the diagonal block \f$A_{j,j}\f$
 *  for some \f$j\f$ is not invertible.
 *
-*  The sparse CSR matrix passed to \p rocsparse_bsrsv_solve does not actually have to be a triangular matrix. Instead the 
-*  triangular upper or lower part of the sparse matrix is solved based on \ref rocsparse_fill_mode set on the descriptor 
-*  \p descr. If the fill mode is set to \ref rocsparse_fill_mode_lower, then the lower triangular matrix is solved. If the 
+*  The sparse CSR matrix passed to \p rocsparse_bsrsv_solve does not actually have to be a triangular matrix. Instead the
+*  triangular upper or lower part of the sparse matrix is solved based on \ref rocsparse_fill_mode set on the descriptor
+*  \p descr. If the fill mode is set to \ref rocsparse_fill_mode_lower, then the lower triangular matrix is solved. If the
 *  fill mode is set to \ref rocsparse_fill_mode_upper then the upper triangular matrix is solved.
 *
 *  \note
