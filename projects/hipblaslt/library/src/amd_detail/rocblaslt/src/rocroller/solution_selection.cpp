@@ -26,6 +26,7 @@
 
 #include "analytical_utils.hpp"
 #include "kernel_type.hpp"
+#include "runtime_args_selection.hpp"
 #include "solution_selection.hpp"
 
 #include <Tensile/analytical/Utils.hpp>
@@ -109,7 +110,8 @@ constexpr auto generateTileList() {
         tileList[i] = std::make_tuple(
             wgt.m, wgt.n, wgtk * unroll,
             MI.m, MI.n, MI.k,
-            1 // occupancy
+            1, // occupancy
+            DEFAULT_WGM
         );
     }
 

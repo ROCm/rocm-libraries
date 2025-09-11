@@ -165,8 +165,11 @@ namespace TensileLite
             size_t elementSizeC_bits
                 = problem.c().elementBytes() * 8;
             const analytical::Hardware& analaytical_hardware = *(pAMDGPU->analyticalHardware);
-            int WGM
-                = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
+            if(analytical::Hardware::is_debug_enabled())
+            {
+                analaytical_hardware.print();
+            }
+            int defaultWGM = std::ceil(std::sqrt(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
             analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
                 miDataType = analytical::DataType::XFloat32;
@@ -183,11 +186,11 @@ namespace TensileLite
                 elementSizeB_bits,
                 elementSizeC_bits,
                 miDataType,
-                0, //mx_block_size -> MX Data types come from rocroller.
-                0.8,
+                0,   // mx_block_size -> MX Data types come from rocroller.
+                0.8, // L2 hit-rate (not used anymore -- should be removed)
                 debug,
                 false,
-                WGM);
+                defaultWGM);
             for(const auto& tile : selected_tiles)
             {
                 auto mapiter  = tile_map.find(std::make_tuple(std::get<1>(tile),
@@ -196,7 +199,9 @@ namespace TensileLite
                                                               std::get<4>(tile),
                                                               std::get<5>(tile),
                                                               std::get<6>(tile),
-                                                              std::get<7>(tile)));
+                                                              std::get<7>(tile),
+                                                              std::get<8>(tile)
+                                                            ));
                 auto smapiter = solutionmap.find(mapiter->second);
                 if(mapiter != tile_map.end() && smapiter != solutionmap.end())
                 {
