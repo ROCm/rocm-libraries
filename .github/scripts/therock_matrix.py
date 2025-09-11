@@ -8,8 +8,8 @@ subtree_to_project_map = {
     "projects/hipcub": "prim",
     "projects/hiprand": "rand",
     "projects/rocblas": "blas",
-    "projects/rocrand": "rand",
     "projects/rocprim": "prim",
+    "projects/rocrand": "rand",
     "projects/rocthrust": "prim"
 }
 

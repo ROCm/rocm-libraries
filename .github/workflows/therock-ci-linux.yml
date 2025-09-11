@@ -40,8 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          # TODO: update
-          ref: users/geomin12/external-temp-patches
+          ref: 9c3abf5ddae250d87ec8f6155e410016fa7221ed
 
       - name: Runner Health Settings
         run: |
@@ -67,16 +66,12 @@ jobs:
 
       - name: Fetch sources
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-math-libs --no-include-ml-frameworks
 
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
           pip freeze
-
-      - name: Patch rocm-libraries
-        run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects external-rocm-libraries
 
       - name: Configure Projects
         env:
