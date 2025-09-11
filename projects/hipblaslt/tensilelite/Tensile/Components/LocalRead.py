@@ -1453,6 +1453,7 @@ class LocalReadMFMA(LocalRead):
                                                 or kernel["ProblemType"]["DataType"].is6bitFloat() or kernel["ProblemType"]["DataType"].isInt8()):
                                     if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                         incOffset = rIdx * numElementPerRead * UnrollStride * 2
+                                        incOffset += tiIdx * MatrixInstT * tileStride
                                     else:
                                         vw = kernel["LocalReadVectorWidth"]
                                         incOffset = (rIdx // vw) * UnrollStride * vw
@@ -1472,7 +1473,7 @@ class LocalReadMFMA(LocalRead):
 
                                 paramList.append(int(offset_val))
 
-                            comment = "L -> Reg lro=%d swapByteOffset=%u ti=%u vIdx=%u eIdx=%u rIdx=%u oIdx=%u buffer=%u iui=%u" \
+                                comment = "L -> Reg lro=%d swapByteOffset=%u ti=%u vIdx=%u eIdx=%u rIdx=%u oIdx=%u buffer=%u iui=%u" \
                                     % (tP["localReadOffset"], tP["localReadSwapByteOffset"], MIWaveGroupShape[tile01], vIdx, eIdx, rIdx, oIdx, bufferIdx, iui)
 
                             highBits = 0 if writer.states.archCaps["DSLow16NotPreserve"] else highBitsForHalf or isHigh16Bits
