@@ -76,7 +76,7 @@ else()
     unset(CMAKE_CXX_CPPCHECK CACHE)
 endif()
 
-find_package(fmt REQUIRED)
+find_package(fmt QUIET)
 if(NOT fmt_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         set(FMT_SYSTEM_HEADERS ON)
@@ -132,10 +132,6 @@ else()
     set(msgpack_libs msgpackc-cxx)
 endif()
 
-<<<<<<< HEAD
-=======
-find_package(Boost REQUIRED) # is 1.74.0 required?
->>>>>>> 1a1f5ddd33 (Drop boost version requirement)
 find_package(hip REQUIRED)
 find_package(amd_comgr REQUIRED)
 if(ROCROLLER_ENABLE_LLVM)
@@ -267,7 +263,6 @@ target_include_directories(rocroller
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
 )
-
 
 target_compile_features(rocroller PUBLIC cxx_std_20)
 
