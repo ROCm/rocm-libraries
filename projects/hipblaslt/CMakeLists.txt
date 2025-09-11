@@ -60,13 +60,12 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(HIPBLASLT_ENABLE_LLVM "Use OpenMP to improve performance." OFF)
+    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
     option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
-    option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
@@ -74,8 +73,8 @@ endif()
 
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
-set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib" CACHE STRING "Install RPATH")
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Use link path for RPATH")
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE CACHE BOOL "Use link path for RPATH")
 
 mark_as_advanced(CMAKE_SKIP_BUILD_RPATH)
 mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
@@ -98,7 +97,7 @@ if(HIPBLASLT_ENABLE_HOST)
     else()
         set(hipblas_target hipblas-common)
     endif()
-    if(NOT ROCM_LIBRARIES_SUPERBUILD) 
+    if(NOT ROCM_LIBS_SUPERBUILD)
         find_package(${hipblas_target} REQUIRED)
     endif()
     if(HIPBLASLT_ENABLE_MARKER)
@@ -117,10 +116,8 @@ endif()
 if(HIPBLASLT_ENABLE_CLIENT)
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
-    else()
-        find_package(BLAS REQUIRED)
-        #find_package(cblas REQUIRED) # is this actually required
     endif()
+    # There is an implicit find_package(BLAS) when finding lapack
     find_package(LAPACK REQUIRED)
 endif()
 
@@ -162,7 +159,7 @@ else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 
-if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
+if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
     if(HIPBLASLT_ENABLE_FETCH)
         block(SCOPE_FOR VARIABLES)
             #set(ROCROLLER_ENABLE_FETCH ON)
@@ -171,8 +168,8 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
             option(YAML_CPP_INSTALL "" ON)
             set(BUILD_TESTING OFF)
             set(BUILD_CLIENTS OFF)
-            #set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
-            #set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
             include(FetchContent)
             FetchContent_Declare(
                 rocRoller
@@ -229,7 +226,7 @@ if(HIPBLASLT_ENABLE_HOST)
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
-    
+
     if(HIPBLASLT_ENABLE_ASAN)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
     endif()
@@ -237,7 +234,7 @@ if(HIPBLASLT_ENABLE_HOST)
     target_compile_features(hipblaslt PUBLIC cxx_std_17)
     target_compile_definitions(hipblaslt
         PUBLIC
-            ROCM_USE_FLOAT16
+            $<BUILD_INTERFACE:ROCM_USE_FLOAT16>
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
 
@@ -246,9 +243,9 @@ if(HIPBLASLT_ENABLE_HOST)
         target_compile_definitions(hipblaslt PUBLIC LEGACY_HIPBLAS_DIRECT)
     endif()
 
-    if(HIPBLASLT_ENABLE_LAZY_LOAD)
-        target_compile_definitions(hipblaslt PRIVATE ROCBLASLT_TENSILE_LAZY_LOAD)
-    endif()
+    target_compile_definitions(hipblaslt PRIVATE
+        ROCBLASLT_TENSILE_LAZY_LOAD=$<BOOL:${HIPBLASLT_ENABLE_LAZY_LOAD}>
+    )
 
     if(HIPBLASLT_ENABLE_MARKER)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER)
@@ -402,6 +399,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
         rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
     endif()
 
+    rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
     rocm_package_setup_client_component(benchmarks
         DEPENDS
@@ -484,7 +482,7 @@ if(HIPBLASLT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
 endif()
 
-if(ROCM_LIBRARIES_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
+if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
     # rocm_create_package makes decisions on what type of package to produce
     # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
     # a dev package.

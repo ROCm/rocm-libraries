@@ -102,7 +102,7 @@ extern "C" {
 *  In general, when multiplying two sparse matrices together, it is entirely possible that the resulting matrix will require a
 *  larger index representation to store correctly. For example, when multiplying \f$A \times B\f$ using
 *  \ref rocsparse_indextype_i32 index types for the row pointer and column indices arrays, it may be the case that the row pointer
-*  of the resulting \f$C\f$ matrix would require index precision \ref rocsparse_indextype_i64. This is currently not supported. 
+*  of the resulting \f$C\f$ matrix would require index precision \ref rocsparse_indextype_i64. This is currently not supported.
 *  In this scenario, the user would need to store the \f$A\f$ and \f$B\f$ matrices using the higher index precision.
 *
 *  \note

@@ -112,8 +112,8 @@ extern "C" {
  *              \f$\max{(1, k)}\f$ where \p k=blockDim*kb otherwise.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p n, \p kb, \p nnzb, \p ldb, 
- *              \p ldc, \p descr, \p alpha, \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p n, \p kb, \p nnzb, \p ldb,
+ *              \p ldc, \p descr, \p alpha, \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
  *              \p B, \p beta or \p C is invalid.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -148,7 +148,7 @@ extern "C" {
  *      int k = kb * blockDim;
  *
  *      // Allocate and generate dense matrix B (k x n)
- *      float hB[6 * 3] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 
+ *      float hB[6 * 3] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f,
  *                      11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f, 17.0f, 18.0f};
  *
  *      int* dbsrRowPtr = NULL;

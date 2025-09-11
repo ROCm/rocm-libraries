@@ -223,27 +223,30 @@ namespace TensileLite
                                                              bool                          transB,
                                                              const Hardware&               hardware,
                                                              const std::vector<TileTuple>& MT_list,
-                                                             size_t element_size_A, //In bits
-                                                             size_t element_size_B, //In bits
-                                                             size_t element_size_out, //In bits
+                                                             size_t   element_size_A, //In bits
+                                                             size_t   element_size_B, //In bits
+                                                             size_t   element_size_out, //In bits
                                                              DataType miDataType,
-                                                             size_t mx_block_size,
-                                                             double H_L2,
-                                                             bool   debug,
-                                                             bool   print,
-                                                             size_t WGM)
+                                                             size_t   mx_block_size,
+                                                             double   H_L2,
+                                                             bool     debug,
+                                                             bool     print,
+                                                             size_t   WGM)
         {
             std::vector<ResultTuple> valid_results;
             valid_results.reserve(MT_list.size());
 
+            bool tf32_emu = ((miDataType == DataType::XFloat32)
+                             && (hardware.arch == Hardware::Architecture::gfx950));
+
             for(const auto& mt : MT_list)
             {
-                size_t MT_M = std::get<0>(mt);
-                size_t MT_N = std::get<1>(mt);
-                size_t MT_K = std::get<2>(mt);
-                size_t MI_M = std::get<3>(mt);
-                size_t MI_N = std::get<4>(mt);
-                size_t MI_K = std::get<5>(mt);
+                size_t MT_M      = std::get<0>(mt);
+                size_t MT_N      = std::get<1>(mt);
+                size_t MT_K      = std::get<2>(mt);
+                size_t MI_M      = std::get<3>(mt);
+                size_t MI_N      = std::get<4>(mt);
+                size_t MI_K      = std::get<5>(mt);
                 size_t occupancy = std::get<6>(mt);
 
                 if(debug)
@@ -279,7 +282,8 @@ namespace TensileLite
                                                                  mx_block_size,
                                                                  debug);
 
-                    valid_results.emplace_back(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy);
+                    valid_results.emplace_back(
+                        Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy);
                 }
                 else if(debug)
                 {
@@ -301,10 +305,14 @@ namespace TensileLite
             // 2) Collect results that tie for the absolute best latency.
             double best_latency = std::get<0>(valid_results.front());
             size_t num_the_same = 0;
+
+            // TODO: Experiment on what the threshold should be.
+            // Likely can be replaced with 5.
+            size_t tie_breaker_threshold = tf32_emu ? 5 : 10;
             for(const auto& res : valid_results)
             {
-                // If it's "essentially" the same as best_latency, include it
-                if(std::fabs(std::get<0>(res) - best_latency) < 10)
+                // If it's "essentially" (within 5 diff) the same as best_latency, include it
+                if(std::fabs(std::get<0>(res) - best_latency) < tie_breaker_threshold)
                     num_the_same++;
                 else
                     break; // Once we pass best_latency, we can stop.

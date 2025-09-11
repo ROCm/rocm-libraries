@@ -27,8 +27,8 @@
 #include "test_utils_thread_operators.hpp"
 
 // hipcub API
-#include "hipcub/device/device_segmented_reduce.hpp"
-#include "hipcub/iterator/counting_input_iterator.hpp"
+#include <hipcub/device/device_segmented_reduce.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
 
 template<class Input,
          class Output,

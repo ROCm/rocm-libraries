@@ -212,4 +212,3 @@ bool operator!=(const discard_block_engine<Engine,p,r> &lhs,
 } // end random
 
 THRUST_NAMESPACE_END
-

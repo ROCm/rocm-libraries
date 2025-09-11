@@ -26,8 +26,8 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_types.hpp"
 
-#include "hipcub/device/device_copy.hpp"
-#include "hipcub/thread/thread_operators.hpp"
+#include <hipcub/device/device_copy.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
 #include <gtest/gtest-typed-test.h>
 #include <gtest/gtest.h>
