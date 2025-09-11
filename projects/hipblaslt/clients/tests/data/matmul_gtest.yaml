@@ -70,7 +70,8 @@ Tests:
 - name: matmul_small
   category: quick
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *small_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
@@ -79,7 +80,8 @@ Tests:
 - name: matmul_conj_small
   category: quick
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *small_matrix_size_range
   transA_transB: *conjugate_transA_transB_range
   alpha_beta: *alpha_beta_range_small
@@ -88,7 +90,8 @@ Tests:
 - name: matmul_medium
   category: pre_checkin
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *medium_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
@@ -96,7 +99,8 @@ Tests:
 - name: matmul_batch_medium
   category: pre_checkin
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *medium_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
@@ -105,7 +109,8 @@ Tests:
 - name: matmul_medium_HMM
   category: HMM
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *medium_matrix_size_range
   transA: [ N ]
   transB: [ N ]
@@ -116,7 +121,8 @@ Tests:
 - name: matmul_chunk
   category: pre_checkin
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *chunk_matrix_size_range
   transA_transB: *transA_transB_range
   alpha: 2
@@ -125,7 +131,8 @@ Tests:
 - name: matmul_deepbench
   category: nightly
   function:
-    matmul: *real_precisions
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
   matrix_size: *deepbench_sizes
   alpha_beta: *deepbench_alpha_beta_range
   transA_transB: *deepbench_transA_transB_range
@@ -2181,5 +2188,31 @@ Tests:
   norm_check: 1
   requested_solution_num: 3
   gpu_arch: '950'
+
+- name: matmul_relu_clamp_useE
+  category: pre_checkin
+  function:
+    matmul:
+    - {a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
+    - {a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r }
+    - {a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
+    - {a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r }
+    - {a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  activation_type: [relu, clamp]
+  activation_arg1: -1.5
+  activation_arg2: 1.5
+  bias_vector: [0, 1]
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '942'
 
 ...

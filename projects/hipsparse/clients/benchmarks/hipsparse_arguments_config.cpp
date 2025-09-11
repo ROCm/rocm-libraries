@@ -283,11 +283,11 @@ void hipsparse_arguments_config::set_description(options_description& desc)
     ("csr2csc_alg",
      value<int>(&this->csr2csc_alg)->default_value(csr2csc_alg_support::get_default_algorithm()),
      csr2csc_alg_support::get_description())
-    
+
     ("dense2sparse_alg",
      value<int>(&this->dense2sparse_alg)->default_value(dense2sparse_alg_support::get_default_algorithm()),
      dense2sparse_alg_support::get_description())
-    
+
     ("sparse2dense_alg",
      value<int>(&this->sparse2dense_alg)->default_value(sparse2dense_alg_support::get_default_algorithm()),
      sparse2dense_alg_support::get_description())
@@ -323,11 +323,11 @@ void hipsparse_arguments_config::set_description(options_description& desc)
     ("permute",
      value<int>(&this->permute)->default_value(0),
      "Using permutation vector in coosort, csrsort, cscsort. Do not use vector: 0, Use vector: 1 (default 0)")
-     
+
     ("gpsv_alg",
      value<int>(&this->gpsv_alg)->default_value(0),
      "Algorithm for gpsv routine. Currently only qr supported: 0, (default 0)")
-     
+
     ("gtsv_alg",
      value<int>(&this->gtsv_alg)->default_value(0),
      "Algorithm for gtsv routine. Possibly choices are thomas: 1, lu: 2, qr: 3, (default 0)");
@@ -487,4 +487,3 @@ int hipsparse_arguments_config::parse(int&argc,char**&argv, options_description&
 
     return 0;
 }
-
