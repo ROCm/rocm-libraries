@@ -63,81 +63,6 @@ enum ReturnCodes : int
     SolutionNotSupportedOnArch = 3
 };
 
-template <typename T>
-class RotatingBuffer
-{
-public:
-    RotatingBuffer(const std::vector<T>& hostData, size_t rotatingBufferSizeBytes)
-        : m_numElems(hostData.size()),
-          m_rotatingBufferElems(rotatingBufferSizeBytes > 0 ? rotatingBufferSizeBytes / sizeof(T) : 0),
-          m_currentOffset(0)
-    {
-        if(hostData.empty())
-        {
-            Throw<FatalError>("RotatingBuffer: hostData is empty");
-        }
-
-        // If rotatingBufferSize == 0, disable rotation
-        if(rotatingBufferSizeBytes == 0)
-        {
-            m_buffer = make_shared_device<T>(m_numElems);
-            HIP_CHECK(hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
-            return;
-        }
-
-        if(m_rotatingBufferElems == 0)
-        {
-            Throw<FatalError>("RotatingBuffer: rotatingBufferSizeBytes too small for element size");
-        }
-
-        if(m_numElems >= m_rotatingBufferElems)
-        {
-            m_buffer = make_shared_device<T>(m_numElems);
-            hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice);
-        }
-        else
-        {
-            m_buffer = make_shared_device<T>(m_rotatingBufferElems);
-            size_t numCopies = m_rotatingBufferElems / m_numElems;
-            for(size_t r = 0; r < numCopies; ++r)
-            {
-                T* dst = m_buffer.get() + r * m_numElems;
-                HIP_CHECK(hipMemcpy(dst, hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
-            }
-        }
-    }
-
-    std::span<T> next()
-    {
-        if(m_rotatingBufferElems == 0)
-        {
-            m_currentOffset = 0;
-            return std::span<T>(m_buffer.get(), m_numElems);
-        }
-
-        if(m_numElems < m_rotatingBufferElems)
-        {
-            m_currentOffset = (m_currentOffset + m_numElems) % m_rotatingBufferElems;
-        }
-        else
-        {
-            m_currentOffset = 0; // always return base
-        }
-        if(m_currentOffset + m_numElems > (m_numElems < m_rotatingBufferElems ? m_rotatingBufferElems : m_numElems))
-        {
-            Throw<FatalError>("RotatingBuffer::next: computed offset out of bounds");
-        }
-
-        return std::span<T>(m_buffer.get() + m_currentOffset, m_numElems);
-    }
-
-private:
-    size_t m_numElems;                // number of elements in one matrix
-    size_t m_rotatingBufferElems;     // rotating buffer size, in elements (0 means rotation is disabled)
-    size_t m_currentOffset;
-    std::shared_ptr<T> m_buffer;
-};
-
 namespace rocRoller::Client::GEMMClient
 {
     using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
@@ -435,9 +360,17 @@ namespace rocRoller::Client::GEMMClient
             // Warmup runs
             for(int i = 0; i < benchmarkParams.numWarmUp; ++i)
             {
-                commandArgs.setArgument(aTag, ArgumentType::Value, static_cast<int>(spanA.size()), spanA.data());
-                commandArgs.setArgument(bTag, ArgumentType::Value, static_cast<int>(spanB.size()), spanB.data());
-                commandArgs.setArgument(cTag, ArgumentType::Value, static_cast<int>(spanC.size()), spanC.data());
+               commandArgs.setArgument(aTag, ArgumentType::Buffer,
+                        static_cast<int>(spanA.size() * sizeof(PackedTypeA)),
+                        reinterpret_cast<unsigned char*>(spanA.data()));
+
+               commandArgs.setArgument(bTag, ArgumentType::Buffer,
+                        static_cast<int>(spanB.size() * sizeof(PackedTypeB)),
+                        reinterpret_cast<unsigned char*>(spanB.data()));
+
+               commandArgs.setArgument(cTag, ArgumentType::Buffer,
+                        static_cast<int>(spanC.size() * sizeof(C)),
+                        reinterpret_cast<unsigned char*>(spanC.data()));
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs);
             }
@@ -445,9 +378,17 @@ namespace rocRoller::Client::GEMMClient
             HIP_TIMER(t_kernel, "GEMM", benchmarkParams.numInner);
             for(int inner = 0; inner < benchmarkParams.numInner; ++inner)
             {
-                commandArgs.setArgument(aTag, ArgumentType::Value, static_cast<int>(spanA.size()), spanA.data());
-                commandArgs.setArgument(bTag, ArgumentType::Value, static_cast<int>(spanB.size()), spanB.data());
-                commandArgs.setArgument(cTag, ArgumentType::Value, static_cast<int>(spanC.size()), spanC.data());
+                commandArgs.setArgument(aTag, ArgumentType::Buffer,
+                        static_cast<int>(spanA.size() * sizeof(PackedTypeA)),
+                        reinterpret_cast<unsigned char*>(spanA.data()));
+
+               commandArgs.setArgument(bTag, ArgumentType::Buffer,
+                        static_cast<int>(spanB.size() * sizeof(PackedTypeB)),
+                        reinterpret_cast<unsigned char*>(spanB.data()));
+
+               commandArgs.setArgument(cTag, ArgumentType::Buffer,
+                        static_cast<int>(spanC.size() * sizeof(C)),
+                        reinterpret_cast<unsigned char*>(spanC.data()));
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
