@@ -540,7 +540,7 @@ inline bool operator>=(tensile_bfloat8 a, tensile_bfloat8 b)
 
 // ================ Explicit downcasting to support Stochastic Rounding and clipping ===============
 
-#if 0 // enable_if_t supported from C++14 and above, not C++11! enable it when compiler updated 
+#if 0 // enable_if_t supported from C++14 and above, not C++11! enable it when compiler updated
     template <typename T,
               typename Ta,
               bool stochastic_rounding,
