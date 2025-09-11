@@ -368,9 +368,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
             cycles += calculateBankConflictCycles(
                 createBankToAddressCounts(groupAddresses, dwords, gfx));
         }
-        // Add 4 cycles for address transfer
-        // TODO: this should only be for writes
-        return cycles + 4;
+        return cycles + 4; // address transfer
     }
 
     DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
