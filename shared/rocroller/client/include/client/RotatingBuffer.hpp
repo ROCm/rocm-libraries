@@ -36,6 +36,14 @@
 #include <rocRoller/Utilities/Utils.hpp>
 
 template <typename T>
+static std::shared_ptr<T> makeSharedDeviceUninitialized(size_t count)
+{
+    T* raw = nullptr;
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&raw), count * sizeof(T)));
+    return std::shared_ptr<T>(raw, [](T* p){ hipFree(p); });
+}
+
+template <typename T>
 class RotatingBuffer
 {
 public:
@@ -52,8 +60,11 @@ public:
         // If rotatingBufferSize == 0, disable rotation
         if(rotatingBufferSizeBytes == 0)
         {
-            m_buffer = make_shared_device<T>(m_numElems);
-            HIP_CHECK(hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
+            m_buffer = makeSharedDeviceUninitialized<T>(m_numElems);
+            HIP_CHECK(hipMemcpy(m_buffer.get(),
+                                hostData.data(),
+                                m_numElems * sizeof(T),
+                                hipMemcpyHostToDevice));
             return;
         }
 
@@ -64,17 +75,25 @@ public:
 
         if(m_numElems >= m_rotatingBufferElems)
         {
-            m_buffer = make_shared_device<T>(m_numElems);
-            hipMemcpy(m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice);
+            m_buffer = makeSharedDeviceUninitialized<T>(m_numElems);
+
+            HIP_CHECK(hipMemcpy(m_buffer.get(),
+                                hostData.data(),
+                                m_numElems * sizeof(T),
+                                hipMemcpyHostToDevice));
         }
         else
         {
-            m_buffer = make_shared_device<T>(m_rotatingBufferElems);
+            m_buffer = makeSharedDeviceUninitialized<T>(m_rotatingBufferElems);
+
             size_t numCopies = m_rotatingBufferElems / m_numElems;
             for(size_t r = 0; r < numCopies; ++r)
             {
                 T* dst = m_buffer.get() + r * m_numElems;
-                HIP_CHECK(hipMemcpy(dst, hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
+                HIP_CHECK(hipMemcpy(dst,
+                                    hostData.data(),
+                                    m_numElems * sizeof(T),
+                                    hipMemcpyHostToDevice));
             }
         }
     }
