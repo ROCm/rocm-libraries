@@ -1294,6 +1294,8 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
         swizzleScale=False,
         prefetchMixMemOps=True,
         betaInFma=True,
+        scaleValue_A=1e-2,
+        scaleValue_B=1e-2,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
         matchMemoryAccess=True,
@@ -1305,11 +1307,14 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
             type_C="half",
             type_D="half",
             type_acc="float",
+            scale_A="SingleScale",
+            scaleType_A="E8M0",
+            scale_B="SingleScale",
+            scaleType_B="E8M0",
         ),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
-        noCheck=True,
     )
 
 

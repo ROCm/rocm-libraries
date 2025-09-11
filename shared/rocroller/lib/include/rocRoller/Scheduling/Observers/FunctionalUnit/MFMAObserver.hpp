@@ -84,6 +84,8 @@ namespace rocRoller
 
             static bool isTargetedInstruction(Instruction const& inst);
 
+            std::string state() const;
+
         private:
             int m_programCycle = 0;
 

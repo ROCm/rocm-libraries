@@ -134,9 +134,19 @@ namespace rocRoller
 
         bool MFMACoexecObserver::isTargetedInstruction(Instruction const& inst)
         {
-            return GPUInstructionInfo::isMFMA(inst.getOpCode())
-                   && inst.getOpCode().find("f8f6f4") != std::string::npos
-                   && inst.getOpCode().find("scale") == std::string::npos;
+            auto isMxInstruction = GPUInstructionInfo::isMFMA(inst.getOpCode())
+                   && inst.getOpCode().find("f8f6f4") != std::string::npos;
+
+            if(!isMxInstruction)
+                return false;
+
+            if(inst.getOpCode().find("scale") == std::string::npos)
+                return true;
+
+            if(Settings::Get(Settings::SchedulerCost) == CostFunction::LinearWeightedSimple)
+                return true;
+
+            return false;
         }
 
         InstructionStatus MFMACoexecObserver::peek(Instruction const& inst) const
@@ -203,6 +213,18 @@ namespace rocRoller
 
             combineCoexec(
                 m_disallowedOps, inst.peekedStatus().disallowedCoexec, m_programCycle - 1);
+        }
+
+        std::string MFMACoexecObserver::state() const
+        {
+            std::string rv = fmt::format("Cycle: {}\n", m_programCycle);
+
+            rv += fmt::format("disallowed:\n{{\n{}}}\n", toString(m_disallowedOps));
+
+            rv += fmt::format(
+                "A Operands: {}\nB Operands: {}\n", toString(m_aOperands), toString(m_bOperands));
+
+            return rv;
         }
     }
 }
