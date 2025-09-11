@@ -272,7 +272,23 @@
     #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP ROCPRIM_CLANG_SUPPRESS_WARNING_POP
 #endif
 
-#define ROCPRIM_HAS_DPP() __builtin_amdgcn_is_invocable(__builtin_amdgcn_mov_dpp)
-#define ROCPRIM_HAS_PERMLANE() __builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane16)
+#if __has_builtin(__builtin_amdgcn_is_invocable)
+    #define ROCPRIM_HAS_DPP() __builtin_amdgcn_is_invocable(__builtin_amdgcn_mov_dpp)
+    #define ROCPRIM_HAS_PERMLANE() __builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane16)
+#elif defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
+    #define ROCPRIM_HAS_DPP() false
+    #define ROCPRIM_HAS_PERMLANE() false
+#else
+    #if defined(ROCPRIM_DETAIL_HAS_DPP) && ROCPRIM_DETAIL_HAS_DPP == 1
+        #define ROCPRIM_HAS_DPP() true
+    #else
+        #define ROCPRIM_HAS_DPP() false
+    #endif
+    #if defined(__GFX8__) || defined(__GFX9__)
+        #define ROCPRIM_HAS_PERMLANE() false
+    #else
+        #define ROCPRIM_HAS_PERMLANE() true
+    #endif
+#endif
 
 #endif // ROCPRIM_CONFIG_HPP_
