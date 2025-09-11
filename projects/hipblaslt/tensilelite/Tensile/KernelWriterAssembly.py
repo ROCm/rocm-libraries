@@ -7682,9 +7682,10 @@ class KernelWriterAssembly(KernelWriter):
 
           if not tPA["isSwizzled"] and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
             for a in range(0, kernel["MIWaveTileA"]):
-              for iui in range(0, innerUnroll):
-                aStr = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a)
-                shiftK.add(_shiftLrElements(aStr, vgprPerInputA, a))
+              for ti in range(0, numTileInInstA):
+                for iui in range(0, innerUnroll):
+                  aStr = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a)
+                  shiftK.add(_shiftLrElements(aStr, vgprPerInputA, a))
 
           numSet0GroupA = vgprPerInputA // vgprPerSet0Group
           for group in range(0, numSet0GroupA):
@@ -7729,9 +7730,10 @@ class KernelWriterAssembly(KernelWriter):
             if not tPA["isSwizzled"]:
               for bk in range(0, vgprPerSet0Group):
                 for a in range(0, kernel["MIWaveTileA"]):
-                  for iui in range(0, innerUnroll):
-                    aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=bk + group * vgprPerSet0Group), 1)
-                    shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
+                  for ti in range(0, numTileInInstA):
+                    for iui in range(0, innerUnroll):
+                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, a, bk=bk + group * vgprPerSet0Group), 1)
+                      shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
 
           if kernel["ProblemType"]["Sparse"] == 2 and numMIInput//8 >= 1:
             shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
@@ -7750,9 +7752,10 @@ class KernelWriterAssembly(KernelWriter):
 
           if tPB["bpe"] == 0.75 and kernel["enableLDSTrB"]:
             for b in range(0, kernel["MIWaveTileB"]):
-              for iui in range(0, innerUnroll):
-                bStr = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b)
-                shiftK.add(_shiftLrElements(bStr, vgprPerInputB, b))
+              for ti in range(0, numTileInInstB):
+                for iui in range(0, innerUnroll):
+                  bStr = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b)
+                  shiftK.add(_shiftLrElements(bStr, vgprPerInputB, b))
 
           numSet0GroupB = vgprPerInputB//vgprPerSet0Group
           for group in range(0, numSet0GroupB):
@@ -7794,9 +7797,10 @@ class KernelWriterAssembly(KernelWriter):
               shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
             for bk in range(0, vgprPerSet0Group):
               for b in range(0, kernel["MIWaveTileB"]):
-                for iui in range(0, innerUnroll):
-                  bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=bk + group*vgprPerSet0Group), 1)
-                  shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
+                for ti in range(0, numTileInInstB):
+                  for iui in range(0, innerUnroll):
+                    bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, b, bk=bk + group*vgprPerSet0Group), 1)
+                    shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=0, src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
 
           # replace elements with 0 for same thread, this conducting shift and mask between numElementsPerRead
           if numMIInput > 1 and kernel["AssertSummationElementMultiple"] < 32 and tPA["bpe"] != 0.75 and tPB["bpe"] != 0.75:
@@ -7826,193 +7830,199 @@ class KernelWriterAssembly(KernelWriter):
               tmpVgpr2   = self.vgprPool.checkOutAligned(2, 2, "tmpVgpr2")
 
             for a in range(0, kernel["MIWaveTileA"]):
-              for iui in range(0, innerUnroll):
-                aStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a)
-                aStr = vgpr(aStr_base, min(2, vgprPerInput))
-                if is_wmma_v2:
-                  if vgprPerInput == 4:
-                    a_64_shift = Label(label=self.labels.getNameInc("a_64_Shift"), comment="")
-                    a_32_shift = Label(label=self.labels.getNameInc("a_32_Shift"), comment="")
-                    a_common = Label(label=self.labels.getNameInc("a_shift_end"), comment="")
-                    if kernel["UseF32XEmulation"]:
-                      aStr1 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a+1), min(2, vgprPerInput))
-                      aStr2 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a+2), min(2, vgprPerInput))
-                    else:
-                      aStr1 = vgpr(aStr_base + "+1", min(2, vgprPerInput))
-                      aStr2 = vgpr(aStr_base + "+2", min(2, vgprPerInput))
-                    shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
-                    shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset > 63"))
-                    shiftK.add(SCBranchSCC1(labelName=a_64_shift.getLabelName(), comment="jump when positive"))
-                    shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=32, comment="check offset > 32"))
-                    shiftK.add(SCBranchSCC1(labelName=a_32_shift.getLabelName(), comment="jump when positive"))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg), src=vgpr(tmpVgpr2),comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr1, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr2, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(SBranch(a_common.getLabelName()))
-                    shiftK.add(a_32_shift)
-                    shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2),comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr1, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(SAddU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
-                    shiftK.add(SBranch(a_common.getLabelName()))
-                    shiftK.add(a_64_shift)
-                    shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=0, comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(abReg+2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
-                    shiftK.add(SAddU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
-                    shiftK.add(a_common)
-                  elif vgprPerInput == 2:
-                    shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
-                  elif vgprPerInput > 1:
-                    assert False, f"Invalid vgprPerInput: {vgprPerInput}"
-
-                  for bk in range(0, vgprPerInput):
-                    aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=bk), 1)
-                    shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
-                else: # mfma or wmma_v3
-                  if kernel["ProblemType"]["Sparse"]:
-                    if vgprPerInput == 2:
-                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a), 2)
+              for ti in range(0, numTileInInstA):
+                for iui in range(0, innerUnroll):
+                  aStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a)
+                  aStr = vgpr(aStr_base, min(2, vgprPerInput))
+                  if is_wmma_v2:
+                    if vgprPerInput == 4:
+                      a_64_shift = Label(label=self.labels.getNameInc("a_64_Shift"), comment="")
+                      a_32_shift = Label(label=self.labels.getNameInc("a_32_Shift"), comment="")
+                      a_common = Label(label=self.labels.getNameInc("a_shift_end"), comment="")
+                      if kernel["UseF32XEmulation"]:
+                        aStr1 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a+1), min(2, vgprPerInput))
+                        aStr2 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a+2), min(2, vgprPerInput))
+                      else:
+                        aStr1 = vgpr(aStr_base + "+1", min(2, vgprPerInput))
+                        aStr2 = vgpr(aStr_base + "+2", min(2, vgprPerInput))
+                      shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
+                      shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset > 63"))
+                      shiftK.add(SCBranchSCC1(labelName=a_64_shift.getLabelName(), comment="jump when positive"))
+                      shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=32, comment="check offset > 32"))
+                      shiftK.add(SCBranchSCC1(labelName=a_32_shift.getLabelName(), comment="jump when positive"))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg), src=vgpr(tmpVgpr2),comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr1, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr2, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(SBranch(a_common.getLabelName()))
+                      shiftK.add(a_32_shift)
+                      shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2),comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr1, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(SAddU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
+                      shiftK.add(SBranch(a_common.getLabelName()))
+                      shiftK.add(a_64_shift)
+                      shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+1), src=0, comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg+2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
+                      shiftK.add(SAddU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
+                      shiftK.add(a_common)
+                    elif vgprPerInput == 2:
                       shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
-                  elif vgprPerInput <= 2:
-                    shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
-                  if vgprPerInput >= 4 and vgprPerInput % 2 == 0:
-                    for ivgpr in range(0, vgprPerInput, 2):
-                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=ivgpr), 2)
-                      shiftK.add(VShiftLeft(dst=vgpr(abReg+ivgpr, 2), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
-                  for bk in range(0, vgprPerInput):
-                    aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=bk), 1)
-                    elemIdx = bk * self.states.bpr // tPA["bpe"]                    
-                    if is_wmma_v3: # may check 64 bit
-                      vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPA["bpe"] * 8)
-                      mivw = vgprLayout[-1]
-                      if vgprPerInput >= 2:
-                        kIncA = int((64 // (numRegistersIn * 32)))
-                        if elemIdx == 0:
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), kIncA, "add part of K: 64 bit groupd"))
-                        elif elemIdx % mivw == 0:
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA+mivw, "add part of K: 64 bit groupd"))
-                        elif bk % 2 == 0:
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K: 64 bit groupd"))
-                        shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
-                        shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2), comment=""))
-                    else:
-                      if vgprPerInput >= 4:
-                        if bk == 0:
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), numMIInput//numSet0GroupA, "add part of K"))
-                        elif bk % 2 == 0:
-                          kIncA = numMIInput//numSet0GroupA
-                          if bk == 4 and self.states.asmCaps["HasMFMA_f8f6f4"]:
-                            kIncA = 56 if kernel["MatrixInstK"] == 128 else 24
-                            if kernel["UseF32XEmulation"]:
-                              kIncA = 14 if kernel["MatrixInstK"] == 32 else 6
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K"))
-                        # replace 0 for differnet thread
-                        if kernel["LocalSplitU"] > 1:
-                          shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
-                        shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2,2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
-                      shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2,2), comment=""))
+                    elif vgprPerInput > 1:
+                      assert False, f"Invalid vgprPerInput: {vgprPerInput}"
+
+                    for bk in range(0, vgprPerInput):
+                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=bk), 1)
+                      shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
+
+                  else: # mfma or wmma_v3
+
+                    if kernel["ProblemType"]["Sparse"]:
+                      if vgprPerInput == 2:
+                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a), 2)
+                        shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                    elif vgprPerInput <= 2:
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                    if vgprPerInput >= 4 and vgprPerInput % 2 == 0:
+                      for ivgpr in range(0, vgprPerInput, 2):
+                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=ivgpr), 2)
+                        shiftK.add(VShiftLeft(dst=vgpr(abReg+ivgpr, 2), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                    for bk in range(0, vgprPerInput):
+                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=bk), 1)
+                      elemIdx = bk * self.states.bpr // tPA["bpe"]                    
+                      if is_wmma_v3: # may check 64 bit
+                        vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPA["bpe"] * 8)
+                        mivw = vgprLayout[-1]
+                        if vgprPerInput >= 2:
+                          kIncA = int((64 // (numRegistersIn * 32)))
+                          if elemIdx == 0:
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), kIncA, "add part of K: 64 bit groupd"))
+                          elif elemIdx % mivw == 0:
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA+mivw, "add part of K: 64 bit groupd"))
+                          elif bk % 2 == 0:
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K: 64 bit groupd"))
+                          shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                          shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2), comment=""))
+                      else:
+                        if vgprPerInput >= 4:
+                          if bk == 0:
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), numMIInput//numSet0GroupA, "add part of K"))
+                          elif bk % 2 == 0:
+                            kIncA = numMIInput//numSet0GroupA
+                            if bk == 4 and self.states.asmCaps["HasMFMA_f8f6f4"]:
+                              kIncA = 56 if kernel["MatrixInstK"] == 128 else 24
+                              if kernel["UseF32XEmulation"]:
+                                kIncA = 14 if kernel["MatrixInstK"] == 32 else 6
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K"))
+                          # replace 0 for differnet thread
+                          if kernel["LocalSplitU"] > 1:
+                            shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
+                          shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2,2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                        shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2,2), comment=""))
 
             for b in range(0, kernel["MIWaveTileB"]):
-              for iui in range(0, innerUnroll):
-                bStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b)
-                bStr = vgpr(bStr_base, min(2, vgprPerInput))
-                if is_wmma_v2:
-                  if vgprPerInput == 4:
-                    b_64_shift = Label(label=self.labels.getNameInc("b_64_Shift"), comment="")
-                    b_32_shift = Label(label=self.labels.getNameInc("b_32_Shift"), comment="")
-                    b_common = Label(label=self.labels.getNameInc("b_shift_end"), comment="")
-                    if kernel["UseF32XEmulation"]:
-                      bStr1 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b+1), min(2, vgprPerInput))
-                      bStr2 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b+2), min(2, vgprPerInput))
+              for ti in range(0, numTileInInstB):
+                for iui in range(0, innerUnroll):
+                  bStr_base = self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b)
+                  bStr = vgpr(bStr_base, min(2, vgprPerInput))
+                  if is_wmma_v2:
+                    if vgprPerInput == 4:
+                      b_64_shift = Label(label=self.labels.getNameInc("b_64_Shift"), comment="")
+                      b_32_shift = Label(label=self.labels.getNameInc("b_32_Shift"), comment="")
+                      b_common = Label(label=self.labels.getNameInc("b_shift_end"), comment="")
+                      if kernel["UseF32XEmulation"]:
+                        bStr1 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b+1), min(2, vgprPerInput))
+                        bStr2 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b+2), min(2, vgprPerInput))
+                      else:
+                        bStr1 = vgpr(bStr_base + "+1", min(2, vgprPerInput))
+                        bStr2 = vgpr(bStr_base + "+2", min(2, vgprPerInput))
+                      shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
+                      shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset >63"))
+                      shiftK.add(SCBranchSCC1(labelName=b_64_shift.getLabelName(), comment="jump when positive"))
+                      shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=32, comment="check offset >32"))
+                      shiftK.add(SCBranchSCC1(labelName=b_32_shift.getLabelName(), comment="jump when positive"))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg), src=vgpr(tmpVgpr2),comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr1, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr2, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(SBranch(b_common.getLabelName()))
+                      shiftK.add(b_32_shift)
+                      shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2),comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr1, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
+                      shiftK.add(SBranch(b_common.getLabelName()))
+                      shiftK.add(b_64_shift)
+                      shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
+                      shiftK.add(VMovB32(dst=vgpr(abReg+1), src=0, comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg+2,2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
+                      shiftK.add(b_common)
                     else:
-                      bStr1 = vgpr(bStr_base + "+1", min(2, vgprPerInput))
-                      bStr2 = vgpr(bStr_base + "+2", min(2, vgprPerInput))
-                    shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
-                    shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset >63"))
-                    shiftK.add(SCBranchSCC1(labelName=b_64_shift.getLabelName(), comment="jump when positive"))
-                    shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=32, comment="check offset >32"))
-                    shiftK.add(SCBranchSCC1(labelName=b_32_shift.getLabelName(), comment="jump when positive"))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg), src=vgpr(tmpVgpr2),comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr1, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr2, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(SBranch(b_common.getLabelName()))
-                    shiftK.add(b_32_shift)
-                    shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2),comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr1, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
-                    shiftK.add(SBranch(b_common.getLabelName()))
-                    shiftK.add(b_64_shift)
-                    shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
-                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=0, comment=""))
-                    shiftK.add(VShiftLeft(dst=vgpr(abReg+2,2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
-                    shiftK.add(b_common)
-                  else:
-                    shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
-                  for bk in range(0, vgprPerInput):
-                    bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=bk), 1)
-                    shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
-                else: # mfma or wmma_v3
-                  if kernel["ProblemType"]["Sparse"]:
-                    if vgprPerInput == 2:
-                      aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a), 2)
-                      shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
-                  elif vgprPerInput <= 2:
-                    shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
-                  if vgprPerInput >= 4 and vgprPerInput % 2 == 0:
-                    for ivgpr in range(0, vgprPerInput, 2):
-                      bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=ivgpr), 2)
-                      shiftK.add(VShiftLeft(dst=vgpr(abReg+ivgpr, 2), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
-                  for bk in range(0, vgprPerInput):
-                    bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=bk), 1)
-                    elemIdx = bk * self.states.bpr // tPB["bpe"]
-                    if is_wmma_v3:
-                      vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
-                      mivw = vgprLayout[-1]
-                      if vgprPerInput >= 2:
-                        kIncB = int((64 // (numRegistersIn * 32)))
-                        if elemIdx == 0:
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), kIncB, "add part of K: 64 bits group"))
-                        elif elemIdx % mivw == 0:
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB+mivw, "add part of K: 64 bit groupd"))
-                        elif bk % 2 == 0:
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K: 64 bits group"))
-                        shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
-                        shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2), comment=""))
-                    else:
-                      if vgprPerInput >= 4:
-                        if bk == 0:
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), numMIInput//numSet0GroupB, "add part of K"))
-                        elif bk % 2 == 0:
-                          kIncB = numMIInput//numSet0GroupB
-                          if bk == 4: # when vgprPerInput == 8
-                            kIncB = 56 if kernel["MatrixInstK"] == 128 else 24
-                            if kernel["UseF32XEmulation"]:
-                              kIncB = 14 if kernel["MatrixInstK"] == 32 else 6
-                          shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
-                        # replace 0 for differnet thread
-                        if kernel["LocalSplitU"] > 1:
-                          shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
-                        shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2,2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
-                      shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2,2), comment=""))
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
+                    for bk in range(0, vgprPerInput):
+                      bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=bk), 1)
+                      shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
+
+                  else: # mfma or wmma_v3
+
+                    if kernel["ProblemType"]["Sparse"]:
+                      if vgprPerInput == 2:
+                        aStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a), 2)
+                        shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                    elif vgprPerInput <= 2:
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
+                    if vgprPerInput >= 4 and vgprPerInput % 2 == 0:
+                      for ivgpr in range(0, vgprPerInput, 2):
+                        bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=ivgpr), 2)
+                        shiftK.add(VShiftLeft(dst=vgpr(abReg+ivgpr, 2), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
+                    for bk in range(0, vgprPerInput):
+                      bStr = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=bk), 1)
+                      elemIdx = bk * self.states.bpr // tPB["bpe"]
+                      if is_wmma_v3:
+                        vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
+                        mivw = vgprLayout[-1]
+                        if vgprPerInput >= 2:
+                          kIncB = int((64 // (numRegistersIn * 32)))
+                          if elemIdx == 0:
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), kIncB, "add part of K: 64 bits group"))
+                          elif elemIdx % mivw == 0:
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB+mivw, "add part of K: 64 bit groupd"))
+                          elif bk % 2 == 0:
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K: 64 bits group"))
+                          shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                          shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2), comment=""))
+                      else:
+                        if vgprPerInput >= 4:
+                          if bk == 0:
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), numMIInput//numSet0GroupB, "add part of K"))
+                          elif bk % 2 == 0:
+                            kIncB = numMIInput//numSet0GroupB
+                            if bk == 4: # when vgprPerInput == 8
+                              kIncB = 56 if kernel["MatrixInstK"] == 128 else 24
+                              if kernel["UseF32XEmulation"]:
+                                kIncB = 14 if kernel["MatrixInstK"] == 32 else 6
+                            shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
+                          # replace 0 for differnet thread
+                          if kernel["LocalSplitU"] > 1:
+                            shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
+                          shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2,2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                        shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2,2), comment=""))
             shiftK.add(TailLoop_SkipZeroOutMask)
             if vgprPerInput == 4 and is_wmma_v2:
               if tmpVgpr2 is not None: self.vgprPool.checkIn(tmpVgpr2)
