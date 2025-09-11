@@ -7786,9 +7786,10 @@ class KernelWriterAssembly(KernelWriter):
                           destVgprHi = vgprSlot[vgprIdx]
                           if r >= rStart and r < rEnd and (r % 2 != 0):
                             vgprIdx = vgprIdx + 1
-                        else:
-                          tmpVgprPool.append(self.vgprPool.checkOut(1, 'destVgprHi'))
-                          destVgprHi = tmpVgprPool[-1]
+                        else: #doTailOpt == 0 case
+                          if r % 2 == 1:
+                            tmpVgprPool.append(self.vgprPool.checkOut(1, 'destVgprHi'))
+                            destVgprHi = tmpVgprPool[-1]
                   regIdx = r // 2
                 elif dataType.isInt8x4() or dataType.isSingle():
                   # Only supported for buffer loads since it has OOB checks
@@ -8052,28 +8053,13 @@ class KernelWriterAssembly(KernelWriter):
                            (numElementsPerLoad != 2 and (r + 1) == (numLoadVectorComp - 1)):
                           module.add(SBranch(labelName=jumpLabel.getLabelName(), comment=""))
                   else:
-                    if doTailOpt == 0 and is16b:
-                      if r % 2 == 1:
-                        packInst.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
-                        if len(tmpVgprPool) == maxNumTempToUse:
-                          module.add(SWaitCnt(vlcnt=0, comment="Wait for previous GR to finish"))
-                          module.add(packInst)
-                          packInst = Module()
-                      else:
-                        #destVgprHi not used so checkIn in vgprpool
-                        self.vgprPool.checkIn(tmpVgprPool[-1])
-                        tmpVgprPool.pop()
-                    elif (doTailOpt == 0 and not is16b) or (doTailOpt == 2 and behavior == "MERGE" and r >= rStart and r < rEnd):
-                      if r % 2 == 1:
-                        if doTailOpt == 0:
-                          module.add(SWaitCnt(vlcnt=0, comment=""))
-                        else:
-                          module.add(SWaitCnt(vlcnt=(loadNum), comment=""))
-                        if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat():
-                          module.add(VLShiftRightB32(dst=vgpr(destVgprHi), shiftHex=hex(8), src=vgpr(destVgprHi), comment="shift right to lower 8 bits"))
-                        module.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
-                        if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat() and (g2lIdx % 2 == 1):
-                          module.add(VLShiftLeftB32(dst=vgpr(destVgpr), shiftHex=hex(16), src=vgpr(destVgpr), comment="shift left to higher 16 bits"))
+                    if r % 2 == 1:
+                      packInst.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
+                      vlcntVal = 0 if doTailOpt == 0 else loadNum
+                      if (doTailOpt == 0 and len(tmpVgprPool) == maxNumTempToUse) or (doTailOpt == 2 and behavior == "MERGE" and r >= rStart and r < rEnd):
+                        module.add(SWaitCnt(vlcnt=(vlcntVal), comment=""))
+                        module.add(packInst)
+                        packInst = Module()
                 else:
                   if doTailOpt == 1 and i == idx and behavior == "MERGE" and\
                      ((numElementsPerLoad == 2 and r == (numLoadVectorComp - 1)) or\
