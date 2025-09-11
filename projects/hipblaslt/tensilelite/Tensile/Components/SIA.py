@@ -369,7 +369,7 @@ def getNumLocalWritePerMfma(writer, kernel, lwStartMfmaIndex):
     #     mfma--24-mfma--24-mfma--24-mfma--24-mfma--24-mfma--24-mfma--24-mfma--24-mfma
     # we need LWPM to get precise LWPM
     # so we iterate formula 10 times to get LWPM
-    while oldValue != newValue and loop < 10:
+    while oldValue != newValue and newValue > 0 and loop < 10:
         loop += 1
         oldValue = newValue
         newValue = roundUp((writesToSched+1 + (oldValue - (writesToSched+1) % oldValue) + oldValue%PRECISION) / numMfmaCanSched)

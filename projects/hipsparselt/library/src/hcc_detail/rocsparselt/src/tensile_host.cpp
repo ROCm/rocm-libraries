@@ -1052,7 +1052,7 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
         configs[i].max_workspace_bytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
         configs[i].use_bias            = tensile_prob.useBias();
         configs[i].use_scale_alpha_vec = tensile_prob.useScaleAlphaVec();
-        configs[i].synchronizer_bytes  = std::ceil(solution->requiredSynchronizerSize(tensile_prob, *hardware) / 16) * 16; // align 16 
+        configs[i].synchronizer_bytes  = std::ceil(solution->requiredSynchronizerSize(tensile_prob, *hardware) / 16) * 16; // align 16
     }
     return rocsparselt_status_success;
 }

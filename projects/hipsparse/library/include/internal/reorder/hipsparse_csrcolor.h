@@ -33,12 +33,12 @@ extern "C" {
 *  \brief Coloring of the adjacency graph of the matrix \f$A\f$ stored in the CSR format.
 *
 *  \details
-*  \p hipsparseXcsrcolor performs the coloring of the undirected graph represented by the (symmetric) sparsity 
-*  pattern of the matrix \f$A\f$ stored in CSR format. Graph coloring is a way of coloring the nodes of a graph 
+*  \p hipsparseXcsrcolor performs the coloring of the undirected graph represented by the (symmetric) sparsity
+*  pattern of the matrix \f$A\f$ stored in CSR format. Graph coloring is a way of coloring the nodes of a graph
 *  such that no two adjacent nodes are of the same color. The \p fractionToColor is a parameter to only color
-*  a given percentage of the graph nodes, the remaining uncolored nodes receive distinct new colors. The optional 
-*  \p reordering array is a permutation array such that unknowns of the same color are grouped. The matrix \f$A\f$ 
-*  must be stored as a general matrix with a symmetric sparsity pattern, and if the matrix \f$A\f$ is non-symmetric 
+*  a given percentage of the graph nodes, the remaining uncolored nodes receive distinct new colors. The optional
+*  \p reordering array is a permutation array such that unknowns of the same color are grouped. The matrix \f$A\f$
+*  must be stored as a general matrix with a symmetric sparsity pattern, and if the matrix \f$A\f$ is non-symmetric
 *  then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.
 *
 *  @param[in]
@@ -58,7 +58,7 @@ extern "C" {
 *  csrColIndA      array of \p nnz elements containing the column indices of the sparse
 *                  CSR matrix.
 *  @param[in]
-*  fractionToColor fraction of nodes to be colored, which should be in the interval \f$[0.0,1.0]\f$, for example \f$0.8\f$ implies that 
+*  fractionToColor fraction of nodes to be colored, which should be in the interval \f$[0.0,1.0]\f$, for example \f$0.8\f$ implies that
 *                  \f$80\f$ percent of nodes will be colored.
 *  @param[out]
 *  ncolors         resulting number of distinct colors.
@@ -70,7 +70,7 @@ extern "C" {
 *  info            structure that holds the information collected during the coloring algorithm.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA, 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA,
 *                                         \p fractionToColor, \p ncolors, \p coloring or \p info pointer is invalid.
 */
 /**@{*/
