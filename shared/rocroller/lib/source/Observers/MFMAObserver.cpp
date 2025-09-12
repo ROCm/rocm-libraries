@@ -135,7 +135,7 @@ namespace rocRoller
         bool MFMACoexecObserver::isTargetedInstruction(Instruction const& inst)
         {
             auto isMxInstruction = GPUInstructionInfo::isMFMA(inst.getOpCode())
-                   && inst.getOpCode().find("f8f6f4") != std::string::npos;
+                                   && inst.getOpCode().find("f8f6f4") != std::string::npos;
 
             if(!isMxInstruction)
                 return false;
