@@ -80,7 +80,7 @@ namespace rocRoller::KernelGraph
             std::string unrollStride;
             int         unrollDimension;
 
-            bool operator==(UnrollStride const& other) const = default;
+            bool operator<=>(UnrollStride const& other) const = default;
         };
 
         struct BaseOffset
@@ -88,7 +88,7 @@ namespace rocRoller::KernelGraph
             std::string base;
             int         subdimension;
 
-            bool operator==(BaseOffset const& other) const = default;
+            bool operator<=>(BaseOffset const& other) const = default;
         };
 
         struct TypeAndNaryArgument

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,6 @@ namespace rocRoller
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         namespace Expression = rocRoller::Expression;
-        using namespace Expression;
 
         inline Expression::ExpressionPtr L(auto const& x)
         {
@@ -299,12 +298,12 @@ namespace rocRoller
                     unitStride = true;
             }
 
-            uint          elementBlockSize = 0;
-            ExpressionPtr elementBlockStride;
-            ExpressionPtr trLoadPairStride;
-            ExpressionPtr elementBlockStridePaddingBytes{L(0u)};
-            ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
-            ExpressionPtr indexExprPaddingBytes{L(0u)};
+            uint                      elementBlockSize = 0;
+            Expression::ExpressionPtr elementBlockStride;
+            Expression::ExpressionPtr trLoadPairStride;
+            Expression::ExpressionPtr elementBlockStridePaddingBytes{L(0u)};
+            Expression::ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
+            Expression::ExpressionPtr indexExprPaddingBytes{L(0u)};
 
             auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
             auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
