@@ -158,15 +158,6 @@ private:
         free(nnz_per_seq);
     }
 
-
-
-
-
-
-
-
-
-
     template <typename T, typename I>
     static void compute_nnz_statistics(const host_ell_matrix<T, I>& that,
                                        rocsparse_direction          direction,
@@ -221,103 +212,6 @@ private:
                                                median_nnz,
                                                max_nnz);
     }
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // template <typename T, typename I, typename J>
-    // static void compute_nnz_statistics(const host_sell_matrix<T, I, J>& that,
-    //                                    rocsparse_direction          direction,
-    //                                    int64_t&                     min_nnz,
-    //                                    int64_t&                     median_nnz,
-    //                                    int64_t&                     max_nnz)
-    // {
-    //     host_raw_compute_nnz_statistics_sell<I, J>(that.m,
-    //                                            that.n,
-    //                                            that.width,
-    //                                            that.ind.data(),
-    //                                            that.base,
-    //                                            direction,
-    //                                            min_nnz,
-    //                                            median_nnz,
-    //                                            max_nnz);
-    // }
-
-    // template <typename T, typename I, typename J>
-    // static void compute_nnz_statistics(const managed_sell_matrix<T, I, J>& that,
-    //                                    rocsparse_direction             direction,
-    //                                    int64_t&                        min_nnz,
-    //                                    int64_t&                        median_nnz,
-    //                                    int64_t&                        max_nnz)
-    // {
-    //     host_raw_compute_nnz_statistics_sell<I, J>(that.m,
-    //                                            that.n,
-    //                                            that.width,
-    //                                            that.ind.data(),
-    //                                            that.base,
-    //                                            direction,
-    //                                            min_nnz,
-    //                                            median_nnz,
-    //                                            max_nnz);
-    // }
-
-    // template <typename T, typename I, typename J>
-    // static void compute_nnz_statistics(const device_sell_matrix<T, I, J>& that,
-    //                                    rocsparse_direction            direction,
-    //                                    int64_t&                       min_nnz,
-    //                                    int64_t&                       median_nnz,
-    //                                    int64_t&                       max_nnz)
-    // {
-    //     host_dense_vector<I> host_ind(that.ind);
-    //     host_raw_compute_nnz_statistics_sell<I, J>(that.m,
-    //                                            that.n,
-    //                                            that.width,
-    //                                            host_ind.data(),
-    //                                            that.base,
-    //                                            direction,
-    //                                            min_nnz,
-    //                                            median_nnz,
-    //                                            max_nnz);
-    // }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     template <rocsparse_direction DIRECTION, typename T, typename I, typename J>
     static void compute_nnz_statistics(const host_csx_matrix<DIRECTION, T, I, J>& that,
@@ -757,23 +651,5 @@ public:
                                 int64_t&                      max_nnz)
     {
         compute_nnz_statistics(that, rocsparse_direction_row, min_nnz, median_nnz, max_nnz);
-    }
-
-    template <memory_mode::value_t MODE, typename T, typename I, typename J>
-    static void get_nnz_per_column(const sell_matrix<MODE, T, I, J>& that,
-                                   int64_t&                       min_nnz,
-                                   int64_t&                       median_nnz,
-                                   int64_t&                       max_nnz)
-    {
-        //compute_nnz_statistics(that, rocsparse_direction_column, min_nnz, median_nnz, max_nnz);
-    }
-
-    template <memory_mode::value_t MODE, typename T, typename I, typename J>
-    static void get_nnz_per_row(const sell_matrix<MODE, T, I, J>& that,
-                                int64_t&                       min_nnz,
-                                int64_t&                       median_nnz,
-                                int64_t&                       max_nnz)
-    {
-        //compute_nnz_statistics(that, rocsparse_direction_row, min_nnz, median_nnz, max_nnz);
     }
 };
