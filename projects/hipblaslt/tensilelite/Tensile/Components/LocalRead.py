@@ -598,8 +598,8 @@ class LocalReadMFMA(LocalRead):
             UnrollStride = 1
 
         enableLDSTr = tP["enableLDSTr"]
-        MatrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
-        numTilePerInst = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]) // MatrixInstT
+        matrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+        numTilePerInst = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]) // matrixInstT
         MIInputPerThUnroll = kernel["MIInputPerThread%s"%tc] // numTilePerInst
         numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
         numReadsPerVector = int((vectorWidth * tP["bpeDS"]) / (tileBlockWidth * bpr))
@@ -1453,7 +1453,7 @@ class LocalReadMFMA(LocalRead):
                                                 or kernel["ProblemType"]["DataType"].is6bitFloat() or kernel["ProblemType"]["DataType"].isInt8()):
                                     if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                         incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                        incOffset += tiIdx * MatrixInstT * vectorWidth * tileStride
+                                        incOffset += tiIdx * matrixInstT * vectorWidth * tileStride
                                     else:
                                         vw = kernel["LocalReadVectorWidth"]
                                         incOffset = (rIdx // vw) * UnrollStride * vw
