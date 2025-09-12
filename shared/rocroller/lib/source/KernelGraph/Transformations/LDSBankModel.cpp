@@ -57,7 +57,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         if(!ldsOp)
             return;
 
-        auto& opAccesses        = m_hierarchicalAccesses[event.operationTag];
+        auto& opAccesses        = m_tagToOperationAccesses[event.operationTag];
         opAccesses.operationTag = event.operationTag;
         opAccesses.ldsTag
             = ldsOp->direction == Direction::Load ? event.sourceTag : event.destinationTag;
@@ -361,12 +361,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return cycles + 4; // address transfer
     }
 
-    RuntimeOperation LDSBankModel::getRuntimeOperation(GPUArchitectureGFX gfx) const
+    OperationAnalysis LDSBankModel::doOperationAnalysis(GPUArchitectureGFX gfx) const
     {
-        RuntimeOperation detailed;
+        OperationAnalysis detailed;
         detailed.gfx = gfx;
 
-        for(const auto& [operationTag, sourceOpAccesses] : m_hierarchicalAccesses)
+        for(const auto& [operationTag, sourceOpAccesses] : m_tagToOperationAccesses)
         {
             OperationAccesses opAccesses;
             opAccesses.operationTag = sourceOpAccesses.operationTag;
@@ -424,7 +424,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
-    std::string RuntimeOperation::toString() const
+    std::string OperationAnalysis::toString() const
     {
         std::stringstream ss;
 
@@ -449,9 +449,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
-    std::ostream& operator<<(std::ostream& stream, RuntimeOperation const& runtimeOperation)
+    std::ostream& operator<<(std::ostream& stream, OperationAnalysis const& operationAnalysis)
     {
-        return stream << runtimeOperation.toString();
+        return stream << operationAnalysis.toString();
     }
 
     std::ostream& operator<<(std::ostream& stream, Summary const& summary)

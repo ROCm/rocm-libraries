@@ -93,7 +93,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         std::vector<RuntimeLDSInstruction> instructions;
     };
 
-    struct RuntimeOperation
+    struct OperationAnalysis
     {
         std::map<int, OperationAccesses> accesses;
         GPUArchitectureGFX               gfx;
@@ -101,7 +101,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         std::string toString() const;
     };
 
-    std::ostream& operator<<(std::ostream& stream, RuntimeOperation const& runtimeOperation);
+    std::ostream& operator<<(std::ostream& stream, OperationAnalysis const& operationAnalysis);
 
     /**
      * LDS bank model
@@ -126,15 +126,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
          */
         LDSBankModel(uint entryWidthInBytes, uint numBanks, uint numEntriesPerBank);
 
+        std::string toString() const;
+
         bool filter(MemoryEventExpression event);
 
         void simulate(MemoryEventSimulated event);
 
         Summary summary() const;
 
-        RuntimeOperation getRuntimeOperation(GPUArchitectureGFX gfx) const;
-
-        std::string toString() const;
+        OperationAnalysis doOperationAnalysis(GPUArchitectureGFX gfx) const;
 
         /**
          * @brief Calculate how many threads per clock can operate on an LDS instruction
@@ -231,7 +231,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         uint m_numEntriesPerBank;
 
         std::map<int, std::vector<LDSBankAccess>> m_bankAccesses; // Keep for backward compatibility
-        std::map<int, OperationAccesses>          m_hierarchicalAccesses;
+        std::map<int, OperationAccesses>          m_tagToOperationAccesses;
     };
 
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel);
