@@ -13,13 +13,13 @@
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/tuple.h>
 
-using Hardware = origami::hardware_t;
+using hardware_t = origami::hardware_t;
 
 NB_MODULE(origami, m)
 {
-    nanobind::enum_<Hardware::architecture_t>(m, "architecture_t")
-        .value("gfx942", Hardware::architecture_t::gfx942)
-        .value("gfx950", Hardware::architecture_t::gfx950)
+    nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t")
+        .value("gfx942", hardware_t::architecture_t::gfx942)
+        .value("gfx950", hardware_t::architecture_t::gfx950)
         .export_values();
 
     nanobind::enum_<origami::data_type_t>(m, "data_type_t")
@@ -51,17 +51,17 @@ NB_MODULE(origami, m)
           &origami::int_to_data_type,
           "Convert int to data_type_t.");
 
-    nanobind::enum_<origami::streamk::ReductionType>(m, "ReductionType")
-        .value("Tree", origami::streamk::ReductionType::Tree)
-        .value("Parallel", origami::streamk::ReductionType::Parallel)
+    nanobind::enum_<origami::streamk::reduction_type>(m, "reduction_type")
+        .value("Tree", origami::streamk::reduction_type::Tree)
+        .value("Parallel", origami::streamk::reduction_type::Parallel)
         .export_values();
 
-    m.def("intToReductionType",
-          &origami::streamk::intToReductionType,
-          "Convert int to ReductionType.");
+    m.def("int_to_reduction_type",
+          &origami::streamk::int_to_reduction_type,
+          "Convert int to reduction_type.");
 
-    nanobind::class_<Hardware>(m, "Hardware")
-        .def(nanobind::init<Hardware::architecture_t,
+    nanobind::class_<hardware_t>(m, "hardware_t")
+        .def(nanobind::init<hardware_t::architecture_t,
                             size_t,
                             size_t,
                             size_t,
@@ -72,22 +72,22 @@ NB_MODULE(origami, m)
                             double,
                             size_t,
                             std::tuple<double, double, double>>())
-        .def("print", &Hardware::print)
-        .def("print_debug_info", &Hardware::print_debug_info)
-        .def_rw("N_CU", &Hardware::N_CU)
-        .def_rw("LDS_capacity", &Hardware::LDS_capacity)
-        .def_rw("mem1_perf_ratio", &Hardware::mem1_perf_ratio)
-        .def_rw("mem2_perf_ratio", &Hardware::mem2_perf_ratio)
-        .def_rw("mem3_perf_ratio", &Hardware::mem3_perf_ratio)
-        .def_rw("L2_capacity", &Hardware::L2_capacity)
-        .def_rw("CU_per_L2", &Hardware::CU_per_L2)
-        .def_rw("compute_clock_ghz", &Hardware::compute_clock_ghz)
-        .def_rw("parallel_mi_cu", &Hardware::parallel_mi_cu)
-        .def_rw("mem_bw_per_wg_coefficients", &Hardware::mem_bw_per_wg_coefficients)
-        .def_rw("NUM_XCD", &Hardware::NUM_XCD);
+        .def("print", &hardware_t::print)
+        .def("print_debug_info", &hardware_t::print_debug_info)
+        .def_rw("N_CU", &hardware_t::N_CU)
+        .def_rw("lds_capacity", &hardware_t::lds_capacity)
+        .def_rw("mem1_perf_ratio", &hardware_t::mem1_perf_ratio)
+        .def_rw("mem2_perf_ratio", &hardware_t::mem2_perf_ratio)
+        .def_rw("mem3_perf_ratio", &hardware_t::mem3_perf_ratio)
+        .def_rw("L2_capacity", &hardware_t::L2_capacity)
+        .def_rw("CU_per_L2", &hardware_t::CU_per_L2)
+        .def_rw("compute_clock_ghz", &hardware_t::compute_clock_ghz)
+        .def_rw("parallel_mi_cu", &hardware_t::parallel_mi_cu)
+        .def_rw("mem_bw_per_wg_coefficients", &hardware_t::mem_bw_per_wg_coefficients)
+        .def_rw("NUM_XCD", &hardware_t::NUM_XCD);
 
     m.def("get_hardware_for_device",
-          &Hardware::get_hardware_for_device,
+          &hardware_t::get_hardware_for_device,
           "This gets a hardware object for a device.");
 
     m.def("datatype_to_bits", &origami::data_type_to_bits, "Return the number of bits in a datatype");
@@ -95,7 +95,7 @@ NB_MODULE(origami, m)
     m.def("select_best_macro_tile_size",
           &origami::select_best_macro_tile_size,
           "Get best macro tile sizes.");
-    m.def("select_streamk_reduction", &origami::streamk::select_streamk_reduction, "Select best StreamK reduction strategy");
+    m.def("select_reduction", &origami::streamk::select_reduction, "Select best StreamK reduction strategy");
     m.def("select_grid", &origami::streamk::select_grid, "Select Best StreamK Grid Size");
     m.def("compute_total_latency", &origami::compute_total_latency, "compute_total_latency");
     m.def("select_best_wgm", &origami::select_best_wgm, "Get best workgroup mapping.");

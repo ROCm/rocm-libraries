@@ -230,7 +230,7 @@ namespace origami
             return min_grid_runtime_v2.first;
         }
 
-        size_t get_streamk_workspace(
+        size_t get_workspace(
             size_t x,
             size_t y,
             size_t mt_m,
@@ -238,10 +238,10 @@ namespace origami
             size_t bpe_c,
             size_t grid,
             size_t tiles,
-            ReductionType reduction)
+            reduction_type reduction)
         {
             size_t size = 0;
-            if(reduction == ReductionType::Tree)
+            if(reduction == reduction_type::Tree)
             {
                 if(tiles % grid == 0)
                 {
@@ -249,7 +249,7 @@ namespace origami
                     size += tileSize * grid;
                 }
             }
-            else if(reduction == ReductionType::Parallel)
+            else if(reduction == reduction_type::Parallel)
             {
                 size_t splitSize = x * y * bpe_c;
                 size_t splitCount = grid / tiles;
@@ -258,7 +258,7 @@ namespace origami
             return size;
         }
 
-        ReductionType select_streamk_reduction(
+        reduction_type select_reduction(
             size_t x,
             size_t y,
             size_t z,
@@ -269,7 +269,7 @@ namespace origami
             const hardware_t& analytical_hardware,
             int dynamic_grid_version)
         {
-            ReductionType reductionStrat = ReductionType::Tree;
+            reduction_type reductionStrat = reduction_type::Tree;
 
             if(dynamic_grid_version == 6)
             {
@@ -284,7 +284,7 @@ namespace origami
                     constexpr int MinItersForParallel = 64;
                     constexpr int MaxTilesForParallel = 16;
                     if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
-                        reductionStrat = ReductionType::Parallel;
+                        reductionStrat = reduction_type::Parallel;
                 }
             }
 
@@ -314,7 +314,7 @@ namespace origami
             int             occupancy,
             const hardware_t& analytical_hardware,
             int dynamic_grid_version,
-            ReductionType reduction_strategy)
+            reduction_type reduction_strategy)
         {
             size_t cu_count = analytical_hardware.N_CU;
             size_t tiles = number_of_output_tiles(mt_m, mt_n, x, y, batch);
@@ -437,7 +437,7 @@ namespace origami
                     // constexpr int MaxTilesForParallel = 16;
                     constexpr int MinItersPerCU = 8;
                     // if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
-                    if(reduction_strategy == ReductionType::Parallel)
+                    if(reduction_strategy == reduction_type::Parallel)
                     {
                         size_t virt_cu_count = cu_count;
                         // TODO check if using occupancy info makes workspace too large

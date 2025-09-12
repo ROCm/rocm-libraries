@@ -49,7 +49,7 @@
 
 namespace TensileLite
 {
-    using ReductionType = origami::streamk::ReductionType;
+    using ReductionType = origami::streamk::reduction_type;
 
     enum class KERNELARGTYPE
     {
@@ -3099,7 +3099,7 @@ namespace TensileLite
             origami::data_type_t miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            reductionStrat = origami::streamk::select_streamk_reduction(
+            reductionStrat = origami::streamk::select_reduction(
                 x,
                 y,
                 z,

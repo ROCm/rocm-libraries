@@ -316,7 +316,7 @@ namespace origami
 
         architecture_t                      arch;
         size_t                              N_CU; // Number of Compute Units
-        size_t                              LDS_capacity; // Capacity of LDS
+        size_t                              lds_capacity; // Capacity of LDS
         double                              mem1_perf_ratio;
         double                              mem2_perf_ratio;
         double                              mem3_perf_ratio;
@@ -329,7 +329,7 @@ namespace origami
 
         hardware_t(architecture_t                       arch,
                     size_t                              N_CU,
-                    size_t                              LDS_capacity,
+                    size_t                              lds_capacity,
                     size_t                              NUM_XCD,
                     double                              mem1_perf_ratio,
                     double                              mem2_perf_ratio,
@@ -340,7 +340,7 @@ namespace origami
                     std::tuple<double, double, double>  mem_bw_per_wg_coefficients)
             : arch(arch)
             , N_CU(N_CU)
-            , LDS_capacity(LDS_capacity)
+            , lds_capacity(lds_capacity)
             , mem1_perf_ratio(mem1_perf_ratio)
             , mem2_perf_ratio(mem2_perf_ratio)
             , mem3_perf_ratio(mem3_perf_ratio)
@@ -361,7 +361,7 @@ namespace origami
         hardware_t(const hardware_t& other)
             : arch(other.arch)
             , N_CU(other.N_CU)
-            , LDS_capacity(other.LDS_capacity)
+            , lds_capacity(other.lds_capacity)
             , mem1_perf_ratio(other.mem1_perf_ratio)
             , mem2_perf_ratio(other.mem2_perf_ratio)
             , mem3_perf_ratio(other.mem3_perf_ratio)
@@ -424,7 +424,7 @@ namespace origami
         {
             std::cout << "================== Hardware Configuration ==================\n";
             std::cout << "Number of CUs (N_CU)      : " << N_CU << "\n";
-            std::cout << "LDS capacity              : " << LDS_capacity << " bytes\n";
+            std::cout << "LDS capacity              : " << lds_capacity << " bytes\n";
             std::cout << "mem1_perf_ratio           : " << mem1_perf_ratio << "\n";
             std::cout << "mem2_perf_ratio           : " << mem2_perf_ratio << "\n";
             std::cout << "mem3_perf_ratio           : " << mem3_perf_ratio << "\n";

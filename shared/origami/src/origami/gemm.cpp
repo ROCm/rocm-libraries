@@ -69,7 +69,7 @@ namespace origami
         }
         else // as what StreamK predicts
         {
-            streamk::ReductionType rt = streamk::select_streamk_reduction(M, 
+            streamk::reduction_type rt = streamk::select_reduction(M, 
                                                                             N, 
                                                                             K, 
                                                                             batch, 
@@ -348,7 +348,7 @@ namespace origami
         // Size of those in bytes
         size_t LDS_usage = (Ld_A_value + Ld_B_value) * (element_size / 8);
 
-        if(LDS_usage > hardware.LDS_capacity)
+        if(LDS_usage > hardware.lds_capacity)
         {
             return false; // Exceeds LDS capacity
         }

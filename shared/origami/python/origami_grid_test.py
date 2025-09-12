@@ -72,7 +72,7 @@ def main():
     if args.print:
         hardware.print()
 
-    reduction = origami.select_streamk_reduction(
+    reduction = origami.select_reduction(
         args.m,
         args.n,
         args.k,

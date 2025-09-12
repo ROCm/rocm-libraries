@@ -10,7 +10,7 @@ namespace origami
 {
     namespace streamk
     {
-        enum class ReductionType
+        enum class reduction_type
         {
             // BasicReduction,
             Tree,
@@ -20,12 +20,12 @@ namespace origami
             None = Count
         };
 
-        inline ReductionType intToReductionType(int rt)
+        inline reduction_type int_to_reduction_type(int rt)
         {
-            return (ReductionType)rt;
+            return (reduction_type)rt;
         }
 
-        size_t get_streamk_workspace(
+        size_t get_workspace(
             size_t x,
             size_t y,
             size_t mt_m,
@@ -33,9 +33,9 @@ namespace origami
             size_t bpe_c,
             size_t grid,
             size_t tiles,
-            ReductionType reduction);
+            reduction_type reduction);
 
-        ReductionType select_streamk_reduction(
+        reduction_type select_reduction(
             size_t x,
             size_t y,
             size_t z,
@@ -68,7 +68,7 @@ namespace origami
                         int             occupancy,
                         const hardware_t& analytical_hardware,
                         int dynamic_grid_version,
-                        ReductionType reduction_strategy);
+                        reduction_type reduction_strategy);
                         // max workspace
                         // max cus
 

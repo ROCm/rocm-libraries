@@ -749,11 +749,11 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
     else
         dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA);
 
-    auto reduction_type = origami::streamk::select_streamk_reduction(prob.m, prob.n, prob.k, prob.batch_count,
+    auto reduction_type = origami::streamk::select_reduction(prob.m, prob.n, prob.k, prob.batch_count,
         gemm->params->workgroupTile.m, gemm->params->workgroupTile.n, gemm->params->workgroupTile.k, analaytical_hardware, DEFAULT_DYNAMIC_MODE);
     // Override reduction type to tree reduction for now.
     // When Parallel reduction is available, this line can be removed
-    reduction_type = origami::streamk::ReductionType::Tree;
+    reduction_type = origami::streamk::reduction_type::Tree;
 
     auto result = origami::streamk::select_grid(prob.m,
         prob.n,

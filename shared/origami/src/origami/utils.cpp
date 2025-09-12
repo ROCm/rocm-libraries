@@ -618,7 +618,7 @@ namespace origami
             return results;
         }
 
-        double compute_TFLOPS_from_latency(
+        double compute_tflops_from_latency(
             double latency_cycles, size_t M, size_t N, size_t K, double clock_GHz, bool debug)
         {
             // Compute total FLOPs

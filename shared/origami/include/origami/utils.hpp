@@ -109,7 +109,7 @@ namespace origami
             bool   debug,
             bool   print);
 
-        double compute_TFLOPS_from_latency(double latency_cycles,
+        double compute_tflops_from_latency(double latency_cycles,
                                            size_t M,
                                            size_t N,
                                            size_t K,
