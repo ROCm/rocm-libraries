@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -101,17 +101,7 @@ rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std
     rocsolver_log_entry& result = stack.back();
     result.name = std::move(name);
     result.level = stack.size() - 1;
-
-#if ROCSOLVER_USE_ASYNC_LOGGER
-    // HIP event-based timing: create and record a start event
-    hipStream_t stream = nullptr;
-    rocblas_get_stream(handle, &stream);
-    THROW_IF_HIP_ERROR(hipEventCreate(&result.start_evt));
-    THROW_IF_HIP_ERROR(hipEventRecord(result.start_evt, stream));
-#else
-    // Synchronous timing: record start time without sync
     result.start_time = get_time_us_no_sync();
-#endif
 
     for(int i = 1; i < stack.size() - 1; i++)
         result.callers.push_back(stack[i].name);
@@ -130,16 +120,6 @@ rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
 {
     std::vector<rocsolver_log_entry>& stack = call_stack[handle];
     rocsolver_log_entry result = stack.back();
-
-#if ROCSOLVER_USE_ASYNC_LOGGER
-    // HIP event-based timing: create and record a stop event
-    hipStream_t stream = nullptr;
-    rocblas_get_stream(handle, &stream);
-    THROW_IF_HIP_ERROR(hipEventCreate(&result.stop_evt));
-    THROW_IF_HIP_ERROR(hipEventRecord(result.stop_evt, stream));
-#endif
-    // For synchronous logger, no additional timing work needed here
-
     stack.pop_back();
 
     if(stack.empty())
@@ -165,13 +145,13 @@ void rocsolver_logger::append_profile(std::string& str,
         int indent = shift_width * indent_level;
 
         str += fmt::format("{: <{}}{}: Calls: {}, Total Time: {:.3f} ms", "", indent, it->first,
-                           entry.calls, entry.total_time * 1e-3);
+                           entry.calls, entry.time * 1e-3);
 
         if(entry.internal_calls)
         {
             double internal_time = 0;
             for(const auto& nested : *entry.internal_calls)
-                internal_time += nested.second.total_time;
+                internal_time += nested.second.time;
 
             str += fmt::format(" (in nested functions: {:.3f} ms)\n", internal_time * 1e-3);
 
@@ -243,14 +223,6 @@ rocblas_status rocsolver_log_end_impl()
     if(!rocsolver_logger::_instance->call_stack.empty())
         return rocblas_status_internal_error;
 
-#if ROCSOLVER_USE_ASYNC_LOGGER
-    // ONE device sync prior to time collection
-    hipDeviceSynchronize();
-
-    // Recursively accumulate elapsed times for all profile entries and destroy events
-    logger->accumulate_times(logger->profile);
-#endif
-
     // print profile logging results
     if(logger->layer_mode & rocblas_layer_mode_log_profile && !logger->profile.empty())
     {
@@ -266,31 +238,6 @@ rocblas_status rocsolver_log_end_impl()
 
     return rocblas_status_success;
 }
-
-#if ROCSOLVER_USE_ASYNC_LOGGER
-void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
-{
-    for(auto& kv : m)
-    {
-        rocsolver_profile_entry& entry = kv.second;
-        entry.total_time = 0;
-        for(auto& pair : entry.events)
-        {
-            float ms = 0;
-            if(pair.first && pair.second)
-                THROW_IF_HIP_ERROR(hipEventElapsedTime(&ms, pair.first, pair.second));
-            entry.total_time += ms * 1000; // us
-            // destroy events after measurement
-            THROW_IF_HIP_ERROR(hipEventDestroy(pair.first));
-            THROW_IF_HIP_ERROR(hipEventDestroy(pair.second));
-        }
-        entry.events.clear();
-        // recurse on internal calls
-        if(entry.internal_calls)
-            accumulate_times(*entry.internal_calls);
-    }
-}
-#endif
 
 rocblas_status rocsolver_log_set_layer_mode_impl(const rocblas_layer_mode_flags layer_mode)
 {

@@ -38,14 +38,6 @@
 #include <unordered_map>
 #include <vector>
 
-#ifndef ROCSOLVER_USE_ASYNC_LOGGER
-#define ROCSOLVER_USE_ASYNC_LOGGER 1  // Default to async logger
-#endif
-
-#if ROCSOLVER_USE_ASYNC_LOGGER
-#include <hip/hip_runtime.h>
-#endif
-
 #include "common_host_helpers.hpp"
 #include "lib_host_helpers.hpp"
 #include "rocsolver/rocsolver.h"
@@ -53,12 +45,6 @@
 #include "rocsolver_logvalue.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
-#define HIP_CHECK(...)                                         \
-    {                                                          \
-        hipError_t _status = (__VA_ARGS__);                    \
-        if(_status != hipSuccess)                              \
-            return get_rocblas_status_for_hip_status(_status); \
-    }
 
 /***************************************************************************
  * rocSOLVER logging macros
@@ -95,16 +81,6 @@ ROCSOLVER_BEGIN_NAMESPACE
             _log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);   \
         }                                                                                     \
     } while(0)
-#if ROCSOLVER_USE_ASYNC_LOGGER
-#define ROCSOLVER_LAUNCH_KERNEL(name, ...) \
-    do { \
-        if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
-            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name); \
-        hipLaunchKernelGGL((name), __VA_ARGS__); \
-        if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
-            rocsolver_logger::instance()->log_exit<T>(handle); \
-    } while(0)
-#else
 #define ROCSOLVER_LAUNCH_KERNEL(name, ...)                                                          \
     do                                                                                              \
     {                                                                                               \
@@ -116,7 +92,6 @@ ROCSOLVER_BEGIN_NAMESPACE
         }                                                                                           \
         hipLaunchKernelGGL((name), __VA_ARGS__);                                                    \
     } while(0)
-#endif
 
 /***************************************************************************
  * The rocsolver_log_entry struct records function data for trace and
@@ -127,18 +102,6 @@ struct rocsolver_log_entry
     std::vector<std::string> callers;
     std::string name;
     int level;
-
-#if ROCSOLVER_USE_ASYNC_LOGGER
-    hipEvent_t start_evt = nullptr;
-    hipEvent_t stop_evt = nullptr;
-
-    rocsolver_log_entry()
-        : level(0)
-        , start_evt(nullptr)
-        , stop_evt(nullptr)
-    {
-    }
-#else
     double start_time;
 
     rocsolver_log_entry()
@@ -146,18 +109,12 @@ struct rocsolver_log_entry
         , start_time(0)
     {
     }
-#endif
 
     // Move constructor
     rocsolver_log_entry(rocsolver_log_entry&&) = default;
 
     // Copy constructor
     rocsolver_log_entry(const rocsolver_log_entry&) = default;
-
-    // Destructor
-    ~rocsolver_log_entry()
-    {
-    }
 };
 
 /***************************************************************************
@@ -172,14 +129,13 @@ struct rocsolver_profile_entry
     std::string name;
     int level;
     int calls;
-    double total_time; // stores accumulated elapsed time in microseconds
-    std::vector<std::pair<hipEvent_t, hipEvent_t>> events;
+    double time;
     std::unique_ptr<rocsolver_profile_map> internal_calls;
 
     rocsolver_profile_entry()
         : level(0)
         , calls(0)
-        , total_time(0)
+        , time(0)
     {
     }
 
@@ -188,11 +144,6 @@ struct rocsolver_profile_entry
 
     // Copy constructor is deleted
     rocsolver_profile_entry(const rocsolver_profile_entry&) = delete;
-
-    // Destructor
-    ~rocsolver_profile_entry()
-    {
-    }
 };
 
 /***************************************************************************
@@ -223,11 +174,6 @@ private:
 
     // returns a unique_ptr to a file stream or a given default stream
     std::ostream* open_log_stream(const char* environment_variable);
-
-#if ROCSOLVER_USE_ASYNC_LOGGER
-    // recurse and accumulate HIP event timings (previously lambda in log_end_impl)
-    void accumulate_times(rocsolver_profile_map& m);
-#endif
 
     // returns a log entry on the call stack
     rocsolver_log_entry& push_log_entry(rocblas_handle handle, std::string&& name);
@@ -292,17 +238,17 @@ private:
     template <typename T>
     void log_profile(rocblas_handle handle, rocsolver_log_entry& from_stack)
     {
-#if !ROCSOLVER_USE_ASYNC_LOGGER
         hipStream_t stream;
         rocblas_get_stream(handle, &stream);
-        double elapsed_time = get_time_us_sync(stream) - from_stack.start_time;
-#endif
+        double time = get_time_us_sync(stream) - from_stack.start_time;
+
         const std::lock_guard<std::mutex> lock(rocsolver_logger::_mutex);
 
         rocsolver_profile_map* map = &profile;
-        for (const std::string& caller_name : from_stack.callers) {
+        for(const std::string& caller_name : from_stack.callers)
+        {
             rocsolver_profile_entry& entry = (*map)[caller_name];
-            if (!entry.internal_calls)
+            if(!entry.internal_calls)
                 entry.internal_calls = std::make_unique<rocsolver_profile_map>();
             map = entry.internal_calls.get();
         }
@@ -311,12 +257,7 @@ private:
         from_profile.name = from_stack.name;
         from_profile.level = from_stack.level;
         from_profile.calls++;
-#if ROCSOLVER_USE_ASYNC_LOGGER
-        // store HIP event pair for later to compute time at log_end_impl.
-        from_profile.events.push_back({from_stack.start_evt, from_stack.stop_evt});
-#else
-        from_profile.total_time += elapsed_time;
-#endif
+        from_profile.time += time;
     }
 
     static std::unique_lock<std::mutex> acquire_lock()
