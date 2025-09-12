@@ -45,7 +45,7 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
     String repoUrl
     (commitSha, repoUrl) = util.getGitHubCommitInformation(project.paths.project_src_prefix)
 
-    withCredentials([string(credentialsId: "mathlibs-codecov-token-hipsparse", variable: 'CODECOV_TOKEN')])
+    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocm-libraries", variable: 'CODECOV_TOKEN')])
     {
         def command = """#!/usr/bin/env bash
                     set -x
@@ -54,7 +54,7 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
                     curl -Os https://uploader.codecov.io/latest/linux/codecov
                     chmod +x codecov
-                    ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name hipSPARSE --sha ${commitSha}
+                    ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocm-libraries --flags hipSPARSE --sha ${commitSha}
                 """
 
         platform.runCommand(this, command)
