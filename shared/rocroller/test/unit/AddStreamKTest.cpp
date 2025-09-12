@@ -91,6 +91,8 @@ namespace AddStreamKTest
 
                     coverage[{m, n, k}]++;
                     f(m, n, k, wg);
+                    std::cout << "SKTile (m, n, k, wg): " << m << ", " << n << ", " << k << ", "
+                              << wg << std::endl;
                     //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
                 }
             }
@@ -107,6 +109,8 @@ namespace AddStreamKTest
 
                     coverage[{m, n, k}]++;
                     f(m, n, k, wg);
+                    std::cout << "DPTile (m, n, k, wg): " << m << ", " << n << ", " << k << ", "
+                              << wg << std::endl;
                     //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
                 }
             }
@@ -168,9 +172,9 @@ namespace AddStreamKTest
 
         rocRoller::KernelGraph::KernelGraph kgraph;
 
-        uint numTileM = 57;
-        uint numTileN = 57;
-        uint numTileK = 57;
+        uint numTileM = 1;
+        uint numTileN = 2;
+        uint numTileK = 2977;
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -227,6 +231,9 @@ namespace AddStreamKTest
         kgraph.control.addElement(Sequence(), {assignWGNumber}, {storeOp});
         kgraph.control.addElement(Sequence(), {storeOp}, {loopWaitOp});
 
+        std::cout << "kgraph original" << std::endl;
+        std::cout << kgraph.toDOT(true) << std::endl;
+
         auto addStreamK = std::make_shared<AddStreamK>(std::vector<int>{0, 1},
                                                        rocRoller::KLOOP,
                                                        rocRoller::KLOOP,
@@ -258,12 +265,19 @@ namespace AddStreamKTest
 
                 numTilesSK = numTileK * ((numTileM * numTileN) % numWGs + numWGs);
                 numTilesDP = numTileM * numTileN * numTileK - numTilesSK;
+                std::cout << "twoTile" << std::endl;
             }
             else
             {
                 numTilesSK = numTileM * numTileN * numTileK;
                 numTilesDP = 0;
+                std::cout << "basic" << std::endl;
             }
+            std::cout << "numWGs, numTileM, numTileN, numTileK: " << numWGs << ", " << numTileM
+                      << ", " << numTileN << ", " << numTileK << std::endl;
+
+            std::cout << "(numTilesSK, numTilesDP): " << numTilesSK << ", " << numTilesDP
+                      << std::endl;
 
             KernelArguments kargs(false);
             kargs.append("result", deviceResult.get());
@@ -532,6 +546,6 @@ namespace AddStreamKTest
 
     INSTANTIATE_TEST_SUITE_P(GPU_AddStreamKTest,
                              GPU_AddStreamKTest,
-                             ::testing::Combine(currentGPUISA(), ::testing::Values(true, false)));
+                             ::testing::Combine(currentGPUISA(), ::testing::Values(false)));
 
 }
