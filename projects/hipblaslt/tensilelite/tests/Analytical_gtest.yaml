@@ -5,7 +5,7 @@ tests:
   
   - name: EstimateL2Hit
     inputs:
-      - { M: 4096, N: 4096, K: 1024, batch: 1, MT_M: 256, MT_N: 256, MT_K: 64, element_size: 16, gpu_arch: 942, expected_gt: 0.0, expected_lt: 1.0}
+      - { M: 4096, N: 4096, K: 1024, batch: 1, MT_M: 256, MT_N: 256, MT_K: 64, element_size: 16, splittingFactor: 3, gpu_arch: 942, expected_gt: 0.0, expected_lt: 1.0}
 
   - name: ComputeNumMatrixInstructions
     inputs:
@@ -23,39 +23,29 @@ tests:
       - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 1, MT_M: 128, MT_N: 32, MT_K: 32, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, gpu_arch: 942, expected_gt: 512} # 8 * 8 * 4
       - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 1, MT_M: 32, MT_N: 128, MT_K: 32, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, gpu_arch: 942, expected_gt: 512} # 8 * 8 * 4
 
-  - name: ComputeNumberWaves
-    inputs:
-      - { M: 4096, N: 1024, batch: 3, MT_M: 256, MT_N: 256, split: 1, gpu_arch: 942, expected: 1} # 16 * 4 * 3 == 192 < 304
-      - { M: 4096, N: 8192, batch: 3, MT_M: 256, MT_N: 256, split: 1, gpu_arch: 942, expected: 6} # 16 * 32 * 3 == 1536 > 5*304
-
-  - name: ComputeActiveCU
-    inputs:
-      - { M: 4096, N: 1024, batch: 3, MT_M: 256, MT_N: 256, gpu_arch: 942, expected: 192}
-      - { M: 4096, N: 8192, batch: 3, MT_M: 256, MT_N: 256, gpu_arch: 942, expected: 304}
-
   - name: ComputeMemoryLatency
     inputs:
-      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 1, MT_M: 128, MT_N: 128, MT_K: 64, split: 1, hmem: 0.9, element_size_A: 16, element_size_B: 16, mx_block_size: 0, gpu_arch: 942} 
+      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 1, MT_M: 128, MT_N: 128, MT_K: 64, element_size_A: 16, element_size_B: 16, mx_block_size: 0, wgm: 8, numActiveCUs: 304, splittingFactor: 2, gpu_arch: 942} 
 
   - name: ComputeTileLatency
     inputs:
-      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, split: 1, hmem: 0.9, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, gpu_arch: 942} 
+      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, wgm: 6, numActiveCUs: 304, splittingFactor: 3, gpu_arch: 942} 
 
   - name: ComputeWaveLatency
     inputs:
-      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, split: 1, hmem: 0.9, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, gpu_arch: 942} 
+      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, wgm: 8, numActiveCUs: 304, splittingFactor: 4, gpu_arch: 942} 
 
   - name: ComputeTotalLatency
     inputs:
-      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, split: 1, hmem: 0.0, element_size_A: 16, element_size_B: 16, element_size_out: 32, WGM: 1, mx_block_size: 0, gpu_arch: 942} 
+      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, wgm: 1, splittingFactor: 6, gpu_arch: 942} 
 
   - name: ComputePerfGflops
     inputs:
-      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, hmem: 0.9, element_size_A: 16, element_size_B: 16, element_size_out: 32, WGM: 1, gpu_arch: 942}
+      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, WGM: 1, gpu_arch: 942}
 
   - name: EstimateMallHit
     inputs:
-      - { M: 4096, N: 4096, K: 1024, batch: 1, MT_M: 256, MT_N: 256, MT_K: 64, gpu_arch: 942, expected_gt: 0} 
+      - { M: 4096, N: 4096, K: 1024, batch: 1, MT_M: 256, MT_N: 256, MT_K: 64, numActiveCUs: 304, splittingFactor: 8, gpu_arch: 942, expected_gt: 0} 
 
   - name: HardwareArchEnum
     inputs:

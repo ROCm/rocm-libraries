@@ -205,7 +205,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
 
     //TODO: Hardcoding numbers for gfx942. Future archs could be added here with if else loop.
     auto gpuInfo = TensileLite::analytical::Hardware(
-        gpuArchEnum, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.0, 1, 1.0);
+        gpuArchEnum, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.0, 1, std::make_tuple(0, 0.015, 0));
 
     if(test.name == "ComputeLoads")
     {
@@ -220,7 +220,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
         {
             EstimateL2Hit(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
                           input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("element_size"),
-                          input_case.expected_gt, input_case.expected_lt);
+                          input_case.values.at("splittingFactor"),input_case.expected_gt, input_case.expected_lt);
         }
     }
     else if(test.name == "ComputeNumMatrixInstructions")
@@ -241,30 +241,14 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
                           input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.expected, input_case.expected_gt);
         }
     }
-    else if(test.name == "ComputeNumberWaves")
-    {
-        for(const auto& input_case : test.inputs)
-        {
-            ComputeNumberWaves(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("batch"), input_case.values.at("MT_M"),
-                          input_case.values.at("MT_N"), input_case.values.at("split"), input_case.expected);
-        }
-    }
-    else if(test.name == "ComputeActiveCU")
-    {
-        for(const auto& input_case : test.inputs)
-        {
-            ComputeActiveCU(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("batch"), 
-                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.expected);
-        }
-    }
     else if(test.name == "ComputeMemoryLatency")
     {
         for(const auto& input_case : test.inputs)
         {
             ComputeMemoryLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
                           input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
-                          input_case.values.at("MT_K"), input_case.values.at("split"), input_case.values.at("hmem"), input_case.values.at("element_size_A"),
-                          input_case.values.at("element_size_B"), input_case.values.at("mx_block_size"));
+                          input_case.values.at("MT_K"), input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), 
+                          input_case.values.at("mx_block_size"), input_case.values.at("wgm"), input_case.values.at("numActiveCUs"), input_case.values.at("splittingFactor"));
         }
     }
     else if(test.name == "ComputeTileLatency")
@@ -274,8 +258,8 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
             ComputeTileLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
                           input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
                           input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
-                          input_case.values.at("split"), input_case.values.at("hmem"), input_case.values.at("element_size_A"),
-                          input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), input_case.values.at("mx_block_size"));
+                          input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), 
+                          input_case.values.at("mx_block_size"), input_case.values.at("wgm"), input_case.values.at("numActiveCUs"), input_case.values.at("splittingFactor"));
         }
     }
     else if(test.name == "ComputeWaveLatency")
@@ -285,8 +269,8 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
             ComputeWaveLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
                           input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
                           input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
-                          input_case.values.at("split"), input_case.values.at("hmem"), input_case.values.at("element_size_A"),
-                          input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), input_case.values.at("mx_block_size"));
+                          input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), 
+                          input_case.values.at("mx_block_size"), input_case.values.at("wgm"), input_case.values.at("numActiveCUs"), input_case.values.at("splittingFactor"));
         }
     }
     else if(test.name == "ComputeTotalLatency")
@@ -296,8 +280,8 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
             ComputeTotalLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
                           input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
                           input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
-                          input_case.values.at("split"), input_case.values.at("hmem"), input_case.values.at("element_size_A"),
-                          input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), input_case.values.at("WGM"), input_case.values.at("mx_block_size"));
+                          input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), 
+                          input_case.values.at("mx_block_size"), input_case.values.at("wgm"), input_case.values.at("splittingFactor"));
         }
     }
     else if(test.name == "ComputePerfGflops")
@@ -307,8 +291,8 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
             ComputePerfGflops(input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
                           input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
                           input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
-                          input_case.values.at("hmem"), input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), 
-                          input_case.values.at("element_size_out"), input_case.values.at("WGM"));
+                          input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), 
+                          input_case.values.at("WGM"));
         }
     }
     else if(test.name == "EstimateMallHit")
@@ -316,7 +300,8 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
         for(const auto& input_case : test.inputs)
         {
             EstimateMallHit(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
-                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.expected_gt);
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("numActiveCUs"), 
+                          input_case.values.at("splittingFactor"), input_case.expected_gt);
         }
     }
     else if(test.name == "CheckLDSCapacity")

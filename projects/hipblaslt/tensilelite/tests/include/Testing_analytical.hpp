@@ -58,10 +58,8 @@ void ComputeLoads(
 {
     auto a_loads  = TensileLite::analytical::compute_A_loads(MT_M, MT_K, debug);
     auto b_loads  = TensileLite::analytical::compute_B_loads(MT_N, MT_K, debug);
-    auto cu_loads = TensileLite::analytical::compute_CU_loads(MT_M, MT_N, MT_K, debug);
     EXPECT_EQ(a_loads, expected);
     EXPECT_EQ(b_loads, expected);
-    EXPECT_EQ(cu_loads, a_loads + b_loads);
 }
 
 void EstimateL2Hit(const TensileLite::analytical::Hardware& hardware,
@@ -73,6 +71,7 @@ void EstimateL2Hit(const TensileLite::analytical::Hardware& hardware,
                    int                                      MT_N,
                    int                                      MT_K,
                    size_t                                   element_size,
+                   int                                      splittingFactor,
                    const std::optional<int>                 expected_gt,
                    const std::optional<int>                 expected_lt)
 {
@@ -80,7 +79,7 @@ void EstimateL2Hit(const TensileLite::analytical::Hardware& hardware,
     for(int i = 1; i < 1025; i++)
     {
         l2_hit = TensileLite::analytical::estimate_l2_hit(
-            hardware, M, N, K, batch, MT_M, MT_N, MT_K, i, element_size);
+            hardware, M, N, K, batch, MT_M, MT_N, MT_K, element_size, i, splittingFactor);
         EXPECT_GT(l2_hit, expected_gt);
         EXPECT_LT(l2_hit, expected_lt);
     }
@@ -126,28 +125,6 @@ void ComputeMTComputeLatency(const TensileLite::analytical::Hardware& hardware,
         EXPECT_GT(latency, expected_gt);
 }
 
-// Computes the number of MT timesteps required to compute all MT. Last wave may be less occupied.
-void ComputeNumberWaves(const TensileLite::analytical::Hardware& hardware,
-                                    size_t          M,
-                                    size_t          N,
-                                    size_t          batch,
-                                    size_t          MT_M,
-                                    size_t          MT_N,
-                                    size_t          split,
-                                    const std::optional<int>                 expected)
-{
-    auto num_waves
-        = TensileLite::analytical::compute_number_waves(hardware, M, N, batch, MT_M, MT_N, split, false);
-    EXPECT_EQ(num_waves, expected);
-}
-
-void ComputeActiveCU(const TensileLite::analytical::Hardware& hardware, size_t M, size_t N, size_t batch, size_t MT_M, size_t MT_N,
-                     const std::optional<int>                 expected)
-{
-    auto active_cu = TensileLite::analytical::compute_active_CU(hardware, M, N, batch, MT_M, MT_N);
-    EXPECT_EQ(active_cu, expected);
-}
-
 void ComputeMemoryLatency(const TensileLite::analytical::Hardware& hardware,
                                       size_t          M,
                                       size_t          N,
@@ -158,17 +135,18 @@ void ComputeMemoryLatency(const TensileLite::analytical::Hardware& hardware,
                                       size_t          MT_M,
                                       size_t          MT_N,
                                       size_t          MT_K,
-                                      size_t          split,
-                                      double          H_mem,
                                       size_t          element_size_A,
                                       size_t          element_size_B,
-                                      size_t          mx_block_size)
+                                      size_t          mx_block_size,
+                                      int             wgm,
+                                      int             numActiveCUs,
+                                      int             splittingFactor)
 {
     auto mem_latency_small = TensileLite::analytical::compute_memory_latency(
-        hardware, M, N, K, transA, transB, batch, MT_M, MT_N, MT_K, split, H_mem, element_size_A, element_size_B, mx_block_size, false);
+        hardware, M, N, K, transA, transB, batch, MT_M, MT_N, MT_K, element_size_A, element_size_B, mx_block_size, wgm, numActiveCUs, splittingFactor, false);
 
     auto mem_latency_large = TensileLite::analytical::compute_memory_latency(
-        hardware, M, N, K, transA, transB, batch, MT_M * 2, MT_N * 2, MT_K * 2, split, H_mem, element_size_A, element_size_B, mx_block_size, false);
+        hardware, M, N, K, transA, transB, batch, MT_M * 2, MT_N * 2, MT_K * 2, element_size_A, element_size_B, mx_block_size, wgm, numActiveCUs, splittingFactor, false);
 
     EXPECT_LT(mem_latency_small, mem_latency_large);
 }
@@ -186,12 +164,13 @@ void ComputeTileLatency(const TensileLite::analytical::Hardware& hardware,
                                     size_t          MI_M,
                                     size_t          MI_N,
                                     size_t          MI_K,
-                                    size_t          split,
-                                    double          H_mem,
                                     size_t          element_size_A, //In bits
                                     size_t          element_size_B, //In bits,
                                     size_t          element_size_out, //In bits
-                                    size_t          mx_block_size)
+                                    size_t          mx_block_size,
+                                    int             WGM,
+                                    size_t          numActiveCUs,
+                                    size_t          splittingFactor)
 {
     auto   tile_latency_small = TensileLite::analytical::compute_tile_latency(hardware,
                                                                             M,
@@ -206,13 +185,14 @@ void ComputeTileLatency(const TensileLite::analytical::Hardware& hardware,
                                                                             MI_M,
                                                                             MI_N,
                                                                             MI_K,
-                                                                            split,
-                                                                            H_mem,
                                                                             element_size_A,
                                                                             element_size_B,
                                                                             element_size_out,
                                                                             TensileLite::analytical::DataType::BFloat16,
                                                                             mx_block_size,
+                                                                            WGM,
+                                                                            numActiveCUs,
+                                                                            splittingFactor,
                                                                             false);
 
     auto   tile_latency_large = TensileLite::analytical::compute_tile_latency(hardware,
@@ -228,13 +208,14 @@ void ComputeTileLatency(const TensileLite::analytical::Hardware& hardware,
                                                                             MI_M,
                                                                             MI_N,
                                                                             MI_K,
-                                                                            split,
-                                                                            H_mem,
                                                                             element_size_A,
                                                                             element_size_B,
                                                                             element_size_out,
                                                                             TensileLite::analytical::DataType::BFloat16,
                                                                             mx_block_size,
+                                                                            WGM,
+                                                                            numActiveCUs,
+                                                                            splittingFactor,
                                                                             false);
 
     EXPECT_GT(tile_latency_large, tile_latency_small);
@@ -253,12 +234,13 @@ void ComputeWaveLatency(const TensileLite::analytical::Hardware& hardware,
                                     size_t          MI_M,
                                     size_t          MI_N,
                                     size_t          MI_K,
-                                    size_t          split,
-                                    double          H_mem,
                                     size_t          element_size_A, //In bits
                                     size_t          element_size_B, //In bits,
                                     size_t          element_size_out, //In bits
-                                    size_t          mx_block_size)
+                                    size_t          mx_block_size,
+                                    int             WGM,
+                                    size_t          numActiveCUs,
+                                    size_t          splittingFactor)
 {
     auto   tile_latency = TensileLite::analytical::compute_tile_latency(hardware,
                                                                             M,
@@ -273,13 +255,14 @@ void ComputeWaveLatency(const TensileLite::analytical::Hardware& hardware,
                                                                             MI_M,
                                                                             MI_N,
                                                                             MI_K,
-                                                                            split,
-                                                                            H_mem,
                                                                             element_size_A,
                                                                             element_size_B,
                                                                             element_size_out,
                                                                             TensileLite::analytical::DataType::BFloat16,
                                                                             mx_block_size,
+                                                                            WGM,
+                                                                            numActiveCUs,
+                                                                            splittingFactor,
                                                                             false);
     auto   wave_latency = TensileLite::analytical::compute_wave_latency(hardware,
                                                                             M,
@@ -294,13 +277,14 @@ void ComputeWaveLatency(const TensileLite::analytical::Hardware& hardware,
                                                                             MI_M,
                                                                             MI_N,
                                                                             MI_K,
-                                                                            split,
-                                                                            H_mem,
                                                                             element_size_A,
                                                                             element_size_B,
                                                                             element_size_out,
                                                                             TensileLite::analytical::DataType::BFloat16,
                                                                             mx_block_size,
+                                                                            WGM,
+                                                                            numActiveCUs,
+                                                                            splittingFactor,
                                                                             false);
     EXPECT_DOUBLE_EQ(wave_latency, tile_latency);
 }
@@ -318,13 +302,12 @@ void ComputeTotalLatency(const TensileLite::analytical::Hardware& hardware,
                                     size_t          MI_M,
                                     size_t          MI_N,
                                     size_t          MI_K,
-                                    size_t          split,
-                                    double          H_mem,
                                     size_t          element_size_A, //In bits
                                     size_t          element_size_B, //In bits,
                                     size_t          element_size_out, //In bits
+                                    size_t          mx_block_size,
                                     int             WGM,
-                                    size_t          mx_block_size)
+                                    size_t          splittingFactor)
 {
     double latency_cycles_small = TensileLite::analytical::compute_total_latency(hardware,
                                                                             M,
@@ -339,14 +322,13 @@ void ComputeTotalLatency(const TensileLite::analytical::Hardware& hardware,
                                                                             MI_M,
                                                                             MI_N,
                                                                             MI_K,
-                                                                            split,
-                                                                            H_mem,
                                                                             element_size_A,
                                                                             element_size_B,
                                                                             element_size_out,
                                                                             TensileLite::analytical::DataType::BFloat16,
-                                                                            WGM,
                                                                             mx_block_size,
+                                                                            WGM,
+                                                                            splittingFactor,
                                                                             false);
 
     double latency_cycles_large = TensileLite::analytical::compute_total_latency(hardware,
@@ -362,14 +344,13 @@ void ComputeTotalLatency(const TensileLite::analytical::Hardware& hardware,
                                                                             MI_M,
                                                                             MI_N,
                                                                             MI_K,
-                                                                            split,
-                                                                            H_mem,
                                                                             element_size_A,
                                                                             element_size_B,
                                                                             element_size_out,
                                                                             TensileLite::analytical::DataType::BFloat16,
-                                                                            WGM,
                                                                             mx_block_size,
+                                                                            WGM,
+                                                                            splittingFactor,
                                                                             false);
     EXPECT_LT(latency_cycles_small, latency_cycles_large);
 }
@@ -386,7 +367,6 @@ void ComputePerfGflops(size_t          M,
                                     size_t          MI_M,
                                     size_t          MI_N,
                                     size_t          MI_K,
-                                    double          H_mem,
                                     size_t          element_size_A, //In bits
                                     size_t          element_size_B, //In bits,
                                     size_t          element_size_out, //In bits
@@ -394,9 +374,9 @@ void ComputePerfGflops(size_t          M,
 {
     auto gfx942arch  = TensileLite::analytical::Hardware::archNameToEnum("gfx942");
     auto gfx942_slow = TensileLite::analytical::Hardware(
-        gfx942arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.4, 1, 1.0);
+        gfx942arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.4, 1, std::make_tuple(0, 0.015, 0));
     auto gfx942_fast = TensileLite::analytical::Hardware(
-        gfx942arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.8, 1, 1.0);
+        gfx942arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.8, 1, std::make_tuple(0, 0.015, 0));
     double flops_slow = TensileLite::analytical::compute_perf_gflops(gfx942_slow,
                                                                      M,
                                                                      N,
@@ -414,7 +394,6 @@ void ComputePerfGflops(size_t          M,
                                                                      element_size_B,
                                                                      element_size_out,
                                                                      TensileLite::analytical::DataType::BFloat16,
-                                                                     H_mem,
                                                                      WGM,                                                                     
                                                                      false);
     double flops_fast = TensileLite::analytical::compute_perf_gflops(gfx942_fast,
@@ -434,7 +413,6 @@ void ComputePerfGflops(size_t          M,
                                                                      element_size_B,
                                                                      element_size_out,
                                                                      TensileLite::analytical::DataType::BFloat16,
-                                                                     H_mem,
                                                                      WGM,                                                                     
                                                                      false);
     EXPECT_GT(flops_fast, flops_slow); // faster clock = higher flops
@@ -448,13 +426,15 @@ void EstimateMallHit(const TensileLite::analytical::Hardware& hardware,
                                  int             MT_M,
                                  int             MT_N,
                                  int             MT_K,
+                                 size_t          numActiveCUs,
+                                 size_t          splittingFactor,
                                  const std::optional<int>                 expected_gt)
 {
     double mall_hit;
     for(int i = 1; i < 1025; i++)
     {
         mall_hit = TensileLite::analytical::estimate_mall_hit(
-            hardware, M, N, K, batch, MT_M, MT_N, MT_K, i);
+            hardware, M, N, K, batch, MT_M, MT_N, MT_K, i, numActiveCUs, splittingFactor);
         EXPECT_GT(mall_hit, expected_gt);
     }
 }
@@ -539,16 +519,17 @@ void BestMacroTileSize(const TensileLite::analytical::Hardware& hardware,
                                                              double H_L2,
                                                              size_t WGM)
 {
-    std::vector<std::tuple<size_t, // MT_M
+    const std::vector<std::tuple<size_t, // MT_M
                            size_t, // MT_N
                            size_t, // MT_K
                            size_t, // MI_M
                            size_t, // MI_N
                            size_t, // MI_K
-                           size_t // Occupancy
+                           size_t, // Occupancy
+                           int     // wgm
                            >>
         MT_list
-        = {{256, 256, 32, 32, 32, 8, 1}, {128, 128, 64, 32, 32, 8, 1}, {64, 64, 64, 32, 32, 8, 1}};
+        = {{256, 256, 32, 32, 32, 8, 1, 6}, {128, 128, 64, 32, 32, 8, 1, 6}, {64, 64, 64, 32, 32, 8, 1, 6}};
     auto results = select_best_macro_tile_size(
         M, N, K, batch, transA, transB, hardware, MT_list, element_size_A, element_size_B, element_size_out, TensileLite::analytical::DataType::BFloat16, mx_block_size, H_L2, false, false, WGM);
 
@@ -582,7 +563,7 @@ void BestWGM(const TensileLite::analytical::Hardware& hardware,
     auto best_wgm_nonsquare = select_best_wgm(
         2048, 5120, K, batch, hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, WGM_list, element_size, H_L2, false, false);
 
-    EXPECT_EQ(best_wgm_large_tile.second, best_wgm_small_tile.second);
+    EXPECT_GT(best_wgm_small_tile.second, best_wgm_large_tile.second);
     EXPECT_NE(best_wgm_large_tile.second, best_wgm_nonsquare.second);
 }
 
