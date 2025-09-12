@@ -156,24 +156,57 @@ namespace rocRoller
             return false;
         }
 
+        DisallowedCycles MFMACoexecObserver::getDisallowedCycles(Instruction const& inst) const
+        {
+            // When this has info for multiple instructions, it should probably
+            // get moved into the GPUInstructionInfo or else where in the
+            // architecture info.
+
+            AssertFatal(isTargetedInstruction(inst));
+
+            bool scaled = inst.getOpCode().find("scale") != std::string::npos;
+
+            DisallowedCycles rv = {{1,
+                                    {CoexecCategory::VMEM,
+                                     CoexecCategory::VALU,
+                                     CoexecCategory::VALU_Trans,
+                                     CoexecCategory::XDL,
+                                     CoexecCategory::XDL_Scale,
+                                     CoexecCategory::LDS}},
+                                   {2, {CoexecCategory::XDL, CoexecCategory::XDL_Scale}}};
+
+            if(scaled)
+            {
+                // If this is a `v_mfma_scale_` instruction, it is actually 2
+                // instructions and will therefore take 2 instructions to issue.
+                // So the next cycle will not be able to issue anything.
+                // Shift everything by a cycle.
+
+                EnumBitset<CoexecCategory> anything = {CoexecCategory::NotAnInstruction};
+                auto                       nothing  = ~anything;
+
+                DisallowedCycles rvIncludingMFMA = {{1, nothing}};
+
+                for(auto const& [cycle, disallowed] : rv)
+                {
+                    AssertFatal(cycle > 0);
+                    rvIncludingMFMA[cycle + 1] = disallowed;
+                }
+
+                return rvIncludingMFMA;
+            }
+
+            return rv;
+        }
+
         InstructionStatus MFMACoexecObserver::peek(Instruction const& inst) const
         {
             using bs = EnumBitset<CoexecCategory>;
             InstructionStatus rv;
             if(isTargetedInstruction(inst))
             {
-                bs   anything = {CoexecCategory::NotAnInstruction};
-                auto nothing  = ~anything;
 
-                rv.disallowedCoexec = {{1, nothing},
-                                       {2,
-                                        {CoexecCategory::VMEM,
-                                         CoexecCategory::VALU,
-                                         CoexecCategory::VALU_Trans,
-                                         CoexecCategory::XDL,
-                                         CoexecCategory::XDL_Scale,
-                                         CoexecCategory::LDS}},
-                                       {3, {CoexecCategory::XDL, CoexecCategory::XDL_Scale}}};
+                rv.disallowedCoexec = getDisallowedCycles(inst);
 
                 auto aOperands = inst.getSrcs()[0]->getRegisterIds().to<std::vector>();
                 if(aOperands == m_aOperands)

@@ -82,6 +82,8 @@ namespace rocRoller
                 return true;
             }
 
+            DisallowedCycles getDisallowedCycles(Instruction const& inst) const;
+
             static bool isTargetedInstruction(Instruction const& inst);
 
             std::string state() const;
