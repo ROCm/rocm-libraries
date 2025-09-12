@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #define CONV_WINO_RAGE_RXS_CPP
 
@@ -34,6 +11,7 @@
 #include <miopen/conv/solvers.hpp>
 #include <miopen/fusion/solvers.hpp>
 #include <miopen/fusion/utils.hpp>
+#include <miopen/stringutils.hpp>
 
 namespace miopen {
 
@@ -75,14 +53,28 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
     if(problem.IsTensorsCasted())
         return false;
-    if(!(problem.IsFp16() || problem.IsFp32() || problem.IsBfp16()))
-        return false;
     if(problem.HasNonPackedTensors())
         return false;
 
-    const auto devName = ctx.GetStream().GetDeviceName();
-    if(!(devName == "gfx942"))
+    WinoShaderArgs args;
+    if(!args.SetConvParams(problem))
         return false;
+
+    const auto devName = ctx.GetStream().GetDeviceName();
+    if(devName == "gfx942")
+    {
+        if(!(problem.IsFp16() || problem.IsFp32() || problem.IsBfp16()))
+            return false;
+    }
+    else if(StartsWith(devName, "gfx12"))
+    {
+        if(!(problem.IsFp16()))
+            return false;
+    }
+    else
+    {
+        return false;
+    }
 
     const auto& targetProperties = ctx.GetStream().GetTargetProperties();
     if(targetProperties.Xnack() && *targetProperties.Xnack())
@@ -91,10 +83,6 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
     if(!(problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1))
         return false;
     if(!(problem.GetDilationH() == 1 && problem.GetDilationW() == 1))
-        return false;
-
-    WinoShaderArgs args;
-    if(!args.SetConvParams(problem))
         return false;
 
     args.n_groups = getNGroups(ctx);
@@ -163,8 +151,19 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     std::string kernelName = "miopenSp3AsmConvRage" + kernelVersion;
     std::string kernelFile = "Conv_Winograd_Rage" + kernelVersion;
 
-    /// \todo Add case for gfx12 kernels
-    kernelName += "_gfx9";
+    const auto devName = ctx.GetStream().GetDeviceName();
+    if(devName == "gfx942")
+    {
+        kernelName += "_gfx9";
+    }
+    else if(StartsWith(devName, "gfx12"))
+    {
+        kernelName += "_gfx12";
+    }
+    else
+    {
+        MIOPEN_THROW(miopenStatusInternalError);
+    }
 
     std::string kernelPostfix;
 
@@ -213,8 +212,11 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     kernelInfo.comp_options = options.GenerateFor(kbp::GcnAsm{});
     kernelInfo.comp_options += std::string(" -mcumode");
 
-    /// \todo Add case for gfx12 wgp size of 384U
-    uint64_t wgSize = 768U;
+    uint64_t wgSize = 768U; // value for gfx942
+    if(StartsWith(devName, "gfx12"))
+    {
+        wgSize = 384U;
+    }
 
     kernelInfo.l_wk.push_back(wgSize);
     kernelInfo.l_wk.push_back(1);
