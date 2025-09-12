@@ -30,9 +30,20 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <thrust/system/hip/detail/nv/target.h>
 #include <thrust/system/hip/detail/util.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <exception>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -41,21 +52,19 @@ namespace hip
 {
 namespace detail
 {
-
-void THRUST_HIP_DEVICE_FUNCTION terminate()
-{
-  thrust::hip_rocprim::terminate();
-}
-
-void THRUST_HIP_FUNCTION terminate_with_message(const char* message)
+inline THRUST_HOST_DEVICE void terminate_with_message(const char* message)
 {
   THRUST_HIP_PRINTF("%s\n", message);
 #if THRUST_HIP_PRINTF_ENABLED == 0
   THRUST_UNUSED_VAR(message);
 #endif
-  thrust::hip_rocprim::terminate();
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  _THRUST_STD::terminate();
+#else
+  NV_IF_TARGET(NV_IS_HOST, (::std::exit(-1);), (__builtin_trap();));
+  __builtin_unreachable();
+#endif
 }
-
 } // namespace detail
 } // namespace hip
 } // namespace system

@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gtsv_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_sgtsv "rocsparse_Xgtsv()". The temporary 
+*  that is required by \ref rocsparse_sgtsv "rocsparse_Xgtsv()". The temporary
 *  storage buffer must be allocated by the user.
 *
 *  \note
@@ -223,7 +223,7 @@ rocsparse_status rocsparse_zgtsv(rocsparse_handle                handle,
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gtsv_no_pivot_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_sgtsv_no_pivot "rocsparse_Xgtsv_no_pivot()". The temporary 
+*  that is required by \ref rocsparse_sgtsv_no_pivot "rocsparse_Xgtsv_no_pivot()". The temporary
 *  storage buffer must be allocated by the user.
 *
 *  \note
@@ -411,7 +411,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot(rocsparse_handle                handle
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gtsv_no_pivot_strided_batch_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_sgtsv_no_pivot_strided_batch "rocsparse_Xgtsv_no_pivot_strided_batch()". 
+*  that is required by \ref rocsparse_sgtsv_no_pivot_strided_batch "rocsparse_Xgtsv_no_pivot_strided_batch()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note
@@ -635,7 +635,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot_strided_batch(rocsparse_handle        
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gtsv_interleaved_batch_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_sgtsv_interleaved_batch "rocsparse_Xgtsv_interleaved_batch()". 
+*  that is required by \ref rocsparse_sgtsv_interleaved_batch "rocsparse_Xgtsv_interleaved_batch()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note

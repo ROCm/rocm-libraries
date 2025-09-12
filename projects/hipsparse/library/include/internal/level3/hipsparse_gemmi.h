@@ -80,8 +80,8 @@ extern "C" {
 *  ldc         leading dimension of \f$C\f$, must be at least \f$m\f$.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, 
-*              \p lda, \p ldc, \p alpha, \p A, \p cscValB, \p cscColPtrB, \p cscRowIndB, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz,
+*              \p lda, \p ldc, \p alpha, \p A, \p cscValB, \p cscColPtrB, \p cscRowIndB,
 *              \p beta or \p C is invalid.
 *
 *  \par Example
@@ -96,8 +96,8 @@ extern "C" {
 *    float beta  = 0.25f;
 *
 *    std::vector<int> hcscColPtr = {0, 2, 5, 7, 8, 10};
-*    std::vector<int> hcscRowInd = {0, 2, 0, 1, 3, 1, 3, 2, 0, 2}; 
-*    std::vector<float> hcsc_val     = {1, 6, 2, 4, 9, 5, 2, 7, 3, 8}; 
+*    std::vector<int> hcscRowInd = {0, 2, 0, 1, 3, 1, 3, 2, 0, 2};
+*    std::vector<float> hcsc_val     = {1, 6, 2, 4, 9, 5, 2, 7, 3, 8};
 *
 *    std::vector<float> hA(nnz_A, 1.0f);
 *    std::vector<float> hC(nnz_C, 1.0f);
@@ -127,19 +127,19 @@ extern "C" {
 *    hipMemcpy(dC, hC.data(), sizeof(float) * nnz_C, hipMemcpyHostToDevice);
 *
 *    // Perform operation
-*    hipsparseSgemmi(handle, 
-*                    m, 
-*                    n, 
-*                    k, 
-*                    nnz_B, 
-*                    &alpha, 
-*                    dA, 
-*                    lda, 
-*                    dcsc_val, 
-*                    dcscColPtr, 
-*                    dcscRowInd, 
-*                    &beta, 
-*                    dC, 
+*    hipsparseSgemmi(handle,
+*                    m,
+*                    n,
+*                    k,
+*                    nnz_B,
+*                    &alpha,
+*                    dA,
+*                    lda,
+*                    dcsc_val,
+*                    dcscColPtr,
+*                    dcscRowInd,
+*                    &beta,
+*                    dC,
 *                    ldc);
 *
 *    // Copy device to host

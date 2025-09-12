@@ -20,11 +20,12 @@
 * THE SOFTWARE.
 *******************************************************************************/
 
+#include <iostream>
+#ifndef WIN32
 #include "rocfft/rocfft.h"
 #include <hip/hip_complex.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
-#include <iostream>
 #include <math.h>
 #include <stdexcept>
 #include <vector>
@@ -46,9 +47,14 @@ __device__ double2 load_callback(double2* input, size_t offset, void* cbdata, vo
                    make_hipDoubleComplex(data->scale, data->scale));
 }
 __device__ auto load_callback_dev = load_callback;
+#endif
 
 int main()
 {
+#ifdef WIN32
+    std::cout << "This sample is temporarily disabled on Windows" << std::endl;
+    return EXIT_SUCCESS;
+#else
 
     const size_t N = 8;
 
@@ -189,4 +195,5 @@ int main()
         throw std::runtime_error("rocfft_cleanup failed.");
 
     return 0;
+#endif
 }

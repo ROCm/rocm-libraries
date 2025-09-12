@@ -37,7 +37,6 @@ else()
     "Install path prefix, prepended onto install directories" )
 endif()
 
-
 # Workarounds..
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
 list( APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake )
