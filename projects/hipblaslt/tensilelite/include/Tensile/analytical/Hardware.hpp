@@ -179,42 +179,42 @@ namespace TensileLite
 
         inline DataType stringToDatatype(std::string s)
         {
-            if (s == "f32")
+            if(s == "f32")
                 return DataType::Float;
-            if (s == "c32")
+            if(s == "c32")
                 return DataType::ComplexFloat;
-            if (s == "c64")
+            if(s == "c64")
                 return DataType::ComplexDouble;
-            if (s == "f64")
+            if(s == "f64")
                 return DataType::Double;
-            if (s == "f16")
+            if(s == "f16")
                 return DataType::Half;
-            if (s == "i32")
+            if(s == "i32")
                 return DataType::Int32;
-            if (s == "bf16")
+            if(s == "bf16")
                 return DataType::BFloat16;
-            if (s == "i8")
+            if(s == "i8")
                 return DataType::Int8;
-            if (s == "xf32")
+            if(s == "xf32")
                 return DataType::XFloat32;
-            if (s == "f8")
+            if(s == "f8")
                 return DataType::Float8;
-            if (s == "bf8")
+            if(s == "bf8")
                 return DataType::BFloat8;
-            if (s == "f6")
+            if(s == "f6")
                 return DataType::Float6;
-            if (s == "bf6")
+            if(s == "bf6")
                 return DataType::BFloat6;
-            if (s == "f4")
+            if(s == "f4")
                 return DataType::Float4;
             return DataType::None;
         }
 
         struct MatrixInstruction
         {
-            size_t MI_M;
-            size_t MI_N;
-            size_t MI_K;
+            size_t   MI_M;
+            size_t   MI_N;
+            size_t   MI_K;
             DataType miInputType;
 
             MatrixInstruction()
@@ -282,6 +282,37 @@ namespace TensileLite
         class Hardware
         {
         public:
+            struct Weights
+            {
+                double compute  = 1.0; // ANALYTICAL_COMPUTE_WEIGHT
+                double memory   = 1.0; // ANALYTICAL_MEMORY_WEIGHT
+                double prologue = 1.0; // ANALYTICAL_PROLOGUE_WEIGHT
+                double epilogue = 1.0; // ANALYTICAL_EPILOGUE_WEIGHT
+                double mem1     = 1.0; // ANALYTICAL_MEM1_WEIGHT
+                double mem2     = 1.0; // ANALYTICAL_MEM2_WEIGHT
+                double mem3     = 1.0; // ANALYTICAL_MEM3_WEIGHT
+
+                static Weights from_env()
+                {
+                    Weights w;
+                    w.compute  = read_env_double("ANALYTICAL_COMPUTE_WEIGHT", 1.0);
+                    w.memory   = read_env_double("ANALYTICAL_MEMORY_WEIGHT", 1.0);
+                    w.prologue = read_env_double("ANALYTICAL_PROLOGUE_WEIGHT", 1.0);
+                    w.epilogue = read_env_double("ANALYTICAL_EPILOGUE_WEIGHT", 1.0);
+                    w.mem1     = read_env_double("ANALYTICAL_MEM1_WEIGHT", 1.0);
+                    w.mem2     = read_env_double("ANALYTICAL_MEM2_WEIGHT", 1.0);
+                    w.mem3     = read_env_double("ANALYTICAL_MEM3_WEIGHT", 1.0);
+                    return w;
+                }
+            };
+
+            // Accessor: returns a reference to weights initialized once from env.
+            static const Weights& weights()
+            {
+                static const Weights w = Weights::from_env();
+                return w;
+            }
+
             enum class Architecture
             {
                 gfx90a,
@@ -310,19 +341,19 @@ namespace TensileLite
 
             struct ArchitectureConstants
             {
-                size_t num_xcds;
-                double mem1_perf_ratio;
-                double mem2_perf_ratio;
-                double mem3_perf_ratio;
-                size_t parallel_MI_CU;
+                size_t                             num_xcds;
+                double                             mem1_perf_ratio;
+                double                             mem2_perf_ratio;
+                double                             mem3_perf_ratio;
+                size_t                             parallel_MI_CU;
                 std::tuple<double, double, double> mem_bw_per_wg_coefficients;
-                double mem_clock_ratio;
+                double                             mem_clock_ratio;
 
-                ArchitectureConstants(size_t num_xcds,
-                                      double mem1_perf_ratio,
-                                      double mem2_perf_ratio,
-                                      double mem3_perf_ratio,
-                                      size_t parallel_MI_CU,
+                ArchitectureConstants(size_t                             num_xcds,
+                                      double                             mem1_perf_ratio,
+                                      double                             mem2_perf_ratio,
+                                      double                             mem3_perf_ratio,
+                                      size_t                             parallel_MI_CU,
                                       std::tuple<double, double, double> mem_bw_per_wg_coefficients,
                                       double mem_clock_ratio) //Obtained through microbenchmarking
                     : num_xcds(num_xcds)
@@ -342,30 +373,30 @@ namespace TensileLite
                                             std::unordered_map<MatrixInstruction, size_t>>
                 INSTRUCTION_MAP;
 
-            Architecture                        arch;
-            size_t                              N_CU; // Number of Compute Units
-            size_t                              LDS_capacity; // Capacity of LDS
-            double                              mem1_perf_ratio;
-            double                              mem2_perf_ratio;
-            double                              mem3_perf_ratio;
-            size_t                              L2_capacity; // Capacity of L2 in bytes
-            size_t                              CU_per_L2; // Number of compute units per L2 domain
-            double                              compute_clock_ghz;
-            size_t                              parallel_MI_CU; // The number of parallel MI in a CU
-            std::tuple<double, double, double>  mem_bw_per_wg_coefficients;
-            size_t                              NUM_XCD;
+            Architecture                       arch;
+            size_t                             N_CU; // Number of Compute Units
+            size_t                             LDS_capacity; // Capacity of LDS
+            double                             mem1_perf_ratio;
+            double                             mem2_perf_ratio;
+            double                             mem3_perf_ratio;
+            size_t                             L2_capacity; // Capacity of L2 in bytes
+            size_t                             CU_per_L2; // Number of compute units per L2 domain
+            double                             compute_clock_ghz;
+            size_t                             parallel_MI_CU; // The number of parallel MI in a CU
+            std::tuple<double, double, double> mem_bw_per_wg_coefficients;
+            size_t                             NUM_XCD;
 
-            Hardware(Architecture                        arch,
-                     size_t                              N_CU,
-                     size_t                              LDS_capacity,
-                     size_t                              NUM_XCD,
-                     double                              mem1_perf_ratio,
-                     double                              mem2_perf_ratio,
-                     double                              mem3_perf_ratio,
-                     size_t                              L2_capacity,
-                     double                              compute_clock_ghz,
-                     size_t                              parallel_MI_CU,
-                     std::tuple<double, double, double>  mem_bw_per_wg_coefficients)
+            Hardware(Architecture                       arch,
+                     size_t                             N_CU,
+                     size_t                             LDS_capacity,
+                     size_t                             NUM_XCD,
+                     double                             mem1_perf_ratio,
+                     double                             mem2_perf_ratio,
+                     double                             mem3_perf_ratio,
+                     size_t                             L2_capacity,
+                     double                             compute_clock_ghz,
+                     size_t                             parallel_MI_CU,
+                     std::tuple<double, double, double> mem_bw_per_wg_coefficients)
                 : arch(arch)
                 , N_CU(N_CU)
                 , LDS_capacity(LDS_capacity)
@@ -461,9 +492,10 @@ namespace TensileLite
                 std::cout << "Compute clock (GHz)       : " << compute_clock_ghz << "\n";
                 std::cout << "Parallel MI/CU            : " << parallel_MI_CU << "\n";
                 std::cout << "Number of XCDs (NUM_XCD)  : " << NUM_XCD << "\n";
-                std::cout << "mem_bw_per_wg_coefficients: " << std::get<0>(mem_bw_per_wg_coefficients) << ", "
-                                                            << std::get<1>(mem_bw_per_wg_coefficients) << ", "
-                                                            << std::get<2>(mem_bw_per_wg_coefficients) << "\n\n";
+                std::cout << "mem_bw_per_wg_coefficients: "
+                          << std::get<0>(mem_bw_per_wg_coefficients) << ", "
+                          << std::get<1>(mem_bw_per_wg_coefficients) << ", "
+                          << std::get<2>(mem_bw_per_wg_coefficients) << "\n\n";
 
                 std::cout << "------------------ Instruction Map -------------------------\n";
                 // Loop over the instruction_map and print each entry
@@ -473,8 +505,8 @@ namespace TensileLite
                     const auto& L_MI = kv.second;
 
                     std::cout << "Instruction: MI_M=" << key.MI_M << ", MI_N=" << key.MI_N
-                              << ", MI_K=" << key.MI_K << ", miInputType=" << toString(key.miInputType)
-                              << " bytes\n"
+                              << ", MI_K=" << key.MI_K
+                              << ", miInputType=" << toString(key.miInputType) << " bytes\n"
                               << "  -> Latency (L_MI): " << L_MI << "\n";
                 }
                 std::cout << "===========================================================\n";
@@ -539,6 +571,27 @@ namespace TensileLite
             }
 
         private:
+            // Robust double parser with defaults; accepts decimal or scientific.
+            static double read_env_double(const char* name, double default_val)
+            {
+                const char* s = std::getenv(name);
+                if(!s || *s == '\0')
+                    return default_val;
+
+                errno      = 0;
+                char*  end = nullptr;
+                double v   = std::strtod(s, &end);
+
+                // Reject if no conversion, trailing junk, or errno set.
+                if(end == s || (end && *end != '\0') || errno == ERANGE || !std::isfinite(v))
+                {
+                    std::cerr << "Warning: environment variable " << name << " has invalid value '"
+                              << s << "'. Using default " << default_val << ".\n";
+                    return default_val;
+                }
+                return v;
+            }
+
             static std::string get_before_first_colon(const std::string& input)
             {
                 size_t pos = input.find(':');
