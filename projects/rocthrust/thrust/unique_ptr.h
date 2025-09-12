@@ -34,6 +34,9 @@ struct default_delete<T, typename std::enable_if<!std::is_array<T>::value>::type
   THRUST_HOST
   void operator()(pointer ptr) const noexcept
   {
+    if (ptr.get() == nullptr)
+      return;
+    
     // We use for_each_n to launch a kernel that executes the destructor on the device,
     // avoiding known issues with thrust::device_delete for user-defined types.
     if constexpr (!std::is_trivially_destructible<T>::value)
@@ -63,6 +66,9 @@ struct default_delete<
   THRUST_HOST
   void operator()(pointer ptr) const noexcept
   {
+    if (ptr.get() == nullptr)
+      return;
+      
     // We use for_each_n to launch a kernel that executes the destructor on the device,
     // avoiding known issues with thrust::device_delete for user-defined types.
     if (m_size)
