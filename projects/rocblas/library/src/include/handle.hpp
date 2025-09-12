@@ -88,6 +88,7 @@ enum class Processor : int
     gfx1100 = 1100,
     gfx1101 = 1101,
     gfx1102 = 1102,
+    gfx1103 = 1103,
     gfx1150 = 1150,
     gfx1151 = 1151,
     gfx1200 = 1200,
@@ -570,6 +571,10 @@ private:
     // hipBLASLt handle is created at handle creation time and remains in effect for the life of the handle.
     std::shared_ptr<hipblasLtHandle_t> hipblasLtHandle;
     int                                hipblasltEnvVar = -1;
+
+    // used in constructor initialization list
+    int       getActiveDevice();
+    Processor getActiveArch();
 
     // Opaque smart allocator class to perform device memory allocations
     // clang-format off

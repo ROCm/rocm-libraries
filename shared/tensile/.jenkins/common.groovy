@@ -34,7 +34,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
     // Do release build of HostLibraryTests on CI until it is upgraded to rocm 5.3 to
     // avoid bug causing long build times of certain files.
     String buildType = (debug || codecov) ? 'Debug' : 'Release'
-    
+
     int systemCPUs = sh(script: 'nproc', returnStdout: true ).trim().toInteger()
     long containerRAMbytes = sh(script: 'if [ -f /sys/fs/cgroup/memory.max ]; then cat /sys/fs/cgroup/memory.max; else cat /sys/fs/cgroup/memory/memory.limit_in_bytes; fi', returnStdout: true ).trim().toLong()
     int containerRAM = containerRAMbytes / (1024 * 1024)
@@ -42,7 +42,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
     if (maxThreads > systemCPUs) maxThreads = systemCPUs
     if (maxThreads > 64) maxThreads = 64
     if (maxThreads < 1) maxThreads = 1
-    
+
     String buildThreads = maxThreads.toString() // if hipcc is used may be multiplied by parallel-jobs
     String codeCovString = codecov ? "-DTENSILE_ENABLE_COVERAGE=ON" : ""
 
@@ -55,7 +55,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
             export HOME=/home/jenkins
             export TENSILE_COMPILER=${compiler}
             export HIPCC_COMPILE_FLAGS_APPEND='-O3 -Wno-format-nonliteral -parallel-jobs=4'
-            
+
             cmake --trace-expand \
                 -B build -S HostLibraryTests \
                 -DCMAKE_BUILD_TYPE=${buildType} \

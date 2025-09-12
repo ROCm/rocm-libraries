@@ -1513,7 +1513,7 @@ functions (for example, ``axpy_ex``, ``scal_ex``, and ``gemm_ex``). For more inf
 rocblas-bench timing
 ^^^^^^^^^^^^^^^^^^^^^
 
-rocblas-bench uses ``hipEvent_t`` recording to time API calls and ignore the overhead of any ``hipStreamSynchronize`` call. 
+rocblas-bench uses ``hipEvent_t`` recording to time API calls and ignore the overhead of any ``hipStreamSynchronize`` call.
 To switch back to the earlier timing approach that uses ``hipStreamSynchronize`` to ensure work completion, set the environment variable ``ROCBLAS_BENCH_STREAM_SYNC=1``.
 
 rocblas-gemm-tune

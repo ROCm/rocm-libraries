@@ -53,6 +53,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
     # rocm-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
+    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
@@ -60,14 +61,12 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(HIPBLASLT_ENABLE_LLVM "Use OpenMP to improve performance." OFF)
+    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
     option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
-    option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
-    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
@@ -98,7 +97,7 @@ if(HIPBLASLT_ENABLE_HOST)
     else()
         set(hipblas_target hipblas-common)
     endif()
-    if(NOT ROCM_LIBS_SUPERBUILD) 
+    if(NOT ROCM_LIBS_SUPERBUILD)
         find_package(${hipblas_target} REQUIRED)
     endif()
     if(HIPBLASLT_ENABLE_MARKER)
@@ -115,12 +114,11 @@ else()
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
+    enable_language(Fortran)
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
-    else()
-        find_package(BLAS REQUIRED)
-        #find_package(cblas REQUIRED) # is this actually required
     endif()
+    # There is an implicit find_package(BLAS) when finding lapack
     find_package(LAPACK REQUIRED)
 endif()
 
@@ -229,7 +227,7 @@ if(HIPBLASLT_ENABLE_HOST)
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
-    
+
     if(HIPBLASLT_ENABLE_ASAN)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
     endif()
@@ -246,9 +244,9 @@ if(HIPBLASLT_ENABLE_HOST)
         target_compile_definitions(hipblaslt PUBLIC LEGACY_HIPBLAS_DIRECT)
     endif()
 
-    if(HIPBLASLT_ENABLE_LAZY_LOAD)
-        target_compile_definitions(hipblaslt PRIVATE ROCBLASLT_TENSILE_LAZY_LOAD)
-    endif()
+    target_compile_definitions(hipblaslt PRIVATE
+        ROCBLASLT_TENSILE_LAZY_LOAD=$<BOOL:${HIPBLASLT_ENABLE_LAZY_LOAD}>
+    )
 
     if(HIPBLASLT_ENABLE_MARKER)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER)
@@ -401,7 +399,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
         string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
         rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
     endif()
-    
+
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
     rocm_package_setup_client_component(benchmarks
@@ -411,7 +409,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
 
 endif()
 
-if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
+if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     rocm_install(
         TARGETS hipblaslt-test
         COMPONENT tests
@@ -427,7 +425,7 @@ if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
     )
 endif()
 
-if(HIPBLASLT_ENABLE_SAMPLES)
+if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
     install(
         TARGETS
             sample_hipblaslt_gemm

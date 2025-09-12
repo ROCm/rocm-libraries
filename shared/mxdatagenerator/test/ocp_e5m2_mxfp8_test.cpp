@@ -112,7 +112,7 @@ constexpr std::array<double, 256> e5m2ValuesOCP = {
     // clang-format off
 };
 
-constexpr uint8_t e5m2BitsOCP[] = 
+constexpr uint8_t e5m2BitsOCP[] =
 {
     // clang-format off
     0b00000000, 0b00000001, 0b00000010, 0b00000011,

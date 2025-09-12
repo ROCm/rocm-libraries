@@ -18,7 +18,7 @@ HIPCC_PATH = os.path.join(ROCM_PATH, "bin", "hipcc")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Origami Python Bindings Setup Script")
-    parser.add_argument("--source", "-s", type=str, default=Path(__file__).parent.parent.parent.resolve() / "Source", help="Path to TensileLite source directory.")
+    parser.add_argument("--source", "-s", type=str, default=Path(__file__).parent.parent.parent.parent.resolve(), help="Path to TensileLite source directory.")
     args, unknown = parser.parse_known_args()
     return args, unknown
 
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     sys.argv = [sys.argv[0]] + unknown  # Preserve unrecognized arguments for setuptools
 
     source_dir = Path(args.source)
-    cpp_path = source_dir / "lib" / "source" / "analytical" / "*.cpp"
+    cpp_path = source_dir / "src" / "analytical" / "*.cpp"
     cpp_files = sorted(glob.glob(str(cpp_path)))
 
     cpp_files = ["origami_module.cpp"] + cpp_files
@@ -49,7 +49,7 @@ if __name__ == "__main__":
             cpp_files,
             include_dirs=[
                 pybind11.get_include(),
-                str(source_dir / "lib" / "include"),
+                str(source_dir / "include"),
                 os.path.join(ROCM_PATH, "include"),
             ],
             language="c++",

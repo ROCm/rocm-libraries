@@ -71,99 +71,12 @@ extern "C" void rocblas_device_malloc_set_default_memory_size(size_t size)
     t_rocblas_device_malloc_default_memory_size = size;
 }
 
-
-static inline int getActiveDevice()
-{
-    int device;
-    THROW_IF_HIP_ERROR(hipGetDevice(&device));
-    return device;
-}
-
-static Processor getActiveArch(int deviceId)
-{
-    hipDeviceProp_t deviceProperties;
-    hipGetDeviceProperties(&deviceProperties, deviceId);
-    // strip out xnack/ecc from name
-    std::string deviceFullString(deviceProperties.gcnArchName);
-    std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
-
-    if(deviceString.find("gfx803") != std::string::npos)
-    {
-        return Processor::gfx803;
-    }
-    else if(deviceString.find("gfx900") != std::string::npos)
-    {
-        return Processor::gfx900;
-    }
-    else if(deviceString.find("gfx906") != std::string::npos)
-    {
-        return Processor::gfx906;
-    }
-    else if(deviceString.find("gfx908") != std::string::npos)
-    {
-        return Processor::gfx908;
-    }
-    else if(deviceString.find("gfx90a") != std::string::npos)
-    {
-        return Processor::gfx90a;
-    }
-    else if(deviceString.find("gfx942") != std::string::npos)
-    {
-        return Processor::gfx942;
-    }
-    else if(deviceString.find("gfx950") != std::string::npos)
-    {
-        return Processor::gfx950;
-    }
-    else if(deviceString.find("gfx1010") != std::string::npos)
-    {
-        return Processor::gfx1010;
-    }
-    else if(deviceString.find("gfx1011") != std::string::npos)
-    {
-        return Processor::gfx1011;
-    }
-    else if(deviceString.find("gfx1012") != std::string::npos)
-    {
-        return Processor::gfx1012;
-    }
-    else if(deviceString.find("gfx1030") != std::string::npos)
-    {
-        return Processor::gfx1030;
-    }
-    else if(deviceString.find("gfx1100") != std::string::npos)
-    {
-        return Processor::gfx1100;
-    }
-    else if(deviceString.find("gfx1101") != std::string::npos)
-    {
-        return Processor::gfx1101;
-    }
-    else if(deviceString.find("gfx1102") != std::string::npos)
-    {
-        return Processor::gfx1102;
-    }
-    else if(deviceString.find("gfx1151") != std::string::npos)
-    {
-        return Processor::gfx1151;
-    }
-    else if(deviceString.find("gfx1200") != std::string::npos)
-    {
-        return Processor::gfx1200;
-    }
-    else if(deviceString.find("gfx1201") != std::string::npos)
-    {
-        return Processor::gfx1201;
-    }
-    return static_cast<Processor>(0);
-}
-
 /*******************************************************************************
  * constructor
  ******************************************************************************/
 _rocblas_handle::_rocblas_handle()
     : device(getActiveDevice()) // getActiveDevice populates device_properties struct
-    , arch(static_cast<int>(getActiveArch(device)))
+    , arch(static_cast<int>(getActiveArch()))
     , mWarpSize(device_properties.warpSize)
 {
     archMajor      = arch / 100; // this may need to switch to string handling in the future
@@ -306,6 +219,99 @@ _rocblas_handle::~_rocblas_handle()
         hipblasLtHandle.reset();
     }
 #endif
+}
+
+int _rocblas_handle::getActiveDevice()
+{
+    int deviceId;
+    THROW_IF_HIP_ERROR(hipGetDevice(&deviceId));
+    THROW_IF_HIP_ERROR(hipGetDeviceProperties(&device_properties, deviceId));
+    return deviceId;
+}
+
+Processor _rocblas_handle::getActiveArch()
+{
+    // strip out xnack/ecc from name
+    std::string deviceFullString(device_properties.gcnArchName);
+    std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
+
+    if(deviceString.find("gfx803") != std::string::npos)
+    {
+        return Processor::gfx803;
+    }
+    else if(deviceString.find("gfx900") != std::string::npos)
+    {
+        return Processor::gfx900;
+    }
+    else if(deviceString.find("gfx906") != std::string::npos)
+    {
+        return Processor::gfx906;
+    }
+    else if(deviceString.find("gfx908") != std::string::npos)
+    {
+        return Processor::gfx908;
+    }
+    else if(deviceString.find("gfx90a") != std::string::npos)
+    {
+        return Processor::gfx90a;
+    }
+    else if(deviceString.find("gfx942") != std::string::npos)
+    {
+        return Processor::gfx942;
+    }
+    else if(deviceString.find("gfx950") != std::string::npos)
+    {
+        return Processor::gfx950;
+    }
+    else if(deviceString.find("gfx1010") != std::string::npos)
+    {
+        return Processor::gfx1010;
+    }
+    else if(deviceString.find("gfx1011") != std::string::npos)
+    {
+        return Processor::gfx1011;
+    }
+    else if(deviceString.find("gfx1012") != std::string::npos)
+    {
+        return Processor::gfx1012;
+    }
+    else if(deviceString.find("gfx1030") != std::string::npos)
+    {
+        return Processor::gfx1030;
+    }
+    else if(deviceString.find("gfx1100") != std::string::npos)
+    {
+        return Processor::gfx1100;
+    }
+    else if(deviceString.find("gfx1101") != std::string::npos)
+    {
+        return Processor::gfx1101;
+    }
+    else if(deviceString.find("gfx1102") != std::string::npos)
+    {
+        return Processor::gfx1102;
+    }
+    else if(deviceString.find("gfx1103") != std::string::npos)
+    {
+        return Processor::gfx1103;
+    }
+    else if(deviceString.find("gfx1150") != std::string::npos)
+    {
+        return Processor::gfx1150;
+    }
+    else if(deviceString.find("gfx1151") != std::string::npos)
+    {
+        return Processor::gfx1151;
+    }
+    else if(deviceString.find("gfx1200") != std::string::npos)
+    {
+        return Processor::gfx1200;
+    }
+    else if(deviceString.find("gfx1201") != std::string::npos)
+    {
+        return Processor::gfx1201;
+    }
+    return static_cast<Processor>(0);
 }
 
 /*******************************************************************************
@@ -459,6 +465,20 @@ static rocblas_status free_existing_device_memory(rocblas_handle handle)
 }
 
 /*******************************************************************************
+ * Set the device memory size
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_device_memory_size(rocblas_handle handle, size_t size)
+try
+{
+    return rocblas_status_not_implemented;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+
+/*******************************************************************************
  * Set the device memory workspace
  ******************************************************************************/
 extern "C" rocblas_status rocblas_set_workspace(rocblas_handle handle, void* addr, size_t size)
@@ -499,6 +519,14 @@ extern "C" bool rocblas_is_managing_device_memory(rocblas_handle handle)
 {
     return handle
            && handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed;
+}
+
+/*******************************************************************************
+ * Returns whether device memory is user-managed
+ ******************************************************************************/
+extern "C" bool rocblas_is_user_managing_device_memory(rocblas_handle handle)
+{
+    return false;  
 }
 
 /* \brief

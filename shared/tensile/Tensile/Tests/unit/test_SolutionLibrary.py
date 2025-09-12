@@ -31,7 +31,7 @@ def test_ArchitectureMap():
     assert msl.ArchitectureIndexMap("gfx90a") == (int("90a", 16) << 18), "Incorrect index value."
     assert msl.ArchitectureIndexMap("gfx900") == (int("900", 16) << 18), "Incorrect index value."
     assert msl.ArchitectureIndexMap("gfx908") == (int("908", 16) << 18), "Incorrect index value."
-    assert msl.ArchitectureIndexMap("fallback") == (0), "Incorrect index value."    
+    assert msl.ArchitectureIndexMap("fallback") == (0), "Incorrect index value."
 
     # Should throw when computing index for previously computed architecture.
     with raises(RuntimeError, match="ERROR in architecture solution index mapping."):
@@ -55,4 +55,3 @@ def test_remapSolutionIndexStartingFrom():
     SolutionLibrary.MasterSolutionLibrary(mockSolutions, MockLibrary()).remapSolutionIndicesStartingFrom(10)
     assert mockSolutions[0].index == 10, "Zeroith entry should have a remapped index of 10"
     assert mockSolutions[1].index == 11, "First entry should have a remapped index of 11"
-    

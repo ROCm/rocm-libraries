@@ -77,7 +77,7 @@ extern "C" {
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha,
 *              \p hybA, \p x, \p beta or \p y is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_ALLOC_FAILED the buffer could not be allocated.
