@@ -288,77 +288,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return maxAddressesPerBank;
     }
 
-    std::string LDSBankModel::instructionDetailedAnalysis(const RuntimeLDSInstruction& instr,
-                                                          GPUArchitectureGFX           gfx,
-                                                          uint&                        totalCycles)
-    {
-        std::stringstream ss;
-
-        // Generate instruction name
-        std::string instructionName;
-        if(instr.memoryOp.direction == Direction::Load)
-        {
-            instructionName = fmt::format("ds_read_b{}", instr.dwords * 32);
-        }
-        else
-        {
-            instructionName = fmt::format("ds_write_b{}", instr.dwords * 32);
-        }
-        ss << fmt::format("  Instruction: {}\n", instructionName);
-
-        // Follows getClockCount
-        uint cycles = 0;
-        {
-            const auto threadsPerClock
-                = LDSBankModel::getThreadsPerClock(instr.memoryOp, instr.dwords, gfx);
-            uint i = 0;
-            for(const auto& groupAddresses :
-                LDSBankModel::divideIntoThreadGroups(instr.baseAddresses, threadsPerClock))
-            {
-                const auto bankToAddressCounts
-                    = LDSBankModel::createBankToAddressCounts(groupAddresses, instr.dwords, gfx);
-                uint groupCycles = LDSBankModel::calculateBankConflictCycles(bankToAddressCounts);
-                ss << fmt::format("    Group {}: threads {}-{}\n",
-                                  i,
-                                  i * threadsPerClock,
-                                  (i + 1) * threadsPerClock - 1);
-                // Find banks with maximum address counts
-                uint maxCount = 0;
-                for(const auto& [bankIndex, count] : bankToAddressCounts)
-                {
-                    maxCount = std::max(maxCount, count);
-                }
-                std::vector<uint> maxBanks;
-                for(const auto& [bankIndex, count] : bankToAddressCounts)
-                {
-                    if(count == maxCount)
-                    {
-                        maxBanks.push_back(bankIndex);
-                    }
-                }
-                if(!maxBanks.empty())
-                {
-                    ss << "      Max bank contention: " << maxCount
-                       << " addresses/bank for bank(s) ";
-                    rocRoller::streamJoin(ss, maxBanks, ", ");
-                    ss << "\n";
-                }
-                ss << fmt::format("      Group cycles: {}\n", groupCycles);
-                cycles += groupCycles;
-                i++;
-            }
-        }
-        cycles += 4;
-
-        const auto instructionTotalClocks = LDSBankModel::getClockCount(instr, gfx);
-
-        AssertFatal(cycles == instructionTotalClocks, "Cycle count mismatch");
-        ss << fmt::format("    Instruction cycles: {}\n", instructionTotalClocks);
-
-        totalCycles = instructionTotalClocks;
-        return ss.str();
-    }
-
     uint LDSBankModel::getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
     {
         AssertFatal(rocRoller::toString(gfx).starts_with("gfx9"),
@@ -433,6 +362,86 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
+    /**
+     * @brief Generate a string representation of the instruction analysis
+     * @param instr The instruction to analyze
+     * @param gfx The GPU architecture
+     * @return A pair containing the string representation and the total clock cycles
+     *         calculated for the instruction
+     */
+    std::pair<std::string, uint> stringifyInstructionAnalysis(const RuntimeLDSInstruction& instr,
+                                                              GPUArchitectureGFX           gfx)
+    {
+        std::stringstream ss;
+
+        std::string instructionName;
+        if(instr.memoryOp.direction == Direction::Load)
+        {
+            instructionName = fmt::format("ds_read_b{}", instr.dwords * 32);
+        }
+        else
+        {
+            instructionName = fmt::format("ds_write_b{}", instr.dwords * 32);
+        }
+        ss << fmt::format("  Instruction: {}\n", instructionName);
+
+        // Follows getClockCount (checked against it later for consistency)
+        uint cycles = 0;
+        {
+            const auto threadsPerClock
+                = LDSBankModel::getThreadsPerClock(instr.memoryOp, instr.dwords, gfx);
+            uint i = 0;
+            for(const auto& groupAddresses :
+                LDSBankModel::divideIntoThreadGroups(instr.baseAddresses, threadsPerClock))
+            {
+                const auto bankToAddressCounts
+                    = LDSBankModel::createBankToAddressCounts(groupAddresses, instr.dwords, gfx);
+                uint groupCycles = LDSBankModel::calculateBankConflictCycles(bankToAddressCounts);
+                ss << fmt::format("    Group {}: threads {}-{}\n",
+                                  i,
+                                  i * threadsPerClock,
+                                  (i + 1) * threadsPerClock - 1);
+
+                uint maxCount = 0;
+                for(const auto& [bankIndex, count] : bankToAddressCounts)
+                {
+                    maxCount = std::max(maxCount, count);
+                }
+                std::vector<uint> maxBanks;
+                for(const auto& [bankIndex, count] : bankToAddressCounts)
+                {
+                    if(count == maxCount)
+                    {
+                        maxBanks.push_back(bankIndex);
+                    }
+                }
+
+                if(!maxBanks.empty())
+                {
+                    ss << "      Max bank contention: " << maxCount
+                       << " addresses/bank for bank(s) ";
+                    rocRoller::streamJoin(ss, maxBanks, ", ");
+                    ss << "\n";
+                }
+                ss << fmt::format("      Group cycles: {}\n", groupCycles);
+                cycles += groupCycles;
+                i++;
+            }
+        }
+        cycles += 4;
+
+        const auto instructionTotalClocks = LDSBankModel::getClockCount(instr, gfx);
+
+        AssertFatal(cycles == instructionTotalClocks,
+                    "Cycle count mismatch between stringify and getClockCount, {} and {}",
+                    cycles,
+                    instructionTotalClocks);
+
+        ss << fmt::format("    Instruction cycles: {}\n", instructionTotalClocks);
+
+        return std::make_pair(ss.str(), instructionTotalClocks);
+    }
+
     std::string OperationsAnalysis::toString() const
     {
         std::stringstream ss;
@@ -447,8 +456,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
             for(const auto& instr : opAccesses.instructions)
             {
-                uint instructionClocks = 0;
-                ss << LDSBankModel::instructionDetailedAnalysis(instr, gfx, instructionClocks);
+                auto [instrStr, instructionClocks] = stringifyInstructionAnalysis(instr, gfx);
+                ss << instrStr;
                 operationTotalClocks += instructionClocks;
             }
             ss << fmt::format("  Operation cycles: {}\n", operationTotalClocks);
