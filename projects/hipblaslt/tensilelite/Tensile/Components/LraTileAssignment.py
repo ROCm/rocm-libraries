@@ -730,14 +730,16 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         LdsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
-        MatrixInstT      = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
-        dividendForKId   = MatrixInstT * kernel["MatrixInstB"]
+        matrixInstT      = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+        numTileInInst    = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]) // matrixInstT
+
+        dividendForKId   = matrixInstT * kernel["MatrixInstB"]
         num1DBlocks      = kernel["MatrixInstBM"] if (tile01 == 0) else kernel["MatrixInstBN"]
         num1DWaves       = kernel["MIWaveGroup"][0] if (tile01 == 0) else kernel["MIWaveGroup"][1]
         if kernel["SourceSwap"]:
-            dividedForBlkId  = MatrixInstT if (tile01 == 0) else (MatrixInstT * kernel["MatrixInstBM"])
+            dividedForBlkId  = matrixInstT if (tile01 == 0) else (matrixInstT * kernel["MatrixInstBM"])
         else:
-            dividedForBlkId  = (MatrixInstT * kernel["MatrixInstBN"]) if (tile01 == 0) else MatrixInstT
+            dividedForBlkId  = (matrixInstT * kernel["MatrixInstBN"]) if (tile01 == 0) else matrixInstT
         dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
         vectorWidth      = kernel["VectorWidth%s"%tc]
         if isDTVAB:
@@ -745,7 +747,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 # DTV + TLU case, glvw and vw are applied to the same direction. No need to apply both.
                 # non TLU case, glvw and vw are applied to the different direction. We need to apply vw here.
                 vectorWidth = 1
-        maxKId = waveWidth // (MatrixInstT * kernel["MatrixInstB"])
+        maxKId = waveWidth // (matrixInstT * kernel["MatrixInstB"])
         writer.states.lraTileProperties[tile01] = LraTilePropertiesMFMA(dividendForKId=dividendForKId, \
                                                                         num1DBlocks=num1DBlocks, \
                                                                         num1DWaves=num1DWaves, \
@@ -795,11 +797,11 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             else:
                 strideK = (mt + LdsPad) * 4
 
-        strideBlock = MatrixInstT * strideTile
+        strideBlock = numTileInInst * matrixInstT * strideTile
         if enableLDSTr:
-           strideWave = MatrixInstT * vectorWidth
+           strideWave = matrixInstT * vectorWidth
         else:
-           strideWave = MatrixInstT * num1DBlocks * strideTile * vectorWidth
+           strideWave = numTileInInst * matrixInstT * num1DBlocks * strideTile * vectorWidth
 
         lsu              = kernel["LocalSplitU"]
 
@@ -845,8 +847,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                          "1. K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
 
             else:
-               module.add(vectorStaticRemainder(dummy, tReg, kReg, MatrixInstT, tmpVgprRes, tmpSgprInfo, \
-                                             "1. N offset: nIdx = wtid %% MI_N(%u)" % MatrixInstT))
+               module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstT, tmpVgprRes, tmpSgprInfo, \
+                                             "1. N offset: nIdx = wtid %% MI_N(%u)" % matrixInstT))
 
             applyVWCalcEarly = perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0 and kernel["ProblemType"]["DataType"].numBytes() != 2
             if applyVWCalcEarly:
