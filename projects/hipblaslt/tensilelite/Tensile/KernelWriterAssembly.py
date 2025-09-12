@@ -8043,6 +8043,7 @@ class KernelWriterAssembly(KernelWriter):
                       if (numElementsPerLoad == 2 and r % numElementsPer4Bytes != 0) or \
                          (numElementsPerLoad != 2 and ((r + 1) % numElementsPer4Bytes != 0)):
                         module.add(SWaitCnt(vlcnt=0, comment=""))
+                        # 8b checks are needed for mixed 16b/8b precisions
                         if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat():
                           module.add(VLShiftRightB32(dst=vgpr(destVgprHi), shiftHex=hex(8), src=vgpr(destVgprHi), comment="shift right to lower 8 bits"))
                         module.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
@@ -8054,7 +8055,12 @@ class KernelWriterAssembly(KernelWriter):
                           module.add(SBranch(labelName=jumpLabel.getLabelName(), comment=""))
                   else:
                     if r % 2 == 1:
+                      # 8b checks are needed for mixed 16b/8b precisions
+                      if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat():
+                        packInst.add(VLShiftRightB32(dst=vgpr(destVgprHi), shiftHex=hex(8), src=vgpr(destVgprHi), comment="shift right to lower 8 bits"))
                       packInst.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
+                      if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat() and (g2lIdx % 2 == 1):
+                        packInst.add(VLShiftLeftB32(dst=vgpr(destVgpr), shiftHex=hex(16), src=vgpr(destVgpr), comment="shift left to higher 16 bits"))
                       vlcntVal = 0 if doTailOpt == 0 else loadNum
                       if (doTailOpt == 0 and len(tmpVgprPool) == maxNumTempToUse) or (doTailOpt == 2 and behavior == "MERGE" and r >= rStart and r < rEnd):
                         module.add(SWaitCnt(vlcnt=(vlcntVal), comment=""))
