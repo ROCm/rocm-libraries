@@ -520,10 +520,8 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         grid_size.y = std::min(rows, ::rocprim::detail::ceiling_div(chosen_grid_size, grid_size.x));
         const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size.y);
 
-        op.shared_histograms = chosen_shared_histograms;
-        op.rows_per_block    = rows_per_block;
-
-        plan.device_callback = op;
+        plan.device_callback.shared_histograms = chosen_shared_histograms;
+        plan.device_callback.rows_per_block    = rows_per_block;
 
         // 4) 发射（无需再做任何按架构分发）
         plan.launch(grid_size,

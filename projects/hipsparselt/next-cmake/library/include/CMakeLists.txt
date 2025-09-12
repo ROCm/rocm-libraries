@@ -17,6 +17,6 @@ configure_file(
     COPYONLY
 )
 
-generate_export_header(hipsparselt 
+generate_export_header(hipsparselt
     EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt-export.h"
 )

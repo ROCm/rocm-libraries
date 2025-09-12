@@ -76,7 +76,7 @@ namespace
             else if(!strcmp(arg.function, "aux_plan_assign"))
                 testing_aux_plan_assign<Ti, To, Tc>(arg);
             else if(!strcmp(arg.function, "spmm_logging"))
-                testing_spmm_logging<Ti, To, Tc, TBias>(arg);        
+                testing_spmm_logging<Ti, To, Tc, TBias>(arg);
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }

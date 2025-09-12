@@ -176,4 +176,3 @@ def getSolutionNameMin(solution, splitGSU: bool):
 
 def getSolutionNameFull(state, splitGSU: bool):
   return _getName(state, getRequiredParametersFull(), splitGSU, False)
-
