@@ -34,7 +34,7 @@ namespace rocRoller
     template <>
     void Component::ComponentFactory<Assembler>::registerImplementations()
     {
-        Component::ComponentFactory<Assembler>::registerComponent<InProcessAssembler>();
-        Component::ComponentFactory<Assembler>::registerComponent<SubprocessAssembler>();
+        registerComponent<InProcessAssembler>();
+        registerComponent<SubprocessAssembler>();
     }
 }

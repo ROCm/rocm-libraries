@@ -37,12 +37,10 @@ namespace rocRoller
     template <>
     void Component::ComponentFactory<Scheduling::Cost>::registerImplementations()
     {
-        Component::ComponentFactory<Scheduling::Cost>::registerComponent<
-            Scheduling::LinearWeightedCost>();
-        Component::ComponentFactory<Scheduling::Cost>::registerComponent<Scheduling::MinNopsCost>();
-        Component::ComponentFactory<Scheduling::Cost>::registerComponent<Scheduling::NoneCost>();
-        Component::ComponentFactory<Scheduling::Cost>::registerComponent<Scheduling::UniformCost>();
-        Component::ComponentFactory<Scheduling::Cost>::registerComponent<
-            Scheduling::WaitCntNopCost>();
+        registerComponent<Scheduling::LinearWeightedCost>();
+        registerComponent<Scheduling::MinNopsCost>();
+        registerComponent<Scheduling::NoneCost>();
+        registerComponent<Scheduling::UniformCost>();
+        registerComponent<Scheduling::WaitCntNopCost>();
     }
 }

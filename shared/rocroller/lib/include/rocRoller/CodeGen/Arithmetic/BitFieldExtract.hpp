@@ -76,5 +76,3 @@ namespace rocRoller
             = concatenate("BitFieldExtractGenerator<", toString(DATATYPE), ">");
     };
 }
-
-#include <rocRoller/CodeGen/Arithmetic/BitFieldExtract_impl.hpp>

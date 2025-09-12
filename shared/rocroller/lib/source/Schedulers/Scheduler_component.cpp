@@ -37,15 +37,10 @@ namespace rocRoller
     template <>
     void Component::ComponentFactory<Scheduling::Scheduler>::registerImplementations()
     {
-        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
-            Scheduling::CooperativeScheduler>();
-        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
-            Scheduling::PriorityScheduler>();
-        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
-            Scheduling::RandomScheduler>();
-        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
-            Scheduling::RoundRobinScheduler>();
-        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
-            Scheduling::SequentialScheduler>();
+        registerComponent<Scheduling::CooperativeScheduler>();
+        registerComponent<Scheduling::PriorityScheduler>();
+        registerComponent<Scheduling::RandomScheduler>();
+        registerComponent<Scheduling::RoundRobinScheduler>();
+        registerComponent<Scheduling::SequentialScheduler>();
     }
 }

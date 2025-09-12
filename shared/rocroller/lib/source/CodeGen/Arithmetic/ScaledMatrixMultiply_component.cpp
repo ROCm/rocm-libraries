@@ -33,7 +33,6 @@ namespace rocRoller
     void Component::ComponentFactory<
         InstructionGenerators::ScaledMatrixMultiply>::registerImplementations()
     {
-        Component::ComponentFactory<InstructionGenerators::ScaledMatrixMultiply>::registerComponent<
-            InstructionGenerators::ScaledMatrixMultiplyGenerator>();
+        registerComponent<InstructionGenerators::ScaledMatrixMultiplyGenerator>();
     }
 }

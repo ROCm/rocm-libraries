@@ -158,8 +158,6 @@ namespace rocRollerTest
 template <>
 void rocRoller::Component::ComponentFactory<rocRollerTest::Interface>::registerImplementations()
 {
-    rocRoller::Component::ComponentFactory<rocRollerTest::Interface>::registerComponent<
-        rocRollerTest::AImpl>();
-    rocRoller::Component::ComponentFactory<rocRollerTest::Interface>::registerComponent<
-        rocRollerTest::BImpl>();
+    registerComponent<rocRollerTest::AImpl>();
+    registerComponent<rocRollerTest::BImpl>();
 }

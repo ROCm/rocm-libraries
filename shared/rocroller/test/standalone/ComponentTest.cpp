@@ -148,6 +148,6 @@ int main(int argc, const char* argv[])
 template <>
 void ComponentFactory<Printer>::registerImplementations()
 {
-    ComponentFactory<Printer>::registerComponent<APrinter>();
-    ComponentFactory<Printer>::registerComponent<BPrinter>();
+    registerComponent<APrinter>();
+    registerComponent<BPrinter>();
 }
