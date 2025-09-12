@@ -1014,22 +1014,62 @@ namespace TensileLite
                     }
                 }
 
-                if(MT_M == 256 && MT_N == 256 && MT_K == 128 && (element_size_A == 8))
-                {
-                    //The kernel for this is more optimized
-                    total_latency = total_latency * 0.8;
+                if (element_size_A == 8) {
+                    if(MT_M == 256 && MT_N == 256 && MT_K == 128)
+                    {
+                        //The kernel for this is more optimized
+                        total_latency = total_latency * 0.8;
+                    }
+
+                     //Bias towards dimensions divisible by 64 for 8-bit datatypes
+                    //This biases the other dimensions to being divisible by 64 bytes
+                    if((MT_M > 64) && (MT_M % 64 != 0))
+                    {
+                        total_latency = total_latency * 1.2;
+                    }
+
+                    if((MT_N > 64) && (MT_N % 64 != 0))
+                    {
+                        total_latency = total_latency * 1.2;
+                    }
                 }
 
-                if(MT_M == 256 && MT_N == 16 && MT_K == 128 && (element_size_A == 16))
-                {
-                    //The kernel for this is less optimized, for some reason
-                    total_latency = total_latency * 2;
-                }
+                if (element_size_A == 16) {
+                    if(MT_M == 256 && MT_N == 256 && MT_K == 64)
+                    {
+                        //The kernel for this is more optimized
+                        total_latency = total_latency * 0.8;
+                    }
 
-                if(MT_M == 16 && MT_N == 256 && MT_K == 128 && (element_size_A == 16))
-                {
-                    //The kernel for this is less optimized, for some reason
-                    total_latency = total_latency * 2;
+                    if(MT_M == 256 && MT_N == 16 && MT_K == 128)
+                    {
+                        //The kernel for this is less optimized, for some reason
+                        total_latency = total_latency * 2;
+                    }
+
+                    if(MT_M == 16 && MT_N == 256 && MT_K == 128)
+                    {
+                        //The kernel for this is less optimized, for some reason
+                        total_latency = total_latency * 2;
+                    }
+
+                    //Bias towards dimensions divisible by 32 for 16-bit datatypes
+                    //This biases the other dimensions to being divisible by 64 bytes
+                    if((MT_M > 32) && (MT_M % 32 != 0))
+                    {
+                        total_latency = total_latency * 1.5;
+                    }
+
+                    if((MT_N > 32) && (MT_N % 32 != 0))
+                    {
+                        total_latency = total_latency * 1.5;
+                    }
+
+                    //Bias towards dimensions 32 or larger for bf16 datatypes
+                    if((MT_M >= 32) || (MT_N >= 32))
+                    {
+                        total_latency = total_latency * 0.9;
+                    }
                 }
 
                 //Bias Model towards at least one dim being power of 2
@@ -1042,40 +1082,6 @@ namespace TensileLite
 
                 //Bias Model towards both dims being a power of 2
                 if(MT_M_is_power_two && MT_N_is_power_two)
-                {
-                    total_latency = total_latency * 0.9;
-                }
-
-                //Bias towards dimensions divisible by 64 for 8-bit datatypes
-                //This biases the other dimensions to being divisible by 64 bytes
-                if((MT_M > 64) && (MT_M % 64 != 0) && (element_size_A == 8))
-                {
-                    total_latency = total_latency * 1.2;
-                }
-
-                //Bias towards dimensions divisible by 64 for 8-bit datatypes
-                //This biases the other dimensions to being divisible by 64 bytes
-                if((MT_N > 64) && (MT_N % 64 != 0) && (element_size_A == 8))
-                {
-                    total_latency = total_latency * 1.2;
-                }
-
-                //Bias towards dimensions divisible by 32 for 16-bit datatypes
-                //This biases the other dimensions to being divisible by 64 bytes
-                if((MT_M > 32) && (MT_M % 32 != 0) && (element_size_A == 16))
-                {
-                    total_latency = total_latency * 1.5;
-                }
-
-                //Bias towards dimensions divisible by 32 for 16-bit datatypes
-                //This biases the other dimensions to being divisible by 64 bytes
-                if((MT_N > 32) && (MT_N % 32 != 0) && (element_size_A == 16))
-                {
-                    total_latency = total_latency * 1.5;
-                }
-
-                //Bias towards dimensions 32 or larger for bf16 datatypes
-                if(((MT_M >= 32) || MT_N >= 32) && (element_size_A == 16))
                 {
                     total_latency = total_latency * 0.9;
                 }

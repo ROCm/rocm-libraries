@@ -231,7 +231,7 @@ hipError_t radix_sort_merge_impl(
                                                                     value_type>;
 
     // Some helpful checks during compile-time
-    (void)device_merge_sort_compile_time_verifier<wrapped_bs_config, wrapped_bm_config>;
+    device_merge_sort_compile_time_verifier<wrapped_bs_config, wrapped_bm_config>();
 
     // We will get this later from the block_sort algorithm
     unsigned int sort_items_per_block
