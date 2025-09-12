@@ -156,12 +156,14 @@ set(ROCSPARSE_TEST_SOURCES
   test_spmv_csr.cpp
   test_spmv_csc.cpp
   test_spmv_ell.cpp
+  test_spmv_sell.cpp
   test_v2_spmv_bsr.cpp
   test_v2_spmv_coo.cpp
   test_v2_spmv_coo_aos.cpp
   test_v2_spmv_csr.cpp
   test_v2_spmv_csc.cpp
   test_v2_spmv_ell.cpp
+  test_v2_spmv_sell.cpp
   test_spsv_csr.cpp
   test_spitsv_csr.cpp
   test_spsv_coo.cpp
@@ -298,12 +300,14 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spmv_csr.cpp
 ../testings/testing_spmv_csc.cpp
 ../testings/testing_spmv_ell.cpp
+../testings/testing_spmv_sell.cpp
 ../testings/testing_v2_spmv_coo.cpp
 ../testings/testing_v2_spmv_coo_aos.cpp
 ../testings/testing_v2_spmv_csr.cpp
 ../testings/testing_v2_spmv_bsr.cpp
 ../testings/testing_v2_spmv_csc.cpp
 ../testings/testing_v2_spmv_ell.cpp
+../testings/testing_v2_spmv_sell.cpp
 ../testings/testing_spsv_csr.cpp
 ../testings/testing_spitsv_csr.cpp
 ../testings/testing_spsv_coo.cpp

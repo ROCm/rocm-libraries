@@ -20,47 +20,24 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "rocsparse_determine_indextype.hpp"
-#include "rocsparse_handle.hpp"
 
-rocsparse_indextype rocsparse::determine_I_indextype(rocsparse_const_spmat_descr mat)
-{
-    switch(mat->format)
-    {
-    case rocsparse_format_coo:
-    case rocsparse_format_coo_aos:
-    case rocsparse_format_csr:
-    case rocsparse_format_ell:
-    case rocsparse_format_bell:
-    case rocsparse_format_bsr:
-    case rocsparse_format_sell:
-    {
-        return mat->row_type;
-    }
-    case rocsparse_format_csc:
-    {
-        return mat->col_type;
-    }
-    }
-}
+#include "test.hpp"
 
-rocsparse_indextype rocsparse::determine_J_indextype(rocsparse_const_spmat_descr mat)
-{
-    switch(mat->format)
-    {
-    case rocsparse_format_coo:
-    case rocsparse_format_coo_aos:
-    case rocsparse_format_csr:
-    case rocsparse_format_ell:
-    case rocsparse_format_bell:
-    case rocsparse_format_bsr:
-    case rocsparse_format_sell:
-    {
-        return mat->col_type;
-    }
-    case rocsparse_format_csc:
-    {
-        return mat->row_type;
-    }
-    }
-}
+#include "testing_v2_spmv_sell.hpp"
+
+TEST_ROUTINE_WITH_CONFIG(v2_spmv_sell,
+                         level2,
+                         rocsparse_test_config_ijaxyt,
+                         arg.M,
+                         arg.N,
+                         arg.alpha,
+                         arg.alphai,
+                         arg.beta,
+                         arg.betai,
+                         arg.transA,
+                         arg.baseA,
+                         arg.uplo,
+                         arg.spmv_alg,
+                         arg.matrix_type,
+                         arg.matrix,
+                         arg.graph_test);

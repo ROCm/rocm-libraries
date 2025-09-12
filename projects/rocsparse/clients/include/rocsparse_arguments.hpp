@@ -50,6 +50,7 @@ struct Arguments
     rocsparse_int col_block_dimA;
     rocsparse_int row_block_dimB;
     rocsparse_int col_block_dimB;
+    rocsparse_int slice_size;
 
     rocsparse_int dimx;
     rocsparse_int dimy;
@@ -209,6 +210,7 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(col_block_dimA);
         ROCSPARSE_FORMAT_CHECK(row_block_dimB);
         ROCSPARSE_FORMAT_CHECK(col_block_dimB);
+        ROCSPARSE_FORMAT_CHECK(slice_size);
         ROCSPARSE_FORMAT_CHECK(dimx);
         ROCSPARSE_FORMAT_CHECK(dimy);
         ROCSPARSE_FORMAT_CHECK(dimz);
@@ -457,6 +459,7 @@ private:
         print("col_block_dimA", arg.col_block_dimA);
         print("row_block_dimB", arg.row_block_dimB);
         print("col_block_dimB", arg.col_block_dimB);
+        print("slice_size", arg.slice_size);
         print("dim_x", arg.dimx);
         print("dim_y", arg.dimy);
         print("dim_z", arg.dimz);

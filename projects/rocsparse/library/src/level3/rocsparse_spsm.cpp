@@ -237,6 +237,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -343,6 +344,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -472,6 +474,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -578,6 +581,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -698,6 +702,7 @@ namespace rocsparse
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -775,6 +780,7 @@ namespace rocsparse
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }

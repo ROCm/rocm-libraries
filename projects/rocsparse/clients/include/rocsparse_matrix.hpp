@@ -40,7 +40,7 @@ template <typename T>
 struct host_scalar : public host_dense_matrix<T>
 {
     host_scalar()
-        : host_dense_matrix<T>(1, 1){};
+        : host_dense_matrix<T>(1, 1) {};
     explicit host_scalar(const T& value)
         : host_dense_matrix<T>(1, 1)
     {
@@ -72,7 +72,7 @@ template <typename T>
 struct device_scalar : public device_dense_matrix<T>
 {
     device_scalar()
-        : device_dense_matrix<T>(1, 1){};
+        : device_dense_matrix<T>(1, 1) {};
     explicit device_scalar(const host_scalar<T>& that)
         : device_dense_matrix<T>(1, 1)
     {
@@ -89,7 +89,7 @@ template <typename T>
 struct managed_scalar : public managed_dense_matrix<T>
 {
     managed_scalar()
-        : managed_dense_matrix<T>(1, 1){};
+        : managed_dense_matrix<T>(1, 1) {};
 
     explicit managed_scalar(const host_scalar<T>& that)
         : managed_dense_matrix<T>(1, 1)
@@ -109,5 +109,6 @@ struct managed_scalar : public managed_dense_matrix<T>
 #include "rocsparse_matrix_csx.hpp"
 #include "rocsparse_matrix_ell.hpp"
 #include "rocsparse_matrix_gebsx.hpp"
+#include "rocsparse_matrix_sell.hpp"
 
 #endif // ROCSPARSE_MATRIX_HPP.

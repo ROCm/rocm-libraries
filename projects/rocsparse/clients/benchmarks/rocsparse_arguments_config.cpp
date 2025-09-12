@@ -42,6 +42,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->col_block_dimA  = static_cast<rocsparse_int>(0);
         this->row_block_dimB  = static_cast<rocsparse_int>(0);
         this->col_block_dimB  = static_cast<rocsparse_int>(0);
+        this->slice_size      = static_cast<rocsparse_int>(1);
         this->dimx            = static_cast<rocsparse_int>(0);
         this->dimy            = static_cast<rocsparse_int>(0);
         this->dimz            = static_cast<rocsparse_int>(0);
@@ -188,6 +189,10 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<rocsparse_int>(&this->col_block_dimB)->default_value(2),
      "General BSR col block dimension (default: 2)")
 
+    ("slicesize",
+     value<rocsparse_int>(&this->slice_size)->default_value(2),
+     "General BSR col block dimension (default: 2)")
+
     ("mtx",
      value<std::string>(&this->b_matrixmarket)->default_value(""), "read from matrix "
      "market (.mtx) format. This will override parameters -m, -n, and -z.")
@@ -321,7 +326,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<std::string>(&this->function_name)->default_value("axpyi"),
      "SPARSE function to test. Options:\n"
      "  Level1: axpyi, doti, dotci, gthr, gthrz, roti, sctr\n"
-     "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csrsv, csritsv, coosv, ellmv, hybmv, gebsrmv, gemvi\n"
+     "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csrsv, csritsv, coosv, ellmv, hybmv, gebsrmv, gemvi, sellmv\n"
      "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, coosm, gemmi, sddmm\n"
      "  Extra: bsrgeam, bsrgemm, csrgeam, csrgemm, csrgemm_reuse\n"
      "  Preconditioner: bsric0, bsrilu0, csric0, csrilu0, csritilu0, gtsv, gtsv_no_pivot, gtsv_no_pivot_strided_batch, gtsv_interleaved_batch, gpsv_interleaved_batch\n"
@@ -424,7 +429,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
 
     ("spmv_alg",
       value<rocsparse_int>(&this->b_spmv_alg)->default_value(rocsparse_spmv_alg_default),
-      "Indicates what algorithm to use when running SpMV. Possibly choices are default: 0, COO: 1, CSR adaptive: 2, CSR stream: 3, ELL: 4, COO atomic: 5, BSR: 6, CSR LRB: 7 (default:0)")
+      "Indicates what algorithm to use when running SpMV. Possibly choices are default: 0, COO: 1, CSR adaptive: 2, CSR stream: 3, ELL: 4, COO atomic: 5, BSR: 6, CSR LRB: 7, SELL: 8 (default:0)")
 
     ("itilu0_alg",
       value<rocsparse_int>(&this->b_itilu0_alg)->default_value(rocsparse_itilu0_alg_default),
@@ -516,7 +521,8 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
        && this->b_spmv_alg != rocsparse_spmv_alg_ell
        && this->b_spmv_alg != rocsparse_spmv_alg_coo_atomic
        && this->b_spmv_alg != rocsparse_spmv_alg_bsr
-       && this->b_spmv_alg != rocsparse_spmv_alg_csr_lrb)
+       && this->b_spmv_alg != rocsparse_spmv_alg_csr_lrb
+       && this->b_spmv_alg != rocsparse_spmv_alg_sell)
     {
         std::cerr << "Invalid value for --spmv_alg" << std::endl;
         return -1;
@@ -771,6 +777,12 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     if(this->col_block_dimB < 1)
     {
         std::cerr << "Invalid value for --col-blockdimB" << std::endl;
+        return -1;
+    }
+
+    if(this->slice_size < 1)
+    {
+        std::cerr << "Invalid value for --slicesize" << std::endl;
         return -1;
     }
 

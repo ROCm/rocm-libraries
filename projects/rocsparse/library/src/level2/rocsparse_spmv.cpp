@@ -32,6 +32,7 @@
 #include "rocsparse_cscmv.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_ellmv.hpp"
+#include "rocsparse_sellmv.hpp"
 #include "rocsparse_enum_utils.hpp"
 #include "rocsparse_spmv.hpp"
 
@@ -51,6 +52,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmv_alg value_)
         CASE(rocsparse_spmv_alg_coo_atomic);
         CASE(rocsparse_spmv_alg_bsr);
         CASE(rocsparse_spmv_alg_csr_lrb);
+        CASE(rocsparse_spmv_alg_sell);
 #undef CASE
     }
     // LCOV_EXCL_START
@@ -109,6 +111,7 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         }
         case rocsparse_spmv_alg_coo:
         case rocsparse_spmv_alg_ell:
+        case rocsparse_spmv_alg_sell:
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_coo_atomic:
         {
@@ -135,6 +138,7 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         case rocsparse_spmv_alg_csr_adaptive:
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_ell:
+        case rocsparse_spmv_alg_sell:
         case rocsparse_spmv_alg_csr_lrb:
         {
             // LCOV_EXCL_START
@@ -160,6 +164,7 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         case rocsparse_spmv_alg_coo:
         case rocsparse_spmv_alg_coo_atomic:
         case rocsparse_spmv_alg_csr_lrb:
+        case rocsparse_spmv_alg_sell:
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -178,9 +183,36 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         case rocsparse_spmv_alg_csr_rowsplit:
         case rocsparse_spmv_alg_csr_adaptive:
         case rocsparse_spmv_alg_ell:
+        case rocsparse_spmv_alg_sell:
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_coo_atomic:
         case rocsparse_spmv_alg_csr_lrb:
+        {
+            // LCOV_EXCL_START
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+        }
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
+    }
+
+    case rocsparse_format_sell:
+    {
+        switch(alg)
+        {
+        case rocsparse_spmv_alg_default:
+        case rocsparse_spmv_alg_sell:
+        {
+            return rocsparse_status_success;
+        }
+        case rocsparse_spmv_alg_csr_rowsplit:
+        case rocsparse_spmv_alg_csr_adaptive:
+        case rocsparse_spmv_alg_bsr:
+        case rocsparse_spmv_alg_coo:
+        case rocsparse_spmv_alg_coo_atomic:
+        case rocsparse_spmv_alg_csr_lrb:
+        case rocsparse_spmv_alg_ell:
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -206,6 +238,7 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         case rocsparse_spmv_alg_coo:
         case rocsparse_spmv_alg_coo_atomic:
         case rocsparse_spmv_alg_csr_lrb:
+        case rocsparse_spmv_alg_sell:
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -248,6 +281,7 @@ rocsparse_status rocsparse::spmv_alg2csrmv_alg(rocsparse_spmv_alg    spmv_alg,
     case rocsparse_spmv_alg_coo_atomic:
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_ell:
+    case rocsparse_spmv_alg_sell:
     {
         // LCOV_EXCL_START
         return rocsparse_status_invalid_value;
@@ -284,6 +318,7 @@ rocsparse_status rocsparse::spmv_alg2coomv_alg(rocsparse_spmv_alg   spmv_alg,
     case rocsparse_spmv_alg_csr_rowsplit:
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_ell:
+    case rocsparse_spmv_alg_sell:
     case rocsparse_spmv_alg_csr_lrb:
     {
         // LCOV_EXCL_START
@@ -321,6 +356,7 @@ rocsparse_status rocsparse::spmv_alg2coomv_aos_alg(rocsparse_spmv_alg       spmv
     case rocsparse_spmv_alg_csr_rowsplit:
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_ell:
+    case rocsparse_spmv_alg_sell:
     case rocsparse_spmv_alg_csr_lrb:
     {
         // LCOV_EXCL_START
@@ -699,6 +735,50 @@ namespace rocsparse
                                                             mat->col_type,
                                                             mat->const_col_data,
                                                             mat->ell_width,
+                                                            x->data_type,
+                                                            x->const_values,
+                                                            beta_type,
+                                                            beta,
+                                                            y->data_type,
+                                                            y->values)));
+                return rocsparse_status_success;
+            }
+            }
+        }
+
+        case rocsparse_format_sell:
+        {
+            switch(stage)
+            {
+            case rocsparse_spmv_stage_buffer_size:
+            {
+                *buffer_size = 0;
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_spmv_stage_preprocess:
+            {
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_spmv_stage_compute:
+            {
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmv(handle,
+                                                            trans,
+                                                            mat->rows,
+                                                            mat->cols,
+                                                            mat->nnz,
+                                                            mat->slice_size,
+                                                            mat->sell_colval_size,
+                                                            alpha_type,
+                                                            alpha,
+                                                            mat->descr,
+                                                            mat->data_type,
+                                                            mat->const_val_data,
+                                                            mat->row_type,
+                                                            mat->const_row_data,
+                                                            mat->col_type,
+                                                            mat->const_col_data,
                                                             x->data_type,
                                                             x->const_values,
                                                             beta_type,

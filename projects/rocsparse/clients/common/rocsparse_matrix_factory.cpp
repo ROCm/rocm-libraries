@@ -892,6 +892,57 @@ void rocsparse_matrix_factory<T, I, J>::init_ell(host_ell_matrix<T, I>& that,
 }
 
 //
+// SLICED ELL
+//
+template <typename T, typename I, typename J, class FILTER = void>
+struct traits_init_sell
+{
+    static void init(rocsparse_matrix_factory<T, I, J>& factory,
+                     host_sell_matrix<T, I, J>&         that,
+                     J&                                 M,
+                     J&                                 N,
+                     J                                  slice_size,
+                     rocsparse_index_base               base)
+    {
+        std::cerr << "non reachable " << __LINE__ << std::endl;
+        exit(1);
+    };
+};
+
+template <typename T, typename I, typename J>
+struct traits_init_sell<T, I, J, std::enable_if_t<std::is_same<I, J>{}>>
+{
+    static void init(rocsparse_matrix_factory<T, I, J>& factory,
+                     host_sell_matrix<T, I, J>&         that,
+                     J&                                 M,
+                     J&                                 N,
+                     J                                  slice_size,
+                     rocsparse_index_base               base)
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+        host_csr_matrix<T, I, J> hA;
+        factory.init_csr(hA, M, N, base);
+        that.define(hA.m, hA.n, hA.nnz, slice_size, 0, hA.base);
+        host_csr_to_sell(
+            hA.m, slice_size, hA.ptr, hA.ind, hA.val, that.ptr, that.ind, that.val, that.sell_colval_size, hA.base, that.base);
+    };
+};
+
+template <typename T, typename I, typename J>
+void rocsparse_matrix_factory<T, I, J>::init_sell(host_sell_matrix<T, I, J>& that,
+                                                 J&                     M,
+                                                 J&                     N,
+                                                 J                      slice_size,
+                                                 rocsparse_index_base   base)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    traits_init_sell<T, I, J>::init(*this, that, M, N, slice_size, base);
+}
+
+
+//
 // HYB
 //
 template <typename T, typename I, typename J, class FILTER = void>
