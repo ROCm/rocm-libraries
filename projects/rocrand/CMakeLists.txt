@@ -189,8 +189,8 @@ set(rocrand_SOVERSION 1.1)
 include(cmake/Summary.cmake)
 print_configuration_summary()
 
-# Skip the "tools" and "library" targets when BUILD_BENCHMARK=OFF AND BUILD_TEST=ON AND USE_SYSTEM_LIB=ON
-if ((NOT BUILD_BENCHMARK) AND (BUILD_TEST AND USE_SYSTEM_LIB))
+# The "tools" and "library" targets may be skipped when USE_SYSTEM_LIB=ON is combined with other options
+if ((NOT BUILD_FORTRAN_WRAPPER) AND (NOT BUILD_BENCHMARK) AND (BUILD_TEST AND USE_SYSTEM_LIB))
   message(STATUS "Skipping the 'tools' and 'library' targets as BUILD_TEST=ON and USE_SYSTEM_LIB=ON were specified")
 else()
   # Tools
