@@ -39,53 +39,31 @@
 
 namespace rocRoller::KernelGraph::MemoryTracer
 {
-    LDSBankModel::LDSBankModel(uint entryWidthInBytes, uint numBanks, uint numEntriesPerBank)
+    bool isLDSOperation(const MemoryEventExpression& event)
+    {
+        return std::holds_alternative<MemoryOpLDS>(event.memoryOp);
+    }
+
+    OperationLevelAnalysis::OperationLevelAnalysis(uint entryWidthInBytes,
+                                                   uint numBanks,
+                                                   uint numEntriesPerBank)
         : m_entryWidthInBytes(entryWidthInBytes)
         , m_numBanks(numBanks)
         , m_numEntriesPerBank(numEntriesPerBank)
     {
     }
 
-    bool LDSBankModel::filter(MemoryEventExpression event)
+    bool OperationLevelAnalysis::filter(MemoryEventExpression event)
     {
-        return std::holds_alternative<MemoryOpLDS>(event.memoryOp);
+        return isLDSOperation(event);
     }
 
-    void LDSBankModel::simulate(MemoryEventSimulated event)
+    void OperationLevelAnalysis::simulate(MemoryEventSimulated event)
     {
         auto ldsOp = std::get_if<MemoryOpLDS>(&event.memoryOp);
         if(!ldsOp)
             return;
 
-        auto& opAccesses        = m_tagToOperationAccesses[event.operationTag];
-        opAccesses.operationTag = event.operationTag;
-        opAccesses.ldsTag
-            = ldsOp->direction == Direction::Load ? event.sourceTag : event.destinationTag;
-
-        uint instructionDwords = (event.bytesRequested + 3) / 4; // Round up to dwords
-
-        RuntimeLDSInstruction* targetInstruction = nullptr;
-        for(auto& instr : opAccesses.instructions)
-        {
-            if(instr.dwords == instructionDwords && instr.memoryOp.direction == ldsOp->direction)
-            {
-                targetInstruction = &instr;
-                break;
-            }
-        }
-
-        if(!targetInstruction)
-        {
-            RuntimeLDSInstruction newInstr;
-            newInstr.memoryOp = *ldsOp;
-            newInstr.dwords   = instructionDwords;
-            opAccesses.instructions.push_back(newInstr);
-            targetInstruction = &opAccesses.instructions.back();
-        }
-
-        targetInstruction->baseAddresses.push_back(event.byteOffset);
-
-        // Update legacy m_bankAccesses for backward compatibility with summary
         std::set<uint> banksAccessed;
         for(uint offset = 0; offset < event.bytesRequested; offset += m_entryWidthInBytes)
         {
@@ -106,7 +84,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
     }
 
-    Summary LDSBankModel::summary() const
+    Summary OperationLevelAnalysis::summary() const
     {
         Summary summary;
 
@@ -158,14 +136,57 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return summary;
     }
 
+    LDSBankModel::LDSBankModel(uint entryWidthInBytes, uint numBanks, uint numEntriesPerBank) {}
+
+    bool LDSBankModel::filter(MemoryEventExpression event)
+    {
+        return isLDSOperation(event);
+    }
+
+    void LDSBankModel::simulate(MemoryEventSimulated event)
+    {
+        auto ldsOp = std::get_if<MemoryOpLDS>(&event.memoryOp);
+        if(!ldsOp)
+            return;
+
+        auto& opAccesses        = m_tagToOperationAccesses[event.operationTag];
+        opAccesses.operationTag = event.operationTag;
+        opAccesses.ldsTag
+            = ldsOp->direction == Direction::Load ? event.sourceTag : event.destinationTag;
+
+        uint instructionDwords = (event.bytesRequested + 3) / 4; // Round up to dwords
+
+        RuntimeLDSInstruction* targetInstruction = nullptr;
+        for(auto& instr : opAccesses.instructions)
+        {
+            if(instr.dwords == instructionDwords && instr.memoryOp.direction == ldsOp->direction)
+            {
+                targetInstruction = &instr;
+                break;
+            }
+        }
+
+        if(!targetInstruction)
+        {
+            RuntimeLDSInstruction newInstr;
+            newInstr.memoryOp = *ldsOp;
+            newInstr.dwords   = instructionDwords;
+            opAccesses.instructions.push_back(newInstr);
+            targetInstruction = &opAccesses.instructions.back();
+        }
+
+        targetInstruction->baseAddresses.push_back(event.byteOffset);
+    }
+
+    Summary LDSBankModel::summary() const
+    {
+        Throw<FatalError>("LDSBankModel::summary() is no longer supported. Use "
+                          "OperationLevelAnalysis::summary() instead.");
+    }
+
     std::string LDSBankModel::toString() const
     {
-        std::stringstream ss;
-        ss << "LDS Bank Model: "
-           << this->m_entryWidthInBytes * this->m_numEntriesPerBank * this->m_numBanks << " bytes, "
-           << this->m_entryWidthInBytes << "byte bank width, " << this->m_numBanks << " banks"
-           << std::endl;
-        return ss.str();
+        return "LDS Bank Model (instruction-level analysis)";
     }
 
     uint LDSBankModel::getThreadsPerClock(const MemoryOpLDS& memoryOp,
@@ -467,9 +488,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         auto tracer = MemoryTracer(graph);
         tracer.trace();
 
-        Log::info("MemoryTracer::LDSBankModel()");
+        Log::info("MemoryTracer::OperationLevelAnalysis()");
         // 64KiB bank model: 4 bytes per bank entry, 32 banks, 512 entries per bank
-        auto model = LDSBankModel(4, 32, 512);
+        auto model = OperationLevelAnalysis(4, 32, 512);
 
         // For LDS, just simulate using 1 workgroup
         auto workgroups            = 1;

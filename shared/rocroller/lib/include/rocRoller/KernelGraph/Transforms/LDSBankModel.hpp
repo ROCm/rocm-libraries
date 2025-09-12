@@ -41,6 +41,8 @@
 
 namespace rocRoller::KernelGraph::MemoryTracer
 {
+    bool isLDSOperation(const MemoryEventExpression& event);
+
     struct Summary
     {
         static constexpr bool echoBanks = false;
@@ -66,19 +68,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     std::ostream& operator<<(std::ostream& stream, Summary const& summary);
 
-    struct ThreadAccess
-    {
-        uint     workitem;
-        uint32_t address;
-        uint     bankIndex;
-    };
-
-    struct ThreadGroup
-    {
-        uint                                   groupIndex;
-        std::vector<std::vector<ThreadAccess>> clockCycles; // Each inner vector is one clock cycle
-    };
-
     struct RuntimeLDSInstruction
     {
         MemoryOpLDS           memoryOp;
@@ -103,20 +92,34 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     std::ostream& operator<<(std::ostream& stream, OperationAnalysis const& operationAnalysis);
 
+    struct LDSBankAccess
+    {
+        int       operationTag;
+        int       ldsTag;
+        Direction direction;
+        uint      workitem;
+        uint      bankIndex;
+    };
+
+    struct OperationLevelAnalysis
+    {
+        uint                                      m_entryWidthInBytes;
+        uint                                      m_numBanks;
+        uint                                      m_numEntriesPerBank;
+        std::map<int, std::vector<LDSBankAccess>> m_bankAccesses;
+
+        OperationLevelAnalysis(uint entryWidthInBytes, uint numBanks, uint numEntriesPerBank);
+
+        bool    filter(MemoryEventExpression event);
+        void    simulate(MemoryEventSimulated event);
+        Summary summary() const;
+    };
+
     /**
      * LDS bank model
      */
     struct LDSBankModel
     {
-        struct LDSBankAccess
-        {
-            int       operationTag;
-            int       ldsTag;
-            Direction direction;
-            uint      workitem;
-            uint      bankIndex;
-        };
-
         /**
          * @brief Construct a new LDSBankModel object.
          *
@@ -226,12 +229,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                                        uint&                        totalCycles);
 
     private:
-        uint m_entryWidthInBytes;
-        uint m_numBanks;
-        uint m_numEntriesPerBank;
-
-        std::map<int, std::vector<LDSBankAccess>> m_bankAccesses; // Keep for backward compatibility
-        std::map<int, OperationAccesses>          m_tagToOperationAccesses;
+        std::map<int, OperationAccesses> m_tagToOperationAccesses;
     };
 
     std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel);
