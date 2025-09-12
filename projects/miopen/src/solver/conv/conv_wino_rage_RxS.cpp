@@ -75,7 +75,7 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
     if(problem.IsTensorsCasted())
         return false;
-    if(!problem.IsFp16())
+    if(!(problem.IsFp16() || problem.IsFp32() || problem.IsBfp16()))
         return false;
     if(problem.HasNonPackedTensors())
         return false;
@@ -152,13 +152,13 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     // Kernel name and file
 
     std::string kernelVersion;
-    if(args.R_S_fit3x3())
+    if(args.R_S_fit3x3() && problem.IsFp16())
     {
         kernelVersion = "_v4_6_0";
     }
     else
     {
-        kernelVersion = "_v4_7_0";
+        kernelVersion = "_v4_9_0";
     }
     std::string kernelName = "miopenSp3AsmConvRage" + kernelVersion;
     std::string kernelFile = "Conv_Winograd_Rage" + kernelVersion;
@@ -171,6 +171,14 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     if(problem.IsFp16())
     {
         kernelPostfix += "_fp16_fp32acc";
+    }
+    else if(problem.IsFp32())
+    {
+        kernelPostfix += "_fp32_fp32acc";
+    }
+    else if(problem.IsBfp16())
+    {
+        kernelPostfix += "_bf16_fp32acc";
     }
     else
     {
@@ -203,7 +211,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
         {"ROCM_METADATA_VERSION", 5},
     };
     kernelInfo.comp_options = options.GenerateFor(kbp::GcnAsm{});
-    kernelInfo.comp_options += std::string(" -mcumode -mwavefrontsize64");
+    kernelInfo.comp_options += std::string(" -mcumode");
 
     /// \todo Add case for gfx12 wgp size of 384U
     uint64_t wgSize = 768U;
