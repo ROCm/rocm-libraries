@@ -72,16 +72,16 @@ namespace TensileLite
                                                                 DataType        mi_datatype,
                                                                 int             WGM,
                                                                 size_t          workspace_size,
-                                                                size_t          workspace_size_per_elem_c,
-                                                                int             occupancy,
-                                                                int             dynamic_grid_version,
-                                                                bool            debug,
-                                                                size_t          split)
+                                                                size_t workspace_size_per_elem_c,
+                                                                int    occupancy,
+                                                                int    dynamic_grid_version,
+                                                                bool   debug,
+                                                                size_t split)
         {
             // Number of output MTs
-            size_t numMT_M  = safe_ceil_div(M, MT_M);
-            size_t numMT_N  = safe_ceil_div(N, MT_N);
-            size_t numMTs   = numMT_M * numMT_N * batch;
+            size_t numMT_M = safe_ceil_div(M, MT_M);
+            size_t numMT_N = safe_ceil_div(N, MT_N);
+            size_t numMTs  = numMT_M * numMT_N * batch;
 
             size_t numWGs, numActiveCUs, numWaves, splitFactor;
             if(split) // if it is given
@@ -94,15 +94,8 @@ namespace TensileLite
             }
             else // as what StreamK predicts
             {
-                streamk::ReductionType rt = streamk::select_streamk_reduction(M, 
-                                                                              N, 
-                                                                              K, 
-                                                                              batch, 
-                                                                              MT_M, 
-                                                                              MT_N, 
-                                                                              MT_K, 
-                                                                              hardware, 
-                                                                              dynamic_grid_version);
+                streamk::ReductionType rt = streamk::select_streamk_reduction(
+                    M, N, K, batch, MT_M, MT_N, MT_K, hardware, dynamic_grid_version);
                 numWGs = streamk::select_streamk_grid(M,
                                                       N,
                                                       K,
@@ -134,12 +127,11 @@ namespace TensileLite
                 // under the hood. From a theoretical point of view, these distributions change all of the
                 // computations in Origami. With current implementation, it is hard to capture that behaviour
                 // analytically.
-                // So for now, if the numWGs is less than the numMTs, we calculate numWaves based on the 
+                // So for now, if the numWGs is less than the numMTs, we calculate numWaves based on the
                 // numMTs. Otherwise, we use numWGs to compute numWaves.
-                numWaves     = numWGs > numMTs ? 
-                               safe_ceil_div(numWGs, hardware.N_CU) : 
-                               safe_ceil_div(numMTs, hardware.N_CU);
-                splitFactor  = safe_ceil_div(numWGs, numMTs);
+                numWaves    = numWGs > numMTs ? safe_ceil_div(numWGs, hardware.N_CU)
+                                              : safe_ceil_div(numMTs, hardware.N_CU);
+                splitFactor = safe_ceil_div(numWGs, numMTs);
             }
 
             if(debug || Hardware::is_debug_enabled())
@@ -410,101 +402,124 @@ namespace TensileLite
                 return 1.0;
 
             const double bw_limited = std::get<0>(hardware.mem_bw_per_wg_coefficients) * CUs * CUs
-                                    + std::get<1>(hardware.mem_bw_per_wg_coefficients) * CUs
-                                    + std::get<2>(hardware.mem_bw_per_wg_coefficients);
+                                      + std::get<1>(hardware.mem_bw_per_wg_coefficients) * CUs
+                                      + std::get<2>(hardware.mem_bw_per_wg_coefficients);
 
             return std::min(bw_limited, 1.0);
         }
 
         // Estimate L2 hit-rate
-            double estimate_l2_hit(const Hardware& hardware,
-                                size_t          M,
-                                size_t          N,
-                                size_t          K,
-                                size_t          batch,
-                                size_t          MT_M,
-                                size_t          MT_N,
-                                size_t          MT_K,
-                                size_t          element_size,
-                                int             WGM,
-                                size_t          splittingFactor)
+        double estimate_l2_hit(const Hardware& hardware,
+                               size_t          M,
+                               size_t          N,
+                               size_t          K,
+                               size_t          batch,
+                               size_t          MT_M,
+                               size_t          MT_N,
+                               size_t          MT_K,
+                               size_t          element_size,
+                               int             WGM,
+                               size_t          splittingFactor)
+        {
+            // Compute grid dimensions
+            int grid_m = static_cast<int>(safe_ceil_div(M, MT_M));
+            int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
+            int num_cu = std::min(grid_m * grid_n, 256);
+            // Distribute CUs per XCD
+            // Modify cu_per_xcd to only take into account the CUs that might share same K-tiles
+            // This is to factor in the effect of splitting on L2
+            int cu_per_xcd = safe_ceil_div(num_cu * splittingFactor, hardware.NUM_XCD);
+            //cu_per_xcd /= splittingFactor;
+            cu_per_xcd = std::max(cu_per_xcd, 1);
+            // N dimension of mem1 tile is divided by whichever is smaller between WGM and grid
+            int l2_n = std::min(WGM, grid_n);
+            int l2_m = cu_per_xcd / l2_n;
+
+            // If a single mem1 tile is larger than the grid, extend M dimension
+            if(l2_m > grid_m)
             {
-                // Compute grid dimensions
-                int grid_m = static_cast<int>(safe_ceil_div(M, MT_M));
-                int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
-
-                // Distribute CUs per XCD
-                // Modify cu_per_xcd to only take into account the CUs that might share same K-tiles
-                // This is to factor in the effect of splitting on L2
-                int cu_per_xcd = safe_ceil_div(grid_m * grid_n, hardware.NUM_XCD);
-                cu_per_xcd /= splittingFactor;
-
-                // N dimension of mem1 tile is divided by whichever is smaller between WGM and grid
-                int l2_n = std::min(WGM, grid_n);
-                int l2_m = cu_per_xcd / l2_n;
-
-                // If a single mem1 tile is larger than the grid, extend M dimension
-                if(l2_m > grid_m)
-                {
-                    int num_wraps   = (l2_m / grid_m) - 1; // how many times we wrap
-                    l2_n += (num_wraps * WGM);
-                    l2_m = grid_m;
-                }
-
-                // Clamp mem1 tile dimensions to at least 1 and at most grid size
-                l2_m = std::max(std::min(grid_m, l2_m), 1);
-                l2_n = std::max(std::min(grid_n, l2_n), 1);
-
-                // Compute "uncached" reads based on mem1 tile dimensions
-                long long l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
-                long long l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
-                long long uncached_read       = l2_A_uncached_reads + l2_B_uncached_reads;
-
-                // If bigger than cache capacity, reduce mem1 tile size and recompute uncached reads
-                while(l2_A_uncached_reads + l2_B_uncached_reads
-                    > hardware.L2_capacity / safe_ceil_div(element_size, 8))
-                {
-                    // Reduce M dimension by 1
-                    l2_m -= 1;
-                    if(l2_m < 1)
-                    {
-                        // We cannot shrink any more without going to zero or negative
-                        l2_m = 1;
-                        break;
-                    }
-                    l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
-                    l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
-                }
-
-                // Total reads considering repeated usage
-                long long l2_A_reads = static_cast<long long>(l2_m) * l2_n * MT_M * MT_K;
-                long long l2_B_reads = static_cast<long long>(l2_n) * l2_m * MT_N * MT_K;
-
-                long long total_reads         = std::max(l2_A_reads + l2_B_reads, 1LL);
-                long long total_uncached_read = l2_A_uncached_reads + l2_B_uncached_reads;
-                long long cached_reads        = total_reads - total_uncached_read;
-
-                double l2_hit = static_cast<double>(cached_reads) / static_cast<double>(total_reads);
-
-                // Guard against numeric anomalies
-                if(l2_hit > 1.0)
-                {
-                    std::cerr << "mem1 hit was greater than 1, which isn't possible.\n"
-                            << "Problem Size: " << M << "x" << N << "x" << K << "\n"
-                            << "Macro-Tile:  " << MT_M << "x" << MT_N << "x" << MT_K << "\n"
-                            << "cu_per_xcd:  " << cu_per_xcd << "\n"
-                            << "l2_m: " << l2_m << ", l2_n: " << l2_n << ", l2_hit: " << l2_hit
-                            << "\n";
-                }
-
-                if(Hardware::is_debug_enabled())
-                {
-                    hardware.log_debug("L2Tile_M", l2_m);
-                    hardware.log_debug("L2Tile_N", l2_n);
-                }
-
-                return l2_hit;
+                int num_wraps = (l2_m / grid_m) - 1; // how many times we wrap
+                l2_n += (num_wraps * WGM);
+                l2_m = grid_m;
             }
+
+            // Clamp mem1 tile dimensions to at least 1 and at most grid size
+            l2_m = std::max(std::min(grid_m, l2_m), 1);
+            l2_n = std::max(std::min(grid_n, l2_n), 1);
+
+            // Compute "uncached" reads based on mem1 tile dimensions
+            long long l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
+            long long l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
+            long long uncached_read       = l2_A_uncached_reads + l2_B_uncached_reads;
+
+            // If bigger than cache capacity, reduce mem1 tile size and recompute uncached reads
+            while(l2_A_uncached_reads + l2_B_uncached_reads
+                  > hardware.L2_capacity / safe_ceil_div(element_size, 8))
+            {
+                // Reduce M dimension by 1
+                l2_m -= 1;
+                if(l2_m < 1)
+                {
+                    // We cannot shrink any more without going to zero or negative
+                    l2_m = 1;
+                    break;
+                }
+                l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
+                l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
+            }
+            while((l2_m * l2_n) > cu_per_xcd)
+            {
+
+                if(l2_m > 1)
+                    l2_m--;
+                else if(l2_n > 1)
+                    l2_n--;
+            }
+
+            l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
+            l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
+
+            // Total reads considering repeated usage
+            long long l2_A_reads = static_cast<long long>(l2_m) * l2_n * MT_M * MT_K;
+            long long l2_B_reads = static_cast<long long>(l2_n) * l2_m * MT_N * MT_K;
+
+            long long total_reads         = std::max(l2_A_reads + l2_B_reads, 1LL);
+            long long total_uncached_read = l2_A_uncached_reads + l2_B_uncached_reads;
+            long long cached_reads        = total_reads - total_uncached_read;
+
+            double l2_hit = static_cast<double>(cached_reads) / static_cast<double>(total_reads);
+
+            // Guard against numeric anomalies
+            if(l2_hit > 1.0 || l2_hit < 0)
+            {
+                std::cerr
+                    << "mem1 hit was greater than 1 or less than zero, which isn't possible.\n"
+                    << "Problem Size: " << M << "x" << N << "x" << K << "\n"
+                    << "Macro-Tile:  " << MT_M << "x" << MT_N << "x" << MT_K << "\n"
+                    << "cu_per_xcd:  " << cu_per_xcd << "\n"
+                    << "l2_m: " << l2_m << ", l2_n: " << l2_n << ", l2_hit: " << l2_hit
+                    << "total_uncached" << total_uncached_read << "\n";
+            }
+
+            if(l2_hit < 0)
+            {
+                l2_hit = 0.2;
+            }
+            if(Hardware::is_debug_enabled())
+            {
+
+                hardware.log_debug("l2_m (L2 Tile M)", l2_m);
+                hardware.log_debug("l2_n (L2 Tile N)", l2_n);
+                hardware.log_debug("L2 Uncached Reads", total_uncached_read);
+                hardware.log_debug("L2 Cached Reads", cached_reads);
+                hardware.log_debug("cu_per_xcd", cu_per_xcd);
+                hardware.log_debug("L2 WGM", WGM);
+                hardware.log_debug("L2Tile_M", l2_m);
+                hardware.log_debug("L2Tile_N", l2_n);
+            }
+
+            return l2_hit;
+        }
 
         // Estimate MALL hit-rate
         double estimate_mall_hit(const Hardware& hardware,
@@ -519,17 +534,23 @@ namespace TensileLite
                                  size_t          numActiveCUs,
                                  size_t          splittingFactor)
         {
+            WGM        = 1;
             int grid_m = static_cast<int>(safe_ceil_div(M, MT_M));
             int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
-
+            int num_cu = std::min(grid_m * grid_n, 256);
             // mem2 tile dimensions
-            int mall_m = grid_m * grid_n / WGM;         // M dimension of mem2 tile
-            int mall_n = std::min(WGM, grid_n); // N dimension of mem2 tile
+            int mall_n = num_cu / WGM; // M dimension of mem2 tile
+            int mall_m = std::min(WGM, grid_m); // N dimension of mem2 tile
+
+            if(mall_n == 1 && mall_m == 1)
+            {
+                mall_n = num_cu;
+            }
 
             // If a single mem2 tile is larger than the grid, extend its M dimension
             if(mall_m > grid_m)
             {
-                int num_wraps   = (mall_m / grid_m) - 1;
+                int num_wraps = (mall_m / grid_m) - 1;
                 mall_n += (num_wraps * WGM);
                 mall_m = grid_m;
             }
@@ -537,6 +558,15 @@ namespace TensileLite
             // Clamp the tile dimensions to valid ranges
             mall_m = std::max(std::min(grid_m, mall_m), 1);
             mall_n = std::max(std::min(grid_n, mall_n), 1);
+
+            while((mall_m * mall_n) > hardware.N_CU)
+            {
+
+                if(mall_m > 1)
+                    mall_m--;
+                else if(mall_n > 1)
+                    mall_n--;
+            }
 
             // Unique “uncached” entries of A/B for this XCD
             int mall_A_uncached_reads = mall_m * MT_M * MT_K;
@@ -581,13 +611,15 @@ namespace TensileLite
                                       size_t          splittingFactor,
                                       bool            debug)
         {
+            const auto& w = TensileLite::analytical::Hardware::weights();
+
             // 1) Estimate L2 hit-rate
-            double H_mem1
-                = estimate_l2_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, element_size_A, WGM, splittingFactor);
+            double H_mem1 = estimate_l2_hit(
+                hardware, M, N, K, batch, MT_M, MT_N, MT_K, element_size_A, WGM, splittingFactor);
 
             // 2) Estimate mall hit-rate
-            double H_mem2
-                = estimate_mall_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, WGM, numActiveCUs, splittingFactor);
+            double H_mem2 = estimate_mall_hit(
+                hardware, M, N, K, batch, MT_M, MT_N, MT_K, WGM, numActiveCUs, splittingFactor);
 
             // 3) Total loads are loads from A and loads from B
             size_t Ld_A_value  = compute_A_loads(MT_M, MT_K, debug);
@@ -614,7 +646,8 @@ namespace TensileLite
             double total_Ld = Ld_CU_bytes * static_cast<double>(numActiveCUs);
 
             // 5) mem1‐limited factor (simple linear model)
-            double mem1_bw_limited = static_cast<double>(numActiveCUs) / static_cast<double>(hardware.N_CU);
+            double mem1_bw_limited
+                = static_cast<double>(numActiveCUs) / static_cast<double>(hardware.N_CU);
             double limited_mem1_bw = hardware.mem1_perf_ratio * mem1_bw_limited;
 
             // 6) mem1 latency
@@ -630,16 +663,16 @@ namespace TensileLite
             // 9) enforce whole‐problem minimum loads
             if(numActiveCUs < hardware.N_CU)
             {
-                double min_load
-                    = static_cast<double>(M * MT_K * splittingFactor * safe_ceil_div(element_size_A, 8)
-                                          + N * MT_K * splittingFactor  * safe_ceil_div(element_size_B, 8));
+                double min_load = static_cast<double>(
+                    M * MT_K * splittingFactor * safe_ceil_div(element_size_A, 8)
+                    + N * MT_K * splittingFactor * safe_ceil_div(element_size_B, 8));
                 Ld_MEM  = std::max(Ld_MEM, min_load) * batch;
                 Ld_mem2 = std::max(Ld_mem2, min_load) * batch;
             }
 
             // 10) mem2 latency
             double limited_mem2_bw = hardware.mem2_perf_ratio * bw_limited;
-            double L_mem_mem2 = (limited_mem2_bw > 0) ? (Ld_mem2 / limited_mem2_bw) : 0.0;
+            double L_mem_mem2      = (limited_mem2_bw > 0) ? (Ld_mem2 / limited_mem2_bw) : 0.0;
 
             // 11) MEM latency
             double limited_mem_bw = hardware.mem3_perf_ratio * bw_limited;
@@ -647,6 +680,9 @@ namespace TensileLite
             L_mem_MEM += 200; // Load Latency
 
             // 12) pick the worst‐case bound
+            L_mem_mem1   = L_mem_mem1 * w.mem1;
+            L_mem_mem2   = L_mem_mem2 * w.mem2;
+            L_mem_MEM    = L_mem_MEM * w.mem3;
             double L_mem = std::max({L_mem_mem1, L_mem_mem2, L_mem_MEM});
 
             // NT
@@ -702,9 +738,12 @@ namespace TensileLite
                 hardware.log_debug("mem1_perf_ratio", hardware.mem1_perf_ratio);
                 hardware.log_debug("mem2_perf_ratio", hardware.mem2_perf_ratio);
                 hardware.log_debug("mem3_perf_ratio", hardware.mem3_perf_ratio);
-                hardware.log_debug("mem_bw_per_wg_coefficients(0)", std::get<0>(hardware.mem_bw_per_wg_coefficients));
-                hardware.log_debug("mem_bw_per_wg_coefficients(1)", std::get<1>(hardware.mem_bw_per_wg_coefficients));
-                hardware.log_debug("mem_bw_per_wg_coefficients(2)", std::get<2>(hardware.mem_bw_per_wg_coefficients));
+                hardware.log_debug("mem_bw_per_wg_coefficients(0)",
+                                   std::get<0>(hardware.mem_bw_per_wg_coefficients));
+                hardware.log_debug("mem_bw_per_wg_coefficients(1)",
+                                   std::get<1>(hardware.mem_bw_per_wg_coefficients));
+                hardware.log_debug("mem_bw_per_wg_coefficients(2)",
+                                   std::get<2>(hardware.mem_bw_per_wg_coefficients));
                 hardware.log_debug("H_mem1 (mem1 hit ratio)", H_mem1);
                 hardware.log_debug("H_mem2 (mem2 hit ratio)", H_mem2);
                 hardware.log_debug("Total Load (bytes)", total_Ld);
@@ -743,7 +782,8 @@ namespace TensileLite
                                     size_t          numActiveCUs,
                                     size_t          splittingFactor,
                                     bool            debug)
-        {            
+        {
+            const auto& w = TensileLite::analytical::Hardware::weights();
             // 1) Compute per-tile latencies
             double L_compute = compute_mt_compute_latency(hardware,
                                                           M,
@@ -780,6 +820,9 @@ namespace TensileLite
                                                   splittingFactor,
                                                   debug);
 
+            L_compute = L_compute * w.compute;
+            L_mem     = L_compute * w.memory;
+
             // 2) Work-group setup & iteration latencies
             double L_WG_setup = 1; // WG_setup_Latency
 
@@ -788,24 +831,52 @@ namespace TensileLite
 
             // 4) Epilogue: writes from all active CUs with limited bandwidth
             double epilogue_limite = (static_cast<double>(numActiveCUs) / hardware.N_CU);
-            double limited_mem1 = hardware.mem1_perf_ratio * epilogue_limite;
+            double limited_mem1    = hardware.mem1_perf_ratio * epilogue_limite;
             if(limited_mem1 < 1)
             {
                 limited_mem1 = 10;
             }
-            double L_epilogue = (static_cast<double>(numActiveCUs)
-                                 * MT_M * MT_N * safe_ceil_div(element_size_out, 8))
-                                 / limited_mem1;
+            double L_epilogue = (static_cast<double>(numActiveCUs) * MT_M * MT_N
+                                 * safe_ceil_div(element_size_out, 8))
+                                / limited_mem1;
+
+            //There is one compute iteration in the epilogue but no loads. This is additive to the stores.
+            //L_epilogue = std::max(L_epilogue, L_compute);
+
+            L_epilogue = std::max(L_epilogue, L_compute);
+
+            //Zero Padding overhead
+            if(K % MT_K != 0 || N % MT_N != 0 || M % MT_M != 0)
+            {
+                L_epilogue += L_compute * 0.1;
+            }
 
             // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N tiles to coherent memory
             if(splittingFactor > 1)
             {
-                size_t n_partials              = splittingFactor - 1;
-                double partial_readwrite_bytes = (2 * numActiveCUs
-                                                  * MT_M * MT_N * safe_ceil_div(element_size_out, 8)
-                                                  * n_partials);
-                double L_reduce = partial_readwrite_bytes / (hardware.mem3_perf_ratio);
-                L_epilogue += L_reduce * 1;
+                size_t n_partials = splittingFactor - 1;
+
+                // Only the reduction CU reads from all splits.
+                double partial_read_bytes
+                    = n_partials * MT_M * MT_N * safe_ceil_div(element_size_out, 8);
+
+                // All CUs write (once for each partial, and once by the reduction CU for the output.)
+                double partial_write_bytes
+                    = numActiveCUs * MT_M * MT_N * safe_ceil_div(element_size_out, 8);
+
+                double partial_readwrite_bytes = partial_read_bytes + partial_write_bytes;
+
+                //64 Threads active in a SIMD. Exposed to at least latency of reducing splittingfactor tiles.
+                double partial_adds = ((MT_M * MT_N) * splittingFactor) / (64);
+                //Things have to be written to memory
+                double mem_bw_occ         = compute_mem_bw_from_occupancy(hardware, numActiveCUs);
+                double mem_bw_occ_limited = hardware.mem3_perf_ratio * mem_bw_occ;
+                // double partial_readwrite_bytes = (2 * numActiveCUs
+                //                                   * MT_M * MT_N * safe_ceil_div(element_size_out, 8)
+                //                                   * n_partials);
+
+                double L_reduce = partial_readwrite_bytes / (mem_bw_occ_limited);
+                L_epilogue += L_reduce;
             }
 
             // 4'') tf32 emu has some more overhead
@@ -834,14 +905,14 @@ namespace TensileLite
             // num_iter      = std::ceil(num_iter / splittingFactor);
             // num_iter      = std::max(num_iter, 1L);
             long splittedK = static_cast<long>(safe_ceil_div(K, splittingFactor));
-            long num_iter = static_cast<long>(safe_ceil_div(splittedK, MT_K)) - 1;
+            long num_iter  = static_cast<long>(safe_ceil_div(splittedK, MT_K)) - 1;
 
+            L_prologue = L_prologue * w.prologue;
+            L_epilogue = L_epilogue * w.epilogue;
             // 7) Total tile latency
-            double L_tile_total = (L_tile_single * num_iter)
-                                  + L_prologue
-                                  + L_epilogue
-                                  + L_WG_setup
-                                  + (28 * num_iter); // 7 instructions (each with 4 cycles) at the end of the loop
+            double L_tile_total
+                = (L_tile_single * num_iter) + L_prologue + L_epilogue + L_WG_setup
+                  + (28 * num_iter); // 7 instructions (each with 4 cycles) at the end of the loop
 
             if(debug || Hardware::is_debug_enabled())
             {
@@ -957,7 +1028,7 @@ namespace TensileLite
                 if(M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N))
                     return std::numeric_limits<double>::max();
 
-                 // Override dot2 instruction with vector lane widths
+                // Override dot2 instruction with vector lane widths
                 if(MI_N == 0 && MI_M == 0 && MI_K == 0)
                 {
                     // We only use Dot2 for NN layout where M < 3
@@ -973,30 +1044,31 @@ namespace TensileLite
             WGM = std::max(WGM, 1); // WGM can't be less than one.
 
             // 1-2) Find CU occupancy
-            auto [numActiveCUs, numWaves, splittingFactor] = compute_CU_occupancy(hardware,
-                                                                                  M,
-                                                                                  N,
-                                                                                  K,
-                                                                                  batch,
-                                                                                  transA,
-                                                                                  transB,
-                                                                                  MT_M,
-                                                                                  MT_N,
-                                                                                  MT_K,
-                                                                                  MI_M,
-                                                                                  MI_N,
-                                                                                  MI_K,
-                                                                                  element_size_A,
-                                                                                  element_size_B,
-                                                                                  element_size_out,
-                                                                                  miDataType,
-                                                                                  WGM,
-                                                                                  std::numeric_limits<size_t>::max(), // workspace
-                                                                                  std::numeric_limits<size_t>::max(), // workspace per c
-                                                                                  0, // occupancy
-                                                                                  6, // dynamic_grid
-                                                                                  debug,
-                                                                                  split);
+            auto [numActiveCUs, numWaves, splittingFactor]
+                = compute_CU_occupancy(hardware,
+                                       M,
+                                       N,
+                                       K,
+                                       batch,
+                                       transA,
+                                       transB,
+                                       MT_M,
+                                       MT_N,
+                                       MT_K,
+                                       MI_M,
+                                       MI_N,
+                                       MI_K,
+                                       element_size_A,
+                                       element_size_B,
+                                       element_size_out,
+                                       miDataType,
+                                       WGM,
+                                       std::numeric_limits<size_t>::max(), // workspace
+                                       std::numeric_limits<size_t>::max(), // workspace per c
+                                       0, // occupancy
+                                       6, // dynamic_grid
+                                       debug,
+                                       split);
 
             // 2) Compute latency of a wave
             // Compute latency of a wave
@@ -1032,31 +1104,39 @@ namespace TensileLite
 
             // Heuristics for TF32
             bool tf32_emu = ((miDataType == DataType::XFloat32)
-                         && (hardware.arch == Hardware::Architecture::gfx950));
+                             && (hardware.arch == Hardware::Architecture::gfx950));
             if(tf32_emu && heuristics)
             {
-                // The kernel for this is more optimized (Custom kernel NT)
-                if((!transA && transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
-                {
-                    total_latency = total_latency * 0.6;
-                }
 
-                // The kernel for this is more optimized (Custom kernel NN)
                 if((!transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
                 {
-                    total_latency = total_latency * 0.8;
+                    total_latency = total_latency * 0.9;
                 }
 
-                // The kernel for this is more optimized (Custom kernel TN)
                 if((transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
                 {
-                    total_latency = total_latency * 0.8;
+                    total_latency = total_latency * 0.9;
                 }
 
                 // Bias large DU where K-dimension is large and M and N are small.
                 if((K >= (M * 16) && K >= (N * 16)) && (MT_K >= 128))
                 {
-                    total_latency = total_latency * 0.5;
+                    total_latency = total_latency * 0.9;
+                }
+
+                if((!transA && transB) && MT_M == 256 && MT_N == 192 && MT_K == 32)
+                {
+                    total_latency = total_latency * 1.5;
+                }
+
+                if((transA && !transB) && MT_M == 256 && MT_N == 192 && MT_K == 32)
+                {
+                    total_latency = total_latency * 1.5;
+                }
+
+                if(MT_K > 16 && K <= 16)
+                {
+                    total_latency = total_latency * 2;
                 }
             }
 
@@ -1066,12 +1146,13 @@ namespace TensileLite
                 const size_t numMT_M = safe_ceil_div(M, MT_M);
                 const size_t numMT_N = safe_ceil_div(N, MT_N);
                 const double waste = static_cast<double>(numMT_M * MT_M * numMT_N * MT_N) / (M * N);
-                double edge_penalty = std::pow(waste, 0.8);
+                double       edge_penalty = std::pow(waste, 0.8);
                 if(batch > 10)
-                    edge_penalty = std::pow(waste, 1.5) * std::log10((double)batch) * std::pow((double)numMT_M * numMT_N, 0.2);
+                    edge_penalty = std::pow(waste, 1.5) * std::log10((double)batch)
+                                   * std::pow((double)numMT_M * numMT_N, 0.2);
                 total_latency = total_latency * edge_penalty;
 
-                // Penalize K iterations 
+                // Penalize K iterations
                 size_t K_iters = safe_ceil_div(K, MT_K);
                 if(K_iters <= 2)
                 {
@@ -1218,25 +1299,25 @@ namespace TensileLite
                 = hardware.compute_clock_ghz * 1e9; // 1 GHz = 1e9 cycles per second
             size_t mx_block_size      = 0;
             double latency_cycles     = compute_total_latency(hardware,
-                                                              M,
-                                                              N,
-                                                              K,
-                                                              batch,
-                                                              transA,
-                                                              transB,
-                                                              MT_M,
-                                                              MT_N,
-                                                              MT_K,
-                                                              MI_M,
-                                                              MI_N,
-                                                              MI_K,
-                                                              element_size_A,
-                                                              element_size_B,
-                                                              element_size_out,
-                                                              miDataType,
-                                                              mx_block_size,
-                                                              WGM,
-                                                              debug);
+                                                          M,
+                                                          N,
+                                                          K,
+                                                          batch,
+                                                          transA,
+                                                          transB,
+                                                          MT_M,
+                                                          MT_N,
+                                                          MT_K,
+                                                          MI_M,
+                                                          MI_N,
+                                                          MI_K,
+                                                          element_size_A,
+                                                          element_size_B,
+                                                          element_size_out,
+                                                          miDataType,
+                                                          mx_block_size,
+                                                          WGM,
+                                                          debug);
             double total_time_seconds = latency_cycles / cycles_per_second;
             // Compute performance in FLOPS
             double FLOPS = total_FLOPs / total_time_seconds;
