@@ -1,16 +1,24 @@
 
 #include <thrust/unique_ptr.h>
+#include <thrust/device_delete.h>
 #include "hip/hip_runtime.h"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
 class A {
 public:    
-    __host__ __device__ A() {}
-    __host__ __device__ A(int num): val_a(num) {}
+    __host__ __device__ A() : finished(nullptr), val_a(0) {}
+    __host__ __device__ A(int num): finished(nullptr), val_a(num) {}
+    __host__ __device__ A(thrust::device_ptr<bool> dev_p, int num): finished(dev_p), val_a(num) {}
 
-    __host__ __device__ ~A() {}
+    __host__ __device__ ~A() {
+    #if defined(__HIP_DEVICE_COMPILE__)
+        if(finished)
+            *finished = true; 
+    #endif
+    }
  
+    thrust::device_ptr<bool> finished;
     int val_a;
 }; 
 
@@ -48,22 +56,14 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltr)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    void *raw_addr = nullptr;
-    size_t sz = 0;
+    thrust::device_ptr<bool> finished = thrust::device_new<bool>(1);
+    *finished = false;
     {
-        thrust::unique_ptr<A> p = thrust::make_unique<A>();
+        thrust::unique_ptr<A> p = thrust::make_unique<A>(finished, 18);
         ASSERT_NE(p, nullptr);
-
-        hipError_t st = hipMemPtrGetInfo(static_cast<void*>(p.get_raw()), &sz);
-        ASSERT_EQ(st, hipSuccess);
-        ASSERT_GE(sz, sizeof(A));
-
-        raw_addr = static_cast<void*>(p.get_raw());
     }
-    
-    size_t dummy = 0;
-    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
-    ASSERT_EQ(st, hipErrorInvalidValue);
+    ASSERT_EQ(*finished, true);
+    thrust::device_delete(finished);
 }
 
 TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmp)
