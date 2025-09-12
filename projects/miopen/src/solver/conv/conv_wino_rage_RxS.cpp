@@ -154,7 +154,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     std::string kernelVersion;
     if(args.R_S_fit3x3() && problem.IsFp16())
     {
-        kernelVersion = "_v4_6_0";
+        kernelVersion = "_v4_6_1";
     }
     else
     {

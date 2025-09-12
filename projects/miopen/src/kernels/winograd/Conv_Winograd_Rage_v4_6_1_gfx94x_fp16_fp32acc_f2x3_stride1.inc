@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 v_lshlrev_b32 v1, 7, v0
 s_getpc_b64 [s8, s9]
@@ -2273,8 +2250,7 @@ v_bfe_u32 v95, v0, 6, 1
 v_and_b32 v84, 63, v0
 v_mov_b32 v101, 124
 v_mad_u32_u16 v90, v101, s5, 0 op_sel:[0, 0, 0, 0]
-v_mov_b32 v101, 2
-v_mad_u32_u16 v95, v101, s8, v95 op_sel:[0, 0, 0, 0]
+v_mad_u32_u16 v95, 2, s8, v95 op_sel:[0, 0, 0, 0]
 v_mad_u32_u16 v88, v86, v87, 0 op_sel:[0, 0, 0, 0]
 v_cmp_eq_u32 [vcc_lo, vcc_hi], 0, v89
 v_cndmask_b32 v96, v88, v87, [vcc_lo, vcc_hi]
@@ -2282,37 +2258,37 @@ v_mad_u32_u16 v85, 62, v95, v84 op_sel:[0, 0, 0, 0]
 v_cndmask_b32 v85, v90, v85, [vcc_lo, vcc_hi]
 v_ffbh_u32 v102, v96
 v_lshlrev_b32 v103, v102, v96
-v_and_b32 v101, -256, v103
+v_and_b32 v104, -256, v103
 v_cmp_eq_u32 [vcc_lo, vcc_hi], 2147483648, v103
-v_cvt_f32_u32 v101, v101
-v_rcp_f32 v97, v101
+v_cvt_f32_u32 v104, v104
+v_rcp_f32 v97, v104
 v_subb_co_u32 v98, [vcc_lo, vcc_hi], 32, v102, [vcc_lo, vcc_hi]
 v_cvt_f32_ubyte0 v102, v103
-v_fma_f32 v101, v101, v97, -1.0
-v_fma_f32 v101, v102, v97, v101
-v_fmaak_f32 v101, v101, v97, 2667577344
-v_mul_f32 v101, 1602224128, v101
+v_fma_f32 v104, v104, v97, -1.0
+v_fma_f32 v104, v102, v97, v104
+v_fmaak_f32 v104, v104, v97, 2667577344
+v_mul_f32 v104, 1602224128, v104
 v_mov_b32 v102, 0
-v_cvt_flr_i32_f32 v101, neg(v101)
-v_lshl_add_u32 v97, v97, 9, v101
+v_cvt_flr_i32_f32 v104, neg(v104)
+v_lshl_add_u32 v97, v97, 9, v104
 v_mad_u64_u32 [v102, v103], [vcc_lo, vcc_hi], v103, v97, [v102, v103]
 v_subb_co_u32 v97, [vcc_lo, vcc_hi], v97, -1, [vcc_lo, vcc_hi]
 v_mov_b32 v100, v98 quad_perm:[1, 1, 1, 1]
 v_mov_b32 v98, v98 quad_perm:[0, 0, 0, 0]
 v_mov_b32 v99, v97 quad_perm:[1, 1, 1, 1]
 v_mov_b32 v97, v97 quad_perm:[0, 0, 0, 0]
-v_mul_hi_u32 v101, v85, v97
-v_add_co_u32 v81, [vcc_lo, vcc_hi], v101, v85
-v_addc_co_u32 v101, [vcc_lo, vcc_hi], 0, 0, [vcc_lo, vcc_hi]
+v_mul_hi_u32 v102, v85, v97
+v_add_co_u32 v81, [vcc_lo, vcc_hi], v102, v85
+v_addc_co_u32 v102, [vcc_lo, vcc_hi], 0, 0, [vcc_lo, vcc_hi]
 v_cmp_eq_u32 [vcc_lo, vcc_hi], 32, v98
-v_cndmask_b32 v81, v81, v101, [vcc_lo, vcc_hi]
-v_alignbit_b32 v81, v101, v81, v98
-v_mul_hi_u32 v101, v85, v99
-v_add_co_u32 v4, [vcc_lo, vcc_hi], v101, v85
-v_addc_co_u32 v101, [vcc_lo, vcc_hi], 0, 0, [vcc_lo, vcc_hi]
+v_cndmask_b32 v81, v81, v102, [vcc_lo, vcc_hi]
+v_alignbit_b32 v81, v102, v81, v98
+v_mul_hi_u32 v102, v85, v99
+v_add_co_u32 v4, [vcc_lo, vcc_hi], v102, v85
+v_addc_co_u32 v102, [vcc_lo, vcc_hi], 0, 0, [vcc_lo, vcc_hi]
 v_cmp_eq_u32 [vcc_lo, vcc_hi], 32, v100
-v_cndmask_b32 v4, v4, v101, [vcc_lo, vcc_hi]
-v_alignbit_b32 v4, v101, v4, v100
+v_cndmask_b32 v4, v4, v102, [vcc_lo, vcc_hi]
+v_alignbit_b32 v4, v102, v4, v100
 v_mad_u32_u16 v94, v81, v87, 0 op_sel:[0, 0, 0, 0]
 v_mad_u32_u16 v93, v4, v86, 0 op_sel:[0, 0, 0, 0]
 v_sub_u32 v94, v85, v94
@@ -2339,21 +2315,21 @@ v_sub_u32 v94, v94, v92
 v_sub_u32 v93, v93, v91
 v_cmp_eq_u32 [vcc_lo, vcc_hi], v84, v89
 v_lshlrev_b32 v1, 16, v93
-v_mov_b32 v104, 65535
-v_bfi_b32 v1, v104, v94, v1
-v_add_u32 v104, v4, s22
+v_mov_b32 v101, 65535
+v_bfi_b32 v1, v101, v94, v1
+v_add_u32 v105, v4, s22
 v_med3_u32 v89, v84, 1, 62
-v_mul_lo_u32 v2, v104, s56
-v_mul_lo_u32 v11, v104, s64
+v_mul_lo_u32 v2, v105, s56
+v_mul_lo_u32 v11, v105, s64
 s_mul_i32 s12, s2, s56
 s_mul_i32 s15, s2, s64
-v_mov_b32 v105, 2147483648
-v_cndmask_b32 v2, v105, v2, [vcc_lo, vcc_hi]
+v_mov_b32 v101, 2147483648
+v_cndmask_b32 v2, v101, v2, [vcc_lo, vcc_hi]
 v_cmp_eq_u32 [vcc_lo, vcc_hi], v84, v89
-v_cndmask_b32 v11, v105, v11, [vcc_lo, vcc_hi]
-v_cmp_ge_u32 [s20, s21], v104, s22
-v_cndmask_b32 v2, v2, v105, [s20, s21]
-v_cndmask_b32 v11, v11, v105, [s20, s21]
+v_cndmask_b32 v11, v101, v11, [vcc_lo, vcc_hi]
+v_cmp_ge_u32 [s20, s21], v105, s22
+v_cndmask_b32 v2, v2, v101, [s20, s21]
+v_cndmask_b32 v11, v11, v101, [s20, s21]
 v_mov_b32 v80, s20
 ds_write_b32 v74, v80 offset:55808
 s_and_b32 s24, s72, 255
@@ -2364,10 +2340,10 @@ s_cmp_eq_u32 s24, 4
 s_cbranch_scc1 label_120
 s_cmp_eq_u32 s24, 2
 s_cbranch_scc1 label_121
-v_cvt_f16_f32 v81, s46
+v_cvt_f16_f32 v81, s46 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
 s_nop 0
 v_readfirstlane_b32 s46, v81
-v_cvt_f16_f32 v81, s47
+v_cvt_f16_f32 v81, s47 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
 v_cmp_gt_f16 [vcc_lo, vcc_hi], s46, 1.0
 v_readfirstlane_b32 s47, v81
 s_pack_ll_b32_b16 s46, s46, s46
@@ -2507,9 +2483,9 @@ v_mov_b32 v92, s56
 v_mov_b32 v89, s64
 v_mov_b32 v94, s2
 v_add_co_u32 v81, [vcc_lo, vcc_hi], v1, s9
-v_mov_b32 v96, 131073
-v_pk_mad_u16 v87, v1, v96, s11 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_mad_u16 v88, v1, v96, s14 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v88, 131073
+v_pk_mad_u16 v87, v1, v88, s11 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_mad_u16 v88, v1, v88, s14 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_pk_min_u16 v90, v81, v1 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_cndmask_b32 v91, 0, v92, [vcc_lo, vcc_hi]
 v_cndmask_b32 v93, 0, v89, [vcc_lo, vcc_hi]
@@ -2758,13 +2734,13 @@ v_pk_add_f16 v59, v59, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v57, v57, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v61, v61, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v75, s46, v55 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v85, s46, v59 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, s46, v59 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_max_f16 v55, v55, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v59, v59, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v59, v59, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v75, s46, v57 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v85, s46, v61 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, s46, v61 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_max_f16 v57, v57, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v61, v61, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v61, v61, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
 buffer_store_short v55, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v59, v82, [s48, s49, s50, s51], 0 idxen
@@ -2791,14 +2767,14 @@ v_pk_add_f16 v56, v56, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v60, v60, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v58, v58, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v62, v62, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v81, s46, v56 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v87, s46, v60 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v56, v56, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v60, v60, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v81, s46, v58 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v87, s46, v62 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v58, v58, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v62, v62, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v84, s46, v56 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v90, s46, v60 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v56, v56, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v60, v60, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v84, s46, v58 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v90, s46, v62 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v58, v58, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v62, v62, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
 buffer_store_short v56, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v60, v82, [s48, s49, s50, s51], 0 idxen
@@ -2830,13 +2806,13 @@ v_pk_add_f16 v67, v67, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v65, v65, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v69, v69, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v75, s46, v63 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v85, s46, v67 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, s46, v67 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_max_f16 v63, v63, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v67, v67, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v67, v67, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v75, s46, v65 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v85, s46, v69 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, s46, v69 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_max_f16 v65, v65, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v69, v69, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v69, v69, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
 buffer_store_short v63, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v67, v82, [s48, s49, s50, s51], 0 idxen
@@ -2863,14 +2839,14 @@ v_pk_add_f16 v64, v64, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v68, v68, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v66, v66, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v70, v70, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v81, s46, v64 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v87, s46, v68 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v64, v64, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v68, v68, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v81, s46, v66 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v87, s46, v70 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v66, v66, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_max_f16 v70, v70, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v84, s46, v64 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v90, s46, v68 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v64, v64, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v68, v68, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v84, s46, v66 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v90, s46, v70 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v66, v66, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_max_f16 v70, v70, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
 buffer_store_short v64, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v68, v82, [s48, s49, s50, s51], 0 idxen
@@ -2904,13 +2880,13 @@ v_pk_add_f16 v59, v59, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v57, v57, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v61, v61, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v75, s46, v55 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v85, s46, v59 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, s46, v59 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_min_f16 v55, v55, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v59, v59, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v59, v59, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v75, s46, v57 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v85, s46, v61 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, s46, v61 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_min_f16 v57, v57, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v61, v61, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v61, v61, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
 buffer_store_short v55, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v59, v82, [s48, s49, s50, s51], 0 idxen
@@ -2937,14 +2913,14 @@ v_pk_add_f16 v56, v56, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v60, v60, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v58, v58, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v62, v62, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v81, s46, v56 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v87, s46, v60 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v56, v56, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v60, v60, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v81, s46, v58 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v87, s46, v62 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v58, v58, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v62, v62, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v84, s46, v56 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v90, s46, v60 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v56, v56, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v60, v60, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v84, s46, v58 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v90, s46, v62 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v58, v58, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v62, v62, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
 buffer_store_short v56, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v60, v82, [s48, s49, s50, s51], 0 idxen
@@ -2976,13 +2952,13 @@ v_pk_add_f16 v67, v67, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v65, v65, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v69, v69, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v75, s46, v63 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v85, s46, v67 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, s46, v67 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_min_f16 v63, v63, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v67, v67, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v67, v67, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v75, s46, v65 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v85, s46, v69 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, s46, v69 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_min_f16 v65, v65, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v69, v69, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v69, v69, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
 buffer_store_short v63, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v67, v82, [s48, s49, s50, s51], 0 idxen
@@ -3009,14 +2985,14 @@ v_pk_add_f16 v64, v64, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v68, v68, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v66, v66, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v70, v70, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v81, s46, v64 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v87, s46, v68 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v64, v64, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v68, v68, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v81, s46, v66 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v87, s46, v70 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v66, v66, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_min_f16 v70, v70, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v84, s46, v64 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v90, s46, v68 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v64, v64, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v68, v68, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v84, s46, v66 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v90, s46, v70 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v66, v66, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_min_f16 v70, v70, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
 buffer_store_short v64, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v68, v82, [s48, s49, s50, s51], 0 idxen
@@ -3179,50 +3155,50 @@ v_pk_add_f16 v55, v55, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v59, v59, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v57, v57, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v61, v61, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v55, v89, v55 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v59, v89, v59 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v55, v55 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v59, v59 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v55, v55 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v59, v59 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v55, 1.0, v55 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v59, 1.0, v59 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v55, v55 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v59, v59 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v55, v55 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v59, v59 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v57, v89, v57 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v61, v89, v61 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v57, v57 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v61, v61 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v57, v57 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v61, v61 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v57, 1.0, v57 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v61, 1.0, v61 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v57, v57 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v61, v61 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v57, v57 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v61, v61 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_mov_b32 v77, 3216550459
+v_mov_b32 v88, 3216550459
+v_fma_mix_f32 v75, v77, v55, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v87, v88, v59, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v77, v77, v55, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v88, v88, v59, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_exp_f32 v75, v75
+v_exp_f32 v87, v87
+v_exp_f32 v77, v77
+v_exp_f32 v88, v88
+v_add_f32 v75, 1.0, v75
+v_add_f32 v87, 1.0, v87
+v_add_f32 v77, 1.0, v77
+v_add_f32 v88, 1.0, v88
+v_rcp_f32 v75, v75
+v_rcp_f32 v87, v87
+v_rcp_f32 v77, v77
+v_rcp_f32 v88, v88
+v_cvt_f16_f32 v55, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v59, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v55, v77 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v59, v88 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_mov_b32 v77, 3216550459
+v_mov_b32 v88, 3216550459
+v_fma_mix_f32 v75, v77, v57, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v87, v88, v61, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v77, v77, v57, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v88, v88, v61, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_exp_f32 v75, v75
+v_exp_f32 v87, v87
+v_exp_f32 v77, v77
+v_exp_f32 v88, v88
+v_add_f32 v75, 1.0, v75
+v_add_f32 v87, 1.0, v87
+v_add_f32 v77, 1.0, v77
+v_add_f32 v88, 1.0, v88
+v_rcp_f32 v75, v75
+v_rcp_f32 v87, v87
+v_rcp_f32 v77, v77
+v_rcp_f32 v88, v88
+v_cvt_f16_f32 v57, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v61, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v57, v77 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v61, v88 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
 s_setprio 0
 buffer_store_short v55, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v59, v82, [s48, s49, s50, s51], 0 idxen
@@ -3249,50 +3225,50 @@ v_pk_add_f16 v56, v56, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v60, v60, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v58, v58, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v62, v62, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v56, v89, v56 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v60, v89, v60 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v56, v56 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v60, v60 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v56, v56 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v60, v60 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v56, 1.0, v56 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v60, 1.0, v60 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v56, v56 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v60, v60 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v56, v56 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v60, v60 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v58, v89, v58 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v62, v89, v62 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v58, v58 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v62, v62 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v58, v58 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v62, v62 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v58, 1.0, v58 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v62, 1.0, v62 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v58, v58 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v62, v62 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v58, v58 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v62, v62 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_mov_b32 v85, 3216550459
+v_mov_b32 v91, 3216550459
+v_fma_mix_f32 v84, v85, v56, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v90, v91, v60, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v85, v85, v56, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v91, v91, v60, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_exp_f32 v84, v84
+v_exp_f32 v90, v90
+v_exp_f32 v85, v85
+v_exp_f32 v91, v91
+v_add_f32 v84, 1.0, v84
+v_add_f32 v90, 1.0, v90
+v_add_f32 v85, 1.0, v85
+v_add_f32 v91, 1.0, v91
+v_rcp_f32 v84, v84
+v_rcp_f32 v90, v90
+v_rcp_f32 v85, v85
+v_rcp_f32 v91, v91
+v_cvt_f16_f32 v56, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v60, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v56, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v60, v91 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_mov_b32 v85, 3216550459
+v_mov_b32 v91, 3216550459
+v_fma_mix_f32 v84, v85, v58, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v90, v91, v62, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v85, v85, v58, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v91, v91, v62, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_exp_f32 v84, v84
+v_exp_f32 v90, v90
+v_exp_f32 v85, v85
+v_exp_f32 v91, v91
+v_add_f32 v84, 1.0, v84
+v_add_f32 v90, 1.0, v90
+v_add_f32 v85, 1.0, v85
+v_add_f32 v91, 1.0, v91
+v_rcp_f32 v84, v84
+v_rcp_f32 v90, v90
+v_rcp_f32 v85, v85
+v_rcp_f32 v91, v91
+v_cvt_f16_f32 v58, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v62, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v58, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v62, v91 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
 s_setprio 0
 buffer_store_short v56, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v60, v82, [s48, s49, s50, s51], 0 idxen
@@ -3323,50 +3299,50 @@ v_pk_add_f16 v63, v63, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v67, v67, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v65, v65, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v69, v69, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v63, v89, v63 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v67, v89, v67 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v63, v63 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v67, v67 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v63, v63 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v67, v67 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v63, 1.0, v63 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v67, 1.0, v67 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v63, v63 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v67, v67 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v63, v63 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v67, v67 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v65, v89, v65 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v69, v89, v69 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v65, v65 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v69, v69 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v65, v65 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v69, v69 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v65, 1.0, v65 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v69, 1.0, v69 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v65, v65 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v69, v69 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v65, v65 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v69, v69 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_mov_b32 v77, 3216550459
+v_mov_b32 v88, 3216550459
+v_fma_mix_f32 v75, v77, v63, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v87, v88, v67, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v77, v77, v63, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v88, v88, v67, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_exp_f32 v75, v75
+v_exp_f32 v87, v87
+v_exp_f32 v77, v77
+v_exp_f32 v88, v88
+v_add_f32 v75, 1.0, v75
+v_add_f32 v87, 1.0, v87
+v_add_f32 v77, 1.0, v77
+v_add_f32 v88, 1.0, v88
+v_rcp_f32 v75, v75
+v_rcp_f32 v87, v87
+v_rcp_f32 v77, v77
+v_rcp_f32 v88, v88
+v_cvt_f16_f32 v63, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v67, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v63, v77 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v67, v88 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_mov_b32 v77, 3216550459
+v_mov_b32 v88, 3216550459
+v_fma_mix_f32 v75, v77, v65, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v87, v88, v69, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v77, v77, v65, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v88, v88, v69, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_exp_f32 v75, v75
+v_exp_f32 v87, v87
+v_exp_f32 v77, v77
+v_exp_f32 v88, v88
+v_add_f32 v75, 1.0, v75
+v_add_f32 v87, 1.0, v87
+v_add_f32 v77, 1.0, v77
+v_add_f32 v88, 1.0, v88
+v_rcp_f32 v75, v75
+v_rcp_f32 v87, v87
+v_rcp_f32 v77, v77
+v_rcp_f32 v88, v88
+v_cvt_f16_f32 v65, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v69, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v65, v77 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v69, v88 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
 s_setprio 0
 buffer_store_short v63, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v67, v82, [s48, s49, s50, s51], 0 idxen
@@ -3393,50 +3369,50 @@ v_pk_add_f16 v64, v64, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v68, v68, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v66, v66, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v70, v70, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v64, v89, v64 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v68, v89, v68 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v64, v64 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v68, v68 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v64, v64 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v68, v68 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v64, 1.0, v64 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v68, 1.0, v68 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v64, v64 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v68, v68 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v64, v64 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v68, v68 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v66, v89, v66 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 3183852997
-v_pk_mul_f16 v70, v89, v70 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v66, v66 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v70, v70 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v66, v66 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v70, v70 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v66, 1.0, v66 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v70, 1.0, v70 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v66, v66 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v70, v70 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v66, v66 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v70, v70 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_mov_b32 v85, 3216550459
+v_mov_b32 v91, 3216550459
+v_fma_mix_f32 v84, v85, v64, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v90, v91, v68, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v85, v85, v64, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v91, v91, v68, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_exp_f32 v84, v84
+v_exp_f32 v90, v90
+v_exp_f32 v85, v85
+v_exp_f32 v91, v91
+v_add_f32 v84, 1.0, v84
+v_add_f32 v90, 1.0, v90
+v_add_f32 v85, 1.0, v85
+v_add_f32 v91, 1.0, v91
+v_rcp_f32 v84, v84
+v_rcp_f32 v90, v90
+v_rcp_f32 v85, v85
+v_rcp_f32 v91, v91
+v_cvt_f16_f32 v64, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v68, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v64, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v68, v91 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_mov_b32 v85, 3216550459
+v_mov_b32 v91, 3216550459
+v_fma_mix_f32 v84, v85, v66, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v90, v91, v70, 0 op_sel:[0, 0, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v85, v85, v66, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_fma_mix_f32 v91, v91, v70, 0 op_sel:[0, 1, 0, 0] op_sel_hi:[0, 1, 0, 0]
+v_exp_f32 v84, v84
+v_exp_f32 v90, v90
+v_exp_f32 v85, v85
+v_exp_f32 v91, v91
+v_add_f32 v84, 1.0, v84
+v_add_f32 v90, 1.0, v90
+v_add_f32 v85, 1.0, v85
+v_add_f32 v91, 1.0, v91
+v_rcp_f32 v84, v84
+v_rcp_f32 v90, v90
+v_rcp_f32 v85, v85
+v_rcp_f32 v91, v91
+v_cvt_f16_f32 v66, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v70, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v66, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
+v_cvt_f16_f32 v70, v91 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE
 s_setprio 0
 buffer_store_short v64, v78, [s48, s49, s50, s51], 0 idxen
 buffer_store_short v68, v82, [s48, s49, s50, s51], 0 idxen
@@ -3472,121 +3448,101 @@ v_pk_add_f16 v61, v61, s19 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v55, v55, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v59, v59, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_and_b32 v75, 2147450879, v55
-v_and_b32 v85, 2147450879, v59
+v_and_b32 v87, 2147450879, v59
 v_mov_b32 v77, 3056514606
-v_mov_b32 v86, 3056514606
+v_mov_b32 v88, 3056514606
+v_mov_b32 v81, 814231688
+v_pk_fma_f16 v77, v75, v81, v77 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_mov_b32 v89, 814231688
-v_pk_fma_f16 v77, v75, v89, v77 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v86, v85, v89, v86 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v89, v88 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v81, 506666547
+v_pk_fma_f16 v77, v75, v77, v81 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_mov_b32 v89, 506666547
-v_pk_fma_f16 v77, v75, v77, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v86, v85, v86, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v88, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_pk_mul_f16 v77, v75, v77 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v86, v85, v86 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v88, v87, v88 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_fma_f16 v77, v75, v77, v75 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_fma_f16 v86, v85, v86, v85 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v88, v87 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v81, 1103446469
+v_pk_mul_f16 v75, v81, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v75, v89, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v85, v89, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, v89, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_exp_f16 v75, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v85, v85 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
+v_exp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
 v_exp_f16 v75, v75 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v85, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_exp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
 v_pk_add_f16 v75, 1.0, v75 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v85, 1.0, v85 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_pk_add_f16 v87, 1.0, v87 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
 v_rcp_f16 v75, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v85, v85 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
+v_rcp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
 v_rcp_f16 v75, v75 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v85, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_rcp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_mov_b32 v81, 1002585026
+v_mov_b32 v89, 1002585026
 v_pk_fma_f16 v75, v75, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_pk_fma_f16 v85, v85, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v55), v89
+v_pk_fma_f16 v87, v87, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v55), v81
 v_cndmask_b32 v77, v77, v75, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
 v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v59), v89
-v_cndmask_b32 v86, v86, v85, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v55), v89 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v55), v81 src0_sel:WORD_1 src1_sel:WORD_1
 v_cndmask_b32 v77, v77, v75, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v89, 1002585026
 v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v59), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v86, v86, v85, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v75, 2147450879
-v_bfi_b32 v55, v75, v77, v55
-v_mov_b32 v85, 2147450879
-v_bfi_b32 v59, v85, v86, v59
+v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_mov_b32 v81, 2147450879
+v_bfi_b32 v55, v81, v77, v55
+v_mov_b32 v89, 2147450879
+v_bfi_b32 v59, v89, v88, v59
 v_pk_mul_f16 v55, v55, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v59, v59, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v57, v57, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v61, v61, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_and_b32 v75, 2147450879, v57
-v_and_b32 v85, 2147450879, v61
+v_and_b32 v87, 2147450879, v61
 v_mov_b32 v77, 3056514606
-v_mov_b32 v86, 3056514606
+v_mov_b32 v88, 3056514606
+v_mov_b32 v81, 814231688
+v_pk_fma_f16 v77, v75, v81, v77 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_mov_b32 v89, 814231688
-v_pk_fma_f16 v77, v75, v89, v77 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v86, v85, v89, v86 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v89, v88 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v81, 506666547
+v_pk_fma_f16 v77, v75, v77, v81 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_mov_b32 v89, 506666547
-v_pk_fma_f16 v77, v75, v77, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v86, v85, v86, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v88, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_pk_mul_f16 v77, v75, v77 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v86, v85, v86 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v88, v87, v88 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_fma_f16 v77, v75, v77, v75 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_fma_f16 v86, v85, v86, v85 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v88, v87 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v81, 1103446469
+v_pk_mul_f16 v75, v81, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v75, v89, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v85, v89, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, v89, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_exp_f16 v75, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v85, v85 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
+v_exp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
 v_exp_f16 v75, v75 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v85, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_exp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
 v_pk_add_f16 v75, 1.0, v75 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v85, 1.0, v85 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_pk_add_f16 v87, 1.0, v87 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
 v_rcp_f16 v75, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v85, v85 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
+v_rcp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
 v_rcp_f16 v75, v75 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v85, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_rcp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_mov_b32 v81, 1002585026
+v_mov_b32 v89, 1002585026
 v_pk_fma_f16 v75, v75, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_pk_fma_f16 v85, v85, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v57), v89
+v_pk_fma_f16 v87, v87, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v57), v81
 v_cndmask_b32 v77, v77, v75, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
 v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v61), v89
-v_cndmask_b32 v86, v86, v85, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v57), v89 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v57), v81 src0_sel:WORD_1 src1_sel:WORD_1
 v_cndmask_b32 v77, v77, v75, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v89, 1002585026
 v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v61), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v86, v86, v85, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v75, 2147450879
-v_bfi_b32 v57, v75, v77, v57
-v_mov_b32 v85, 2147450879
-v_bfi_b32 v61, v85, v86, v61
+v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_mov_b32 v81, 2147450879
+v_bfi_b32 v57, v81, v77, v57
+v_mov_b32 v89, 2147450879
+v_bfi_b32 v61, v89, v88, v61
 v_pk_mul_f16 v57, v57, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v61, v61, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
@@ -3617,122 +3573,102 @@ v_pk_add_f16 v58, v58, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v62, v62, s29 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v56, v56, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v60, v60, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_and_b32 v81, 2147450879, v56
-v_and_b32 v87, 2147450879, v60
-v_mov_b32 v84, 3056514606
-v_mov_b32 v88, 3056514606
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v84, v81, v89, v84 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v88, v87, v89, v88 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v84, v81, v84, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v88, v87, v88, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_mul_f16 v84, v81, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v88, v87, v88 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_fma_f16 v84, v81, v84, v81 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_fma_f16 v88, v87, v88, v87 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v81, v89, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v87, v89, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v81, v81 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v81, v81 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v81, 1.0, v81 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v87, 1.0, v87 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v81, v81 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v81, v81 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_fma_f16 v81, v81, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_pk_fma_f16 v87, v87, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v56), v89
-v_cndmask_b32 v84, v84, v81, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v60), v89
-v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v56), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v84, v84, v81, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v60), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v81, 2147450879
-v_bfi_b32 v56, v81, v84, v56
-v_mov_b32 v87, 2147450879
-v_bfi_b32 v60, v87, v88, v60
+v_and_b32 v84, 2147450879, v56
+v_and_b32 v90, 2147450879, v60
+v_mov_b32 v85, 3056514606
+v_mov_b32 v91, 3056514606
+v_mov_b32 v86, 814231688
+v_pk_fma_f16 v85, v84, v86, v85 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v92, 814231688
+v_pk_fma_f16 v91, v90, v92, v91 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v86, 506666547
+v_pk_fma_f16 v85, v84, v85, v86 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v92, 506666547
+v_pk_fma_f16 v91, v90, v91, v92 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_mul_f16 v85, v84, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v91, v90, v91 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_fma_f16 v85, v84, v85, v84 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v91, v90, v91, v90 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v86, 1103446469
+v_pk_mul_f16 v84, v86, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_mov_b32 v92, 1103446469
+v_pk_mul_f16 v90, v92, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_exp_f16 v84, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_exp_f16 v90, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_exp_f16 v84, v84 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_exp_f16 v90, v90 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_pk_add_f16 v84, 1.0, v84 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_pk_add_f16 v90, 1.0, v90 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_rcp_f16 v84, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_rcp_f16 v90, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_rcp_f16 v84, v84 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_rcp_f16 v90, v90 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_mov_b32 v86, 1002585026
+v_mov_b32 v92, 1002585026
+v_pk_fma_f16 v84, v84, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_pk_fma_f16 v90, v90, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v56), v86
+v_cndmask_b32 v85, v85, v84, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v60), v92
+v_cndmask_b32 v91, v91, v90, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v56), v86 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v85, v85, v84, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v60), v92 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v91, v91, v90, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_mov_b32 v86, 2147450879
+v_bfi_b32 v56, v86, v85, v56
+v_mov_b32 v92, 2147450879
+v_bfi_b32 v60, v92, v91, v60
 v_pk_mul_f16 v56, v56, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v60, v60, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v58, v58, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v62, v62, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_and_b32 v81, 2147450879, v58
-v_and_b32 v87, 2147450879, v62
-v_mov_b32 v84, 3056514606
-v_mov_b32 v88, 3056514606
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v84, v81, v89, v84 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v88, v87, v89, v88 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v84, v81, v84, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v88, v87, v88, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_mul_f16 v84, v81, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v88, v87, v88 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_fma_f16 v84, v81, v84, v81 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_fma_f16 v88, v87, v88, v87 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v81, v89, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v87, v89, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v81, v81 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v81, v81 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v81, 1.0, v81 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v87, 1.0, v87 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v81, v81 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v81, v81 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_fma_f16 v81, v81, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_pk_fma_f16 v87, v87, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v58), v89
-v_cndmask_b32 v84, v84, v81, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v62), v89
-v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v58), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v84, v84, v81, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v62), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v81, 2147450879
-v_bfi_b32 v58, v81, v84, v58
-v_mov_b32 v87, 2147450879
-v_bfi_b32 v62, v87, v88, v62
+v_and_b32 v84, 2147450879, v58
+v_and_b32 v90, 2147450879, v62
+v_mov_b32 v85, 3056514606
+v_mov_b32 v91, 3056514606
+v_mov_b32 v86, 814231688
+v_pk_fma_f16 v85, v84, v86, v85 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v92, 814231688
+v_pk_fma_f16 v91, v90, v92, v91 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v86, 506666547
+v_pk_fma_f16 v85, v84, v85, v86 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v92, 506666547
+v_pk_fma_f16 v91, v90, v91, v92 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_mul_f16 v85, v84, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v91, v90, v91 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_fma_f16 v85, v84, v85, v84 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v91, v90, v91, v90 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v86, 1103446469
+v_pk_mul_f16 v84, v86, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_mov_b32 v92, 1103446469
+v_pk_mul_f16 v90, v92, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_exp_f16 v84, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_exp_f16 v90, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_exp_f16 v84, v84 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_exp_f16 v90, v90 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_pk_add_f16 v84, 1.0, v84 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_pk_add_f16 v90, 1.0, v90 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_rcp_f16 v84, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_rcp_f16 v90, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_rcp_f16 v84, v84 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_rcp_f16 v90, v90 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_mov_b32 v86, 1002585026
+v_mov_b32 v92, 1002585026
+v_pk_fma_f16 v84, v84, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_pk_fma_f16 v90, v90, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v58), v86
+v_cndmask_b32 v85, v85, v84, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v62), v92
+v_cndmask_b32 v91, v91, v90, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v58), v86 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v85, v85, v84, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v62), v92 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v91, v91, v90, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_mov_b32 v86, 2147450879
+v_bfi_b32 v58, v86, v85, v58
+v_mov_b32 v92, 2147450879
+v_bfi_b32 v62, v92, v91, v62
 v_pk_mul_f16 v58, v58, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v62, v62, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
@@ -3768,121 +3704,101 @@ v_pk_add_f16 v69, v69, s30 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v63, v63, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v67, v67, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_and_b32 v75, 2147450879, v63
-v_and_b32 v85, 2147450879, v67
+v_and_b32 v87, 2147450879, v67
 v_mov_b32 v77, 3056514606
-v_mov_b32 v86, 3056514606
+v_mov_b32 v88, 3056514606
+v_mov_b32 v81, 814231688
+v_pk_fma_f16 v77, v75, v81, v77 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_mov_b32 v89, 814231688
-v_pk_fma_f16 v77, v75, v89, v77 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v86, v85, v89, v86 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v89, v88 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v81, 506666547
+v_pk_fma_f16 v77, v75, v77, v81 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_mov_b32 v89, 506666547
-v_pk_fma_f16 v77, v75, v77, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v86, v85, v86, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v88, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_pk_mul_f16 v77, v75, v77 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v86, v85, v86 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v88, v87, v88 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_fma_f16 v77, v75, v77, v75 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_fma_f16 v86, v85, v86, v85 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v88, v87 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v81, 1103446469
+v_pk_mul_f16 v75, v81, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v75, v89, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v85, v89, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, v89, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_exp_f16 v75, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v85, v85 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
+v_exp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
 v_exp_f16 v75, v75 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v85, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_exp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
 v_pk_add_f16 v75, 1.0, v75 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v85, 1.0, v85 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_pk_add_f16 v87, 1.0, v87 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
 v_rcp_f16 v75, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v85, v85 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
+v_rcp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
 v_rcp_f16 v75, v75 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v85, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_rcp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_mov_b32 v81, 1002585026
+v_mov_b32 v89, 1002585026
 v_pk_fma_f16 v75, v75, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_pk_fma_f16 v85, v85, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v63), v89
+v_pk_fma_f16 v87, v87, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v63), v81
 v_cndmask_b32 v77, v77, v75, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
 v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v67), v89
-v_cndmask_b32 v86, v86, v85, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v63), v89 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v63), v81 src0_sel:WORD_1 src1_sel:WORD_1
 v_cndmask_b32 v77, v77, v75, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v89, 1002585026
 v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v67), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v86, v86, v85, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v75, 2147450879
-v_bfi_b32 v63, v75, v77, v63
-v_mov_b32 v85, 2147450879
-v_bfi_b32 v67, v85, v86, v67
+v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_mov_b32 v81, 2147450879
+v_bfi_b32 v63, v81, v77, v63
+v_mov_b32 v89, 2147450879
+v_bfi_b32 v67, v89, v88, v67
 v_pk_mul_f16 v63, v63, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v67, v67, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v65, v65, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v69, v69, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_and_b32 v75, 2147450879, v65
-v_and_b32 v85, 2147450879, v69
+v_and_b32 v87, 2147450879, v69
 v_mov_b32 v77, 3056514606
-v_mov_b32 v86, 3056514606
+v_mov_b32 v88, 3056514606
+v_mov_b32 v81, 814231688
+v_pk_fma_f16 v77, v75, v81, v77 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_mov_b32 v89, 814231688
-v_pk_fma_f16 v77, v75, v89, v77 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v86, v85, v89, v86 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v89, v88 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v81, 506666547
+v_pk_fma_f16 v77, v75, v77, v81 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_mov_b32 v89, 506666547
-v_pk_fma_f16 v77, v75, v77, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v86, v85, v86, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v88, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
 v_pk_mul_f16 v77, v75, v77 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v86, v85, v86 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v88, v87, v88 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_fma_f16 v77, v75, v77, v75 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_fma_f16 v86, v85, v86, v85 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v88, v87, v88, v87 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v81, 1103446469
+v_pk_mul_f16 v75, v81, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v75, v89, v75 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v85, v89, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v87, v89, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_exp_f16 v75, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v85, v85 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
+v_exp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
 v_exp_f16 v75, v75 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v85, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_exp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
 v_pk_add_f16 v75, 1.0, v75 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v85, 1.0, v85 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_pk_add_f16 v87, 1.0, v87 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
 v_rcp_f16 v75, v75 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v85, v85 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
+v_rcp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
 v_rcp_f16 v75, v75 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v85, v85 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
+v_rcp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_mov_b32 v81, 1002585026
+v_mov_b32 v89, 1002585026
 v_pk_fma_f16 v75, v75, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_pk_fma_f16 v85, v85, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v65), v89
+v_pk_fma_f16 v87, v87, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v65), v81
 v_cndmask_b32 v77, v77, v75, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
 v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v69), v89
-v_cndmask_b32 v86, v86, v85, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v65), v89 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v65), v81 src0_sel:WORD_1 src1_sel:WORD_1
 v_cndmask_b32 v77, v77, v75, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v89, 1002585026
 v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v69), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v86, v86, v85, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v75, 2147450879
-v_bfi_b32 v65, v75, v77, v65
-v_mov_b32 v85, 2147450879
-v_bfi_b32 v69, v85, v86, v69
+v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_mov_b32 v81, 2147450879
+v_bfi_b32 v65, v81, v77, v65
+v_mov_b32 v89, 2147450879
+v_bfi_b32 v69, v89, v88, v69
 v_pk_mul_f16 v65, v65, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v69, v69, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
@@ -3913,122 +3829,102 @@ v_pk_add_f16 v66, v66, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_add_f16 v70, v70, s31 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v64, v64, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v68, v68, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_and_b32 v81, 2147450879, v64
-v_and_b32 v87, 2147450879, v68
-v_mov_b32 v84, 3056514606
-v_mov_b32 v88, 3056514606
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v84, v81, v89, v84 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v88, v87, v89, v88 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v84, v81, v84, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v88, v87, v88, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_mul_f16 v84, v81, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v88, v87, v88 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_fma_f16 v84, v81, v84, v81 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_fma_f16 v88, v87, v88, v87 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v81, v89, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v87, v89, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v81, v81 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v81, v81 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v81, 1.0, v81 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v87, 1.0, v87 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v81, v81 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v81, v81 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_fma_f16 v81, v81, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_pk_fma_f16 v87, v87, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v64), v89
-v_cndmask_b32 v84, v84, v81, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v68), v89
-v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v64), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v84, v84, v81, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v68), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v81, 2147450879
-v_bfi_b32 v64, v81, v84, v64
-v_mov_b32 v87, 2147450879
-v_bfi_b32 v68, v87, v88, v68
+v_and_b32 v84, 2147450879, v64
+v_and_b32 v90, 2147450879, v68
+v_mov_b32 v85, 3056514606
+v_mov_b32 v91, 3056514606
+v_mov_b32 v86, 814231688
+v_pk_fma_f16 v85, v84, v86, v85 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v92, 814231688
+v_pk_fma_f16 v91, v90, v92, v91 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v86, 506666547
+v_pk_fma_f16 v85, v84, v85, v86 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v92, 506666547
+v_pk_fma_f16 v91, v90, v91, v92 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_mul_f16 v85, v84, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v91, v90, v91 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_fma_f16 v85, v84, v85, v84 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v91, v90, v91, v90 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v86, 1103446469
+v_pk_mul_f16 v84, v86, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_mov_b32 v92, 1103446469
+v_pk_mul_f16 v90, v92, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_exp_f16 v84, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_exp_f16 v90, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_exp_f16 v84, v84 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_exp_f16 v90, v90 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_pk_add_f16 v84, 1.0, v84 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_pk_add_f16 v90, 1.0, v90 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_rcp_f16 v84, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_rcp_f16 v90, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_rcp_f16 v84, v84 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_rcp_f16 v90, v90 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_mov_b32 v86, 1002585026
+v_mov_b32 v92, 1002585026
+v_pk_fma_f16 v84, v84, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_pk_fma_f16 v90, v90, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v64), v86
+v_cndmask_b32 v85, v85, v84, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v68), v92
+v_cndmask_b32 v91, v91, v90, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v64), v86 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v85, v85, v84, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v68), v92 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v91, v91, v90, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_mov_b32 v86, 2147450879
+v_bfi_b32 v64, v86, v85, v64
+v_mov_b32 v92, 2147450879
+v_bfi_b32 v68, v92, v91, v68
 v_pk_mul_f16 v64, v64, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v68, v68, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v66, v66, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v70, v70, s47 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_and_b32 v81, 2147450879, v66
-v_and_b32 v87, 2147450879, v70
-v_mov_b32 v84, 3056514606
-v_mov_b32 v88, 3056514606
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v84, v81, v89, v84 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 814231688
-v_pk_fma_f16 v88, v87, v89, v88 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v84, v81, v84, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 506666547
-v_pk_fma_f16 v88, v87, v88, v89 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_mul_f16 v84, v81, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_mul_f16 v88, v87, v88 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_pk_fma_f16 v84, v81, v84, v81 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_pk_fma_f16 v88, v87, v88, v87 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v81, v89, v81 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_mov_b32 v89, 1103446469
-v_pk_mul_f16 v87, v89, v87 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
-v_exp_f16 v81, v81 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_exp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_exp_f16 v81, v81 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_exp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_add_f16 v81, 1.0, v81 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_pk_add_f16 v87, 1.0, v87 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
-v_rcp_f16 v81, v81 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_rcp_f16 v87, v87 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
-v_nop
-v_nop
-v_rcp_f16 v81, v81 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_rcp_f16 v87, v87 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
-v_nop
-v_nop
-v_pk_fma_f16 v81, v81, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_pk_fma_f16 v87, v87, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v66), v89
-v_cndmask_b32 v84, v84, v81, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v70), v89
-v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v66), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v84, v84, v81, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v89, 1002585026
-v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v70), v89 src0_sel:WORD_1 src1_sel:WORD_1
-v_cndmask_b32 v88, v88, v87, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
-v_mov_b32 v81, 2147450879
-v_bfi_b32 v66, v81, v84, v66
-v_mov_b32 v87, 2147450879
-v_bfi_b32 v70, v87, v88, v70
+v_and_b32 v84, 2147450879, v66
+v_and_b32 v90, 2147450879, v70
+v_mov_b32 v85, 3056514606
+v_mov_b32 v91, 3056514606
+v_mov_b32 v86, 814231688
+v_pk_fma_f16 v85, v84, v86, v85 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v92, 814231688
+v_pk_fma_f16 v91, v90, v92, v91 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v86, 506666547
+v_pk_fma_f16 v85, v84, v85, v86 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v92, 506666547
+v_pk_fma_f16 v91, v90, v91, v92 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_mul_f16 v85, v84, v85 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_mul_f16 v91, v90, v91 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_pk_fma_f16 v85, v84, v85, v84 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_pk_fma_f16 v91, v90, v91, v90 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 1, 1, 1]
+v_mov_b32 v86, 1103446469
+v_pk_mul_f16 v84, v86, v84 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_mov_b32 v92, 1103446469
+v_pk_mul_f16 v90, v92, v90 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
+v_exp_f16 v84, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_exp_f16 v90, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_exp_f16 v84, v84 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_exp_f16 v90, v90 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_pk_add_f16 v84, 1.0, v84 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_pk_add_f16 v90, 1.0, v90 op_sel:[0, 0, 0] op_sel_hi:[0, 1, 1]
+v_rcp_f16 v84, v84 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_rcp_f16 v90, v90 dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0
+v_rcp_f16 v84, v84 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_rcp_f16 v90, v90 dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1
+v_mov_b32 v86, 1002585026
+v_mov_b32 v92, 1002585026
+v_pk_fma_f16 v84, v84, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_pk_fma_f16 v90, v90, -2.0, 1.0 op_sel:[0, 0, 0, 0] op_sel_hi:[1, 0, 0, 1]
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v66), v86
+v_cndmask_b32 v85, v85, v84, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v70), v92
+v_cndmask_b32 v91, v91, v90, [vcc_lo, vcc_hi] dst_sel:WORD_0 dst_unused:UNUSED_PRESERVE src0_sel:WORD_0 src1_sel:WORD_0
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v66), v86 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v85, v85, v84, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_cmp_gt_f16 [vcc_lo, vcc_hi], abs(v70), v92 src0_sel:WORD_1 src1_sel:WORD_1
+v_cndmask_b32 v91, v91, v90, [vcc_lo, vcc_hi] dst_sel:WORD_1 dst_unused:UNUSED_PRESERVE src0_sel:WORD_1 src1_sel:WORD_1
+v_mov_b32 v86, 2147450879
+v_bfi_b32 v66, v86, v85, v66
+v_mov_b32 v92, 2147450879
+v_bfi_b32 v70, v92, v91, v70
 v_pk_mul_f16 v66, v66, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 v_pk_mul_f16 v70, v70, s46 op_sel:[0, 0, 0] op_sel_hi:[1, 1, 1]
 s_setprio 0
