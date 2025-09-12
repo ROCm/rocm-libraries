@@ -18,7 +18,7 @@ HIPCC_PATH = os.path.join(ROCM_PATH, "bin", "hipcc")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Origami Python Bindings Setup Script")
-    parser.add_argument("--source", "-s", type=str, default=Path(__file__).parent.parent.parent.resolve() / "origami" / "src", help="Path to origami source directory.")
+    parser.add_argument("--source", "-s", type=str, default=Path(__file__).parent.parent.resolve() / "src", help="Path to origami source directory.")
     args, unknown = parser.parse_known_args()
     return args, unknown
 
