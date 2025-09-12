@@ -1453,7 +1453,7 @@ class LocalReadMFMA(LocalRead):
                                                 or kernel["ProblemType"]["DataType"].is6bitFloat() or kernel["ProblemType"]["DataType"].isInt8()):
                                     if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                         incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                        incOffset += tiIdx * MatrixInstT * tileStride
+                                        incOffset += tiIdx * MatrixInstT * vectorWidth * tileStride
                                     else:
                                         vw = kernel["LocalReadVectorWidth"]
                                         incOffset = (rIdx // vw) * UnrollStride * vw
