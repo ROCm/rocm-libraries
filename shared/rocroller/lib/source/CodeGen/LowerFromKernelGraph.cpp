@@ -634,7 +634,7 @@ namespace rocRoller
                     m_context->registerTagManager()->addExpression(
                         dimTag,
                         m_fastArith(assign.expression),
-                        *(assign.strideExpressionAttributes));
+                        assign.strideExpressionAttributes.value());
                     scope->addRegister(dimTag);
                 }
                 else

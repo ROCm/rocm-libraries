@@ -412,6 +412,17 @@ namespace rocRoller
                 auto buffer = kgraph.mapper.get(
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
 
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::commit: computeindex {} base {} offset {} stride {}, target {} "
+                    "increment {} buffer {}",
+                    tag,
+                    base,
+                    offset,
+                    stride,
+                    target,
+                    increment,
+                    buffer);
+
                 auto maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
                 if(maybeLDS)
                 {

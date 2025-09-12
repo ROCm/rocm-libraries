@@ -93,7 +93,7 @@ namespace rocRoller
             static void mapping(IO& io, KernelGraph::Connections::UnrollStride& x, Context& ctx)
             {
                 iot::mapRequired(io, "unrollStride", x.unrollStride);
-                iot::mapRequired(io, "unrollDmension", x.unrollDimension);
+                iot::mapRequired(io, "unrollDimension", x.unrollDimension);
             }
 
             static void mapping(IO& io, KernelGraph::Connections::UnrollStride& x)

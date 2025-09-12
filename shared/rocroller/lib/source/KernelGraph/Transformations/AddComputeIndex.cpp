@@ -331,8 +331,7 @@ namespace rocRoller::KernelGraph
                     // Find the neighbour of the Unroll that:
                     // 1. is in the load/store coordinate transform path
                     // 2. has a Stride edge connected to it
-                    std::optional<int> maybeStrideTag;
-                    std::vector<int>   neighbourNodes;
+                    std::vector<int> neighbourNodes;
                     if(direction == Graph::Direction::Downstream)
                         neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
                     else
@@ -352,10 +351,10 @@ namespace rocRoller::KernelGraph
                                           strideCoords.begin(), strideCoords.end(), neighbourEdge)
                                           != strideCoords.end())
                                 {
-                                    maybeStrideTag = neighbourEdge;
+                                    auto maybeStrideTag = neighbourEdge;
                                     auto newConnection
                                         = makeConnection<Stride, Connections::UnrollStride>(
-                                            *maybeStrideTag, subDimension);
+                                            maybeStrideTag, subDimension);
                                     connections.push_back(newConnection);
                                 }
                             }
@@ -453,7 +452,7 @@ namespace rocRoller::KernelGraph
                 connections.push_back(
                     makeConnection<Offset, Connections::BaseOffset>(base, info.sdim));
 
-            // save all stride coordinates for the meory operation
+            // save all stride coordinates for the memory operation
             // then select the unroll stride and add it to connection
             if(stride != -1)
                 strideCoords.push_back(stride);
