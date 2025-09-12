@@ -101,14 +101,14 @@ namespace rocRoller::KernelGraph::MemoryTracer
         uint      bankIndex;
     };
 
-    struct OperationLevelAnalysis
+    struct OperationBankConflicts
     {
         uint                                      m_entryWidthInBytes;
         uint                                      m_numBanks;
         uint                                      m_numEntriesPerBank;
         std::map<int, std::vector<LDSBankAccess>> m_bankAccesses;
 
-        OperationLevelAnalysis(uint entryWidthInBytes, uint numBanks, uint numEntriesPerBank);
+        OperationBankConflicts(uint entryWidthInBytes, uint numBanks, uint numEntriesPerBank);
 
         bool    filter(MemoryEventExpression event);
         void    simulate(MemoryEventSimulated event);

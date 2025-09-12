@@ -44,7 +44,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return std::holds_alternative<MemoryOpLDS>(event.memoryOp);
     }
 
-    OperationLevelAnalysis::OperationLevelAnalysis(uint entryWidthInBytes,
+    OperationBankConflicts::OperationBankConflicts(uint entryWidthInBytes,
                                                    uint numBanks,
                                                    uint numEntriesPerBank)
         : m_entryWidthInBytes(entryWidthInBytes)
@@ -53,12 +53,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
     }
 
-    bool OperationLevelAnalysis::filter(MemoryEventExpression event)
+    bool OperationBankConflicts::filter(MemoryEventExpression event)
     {
         return isLDSOperation(event);
     }
 
-    void OperationLevelAnalysis::simulate(MemoryEventSimulated event)
+    void OperationBankConflicts::simulate(MemoryEventSimulated event)
     {
         auto ldsOp = std::get_if<MemoryOpLDS>(&event.memoryOp);
         if(!ldsOp)
@@ -84,7 +84,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
     }
 
-    Summary OperationLevelAnalysis::summary() const
+    Summary OperationBankConflicts::summary() const
     {
         Summary summary;
 
@@ -181,7 +181,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     Summary LDSBankModel::summary() const
     {
         Throw<FatalError>("LDSBankModel::summary() is no longer supported. Use "
-                          "OperationLevelAnalysis::summary() instead.");
+                          "OperationBankConflicts::summary() instead.");
     }
 
     std::string LDSBankModel::toString() const
@@ -488,9 +488,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         auto tracer = MemoryTracer(graph);
         tracer.trace();
 
-        Log::info("MemoryTracer::OperationLevelAnalysis()");
+        Log::info("MemoryTracer::OperationBankConflicts()");
         // 64KiB bank model: 4 bytes per bank entry, 32 banks, 512 entries per bank
-        auto model = OperationLevelAnalysis(4, 32, 512);
+        auto model = OperationBankConflicts(4, 32, 512);
 
         // For LDS, just simulate using 1 workgroup
         auto workgroups            = 1;
