@@ -41,7 +41,7 @@ jobs:
           repository: "ROCm/TheRock"
           path: TheRock
           # TODO: update
-          ref: users/geomin12/external-temp-patches
+          ref: users/geomin12/monorepo-patches
 
       - name: Runner Health Settings
         run: |
