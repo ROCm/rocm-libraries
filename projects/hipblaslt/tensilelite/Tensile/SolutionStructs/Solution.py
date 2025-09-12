@@ -3100,6 +3100,9 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["DataTypeA"].numBytes() != state["ProblemType"]["DataTypeB"].numBytes():
         reject(state, printRejectionReason, "UnrollLoopSwapGlobalReadOrder doesn't support mixed precision.")
 
+    if state["ExpandPointerSwap"] == 1 and state["LDSTrInst"]:
+      reject(state, printRejectionReason, "LDSTrInst + ExpandPointerSwap not supported")
+
     # guard against out of bounds reads
     # None: don't guard against ou
     # ShiftPtr: shift read pointers to be in bounds, then unshift registers (source & assembly),
