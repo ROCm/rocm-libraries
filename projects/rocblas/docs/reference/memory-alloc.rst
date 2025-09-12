@@ -12,11 +12,11 @@ rocBLAS uses per-handle device memory allocation to manage temporary memory effi
 
 There are two memory allocation schemes:
 
-*  **rocBLAS_managed(default)**:  By default rocBLAS internally manages memory, allocating more if needed. Allocated memory persists with the handle for reuse.
+*  **rocBLAS_managed(default)**:  By default, rocBLAS internally manages memory, allocating more if needed. Allocated memory persists with the handle for reuse.
 
 *  **user_owned**: Users allocate memory and provide it to rocBLAS via ``rocblas_set_workspace``.
 
-rocBLAS_managed is the default scheme, this scheme uses ``hipMallocAsync`` and ``hipFreeAsync`` (stream-order allocation) to allocate and free memory in stream order, avoiding global synchronization. This enables seamless stream switching without needing ``hipStreamSynchronize()``.
+``rocBLAS_managed`` is the default scheme. This scheme uses ``hipMallocAsync`` and ``hipFreeAsync`` (stream-order allocation) to allocate and free memory in stream order, avoiding global synchronization. This enables seamless stream switching without needing ``hipStreamSynchronize()``.
 
 The following computational functions use temporary device memory.
 

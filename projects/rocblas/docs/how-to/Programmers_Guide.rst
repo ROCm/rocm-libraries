@@ -237,7 +237,7 @@ the ``hipStreamSynchronize(old_stream)`` API before setting the new stream.
     // Destroy the old stream (this step is optional but must come after synchronization)
     if(hipStreamDestroy(old_stream) != hipSuccess) return EXIT_FAILURE;
 
-The call to ``hipStreamSynchronize`` above is necessary for user_owned allocation scheme because the ``rocBLAS_handle`` contains allocated device
+The call to ``hipStreamSynchronize`` above is necessary for the ``user_owned`` allocation scheme because the ``rocBLAS_handle`` contains allocated device
 memory provided by the user that must not be shared by multiple asynchronous streams at the same time.
 
 If either the old or new stream is the default or ``NULL`` stream, it is not necessary to
@@ -246,7 +246,7 @@ because the synchronization is implicit.
 
 .. note::
 
-   You can switch from one non-default stream to another without calling ``hipStreamSynchronize()`` as the default memory allocation scheme (rocBLAS_managed) uses stream order allocation.
+   You can switch from one non-default stream to another without calling ``hipStreamSynchronize()`` as the default memory allocation scheme (``rocBLAS_managed``) uses stream order allocation.
    For more information, see :ref:`Device Memory Allocation Usage`.
 
 Creating the handle incurs a startup cost. There is an additional startup cost for
