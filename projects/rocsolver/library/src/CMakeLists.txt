@@ -350,6 +350,7 @@ if(OPTIMAL)
 endif()
 
 # Asynchronous logger option
+# Note: this does not mean abolsutely asynchronous, just less synchronous
 option(ROCSOLVER_USE_ASYNC_LOGGER "Enable asynchronous HIP event-based logger (reduces GPU synchronizations)" ON)
 
 # Configure asynchronous logger compile definition
