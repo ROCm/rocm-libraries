@@ -40,8 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          # TODO: update
-          ref: users/geomin12/monorepo-patches
+          ref: c937648308b5eba0e1aca437d334ab2ae84790eb
 
       - name: Runner Health Settings
         run: |
@@ -76,7 +75,7 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects rocm-libraries
+          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
 
       - name: Configure Projects
         env:

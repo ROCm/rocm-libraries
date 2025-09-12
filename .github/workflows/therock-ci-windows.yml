@@ -45,8 +45,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          # TODO: update
-          ref: users/geomin12/monorepo-patches
+          ref: c937648308b5eba0e1aca437d334ab2ae84790eb
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -59,7 +58,7 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          python ./TheRock/build_tools/patch_rocm_libraries.py --repo ./ --patch-external-monorepo --projects rocm-libraries
+          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
 
       - name: Install requirements
         run: |
