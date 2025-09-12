@@ -1420,7 +1420,7 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{}, int8_t{});
         case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{}, ck::half_t{});
         case miopenFloat:
-            if(problem.GetConv().GetMathType() == miopenMathDefault)
+            if(problem.EnableTF32())
                 return invoker_factory_maker_ncdhw(float{}, ck::tf32_t{});
             else
                 return invoker_factory_maker_ncdhw(float{}, float{});
@@ -1443,7 +1443,7 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{}, int8_t{});
         case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{}, ck::half_t{});
         case miopenFloat:
-            if(problem.GetConv().GetMathType() == miopenMathDefault)
+            if(problem.EnableTF32())
                 return invoker_factory_maker_ndhwc(float{}, ck::tf32_t{});
             else
                 return invoker_factory_maker_ndhwc(float{}, float{});

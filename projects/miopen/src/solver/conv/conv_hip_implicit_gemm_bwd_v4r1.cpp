@@ -751,7 +751,7 @@ bool ConvHipImplicitGemmBwdDataV4R1::IsApplicable(const ExecutionContext& ctx,
         // Missing instruction: v_mac_f32
         if(static_ck::GfxHasMissingFp32Intrinsics(ctx.GetStream().GetDeviceName()))
             return false;
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             return false;
     }
 

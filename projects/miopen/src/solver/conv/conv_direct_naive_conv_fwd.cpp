@@ -58,7 +58,7 @@ bool ConvDirectNaiveConvFwd::IsApplicable(const ExecutionContext& ctx,
          problem.IsFp8() || problem.IsBfp8()))
         return false;
 
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
 
     if(!problem.IsDirectionForward())

@@ -496,7 +496,7 @@ bool ConvOclBwdWrW2<N_BATCH_LOOPS>::IsApplicableBase(const ExecutionContext& ctx
         return false;
     if(problem.IsTensorsCasted())
         return false;
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
     return problem.GetDilationW() == 1 && problem.GetDilationH() == 1 &&
 #if 0

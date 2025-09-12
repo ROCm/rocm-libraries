@@ -79,7 +79,7 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
     if(problem.HasNonPackedTensors())
         return false;
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
 
     const auto devName = ctx.GetStream().GetDeviceName();

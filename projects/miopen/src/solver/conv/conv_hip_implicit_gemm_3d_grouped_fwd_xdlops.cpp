@@ -509,7 +509,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
     case miopenFloat:
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             Init<float, ck::tf32_t>(problem);
         else
             Init<float>(problem);
@@ -563,7 +563,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValid(
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
     case miopenFloat:
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             return CheckIsSupportCKArgs<float, ck::tf32_t>(problem);
         else
             return CheckIsSupportCKArgs<float>(problem);
@@ -646,7 +646,7 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
     case miopenFloat:
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             return CheckCKApplicability<float, ck::tf32_t>(problem);
         else
             return CheckCKApplicability<float>(problem);

@@ -588,7 +588,7 @@ bool ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC::IsApplicable(
        !(problem.IsFp16() && problem.GetVectorLength() == 8))
         return false;
 
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
 
     if(problem.IsTensorsCasted())

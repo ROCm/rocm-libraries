@@ -923,7 +923,7 @@ bool ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC::IsApplicable(
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
 
     if(!problem.IsFp32() && !problem.IsFp16() &&

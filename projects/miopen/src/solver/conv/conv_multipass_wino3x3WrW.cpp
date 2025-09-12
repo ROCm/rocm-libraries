@@ -116,7 +116,7 @@ struct InTransform
         {
             return false;
         }
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             return false;
 
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16())
@@ -225,7 +225,7 @@ struct FilterTransform
         {
             return false;
         }
-         if(problem.GetConv().GetMathType() == miopenMathDefault)
+         if(problem.EnableTF32())
             return false;
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16())
                 && problem.Is2d()
@@ -305,7 +305,7 @@ struct OutTransform
 {
     static bool IsApplicable(const ProblemDescription& problem)
     {
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             return false;
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16()) && problem.Is2d();
     }

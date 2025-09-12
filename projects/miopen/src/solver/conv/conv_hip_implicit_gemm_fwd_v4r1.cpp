@@ -56,7 +56,7 @@ bool ConvHipImplicitGemmV4R1Fwd::IsApplicable(const ExecutionContext& ctx,
         // Missing instruction: v_mac_f32
         if(static_ck::GfxHasMissingFp32Intrinsics(ctx.GetStream().GetDeviceName()))
             return false;
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             return false;
     }
     if(problem.GetConv().attribute.deterministic)
@@ -114,7 +114,7 @@ bool ConvHipImplicitGemmV4R1WrW::IsApplicable(const ExecutionContext& ctx,
         // Missing instruction: v_mac_f32
         if(static_ck::GfxHasMissingFp32Intrinsics(ctx.GetStream().GetDeviceName()))
             return false;
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             return false;
     }
     if(!problem.IsDirectionBackwardWrW())

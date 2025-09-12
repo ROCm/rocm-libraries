@@ -558,7 +558,7 @@ bool ConvAsm1x1U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.IsTensorsCasted() || problem.IsFp8() || problem.IsBfp8())
         return false;
 
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
 
     if(name == "gfx90a" && problem.IsGfx90aFp16altRequired())

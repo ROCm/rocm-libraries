@@ -327,5 +327,13 @@ std::string ProblemDescription::ComputeOutLayout() const { return ComputeLayout(
 
 std::string ProblemDescription::ComputeWeightsLayout() const { return ComputeLayout(weights); }
 
+void ProblemDescription::InitEnableTF32()
+{
+    /* true only when both EnableTF32() and (MathType==Default) are true. */
+    if(!(miopen::EnableTF32() && (conv.GetMathType() == miopenMathDefault)))
+        enable_tf32 = false;
+    MIOPEN_LOG_I2("enable_tf32: " << (enable_tf32 ? "true" : "false"));
+}
+
 } // namespace conv
 } // namespace miopen

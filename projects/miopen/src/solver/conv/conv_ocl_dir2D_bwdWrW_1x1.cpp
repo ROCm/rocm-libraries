@@ -71,7 +71,7 @@ bool ConvOclBwdWrW1x1::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!(problem.IsFp32() || problem.IsFp16() || problem.IsBfp16()))
         return false;
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
     if(!problem.IsLayoutDefault())
         return false;

@@ -111,7 +111,7 @@ bool ConvCkIgemmFwdV6r1DlopsNchw::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!(problem.IsFp32() or problem.IsFp16()))
         return false;
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
     if(problem.HasNonPackedTensors())
         return false;

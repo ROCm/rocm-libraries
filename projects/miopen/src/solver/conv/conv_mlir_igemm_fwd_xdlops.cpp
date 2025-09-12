@@ -75,7 +75,7 @@ bool ConvMlirIgemmFwdXdlops::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(problem.IsTensorsCasted() || problem.IsFp8() || problem.IsBfp8())
         return false;
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
 
     return MiirIsConfigApplicable(mlir::ConstructBuildOptions(ctx, problem, true));

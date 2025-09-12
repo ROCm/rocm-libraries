@@ -607,7 +607,7 @@ bool ConvHipImplicitGemmV4R4WrW::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!problem.IsFp32())
         return false;
-    if(problem.GetConv().GetMathType() == miopenMathDefault)
+    if(problem.EnableTF32())
         return false;
     if(problem.IsTensorsCasted())
         return false;

@@ -508,7 +508,7 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
     case miopenFloat:
-        if(problem.GetConv().GetMathType() == miopenMathDefault)
+        if(problem.EnableTF32())
             return false;
         return CheckCKApplicability<float>(problem);
     case miopenInt8: return CheckCKApplicability<int8_t>(problem);
