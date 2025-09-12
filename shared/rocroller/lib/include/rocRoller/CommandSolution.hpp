@@ -281,10 +281,11 @@ namespace rocRoller
         void launchKernel(RuntimeArguments const& args, hipStream_t stream = 0);
 
         /**
-         * @brief Only do memory trace analysis on kernel
+         * @brief Do memory trace analysis on kernel
          *
          * @param args The runtime arguments being passed to the kernel
          *
+         * @return A memory trace summary
          */
         KernelGraph::MemoryTracer::Summary memoryTrace(RuntimeArguments const& args);
 

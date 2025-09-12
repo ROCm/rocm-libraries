@@ -113,8 +113,7 @@ namespace rocRoller
                 uint     instructionIndex; //< Instruction index within the operation
                 uint     instructionCount; //< Total number of instructions for this operation
 
-                // XXX Consider adding SMEM vs VMEM, ie, if VMEM, this has a Workitem dependency
-                //
+                // For future: consider adding SMEM vs VMEM, ie, if VMEM, this has a Workitem dependency
                 // If VMEM, possibly remove workItem and just keep a stride?
             };
 
@@ -122,7 +121,7 @@ namespace rocRoller
              * @brief Memory tracer for the kernel graph.
              *
              * This class walks the control graph and builds a list of
-             * MemoryEventExpression objects.  These objects represent
+             * MemoryEventExpression objects. These objects represent
              * instructions that the code-generator will emit.
              *
              * Note that the base LDS allocation address is assumed to be

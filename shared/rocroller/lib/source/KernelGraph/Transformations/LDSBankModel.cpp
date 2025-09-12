@@ -103,7 +103,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 bankToWorkitems[bankAccess.bankIndex].push_back(bankAccess.workitem);
             }
 
-            // Initialize banksToWorkitems vector with 32 banks
             access.banksToWorkitems.resize(m_numBanks);
 
             // Populate accessedBanks and banksToWorkitems
@@ -120,7 +119,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
                 access.accessedBanks.push_back(bank);
 
-                // Copy workitems to the banksToWorkitems vector
                 access.banksToWorkitems[bankIndex] = workitems;
 
                 // Mark operation as imbalanced if any bank is imbalanced
@@ -154,8 +152,13 @@ namespace rocRoller::KernelGraph::MemoryTracer
         opAccesses.ldsTag
             = ldsOp->direction == Direction::Load ? event.sourceTag : event.destinationTag;
 
-        uint instructionDwords = (event.bytesRequested + 3) / 4; // Round up to dwords
+        AssertFatal(std::clamp(event.bytesRequested / 4u, 1u, 4u) == event.bytesRequested / 4u,
+                    "Unsupported LDS access size: {}",
+                    event.bytesRequested);
 
+        uint instructionDwords = event.bytesRequested / 4;
+
+        // TODO: Use the workitem to figure out which instruction this belongs to
         RuntimeLDSInstruction* targetInstruction = nullptr;
         for(auto& instr : opAccesses.instructions)
         {
@@ -182,9 +185,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                           uint               dwords,
                                           GPUArchitectureGFX gfx)
     {
-        // TODO: These numbers assume aligned accesses
-        // (e.g. for 128-bit bottom 4 bits of base address are zero)
-        // At codegen, can check allocation's alignment
+        // Assumes aligned assesses (e.g. b128 is 16-byte aligned)
+        // In future, when linked to codegen, update interface check alignment of allocation
         if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == Direction::Load)
         {
             switch(dwords)
@@ -214,7 +216,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 return 8;
             }
         }
-
         Throw<FatalError>("Unsupported dword count: ", dwords);
     }
 
@@ -228,9 +229,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                              uint                         threadsPerClock)
     {
         AssertFatal(addresses.size() % threadsPerClock == 0,
-                    "Number of addresses {} is not a multiple of threads per clock {}",
-                    addresses.size(),
-                    threadsPerClock);
+                    fmt::format("Number of addresses {} is not a multiple of threads per clock {}",
+                                addresses.size(),
+                                threadsPerClock));
 
         std::vector<std::vector<uint32_t>> threadGroups;
 
