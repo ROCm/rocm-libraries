@@ -33,6 +33,7 @@
 #include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 #include <sstream>
 #include <unordered_map>
 
@@ -329,14 +330,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 {
                     ss << "      Max bank contention: " << maxCount
                        << " addresses/bank for bank(s) ";
-                    for(size_t j = 0; j < maxBanks.size(); ++j)
-                    {
-                        if(j > 0)
-                        {
-                            ss << ", ";
-                        }
-                        ss << maxBanks[j];
-                    }
+                    rocRoller::streamJoin(ss, maxBanks, ", ");
                     ss << "\n";
                 }
                 ss << fmt::format("      Group cycles: {}\n", groupCycles);
