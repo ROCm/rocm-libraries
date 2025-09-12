@@ -71,7 +71,7 @@ NB_MODULE(origami, m)
                             size_t,
                             double,
                             size_t,
-                            double>())
+                            std::tuple<double, double, double>>())
         .def("print", &Hardware::print)
         .def("print_debug_info", &Hardware::print_debug_info)
         .def_rw("N_CU", &Hardware::N_CU)
@@ -83,7 +83,7 @@ NB_MODULE(origami, m)
         .def_rw("CU_per_L2", &Hardware::CU_per_L2)
         .def_rw("compute_clock_ghz", &Hardware::compute_clock_ghz)
         .def_rw("parallel_mi_cu", &Hardware::parallel_mi_cu)
-        .def_rw("percent_bw_per_wg", &Hardware::percent_bw_per_wg)
+        .def_rw("mem_bw_per_wg_coefficients", &Hardware::mem_bw_per_wg_coefficients)
         .def_rw("NUM_XCD", &Hardware::NUM_XCD);
 
     m.def("get_hardware_for_device",

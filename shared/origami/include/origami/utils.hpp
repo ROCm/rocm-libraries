@@ -19,8 +19,8 @@ namespace origami
                                        size_t, // MI_M
                                        size_t, // MI_N
                                        size_t, // MI_K
-                                       size_t  // Occupancy
-                                       >;
+                                       size_t,  // Occupancy
+                                       int>;    // WGM
 
         using tile_tuple = std::tuple<size_t, // MT_M
                                      size_t, // MT_N
@@ -28,8 +28,8 @@ namespace origami
                                      size_t, // MI_M
                                      size_t, // MI_N
                                      size_t, // MI_K
-                                     size_t  // Occupancy
-                                     >;
+                                     size_t,  // Occupancy
+                                     int>;    // WGM
 
         size_t select_best_grid_size(size_t          M,
                                      size_t          N,

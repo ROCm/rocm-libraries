@@ -287,21 +287,22 @@ namespace origami
             double mem2_perf_ratio;
             double mem3_perf_ratio;
             size_t parallel_mi_cu;
-            double percent_bw_per_wg;
+            std::tuple<double, double, double> mem_bw_per_wg_coefficients;
             double mem_clock_ratio;
+
             architecture_constants(size_t num_xcds,
                                     double mem1_perf_ratio,
                                     double mem2_perf_ratio,
                                     double mem3_perf_ratio,
                                     size_t parallel_mi_cu,
-                                    double percent_bw_per_wg,
+                                    std::tuple<double, double, double> mem_bw_per_wg_coefficients,
                                     double mem_clock_ratio) //Obtained through microbenchmarking
                 : num_xcds(num_xcds)
                 , mem1_perf_ratio(mem1_perf_ratio)
                 , mem2_perf_ratio(mem2_perf_ratio)
                 , mem3_perf_ratio(mem3_perf_ratio)
                 , parallel_mi_cu(parallel_mi_cu)
-                , percent_bw_per_wg(percent_bw_per_wg)
+                , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
                 , mem_clock_ratio(mem_clock_ratio)
             {
             }
@@ -313,30 +314,30 @@ namespace origami
                                         std::unordered_map<matrix_instruction, size_t>>
             INSTRUCTION_MAP;
 
-        architecture_t arch;
-        size_t       N_CU; // Number of Compute Units
-        size_t       LDS_capacity; // Capacity of LDS
-        double       mem1_perf_ratio;
-        double       mem2_perf_ratio;
-        double       mem3_perf_ratio;
-        size_t       L2_capacity; // Capacity of L2 in bytes
-        size_t       CU_per_L2; // Number of compute units per L2 domain
-        double       compute_clock_ghz;
-        size_t       parallel_mi_cu; // The number of parallel MI in a CU
-        double       percent_bw_per_wg;
-        size_t       NUM_XCD;
+        architecture_t                      arch;
+        size_t                              N_CU; // Number of Compute Units
+        size_t                              LDS_capacity; // Capacity of LDS
+        double                              mem1_perf_ratio;
+        double                              mem2_perf_ratio;
+        double                              mem3_perf_ratio;
+        size_t                              L2_capacity; // Capacity of L2 in bytes
+        size_t                              CU_per_L2; // Number of compute units per L2 domain
+        double                              compute_clock_ghz;
+        size_t                              parallel_mi_cu; // The number of parallel MI in a CU
+        std::tuple<double, double, double>  mem_bw_per_wg_coefficients;
+        size_t                              NUM_XCD;
 
-        hardware_t(architecture_t arch,
-                    size_t       N_CU,
-                    size_t       LDS_capacity,
-                    size_t       NUM_XCD,
-                    double       mem1_perf_ratio,
-                    double       mem2_perf_ratio,
-                    double       mem3_perf_ratio,
-                    size_t       L2_capacity,
-                    double       compute_clock_ghz,
-                    size_t       parallel_mi_cu,
-                    double       percent_bw_per_wg)
+        hardware_t(architecture_t                       arch,
+                    size_t                              N_CU,
+                    size_t                              LDS_capacity,
+                    size_t                              NUM_XCD,
+                    double                              mem1_perf_ratio,
+                    double                              mem2_perf_ratio,
+                    double                              mem3_perf_ratio,
+                    size_t                              L2_capacity,
+                    double                              compute_clock_ghz,
+                    size_t                              parallel_mi_cu,
+                    std::tuple<double, double, double>  mem_bw_per_wg_coefficients)
             : arch(arch)
             , N_CU(N_CU)
             , LDS_capacity(LDS_capacity)
@@ -347,13 +348,9 @@ namespace origami
             , CU_per_L2(N_CU / NUM_XCD)
             , compute_clock_ghz(compute_clock_ghz)
             , parallel_mi_cu(parallel_mi_cu)
-            , percent_bw_per_wg(percent_bw_per_wg)
+            , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
             , NUM_XCD(NUM_XCD)
         {
-            if(hardware_t::is_debug_enabled())
-            {
-                print();
-            }
         }
 
         hardware_t(hipDeviceProp_t properties)
@@ -372,7 +369,7 @@ namespace origami
             , CU_per_L2(other.CU_per_L2)
             , compute_clock_ghz(other.compute_clock_ghz)
             , parallel_mi_cu(other.parallel_mi_cu)
-            , percent_bw_per_wg(other.percent_bw_per_wg)
+            , mem_bw_per_wg_coefficients(other.mem_bw_per_wg_coefficients)
             , NUM_XCD(other.NUM_XCD)
         {
         }
@@ -400,7 +397,7 @@ namespace origami
                             properties.l2CacheSize,
                             properties.clockRate / 1e6,
                             constants.parallel_mi_cu,
-                            constants.percent_bw_per_wg);
+                            constants.mem_bw_per_wg_coefficients);
         }
 
         static hardware_t get_hardware_for_device(int deviceId)
@@ -411,7 +408,6 @@ namespace origami
             {
                 throw std::runtime_error(hipGetErrorString(e));
             }
-
             return get_hardware_for_properties(prop);
         }
 
@@ -424,10 +420,10 @@ namespace origami
         }
 
         // Function to print hardware details
-        void print()
+        void print() const
         {
-            std::cout << "================== hardware_t Configuration ==================\n";
-            std::cout << "Number of CUs (N_CU)       : " << N_CU << "\n";
+            std::cout << "================== Hardware Configuration ==================\n";
+            std::cout << "Number of CUs (N_CU)      : " << N_CU << "\n";
             std::cout << "LDS capacity              : " << LDS_capacity << " bytes\n";
             std::cout << "mem1_perf_ratio           : " << mem1_perf_ratio << "\n";
             std::cout << "mem2_perf_ratio           : " << mem2_perf_ratio << "\n";
@@ -437,7 +433,9 @@ namespace origami
             std::cout << "Compute clock (GHz)       : " << compute_clock_ghz << "\n";
             std::cout << "Parallel MI/CU            : " << parallel_mi_cu << "\n";
             std::cout << "Number of XCDs (NUM_XCD)  : " << NUM_XCD << "\n";
-            std::cout << "percent_bw_per_wg         : " << percent_bw_per_wg << "\n\n";
+            std::cout << "mem_bw_per_wg_coefficients: " << std::get<0>(mem_bw_per_wg_coefficients) << ", "
+                                                        << std::get<1>(mem_bw_per_wg_coefficients) << ", "
+                                                        << std::get<2>(mem_bw_per_wg_coefficients) << "\n\n";
 
             std::cout << "------------------ Instruction Map -------------------------\n";
             // Loop over the instruction_map and print each entry
@@ -462,6 +460,12 @@ namespace origami
             return debugEnvVar;
         }
 
+        static bool is_heuristics_enabled()
+        {
+            static bool heuristicsEnvVar = read_heuristics_env_var(); //Used to cache the read.
+            return heuristicsEnvVar;
+        }
+
         void log_debug(const std::string& key, const std::string& value) const
         {
             debug_info[key] = value;
@@ -479,7 +483,7 @@ namespace origami
 
         void print_debug_info() const
         {
-            std::cout << "=== hardware_t Debug Info ===\n";
+            std::cout << "=== Hardware Debug Info ===\n";
             for(const auto& [key, val] : debug_info)
             {
                 std::cout << key << ": " << val << "\n";
@@ -522,6 +526,13 @@ namespace origami
         {
             const char* env = std::getenv("ANALYTICAL_GEMM_DEBUG");
             return env && std::string(env) == "1";
+        }
+
+        // Helper function to read the heuristics environment variable
+        static bool read_heuristics_env_var()
+        {
+            const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS");
+            return !(env && std::string(env) == "0");
         }
     };
 } // namespace origami
