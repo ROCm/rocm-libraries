@@ -59,7 +59,7 @@ namespace rocRoller
             auto        operator<=>(RegisterId const&) const = default;
             std::string toString() const;
         };
-        
+
         std::string toString(std::vector<Register::RegisterId> const& regs);
 
         struct RegisterIdHash
