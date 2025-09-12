@@ -340,8 +340,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
         cycles += 4;
 
-        const auto instructionTotalClocks
-            = LDSBankModel::getClockCount(gfx, instr.memoryOp, instr.dwords, instr.baseAddresses);
+        const auto instructionTotalClocks = LDSBankModel::getClockCount(instr, gfx);
 
         AssertFatal(cycles == instructionTotalClocks, "Cycle count mismatch");
         ss << fmt::format("    Instruction cycles: {}\n", instructionTotalClocks);
@@ -350,24 +349,21 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
-    uint LDSBankModel::getClockCount(GPUArchitectureGFX           gfx,
-                                     const MemoryOpLDS&           memoryOp,
-                                     uint                         dwords,
-                                     const std::vector<uint32_t>& baseAddresses)
+    uint LDSBankModel::getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
     {
         uint cycles = 0;
-        for(const auto& groupAddresses :
-            divideIntoThreadGroups(baseAddresses, getThreadsPerClock(memoryOp, dwords, gfx)))
+        for(const auto& groupAddresses : divideIntoThreadGroups(
+                instr.baseAddresses, getThreadsPerClock(instr.memoryOp, instr.dwords, gfx)))
         {
             cycles += calculateBankConflictCycles(
-                createBankToAddressCounts(groupAddresses, dwords, gfx));
+                createBankToAddressCounts(groupAddresses, instr.dwords, gfx));
         }
         return cycles + 4; // address transfer
     }
 
-    DetailedSummary LDSBankModel::detailedSummary(GPUArchitectureGFX gfx) const
+    RuntimeOperation LDSBankModel::getRuntimeOperation(GPUArchitectureGFX gfx) const
     {
-        DetailedSummary detailed;
+        RuntimeOperation detailed;
         detailed.gfx = gfx;
 
         for(const auto& [operationTag, sourceOpAccesses] : m_hierarchicalAccesses)
@@ -428,7 +424,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
-    std::string DetailedSummary::toString() const
+    std::string RuntimeOperation::toString() const
     {
         std::stringstream ss;
 
@@ -453,9 +449,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
-    std::ostream& operator<<(std::ostream& stream, DetailedSummary const& detailedSummary)
+    std::ostream& operator<<(std::ostream& stream, RuntimeOperation const& runtimeOperation)
     {
-        return stream << detailedSummary.toString();
+        return stream << runtimeOperation.toString();
     }
 
     std::ostream& operator<<(std::ostream& stream, Summary const& summary)

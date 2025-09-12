@@ -93,7 +93,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         std::vector<RuntimeLDSInstruction> instructions;
     };
 
-    struct DetailedSummary
+    struct RuntimeOperation
     {
         std::map<int, OperationAccesses> accesses;
         GPUArchitectureGFX               gfx;
@@ -101,7 +101,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         std::string toString() const;
     };
 
-    std::ostream& operator<<(std::ostream& stream, DetailedSummary const& detailedSummary);
+    std::ostream& operator<<(std::ostream& stream, RuntimeOperation const& runtimeOperation);
 
     /**
      * LDS bank model
@@ -132,7 +132,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         Summary summary() const;
 
-        DetailedSummary detailedSummary(GPUArchitectureGFX gfx) const;
+        RuntimeOperation getRuntimeOperation(GPUArchitectureGFX gfx) const;
 
         std::string toString() const;
 
@@ -172,10 +172,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
          *                      the actual addresses accessed are calculated from these base addresses.
          * @return Total number of clock cycles for this instruction
          */
-        static uint getClockCount(GPUArchitectureGFX           gfx,
-                                  const MemoryOpLDS&           memoryOp,
-                                  uint                         dwords,
-                                  const std::vector<uint32_t>& baseAddresses);
+        static uint getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
 
         /**
          * @brief Divide addresses into thread groups based on threads-per-clock limit

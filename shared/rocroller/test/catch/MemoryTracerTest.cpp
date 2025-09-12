@@ -115,7 +115,7 @@ namespace MemoryTracerTest
             auto workitemsPerWorkgroup = product(inv.workgroupSize);
             tracer.simulateLaunch(model, workgroups, workitemsPerWorkgroup);
 
-            auto detailed = model.detailedSummary(GPUArchitectureGFX::GFX942);
+            auto detailed = model.getRuntimeOperation(GPUArchitectureGFX::GFX942);
 
             if constexpr(true)
                 std::cout << "\nDetailed Summary:\n" << detailed << std::endl;
@@ -201,7 +201,7 @@ namespace MemoryTracerTest
                                                 threadId});
         }
 
-        auto        detailed   = model.detailedSummary(GPUArchitectureGFX::GFX950);
+        auto        detailed   = model.getRuntimeOperation(GPUArchitectureGFX::GFX950);
         const auto& opAccesses = detailed.accesses.at(operationTag);
 
         // TODO: currently fix test when operation disconnected from instruction
