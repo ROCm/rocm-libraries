@@ -611,8 +611,6 @@ namespace TensileLite
                                       size_t          splittingFactor,
                                       bool            debug)
         {
-            const auto& w = TensileLite::analytical::Hardware::weights();
-
             // 1) Estimate L2 hit-rate
             double H_mem1 = estimate_l2_hit(
                 hardware, M, N, K, batch, MT_M, MT_N, MT_K, element_size_A, WGM, splittingFactor);
@@ -680,9 +678,6 @@ namespace TensileLite
             L_mem_MEM += 200; // Load Latency
 
             // 12) pick the worst‐case bound
-            L_mem_mem1   = L_mem_mem1 * w.mem1;
-            L_mem_mem2   = L_mem_mem2 * w.mem2;
-            L_mem_MEM    = L_mem_MEM * w.mem3;
             double L_mem = std::max({L_mem_mem1, L_mem_mem2, L_mem_MEM});
 
             // NT
@@ -783,7 +778,6 @@ namespace TensileLite
                                     size_t          splittingFactor,
                                     bool            debug)
         {
-            const auto& w = TensileLite::analytical::Hardware::weights();
             // 1) Compute per-tile latencies
             double L_compute = compute_mt_compute_latency(hardware,
                                                           M,
@@ -819,9 +813,6 @@ namespace TensileLite
                                                   numActiveCUs,
                                                   splittingFactor,
                                                   debug);
-
-            L_compute = L_compute * w.compute;
-            L_mem     = L_compute * w.memory;
 
             // 2) Work-group setup & iteration latencies
             double L_WG_setup = 1; // WG_setup_Latency
@@ -907,8 +898,6 @@ namespace TensileLite
             long splittedK = static_cast<long>(safe_ceil_div(K, splittingFactor));
             long num_iter  = static_cast<long>(safe_ceil_div(splittedK, MT_K)) - 1;
 
-            L_prologue = L_prologue * w.prologue;
-            L_epilogue = L_epilogue * w.epilogue;
             // 7) Total tile latency
             double L_tile_total
                 = (L_tile_single * num_iter) + L_prologue + L_epilogue + L_WG_setup

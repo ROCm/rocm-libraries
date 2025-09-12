@@ -220,7 +220,6 @@ namespace TensileLite
                                      size_t          split = 0,
                                      bool            debug = false);
 
-
         // Compute the performance from the latency.
         // IMPORTANT : This program is NOT meant to be an analytical model for performance, but rather a way to rank different macro tile sizes.
         // These performance values could be wildly inaccurate in absolute terms, but will often result in the correct ranking of MTin relative terms.
