@@ -143,6 +143,13 @@ namespace rocRoller
             if(inst.getOpCode().find("scale") == std::string::npos)
                 return true;
 
+            /**
+             * TODO: Remove.
+             * Right now, this observer gives slower results unless it is
+             * combined with the LinearWeightedSimple cost function. Once we can
+             * make this the default cost function we should be able to remove
+             * this and just always return true for this instruction.
+             */
             if(Settings::Get(Settings::SchedulerCost) == CostFunction::LinearWeightedSimple)
                 return true;
 

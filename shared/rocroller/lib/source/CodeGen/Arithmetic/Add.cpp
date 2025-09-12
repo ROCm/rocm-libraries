@@ -233,9 +233,6 @@ namespace rocRoller
         co_yield VectorAddUInt32CarryInOut(
             m_context, dest->subset({1}), carry, carry, l1, r1, "most significant half")
             .unlock(dependency, "End of Int64 add, Unlocking VCC.");
-
-        // if(useVCC)
-        //     co_yield(Instruction::Unlock("End of Int64 add, Unlocking VCC."));
     }
 
     template <>

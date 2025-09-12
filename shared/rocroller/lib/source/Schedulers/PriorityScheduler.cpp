@@ -112,14 +112,7 @@ namespace rocRoller
 
                 if(minCostIdx >= 0)
                 {
-                    if(categories.count() > 1)
-                    {
-                        co_yield yieldFromStream(iterators[minCostIdx], minCostIdx);
-                    }
-                    else
-                    {
-                        co_yield yieldFromStream(iterators[minCostIdx], minCostIdx);
-                    }
+                    co_yield yieldFromStream(iterators[minCostIdx], minCostIdx);
                 }
 
             } while(minCostIdx >= 0);
