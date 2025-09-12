@@ -1043,9 +1043,13 @@ namespace rocRoller
                 }
                 else
                 {
-                    AssertFatal(DataTypeInfo::Get(destResultType.varType).registerCount
-                                    == dest->registerCount(),
-                                "Destination size mismatch");
+                    auto const expectDestRegisterCount
+                        = DataTypeInfo::Get(destResultType.varType).registerCount;
+                    auto const actualDestRegisterCount = dest->registerCount();
+                    AssertFatal(expectDestRegisterCount == actualDestRegisterCount,
+                                "Destination size mismatch.",
+                                ShowValue(expectDestRegisterCount),
+                                ShowValue(actualDestRegisterCount));
                 }
 
                 unsigned offset = 0;
