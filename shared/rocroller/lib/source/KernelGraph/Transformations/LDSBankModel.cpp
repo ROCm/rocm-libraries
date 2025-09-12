@@ -178,17 +178,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         targetInstruction->baseAddresses.push_back(event.byteOffset);
     }
 
-    Summary LDSBankModel::summary() const
-    {
-        Throw<FatalError>("LDSBankModel::summary() is no longer supported. Use "
-                          "OperationBankConflicts::summary() instead.");
-    }
-
-    std::string LDSBankModel::toString() const
-    {
-        return "LDS Bank Model (instruction-level analysis)";
-    }
-
     uint LDSBankModel::getThreadsPerClock(const MemoryOpLDS& memoryOp,
                                           uint               dwords,
                                           GPUArchitectureGFX gfx)
@@ -372,6 +361,10 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     uint LDSBankModel::getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
     {
+        AssertFatal(rocRoller::toString(gfx).starts_with("gfx9"),
+                    "Unsupported GPU architecture: {}",
+                    rocRoller::toString(gfx));
+
         uint cycles = 0;
         for(const auto& groupAddresses : divideIntoThreadGroups(
                 instr.baseAddresses, getThreadsPerClock(instr.memoryOp, instr.dwords, gfx)))
@@ -382,9 +375,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return cycles + 4; // address transfer
     }
 
-    OperationAnalysis LDSBankModel::doOperationAnalysis(GPUArchitectureGFX gfx) const
+    OperationsAnalysis LDSBankModel::doOperationsAnalysis(GPUArchitectureGFX gfx) const
     {
-        OperationAnalysis detailed;
+        OperationsAnalysis detailed;
         detailed.gfx = gfx;
 
         for(const auto& [operationTag, sourceOpAccesses] : m_tagToOperationAccesses)
@@ -407,11 +400,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
 
         return detailed;
-    }
-
-    std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)
-    {
-        return stream << ldsBankModel.toString();
     }
 
     std::string Summary::toString() const
@@ -445,7 +433,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
-    std::string OperationAnalysis::toString() const
+    std::string OperationsAnalysis::toString() const
     {
         std::stringstream ss;
 
@@ -470,7 +458,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return ss.str();
     }
 
-    std::ostream& operator<<(std::ostream& stream, OperationAnalysis const& operationAnalysis)
+    std::ostream& operator<<(std::ostream& stream, OperationsAnalysis const& operationAnalysis)
     {
         return stream << operationAnalysis.toString();
     }
