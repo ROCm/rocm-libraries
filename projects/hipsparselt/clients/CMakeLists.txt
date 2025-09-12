@@ -1,10 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+include(FetchLAPACK)
+
 find_package(Threads REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(BLAS REQUIRED)
-find_package(LAPACK REQUIRED)
 
 if(HIPSPARSELT_ENABLE_BLIS)
   find_package(BLIS QUIET)
