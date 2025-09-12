@@ -146,13 +146,15 @@
 #endif
 
 #if __has_builtin(__builtin_amdgcn_processor_is)
-    // There will be error: value of type 'void' is not contextually convertible to 'bool' when including the following archs
-
-    // CDNA3: gfx9-4-generic
-    // RDNA4: gfx1250
-    // RDNA4: gfx12-generic
-    #define IS_CDNA3() \
-        __builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950")
+    #if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS)
+        #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
+    #endif
+    #if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS)
+        #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
+    #endif
+    #define IS_CDNA3()                                                                     \
+        __builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950") \
+            || __builtin_amdgcn_processor_is("gfx9-4-generic")
     #define IS_CDNA2() __builtin_amdgcn_processor_is("gfx90a")
     #define IS_CDNA1() __builtin_amdgcn_processor_is("gfx908")
     #define IS_GCN5()                                                                             \
@@ -160,8 +162,10 @@
             || __builtin_amdgcn_processor_is("gfx904") || __builtin_amdgcn_processor_is("gfx906") \
             || __builtin_amdgcn_processor_is("gfx90c")                                            \
             || __builtin_amdgcn_processor_is("gfx9-generic")
-    #define IS_RDNA4() \
-        __builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201")
+    #define IS_RDNA4()                                                                       \
+        __builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201") \
+            || __builtin_amdgcn_processor_is("gfx1250")                                      \
+            || __builtin_amdgcn_processor_is("gfx12-generic")
     #define IS_RDNA3()                                                                       \
         __builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101") \
             || __builtin_amdgcn_processor_is("gfx1102")                                      \
@@ -185,21 +189,65 @@
             || __builtin_amdgcn_processor_is("gfx803") || __builtin_amdgcn_processor_is("gfx805") \
             || __builtin_amdgcn_processor_is("gfx810")
 #else
-    #define IS_CDNA3() ROCPRIM_TARGET_CDNA3
-    #define IS_CDNA2() ROCPRIM_TARGET_CDNA2
-    #define IS_CDNA1() ROCPRIM_TARGET_CDNA1
-    #define IS_GCN5() ROCPRIM_TARGET_GCN5
-    #define IS_RDNA4() ROCPRIM_TARGET_RDNA4
-    #define IS_RDNA3() ROCPRIM_TARGET_RDNA3
-    #define IS_RDNA2() ROCPRIM_TARGET_RDNA2
-    #define IS_RDNA1() ROCPRIM_TARGET_RDNA1
-    #define IS_GCN3() ROCPRIM_TARGET_GCN3
-    #if defined(ROCPRIM_TARGET_SPIRV)
-        #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 0
-        #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 0
+    #if defined(ROCPRIM_TARGET_CDNA3)
+        #define IS_CDNA3() 1
     #else
-        #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
-        #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
+        #define IS_CDNA3() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_CDNA2)
+        #define IS_CDNA2() 1
+    #else
+        #define IS_CDNA2() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_CDNA1)
+        #define IS_CDNA1() 1
+    #else
+        #define IS_CDNA1() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_GCN5)
+        #define IS_GCN5() 1
+    #else
+        #define IS_GCN5() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_RDNA4)
+        #define IS_RDNA4() 1
+    #else
+        #define IS_RDNA4() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_RDNA3)
+        #define IS_RDNA3() 1
+    #else
+        #define IS_RDNA3() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_RDNA2)
+        #define IS_RDNA2() 1
+    #else
+        #define IS_RDNA2() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_RDNA1)
+        #define IS_RDNA1() 1
+    #else
+        #define IS_RDNA1() 0
+    #endif
+    #if defined(ROCPRIM_TARGET_GCN3)
+        #define IS_GCN3() 1
+    #else
+        #define IS_GCN3() 0
+    #endif
+
+    #if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS)
+        #if defined(ROCPRIM_TARGET_SPIRV)
+            #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 0
+        #else
+            #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
+        #endif
+    #endif
+    #if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS)
+        #if defined(ROCPRIM_TARGET_SPIRV)
+            #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 0
+        #else
+            #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
+        #endif
     #endif
 #endif
 

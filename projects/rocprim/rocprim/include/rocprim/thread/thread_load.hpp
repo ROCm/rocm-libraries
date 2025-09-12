@@ -80,11 +80,7 @@ T asm_thread_load(void* ptr)
 
     // Important for syncing. Check section 9.2.2 or 7.3 in the following document
     // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
-    #define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                         \
-                                    type,                                                   \
-                                    interim_type,                                           \
-                                    asm_operator,                                           \
-                                    output_modifier)                                        \
+    #define ROCPRIM_ASM_THREAD_LOAD(cache_modifier, type, interim_type, asm_operator)       \
         template<>                                                                          \
         ROCPRIM_DEVICE ROCPRIM_INLINE type asm_thread_load<cache_modifier, type>(void* ptr) \
         {                                                                                   \
@@ -93,21 +89,21 @@ T asm_thread_load(void* ptr)
             {                                                                               \
                 asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"      \
                                            "s_wait_loadcnt_dscnt(%2)"                       \
-                             : "=" #output_modifier(retval)                                 \
+                             : "=&v"(retval)                                                \
                              : "v"(ptr), "I"(0x00));                                        \
             }                                                                               \
             else if ROCPRIM_CONSTEXPR(IS_CDNA3())                                           \
             {                                                                               \
                 asm volatile(#asm_operator " %0, %1 sc0 nt\n\t"                             \
                                            "s_waitcnt(%2)"                                  \
-                             : "=" #output_modifier(retval)                                 \
+                             : "=&v"(retval)                                                \
                              : "v"(ptr), "I"(0x00));                                        \
             }                                                                               \
             else                                                                            \
             {                                                                               \
                 asm volatile(#asm_operator " %0, %1 glc slc\n\t"                            \
                                            "s_waitcnt(%2)"                                  \
-                             : "=" #output_modifier(retval)                                 \
+                             : "=v"(retval)                                                 \
                              : "v"(ptr), "I"(0x00));                                        \
             }                                                                               \
             return *bit_cast<type*>(&retval);                                               \
@@ -115,15 +111,15 @@ T asm_thread_load(void* ptr)
 
     // TODO Add specialization for custom larger data types
     // clang-format off
-#define ROCPRIM_ASM_THREAD_LOAD_GROUP(cache_modifier)                                  \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, int8_t,   int32_t,  flat_load_sbyte,   v); \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, int16_t,  int32_t,  flat_load_sshort,  v); \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, uint8_t,  uint32_t, flat_load_ubyte,   v); \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, uint16_t, uint32_t, flat_load_ushort,  v); \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, uint32_t, uint32_t, flat_load_dword,   v); \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, float,    uint32_t, flat_load_dword,   v); \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, uint64_t, uint64_t, flat_load_dwordx2, v); \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, double,   uint64_t, flat_load_dwordx2, v)
+#define ROCPRIM_ASM_THREAD_LOAD_GROUP(cache_modifier)                                   \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, int8_t,   int32_t,  flat_load_sbyte);       \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, int16_t,  int32_t,  flat_load_sshort);      \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, uint8_t,  uint32_t, flat_load_ubyte);       \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, uint16_t, uint32_t, flat_load_ushort);      \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, uint32_t, uint32_t, flat_load_dword);       \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, float,    uint32_t, flat_load_dword);       \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, uint64_t, uint64_t, flat_load_dwordx2);     \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, double,   uint64_t, flat_load_dwordx2)
 // clang-format on
 
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg);
