@@ -58,54 +58,54 @@ unsigned int bit_count(unsigned long long x)
 /// \brief Count trailing zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// least significant bit. Return zero when x is zero.
+/// least significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned int x)
 {
-    // __builtin_ctz is undefined for x == 0
-    return x == 0 ? 0 : __builtin_ctz(x);
+    __hip_assert(x != 0 && "'x' should be non-zero!");
+    return __builtin_ctz(x);
 }
 
 /// \brief Count trailing zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// least significant bit. Return zero when x is zero.
+/// least significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned long long x)
 {
-    // __builtin_ctzll is undefined for x == 0
-    return x == 0 ? 0 : __builtin_ctzll(x);
+    __hip_assert(x != 0 && "'x' should be non-zero!");
+    return __builtin_ctzll(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit. Return zero when x is zero.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned int x)
 {
-    // __builtin_clz is undefined for x == 0
-    return x == 0 ? 0 : __builtin_clz(x);
+    __hip_assert(x != 0 && "'x' should be non-zero!");
+    return __builtin_clz(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit. Return zero when x is zero.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned long x)
 {
-    // __builtin_clzl is undefined for x == 0
-    return x == 0 ? 0 : __builtin_clzl(x);
+    __hip_assert(x != 0 && "'x' should be non-zero!");
+    return __builtin_clzl(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit. Return zero when x is zero.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned long long x)
 {
-    // __builtin_clzll is undefined for x == 0
-    return x == 0 ? 0 : __builtin_clzll(x);
+    __hip_assert(x != 0 && "'x' should be non-zero!");
+    return __builtin_clzll(x);
 }
 
 /// @}
