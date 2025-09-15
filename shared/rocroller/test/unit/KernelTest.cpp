@@ -487,7 +487,7 @@ amdhsa.kernels:
         const auto one  = std::make_shared<Expression::Expression>(1u);
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
-        const auto workgroupSize = 64u;
+        const auto workgroupSize = 32u;
         auto       workitemCount = Expression::literal(256 * 64); // one hit per CU on MI350x
         k->setWorkgroupSize({workgroupSize, 1, 1});
         k->setWorkitemCount({workitemCount, one, one});
@@ -512,16 +512,14 @@ amdhsa.kernels:
             const auto loops
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
             // _b96 requires 64-bit alignment for dst, _b96 has huge penalty if not 64-bit aligned for LDS addr
-            const auto alignment   = instrDwords == 3 ? 4 : instrDwords;
-            const auto dstRegCount = 192;
-            const auto count
-                = dstRegCount / instrDwords; // number of instructions put one after another
+            const auto alignment = instrDwords == 3 ? 4 : instrDwords;
+            const auto regCount  = 256 - 4;
 
             auto dst = Register::Value::Placeholder(
                 m_context,
                 Register::Type::Vector,
                 DataType::Raw32,
-                count * instrDwords,
+                regCount,
                 Register::AllocationOptions{
                     .contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
                     .alignment            = alignment,
@@ -531,10 +529,7 @@ amdhsa.kernels:
             auto lds = Register::Value::AllocateLDS(
                 m_context,
                 DataType::Raw32,
-                std::min(static_cast<unsigned int>(m_context->targetArchitecture().GetCapability(
-                                                       GPUCapability::MaxLdsSize)
-                                                   / 4),
-                         workgroupSize * strideMultiplier * instrDwords));
+                m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) / 4);
             auto ldsWithOffset = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
             auto workitemIndex = m_context->kernel()->workitemIndex()[0];
@@ -553,23 +548,31 @@ amdhsa.kernels:
             auto label = m_context->labelAllocator()->label("label");
             co_yield Instruction::Label(label);
 
-            for(int i = 0; i < count * instrDwords; i += alignment)
+            auto getSubset = [](size_t n, size_t m, size_t i) -> std::pair<size_t, size_t> {
+                size_t num_complete_chunks = n / m;
+                if(num_complete_chunks == 0)
+                {
+                    return {0, 0};
+                }
+                size_t chunk_index = i % num_complete_chunks;
+                size_t start       = chunk_index * m;
+                return {start, start + m};
+            };
+
+            for(int i = 0; i < 200; ++i)
             {
+                const auto [start, end] = getSubset(regCount, instrDwords, i);
+                const auto numBytes     = instrDwords * 4;
+
                 if(write)
                 {
                     co_yield m_context->mem()->storeLocal(
-                        ldsWithOffset,
-                        dst->subset(Generated(iota(i, i + instrDwords))),
-                        i * instrDwords * 4,
-                        4 * instrDwords);
+                        ldsWithOffset, dst->subset(Generated(iota(start, end))), 0, numBytes);
                 }
                 else
                 {
                     co_yield m_context->mem()->loadLocal(
-                        dst->subset(Generated(iota(i, i + instrDwords))),
-                        ldsWithOffset,
-                        i * strideMultiplier * 4,
-                        4 * instrDwords);
+                        dst->subset(Generated(iota(start, end))), ldsWithOffset, 0, numBytes);
                 }
             }
 
