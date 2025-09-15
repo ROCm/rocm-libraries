@@ -32,6 +32,7 @@
 #include "rocprim/device/config_types.hpp"
 #include "rocprim/device/detail/device_scan_common.hpp"
 #include "rocprim/device/detail/lookback_scan_state.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 #include "rocprim/device/device_memcpy_config.hpp"
 #include "rocprim/device/device_scan.hpp"
 
@@ -473,6 +474,8 @@ private:
 
             union shared_t
             {
+                ordered_block_id<>::storage_type ordered_bid;
+
                 union analysis_t
                 {
                     typename buffer_load_type::storage_type     load_storage;
@@ -940,7 +943,8 @@ public:
     static ROCPRIM_KERNEL
     void init_tile_state_kernel(blev_buffer_scan_state_type buffer_scan_state,
                                 blev_block_scan_state_type  block_scan_state,
-                                tile_offset_type            num_tiles)
+                                tile_offset_type            num_tiles,
+                                ordered_block_id<>          ordered_bid)
     {
         const uint32_t block_id        = rocprim::detail::block_id<0>();
         const uint32_t block_size      = rocprim::detail::block_size<0>();
@@ -950,6 +954,8 @@ public:
         buffer_scan_state.initialize_prefix(flat_thread_id, num_tiles);
 
         block_scan_state.initialize_prefix(flat_thread_id, num_tiles);
+
+        ordered_bid.reset();
     }
 
     template<class ArchConfig>
@@ -958,16 +964,22 @@ public:
                                      buffer_offset_type          num_buffers,
                                      copyable_blev_buffers       blev_buffers,
                                      blev_buffer_scan_state_type blev_buffer_scan_state,
-                                     blev_block_scan_state_type  blev_block_scan_state)
+                                     blev_block_scan_state_type  blev_block_scan_state,
+                                     ordered_block_id<>          ordered_bid)
     {
         ROCPRIM_SHARED_MEMORY typename non_blev_memcpy<ArchConfig>::storage_type temp_storage;
+
+        auto tile_id = ordered_bid.get(rocprim::flat_tile_thread_id(),
+                                       temp_storage.get().shared.ordered_bid);
+        rocprim::syncthreads();
+
         non_blev_memcpy<ArchConfig>{}.copy(temp_storage.get(),
                                            buffers,
                                            num_buffers,
                                            blev_buffers,
                                            blev_buffer_scan_state,
                                            blev_block_scan_state,
-                                           rocprim::flat_block_id());
+                                           tile_id /* rocprim::flat_block_id() */);
     }
 
     template<typename ArchConfig>
@@ -1080,11 +1092,7 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
                                       IsMemCpy>;
 
     detail::target_arch target_arch;
-    hipError_t          result = detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    ROCPRIM_RETURN_ON_ERROR(detail::host_target_arch(stream, target_arch));
 
     const detail::batch_memcpy_config_params params
         = detail::dispatch_target_arch<config, false>(target_arch);
@@ -1129,6 +1137,10 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
     uint8_t* blev_buffer_scan_data;
     uint8_t* blev_block_scan_state_data;
 
+    
+    using ordered_bid_type = ordered_block_id<unsigned int>;
+    ordered_bid_type::id_type* ordered_bid_storage;
+
     // The non-blev kernel will prepare blev copy. Communication between the two
     // kernels is done via `blev_buffers`.
     typename batch_memcpy_impl_type::copyable_blev_buffers blev_buffers{};
@@ -1145,7 +1157,9 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
             detail::temp_storage::ptr_aligned_array(&blev_buffers.offsets, num_copies),
             detail::temp_storage::make_partition(&blev_buffer_scan_data, scan_state_buffer_layout),
             detail::temp_storage::make_partition(&blev_block_scan_state_data,
-                                                 blev_block_scan_state_layout))));
+                                                 blev_block_scan_state_layout),
+            detail::temp_storage::make_partition(&ordered_bid_storage,
+                                                 ordered_bid_type::get_temp_storage_layout()))));
 
     // Return the storage size.
     if(temporary_storage == nullptr)
@@ -1182,6 +1196,8 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
                                                           blev_block_scan_state_data,
                                                           num_blocks,
                                                           stream));
+
+    auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
 
     // `hipOccupancyMaxActiveBlocksPerMultiprocessor` uses the default device.
     // We need to perserve the current default device id while we change it temporarily
@@ -1256,7 +1272,8 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
         init_tile_state_kernel<<<init_kernel_grid_size, init_kernel_threads, 0, stream>>>(
             scan_state_buffer,
             scan_state_block,
-            num_blocks);
+            num_blocks,
+            ordered_bid);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_tile_state_kernel", num_blocks, start);
 
     auto non_blev_memcpy_kernel = [=](auto arch_config)
@@ -1266,7 +1283,8 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
             num_copies,
             blev_buffers,
             scan_state_buffer,
-            scan_state_block);
+            scan_state_block,
+            ordered_bid);
     };
 
     // Launch batch_memcpy_non_blev_kernel.
