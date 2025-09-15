@@ -3774,7 +3774,7 @@ try
     *cols       = descr->cols;
     *nnz        = descr->nnz;
     *slice_size = descr->slice_size;
-    *slice_size = descr->sell_colval_size;
+    *sell_colval_size = descr->sell_colval_size;
 
     *sell_slice_offsets = descr->row_data;
     *sell_col_ind       = descr->col_data;
