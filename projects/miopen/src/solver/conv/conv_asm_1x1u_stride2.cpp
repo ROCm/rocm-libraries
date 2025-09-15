@@ -519,9 +519,6 @@ bool ConvAsm1x1UV2::IsApplicable(const ExecutionContext& ctx,
     if(problem.IsTensorsCasted() || problem.IsFp8() || problem.IsBfp8())
         return false;
 
-    if(problem.EnableTF32())
-        return false;
-
     const auto elements_in_dword = 4 / GetTypeSize(problem.GetInDataType());
     // clang-format off
     const auto img_hw = problem.GetOutHeight() * problem.GetOutWidth();

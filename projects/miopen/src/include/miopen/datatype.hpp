@@ -29,8 +29,6 @@
 #include <miopen/errors.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/visit_float.hpp>
-#include <miopen/env.hpp>
-#include <miopen/logger.hpp>
 
 #include <sstream>
 #include <string>

@@ -249,8 +249,6 @@ bool ConvWinoFuryRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
     if(problem.HasNonPackedTensors())
         return false;
-    if(problem.EnableTF32())
-        return false;
 
     const auto dev_name = ctx.GetStream().GetDeviceName();
     // All gfx11 ASICs are supported

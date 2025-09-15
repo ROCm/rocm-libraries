@@ -607,8 +607,6 @@ bool ConvHipImplicitGemmV4R4WrW::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!problem.IsFp32())
         return false;
-    if(problem.EnableTF32())
-        return false;
     if(problem.IsTensorsCasted())
         return false;
     if(problem.GetGroupCount() != 1)

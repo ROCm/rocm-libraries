@@ -37,7 +37,6 @@
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_scale.hpp>
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp"
-#include <ck/utility/data_type.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
@@ -191,31 +190,6 @@ struct CKArgs
         rPadding         = {ProblemInterpreter::GetAdjustedInputRightPadD(problem),
                             ProblemInterpreter::GetAdjustedInputRightPadH(problem),
                             ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
-        // auto arr_to_string = [](const auto& arr, int size) {
-        //     std::string ss = "[";
-        //     for(int i = 0; i < size; ++i)
-        //     {
-        //         ss += std::to_string(arr[i]);
-        //         if(i < 5)
-        //             ss += ", ";
-        //     }
-        //     ss += "]";
-        //     return ss;
-        // };
-        // MIOPEN_LOG_I("G=" << G << ", N=" << N << ", K=" << K << ", C=" << C << ", C1=" << C1
-        //                   << ", K1=" << K1 << ", Hi=" << Hi << ", Wi=" << Wi << ", Di=" << Di
-        //                   << ", Ho=" << Ho << ", Wo=" << Wo << ", Do=" << Do << ", Y=" << Y
-        //                   << ", X=" << X << ", Z=" << Z
-        //                   << ", in_lengths=" << arr_to_string(in_lengths, 6)
-        //                   << ", in_strides=" << arr_to_string(in_strides, 6)
-        //                   << ", out_lengths=" << arr_to_string(out_lengths, 6)
-        //                   << ", out_strides=" << arr_to_string(out_strides, 6)
-        //                   << ", wei_lengths=" << arr_to_string(wei_lengths, 6)
-        //                   << ", wei_strides=" << arr_to_string(wei_strides, 6)
-        //                   << ", filter_strides=" << arr_to_string(filter_strides, 3)
-        //                   << ", filter_dilations=" << arr_to_string(filter_dilations, 3)
-        //                   << ", lPadding=" << arr_to_string(lPadding, 3)
-        //                   << ", rPadding=" << arr_to_string(rPadding, 3));
     }
 
     CKArgs(const CKArgs&)            = default;
@@ -378,7 +352,6 @@ template <typename DataType, typename ComputeType>
 void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
     const miopen::conv::ProblemDescription& problem)
 {
-    MIOPEN_LOG_I("problem.GetAlphaBetaCase(): " << problem.GetAlphaBetaCase());
     switch(problem.GetAlphaBetaCase())
     {
     case BILINEAR:
@@ -422,7 +395,6 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
         {
             if(K < 64)
             {
-                MIOPEN_LOG_I("default kernel and K < 64");
                 index =
                     find_kernel(38,
                                 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
@@ -431,7 +403,6 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
             }
             else
             {
-                MIOPEN_LOG_I("default kernel and K > 64");
                 index =
                     find_kernel(30,
                                 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
@@ -441,7 +412,6 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
         }
         else if(problem.GetInDataType() == miopenHalf)
         {
-            MIOPEN_LOG_I("half kernel");
             if(K < 64)
             {
                 index =
@@ -461,7 +431,6 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
         }
     }
     kernel_id = valid_kernels[index];
-    MIOPEN_LOG_I("kernel index: " << index << ", kernel_id: " << kernel_id);
 }
 
 template <typename DataType, typename ComputeType>
@@ -520,8 +489,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     case miopenInt32:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    case miopenDouble:
-    default: break;
+    case miopenDouble: break;
     }
 #endif
 }
@@ -573,8 +541,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValid(
     case miopenInt32:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    case miopenDouble:
-    default: break;
+    case miopenDouble: break;
     }
 #endif
     return false;
@@ -656,8 +623,7 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(
     case miopenInt32:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    case miopenDouble:
-    default: break;
+    case miopenDouble: break;
     }
 #endif
     return false;

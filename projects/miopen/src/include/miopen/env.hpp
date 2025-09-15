@@ -40,7 +40,7 @@ namespace miopen::env {
 
 // Some tests and also the MIOpenDriver use their own environment variables, so this needs to be
 // exported
-MIOPEN_EXPORT std::optional<std::string> getEnvironmentVariable(std::string_view name); // todo: environment 
+MIOPEN_EXPORT std::optional<std::string> getEnvironmentVariable(std::string_view name);
 
 namespace detail {
 

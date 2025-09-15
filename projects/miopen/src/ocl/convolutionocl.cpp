@@ -793,6 +793,7 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
             static_cast<miopenConvAlgorithm_t>(algo), conv::Direction::Forward)};
         const auto network_config = problem.MakeNetworkConfig();
         const auto& invoker       = handle.GetInvoker(network_config, {}, algorithm_name);
+
         if(invoker)
         {
             const auto& invoke_ctx = conv::DataInvokeParams{tensors,
@@ -1577,7 +1578,7 @@ void ConvolutionBackwardBias(const Handle& handle,
     }
 }
 
-bool EnableTF32()
+bool EnvEnableTF32()
 {
     bool bool_miopen = miopen::env::enabled(MIOPEN_TF32_OVERRIDE);
     bool bool_nvidia = miopen::env::enabled(NVIDIA_TF32_OVERRIDE);

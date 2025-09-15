@@ -410,9 +410,6 @@ bool ConvAsmBwdWrW3x3::IsApplicable(const ExecutionContext& ctx,
     if(!ctx.rmv.IsV2orV3())
         return false;
 
-    if(problem.EnableTF32())
-        return false;
-
     const auto& target = ctx.GetStream().GetTargetProperties();
     if(target.Xnack() && *target.Xnack())
         return false;

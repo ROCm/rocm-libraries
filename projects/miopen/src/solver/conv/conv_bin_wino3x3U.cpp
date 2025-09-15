@@ -55,9 +55,6 @@ bool ConvBinWinograd3x3U::IsApplicable(const ExecutionContext& ctx,
     if(!(ctx.rmv.IsV2orV3() && ctx.use_asm_kernels))
         return false;
 
-    if(problem.EnableTF32())
-        return false;
-
     const auto& target = ctx.GetStream().GetTargetProperties();
     if(target.Xnack() && *target.Xnack())
         return false;

@@ -1003,9 +1003,6 @@ bool ConvHipImplicitGemmForwardV4R4Xdlops::IsApplicable(const ExecutionContext& 
     if(!(problem.IsFp32() || problem.IsFp16() || problem.IsBfp16()))
         return false;
 
-    if(problem.EnableTF32())
-        return false;
-
     if(problem.HasNonPackedTensors())
         return false;
 

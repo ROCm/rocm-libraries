@@ -664,8 +664,6 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
         return false;
     if(!(problem.IsFp32() || problem.IsFp16()))
         return false;
-    if(problem.EnableTF32())
-        return false;
     if(problem.IsTensorsCasted())
         return false;
     if(!ctx.use_asm_kernels)

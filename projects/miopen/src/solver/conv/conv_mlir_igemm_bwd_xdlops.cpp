@@ -61,8 +61,6 @@ bool ConvMlirIgemmBwdXdlops::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!mlir::IsMlirSupportedHardware(ctx))
         return false;
-    if(problem.EnableTF32())
-        return false;
 
     return MiirIsConfigApplicable(mlir::ConstructBuildOptions(ctx, problem, true));
 #else

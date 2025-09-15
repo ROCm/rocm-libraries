@@ -223,10 +223,6 @@ bool ConvBinWinogradRxS::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!(problem.IsFp32() || problem.IsFp16()))
         return false;
-
-    if(problem.EnableTF32())
-        return false;
-
     if(problem.HasNonPackedTensors())
         return false;
     if(!problem.AllTensorsDimsFitIntoInt())

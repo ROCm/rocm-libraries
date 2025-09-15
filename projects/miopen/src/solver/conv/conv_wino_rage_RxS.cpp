@@ -79,8 +79,6 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
     if(problem.HasNonPackedTensors())
         return false;
-    if(problem.EnableTF32())
-        return false;
 
     const auto devName = ctx.GetStream().GetDeviceName();
     if(!(devName == "gfx942"))

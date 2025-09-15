@@ -120,9 +120,6 @@ typedef enum
     miopenStatusVersionMismatch = 10, /*!< Version mismatch of the supplied binary data argment. */
 } miopenStatus_t;
 
-/*! @enum miopenStatus_t
- * Error codes that are returned by all MIOpen API calls.
- */
 typedef enum
 {
     miopenMathDefault  = 0, /*!< Default MathType, use TF32 if possible */

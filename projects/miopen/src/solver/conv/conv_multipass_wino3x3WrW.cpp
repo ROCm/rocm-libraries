@@ -38,7 +38,7 @@
 #include <miopen/tensor.hpp>
 #include <miopen/conv/solvers.hpp>
 
-#if (MIOPEN_BACKEND_HIP && MIOPEN_USE_ROCBLAS)
+#if(MIOPEN_BACKEND_HIP && MIOPEN_USE_ROCBLAS)
 #define WORKAROUND_SWDEV_203031 1 // See also issues #2075, #2067
 #define WORKAROUND_SWDEV_234193 1
 #endif
@@ -116,8 +116,6 @@ struct InTransform
         {
             return false;
         }
-        if(problem.EnableTF32())
-            return false;
 
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16())
                 && problem.Is2d()
@@ -225,8 +223,6 @@ struct FilterTransform
         {
             return false;
         }
-         if(problem.EnableTF32())
-            return false;
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16())
                 && problem.Is2d()
                 && H < u16limit
@@ -305,8 +301,6 @@ struct OutTransform
 {
     static bool IsApplicable(const ProblemDescription& problem)
     {
-        if(problem.EnableTF32())
-            return false;
         return (problem.IsFp32() || problem.IsFp16() || problem.IsBfp16()) && problem.Is2d();
     }
 
@@ -385,7 +379,7 @@ bool ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>
     // HIP backend required for sending ptr (buffer + offset)
     // ROCBLAS for GEMM step
 
-#if (MIOPEN_BACKEND_HIP && MIOPEN_USE_ROCBLAS)
+#if(MIOPEN_BACKEND_HIP && MIOPEN_USE_ROCBLAS)
     static const int wino_data_tile   = std::max(WinoDataH, WinoDataW);
     static const int wino_filter_tile = std::max(WinoFilterH, WinoFilterW);
 
@@ -602,7 +596,7 @@ InvokerFactory
 ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>::PrepareInvokerFactory(
     const ExecutionContext& ctx, const ProblemDescription& problem, std::size_t ws_sz) const
 {
-#if (MIOPEN_BACKEND_HIP && MIOPEN_USE_ROCBLAS)
+#if(MIOPEN_BACKEND_HIP && MIOPEN_USE_ROCBLAS)
     int flags         = 0;
     int reserved      = 0;
     int* reserved_ptr = nullptr;

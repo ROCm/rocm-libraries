@@ -58,9 +58,6 @@ bool ConvDirectNaiveConvFwd::IsApplicable(const ExecutionContext& ctx,
          problem.IsFp8() || problem.IsBfp8()))
         return false;
 
-    if(problem.EnableTF32())
-        return false;
-
     if(!problem.IsDirectionForward())
         return false;
 

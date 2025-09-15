@@ -124,9 +124,6 @@ bool fft::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& pr
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    if(problem.EnableTF32())
-        return false;
-
     const auto is_fwd    = problem.IsDirectionForward();
     decltype(auto) conv  = problem.GetConv();
     decltype(auto) xDesc = is_fwd ? problem.GetIn() : problem.GetOut();

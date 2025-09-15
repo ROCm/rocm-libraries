@@ -892,9 +892,6 @@ bool ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::IsApplicable(
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    if(problem.EnableTF32())
-        return false;
-
     if(!problem.IsFp32() && !problem.IsFp16() &&
        !(problem.IsBfp16() &&
          (device_name == "gfx90a" || device_name == "gfx942" || StartsWith(device_name, "gfx95"))))

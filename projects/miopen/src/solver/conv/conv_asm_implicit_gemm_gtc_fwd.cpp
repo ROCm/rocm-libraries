@@ -1528,9 +1528,6 @@ bool ConvAsmImplicitGemmGTCDynamicFwdXdlops::IsApplicable(const ExecutionContext
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    if(problem.EnableTF32())
-        return false;
-
     if(!problem.IsFp32() && !problem.IsFp16())
         return false;
 

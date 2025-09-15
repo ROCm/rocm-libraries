@@ -58,7 +58,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(NVIDIA_TF32_OVERRIDE, 1);
 
 namespace miopen {
 
-MIOPEN_INTERNALS_EXPORT bool EnableTF32();
+MIOPEN_INTERNALS_EXPORT bool EnvEnableTF32();
 
 namespace conv {
 struct ProblemDescription;
@@ -143,13 +143,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvolutionAttribute
         friend struct ConvolutionAttribute;
 
     public:
-        inline int Get() const
-        {
-            if(value == miopenMathDefault)
-                return static_cast<int>(miopen::EnableTF32() ? miopenMathDefault
-                                                             : miopenMathPedantic);
-            return static_cast<int>(value);
-        }
+        inline int Get() const { return value; }
     } math_type;
 
     /// Tri-state attribute values:
