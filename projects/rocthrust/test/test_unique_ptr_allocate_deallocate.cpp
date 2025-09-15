@@ -238,21 +238,21 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltrArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    void *raw_addr = nullptr;
-    size_t sz = 0;
+    thrust::device_ptr<bool> finished = thrust::device_new<bool>(3);
+    for (int i = 0; i < 3; ++i)
+        finished[i] = false;
     {
         thrust::unique_ptr<A[]> p = thrust::make_unique<A[]>(3);
         ASSERT_NE(p, nullptr);
         
-        hipError_t st = hipMemPtrGetInfo(static_cast<void*>(p.get_raw()), &sz);
-        ASSERT_EQ(st, hipSuccess);
-        ASSERT_GE(sz, 3 * sizeof(A));
-
-        raw_addr = static_cast<void*>(p.get_raw());
+        p[0] = A(finished + 0, 1);
+        p[1] = A(finished + 1, 2);
+        p[2] = A(finished + 2, 3);
     }
-    size_t dummy = 0;
-    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
-    ASSERT_EQ(st, hipErrorInvalidValue);
+    ASSERT_EQ(finished[0], true);
+    ASSERT_EQ(finished[1], true);
+    ASSERT_EQ(finished[2], true);
+    thrust::device_delete(finished, 3);
 }
 
 #if THRUST_CPP_DIALECT >= 2020
