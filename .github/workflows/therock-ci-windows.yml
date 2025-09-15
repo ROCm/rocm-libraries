@@ -67,8 +67,15 @@ jobs:
           choco install --no-progress -y strawberryperl
           echo "$PATH;C:\Strawberry\c\bin" >> $GITHUB_PATH
           choco install --no-progress -y awscli
-          choco install --no-progress -y mingw-w64
           echo "$PATH;C:\Program Files\Amazon\AWSCLIV2" >> $GITHUB_PATH
+
+      # Install Intel oneAPI Fortran
+      - name: Install Intel oneAPI Fortran
+        run: choco install intel-oneapi-compiler-fortran --yes --force
+
+      # Set up environment for Intel compiler
+      - name: Set Intel environment
+        run: call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
 
       - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
         with:
