@@ -77,8 +77,8 @@ def main():
     parser.add_argument(
         "directory",
         nargs="?",
-        default=".",
-        help="Directory to search for CSV files (default: current directory)",
+        default="output",
+        help="Directory to search for CSV files",
     )
     args = parser.parse_args()
 
