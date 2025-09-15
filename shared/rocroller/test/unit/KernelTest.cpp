@@ -375,103 +375,62 @@ amdhsa.kernels:
 
         auto command = std::make_shared<Command>();
 
+        VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
+        VariableType floatVal{DataType::Float, PointerType::Value};
+        VariableType uintVal{DataType::UInt32, PointerType::Value};
+
+        auto ptrTag   = command->allocateTag();
+        auto ptr_arg  = command->allocateArgument(floatPtr, ptrTag, ArgumentType::Value);
+        auto valTag   = command->allocateTag();
+        auto val_arg  = command->allocateArgument(floatVal, valTag, ArgumentType::Value);
+        auto sizeTag  = command->allocateTag();
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
+
+        auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
+        auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
+        auto size_exp = std::make_shared<Expression::Expression>(size_arg);
+
+        auto one  = std::make_shared<Expression::Expression>(1u);
+        auto zero = std::make_shared<Expression::Expression>(0u);
+
         auto k = m_context->kernel();
 
         k->setKernelDimensions(1);
 
-        const auto one  = std::make_shared<Expression::Expression>(1u);
-        const auto zero = std::make_shared<Expression::Expression>(0u);
+        k->addArgument({"ptr",
+                        {DataType::Float, PointerType::PointerGlobal},
+                        DataDirection::WriteOnly,
+                        ptr_exp});
+        k->addArgument({"val", {DataType::Float}, DataDirection::ReadOnly, val_exp});
 
-        const auto workgroupSize = 256u;
-        auto       workitemCount
-            = Expression::literal(1024 * workgroupSize); // Have high workgroup count for rocprofv3
-        k->setWorkgroupSize({workgroupSize, 1, 1});
-        k->setWorkitemCount({workitemCount, one, one});
+        k->setWorkgroupSize({1, 1, 1});
+        k->setWorkitemCount({size_exp, one, one});
         k->setDynamicSharedMemBytes(zero);
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
-        auto strideMultiplier = 1;
-        if(const char* env_p = std::getenv("BYTE_STRIDE"))
-            strideMultiplier = atoi(env_p); // adjust for bank conflict
-
-        auto instrDwords = 1;
-        if(const char* env_p = std::getenv("INSTR_WIDTH"))
-            instrDwords = atoi(env_p); // e.g. 1 for ds_read_b32
-
-        bool write; // else read
-        if(const char* env_p = std::getenv("WRITE"))
-            write = atoi(env_p) == 1 ? true : false;
-
         auto kb = [&]() -> Generator<Instruction> {
-            const auto loops
-                = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
-            // _b96 requires 64-bit alignment for dst, _b96 has huge penalty if not 64-bit aligned for LDS addr
-            const auto alignment   = instrDwords == 3 ? 4 : instrDwords;
-            const auto dstRegCount = 192;
-            const auto count
-                = dstRegCount / instrDwords; // number of instructions put one after another
+            Register::ValuePtr s_ptr, s_value;
+            co_yield m_context->argLoader()->getValue("ptr", s_ptr);
+            co_yield m_context->argLoader()->getValue("val", s_value);
 
-            auto dst = Register::Value::Placeholder(
-                m_context,
-                Register::Type::Vector,
-                DataType::Raw32,
-                count * instrDwords,
-                Register::AllocationOptions{
-                    .contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
-                    .alignment            = alignment,
-                });
-            co_yield dst->allocate();
+            auto v_ptr   = Register::Value::Placeholder(m_context,
+                                                      Register::Type::Vector,
+                                                      {DataType::Float, PointerType::PointerGlobal},
+                                                      1);
+            auto v_value = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 1);
 
-            auto lds = Register::Value::AllocateLDS(
-                m_context,
-                DataType::Raw32,
-                std::min(static_cast<unsigned int>(m_context->targetArchitecture().GetCapability(
-                                                       GPUCapability::MaxLdsSize)
-                                                   / 4),
-                         workgroupSize * strideMultiplier * instrDwords));
-            auto ldsWithOffset = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
-            auto workitemIndex = m_context->kernel()->workitemIndex()[0];
-            co_yield Expression::generate(
-                ldsWithOffset,
-                Expression::literal(lds->getLDSAllocation()->offset())
-                    + workitemIndex->expression()
-                          * Expression::literal((4 * strideMultiplier * alignment)
-                                                % lds->getLDSAllocation()->size()),
-                m_context);
+            co_yield v_ptr->allocate();
 
-            auto i = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::UInt64, 1);
-            co_yield Expression::generate(i, Expression::literal(loops + 1), m_context);
+            co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
 
-            auto label = m_context->labelAllocator()->label("label");
-            co_yield Instruction::Label(label);
+            co_yield v_value->allocate();
 
-            for(int i = 0; i < count * instrDwords; i += alignment)
-            {
-                if(write)
-                {
-                    co_yield m_context->mem()->storeLocal(
-                        ldsWithOffset,
-                        dst->subset(Generated(iota(i, i + instrDwords))),
-                        i * instrDwords * 4,
-                        4 * instrDwords);
-                }
-                else
-                {
-                    co_yield m_context->mem()->loadLocal(
-                        dst->subset(Generated(iota(i, i + instrDwords))),
-                        ldsWithOffset,
-                        i * strideMultiplier * 4,
-                        4 * instrDwords);
-                }
-            }
+            co_yield m_context->copier()->copy(v_value, s_value, "Move value");
 
-            co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
-            co_yield Expression::generate(i, i->expression() - Expression::literal(1), m_context);
-            co_yield m_context->brancher()->branchIfNonZero(label, i);
+            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
         };
 
         m_context->schedule(kb());
@@ -483,9 +442,25 @@ amdhsa.kernels:
         commandKernel.setContext(m_context);
         commandKernel.generateKernel();
 
+        auto         ptr  = make_shared_device<float>();
+        float        val  = 6.0f;
+        unsigned int size = 1;
+
+        ASSERT_THAT(hipMemset(ptr.get(), 0, sizeof(float)), HasHipSuccess(0));
+
         CommandArguments commandArgs = command->createArguments();
 
+        commandArgs.setArgument(ptrTag, ArgumentType::Value, ptr.get());
+        commandArgs.setArgument(valTag, ArgumentType::Value, val);
+        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
+
         commandKernel.launchKernel(commandArgs.runtimeArguments());
+
+        float resultValue = 0.0f;
+        ASSERT_THAT(hipMemcpy(&resultValue, ptr.get(), sizeof(float), hipMemcpyDefault),
+                    HasHipSuccess(0));
+
+        EXPECT_EQ(resultValue, 6.0f);
     }
 
     INSTANTIATE_TEST_SUITE_P(GPU_KernelTests,
