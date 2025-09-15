@@ -183,7 +183,8 @@ constexpr auto generateTileList() {
         tileList[i] = std::make_tuple(
             wgt.m, wgt.n, wgtk * unroll,
             MI.m, MI.n, MI.k,
-            1 // occupancy
+            1, // occupancy
+            6 // WGM
         );
     }
 

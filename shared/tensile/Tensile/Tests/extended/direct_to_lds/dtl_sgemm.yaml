@@ -25,7 +25,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -87,7 +87,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -149,7 +149,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -211,7 +211,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 2, 1, 1, 2,2, 2,2] # 128x128
@@ -275,7 +275,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -337,7 +337,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -399,7 +399,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -461,7 +461,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 2, 1, 1, 2,2, 2,2] # 128x128
@@ -525,7 +525,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -587,7 +587,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -649,7 +649,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -711,7 +711,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 2, 1, 1, 2,2, 2,2] # 128x128
@@ -775,7 +775,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -837,7 +837,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -899,7 +899,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,4, 4,1]  # 64x64
@@ -961,7 +961,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        - AtomicAddC: [False] 
+        - AtomicAddC: [False]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 2, 1, 1, 2,2, 2,2] # 128x128

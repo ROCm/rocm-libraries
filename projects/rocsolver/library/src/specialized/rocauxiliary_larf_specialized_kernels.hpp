@@ -118,7 +118,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
     const T* tau = tauA + bid * strideP;
 
     // shared variables
-    __shared__ T sval[MAX_THDS];
+    __shared__ T sval[MAX_THDS / WarpSize];
     __shared__ T xs[LARF_SSKER_MAX_DIM];
 
     // load x into shared memory

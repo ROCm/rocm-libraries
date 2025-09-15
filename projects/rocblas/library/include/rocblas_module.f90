@@ -627,7 +627,7 @@ module rocblas
         end function rocblas_zdscal_batched
     end interface
 
-    ! scal_batched_64 
+    ! scal_batched_64
     interface
         function rocblas_sscal_batched_64(handle, n, alpha, x, incx, batch_count) &
             bind(c, name='rocblas_sscal_batched_64')
@@ -929,7 +929,7 @@ module rocblas
             integer(c_int64_t), value :: batch_count
         end function rocblas_zdscal_strided_batched_64
     end interface
-    
+
     ! copy
     interface
         function rocblas_scopy(handle, n, x, incx, y, incy) &
@@ -3537,7 +3537,7 @@ module rocblas
             type(c_ptr), value :: result
         end function rocblas_dzasum_strided_batched
     end interface
-    
+
     ! asum_strided_batched_64
     interface
         function rocblas_sasum_strided_batched_64(handle, n, x, incx, stride_x, batch_count, result) &
@@ -6084,7 +6084,7 @@ module rocblas
 
     ! rotm_strided_batched_64
     interface
-        function rocblas_srotm_strided_batched_64(handle, n, x, incx, stride_x, y, incy, stride_y, param, stride_param, & 
+        function rocblas_srotm_strided_batched_64(handle, n, x, incx, stride_x, y, incy, stride_y, param, stride_param, &
             batch_count) &
             bind(c, name='rocblas_srotm_strided_batched_64')
             use iso_c_binding
@@ -14689,7 +14689,7 @@ module rocblas
             integer(c_int64_t), value :: batch_count
         end function rocblas_zgerc_batched_64
     end interface
-    
+
     ! ger_strided_batched
     interface
         function rocblas_sger_strided_batched(handle, m, n, alpha, x, incx, stride_x, &
@@ -16901,7 +16901,7 @@ module rocblas
             integer(c_int), value :: batch_count
         end function rocblas_zhemm_strided_batched
     end interface
-    
+
     ! hemm_64
     interface
         function rocblas_chemm_64(handle, side, uplo, n, k, alpha, &
@@ -24610,7 +24610,7 @@ module rocblas
             integer(kind(rocblas_datatype_f16_r)), value :: execution_type
         end function rocblas_axpy_ex_64
     end interface
-    
+
     interface
         function rocblas_axpy_batched_ex_64(handle, n, alpha, alpha_type, x, x_type, incx, &
                                          y, y_type, incy, batch_count, execution_type) &

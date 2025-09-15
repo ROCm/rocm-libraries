@@ -9,6 +9,7 @@ Documentation for rocThrust available at
 
 * Added a new CMake option `-DSQLITE_USE_SYSTEM_PACKAGE` to allow SQLite to be provided by the system.
 * Introduced `libhipcxx` as a soft depedency. When `liphipcxx` can be included, rocthrust, may use structs and methods defined in `libhipcxx`. This allows for a more complete behaviour parity with CCCL and mirrors CCCL's thrust own depedency on `libcudacxx`.
+* Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 
 ### Known Issues
 * `event` test is failing on CI and local runs on MI300, MI250 and MI210.
@@ -100,8 +101,8 @@ Documentation for rocThrust available at
 * Fixed `copy_if` to work with large data types (512 bytes)
 
 ### Known Issues
-*  `thrust::inclusive_scan_by_key` might produce incorrect results when it's used with -O2 or -O3 optimization.  
-  - The error is caused by a recent compiler change. There is a fix available that will be released at a later date. 
+*  `thrust::inclusive_scan_by_key` might produce incorrect results when it's used with -O2 or -O3 optimization.
+  - The error is caused by a recent compiler change. There is a fix available that will be released at a later date.
 
 ## rocThrust 3.2.0 for ROCm 6.3
 

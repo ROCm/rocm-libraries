@@ -47,7 +47,7 @@ add_custom_command(
 
 set(lite2_command ${tcl_command} --embed-library=test_kernels_lite_2 --embed-library-key=kernels_lite_2
                 "${TENSILE_CONFIG_DIR}/lite_configs" "${TENSILE_TEST_DATA_DIR}/test_kernels_lite_2" HIP)
-  
+
 add_custom_command(
   COMMENT "Generating ${TENSILE_TEST_DATA_DIR}/test_kernels_lite_2/library/test_kernels_lite_2.cpp"
   COMMAND ${lite2_command}
@@ -56,7 +56,7 @@ add_custom_command(
 
 set(lite_mixed_command ${tcl_command} --embed-library=test_kernels_lite_mixed --embed-library-key=kernels_lite_mixed
                 "${TENSILE_CONFIG_DIR}/lite_configs_mixed" "${TENSILE_TEST_DATA_DIR}/test_kernels_lite_mixed" HIP)
-  
+
 add_custom_command(
   COMMENT "Generating ${TENSILE_TEST_DATA_DIR}/test_kernels_lite_mixed/library/test_kernels_lite_mixed.cpp"
   COMMAND ${lite_mixed_command}
