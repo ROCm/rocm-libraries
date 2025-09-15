@@ -54,8 +54,8 @@ def run(args):
         else:
             suite = "all"
 
-    generator = getattr(rrperf.rrsuites, suite)
-    for x in generator():
+    generator = utils.load_suite(suite)
+    for x in generator:
         print(hline())
         print("-- rocRoller benchmark run")
         print("--")
