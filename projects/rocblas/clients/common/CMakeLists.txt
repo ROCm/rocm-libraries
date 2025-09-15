@@ -167,5 +167,3 @@ if(BUILD_WITH_HIPBLASLT)
     target_link_libraries( rocblas_clients_common PRIVATE roc::hipblaslt )
 endif()
 target_link_libraries( rocblas_clients_testing_common roc::rocblas hip::host hip::device ${BLAS_LIBRARY} $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
-
-

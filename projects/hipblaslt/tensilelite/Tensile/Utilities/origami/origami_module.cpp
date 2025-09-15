@@ -51,6 +51,15 @@ PYBIND11_MODULE(origami, m)
           &Origami::intToDataType,
           "Convert int to DataType.");
 
+    pybind11::enum_<Origami::streamk::ReductionType>(m, "ReductionType")
+        .value("Tree", Origami::streamk::ReductionType::Tree)
+        .value("Parallel", Origami::streamk::ReductionType::Parallel)
+        .export_values();
+
+    m.def("intToReductionType",
+          &Origami::streamk::intToReductionType,
+          "Convert int to ReductionType.");
+
     pybind11::class_<Hardware>(m, "Hardware")
         .def(pybind11::init<Hardware::Architecture,
                             size_t,
@@ -62,7 +71,7 @@ PYBIND11_MODULE(origami, m)
                             size_t,
                             double,
                             size_t,
-                            double>())
+                            std::tuple<double, double, double>>())
         .def("print", &Hardware::print)
         .def("print_debug_info", &Hardware::print_debug_info)
         .def_readwrite("N_CU", &Hardware::N_CU)
@@ -74,7 +83,7 @@ PYBIND11_MODULE(origami, m)
         .def_readwrite("CU_per_L2", &Hardware::CU_per_L2)
         .def_readwrite("compute_clock_ghz", &Hardware::compute_clock_ghz)
         .def_readwrite("parallel_MI_CU", &Hardware::parallel_MI_CU)
-        .def_readwrite("percent_bw_per_wg", &Hardware::percent_bw_per_wg)
+        .def_readwrite("mem_bw_per_wg_coefficients", &Hardware::mem_bw_per_wg_coefficients)
         .def_readwrite("NUM_XCD", &Hardware::NUM_XCD);
 
     m.def("getHardwareForDevice",
@@ -86,6 +95,7 @@ PYBIND11_MODULE(origami, m)
     m.def("select_best_macro_tile_size",
           &Origami::select_best_macro_tile_size,
           "Get best macro tile sizes.");
+    m.def("select_streamk_reduction", &Origami::streamk::select_streamk_reduction, "Select best StreamK reduction strategy");
     m.def("select_streamk_grid", &Origami::streamk::select_streamk_grid, "Select Best StreamK Grid Size");
     m.def("compute_total_latency", &Origami::compute_total_latency, "compute_total_latency");
     m.def("select_best_wgm", &Origami::select_best_wgm, "Get best workgroup mapping.");
