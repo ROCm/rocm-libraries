@@ -383,9 +383,6 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
     else if(filename == "")
         filename = default_file;
 
-    std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA yaml: " << yaml << " filename: " << filename
-              << " include_path: " << include_path << std::endl;
-
     if(yaml)
         filename = rocsparse_parse_yaml(filename, include_path);
 
