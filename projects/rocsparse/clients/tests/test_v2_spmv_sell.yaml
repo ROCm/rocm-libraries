@@ -111,7 +111,7 @@ Tests:
              mplate]
 
 - name: v2_spmv_sell
-  category: nighlty
+  category: nightly
   function: v2_spmv_sell
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
