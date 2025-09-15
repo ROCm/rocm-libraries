@@ -96,12 +96,13 @@ def main():
     # If the output is too short (i.e. only csv headers), repeat the run
     CHAR_LIMIT = args.char_limit
 
-    # Create output directory structure
     output_dir = "output"
 
-    # Create output directory if it doesn't exist
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    if os.path.exists(output_dir):
+        print(f"Cleaning output directory: {output_dir}")
+        shutil.rmtree(output_dir)
+
+    os.makedirs(output_dir)
 
     print(f"Testing instruction widths: {args.instr_widths}")
     print(f"Testing modes: {[mode[0] for mode in modes_to_test]}")
