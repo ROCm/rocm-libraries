@@ -1184,18 +1184,20 @@ template <int BDIM, typename S>
 __device__ inline void reduce1(S& val)
 {
     __shared__ S lds[BDIM];
-    
-    lds[hipThreadIdx_x] = val;
-    for (int r = hipBlockDim_x / 2; r > 0; r /= 2)
+
+    // on each iteration reduction is done within a subgroup of size of 2*bit
+    // by xoring corresponding bit of an address.
+    // The faster implementation should use dpp + a single trip through lds
+    // but keeping code simple for now.
+    int bit = 1;
+    while(bit < BDIM)
     {
+        lds[hipThreadIdx_x ^ bit] = val;
         __syncthreads();
-        if (hipThreadIdx_x < r) {
-            val += lds[hipThreadIdx_x + r];
-            lds[hipThreadIdx_x] = val;
-        }
+        val += lds[hipThreadIdx_x];
+        __syncthreads();
+        bit *= 2;
     }
-    __syncthreads();
-    val = lds[0];
 }
 
 template <int BDIM, typename S>
@@ -1205,26 +1207,23 @@ __device__ inline void reduce3(S& val1, S& val2, S& val3)
     __shared__ S lds2[BDIM];
     __shared__ S lds3[BDIM];
 
-    lds1[hipThreadIdx_x] = val1;
-    lds2[hipThreadIdx_x] = val2;
-    lds3[hipThreadIdx_x] = val3;
-    for(int r = hipBlockDim_x / 2; r > 0; r /= 2)
+    // on each iteration reduction is done within a subgroup of size of 2*bit
+    // by xoring corresponding bit of an address.
+    // The faster implementation should use dpp + a single trip through lds
+    // but keeping code simple for now.
+    int bit = 1;
+    while(bit < BDIM)
     {
+        lds1[hipThreadIdx_x ^ bit] = val1;
+        lds2[hipThreadIdx_x ^ bit] = val2;
+        lds3[hipThreadIdx_x ^ bit] = val3;
         __syncthreads();
-        if(hipThreadIdx_x < r)
-        {
-            val1 += lds1[hipThreadIdx_x + r];
-            val2 += lds2[hipThreadIdx_x + r];
-            val3 += lds3[hipThreadIdx_x + r];
-            lds1[hipThreadIdx_x] = val1;
-            lds2[hipThreadIdx_x] = val2;
-            lds3[hipThreadIdx_x] = val3;
-        }
+        val1 += lds1[hipThreadIdx_x];
+        val2 += lds2[hipThreadIdx_x];
+        val3 += lds3[hipThreadIdx_x];
+        __syncthreads();
+        bit *= 2;
     }
-    __syncthreads();
-    val1 = lds1[0];
-    val2 = lds2[0];
-    val3 = lds3[0];
 }
 
 template <typename S, typename I>
@@ -1280,6 +1279,7 @@ __device__ I slaed4_new(I n,
     S psi, dpsi, phi, dphi, rhoinv, midpt;
     S del, a, b, c, w, erretm, erretm2, temp, dw, temp1, prew;
     I ii, niter, iter, orgati, iim1, iip1;
+    I beg, end, rbeg, rend, cnt;
     bool swtch3, swtch;
 
     S d1 = DELTA(1);
@@ -1308,9 +1308,19 @@ __device__ I slaed4_new(I n,
         midpt = rho / S(2.);
 
         psi = S(0.);
-        for(int j = 1 + hipThreadIdx_x; j <= n - 2; j += hipBlockDim_x)
+        beg = 1;
+        end = n - 2;
+        if(end >= beg)
         {
-            psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
+            cnt = (end - beg) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = jc + beg + hipThreadIdx_x * cnt;
+                if(j <= end)
+                {
+                    psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
+                }
+            }
         }
         reduce1<STEDC_SOLVE_BDIM>(psi);
 
@@ -1375,12 +1385,22 @@ __device__ I slaed4_new(I n,
         dpsi = S(0.);
         psi = S(0.);
         erretm = S(0.);
-        for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
+        beg = 1;
+        end = ii;
+        if(end >= beg)
         {
-            temp = Z(j) / DELTA(j);
-            psi = psi + Z(j) * temp;
-            dpsi = dpsi + temp * temp;
-            erretm = erretm + psi;
+            cnt = (end - beg) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = jc + beg + hipThreadIdx_x * cnt;
+                if(j <= end)
+                {
+                    temp = Z(j) / DELTA(j);
+                    psi = psi + Z(j) * temp;
+                    dpsi = dpsi + temp * temp;
+                    erretm = erretm + psi;
+                }
+            }
         }
         reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
@@ -1468,12 +1488,22 @@ __device__ I slaed4_new(I n,
         dpsi = S(0.);
         psi = S(0.);
         erretm = S(0.);
-        for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
+        beg = 1;
+        end = ii;
+        if(end >= beg)
         {
-            temp = Z(j) / DELTA(j);
-            psi = psi + Z(j) * temp;
-            dpsi = dpsi + temp * temp;
-            erretm = erretm + psi;
+            cnt = (end - beg) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = jc + beg + hipThreadIdx_x * cnt;
+                if(j <= end)
+                {
+                    temp = Z(j) / DELTA(j);
+                    psi = psi + Z(j) * temp;
+                    dpsi = dpsi + temp * temp;
+                    erretm = erretm + psi;
+                }
+            }
         }
         reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
@@ -1556,12 +1586,22 @@ __device__ I slaed4_new(I n,
             dpsi = S(0.);
             psi = S(0.);
             erretm = S(0.);
-            for(int j = 1 + hipThreadIdx_x; j <= ii; j += hipBlockDim_x)
+            beg = 1;
+            end = ii;
+            if(end >= beg)
             {
-                temp = Z(j) / DELTA(j);
-                psi = psi + Z(j) * temp;
-                dpsi = dpsi + temp * temp;
-                erretm = erretm + psi;
+                cnt = (end - beg) / hipBlockDim_x + 1;
+                for(int jc = 0; jc < cnt; jc++)
+                {
+                    int j = jc + beg + hipThreadIdx_x * cnt;
+                    if(j <= end)
+                    {
+                        temp = Z(j) / DELTA(j);
+                        psi = psi + Z(j) * temp;
+                        dpsi = dpsi + temp * temp;
+                        erretm = erretm + psi;
+                    }
+                }
             }
             reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
@@ -1594,18 +1634,38 @@ __device__ I slaed4_new(I n,
         del = dip1 - di;
         midpt = del / S(2.);
         psi = S(0.);
-        for(int j = 1 + hipThreadIdx_x; j <= i - 1; j += hipBlockDim_x)
+        beg = 1;
+        end = i - 1;
+        if(end >= beg)
         {
-            S dj = (DELTA(j) - di) - midpt;
-            psi = psi + Z(j) * Z(j) / dj;
+            cnt = (end - beg) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = jc + beg + hipThreadIdx_x * cnt;
+                if(j <= end)
+                {
+                    S dj = (DELTA(j) - di) - midpt;
+                    psi = psi + Z(j) * Z(j) / dj;
+                }
+            }
         }
         reduce1<STEDC_SOLVE_BDIM>(psi);
 
         phi = S(0.);
-        for(int j = n - hipThreadIdx_x; j >= i + 2; j -= hipBlockDim_x)
+        rbeg = n;
+        rend = i + 2;
+        if(rbeg >= rend)
         {
-            S dj = (DELTA(j) - di) - midpt;
-            phi = phi + Z(j) * Z(j) / dj;
+            cnt = (rbeg - rend) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = rbeg - jc - hipThreadIdx_x * cnt;
+                if(j >= rend)
+                {
+                    S dj = (DELTA(j) - di) - midpt;
+                    phi = phi + Z(j) * Z(j) / dj;
+                }
+            }
         }
         reduce1<STEDC_SOLVE_BDIM>(phi);
 
@@ -1686,12 +1746,22 @@ __device__ I slaed4_new(I n,
         dpsi = S(0.);
         psi = S(0.);
         erretm = S(0.);
-        for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
+        beg = 1;
+        end = iim1;
+        if(end >= beg)
         {
-            temp = Z(j) / DELTA(j);
-            psi = psi + Z(j) * temp;
-            dpsi = dpsi + temp * temp;
-            erretm = erretm + psi;
+            cnt = (end - beg) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = jc + beg + hipThreadIdx_x * cnt;
+                if(j <= end)
+                {
+                    temp = Z(j) / DELTA(j);
+                    psi = psi + Z(j) * temp;
+                    dpsi = dpsi + temp * temp;
+                    erretm = erretm + psi;
+                }
+            }
         }
         reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
@@ -1701,12 +1771,22 @@ __device__ I slaed4_new(I n,
         dphi = S(0.);
         phi = S(0.);
         erretm2 = S(0.);
-        for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+        rbeg = n;
+        rend = iip1;
+        if(rbeg >= rend)
         {
-            temp = Z(j) / DELTA(j);
-            phi = phi + Z(j) * temp;
-            dphi = dphi + temp * temp;
-            erretm2 = erretm2 + phi;
+            cnt = (rbeg - rend) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = rbeg - jc - hipThreadIdx_x * cnt;
+                if(j >= rend)
+                {
+                    temp = Z(j) / DELTA(j);
+                    phi = phi + Z(j) * temp;
+                    dphi = dphi + temp * temp;
+                    erretm2 = erretm2 + phi;
+                }
+            }
         }
         reduce3<STEDC_SOLVE_BDIM>(phi, dphi, erretm2);
         erretm += erretm2;
@@ -1868,12 +1948,22 @@ __device__ I slaed4_new(I n,
         dpsi = S(0.);
         psi = S(0.);
         erretm = S(0.);
-        for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
+        beg = 1;
+        end = iim1;
+        if (end >= beg)
         {
-            temp = Z(j) / DELTA(j);
-            psi = psi + Z(j) * temp;
-            dpsi = dpsi + temp * temp;
-            erretm = erretm + psi;
+            cnt = (end - beg) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = jc + beg + hipThreadIdx_x * cnt;
+                if(j <= end)
+                {
+                    temp = Z(j) / DELTA(j);
+                    psi = psi + Z(j) * temp;
+                    dpsi = dpsi + temp * temp;
+                    erretm = erretm + psi;
+                }
+            }
         }
         reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
@@ -1883,12 +1973,22 @@ __device__ I slaed4_new(I n,
         dphi = S(0.);
         phi = S(0.);
         erretm2 = S(0.);
-        for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+        rbeg = n;
+        rend = iip1;
+        if(rbeg >= rend)
         {
-            temp = Z(j) / DELTA(j);
-            phi = phi + Z(j) * temp;
-            dphi = dphi + temp * temp;
-            erretm2 = erretm2 + phi;
+            cnt = (rbeg - rend) / hipBlockDim_x + 1;
+            for(int jc = 0; jc < cnt; jc++)
+            {
+                int j = rbeg - jc - hipThreadIdx_x * cnt;
+                if(j >= rend)
+                {
+                    temp = Z(j) / DELTA(j);
+                    phi = phi + Z(j) * temp;
+                    dphi = dphi + temp * temp;
+                    erretm2 = erretm2 + phi;
+                }
+            }
         }
         reduce3<STEDC_SOLVE_BDIM>(phi, dphi, erretm2);
         erretm += erretm2;
@@ -2081,12 +2181,22 @@ __device__ I slaed4_new(I n,
             dpsi = S(0.);
             psi = S(0.);
             erretm = S(0.);
-            for(int j = 1 + hipThreadIdx_x; j <= iim1; j += hipBlockDim_x)
+            beg = 1;
+            end = iim1;
+            if(end >= beg)
             {
-                temp = Z(j) / DELTA(j);
-                psi = psi + Z(j) * temp;
-                dpsi = dpsi + temp * temp;
-                erretm = erretm + psi;
+                cnt = (end - beg) / (int)hipBlockDim_x + 1;
+                for(int jc = 0; jc < cnt; jc++)
+                {
+                    int j = jc + beg + hipThreadIdx_x * cnt;
+                    if(j <= end)
+                    {
+                        temp = Z(j) / DELTA(j);
+                        psi = psi + Z(j) * temp;
+                        dpsi = dpsi + temp * temp;
+                        erretm = erretm + psi;
+                    }
+                }
             }
             reduce3<STEDC_SOLVE_BDIM>(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
@@ -2096,12 +2206,22 @@ __device__ I slaed4_new(I n,
             dphi = S(0.);
             phi = S(0.);
             erretm2 = S(0.);
-            for(int j = n - hipThreadIdx_x; j >= iip1; j -= hipBlockDim_x)
+            rbeg = n;
+            rend = iip1;
+            if(rbeg >= rend)
             {
-                temp = Z(j) / DELTA(j);
-                phi = phi + Z(j) * temp;
-                dphi = dphi + temp * temp;
-                erretm2 = erretm2 + phi;
+                cnt = (rbeg - rend) / hipBlockDim_x + 1;
+                for(int jc = 0; jc < cnt; jc++)
+                {
+                    int j = rbeg - jc - hipThreadIdx_x * cnt;
+                    if(j >= rend)
+                    {
+                        temp = Z(j) / DELTA(j);
+                        phi = phi + Z(j) * temp;
+                        dphi = dphi + temp * temp;
+                        erretm2 = erretm2 + phi;
+                    }
+                }
             }
             reduce3<STEDC_SOLVE_BDIM>(phi, dphi, erretm2);
             erretm += erretm2;
