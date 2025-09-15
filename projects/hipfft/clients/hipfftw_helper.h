@@ -1046,13 +1046,10 @@ public:
             return true;
         if(dft_kind == fft_transform_type_real_inverse && rank > 1 && (flags & FFTW_PRESERVE_INPUT))
             return true;
-        if(!(creation_options & hipfftw_plan_creation_func::PLAN_GURU64) && has_valid_rank()
-           && has_valid_lengths())
+        // negative strides and distances are not supported
+        for(const std::vector<ptrdiff_t>& tmp : {istrides, ostrides, idist, odist})
         {
-            // cannot handle data sizes involving more elements than the
-            // largest representable int value
-            if(get_num_elements_in(fft_io_in) > std::numeric_limits<int>::max()
-               || get_num_elements_in(fft_io_out) > std::numeric_limits<int>::max())
+            if(std::any_of(tmp.begin(), tmp.end(), [](const ptrdiff_t& val) { return val < 0; }))
                 return true;
         }
         return false;

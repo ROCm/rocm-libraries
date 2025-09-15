@@ -338,16 +338,15 @@ namespace
 
     template <size_t rank,
               size_t batch_rank,
-              typename T,
-              std::enable_if_t<std::is_integral_v<T> && (rank > 0 && batch_rank > 0), bool> = true>
+              std::enable_if_t<(rank > 0 && batch_rank > 0), bool> = true>
     struct hipfftw_general_layout_data
     {
-        std::array<T, rank>       lengths; // row-major
-        std::array<T, rank>       istrides; // row-major
-        std::array<T, rank>       ostrides; // row-major
-        std::array<T, batch_rank> batches;
-        std::array<T, batch_rank> idist;
-        std::array<T, batch_rank> odist;
+        std::array<ptrdiff_t, rank>       lengths; // row-major
+        std::array<ptrdiff_t, rank>       istrides; // row-major
+        std::array<ptrdiff_t, rank>       ostrides; // row-major
+        std::array<ptrdiff_t, batch_rank> batches;
+        std::array<ptrdiff_t, batch_rank> idist;
+        std::array<ptrdiff_t, batch_rank> odist;
         // constexpr getters
         constexpr inline size_t get_rank() const
         {
@@ -432,8 +431,8 @@ namespace
             internal_execute(new_exec_in, new_exec_out);
         }
 
-        template <rocfft_transform_type dft_type, size_t rank, typename T, size_t batch_rank>
-        void init(const hipfftw_general_layout_data<rank, batch_rank, T>&             data_layout,
+        template <rocfft_transform_type dft_type, size_t rank, size_t batch_rank>
+        void init(const hipfftw_general_layout_data<rank, batch_rank>&                data_layout,
                   hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  user_in,
                   hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* user_out,
                   unsigned                                                            flags)
@@ -441,8 +440,9 @@ namespace
             // compile-time validations of template specialization values
             static_assert(1 <= rank && rank <= 3);
             static_assert(1 == batch_rank); // only supported case at the moment
-            // assuming no overflow when converting values from T into size_t below
-            static_assert(std::numeric_limits<T>::max() <= std::numeric_limits<size_t>::max());
+            // assuming no overflow when converting values from ptrdiff_t into size_t below
+            static_assert(std::numeric_limits<ptrdiff_t>::max()
+                          <= std::numeric_limits<size_t>::max());
             // Validation of input arguments:
             for(auto dim = 0; dim < rank; dim++)
             {
@@ -581,14 +581,6 @@ namespace
                 last_output_element_idx
                     += (data_layout.batches[batch_dim] - 1) * data_layout.odist[batch_dim];
             }
-            if(last_input_element_idx > std::numeric_limits<T>::max()
-               || last_output_element_idx > std::numeric_limits<T>::max())
-            {
-                throw hipfftw_unsupported(
-                    "data layouts involving element indices that exceed the maximum value "
-                    "representable in the chosen integral type are not supported (consider using "
-                    "guru64 plan creation functions).");
-            }
             in_bytes = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)
                        * (last_input_element_idx + 1);
             out_bytes = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>)
@@ -598,8 +590,8 @@ namespace
                 in_bytes = out_bytes = std::max(in_bytes, out_bytes);
             }
 
-            // Change row-major to col-major for all relevant inputs, converting from T to size_t
-            auto reverse = [](const std::array<T, rank>& in_array) {
+            // Change row-major to col-major for all relevant inputs, converting from ptrdiff_t to size_t
+            auto reverse = [](const std::array<ptrdiff_t, rank>& in_array) {
                 auto ret = std::array<size_t, rank>();
                 std::reverse_copy(in_array.begin(), in_array.end(), ret.begin());
                 return ret;
@@ -777,40 +769,31 @@ namespace
 
     // default values are consistent with basic plans' data layouts
     template <size_t rank, rocfft_transform_type dft_type>
-    hipfftw_general_layout_data<rank, 1, int> hipfftw_get_data_layout(const int*  n,
-                                                                      const void* input_ptr,
-                                                                      const void* output_ptr,
-                                                                      const int   istride = 1,
-                                                                      const int   ostride = 1,
-                                                                      const int*  inembed = nullptr,
-                                                                      const int*  onembed = nullptr,
-                                                                      const int   howmany = 1,
-                                                                      const int   idist   = 0,
-                                                                      const int   odist   = 0)
+    hipfftw_general_layout_data<rank, 1> hipfftw_get_data_layout(const int*  n,
+                                                                 const void* input_ptr,
+                                                                 const void* output_ptr,
+                                                                 const int   istride = 1,
+                                                                 const int   ostride = 1,
+                                                                 const int*  inembed = nullptr,
+                                                                 const int*  onembed = nullptr,
+                                                                 const int   howmany = 1,
+                                                                 const int   idist   = 0,
+                                                                 const int   odist   = 0)
     {
         if(!n)
             throw hipfftw_invalid_arg("lengths argument must not be nullptr.");
 
-        auto overflow_guarded_mult = [](int& a, const int& b) {
-            auto tmp = static_cast<std::int64_t>(a) * static_cast<std::int64_t>(b);
-            if(tmp > std::numeric_limits<int>::max() || tmp < std::numeric_limits<int>::min())
-                throw hipfftw_unsupported(
-                    "length(s) that trigger integer overflow(s) for overall stride(s) and/or "
-                    "distance(s) are not supported via this plan creation function (consider "
-                    "guru64 plan creation functions instead).");
-            a = static_cast<int>(tmp);
-        };
-        hipfftw_general_layout_data<rank, 1, int> ret;
+        hipfftw_general_layout_data<rank, 1> ret;
         // length(s) and strides
-        int ival = istride, oval = ostride;
+        ptrdiff_t ival = istride, oval = ostride;
         for(auto dim_idx = rank; dim_idx-- > 0;)
         {
             ret.lengths[dim_idx] = n[dim_idx];
             for(auto io : {hipfftw_io_label::INPUT_DATA, hipfftw_io_label::OUTPUT_DATA})
             {
-                std::array<int, rank>& strides
+                std::array<ptrdiff_t, rank>& strides
                     = io == hipfftw_io_label::INPUT_DATA ? ret.istrides : ret.ostrides;
-                int&       stride_val = io == hipfftw_io_label::INPUT_DATA ? ival : oval;
+                auto&      stride_val = io == hipfftw_io_label::INPUT_DATA ? ival : oval;
                 const int* nembed     = io == hipfftw_io_label::INPUT_DATA ? inembed : onembed;
                 int        default_embed_val = n[dim_idx];
                 if(is_real(dft_type) && dim_idx == rank - 1)
@@ -822,7 +805,7 @@ namespace
                         default_embed_val = 2 * (n[dim_idx] / 2 + 1); // padded real domain
                 }
 
-                const int embed_val = nembed ? nembed[dim_idx] : default_embed_val;
+                const auto embed_val = nembed ? nembed[dim_idx] : default_embed_val;
                 if(embed_val < default_embed_val)
                 {
                     std::ostringstream exception_info;
@@ -833,7 +816,7 @@ namespace
                     throw hipfftw_invalid_arg(exception_info.str());
                 }
                 strides[dim_idx] = stride_val;
-                overflow_guarded_mult(stride_val, embed_val);
+                stride_val *= embed_val;
             }
         }
         // batch size and distances
@@ -1071,19 +1054,15 @@ struct hipfftw_plan<rocfft_precision_double>
 template <rocfft_precision prec>
 using hipfftw_plan_t = typename hipfftw_plan<prec>::type;
 
-template <rocfft_transform_type dft_type,
-          rocfft_precision      prec,
-          size_t                rank,
-          typename T,
-          size_t batch_rank = 1>
+template <rocfft_transform_type dft_type, rocfft_precision prec, size_t rank, size_t batch_rank = 1>
 static hipfftw_plan_t<prec>* hipfftw_create_plan(
-    const hipfftw_general_layout_data<rank, batch_rank, T>              layout,
+    const hipfftw_general_layout_data<rank, batch_rank>                 layout,
     hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  user_in,
     hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* user_out,
     unsigned                                                            flags)
 {
     auto ret = std::make_unique<hipfftw_plan_t<prec>>();
-    ret->template init<dft_type, rank, T, batch_rank>(layout, user_in, user_out, flags);
+    ret->template init<dft_type, rank, batch_rank>(layout, user_in, user_out, flags);
     return ret.release();
 }
 
