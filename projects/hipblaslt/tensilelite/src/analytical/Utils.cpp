@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <Tensile/analytical/Utils.hpp>
-// #include "Utils.hpp"
 
 #include <algorithm>
 #include <chrono> // For timing
@@ -73,7 +72,7 @@ namespace TensileLite
             };
             // 2) Sort the results in descending order of arithmetic intensity
             //    (highest arithmetic intensity first).
-            std::sort(top_results.begin(),
+            std::stable_sort(top_results.begin(),
                       top_results.begin() + num_to_sort,
                       [&](const ResultTuple& a, const ResultTuple& b) {
                           double ai_a = computeArithmeticIntensity(a);
@@ -124,7 +123,7 @@ namespace TensileLite
             //    - If still a tie, compare dimensionPriority[2]
             //    - If they're all equal, consider them tied
             std::vector<ResultTuple> sorted = top_results; // copy
-            std::sort(
+            std::stable_sort(
                 sorted.begin(), sorted.end(), [&](const ResultTuple& a, const ResultTuple& b) {
                     for(char d : dimPriority)
                     {
@@ -192,14 +191,13 @@ namespace TensileLite
                                                        MI_M,
                                                        MI_N,
                                                        MI_K,
-                                                       split,
-                                                       H_L2,
                                                        element_size_A, //ElementSizeA
                                                        element_size_B, //ElementSizeB
                                                        element_size_out, //ElementSizeout
                                                        miDataType,
-                                                       WGM,
                                                        mx_block_size,
+                                                       WGM,
+                                                       split,
                                                        debug);
 
                 if(latency < best_latency)
@@ -231,7 +229,7 @@ namespace TensileLite
                                                              double   H_L2,
                                                              bool     debug,
                                                              bool     print,
-                                                             size_t   WGM)
+                                                             size_t   defaultWGM)
         {
             std::vector<ResultTuple> valid_results;
             valid_results.reserve(MT_list.size());
@@ -248,6 +246,7 @@ namespace TensileLite
                 size_t MI_N      = std::get<4>(mt);
                 size_t MI_K      = std::get<5>(mt);
                 size_t occupancy = std::get<6>(mt);
+                size_t WGM       = std::get<7>(mt);
 
                 if(debug)
                 {
@@ -256,7 +255,6 @@ namespace TensileLite
                               << ", MI_K=" << MI_K << "\n";
                 }
 
-                size_t split = 1;
                 if(check_LDS_capacity(hardware, MT_M, MT_N, MT_K, element_size_A, debug))
                 {
                     double Total_latency = compute_total_latency(hardware,
@@ -272,18 +270,17 @@ namespace TensileLite
                                                                  MI_M,
                                                                  MI_N,
                                                                  MI_K,
-                                                                 split,
-                                                                 H_L2,
                                                                  element_size_A,
                                                                  element_size_B,
                                                                  element_size_out,
                                                                  miDataType,
-                                                                 WGM,
                                                                  mx_block_size,
+                                                                 WGM,
+                                                                 0, // split will be picked automatically
                                                                  debug);
 
                     valid_results.emplace_back(
-                        Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy);
+                        Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy, WGM);
                 }
                 else if(debug)
                 {
@@ -298,7 +295,7 @@ namespace TensileLite
             }
 
             // 1) Sort results by ascending latency.
-            std::sort(valid_results.begin(), valid_results.end(), [](auto const& a, auto const& b) {
+            std::stable_sort(valid_results.begin(), valid_results.end(), [](auto const& a, auto const& b) {
                 return std::get<0>(a) < std::get<0>(b);
             });
 
@@ -306,13 +303,13 @@ namespace TensileLite
             double best_latency = std::get<0>(valid_results.front());
             size_t num_the_same = 0;
 
-            // TODO: Experiment on what the threshold should be.
-            // Likely can be replaced with 5.
-            size_t tie_breaker_threshold = tf32_emu ? 5 : 10;
+            // Count the number of similar latencies
             for(const auto& res : valid_results)
             {
-                // If it's "essentially" (within 5 diff) the same as best_latency, include it
-                if(std::fabs(std::get<0>(res) - best_latency) < tie_breaker_threshold)
+                double diff = std::fabs(std::get<0>(res) - best_latency);
+                diff /= best_latency;
+                // If it's within 1%, include it.
+                if(diff < 0.01)
                     num_the_same++;
                 else
                     break; // Once we pass best_latency, we can stop.
@@ -410,15 +407,16 @@ namespace TensileLite
 
                 // Compute L2 hit rate for this WGM
                 double current_hit = estimate_l2_hit(hardware,
-                                                     static_cast<int>(M),
-                                                     static_cast<int>(N),
-                                                     static_cast<int>(K),
-                                                     static_cast<int>(batch),
-                                                     static_cast<int>(MT_M),
-                                                     static_cast<int>(MT_N),
-                                                     static_cast<int>(MT_K),
+                                                     M,
+                                                     N,
+                                                     K,
+                                                     batch,
+                                                     MT_M,
+                                                     MT_N,
+                                                     MT_K,
+                                                     element_size,
                                                      static_cast<int>(candidate_wgm),
-                                                     element_size);
+                                                     1 /* splittingFactor */);
 
                 valid_results.emplace_back(current_hit, candidate_wgm);
             }
@@ -471,7 +469,7 @@ namespace TensileLite
             }
 
             // Sort results by precise_latency (ascending order)
-            std::sort(tie_breaker_results.begin(), tie_breaker_results.end());
+            std::stable_sort(tie_breaker_results.begin(), tie_breaker_results.end());
 
             return tie_breaker_results;
         }
@@ -532,15 +530,14 @@ namespace TensileLite
                                                 MI_M,
                                                 MI_N,
                                                 MI_K,
-                                                split, //Split
-                                                H_L2, //H_mem1
                                                 element_size * 8, //Element Size A
                                                 element_size * 8, //Element Size B
                                                 element_size * 8, //Element Size out
                                                 miDataType,
-                                                WGM, //WGM
-                                                mx_block_size, //mx_block_size
-                                                debug); //debug
+                                                mx_block_size,
+                                                WGM,
+                                                split,
+                                                debug);
 
                     results.push_back(
                         std::make_tuple(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K));
@@ -553,7 +550,7 @@ namespace TensileLite
             }
 
             // Sort results by Total_latency, from worst (largest latency) to best (smallest latency)
-            std::sort(
+            std::stable_sort(
                 results.begin(), results.end(), [](const ResultTuple& a, const ResultTuple& b) {
                     return std::get<0>(a) > std::get<0>(b);
                 });
@@ -598,7 +595,7 @@ namespace TensileLite
                     }
 
                     // Now sort the tie_breaker_scores based on score
-                    std::sort(tie_breaker_scores.begin(),
+                    std::stable_sort(tie_breaker_scores.begin(),
                               tie_breaker_scores.end(),
                               [](const std::pair<double, size_t>& a,
                                  const std::pair<double, size_t>& b) { return a.first > b.first; });
