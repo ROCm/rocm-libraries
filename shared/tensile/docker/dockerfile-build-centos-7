@@ -35,4 +35,3 @@ RUN yum -y install llvm-toolset-7-llvm-devel \
                    git ncurses-devel zlib-devel
 
 RUN echo -e "\nsource /opt/rh/llvm-toolset-7/enable" >> /etc/skel/.bashrc
-
