@@ -7636,12 +7636,16 @@ class KernelWriterAssembly(KernelWriter):
       graIdx = 0
       g2lIdx = 0
       loadWidth = tP["globalReadInstruction"].totalWidth
+      # FIXME: Don't know why for grvw == 1, need further investigate
+      glvwWorkaround = 8 * kernel["ProblemType"]["DataType"].numRegisters()
+      dataType = kernel["ProblemType"]["DataType"] if tP["glvw"] < glvwWorkaround else kernel["ProblemType"]["DataType%s"%tcDataType]
 
       isGlc = bool(tP["NonTemporal"] & 0x1)
       isSlc = bool(tP["NonTemporal"] & 0x2)
       isNT  = bool(tP["NonTemporal"] & 0x4)
       isLds = True if (kernel["DirectToLds%s"%tc] and not kernel["NonDTLTailLoop%s"%tc]) else False
       isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
+      is16b = dataType.isHalf() or dataType.isBFloat16()
 
       directToLdsLoads = 0
       if doTailOpt == 2 and behavior == "LOAD":
@@ -7662,6 +7666,14 @@ class KernelWriterAssembly(KernelWriter):
       sParaEnd = periodParam[7] if doTailOpt == 2 else (tP["nrcv"]//tP["nrcvpi"])
       rStart = periodParam[8] if doTailOpt == 2 else 0
       rEnd = periodParam[9] if doTailOpt == 2 else 0
+
+      requiredSgprs = min(self.sgprPool.size() + 5, self.states.regCaps["MaxSgpr"])
+      maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
+                                                      self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+
+      tmpVgprPool = []
+      packInst = Module()
+      maxNumTempToUse = max(maxVgprs - self.vgprPool.size(), 1)
 
       for perp in range(perpStart, perpEnd):
         for sPerp in range(sPerpStart, sPerpEnd):
@@ -7687,6 +7699,7 @@ class KernelWriterAssembly(KernelWriter):
 
               r = 0
               numLoadVectorComp = int(loadWidth*self.states.bpr//tP["bpeGR"])
+
               if (kernel["ProblemType"]["DataType%s"%tcDataType].isDouble() or kernel["ProblemType"]["DataType%s"%tcDataType].isSingle())\
                  and kernel["BufferLoad"]:
                 # adjustment for {d,s}gemm + BufferLoad
@@ -7708,9 +7721,7 @@ class KernelWriterAssembly(KernelWriter):
                     module.add(SCBranchSCC0(labelName=jumpLabel.getLabelName(), comment=""))
 
                 numElementsPerLoad = 1
-                # FIXME: Don't know why for grvw == 1, need further investigate
-                glvwWorkaround = 8 * kernel["ProblemType"]["DataType"].numRegisters()
-                dataType = kernel["ProblemType"]["DataType"] if tP["glvw"] < glvwWorkaround else kernel["ProblemType"]["DataType%s"%tcDataType]
+
                 if kernel["ConvertAfterDS"]:
                     dataType = kernel["ProblemType"]["DataType%s"%tcDataType]
                 if dataType.isInt8() or dataType.is8bitFloat() or tP["isM"]:
@@ -7775,8 +7786,10 @@ class KernelWriterAssembly(KernelWriter):
                           destVgprHi = vgprSlot[vgprIdx]
                           if r >= rStart and r < rEnd and (r % 2 != 0):
                             vgprIdx = vgprIdx + 1
-                        else:
-                          destVgprHi = self.vgprPool.checkOut(1, 'destVgprHi')
+                        else: #doTailOpt == 0 case
+                          if r % 2 == 1:
+                            tmpVgprPool.append(self.vgprPool.checkOut(1, 'destVgprHi'))
+                            destVgprHi = tmpVgprPool[-1]
                   regIdx = r // 2
                 elif dataType.isInt8x4() or dataType.isSingle():
                   # Only supported for buffer loads since it has OOB checks
@@ -8030,6 +8043,7 @@ class KernelWriterAssembly(KernelWriter):
                       if (numElementsPerLoad == 2 and r % numElementsPer4Bytes != 0) or \
                          (numElementsPerLoad != 2 and ((r + 1) % numElementsPer4Bytes != 0)):
                         module.add(SWaitCnt(vlcnt=0, comment=""))
+                        # 8b checks are needed for mixed 16b/8b precisions
                         if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat():
                           module.add(VLShiftRightB32(dst=vgpr(destVgprHi), shiftHex=hex(8), src=vgpr(destVgprHi), comment="shift right to lower 8 bits"))
                         module.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
@@ -8040,18 +8054,18 @@ class KernelWriterAssembly(KernelWriter):
                            (numElementsPerLoad != 2 and (r + 1) == (numLoadVectorComp - 1)):
                           module.add(SBranch(labelName=jumpLabel.getLabelName(), comment=""))
                   else:
-                    if (doTailOpt == 0) or (doTailOpt == 2 and behavior == "MERGE" and r >= rStart and r < rEnd):
-                      if r % 2 == 1:
-                        if doTailOpt == 0:
-                          module.add(SWaitCnt(vlcnt=0, comment=""))
-                        else:
-
-                          module.add(SWaitCnt(vlcnt=(loadNum), comment=""))
-                        if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat():
-                          module.add(VLShiftRightB32(dst=vgpr(destVgprHi), shiftHex=hex(8), src=vgpr(destVgprHi), comment="shift right to lower 8 bits"))
-                        module.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
-                        if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat() and (g2lIdx % 2 == 1):
-                          module.add(VLShiftLeftB32(dst=vgpr(destVgpr), shiftHex=hex(16), src=vgpr(destVgpr), comment="shift left to higher 16 bits"))
+                    if r % 2 == 1:
+                      # 8b checks are needed for mixed 16b/8b precisions
+                      if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat():
+                        packInst.add(VLShiftRightB32(dst=vgpr(destVgprHi), shiftHex=hex(8), src=vgpr(destVgprHi), comment="shift right to lower 8 bits"))
+                      packInst.add(VOrB32(dst=vgpr(destVgpr), src0=vgpr(destVgpr), src1=vgpr(destVgprHi), comment="HasEccHalf: pack"))
+                      if kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat() and (g2lIdx % 2 == 1):
+                        packInst.add(VLShiftLeftB32(dst=vgpr(destVgpr), shiftHex=hex(16), src=vgpr(destVgpr), comment="shift left to higher 16 bits"))
+                      vlcntVal = 0 if doTailOpt == 0 else loadNum
+                      if (doTailOpt == 0 and len(tmpVgprPool) == maxNumTempToUse) or (doTailOpt == 2 and behavior == "MERGE" and r >= rStart and r < rEnd):
+                        module.add(SWaitCnt(vlcnt=(vlcntVal), comment=""))
+                        module.add(packInst)
+                        packInst = Module()
                 else:
                   if doTailOpt == 1 and i == idx and behavior == "MERGE" and\
                      ((numElementsPerLoad == 2 and r == (numLoadVectorComp - 1)) or\
@@ -8059,8 +8073,10 @@ class KernelWriterAssembly(KernelWriter):
                     module.add(SBranch(labelName=jumpLabel.getLabelName(), comment=""))
                 # For half (bf16). Note: for int8, we will checkin after loading all components
                 if (destVgprHi != None) and (not dataIsByte):
-                  if doTailOpt == 0:
-                    self.vgprPool.checkIn(destVgprHi)
+                  if len(tmpVgprPool) == maxNumTempToUse and doTailOpt == 0:
+                    for v in tmpVgprPool:
+                      self.vgprPool.checkIn(v)
+                    tmpVgprPool = []
                   destVgprHi = None
 
                 r += 1 # next component (for half, byte)
@@ -8079,6 +8095,14 @@ class KernelWriterAssembly(KernelWriter):
                 if doTailOpt == 0:
                   self.vgprPool.checkIn(destVgprHi - int8TempVgpr)
                 destVgprHi = None
+
+      # Handles doTailOpt==0 packing after all previous buffer loads have completed
+      if is16b and doTailOpt == 0 and tmpVgprPool:
+        module.add(SWaitCnt(vlcnt=0, comment="Wait for previous GR to finish"))
+        module.add(packInst)
+        for v in tmpVgprPool:
+          self.vgprPool.checkIn(v)
+        tmpVgprPool = []
 
       if kernel["ProblemType"]["Sparse"]:
         if kernel["DirectToVgprSparseMetadata"]:
@@ -11038,7 +11062,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(skipSrdTDLabel)
         else:
           module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
- 
+
     gsuLimitRange = range(0, gsuLimit) # generate GSU1 and GSUM label
     # TODO: generate only GSUM label for MBSK
     # if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):

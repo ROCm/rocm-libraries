@@ -71,6 +71,7 @@ option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
 option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
+cmake_dependent_option(USE_SYSTEM_LIB "Use installed hipCUB when building tests" OFF BUILD_TEST OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -191,6 +192,20 @@ endif()
 
 # Tests
 if(BUILD_TEST)
+  if(USE_SYSTEM_LIB)
+    # On ROCm hipCUB requires rocPRIM
+    if(HIP_COMPILER STREQUAL "clang")
+      find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/rocprim")
+      if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
+        message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+      endif()
+    endif()
+    find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/hipcub")
+    if (NOT ${hipcub_VERSION} VERSION_EQUAL ${VERSION_STRING})
+      message(WARNING "The installed hipcub version, ${hipcub_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+    endif()
+  endif()
+
   enable_testing()
   rocm_package_setup_client_component(tests)
   add_subdirectory(test)

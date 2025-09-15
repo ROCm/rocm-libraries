@@ -53,6 +53,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
     # rocm-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
+    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
@@ -66,7 +67,6 @@ endif()
 if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
     option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
-    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
@@ -114,6 +114,7 @@ else()
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
+    enable_language(Fortran)
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
     endif()
@@ -408,7 +409,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
 
 endif()
 
-if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
+if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     rocm_install(
         TARGETS hipblaslt-test
         COMPONENT tests
@@ -424,7 +425,7 @@ if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
     )
 endif()
 
-if(HIPBLASLT_ENABLE_SAMPLES)
+if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
     install(
         TARGETS
             sample_hipblaslt_gemm
