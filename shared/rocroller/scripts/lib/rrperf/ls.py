@@ -59,6 +59,7 @@ def run(args):
         print(hline())
         print("-- rocRoller benchmark run")
         print("--")
+        print("Id: ", x.id)
         print("Token: ", x)
         print("")
         print(utils.sjoin(x.command()))

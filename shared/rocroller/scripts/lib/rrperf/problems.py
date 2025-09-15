@@ -23,9 +23,11 @@
 #
 ################################################################################
 
+import json
 import pathlib
 from dataclasses import dataclass, field, fields, asdict
 from typing import Any, List, Optional
+from hashlib import sha1
 import yaml
 
 
@@ -235,6 +237,15 @@ class GEMM(GEMMProblem, GEMMSolution):
         convert_class_params(GEMM, self)
 
     @property
+    def id(self):
+        self_dict = asdict(self)
+        for f in fields(self):
+            if not f.compare:
+                del self_dict[f.name]
+        data_str = json.dumps(self_dict, sort_keys=True)
+        return sha1(data_str.encode()).hexdigest()
+
+    @property
     def run_invariant_token(self):
         return repr(GEMMProblem(**field_dict(GEMMProblem, self))) + repr(
             GEMMSolution(**field_dict(GEMMSolution, self))
@@ -408,6 +419,15 @@ class CodeGen:
     numRuns: int = 10
 
     @property
+    def id(self):
+        self_dict = asdict(self)
+        for f in fields(self):
+            if not f.compare:
+                del self_dict[f.name]
+        data_str = json.dumps(self_dict, sort_keys=True)
+        return sha1(data_str.encode()).hexdigest()
+
+    @property
     def run_invariant_token(self):
         return self.problem_token(None)
 
@@ -455,7 +475,7 @@ class CodeGen:
 class CodeGenRun(CodeGen):
     """CodeGen run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
@@ -488,8 +508,8 @@ class CodeGenResult(CodeGen, RRPerfResult):
 class TensileRun(GEMM):
     """Tensile run interface."""
 
-    config: pathlib.Path = field(repr=False, default=None, hash=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    config: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
     tensile_commit: str = "rocm-6.0.0"
 
     @property

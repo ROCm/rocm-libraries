@@ -62,7 +62,11 @@ def from_token(token: str):
 
 
 def run_problems(
-    generator, build_dir: Path, work_dir: Path, env: Dict[str, str]
+    generator,
+    build_dir: Path,
+    work_dir: Path,
+    env: Dict[str, str],
+    id_filter: list[str],
 ) -> bool:
 
     SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
@@ -72,8 +76,8 @@ def run_problems(
     failed = []
 
     for i, problem in enumerate(generator):
-        if filter is not None:
-            pass
+        if id_filter is not None and problem.id not in id_filter:
+            continue
 
         if problem in already_run:
             continue
@@ -91,6 +95,7 @@ def run_problems(
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")
+            print(f"  id: {problem.id}")
             print(f"  command: {scmd}")
             print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
@@ -152,6 +157,7 @@ def get_args(parser: argparse.ArgumentParser):
     common_args = [
         rrperf.args.rundir,
         rrperf.args.suite,
+        rrperf.args.id_filter,
     ]
     for arg in common_args:
         arg(parser)
@@ -163,7 +169,6 @@ def get_args(parser: argparse.ArgumentParser):
         default=False,
     )
     parser.add_argument("--token", help="Benchmark token to run.")
-    parser.add_argument("--filter", help="Filter benchmarks...")
     parser.add_argument(
         "--rocm_smi",
         default="rocm-smi",
@@ -185,7 +190,7 @@ def run_cli(
     token: str = None,
     suite: str = None,
     submit: bool = False,
-    filter: str = None,
+    id_filter: list[str] = None,
     rundir: str = None,
     build_dir: str = None,
     rocm_smi: str = "rocm-smi",
@@ -238,7 +243,7 @@ def run_cli(
     timestamp = rundir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")
 
-    result = run_problems(generator, build_dir, rundir, env)
+    result = run_problems(generator, build_dir, rundir, env, id_filter)
 
     if submit:
         ptsdir = rundir / "rocRoller"
