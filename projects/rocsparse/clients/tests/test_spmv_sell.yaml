@@ -110,7 +110,7 @@ Tests:
              mplate]
 
 - name: spmv_sell
-  category: nighlty
+  category: nightly
   function: spmv_sell
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
