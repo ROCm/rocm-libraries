@@ -812,9 +812,9 @@ namespace
     enum hipfftw_execution_io_args : unsigned
     {
         use_creation_io       = 0x0,
-        non_null_new_in       = 0x1 << 1,
-        non_null_new_out      = 0x1 << 2,
-        new_io_same_placement = 0x1 << 3,
+        non_null_new_in       = 0x1 << 0,
+        non_null_new_out      = 0x1 << 1,
+        new_io_same_placement = 0x1 << 2,
         // all flags must be up to be generally clean with new I/O
         clean_new_io = non_null_new_in | non_null_new_out | new_io_same_placement
     };
