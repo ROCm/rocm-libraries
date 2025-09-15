@@ -37,8 +37,6 @@ The environment variables ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_
 *  ``ROCBLAS_USE_HIPBLASLT=0``: Tensile is always used as the GEMM backend.
 *  ``ROCBLAS_USE_HIPBLASLT_BATCHED=0``: Tensile is always used as the GEMM _batched backend.
 *  ``ROCBLAS_USE_HIPBLASLT=1``: hipBLASLt is preferred as the GEMM backend, but the backend will fall back to Tensile for problems for which hipBLASLt does not provide a solution or if errors are encountered using the hipBLASLt backend.
-*  ``ROCBLAS_USE_HIPBLASLT_BATCHED=1``: hipBLASLt is preferred as the GEMM _batched backend, but the backend will fall back to Tensile for problems for which hipBLASLt does not provide a solution or if errors are encountered using the hipBLASLt backend.
-
 
 .. note::
 
