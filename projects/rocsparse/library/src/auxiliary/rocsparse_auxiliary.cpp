@@ -3735,6 +3735,122 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_sell_get returns the sparse SLICED ELL matrix data,
+ * sizes and properties.
+ *******************************************************************************/
+rocsparse_status rocsparse_sell_get(const rocsparse_spmat_descr descr,
+                                    int64_t*                    rows,
+                                    int64_t*                    cols,
+                                    int64_t*                    nnz,
+                                    int64_t*                    slice_size,
+                                    int64_t*                    sell_colval_size,
+                                    void**                      sell_slice_offsets,
+                                    void**                      sell_col_ind,
+                                    void**                      sell_val,
+                                    rocsparse_indextype*        offsets_ptr_type,
+                                    rocsparse_indextype*        col_ind_type,
+                                    rocsparse_index_base*       idx_base,
+                                    rocsparse_datatype*         data_type)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, rows);
+    ROCSPARSE_CHECKARG_POINTER(2, cols);
+    ROCSPARSE_CHECKARG_POINTER(3, nnz);
+    ROCSPARSE_CHECKARG_POINTER(4, slice_size);
+    ROCSPARSE_CHECKARG_POINTER(5, sell_colval_size);
+    ROCSPARSE_CHECKARG_POINTER(6, sell_slice_offsets);
+    ROCSPARSE_CHECKARG_POINTER(7, sell_col_ind);
+    ROCSPARSE_CHECKARG_POINTER(8, sell_val);
+    ROCSPARSE_CHECKARG_POINTER(9, offsets_ptr_type);
+    ROCSPARSE_CHECKARG_POINTER(10, col_ind_type);
+    ROCSPARSE_CHECKARG_POINTER(11, idx_base);
+    ROCSPARSE_CHECKARG_POINTER(12, data_type);
+
+    *rows       = descr->rows;
+    *cols       = descr->cols;
+    *nnz        = descr->nnz;
+    *slice_size = descr->slice_size;
+    *slice_size = descr->sell_colval_size;
+
+    *sell_slice_offsets = descr->row_data;
+    *sell_col_ind       = descr->col_data;
+    *sell_val           = descr->val_data;
+
+    *offsets_ptr_type = descr->row_type;
+    *col_ind_type     = descr->col_type;
+    *idx_base         = descr->idx_base;
+    *data_type        = descr->data_type;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
+                                          int64_t*                    rows,
+                                          int64_t*                    cols,
+                                          int64_t*                    nnz,
+                                          int64_t*                    slice_size,
+                                          int64_t*                    sell_colval_size,
+                                          const void**                sell_slice_offsets,
+                                          const void**                sell_col_ind,
+                                          const void**                sell_val,
+                                          rocsparse_indextype*        offsets_ptr_type,
+                                          rocsparse_indextype*        col_ind_type,
+                                          rocsparse_index_base*       idx_base,
+                                          rocsparse_datatype*         data_type)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, rows);
+    ROCSPARSE_CHECKARG_POINTER(2, cols);
+    ROCSPARSE_CHECKARG_POINTER(3, nnz);
+    ROCSPARSE_CHECKARG_POINTER(4, slice_size);
+    ROCSPARSE_CHECKARG_POINTER(5, sell_colval_size);
+    ROCSPARSE_CHECKARG_POINTER(6, sell_slice_offsets);
+    ROCSPARSE_CHECKARG_POINTER(7, sell_col_ind);
+    ROCSPARSE_CHECKARG_POINTER(8, sell_val);
+    ROCSPARSE_CHECKARG_POINTER(9, offsets_ptr_type);
+    ROCSPARSE_CHECKARG_POINTER(10, col_ind_type);
+    ROCSPARSE_CHECKARG_POINTER(11, idx_base);
+    ROCSPARSE_CHECKARG_POINTER(12, data_type);
+
+    *rows       = descr->rows;
+    *cols       = descr->cols;
+    *nnz        = descr->nnz;
+    *slice_size = descr->slice_size;
+    *slice_size = descr->sell_colval_size;
+
+    *sell_slice_offsets = descr->const_row_data;
+    *sell_col_ind       = descr->const_col_data;
+    *sell_val           = descr->const_val_data;
+
+    *offsets_ptr_type = descr->row_type;
+    *col_ind_type     = descr->col_type;
+    *idx_base         = descr->idx_base;
+    *data_type        = descr->data_type;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_coo_set_pointers sets the sparse COO matrix data pointers.
  *******************************************************************************/
 rocsparse_status rocsparse_coo_set_pointers(rocsparse_spmat_descr descr,
