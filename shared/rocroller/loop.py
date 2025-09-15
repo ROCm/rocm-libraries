@@ -42,7 +42,7 @@ def main():
     parser.add_argument(
         "--char-limit",
         type=int,
-        default=76,
+        default=77,
         help="Minimum character limit for output validation (default: 76)",
     )
 
