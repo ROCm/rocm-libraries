@@ -7584,11 +7584,6 @@ void host_coo_to_dense(I                     m,
     }
 }
 
-
-
-
-
-
 template <typename I, typename J>
 void host_csr_to_coo(J                     M,
                      I                     nnz,
@@ -8210,14 +8205,6 @@ void host_bsr_to_bsc(rocsparse_int               mb,
     bsc_col_ptr[0] = bsc_base;
 }
 
-
-
-
-
-
-
-
-
 template <typename I, typename J, typename T>
 void host_csr_to_ell(J                     M,
                      const std::vector<I>& csr_row_ptr,
@@ -8383,16 +8370,6 @@ void host_csr_to_sell(J                     M,
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
 
 template <typename T>
 void host_csr_to_hyb(rocsparse_int                     M,
@@ -9471,13 +9448,12 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   std::vector<ITYPE>&       coo_row_ind, \
                                                   std::vector<ITYPE>&       coo_col_ind);
 
-
-#define INSTANTIATE_IJ(ITYPE, JTYPE)                                                         \
+#define INSTANTIATE_IJ(ITYPE, JTYPE)                                                       \
     template void host_csr_to_coo<ITYPE, JTYPE>(JTYPE                     M,               \
                                                 ITYPE                     nnz,             \
                                                 const std::vector<ITYPE>& csr_row_ptr,     \
                                                 std::vector<JTYPE>&       coo_row_ind,     \
-                                                rocsparse_index_base      base);                \
+                                                rocsparse_index_base      base);           \
     template void host_coo_to_csr<ITYPE, JTYPE>(JTYPE                M,                    \
                                                 ITYPE                NNZ,                  \
                                                 const JTYPE*         coo_row_ind,          \
@@ -9489,8 +9465,6 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                     const std::vector<JTYPE>& csr_col_ind, \
                                                     std::vector<ITYPE>&       coo_ind,     \
                                                     rocsparse_index_base      base);
-
-
                                                   
 #define INSTANTIATE_IT(ITYPE, TTYPE)                                          \
     template void host_gemvi<ITYPE, TTYPE>(ITYPE                M,            \
@@ -10116,44 +10090,6 @@ INSTANTIATE_IJT(int64_t, int64_t, double);
 INSTANTIATE_IJT(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE_IJT(int64_t, int64_t, rocsparse_double_complex);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 INSTANTIATE_IJT_2(int32_t, int32_t, int8_t);
 INSTANTIATE_IJT_2(int64_t, int32_t, int8_t);
 INSTANTIATE_IJT_2(int64_t, int64_t, int8_t);
@@ -10175,21 +10111,6 @@ INSTANTIATE_IJT_2(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE_IJT_2(int32_t, int32_t, rocsparse_double_complex);
 INSTANTIATE_IJT_2(int64_t, int32_t, rocsparse_double_complex);
 INSTANTIATE_IJT_2(int64_t, int64_t, rocsparse_double_complex);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int32_t, int32_t, _Float16);
 INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int32_t, int32_t, rocsparse_bfloat16);

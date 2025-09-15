@@ -438,7 +438,7 @@ private:
                                        int64_t&                       max_nnz)
     {
         host_dense_vector<I>       host_ind((direction == rocsparse_direction_row) ? that.row_ind
-                                                                             : that.col_ind);
+                                                                                   : that.col_ind);
         const I*                   ind      = host_ind.data();
         static constexpr uint32_t  ind_inc  = 1;
         const rocsparse_index_base ind_base = that.base;
