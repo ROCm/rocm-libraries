@@ -56,7 +56,7 @@ def main():
     parser.add_argument(
         "--exe-cmd",
         type=str,
-        default="./test/rocroller-tests --gtest_filter=*GPU_KernelTest.GPU_WholeKernel/1*",
+        default="./test/rocroller-tests --gtest_filter=*GPU_LoopLDSKernel*",
         help="Executable command to profile (default: rocroller-tests with GPU_KernelTest filter)",
     )
 

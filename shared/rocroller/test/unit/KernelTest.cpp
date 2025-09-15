@@ -493,4 +493,129 @@ amdhsa.kernels:
                              ::testing::Values(AssemblerType::InProcess,
                                                AssemblerType::Subprocess));
 
+    class LoopLDSKernel : public CurrentGPUContextFixture
+    {
+    };
+
+    TEST_F(LoopLDSKernel, GPU_LoopLDSKernel)
+    {
+        Settings::getInstance()->set(Settings::KernelAssembler, AssemblerType::Subprocess);
+
+        ASSERT_EQ(true, isLocalDevice());
+
+        auto command = std::make_shared<Command>();
+
+        auto k = m_context->kernel();
+
+        k->setKernelDimensions(1);
+
+        const auto one  = std::make_shared<Expression::Expression>(1u);
+        const auto zero = std::make_shared<Expression::Expression>(0u);
+
+        const auto workgroupSize = 256u;
+        auto       workitemCount
+            = Expression::literal(1024 * workgroupSize); // Have high workgroup count for rocprofv3
+        k->setWorkgroupSize({workgroupSize, 1, 1});
+        k->setWorkitemCount({workitemCount, one, one});
+        k->setDynamicSharedMemBytes(zero);
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        auto strideMultiplier = 1;
+        if(const char* env_p = std::getenv("BYTE_STRIDE"))
+            strideMultiplier = atoi(env_p); // adjust for bank conflict
+
+        auto instrDwords = 1;
+        if(const char* env_p = std::getenv("INSTR_WIDTH"))
+            instrDwords = atoi(env_p); // e.g. 1 for ds_read_b32
+
+        bool write; // else read
+        if(const char* env_p = std::getenv("WRITE"))
+            write = atoi(env_p) == 1 ? true : false;
+
+        auto kb = [&]() -> Generator<Instruction> {
+            const auto loops
+                = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
+            // _b96 requires 64-bit alignment for dst, _b96 has huge penalty if not 64-bit aligned for LDS addr
+            const auto alignment   = instrDwords == 3 ? 4 : instrDwords;
+            const auto dstRegCount = 192;
+            const auto count
+                = dstRegCount / instrDwords; // number of instructions put one after another
+
+            auto dst = Register::Value::Placeholder(
+                m_context,
+                Register::Type::Vector,
+                DataType::Raw32,
+                count * instrDwords,
+                Register::AllocationOptions{
+                    .contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
+                    .alignment            = alignment,
+                });
+            co_yield dst->allocate();
+
+            auto lds = Register::Value::AllocateLDS(
+                m_context,
+                DataType::Raw32,
+                std::min(static_cast<unsigned int>(m_context->targetArchitecture().GetCapability(
+                                                       GPUCapability::MaxLdsSize)
+                                                   / 4),
+                         workgroupSize * strideMultiplier * instrDwords));
+            auto ldsWithOffset = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, 1);
+            auto workitemIndex = m_context->kernel()->workitemIndex()[0];
+            co_yield Expression::generate(
+                ldsWithOffset,
+                Expression::literal(lds->getLDSAllocation()->offset())
+                    + workitemIndex->expression()
+                          * Expression::literal((4 * strideMultiplier * alignment)
+                                                % lds->getLDSAllocation()->size()),
+                m_context);
+
+            auto i = Register::Value::Placeholder(
+                m_context, Register::Type::Scalar, DataType::UInt64, 1);
+            co_yield Expression::generate(i, Expression::literal(loops + 1), m_context);
+
+            auto label = m_context->labelAllocator()->label("label");
+            co_yield Instruction::Label(label);
+
+            for(int i = 0; i < count * instrDwords; i += alignment)
+            {
+                if(write)
+                {
+                    co_yield m_context->mem()->storeLocal(
+                        ldsWithOffset,
+                        dst->subset(Generated(iota(i, i + instrDwords))),
+                        i * instrDwords * 4,
+                        4 * instrDwords);
+                }
+                else
+                {
+                    co_yield m_context->mem()->loadLocal(
+                        dst->subset(Generated(iota(i, i + instrDwords))),
+                        ldsWithOffset,
+                        i * strideMultiplier * 4,
+                        4 * instrDwords);
+                }
+            }
+
+            co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
+            co_yield Expression::generate(i, i->expression() - Expression::literal(1), m_context);
+            co_yield m_context->brancher()->branchIfNonZero(label, i);
+        };
+
+        m_context->schedule(kb());
+
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
+
+        CommandArguments commandArgs = command->createArguments();
+
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
+    }
+
 }
