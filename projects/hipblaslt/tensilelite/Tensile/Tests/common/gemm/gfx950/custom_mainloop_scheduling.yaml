@@ -126,13 +126,6 @@ BenchmarkProblems:
       TransposeB: 0
       UseBeta: True
       Batched: True
-      UseBias: 1
-      BiasDataTypeList: [s, h]
-      UseScaleAlphaVec: 1
-      Activation: true
-      ActivationType: hipblaslt_all
-      ActivationFuncCall: true
-      #ActivationHPA: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -166,7 +159,6 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [[17, 235, 750], [2, 127, 400], [1], [1, 13, 200]]
           - Exact: [4096, 4096, 1, 8192]
-        - BiasTypeArgs: ['h']
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -201,7 +193,6 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [[17, 235, 750], [2, 127, 400], [1], [1, 13, 200]]
           - Exact: [4096, 4096, 1, 8192]
-        - BiasTypeArgs: ['h']
 
   ########################################
   # BBS TT - standard
@@ -275,13 +266,6 @@ BenchmarkProblems:
       TransposeB: 1
       UseBeta: True
       Batched: True
-      UseBias: 1
-      BiasDataTypeList: [s, h]
-      UseScaleAlphaVec: 1
-      Activation: true
-      ActivationType: hipblaslt_all
-      ActivationFuncCall: true
-      #ActivationHPA: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -317,7 +301,6 @@ BenchmarkProblems:
           - Range: [[613], [612], [1], [1, 1, 192]]
           - Exact: [4096, 4096, 1, 8192]
           - Exact: [8192, 8192, 1, 16384]
-        - BiasTypeArgs: ['h']
 
   ########################################
   # BBS TN - standard
@@ -392,13 +375,6 @@ BenchmarkProblems:
       TransposeB: 0
       UseBeta: True
       Batched: True
-      UseBias: 1
-      BiasDataTypeList: [s, h]
-      UseScaleAlphaVec: 1
-      Activation: true
-      ActivationType: hipblaslt_all
-      ActivationFuncCall: true
-      #ActivationHPA: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -434,7 +410,6 @@ BenchmarkProblems:
           - Range: [[613], [612], [1], [1, 1, 192]]
           - Exact: [4096, 4096, 1, 8192]
           - Exact: [8192, 8192, 1, 16384]
-        - BiasTypeArgs: ['h']
 
   ########################################
   # F8BS TN - standard
@@ -567,14 +542,6 @@ BenchmarkProblems:
       TransposeB: 1
       UseBeta: True
       Batched: True
-
-      UseBias: 1
-      BiasDataTypeList: [s, h]
-      UseScaleAlphaVec: 1
-      Activation: true
-      ActivationType: hipblaslt_all
-      ActivationFuncCall: true
-      #ActivationHPA: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -609,4 +576,3 @@ BenchmarkProblems:
           - Range: [[613], [612], [1], [1, 1, 192]]
           - Exact: [4096, 4096, 1, 8192]
           - Exact: [8192, 8192, 1, 16384]
-        - BiasTypeArgs: ['h']

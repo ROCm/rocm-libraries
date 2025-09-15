@@ -265,7 +265,7 @@ def hasCustomSchedule(kernel):
     isMixed = kernel["ProblemType"]["DataTypeA"].numBytes() != kernel["ProblemType"]["DataTypeB"].numBytes()
 
     MT0, MT1, DU, PGR, PLR, DTL = kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"], kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"]
-    GRVWA, GRVWB = kernel["GlobalReadVectorWidthA"], kernel["GlobalReadVectorWidthA"]
+    GRVWA, GRVWB = kernel["GlobalReadVectorWidthA"], kernel["GlobalReadVectorWidthB"]
     LRVW = kernel["LocalReadVectorWidth"]
     MI = kernel["MatrixInstruction"]
     useLDSTr = kernel["LDSTrInst"]
