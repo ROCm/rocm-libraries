@@ -50,6 +50,16 @@ static inline bool is_ck_whitelist(const Handle& handle)
     return is_ck_whitelist(handle.GetDeviceName());
 }
 
+static inline bool is_wmma_capable(const std::string& device_name)
+{
+    return StartsWith(device_name, "gfx110") || StartsWith(device_name, "gfx120");
+}
+
+static inline bool is_wmma_capable(const Handle& handle)
+{
+    return is_wmma_capable(handle.GetDeviceName());
+}
+
 } // namespace ck_utility
 } // namespace solver
 } // namespace miopen

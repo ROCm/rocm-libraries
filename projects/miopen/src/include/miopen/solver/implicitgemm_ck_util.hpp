@@ -1462,6 +1462,63 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
 #endif
 }
 
+template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
+ConvSolution
+MakeSolutionGroupConvImplicitGemmWmma(const miopen::conv::ProblemDescription& problem,
+                                      InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
+                                      InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc)
+{
+
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(problem.IsLayoutDefault())
+    {
+        switch(problem.GetInDataType())
+        {
+        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{});
+        case miopenFloat: return invoker_factory_maker_ncdhw(float{});
+        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{});
+        case miopenInt8:
+        case miopenInt64:
+        case miopenInt32:
+        case miopenDouble:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        default:
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "GroupConvolutionImplicitGemmWmma operation not implemented for this "
+                         "data type");
+        }
+    }
+    else if(problem.IsLayoutNHWC())
+    {
+        switch(problem.GetInDataType())
+        {
+        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{});
+        case miopenFloat: return invoker_factory_maker_ndhwc(float{});
+        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{});
+        case miopenInt8:
+        case miopenInt64:
+        case miopenInt32:
+        case miopenDouble:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        default:
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "GroupConvolutionImplicitGemmWmma operation not implemented for this "
+                         "data type");
+        }
+    }
+    else
+    {
+        MIOPEN_THROW(
+            miopenStatusInternalError,
+            "GroupConvolutionImplicitGemmWmma operation not implemented for this data type");
+    }
+#else
+    return {};
+#endif
+}
+
 /// \todo This check is probably no longer needed, as it was likely related to static_ck or
 /// legacy_ck, and was copy-pasted into solvers that use the modern CK.
 static inline bool IsIndexRangeLargeEnough(const miopen::conv::ProblemDescription& problem)

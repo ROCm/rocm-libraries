@@ -726,6 +726,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
              miopenConvolutionAlgoImplicitGEMM);
 
     Register(registry, ++id, Primitive::Normalization, layernorm::LayernormBackward().SolverDbId());
+    RegisterWithSolver(
+        registry, ++id, conv::ConvHipImplicitGemmGroupWrwWmma{}, miopenConvolutionAlgoImplicitGEMM);
     // IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     // space between this comment and the newly registered solver(s)!
 }
