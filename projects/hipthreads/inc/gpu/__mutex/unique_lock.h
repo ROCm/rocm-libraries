@@ -31,8 +31,8 @@
 
 #include <mutex>
 
-#include "gpu/__memory/addressof.h"
-#include "gpu/__utility/swap.h"
+#include "hip/std/__memory/addressof.h"
+#include "hip/std/__utility/swap.h"
 
 namespace gpu {
 
@@ -51,18 +51,18 @@ private:
 
 public:
   __device__ _LIBGPU_HIDE_FROM_ABI unique_lock() _NOEXCEPT : __m_(nullptr), __owns_(false) {}
-  __device__ _LIBGPU_HIDE_FROM_ABI explicit unique_lock(mutex_type& __m) : __m_(gpu::addressof(__m)), __owns_(true) {
+  __device__ _LIBGPU_HIDE_FROM_ABI explicit unique_lock(mutex_type& __m) : __m_(hip::std::addressof(__m)), __owns_(true) {
     __m_->lock();
   }
 
   __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, std::defer_lock_t) _NOEXCEPT
-      : __m_(gpu::addressof(__m)),
+      : __m_(hip::std::addressof(__m)),
         __owns_(false) {}
 
   __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, std::try_to_lock_t)
-      : __m_(gpu::addressof(__m)), __owns_(__m.try_lock()) {}
+      : __m_(hip::std::addressof(__m)), __owns_(__m.try_lock()) {}
 
-  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, std::adopt_lock_t) : __m_(gpu::addressof(__m)), __owns_(true) {}
+  __device__ _LIBGPU_HIDE_FROM_ABI unique_lock(mutex_type& __m, std::adopt_lock_t) : __m_(hip::std::addressof(__m)), __owns_(true) {}
 
   // TODO: Uncomment this once we implement chrono
   // template <class _Clock, class _Duration>
@@ -112,8 +112,8 @@ public:
   __device__ void unlock();
 
   __device__ _LIBGPU_HIDE_FROM_ABI void swap(unique_lock& __u) _NOEXCEPT {
-    gpu::swap(__m_, __u.__m_);
-    gpu::swap(__owns_, __u.__owns_);
+    hip::std::swap(__m_, __u.__m_);
+    hip::std::swap(__owns_, __u.__owns_);
   }
 
   __device__ _LIBGPU_HIDE_FROM_ABI mutex_type* release() _NOEXCEPT {
