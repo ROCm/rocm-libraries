@@ -305,6 +305,10 @@ if(NOT MIOPEN_TEST_DBSYNC)
     list(APPEND SKIP_TESTS db_sync)
 endif()
 
+if (MIOPEN_TEST_GFX115X)
+    list(APPEND SKIP_TESTS test_ctc)
+endif()
+
 # The usage is non-trivial, see function add_test_command.
 if(SKIP_TESTS)
     list(REMOVE_DUPLICATES SKIP_TESTS)

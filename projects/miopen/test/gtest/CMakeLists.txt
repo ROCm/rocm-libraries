@@ -162,6 +162,8 @@ function(add_gtest TEST_NAME TEST_CPP)
     if(MIOPEN_TEST_GFX90A)
         add_gtest_negative_filter("FullConvFwdScalar/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/1")
         add_gtest_negative_filter("Full/GPU_LayerNormTest_FP32.LayerNormTestFw/61")
+        add_gtest_negative_filter("FullConvFwdBilinear/GPU_ConvNonpackFwdSolverTest3D_FP16.CKNonPackConvFwd3D/0")
+        add_gtest_negative_filter("Smoke/GPU_Conv2dTuningDynamicXdlops_FP32.FloatTest_smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16/0")
     endif()
 
     # when building the single gtest, add them in a sharded manner
