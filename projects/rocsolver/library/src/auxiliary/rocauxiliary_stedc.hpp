@@ -2104,7 +2104,7 @@ __device__ I slaed4_new(I n,
                 erretm2 = erretm2 + phi;
             }
             reduce3<STEDC_SOLVE_BDIM>(phi, dphi, erretm2);
-            erretm += erretm;
+            erretm += erretm2;
             temp = Z(ii) / DELTA(ii);
             dw = dpsi + dphi + temp * temp;
             temp = Z(ii) * temp;
