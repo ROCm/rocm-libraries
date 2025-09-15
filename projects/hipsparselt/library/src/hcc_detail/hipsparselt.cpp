@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "Debug.hpp"
 #include "exceptions.hpp"
 #include "hipsparselt_ostream.hpp"
 #include "utility.hpp"
@@ -32,7 +33,6 @@
 #include <rocsparselt.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "Debug.hpp"
 
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
@@ -196,7 +196,6 @@ rocsparselt_matmul_descr_attribute_
         throw HIPSPARSE_STATUS_NOT_SUPPORTED;
     }
 }
-
 
 rocsparselt_mat_descr_attribute_
     HIPMatDescAttributeToRocSparseLtMatDescAttribute(hipsparseLtMatDescAttribute_t attr)
@@ -632,17 +631,18 @@ hipsparseStatus_t hipsparseLtMatmul(const hipsparseLtHandle_t*     handle,
 try
 {
     rocsparselt::Debug::Instance().markerStart("hipsparseLtMatmul");
-    auto status = RocSparseLtStatusToHIPStatus(rocsparselt_matmul((const rocsparselt_handle*)handle,
-                                                           (const rocsparselt_matmul_plan*)plan,
-                                                           alpha,
-                                                           d_A,
-                                                           d_B,
-                                                           beta,
-                                                           d_C,
-                                                           d_D,
-                                                           workspace,
-                                                           streams,
-                                                           numStreams));
+    auto status
+        = RocSparseLtStatusToHIPStatus(rocsparselt_matmul((const rocsparselt_handle*)handle,
+                                                          (const rocsparselt_matmul_plan*)plan,
+                                                          alpha,
+                                                          d_A,
+                                                          d_B,
+                                                          beta,
+                                                          d_C,
+                                                          d_D,
+                                                          workspace,
+                                                          streams,
+                                                          numStreams));
     rocsparselt::Debug::Instance().markerStop();
     return status;
 }
@@ -665,17 +665,18 @@ hipsparseStatus_t hipsparseLtMatmulSearch(const hipsparseLtHandle_t* handle,
 try
 {
     rocsparselt::Debug::Instance().markerStart("hipsparseLtMatmulSearch");
-    auto status = RocSparseLtStatusToHIPStatus(rocsparselt_matmul_search((const rocsparselt_handle*)handle,
-                                                                  (rocsparselt_matmul_plan*)plan,
-                                                                  alpha,
-                                                                  d_A,
-                                                                  d_B,
-                                                                  beta,
-                                                                  d_C,
-                                                                  d_D,
-                                                                  workspace,
-                                                                  streams,
-                                                                  numStreams));
+    auto status
+        = RocSparseLtStatusToHIPStatus(rocsparselt_matmul_search((const rocsparselt_handle*)handle,
+                                                                 (rocsparselt_matmul_plan*)plan,
+                                                                 alpha,
+                                                                 d_A,
+                                                                 d_B,
+                                                                 beta,
+                                                                 d_C,
+                                                                 d_D,
+                                                                 workspace,
+                                                                 streams,
+                                                                 numStreams));
     rocsparselt::Debug::Instance().markerStop();
     return status;
 }

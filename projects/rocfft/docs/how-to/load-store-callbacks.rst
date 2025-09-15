@@ -17,6 +17,11 @@ to the library using
 :cpp:func:`rocfft_execution_info_set_load_callback` and
 :cpp:func:`rocfft_execution_info_set_store_callback`.
 
+.. note::
+
+   Callback functions must be built as relocatable device code by
+   passing the ``-fgpu-rdc`` option to the compiler and linker.
+
 Device functions supplied as callbacks must load and store element
 data types appropriate for the transform being executed.
 

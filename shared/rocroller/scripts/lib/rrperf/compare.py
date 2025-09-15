@@ -149,6 +149,7 @@ class PerformanceRun:
                     result = rrperf.problems.load_results(path)
                 except Exception as e:
                     print('Error loading results in "{}": {}'.format(path, e))
+                    raise
                 for element in result:
                     if element.run_invariant_token in results:
                         # TODO: Handle result files that have multiple results in

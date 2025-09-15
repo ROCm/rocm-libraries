@@ -27,6 +27,8 @@ The rocThrust public repository is located at `https://github.com/ROCm/rocThrust
 
     * :doc:`Add rocThrust to a CMake project <./how-to/use-rocThrust-in-a-project>`
     * :doc:`Run tests on multiple GPUs <./how-to/run-rocThrust-tests-on-multiple-gpus>`
+    * :doc:`Build rocThrust applications on different backends <./how-to/rocThrust-build-backends>`
+
 
   .. grid-item-card:: API reference
 

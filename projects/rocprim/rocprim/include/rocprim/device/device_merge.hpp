@@ -107,13 +107,31 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block
                                 storage);
 }
 
+// Templated helper that instantiates merge_kernel_impl_ for an Arch,
+// and puts its vsmem_per_block in the vsmem_size_out member variable.
 template<class Config, class Key, class Value>
-inline size_t get_merge_vsmem_size_per_block()
+struct merge_vsmem_size_visitor
 {
-    using merge_kernel_impl_t = merge_kernel_impl_<Config, Key, Value>;
-    using MergeVSmemHelperT   = detail::vsmem_helper_impl<merge_kernel_impl_t>;
+    size_t& vsmem_size_out;
 
-    return MergeVSmemHelperT::vsmem_per_block;
+    template<target_arch Arch>
+    inline hipError_t operator()() const
+    {
+        using forced_conf_t = force_arch_config<Arch, Config, merge_config_params>;
+
+        using merge_kernel_impl_t = merge_kernel_impl_<forced_conf_t, Key, Value>;
+
+        vsmem_size_out = vsmem_helper_impl<merge_kernel_impl_t>::vsmem_per_block;
+
+        return hipSuccess;
+    }
+};
+
+template<class Config, class Key, class Value>
+inline hipError_t get_merge_vsmem_size_per_block(target_arch target_arch, size_t& vsmem_size)
+{
+    return generic_dispatch_target_arch(target_arch,
+                                        merge_vsmem_size_visitor<Config, Key, Value>{vsmem_size});
 }
 
 template<
@@ -163,8 +181,14 @@ hipError_t merge_impl(void * temporary_storage,
     const unsigned int number_of_blocks
         = ((input1_size + input2_size) + items_per_block - 1) / items_per_block;
 
-    size_t virtual_shared_memory_size
-        = get_merge_vsmem_size_per_block<config, key_type, value_type>() * number_of_blocks;
+    size_t vsmem_size;
+    result = get_merge_vsmem_size_per_block<config, key_type, value_type>(target_arch, vsmem_size);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+
+    vsmem_size *= number_of_blocks;
 
     unsigned int* index = nullptr;
     void*         vsmem = nullptr;
@@ -175,9 +199,7 @@ hipError_t merge_impl(void * temporary_storage,
         detail::temp_storage::make_linear_partition(
             detail::temp_storage::ptr_aligned_array(&index, number_of_blocks + 1),
             // vsmem
-            detail::temp_storage::make_partition(&vsmem,
-                                                 virtual_shared_memory_size,
-                                                 cache_line_size)));
+            detail::temp_storage::make_partition(&vsmem, vsmem_size, cache_line_size)));
 
     if(partition_result != hipSuccess || temporary_storage == nullptr)
     {

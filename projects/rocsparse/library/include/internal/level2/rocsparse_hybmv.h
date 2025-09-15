@@ -97,77 +97,7 @@ extern "C" {
 *  \par Example
 *  This example performs a sparse matrix vector multiplication in HYB format. Also
 *  demonstrate conversion from CSR to HYB.
-*  \code{.c}
-*      // rocSPARSE handle
-*      rocsparse_handle handle;
-*      rocsparse_create_handle(&handle);
-*
-*      // A sparse matrix
-*      // 1 0 3 4
-*      // 0 0 5 1
-*      // 0 2 0 0
-*      // 4 0 0 8
-*      rocsparse_int hAptr[5] = {0, 3, 5, 6, 8};
-*      rocsparse_int hAcol[8] = {0, 2, 3, 2, 3, 1, 0, 3};
-*      double        hAval[8] = {1.0, 3.0, 4.0, 5.0, 1.0, 2.0, 4.0, 8.0};
-*
-*      rocsparse_int m = 4;
-*      rocsparse_int n = 4;
-*      rocsparse_int nnz = 8;
-*
-*      double halpha = 1.0;
-*      double hbeta  = 0.0;
-*
-*      double  hx[4] = {1.0, 2.0, 3.0, 4.0};
-*      double  hy[4] = {4.0, 5.0, 6.0, 7.0};
-*
-*      // Matrix descriptor
-*      rocsparse_mat_descr descrA;
-*      rocsparse_create_mat_descr(&descrA);
-*
-*      // Offload data to device
-*      rocsparse_int* dAptr = NULL;
-*      rocsparse_int* dAcol = NULL;
-*      double*        dAval = NULL;
-*      double*        dx    = NULL;
-*      double*        dy    = NULL;
-*
-*      hipMalloc((void**)&dAptr, sizeof(rocsparse_int) * (m + 1));
-*      hipMalloc((void**)&dAcol, sizeof(rocsparse_int) * nnz);
-*      hipMalloc((void**)&dAval, sizeof(double) * nnz);
-*      hipMalloc((void**)&dx, sizeof(double) * n);
-*      hipMalloc((void**)&dy, sizeof(double) * m);
-*
-*      hipMemcpy(dAptr, hAptr, sizeof(rocsparse_int) * (m + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dAcol, hAcol, sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dAval, hAval, sizeof(double) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dx, hx, sizeof(double) * n, hipMemcpyHostToDevice);
-*
-*      // Convert CSR matrix to HYB format
-*      rocsparse_hyb_mat hybA;
-*      rocsparse_create_hyb_mat(&hybA);
-*
-*      rocsparse_dcsr2hyb(handle, m, n, descrA, dAval, dAptr, dAcol, hybA, 0, rocsparse_hyb_partition_auto);
-*
-*      // Clean up CSR structures
-*      hipFree(dAptr);
-*      hipFree(dAcol);
-*      hipFree(dAval);
-*
-*      // Call rocsparse hybmv
-*      rocsparse_dhybmv(handle, rocsparse_operation_none, &halpha, descrA, hybA, dx, &hbeta, dy);
-*
-*      // Copy result back to host
-*      hipMemcpy(hy, dy, sizeof(double) * m, hipMemcpyDeviceToHost);
-*
-*      // Clear up on device
-*      rocsparse_destroy_hyb_mat(hybA);
-*      rocsparse_destroy_mat_descr(descrA);
-*      rocsparse_destroy_handle(handle);
-*
-*      hipFree(dx);
-*      hipFree(dy);
-*  \endcode
+*  \snippet example_rocsparse_hybmv.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

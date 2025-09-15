@@ -786,6 +786,51 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1088]
           - Exact: [519, 519, 1, 1120]
           - Exact: [2053, 2053, 1, 2053]
+  ########################################
+  # NN - standard HHS Test LDS > 64K Double Buffer
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 0 # 1
+      Batched: True
+      Activation: False
+      ActivationHPA: False
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 16, 1, 1, 5, 3, 2, 2 ]  
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1] #0,1
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - StaggerUStride: [64]
+        - 1LDSBuffer: [0]
+        - LDSTrInst: [1] 
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 8192]
 
   ########################################
   # HSS - Test LDS > 64K

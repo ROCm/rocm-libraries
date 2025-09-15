@@ -57,7 +57,7 @@ void testing_sctr(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_seedrand();
     rocsparse_init_index(hx_ind, nnz, base, M + base);
-    rocsparse_init<T>(hx_val, 1, nnz, 1);
+    rocsparse_init<T>(hx_val, 1, nnz, 1, arg.convert_to_int);
     hy_2    = hy_1;
     hy_gold = hy_1;
 

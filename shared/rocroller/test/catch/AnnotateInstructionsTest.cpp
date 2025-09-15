@@ -35,7 +35,7 @@
 #include <catch2/generators/catch_generators_range.hpp>
 #include <catch2/matchers/catch_matchers_all.hpp>
 
-TEST_CASE("AddComment works", "")
+TEST_CASE("AddComment works", "[codegen][utility]")
 {
     using namespace rocRoller;
     using namespace Catch::Matchers;
@@ -62,7 +62,7 @@ TEST_CASE("AddComment works", "")
         CHECK_THAT(inst.comments(), Contains("bar") && Contains("baz"));
 }
 
-TEST_CASE("AddControlOp works", "")
+TEST_CASE("AddControlOp works", "[codegen][utility]")
 {
     using namespace rocRoller;
     using namespace Catch::Matchers;
@@ -87,4 +87,34 @@ TEST_CASE("AddControlOp works", "")
 
     for(auto inst : generatorTwo().map(AddControlOp(4)))
         CHECK(inst.controlOps() == std::vector({9, 4}));
+}
+
+TEST_CASE("AddLocation works", "[codegen][utility]")
+{
+    using namespace rocRoller;
+    using namespace Catch::Matchers;
+
+    CHECK(AddLocation().comment() == "97");
+    CHECK(AddLocation({SourceLocationPart::File}).comment()
+          == "shared/rocroller/test/catch/AnnotateInstructionsTest.cpp");
+
+    CHECK_THAT(AddLocation(EnumBitset<SourceLocationPart>::All()).comment(),
+               ContainsSubstring("void CATCH2")
+                   && ContainsSubstring(
+                       "shared/rocroller/test/catch/AnnotateInstructionsTest.cpp:104:90"));
+
+    auto generatorOne = []() -> Generator<Instruction> {
+        co_yield_(Instruction("v_add_u32", {}, {}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {}, {}, {}, ""));
+        co_yield_(Instruction("v_mul_u32", {}, {}, {}, ""));
+        co_yield_(Instruction("v_add_f32", {}, {}, {}, ""));
+    };
+
+    for(auto inst : generatorOne().map(AddLocation()))
+        CHECK_THAT(inst.comments(), Contains("113"));
+
+    for(auto inst :
+        generatorOne().map(AddLocation({SourceLocationPart::File, SourceLocationPart::Line})))
+        CHECK_THAT(inst.comments(),
+                   Contains("shared/rocroller/test/catch/AnnotateInstructionsTest.cpp:117"));
 }

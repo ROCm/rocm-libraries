@@ -329,4 +329,14 @@ namespace rocRoller::KernelGraph
         return {firstNode, lastNode};
     }
 
+    template <typename EdgeType>
+    void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg)
+    {
+        if(A.empty() or B.empty())
+            return;
+
+        for(auto const a : A)
+            for(auto const b : B)
+                kg.control.addElement(EdgeType(), {a}, {b});
+    }
 }

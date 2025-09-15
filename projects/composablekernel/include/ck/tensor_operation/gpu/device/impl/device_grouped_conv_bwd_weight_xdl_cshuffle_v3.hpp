@@ -331,8 +331,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
     using CGridDesc_M_N     = remove_cvref_t<decltype(ABCGridDescs{}[I2])>;
 
     using GridwiseGemm = GridwiseGemm_xdl_cshuffle_conv_v3<
-        tensor_layout::gemm::ColumnMajor,
         tensor_layout::gemm::RowMajor,
+        tensor_layout::gemm::ColumnMajor,
         tensor_layout::gemm::RowMajor,
         ADataType,
         BDataType,
@@ -506,7 +506,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                 // Ensure that k_batch_ does not exceed the maximum value
                 // for the GEMM pipeline.
                 const auto k_batch_max = static_cast<index_t>((gemmK - 1) / K0PerBlock);
-                k_batch_               = std::min(k_batch_, k_batch_max);
+                k_batch_               = std::max(std::min(k_batch_, k_batch_max), 1);
 
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
@@ -1323,7 +1323,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         }
 
         // Gridwise GEMM size
-        return GridwiseGemm::CheckValidity(gemm_arg);
+        return true;
     }
 
     bool IsSupportedArgument(const BaseArgument* p_arg) override

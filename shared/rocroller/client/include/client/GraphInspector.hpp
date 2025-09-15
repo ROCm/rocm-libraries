@@ -121,6 +121,11 @@ namespace rocRoller
 
             KernelGraph::CoordinateGraph::Transformer& tx();
 
+            KernelGraph::KernelGraphPtr graph()
+            {
+                return m_kgraph;
+            };
+
         private:
             void assignLiteralSizesAndStrides();
 

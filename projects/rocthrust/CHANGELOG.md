@@ -3,6 +3,12 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.1.0 for ROCm 7.1
+
+### Added
+
+* Added a new CMake option `-DSQLITE_USE_SYSTEM_PACKAGE` to allow SQLite to be provided by the system.
+
 ## rocThrust 4.0.0 for ROCm 7.0
 
 ### Changed

@@ -149,6 +149,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable lds_complex{"lds_complex", "scalar_type", true, true};
     Variable lds_row_padding{"lds_row_padding", "unsigned int"};
 
+    // hip thread grid dim
+    Variable grid_dim{"gridDim.x", "unsigned int"};
+
     // hip thread block id
     Variable block_id{"blockIdx.x", "unsigned int"};
 
@@ -504,7 +507,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                  unsigned int                                                             width,
                  double                                                                   height,
                  ThreadGuardMode                                                          guard,
-                 bool trans_dir = false) const
+                 bool                               trans_dir    = false,
+                 const std::optional<unsigned int>& guard_factor = std::nullopt,
+                 const std::optional<unsigned int>& work_length  = std::nullopt) const
     {
         StatementList stmts;
         unsigned int  iheight = std::floor(height);
@@ -513,17 +518,21 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
         Expression guard_expr = Expression{Literal{"true"}};
 
+        const auto effective_length = work_length ? *work_length : length;
+        const auto thread_guard_cond
+            = (effective_length / width) * (guard_factor ? *guard_factor : 1);
+
         // do thread gurad when guard_by_if or guard_by_arg
         if(guard != ThreadGuardMode::NO_GUARD)
         {
             // using ">" : no need to test "if(thread < XXX)"" if it is always true
-            if((!trans_dir && threads_per_transform > length / width)
-               || (trans_dir && workgroup_size / transforms_per_block > length / width))
+            if((!trans_dir && threads_per_transform > (effective_length / width))
+               || (trans_dir && workgroup_size / transforms_per_block > (effective_length / width)))
             {
                 if(writeGuard)
-                    guard_expr = Expression{write && (thread < length / width)};
+                    guard_expr = Expression{write && (thread < thread_guard_cond)};
                 else
-                    guard_expr = Expression{thread < length / width};
+                    guard_expr = Expression{thread < thread_guard_cond};
             }
             else
             {
@@ -547,16 +556,16 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             stmts += work;
         }
 
-        if(height > iheight && threads_per_transform < length / width)
+        if(height > iheight && threads_per_transform < effective_length / width)
         {
             stmts += CommentLines{"not enough threads, some threads do extra work"};
             unsigned int dt = iheight * threads_per_transform;
 
             // always do thread gurad
             if(writeGuard)
-                guard_expr = Expression{write && (thread + dt < length / width)};
+                guard_expr = Expression{write && (thread + dt < thread_guard_cond)};
             else
-                guard_expr = Expression{thread + dt < length / width};
+                guard_expr = Expression{thread + dt < thread_guard_cond};
 
             work = generator(0, iheight, width, dt, guard_expr);
 

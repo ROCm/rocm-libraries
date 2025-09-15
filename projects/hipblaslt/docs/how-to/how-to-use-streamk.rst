@@ -22,7 +22,12 @@ Configuring the kernel selection strategy
 The ``TENSILE_SOLUTION_SELECTION_METHOD`` environment variable controls the hipBLASLt kernel selection strategy for GEMM operations.
 Set this variable to ``2`` to enable the Stream-K library or leave it set to ``0`` to continue to use the default settings.
 
-*  ``TENSILE_SOLUTION_SELECTION_METHOD=0`` (Default)
+.. note::
+
+   On the AMD Instinct™ MI350 series, Stream-K is the only kernel selection strategy available.
+   There is no alternative library and the ``TENSILE_SOLUTION_SELECTION_METHOD`` variable has no effect.
+
+*  ``TENSILE_SOLUTION_SELECTION_METHOD=0`` (Standard tuned libraries)
 
    *  Kernels are selected from the standard tuned libraries.
    *  The heuristic best kernel is selected from the standard tuning grid.
