@@ -52,11 +52,33 @@ namespace
     //---------------------------------------------------------------------------------------------
     //
 
-    // byte size limit used for I/O data sizes (arbitrarily decided)
-    const std::vector<size_t> max_byte_size_for_unbatched_hipfftw_tests
-        = {1ULL << 16, 1ULL << 24, 1ULL << 29};
-    //             1D          2D       >= 3D
-    //         64 KiB,     16 MiB,    512 MiB
+    size_t max_byte_size_for_hipfftw_tests()
+    {
+        auto get_io_byte_size_limit = []() {
+            size_t tmp = vramgb * ONE_GiB;
+            if(tmp == 0)
+            {
+                size_t free = 0, total = 0;
+                if(hipMemGetInfo(&free, &total) == hipSuccess)
+                    tmp = total / 8;
+            }
+            tmp = std::min(tmp, ramgb * ONE_GiB);
+            tmp = std::min(tmp, max_io_gb_for_hipfftw_test * ONE_GiB);
+            if(verbose > 0)
+            {
+                std::cout << "Limit for the size of I/O data used in hipfftw tests: ";
+                if(tmp >= ONE_GiB)
+                    std::cout << float(tmp) / ONE_GiB << " GiB." << std ::endl;
+                else if(tmp >= ONE_MiB)
+                    std::cout << float(tmp) / ONE_MiB << " MiB." << std ::endl;
+                else
+                    std::cout << float(tmp) / ONE_KiB << " KiB." << std ::endl;
+            }
+            return tmp;
+        };
+        static const size_t io_byte_size_limit = get_io_byte_size_limit();
+        return io_byte_size_limit;
+    }
 
     std::ranlux24_base& get_pseudo_rng()
     {
@@ -1036,12 +1058,12 @@ namespace
                     {
                         const bool is_real_inplace
                             = is_real(dft_kind) && placement == fft_placement_inplace;
-                        const auto max_byte_size
-                            = max_byte_size_for_unbatched_hipfftw_tests[std::min(rank - 1, 2)];
-                        const ptrdiff_t allocatable_len_threshold = get_len_threshold(
-                            max_num_elems_for_data_size<prec>(max_byte_size, dft_kind),
-                            rank,
-                            is_real_inplace);
+                        const ptrdiff_t allocatable_len_threshold = std::min(
+                            get_len_threshold(max_num_elems_for_data_size<prec>(
+                                                  max_byte_size_for_hipfftw_tests(), dft_kind),
+                                              rank,
+                                              is_real_inplace),
+                            static_cast<ptrdiff_t>(max_length_for_hipfftw_test));
                         const auto valid_int_lengths
                             = get_random_lengths<valid_value, int>(rank, allocatable_len_threshold);
                         // always add valid integer lengths for valid ranks
@@ -1105,12 +1127,11 @@ namespace
         {
             // do not allocate for the lengths designed to trigger an overflow
             // (allocation sizes would be ridiculously large)
-            const bool test_may_allocate
-                = helper.has_valid_rank() && helper.has_valid_lengths()
-                  && helper.get_data_byte_size(fft_io::fft_io_in)
-                         <= max_byte_size_for_unbatched_hipfftw_tests[helper.get_rank() - 1]
-                  && helper.get_data_byte_size(fft_io::fft_io_out)
-                         <= max_byte_size_for_unbatched_hipfftw_tests[helper.get_rank() - 1];
+            const bool test_may_allocate = helper.has_valid_rank() && helper.has_valid_lengths()
+                                           && helper.get_data_byte_size(fft_io::fft_io_in)
+                                                  <= max_byte_size_for_hipfftw_tests()
+                                           && helper.get_data_byte_size(fft_io::fft_io_out)
+                                                  <= max_byte_size_for_hipfftw_tests();
             for(auto creation : hipfftw_plan_creation_func_candidates)
             {
                 // full range considered for creation_io_is_null and execution_io
@@ -2025,12 +2046,15 @@ namespace
             to_add.execution_io = hipfftw_execution_io_args::use_creation_io;
             const auto dft_kind
                 = trans_type_range_full[get_random_idx(trans_type_range_full.size())];
-            const auto rank               = get_random_rank<valid_value, 1, 3>();
-            const auto placement          = place_range[get_random_idx(place_range.size())];
-            const bool is_real_inplace    = is_real(dft_kind) && placement == fft_placement_inplace;
-            const auto max_byte_size      = max_byte_size_for_unbatched_hipfftw_tests[rank - 1];
-            const ptrdiff_t len_threshold = get_len_threshold(
-                max_num_elems_for_data_size<prec>(max_byte_size, dft_kind), rank, is_real_inplace);
+            const auto rank            = get_random_rank<valid_value, 1, 3>();
+            const auto placement       = place_range[get_random_idx(place_range.size())];
+            const bool is_real_inplace = is_real(dft_kind) && placement == fft_placement_inplace;
+            const ptrdiff_t len_threshold
+                = std::min(get_len_threshold(max_num_elems_for_data_size<prec>(
+                                                 max_byte_size_for_hipfftw_tests(), dft_kind),
+                                             rank,
+                                             is_real_inplace),
+                           static_cast<ptrdiff_t>(max_length_for_hipfftw_test));
             to_add.plan_helper.set_creation_args(
                 dft_kind,
                 rank,

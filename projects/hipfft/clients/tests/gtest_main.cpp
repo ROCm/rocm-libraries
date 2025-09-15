@@ -61,6 +61,9 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
+// Constraints for the hipfftw tests
+size_t max_length_for_hipfftw_test;
+size_t max_io_gb_for_hipfftw_test;
 
 // Transform parameters for manual test:
 hipfft_params manual_params;
@@ -306,6 +309,16 @@ int main(int argc, char* argv[])
                    "Probability multiplier for running individual callback transforms")
         ->default_val(0.1)
         ->check(CLI::NonNegativeNumber);
+    app.add_option("--max_hipfftw_test_len",
+                   max_length_for_hipfftw_test,
+                   "Maximum length to be considered in hipfftw tests")
+        ->default_val(8192)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--max_io_gb_for_hipfftw_test",
+                   max_io_gb_for_hipfftw_test,
+                   "Maximum size of I/O to be considered in hipfftw tests in GiB")
+        ->default_val(1) /* 1 GiB */
+        ->check(CLI::PositiveNumber);
 
     app.add_option("--fftw_compare", fftw_compare, "Compare to FFTW in accuracy tests")
         ->default_val(true);
