@@ -53,9 +53,15 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       $<BUILD_INTERFACE:${COMMON_TEST_HEADER_DIRECTORY}>
   )
 
+  if(USE_SYSTEM_LIB)
+    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocprim)
+    # We need this include to allow tests to find the common utilities folder
+    target_include_directories(${TEST_TARGET} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  else()
+    target_link_libraries(${TEST_TARGET} PRIVATE rocprim)
+  endif()
   target_link_libraries(${TEST_TARGET}
     PRIVATE
-      rocprim
       GTest::GTest
       GTest::Main
   )

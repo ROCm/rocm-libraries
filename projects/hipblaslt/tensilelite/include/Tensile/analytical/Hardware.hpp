@@ -315,21 +315,22 @@ namespace TensileLite
                 double mem2_perf_ratio;
                 double mem3_perf_ratio;
                 size_t parallel_MI_CU;
-                double percent_bw_per_wg;
+                std::tuple<double, double, double> mem_bw_per_wg_coefficients;
                 double mem_clock_ratio;
+
                 ArchitectureConstants(size_t num_xcds,
                                       double mem1_perf_ratio,
                                       double mem2_perf_ratio,
                                       double mem3_perf_ratio,
                                       size_t parallel_MI_CU,
-                                      double percent_bw_per_wg,
+                                      std::tuple<double, double, double> mem_bw_per_wg_coefficients,
                                       double mem_clock_ratio) //Obtained through microbenchmarking
                     : num_xcds(num_xcds)
                     , mem1_perf_ratio(mem1_perf_ratio)
                     , mem2_perf_ratio(mem2_perf_ratio)
                     , mem3_perf_ratio(mem3_perf_ratio)
                     , parallel_MI_CU(parallel_MI_CU)
-                    , percent_bw_per_wg(percent_bw_per_wg)
+                    , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
                     , mem_clock_ratio(mem_clock_ratio)
                 {
                 }
@@ -341,30 +342,30 @@ namespace TensileLite
                                             std::unordered_map<MatrixInstruction, size_t>>
                 INSTRUCTION_MAP;
 
-            Architecture arch;
-            size_t       N_CU; // Number of Compute Units
-            size_t       LDS_capacity; // Capacity of LDS
-            double       mem1_perf_ratio;
-            double       mem2_perf_ratio;
-            double       mem3_perf_ratio;
-            size_t       L2_capacity; // Capacity of L2 in bytes
-            size_t       CU_per_L2; // Number of compute units per L2 domain
-            double       compute_clock_ghz;
-            size_t       parallel_MI_CU; // The number of parallel MI in a CU
-            double       percent_bw_per_wg;
-            size_t       NUM_XCD;
+            Architecture                        arch;
+            size_t                              N_CU; // Number of Compute Units
+            size_t                              LDS_capacity; // Capacity of LDS
+            double                              mem1_perf_ratio;
+            double                              mem2_perf_ratio;
+            double                              mem3_perf_ratio;
+            size_t                              L2_capacity; // Capacity of L2 in bytes
+            size_t                              CU_per_L2; // Number of compute units per L2 domain
+            double                              compute_clock_ghz;
+            size_t                              parallel_MI_CU; // The number of parallel MI in a CU
+            std::tuple<double, double, double>  mem_bw_per_wg_coefficients;
+            size_t                              NUM_XCD;
 
-            Hardware(Architecture arch,
-                     size_t       N_CU,
-                     size_t       LDS_capacity,
-                     size_t       NUM_XCD,
-                     double       mem1_perf_ratio,
-                     double       mem2_perf_ratio,
-                     double       mem3_perf_ratio,
-                     size_t       L2_capacity,
-                     double       compute_clock_ghz,
-                     size_t       parallel_MI_CU,
-                     double       percent_bw_per_wg)
+            Hardware(Architecture                        arch,
+                     size_t                              N_CU,
+                     size_t                              LDS_capacity,
+                     size_t                              NUM_XCD,
+                     double                              mem1_perf_ratio,
+                     double                              mem2_perf_ratio,
+                     double                              mem3_perf_ratio,
+                     size_t                              L2_capacity,
+                     double                              compute_clock_ghz,
+                     size_t                              parallel_MI_CU,
+                     std::tuple<double, double, double>  mem_bw_per_wg_coefficients)
                 : arch(arch)
                 , N_CU(N_CU)
                 , LDS_capacity(LDS_capacity)
@@ -375,13 +376,9 @@ namespace TensileLite
                 , CU_per_L2(N_CU / NUM_XCD)
                 , compute_clock_ghz(compute_clock_ghz)
                 , parallel_MI_CU(parallel_MI_CU)
-                , percent_bw_per_wg(percent_bw_per_wg)
+                , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
                 , NUM_XCD(NUM_XCD)
             {
-                if(Hardware::is_debug_enabled())
-                {
-                    print();
-                }
             }
 
             Hardware(hipDeviceProp_t properties)
@@ -400,7 +397,7 @@ namespace TensileLite
                 , CU_per_L2(other.CU_per_L2)
                 , compute_clock_ghz(other.compute_clock_ghz)
                 , parallel_MI_CU(other.parallel_MI_CU)
-                , percent_bw_per_wg(other.percent_bw_per_wg)
+                , mem_bw_per_wg_coefficients(other.mem_bw_per_wg_coefficients)
                 , NUM_XCD(other.NUM_XCD)
             {
             }
@@ -428,7 +425,7 @@ namespace TensileLite
                                 properties.l2CacheSize,
                                 properties.clockRate / 1e6,
                                 constants.parallel_MI_CU,
-                                constants.percent_bw_per_wg);
+                                constants.mem_bw_per_wg_coefficients);
             }
 
             static Hardware getHardwareForDevice(int deviceId)
@@ -451,10 +448,10 @@ namespace TensileLite
             }
 
             // Function to print hardware details
-            void print()
+            void print() const
             {
                 std::cout << "================== Hardware Configuration ==================\n";
-                std::cout << "Number of CUs (N_CU)       : " << N_CU << "\n";
+                std::cout << "Number of CUs (N_CU)      : " << N_CU << "\n";
                 std::cout << "LDS capacity              : " << LDS_capacity << " bytes\n";
                 std::cout << "mem1_perf_ratio           : " << mem1_perf_ratio << "\n";
                 std::cout << "mem2_perf_ratio           : " << mem2_perf_ratio << "\n";
@@ -464,7 +461,9 @@ namespace TensileLite
                 std::cout << "Compute clock (GHz)       : " << compute_clock_ghz << "\n";
                 std::cout << "Parallel MI/CU            : " << parallel_MI_CU << "\n";
                 std::cout << "Number of XCDs (NUM_XCD)  : " << NUM_XCD << "\n";
-                std::cout << "percent_bw_per_wg         : " << percent_bw_per_wg << "\n\n";
+                std::cout << "mem_bw_per_wg_coefficients: " << std::get<0>(mem_bw_per_wg_coefficients) << ", "
+                                                            << std::get<1>(mem_bw_per_wg_coefficients) << ", "
+                                                            << std::get<2>(mem_bw_per_wg_coefficients) << "\n\n";
 
                 std::cout << "------------------ Instruction Map -------------------------\n";
                 // Loop over the instruction_map and print each entry
@@ -487,6 +486,12 @@ namespace TensileLite
             {
                 static bool debugEnvVar = read_debug_env_var(); //Used to cache the read.
                 return debugEnvVar;
+            }
+
+            static bool is_heuristics_enabled()
+            {
+                static bool heuristicsEnvVar = read_heuristics_env_var(); //Used to cache the read.
+                return heuristicsEnvVar;
             }
 
             void log_debug(const std::string& key, const std::string& value) const
@@ -549,6 +554,13 @@ namespace TensileLite
             {
                 const char* env = std::getenv("ANALYTICAL_GEMM_DEBUG");
                 return env && std::string(env) == "1";
+            }
+
+            // Helper function to read the heuristics environment variable
+            static bool read_heuristics_env_var()
+            {
+                const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS");
+                return !(env && std::string(env) == "0");
             }
         };
 
