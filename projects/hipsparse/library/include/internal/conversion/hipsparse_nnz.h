@@ -43,7 +43,7 @@ extern "C" {
 *    \end{bmatrix}
 *  \f]
 *
-*  then using \p dirA == \ref HIPSPARSE_DIRECTION_ROW results in: 
+*  then using \p dirA == \ref HIPSPARSE_DIRECTION_ROW results in:
 *  \f[
 *    \begin{align}
 *    \text{nnzPerRowColumn} &= \begin{bmatrix} 2 & 2 & 3 \end{bmatrix} \\
@@ -54,19 +54,19 @@ extern "C" {
 *  while using \p dirA == \ref HIPSPARSE_DIRECTION_COLUMN results in:
 *  \f[
 *    \begin{align}
-*    \text{nnzPerRowColumn} &= \begin{bmatrix} 3 & 1 & 1 & 2 \end{bmatrix} \\ 
+*    \text{nnzPerRowColumn} &= \begin{bmatrix} 3 & 1 & 1 & 2 \end{bmatrix} \\
 *    \text{nnzTotalDevHostPtr} &= 7
 *    \end{align}
 *  \f]
 *
 *  The array \p nnzPerRowColumn must be allocated by the user before calling \p hipsparseXnnz and
-*  has length equal to \p m if \p dirA == \ref HIPSPARSE_DIRECTION_ROW or \p n if 
+*  has length equal to \p m if \p dirA == \ref HIPSPARSE_DIRECTION_ROW or \p n if
 *  \p dirA == \ref HIPSPARSE_DIRECTION_COLUMN.
 *
 *  For a complete code example on its usage, see the example found with hipsparseSdense2csr().
-* 
+*
 *  \note
-*  As indicated, \p nnzTotalDevHostPtr can point either to host or device memory. This is controlled 
+*  As indicated, \p nnzTotalDevHostPtr can point either to host or device memory. This is controlled
 *  by setting the pointer mode. See \ref hipsparseSetPointerMode().
 *
 *  \note
@@ -75,7 +75,7 @@ extern "C" {
 *  @param[in]
 *  handle             handle to the rocsparse library context queue.
 *  @param[in]
-*  dirA               direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW 
+*  dirA               direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW
 *                     or by \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  m                  number of rows of the dense matrix \p A.
@@ -93,7 +93,7 @@ extern "C" {
 *  nnzTotalDevHostPtr total number of nonzero elements in device or host memory.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A or \p nnzPerRowColumn or 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A or \p nnzPerRowColumn or
 *              \p nnzTotalDevHostPtr pointer is invalid.
 */
 /**@{*/

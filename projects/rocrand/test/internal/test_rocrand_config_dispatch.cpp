@@ -121,11 +121,11 @@ TEST(rocrand_config_dispatch_tests, get_config_on_host_and_device)
     HIP_CHECK(hipMallocHelper(&d_grid_size, sizeof(*d_grid_size)));
 
     rocrand_impl::host::generator_config config{};
-    const hipError_t error = rocrand_impl::host::get_generator_config<dummy_rng_type, T>(
+    const hipError_t err = rocrand_impl::host::get_generator_config<dummy_rng_type, T>(
         stream,
         ROCRAND_ORDERING_PSEUDO_DEFAULT,
         config);
-    HIP_CHECK(error);
+    HIP_CHECK(err);
 
     hipLaunchKernelGGL(write_config<T>,
                        dim3(config.blocks),

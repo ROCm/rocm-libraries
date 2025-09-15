@@ -550,7 +550,7 @@ class LSUOn(LSU):
         vectorWidths     = [fullVw, edgeVw]
         vectorWidths_1 = [fullVw_1, edgeVw_1]
 
-        noGSUBranch = (kernel["GlobalSplitU"] == 0)
+        noGSUBranch = (kernel["GlobalSplitU"] == 0 and kernel["StreamK"] != 3)
         module = Module("localSplitUGlobalWrite")
         module.add(writer.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch))
         writer.cleanupGlobalWrite(kernel)

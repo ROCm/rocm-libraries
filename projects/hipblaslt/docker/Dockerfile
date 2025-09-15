@@ -25,4 +25,3 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-
   && apt-get clean
 
 RUN groupadd -f render
-

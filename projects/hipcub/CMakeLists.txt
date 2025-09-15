@@ -21,7 +21,18 @@
 # SOFTWARE.
 
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-cmake_policy(VERSION 3.18...3.21)
+cmake_policy(VERSION 3.18...3.25)
+
+# --------------------------------------
+# Update these variables at release time
+#
+# Set the library version
+set(VERSION_STRING "4.1.0")
+# Set the minimum required rocPRIM version
+set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+# Set download branch for dependency rocPRIM
+set(ROCM_DEP_RELEASE_BRANCH "release/rocm-rel-7.1" CACHE STRING "Download branch for ROCm dependencies")
+# --------------------------------------
 
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
@@ -53,13 +64,14 @@ include(CMakeDependentOption)
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(CODE_COVERAGE "Enable code coverage" OFF)
-option(DEPENDENCIES_FORCE_DOWNLOAD "Download dependencies and do not search for packages" OFF)
+option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
 option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
+cmake_dependent_option(USE_SYSTEM_LIB "Use installed hipCUB when building tests" OFF BUILD_TEST OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -70,6 +82,24 @@ if(WIN32)
 else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
+
+# Set up options for obtaining dependency rocPRIM.
+# PACKAGE: Search for an install package that contains the dependency.
+# MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
+# DOWNLOAD: Download the dependency from the monorepo.
+set(FETCH_METHOD_OPTIONS "PACKAGE" "MONOREPO" "DOWNLOAD")
+
+set(ROCPRIM_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocPRIM dependency")
+
+# This function checks to see if the fetch method variable it's passed is defined, and contains a valid value.
+# If it does not contain a valid value, it issues a fatal failure with an error message.
+function(check_fetch_method method)
+  if (DEFINED ${method} AND NOT ${${method}} IN_LIST FETCH_METHOD_OPTIONS)
+    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${FETCH_METHOD_OPTIONS}.")
+  endif()
+endfunction()
+
+check_fetch_method(ROCPRIM_FETCH_METHOD)
 
 # Add hipCUB's CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -116,6 +146,17 @@ else()
   endif()
 endif()
 
+# Compressed offload binaries are currently not working with the SPIR-V target
+if("amdgcnspirv" IN_LIST GPU_TARGETS)
+  if(BUILD_OFFLOAD_COMPRESS)
+    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
+  endif()
+endif()
+
+# Setup the library version
+rocm_setup_version(VERSION ${VERSION_STRING})
+math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
+
 # Find and verify HIP.
 include(VerifyCompiler)
 
@@ -138,11 +179,6 @@ if(BUILD_OFFLOAD_COMPRESS)
   endif()
 endif()
 
-# Setup VERSION
-set(VERSION_STRING "4.0.0")
-rocm_setup_version(VERSION ${VERSION_STRING})
-math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
-
 # hipCUB library
 add_subdirectory(hipcub)
 
@@ -156,6 +192,20 @@ endif()
 
 # Tests
 if(BUILD_TEST)
+  if(USE_SYSTEM_LIB)
+    # On ROCm hipCUB requires rocPRIM
+    if(HIP_COMPILER STREQUAL "clang")
+      find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/rocprim")
+      if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
+        message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+      endif()
+    endif()
+    find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/hipcub")
+    if (NOT ${hipcub_VERSION} VERSION_EQUAL ${VERSION_STRING})
+      message(WARNING "The installed hipcub version, ${hipcub_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+    endif()
+  endif()
+
   enable_testing()
   rocm_package_setup_client_component(tests)
   add_subdirectory(test)

@@ -384,9 +384,8 @@ struct GroupedConvBwdDataKernelArgs
 
     static constexpr index_t MaxGroupedGemmGroupsNum = 128;
 
-    using ABCGridDescs =
-        remove_cvref_t<decltype(ConvToGemmTransformer{}
-                                    .template MakeABCGridDescriptor_A_K0_M_K1_B_K0_N_K1_C_M_N(1))>;
+    using ABCGridDescs = remove_cvref_t<
+        decltype(ConvToGemmTransformer{}.MakeABCGridDescriptor_A_K0_M_K1_B_K0_N_K1_C_M_N(1))>;
 
     using AGridDescMK = remove_cvref_t<decltype(ABCGridDescs{}[number<0>{}])>;
     using BGridDescNK = remove_cvref_t<decltype(ABCGridDescs{}[number<1>{}])>;
@@ -487,7 +486,7 @@ struct GroupedConvolutionBackwardDataKernel
     using GemmDsLayout                  = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
     static constexpr index_t NumDTensor = GroupedConvTraitsType_::NumDTensor;
 
-    static constexpr index_t KernelBlockSize = GemmPipeline::BlockSize;
+    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
 
     using InDataType  = remove_cvref_t<typename GemmPipeline::ADataType>;
     using WeiDataType = remove_cvref_t<typename GemmPipeline::BDataType>;
@@ -530,7 +529,10 @@ struct GroupedConvolutionBackwardDataKernel
         return dim3(kargs.grid_size_, kargs.GemmBatch, kargs.k_batch);
     }
 
-    CK_TILE_HOST static constexpr auto BlockSize() { return dim3(KernelBlockSize); }
+    CK_TILE_HOST static constexpr auto BlockSize()
+    {
+        return is_wave32() ? dim3(kBlockSize / 2) : dim3(kBlockSize);
+    }
 
     CK_TILE_HOST static constexpr GroupedConvBwdDataKernelArgsSpecialized
     MakeKernelArgs(const GroupedConvBwdDataHostArgs& hostArgs)

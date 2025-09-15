@@ -408,4 +408,3 @@ Function name                                     single double single complex d
 :cpp:func:`hipsparseSpSM_analysis()`              x      x      x              x
 :cpp:func:`hipsparseSpSM_solve()`                 x      x      x              x
 ================================================= ====== ====== ============== ==============
-

@@ -653,4 +653,3 @@ The given kernel name example is a GEMM. The different parts of the kernel name 
     * - ``WGMT``
       - ``WorkGroupMappingType``
       - B
-

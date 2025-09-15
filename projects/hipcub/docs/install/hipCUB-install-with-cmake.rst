@@ -17,7 +17,7 @@ Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` if you're building 
     CXX=amdclang++
     CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
 
-Create the ``build`` directory inside the ``hipCUB`` directory, then change directory to the ``build`` directory:
+After :doc:`cloning the project <./hipCUB-install-overview>`, create the ``build`` directory under the ``hipcub`` root directory, then change directory to the ``build`` directory:
 
 .. code:: shell
 
@@ -35,6 +35,7 @@ The available build options are:
 
 * ``BUILD_BENCHMARK``. Set this to ``ON`` to build benchmark tests. Off by default.
 * ``BUILD_TEST``. Set this to ``ON`` to build tests. Off by default. 
+* ``USE_SYSTEM_LIB``: Set to ``ON`` to use the installed ``hipCUB`` from the system when building the tests. Off by default. For this option to take effect, ``BUILD_TEST`` must be ``ON`` and the ``hipCUB`` install (with its dependencies) must be compatible with the version of the tests.
 * ``DEPENDENCIES_FORCE_DOWNLOAD``. Set this to ``ON`` to download the dependencies regardless of whether or not they are already installed. Off by default.
 
 Build hipCUB using the generated make file:

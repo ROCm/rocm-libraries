@@ -9,6 +9,6 @@ function(hipsparselt_link_blas_libraries target_name)
         target_link_libraries(${target_name} PRIVATE ${BLAS_LIBRARIES} ${CBLAS_LIBRARIES})
         message(STATUS "Linking ${target_name} with standard BLAS/CBLAS")
     endif()
-    
+
     target_link_libraries(${target_name} PRIVATE ${LAPACK_LIBRARIES})
 endfunction()

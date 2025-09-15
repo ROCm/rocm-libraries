@@ -34,13 +34,15 @@ namespace TensileLite
             Hardware::ARCH_CONSTANT_MAP
             = {{Hardware::Architecture::gfx90a,
                 Hardware::ArchitectureConstants(
-                    1, 5.5, 1.21875121875121875122 * 1.2, 1.2, 4, 3e-2, 1.5)},
+                    1, 5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5)},
                {Hardware::Architecture::gfx942,
                 Hardware::ArchitectureConstants(
-                    8, 17, 1.21875121875121875122 * 6, 4, 4, 1.5e-2, 1.5)},
+                    8, 17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5)},
                {Hardware::Architecture::gfx950,
+                // Hardware::ArchitectureConstants(
+                //     8, 17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(-0.000013, 0.007070, 0.027355), 1.5)}};
                 Hardware::ArchitectureConstants(
-                    8, 17, 1.21875121875121875122 * 7, 6, 4, 0.008, 1.5)}};
+                    8, 17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5)}};
 
         // Schema : (MI_M, MI_N, MI_K, DataType)
         const std::unordered_map<Hardware::Architecture,

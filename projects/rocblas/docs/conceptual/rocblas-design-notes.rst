@@ -452,4 +452,3 @@ the enum value of ``rocblas_gemm_flags_fp16_alt_impl`` for the ``flags`` argumen
 
    Not all problem sizes consistently select the MFMA-based kernels.
    Additional tuning might be required to achieve good performance.
-

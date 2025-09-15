@@ -4,4 +4,3 @@ libraryPathDependencies:
   - codeql/cpp-all
   - rocmsoftwareplatform/rocroller
 extractor: cpp
-

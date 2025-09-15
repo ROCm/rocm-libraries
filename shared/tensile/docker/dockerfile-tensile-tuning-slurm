@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-# This Dockerfile provides a starting point for a Tensile tuning image 
+# This Dockerfile provides a starting point for a Tensile tuning image
 # to run tuning tasks. It provides a deployment package that ensures
 # consistency for ROCm image, Tensile code and ATITOOL
 
@@ -113,7 +113,7 @@ RUN bash -xc \
     runScript=/Tensile/bin/run.sh ; \
     touch \$runScript; \
     echo \"# !/bin/bash\" >> \$runScript; \
-    echo \"# Container run script\" >> \$runScript ; \ 
+    echo \"# Container run script\" >> \$runScript ; \
     echo \"# Expects single yaml in mounted /TaskDir\" >> \$runScript ; \
     echo \"# Generates tuning result to /ResultDir\" >> \$runScript ; \
     echo \"cd /Tensile\" >> \$runScript ; \

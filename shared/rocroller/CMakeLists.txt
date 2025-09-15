@@ -256,8 +256,8 @@ target_link_libraries(rocroller
         ${llvm_libs}
 )
 
-target_include_directories(rocroller 
-    PUBLIC 
+target_include_directories(rocroller
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
 )
 

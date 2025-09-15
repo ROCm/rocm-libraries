@@ -196,8 +196,8 @@ struct default_non_trivial_runs_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8))>>
     : non_trivial_runs_config<64,
-                              32,
-                              ::rocprim::block_load_method::block_load_vectorize,
+                              8,
+                              ::rocprim::block_load_method::block_load_warp_transpose,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
 
@@ -442,9 +442,9 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4))>>
-    : non_trivial_runs_config<64,
-                              16,
-                              ::rocprim::block_load_method::block_load_warp_transpose,
+    : non_trivial_runs_config<256,
+                              8,
+                              ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
 
@@ -455,8 +455,8 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2))>>
-    : non_trivial_runs_config<128,
-                              16,
+    : non_trivial_runs_config<256,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -469,7 +469,7 @@ struct default_non_trivial_runs_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value)
                       && (sizeof(key_type) <= 2))>>
     : non_trivial_runs_config<256,
-                              16,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -482,7 +482,7 @@ struct default_non_trivial_runs_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8))>>
     : non_trivial_runs_config<64,
-                              16,
+                              8,
                               ::rocprim::block_load_method::block_load_warp_transpose,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -494,9 +494,9 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4))>>
-    : non_trivial_runs_config<64,
-                              16,
-                              ::rocprim::block_load_method::block_load_warp_transpose,
+    : non_trivial_runs_config<256,
+                              8,
+                              ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
 
@@ -507,8 +507,8 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2))>>
-    : non_trivial_runs_config<128,
-                              16,
+    : non_trivial_runs_config<256,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -534,7 +534,7 @@ struct default_non_trivial_runs_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value)
                       && (sizeof(key_type) <= 1))>>
     : non_trivial_runs_config<256,
-                              16,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -650,8 +650,8 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4))>>
-    : non_trivial_runs_config<64,
-                              16,
+    : non_trivial_runs_config<256,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -664,7 +664,7 @@ struct default_non_trivial_runs_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2))>>
     : non_trivial_runs_config<256,
-                              16,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -690,7 +690,7 @@ struct default_non_trivial_runs_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8))>>
     : non_trivial_runs_config<64,
-                              16,
+                              8,
                               ::rocprim::block_load_method::block_load_warp_transpose,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -702,8 +702,8 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4))>>
-    : non_trivial_runs_config<64,
-                              16,
+    : non_trivial_runs_config<256,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -716,7 +716,7 @@ struct default_non_trivial_runs_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2))>>
     : non_trivial_runs_config<256,
-                              16,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -858,8 +858,8 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4))>>
-    : non_trivial_runs_config<256,
-                              16,
+    : non_trivial_runs_config<512,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -897,8 +897,8 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8))>>
-    : non_trivial_runs_config<128,
-                              16,
+    : non_trivial_runs_config<256,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -910,8 +910,8 @@ struct default_non_trivial_runs_config<
     key_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4))>>
-    : non_trivial_runs_config<256,
-                              16,
+    : non_trivial_runs_config<512,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};
@@ -951,6 +951,19 @@ struct default_non_trivial_runs_config<
                       && (sizeof(key_type) <= 1))>>
     : non_trivial_runs_config<256,
                               16,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = rocprim::int128_t
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                      && (sizeof(key_type) > 8))>>
+    : non_trivial_runs_config<256,
+                              8,
                               ::rocprim::block_load_method::block_load_vectorize,
                               ::rocprim::block_scan_algorithm::using_warp_scan>
 {};

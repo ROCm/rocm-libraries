@@ -15,8 +15,50 @@ resources:
     name: ROCm/ROCm
     ref: ${{ parameters.pipelinesRepoRef }}
 
-trigger: none
-pr: none
+trigger:
+  batch: true
+  branches:
+    include:
+    - develop
+    - release-staging/rocm-rel-7.*
+  paths:
+    include:
+    - CMakeLists.txt
+    - cmake
+    - shared/mxdatagenerator
+    - shared/rocroller
+    - projects/hipblas-common
+    - projects/rocprim
+    - projects/rocrand
+    exclude:
+    - .githooks
+    - .github
+    - docs
+    - CODEOWNERS
+    - .*.y*ml
+    - ./**/*.md
+
+pr:
+  branches:
+    include:
+    - develop
+    - release-staging/rocm-rel-7.*
+  paths:
+    include:
+    - CMakeLists.txt
+    - cmake
+    - shared/mxdatagenerator
+    - shared/rocroller
+    - projects/hipblas-common
+    - projects/rocprim
+    - projects/rocrand
+    exclude:
+    - .githooks
+    - .github
+    - docs
+    - CODEOWNERS
+    - .*.y*ml
+    - ./**/*.md
 
 stages:
 - stage: rocm_libraries

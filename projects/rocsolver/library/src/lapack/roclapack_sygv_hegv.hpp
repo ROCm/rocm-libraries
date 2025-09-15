@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
 #include "roclapack_potrf.hpp"
 #include "roclapack_syev_heev.hpp"
@@ -39,20 +40,6 @@
 #include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
-
-template <typename T>
-ROCSOLVER_KERNEL void sygv_update_info(T* info, T* iinfo, const rocblas_int n, const rocblas_int bc)
-{
-    int b = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-    if(b < bc)
-    {
-        if(info[b] != 0)
-            info[b] += n;
-        else
-            info[b] = iinfo[b];
-    }
-}
 
 template <bool BATCHED, bool STRIDED, typename T, typename S>
 void rocsolver_sygv_hegv_getMemorySize(const rocblas_eform itype,

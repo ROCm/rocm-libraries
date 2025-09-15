@@ -123,10 +123,10 @@ class ProblemType:
         rv.aType = srcType
         rv.bType = srcType
         # for hybrid 8bit float types, we need to split the type into a_type and b_type
-        if srcType.isFloat8BFloat8(): 
+        if srcType.isFloat8BFloat8():
             rv.aType = DataType("F8")
             rv.bType = DataType("B8")
-        elif srcType.isBFloat8Float8(): 
+        elif srcType.isBFloat8Float8():
             rv.aType = DataType("B8")
             rv.bType = DataType("F8")
 
@@ -179,7 +179,7 @@ class ProblemType:
         rv.stochasticRounding = False
         if 'StochasticRounding' in d:
             rv.stochasticRounding = d['StochasticRounding']
-        
+
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):

@@ -277,7 +277,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - EdgeType: ["ShiftPtr"]
-        #- AtomicAddC: [False] 
+        #- AtomicAddC: [False]
         #- AssertBetaValue: [1]
         #- AssertCEqualsD: [True]
       ForkParameters:
@@ -338,4 +338,3 @@ BenchmarkProblems:
           #- Exact: [ M, N, B, K, ldc, ldc, lda, ldb ]
           - Exact: [1024, 1024, 1, 512]
           - Exact: [1022, 1022, 1, 502]
-

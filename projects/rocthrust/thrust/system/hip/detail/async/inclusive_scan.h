@@ -30,24 +30,32 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/detail/cpp_version_check.h>
 
-#  include <thrust/system/hip/config.h>
+#if THRUST_CPP_DIALECT >= 2017
 
-#  include <thrust/distance.h>
-#  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/system/hip/detail/async/customization.h>
-#  include <thrust/system/hip/detail/scan.h>
-#  include <thrust/system/hip/future.h>
-#  include <thrust/type_traits/remove_cvref.h>
+#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#  include <type_traits> // IWYU pragma: export
+#    include <thrust/system/hip/config.h>
+
+#    include <thrust/distance.h>
+#    include <thrust/iterator/iterator_traits.h>
+#    include <thrust/system/hip/detail/async/customization.h>
+#    include <thrust/system/hip/detail/util.h>
+#    include <thrust/system/hip/future.h>
+
+#    include <type_traits>
 
 // TODO specialize for thrust::plus to use e.g. InclusiveSum instead of IncScan
-//  - Note that thrust::plus<> is transparent, cub::Sum is not. This should be
-//    fixed in CUB first).
-//  - Need to check if CUB actually optimizes for sums before putting in effort
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -61,54 +69,52 @@ unique_eager_event
 async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt out, BinaryOp op)
 {
   auto const device_alloc = get_async_device_allocator(policy);
-
   unique_eager_event ev;
-  // Determine temporary device storage requirements.
 
+  // Determine temporary device storage requirements.
   size_t tmp_size = 0;
-  thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::__scan::invoke_inclusive_scan(
-      policy,
-      nullptr,
-      tmp_size,
-      first,
-      out,
-      n,
-      op,
-      0, // Null stream, just for sizing.
-      THRUST_HIP_DEBUG_SYNC_FLAG),
-    "after determining tmp storage "
-    "requirements for inclusive_scan");
+  {
+    thrust::hip_rocprim::throw_on_error(
+      thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+        policy,
+        nullptr,
+        tmp_size,
+        first,
+        out,
+        n,
+        op,
+        0, // Null stream, just for sizing.
+        THRUST_HIP_DEBUG_SYNC_FLAG),
+      "after determining tmp storage "
+      "requirements for inclusive_scan");
+  }
 
   // Allocate temporary storage.
-
-  auto tmp = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
-
-  // The array was dynamically allocated, so we assume that it's suitably
-  // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
-  // make this guarantee.
-  void* const tmp_ptr = raw_pointer_cast(tmp.get());
+  auto content        = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
+  void* const tmp_ptr = raw_pointer_cast(content.get());
 
   // Set up stream with dependencies.
-
-  hipStream_t user_raw_stream = thrust::hip_rocprim::stream(policy);
+  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
 
   if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
-    ev = make_dependent_event(std::tuple_cat(std::make_tuple(std::move(tmp), unique_stream(nonowning, user_raw_stream)),
-                                             extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+    ev = make_dependent_event(
+      std::tuple_cat(std::make_tuple(std::move(content), unique_stream(nonowning, user_raw_stream)),
+                     extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
   }
   else
   {
     ev = make_dependent_event(std::tuple_cat(
-      std::make_tuple(std::move(tmp)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+      std::make_tuple(std::move(content)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
   }
 
-  // Run reduction.
-  thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::__scan::invoke_inclusive_scan(
-      policy, tmp_ptr, tmp_size, first, out, n, op, user_raw_stream, THRUST_HIP_DEBUG_SYNC_FLAG),
-    "after dispatching inclusive_scan kernel");
+  // Run scan.
+  {
+    thrust::hip_rocprim::throw_on_error(
+      thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+        policy, tmp_ptr, tmp_size, first, out, n, op, user_raw_stream, THRUST_HIP_DEBUG_SYNC_FLAG),
+      "after dispatching inclusive_scan kernel");
+  }
 
   return ev;
 }
@@ -123,55 +129,53 @@ unique_eager_event async_inclusive_scan_n(
   execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt out, InitialValueType init, BinaryOp op)
 {
   auto const device_alloc = get_async_device_allocator(policy);
-
   unique_eager_event ev;
-  // Determine temporary device storage requirements.
 
+  // Determine temporary device storage requirements.
   size_t tmp_size = 0;
-  thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::__scan::invoke_inclusive_scan(
-      policy,
-      nullptr,
-      tmp_size,
-      first,
-      out,
-      n,
-      init,
-      op,
-      0, // Null stream, just for sizing.
-      THRUST_HIP_DEBUG_SYNC_FLAG),
-    "after determining tmp storage "
-    "requirements for inclusive_scan");
+  {
+    thrust::hip_rocprim::throw_on_error(
+      thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+        policy,
+        nullptr,
+        tmp_size,
+        first,
+        out,
+        n,
+        init,
+        op,
+        0, // Null stream, just for sizing.
+        THRUST_HIP_DEBUG_SYNC_FLAG),
+      "after determining tmp storage "
+      "requirements for inclusive_scan");
+  }
 
   // Allocate temporary storage.
-
-  auto tmp = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
-
-  // The array was dynamically allocated, so we assume that it's suitably
-  // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
-  // make this guarantee.
-  void* const tmp_ptr = raw_pointer_cast(tmp.get());
+  auto content        = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
+  void* const tmp_ptr = raw_pointer_cast(content.get());
 
   // Set up stream with dependencies.
-
-  hipStream_t user_raw_stream = thrust::hip_rocprim::stream(policy);
+  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
 
   if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
-    ev = make_dependent_event(std::tuple_cat(std::make_tuple(std::move(tmp), unique_stream(nonowning, user_raw_stream)),
-                                             extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+    ev = make_dependent_event(
+      std::tuple_cat(std::make_tuple(std::move(content), unique_stream(nonowning, user_raw_stream)),
+                     extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
   }
   else
   {
     ev = make_dependent_event(std::tuple_cat(
-      std::make_tuple(std::move(tmp)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+      std::make_tuple(std::move(content)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
   }
 
-  // Run reduction.
-  thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::__scan::invoke_inclusive_scan(
-      policy, tmp_ptr, tmp_size, first, out, n, init, op, user_raw_stream, THRUST_HIP_DEBUG_SYNC_FLAG),
-    "after dispatching inclusive_scan kernel");
+  // Run scan.
+  {
+    thrust::hip_rocprim::throw_on_error(
+      thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+        policy, tmp_ptr, tmp_size, first, out, n, init, op, user_raw_stream, THRUST_HIP_DEBUG_SYNC_FLAG),
+      "after dispatching inclusive_scan kernel");
+  }
 
   return ev;
 }
@@ -209,6 +213,9 @@ auto async_inclusive_scan(
 
 } // namespace hip_rocprim
 
+THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
+#endif // C++17

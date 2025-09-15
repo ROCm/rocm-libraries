@@ -109,6 +109,21 @@ inline rocfft_precision rocfft_precision_from_fftparams(const fft_precision val)
     }
 }
 
+inline fft_precision fft_precision_from_rocfft_precision(const rocfft_precision val)
+{
+    switch(val)
+    {
+    case rocfft_precision_single:
+        return fft_precision_single;
+    case rocfft_precision_double:
+        return fft_precision_double;
+    case rocfft_precision_half:
+        return fft_precision_half;
+    default:
+        throw std::runtime_error("Invalid precision");
+    }
+}
+
 inline rocfft_array_type rocfft_array_type_from_fftparams(const fft_array_type val)
 {
     switch(val)
@@ -129,6 +144,26 @@ inline rocfft_array_type rocfft_array_type_from_fftparams(const fft_array_type v
     return rocfft_array_type_unset;
 }
 
+inline fft_array_type fft_array_type_from_rocfft_array_type(const rocfft_array_type val)
+{
+    switch(val)
+    {
+    case rocfft_array_type_complex_interleaved:
+        return fft_array_type_complex_interleaved;
+    case rocfft_array_type_complex_planar:
+        return fft_array_type_complex_planar;
+    case rocfft_array_type_real:
+        return fft_array_type_real;
+    case rocfft_array_type_hermitian_interleaved:
+        return fft_array_type_hermitian_interleaved;
+    case rocfft_array_type_hermitian_planar:
+        return fft_array_type_hermitian_planar;
+    case rocfft_array_type_unset:
+        return fft_array_type_unset;
+    }
+    return fft_array_type_unset;
+}
+
 inline rocfft_transform_type rocfft_transform_type_from_fftparams(const fft_transform_type val)
 {
     switch(val)
@@ -141,6 +176,24 @@ inline rocfft_transform_type rocfft_transform_type_from_fftparams(const fft_tran
         return rocfft_transform_type_real_forward;
     case fft_transform_type_real_inverse:
         return rocfft_transform_type_real_inverse;
+    default:
+        throw std::runtime_error("Invalid transform type");
+    }
+}
+
+inline fft_transform_type
+    fft_transform_type_from_rocfft_transform_type(const rocfft_transform_type val)
+{
+    switch(val)
+    {
+    case rocfft_transform_type_complex_forward:
+        return fft_transform_type_complex_forward;
+    case rocfft_transform_type_complex_inverse:
+        return fft_transform_type_complex_inverse;
+    case rocfft_transform_type_real_forward:
+        return fft_transform_type_real_forward;
+    case rocfft_transform_type_real_inverse:
+        return fft_transform_type_real_inverse;
     default:
         throw std::runtime_error("Invalid transform type");
     }
@@ -160,6 +213,20 @@ inline rocfft_result_placement
     }
 }
 
+inline fft_result_placement
+    fft_result_placement_from_rocfft_result_placement(const rocfft_result_placement val)
+{
+    switch(val)
+    {
+    case rocfft_placement_inplace:
+        return fft_placement_inplace;
+    case rocfft_placement_notinplace:
+        return fft_placement_notinplace;
+    default:
+        throw std::runtime_error("Invalid result placement");
+    }
+}
+
 template <typename Funcs>
 class rocfft_params_base : public fft_params
 {
@@ -170,6 +237,7 @@ public:
     rocfft_execution_info   info = nullptr;
     rocfft_plan_description desc = nullptr;
     gpubuf_t<void>          wbuffer;
+    size_t                  workbuffersize = 0;
 
     explicit rocfft_params_base() = default;
 
@@ -410,7 +478,8 @@ public:
         {
             return ret;
         }
-        if(workbuffersize > 0)
+        // default behavior is to feed rocfft with a work area if it needs one
+        if(workbuffersize > 0 && auto_allocate != fft_auto_allocation_on)
         {
             hipError_t hip_status = hipSuccess;
             hip_status            = wbuffer.alloc(workbuffersize);
@@ -429,7 +498,7 @@ public:
                 {
                     oss << "hipMemGetInfo also failed";
                 }
-                throw work_buffer_alloc_failure(oss.str());
+                throw work_buffer_alloc_failure(oss.str(), workbuffersize);
             }
 
             auto rocret

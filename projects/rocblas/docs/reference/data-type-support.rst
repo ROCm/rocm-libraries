@@ -10,11 +10,11 @@ Data type support
 
 This topic lists the data type support for the rocBLAS library on AMD GPUs for
 different levels of BLAS operations :ref:`Level 1 <level-1>`,
-:ref:`2 <level-2>`, and :ref:`3 <level-3>`. 
+:ref:`2 <level-2>`, and :ref:`3 <level-3>`.
 
 The rocBLAS library functions are also available with ILP64 interfaces. With
 these interfaces, all ``rocblas_int`` arguments are replaced by the type name
-``int64_t``. For more information on these ``_64`` functions, see the 
+``int64_t``. For more information on these ``_64`` functions, see the
 :ref:`ILP64 API` section.
 
 The icons representing different levels of support are explained in the
@@ -44,8 +44,8 @@ following table.
       - Full support
 
 
-For more information about data type support for the other ROCm libraries, see 
-:doc:`Data types and precision support page <rocm:reference/precision-support>`. 
+For more information about data type support for the other ROCm libraries, see
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
 
 Level 1 functions - vector operations
 =====================================
@@ -61,7 +61,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
         :header-rows: 1
         :widths: 15, 45, 10, 10, 10, 10
 
-        * 
+        *
           - Function
           - Description
           - float16
@@ -99,7 +99,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
           - ✅
           - ✅
           - ✅
-          - ✅    
+          - ✅
 
         *
           - :ref:`NRM2 <rocblas_nrm2>`
@@ -146,9 +146,9 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
 
     .. list-table::
         :header-rows: 1
-        :widths: 15, 55, 10, 20 
+        :widths: 15, 55, 10, 20
 
-        * 
+        *
           - Function
           - Description
           - complex
@@ -176,7 +176,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
           - :ref:`Dot <rocblas_dot>`
           - Computes the dot product: :math:`result = x^T y`
           - ✅
-          - ✅      
+          - ✅
 
         *
           - :ref:`NRM2 <rocblas_nrm2>`
@@ -222,7 +222,7 @@ Level-2 functions perform matrix-vector operations.
         :header-rows: 1
         :widths: 15, 45, 10, 10, 10, 10
 
-        * 
+        *
           - Function
           - Description
           - float16
@@ -358,9 +358,9 @@ Level-2 functions perform matrix-vector operations.
 
     .. list-table::
         :header-rows: 1
-        :widths: 15, 55, 10, 20 
+        :widths: 15, 55, 10, 20
 
-        * 
+        *
           - Function
           - Description
           - complex
@@ -388,7 +388,7 @@ Level-2 functions perform matrix-vector operations.
           - :ref:`GERU and GERC <rocblas_ger>`
           - Generalized rank-1 update for unconjugated or conjugated complex numbers: :math:`A = \alpha x y^T + A`
           - ✅
-          - ✅          
+          - ✅
 
         *
           - :ref:`SBMV <rocblas_sbmv>`, :ref:`SPMV <rocblas_spmv>`
@@ -455,11 +455,11 @@ Level-2 functions perform matrix-vector operations.
           - Hermitian packed rank-1 and rank-2 update.
           - ✅
           - ✅
- 
+
 Level 3 functions - matrix-matrix operations
 ============================================
 
-Level-3 functions perform matix-matrix operations. rocBLAS calls the AMD 
+Level-3 functions perform matix-matrix operations. rocBLAS calls the AMD
 :doc:`Tensile <tensile:src/index>` and :doc:`hipBLASLt <hipblaslt:index>`
 libraries for Level-3 GEMMs (matrix matrix multiplication).
 
@@ -472,7 +472,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
         :header-rows: 1
         :widths: 15, 45, 10, 10, 10, 10
 
-        * 
+        *
           - Function
           - Description
           - float16
@@ -480,7 +480,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - float
           - double
 
-        * 
+        *
           - :ref:`GEMM <rocblas_gemm>`
           - General matrix-matrix multiplication: :math:`C = \alpha A B + \beta C`
           - ✅
@@ -488,7 +488,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYMM <rocblas_symm>`
           - Symmetric matrix-matrix multiplication: :math:`C = \alpha A B + \beta C`
           - ❌
@@ -496,7 +496,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYRK <rocblas_syrk>`, :ref:`SYR2K <rocblas_syr2k>`
           - Update symmetric matrix with one matrix product or by using two matrices.
           - ❌
@@ -504,7 +504,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYRKX <rocblas_syrkx>`
           - SYRKX adds an extra matrix multiplication step before updating the symmetric matrix.
           - ❌
@@ -512,7 +512,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRMM <rocblas_trmm>`
           - Triangular matrix-matrix multiplication.
           - ❌
@@ -520,14 +520,14 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRSM <rocblas_trsm>`
           - Triangular solve with multiple right-hand sides.
           - ❌
           - ❌
           - ✅
           - ✅
-        * 
+        *
           - :ref:`HEMM <rocblas_hemm>`
           - Hermitian matrix-matrix multiplication.
           - NA
@@ -535,7 +535,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - NA
           - NA
 
-        * 
+        *
           - :ref:`HERK <rocblas_herk>`, :ref:`HER2K <rocblas_her2k>`
           - Update Hermitian matrix with one matrix product or by using two matrices.
           - NA
@@ -543,14 +543,14 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - NA
           - NA
 
-        * 
+        *
           - :ref:`HERKX <rocblas_herkx>`
           - HERKX adds an extra matrix multiplication step before updating the Hermitian matrix.
           - NA
           - NA
           - NA
           - NA
-        * 
+        *
           - :ref:`TRTRI <rocblas_trtri>`
           - Triangular matrix inversion.
           - ❌
@@ -566,65 +566,65 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
         :header-rows: 1
         :widths: 15, 55, 10, 20
 
-        * 
+        *
           - Function
           - Description
           - complex
           - double complex
 
-        * 
+        *
           - :ref:`GEMM <rocblas_gemm>`
           - General matrix-matrix multiplication: :math:`C = \alpha A B + \beta C`
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYMM <rocblas_symm>`
           - Symmetric matrix-matrix multiplication: :math:`C = \alpha A B + \beta C`
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYRK <rocblas_syrk>`, :ref:`SYR2K <rocblas_syr2k>`
           - Update symmetric matrix with one matrix product or by using two matrices.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYRKX <rocblas_syrkx>`
           - SYRKX adds an extra matrix multiplication step before updating the symmetric matrix.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRMM <rocblas_trmm>`
           - Triangular matrix-matrix multiplication.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRSM <rocblas_trsm>`
           - Triangular solve with multiple right-hand sides.
           - ✅
           - ✅
-        * 
+        *
           - :ref:`HEMM <rocblas_hemm>`
           - Hermitian matrix-matrix multiplication.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`HERK <rocblas_herk>`, :ref:`HER2K <rocblas_her2k>`
           - Update Hermitian matrix with one matrix product or by using two matrices.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`HERKX <rocblas_herkx>`
           - HERKX adds an extra matrix multiplication step before updating the Hermitian matrix.
           - ✅
           - ✅
-        * 
+        *
           - :ref:`TRTRI <rocblas_trtri>`
           - Triangular matrix inversion.
           - ❌
@@ -635,7 +635,7 @@ Extensions
 ==========
 
 The extension function data type support is listed for every function separately
-on the :ref:`Extensions reference page <extension>`. 
+on the :ref:`Extensions reference page <extension>`.
 
 .. rubric:: Footnotes
 

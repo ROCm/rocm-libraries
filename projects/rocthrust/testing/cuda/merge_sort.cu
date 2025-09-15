@@ -196,7 +196,7 @@ void TestMergeSortAscendingKeyValue(const size_t n)
 #if 0
     thrust::host_vector<T>   h_keys = unittest::random_integers<T>(n);
     thrust::device_vector<T> d_keys = h_keys;
-    
+
     thrust::host_vector<T>   h_values = unittest::random_integers<T>(n);
     thrust::device_vector<T> d_values = h_values;
 
@@ -221,7 +221,7 @@ void TestMergeSortDescendingKeyValue(void)
 
     thrust::host_vector<int>   h_keys = unittest::random_integers<int>(n);
     thrust::device_vector<int> d_keys = h_keys;
-    
+
     thrust::host_vector<int>   h_values = unittest::random_integers<int>(n);
     thrust::device_vector<int> d_values = h_values;
 

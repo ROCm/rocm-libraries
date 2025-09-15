@@ -45,6 +45,7 @@
 using namespace rocRoller;
 
 const int DEFAULT_WGM                  = 2;
+const int DEFAULT_DYNAMIC_MODE         = 6;
 const int MAX_BITS_WORKGROUPTILE_M     = 8;
 const int MAX_BITS_WORKGROUPTILE_N     = 8;
 const int MAX_BITS_WORKGROUPTILE_K     = 7;
@@ -748,6 +749,12 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
     else
         dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA);
 
+    auto reduction_type = TensileLite::analytical::streamk::select_streamk_reduction(prob.m, prob.n, prob.k, prob.batch_count,
+        gemm->params->workgroupTile.m, gemm->params->workgroupTile.n, gemm->params->workgroupTile.k, analaytical_hardware, DEFAULT_DYNAMIC_MODE);
+    // Override reduction type to tree reduction for now.
+    // When Parallel reduction is available, this line can be removed
+    reduction_type = TensileLite::analytical::streamk::ReductionType::Tree;
+
     auto result = TensileLite::analytical::streamk::select_streamk_grid(prob.m,
         prob.n,
         prob.k,
@@ -769,7 +776,8 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
         elementSizeAcc,
         gemm->occupancy,
         analaytical_hardware,
-        6);
+        DEFAULT_DYNAMIC_MODE,
+        reduction_type);
 
     return result;
 }
@@ -847,7 +855,7 @@ std::shared_ptr<SolutionParameters>
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
-    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate || 
+    if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate ||
         kernelType.scaleBMode != rocRoller::Operations::ScaleMode::Separate)
     {
         gemm->swizzleScale = false;
@@ -1475,7 +1483,7 @@ rocblaslt_status
 
 /**
  * @brief Return the amount of workspace that is required to execute a kernel.
- * 
+ *
  * Note: This only takes into account the workspace required for StreamK kernels.
  */
 size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)

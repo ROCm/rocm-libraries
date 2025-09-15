@@ -43,7 +43,9 @@
 #include "norm.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
+#include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <functional>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -169,7 +171,7 @@ void swizzle_tensor(T*               dst,
         auto orgTensor = Tensor::create<T>({b, k, m});
         for(size_t i = 0; i < b * k; i++)
         {
-            memcpy(orgTensor.template as<T>() + (i * m), src + (i * ld), m * sizeof(T));
+            std::copy(src + (i * ld), src + (i * ld) + m, orgTensor.template as<T>() + (i * m));
         }
         tmpTensor = permute(orgTensor, {0, 2, 1});
     }
@@ -177,7 +179,7 @@ void swizzle_tensor(T*               dst,
     {
         for(size_t i = 0; i < b * m; i++)
         {
-            memcpy(tmpTensor.template as<T>() + (i * k), src + (i * ld), k * sizeof(T));
+            std::copy(src + (i * ld), src + (i * ld) + k, tmpTensor.template as<T>() + (i * k));
         }
     }
 
@@ -190,7 +192,7 @@ void swizzle_tensor(T*               dst,
     paddedTensor.reshape(
         {b, paddedM / MiM, MiM, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK});
     Tensor permuted = permute(paddedTensor, {0, 1, 3, 4, 2, 5});
-    memcpy(dst, permuted.template as<void>(), b * paddedM * paddedK * sizeof(T));
+    std::copy(permuted.template as<T>(), permuted.template as<T>() + (b * paddedM * paddedK), dst);
 }
 
 void swizzle_tensor_type(HipHostBuffer&       dst,
@@ -430,9 +432,9 @@ void epilogue_func(int64_t     m,
             for(int j = 0; j < n; j++)
             {
                 CALCULATE_EPILOGUE_ACT;
-                *amaxD = *amaxD > fabs(static_cast<Tc>(in_Tact_act))
+                *amaxD = *amaxD > std::abs(static_cast<Tc>(in_Tact_act))
                              ? *amaxD
-                             : fabs(static_cast<Tc>(in_Tact_act));
+                             : std::abs(static_cast<Tc>(in_Tact_act));
                 saturate_cast_to_type(out, in_Tact_act * scaleD, To, pos);
                 *(out_raw + pos) = static_cast<Tc>(in_Tact_act * scaleD);
             }
@@ -579,8 +581,8 @@ void epilogue_func(int64_t     m,
             for(int j = 0; j < n; j++)
             {
                 CALCULATE_EPILOGUE_BASIC;
-                *amaxD
-                    = *amaxD > fabs(static_cast<Tc>(temp)) ? *amaxD : fabs(static_cast<Tc>(temp));
+                *amaxD = *amaxD > std::abs(static_cast<Tc>(temp)) ? *amaxD
+                                                                  : std::abs(static_cast<Tc>(temp));
                 temp *= scaleD;
                 saturate_cast_to_type(out, temp, To, pos);
                 *(out_raw + pos) = static_cast<Tc>(temp);
@@ -744,9 +746,10 @@ auto _silu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
 
 // clamp
 auto _clamp = [](auto in, auto alpha, auto beta) -> decltype(in) {
-  using Tc = float;
-  Tc in_Tc = static_cast<Tc>(in);
-  return static_cast<decltype(in)>(std::max(static_cast<Tc>(alpha), std::min(in_Tc, static_cast<Tc>(beta))));
+    using Tc = float;
+    Tc in_Tc = static_cast<Tc>(in);
+    return static_cast<decltype(in)>(
+        std::max(static_cast<Tc>(alpha), std::min(in_Tc, static_cast<Tc>(beta))));
 };
 
 void testing_matmul_bad_arg(const Arguments& arg)
@@ -1333,7 +1336,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         matD(gemm_count);
     std::vector<std::vector<hipblasLtMatmulDesc_t>> matmul;
     std::vector<hipblasLtEpilogue_t> epilogue(gemm_count, HIPBLASLT_EPILOGUE_DEFAULT);
-    std::vector<float> act0(gemm_count), act1(gemm_count);
+    std::vector<float>               act0(gemm_count), act1(gemm_count);
 
     std::vector<HipDeviceBuffer>  dA, dB, dC, dD, dE, dBias;
     std::vector<HipDeviceBuffer>* dDp;
@@ -1392,7 +1395,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             size_t MiM = 16, MiK = 0, __ = 0, PackK = 0;
             calculateKforSwizzling(TiA, arg, MiK, __, PackK);
-            size_t K_block = MiK * PackK;
+            size_t  K_block = MiK * PackK;
             int64_t stride_swizzle
                 = ((M[i] + MiM - 1) / MiM) * MiM * ((K[i] + K_block - 1) / K_block) * K_block;
             if(do_batched[i] && stride_a[i] != 0)
@@ -1610,8 +1613,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         if(epilogue_on[i])
         {
-          act0[i] = arg.activation_arg1;
-          act1[i] = arg.activation_arg2;
+            act0[i] = arg.activation_arg1;
+            act1[i] = arg.activation_arg2;
         }
         if(arg.gradient)
         {
@@ -1648,13 +1651,32 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             switch(epilogue[i])
             {
+            case HIPBLASLT_EPILOGUE_RELU:
+                epilogue[i] = HIPBLASLT_EPILOGUE_RELU_AUX;
+                break;
+            case HIPBLASLT_EPILOGUE_RELU_BIAS:
+                epilogue[i] = HIPBLASLT_EPILOGUE_RELU_AUX_BIAS;
+                break;
             case HIPBLASLT_EPILOGUE_GELU:
                 epilogue[i] = HIPBLASLT_EPILOGUE_GELU_AUX;
                 break;
             case HIPBLASLT_EPILOGUE_GELU_BIAS:
                 epilogue[i] = HIPBLASLT_EPILOGUE_GELU_AUX_BIAS;
                 break;
+            case HIPBLASLT_EPILOGUE_CLAMP_EXT:
+                epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT;
+                break;
+            case HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
+                epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT;
+                break;
+            case HIPBLASLT_EPILOGUE_DGELU:
+            case HIPBLASLT_EPILOGUE_DGELU_BGRAD:
+                // DGELU_AUX and DGELU_AUX_BGRAD already use E
+                break;
             default:
+                hipblaslt_cerr << "The activation type " << epilogue[i]
+                               << " does not support '--use_e'.\n";
+                CHECK_SUCCESS(false);
                 break;
             }
         }
@@ -2075,14 +2097,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                   &(epilogue[i]),
                                                                   sizeof(epilogue[i])),
                                   HIPBLAS_STATUS_SUCCESS);
-            CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul[0][i],
-                                                                  HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
-                                                                  &(act0[i]),
-                                                                  sizeof(act0[i])));
-            CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul[0][i],
-                                                                  HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
-                                                                  &(act1[i]),
-                                                                  sizeof(act1[i])));
+            CHECK_HIPBLASLT_ERROR(
+                hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
+                                                &(act0[i]),
+                                                sizeof(act0[i])));
+            CHECK_HIPBLASLT_ERROR(
+                hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
+                                                &(act1[i]),
+                                                sizeof(act1[i])));
         }
 
         if(arg.use_e)
@@ -2543,21 +2567,22 @@ void testing_matmul_with_bias(const Arguments& arg,
                     if(arg.use_ext_setproblem)
                     {
                         for(int32_t b = 0; b < block_count; b++)
-                            CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(M[0],
-                                                                        N[0],
-                                                                        K[0],
-                                                                        num_batches[0],
-                                                                        lda[0],
-                                                                        ldb[0],
-                                                                        ldc[0],
-                                                                        ldd[0],
-                                                                        (do_swizzle_a) ? stride_da[0] : stride_a[0],
-                                                                        stride_b[0],
-                                                                        stride_c[0],
-                                                                        stride_d[0],
-                                                                        extepilogue[0],
-                                                                        extinputs[b][0],
-                                                                        extproblemtype));
+                            CHECK_HIPBLASLT_ERROR(
+                                gemmVec[b].setProblem(M[0],
+                                                      N[0],
+                                                      K[0],
+                                                      num_batches[0],
+                                                      lda[0],
+                                                      ldb[0],
+                                                      ldc[0],
+                                                      ldd[0],
+                                                      (do_swizzle_a) ? stride_da[0] : stride_a[0],
+                                                      stride_b[0],
+                                                      stride_c[0],
+                                                      stride_d[0],
+                                                      extepilogue[0],
+                                                      extinputs[b][0],
+                                                      extproblemtype));
                     }
                     else
                     {
@@ -2638,21 +2663,22 @@ void testing_matmul_with_bias(const Arguments& arg,
                     auto num_batches_64
                         = std::vector<int64_t>{num_batches.begin(), num_batches.end()};
                     for(int32_t b = 0; b < block_count; b++)
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(M,
-                                                                           N,
-                                                                           K,
-                                                                           num_batches_64,
-                                                                           lda,
-                                                                           ldb,
-                                                                           ldc,
-                                                                           ldd,
-                                                                           (do_swizzle_a) ? stride_da : stride_a,
-                                                                           stride_b,
-                                                                           stride_c,
-                                                                           stride_d,
-                                                                           extepilogue,
-                                                                           extinputs[b],
-                                                                           extproblemtype));
+                        CHECK_HIPBLASLT_ERROR(
+                            groupedGemmVec[b].setProblem(M,
+                                                         N,
+                                                         K,
+                                                         num_batches_64,
+                                                         lda,
+                                                         ldb,
+                                                         ldc,
+                                                         ldd,
+                                                         (do_swizzle_a) ? stride_da : stride_a,
+                                                         stride_b,
+                                                         stride_c,
+                                                         stride_d,
+                                                         extepilogue,
+                                                         extinputs[b],
+                                                         extproblemtype));
                 }
                 else
                 {
@@ -2736,21 +2762,22 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(arg.use_ext_setproblem)
                 {
                     for(int32_t b = 0; b < block_count; b++)
-                        CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(M[0],
-                                                                    N[0],
-                                                                    K[0],
-                                                                    num_batches[0],
-                                                                    lda[0],
-                                                                    ldb[0],
-                                                                    ldc[0],
-                                                                    ldd[0],
-                                                                    (do_swizzle_a) ? stride_da[0] : stride_a[0],
-                                                                    stride_b[0],
-                                                                    stride_c[0],
-                                                                    stride_d[0],
-                                                                    extepilogue[0],
-                                                                    extinputs[b][0],
-                                                                    extproblemtype));
+                        CHECK_HIPBLASLT_ERROR(
+                            gemmVec[b].setProblem(M[0],
+                                                  N[0],
+                                                  K[0],
+                                                  num_batches[0],
+                                                  lda[0],
+                                                  ldb[0],
+                                                  ldc[0],
+                                                  ldd[0],
+                                                  (do_swizzle_a) ? stride_da[0] : stride_a[0],
+                                                  stride_b[0],
+                                                  stride_c[0],
+                                                  stride_d[0],
+                                                  extepilogue[0],
+                                                  extinputs[b][0],
+                                                  extproblemtype));
                 }
                 else
                 {
@@ -2802,7 +2829,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     int addRequest = 0;
                     for(size_t t = 0; t < 1; t++) // C API not supported yet
                     {
-                        size_t tmpWorkspaceSize = 0;
+                        size_t tmpWorkspaceSize             = 0;
                         tmpAlgo[j].algo.max_workspace_bytes = max_workspace_size;
                         if(hipblaslt_ext::matmulIsAlgoSupported(handle,
                                                                 matmul[0][0],
@@ -2840,21 +2867,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 auto num_batches_64 = std::vector<int64_t>{num_batches.begin(), num_batches.end()};
                 for(int32_t b = 0; b < block_count; b++)
-                    CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(M,
-                                                                       N,
-                                                                       K,
-                                                                       num_batches_64,
-                                                                       lda,
-                                                                       ldb,
-                                                                       ldc,
-                                                                       ldd,
-                                                                       (do_swizzle_a) ? stride_da : stride_a,
-                                                                       stride_b,
-                                                                       stride_c,
-                                                                       stride_d,
-                                                                       extepilogue,
-                                                                       extinputs[b],
-                                                                       extproblemtype));
+                    CHECK_HIPBLASLT_ERROR(
+                        groupedGemmVec[b].setProblem(M,
+                                                     N,
+                                                     K,
+                                                     num_batches_64,
+                                                     lda,
+                                                     ldb,
+                                                     ldc,
+                                                     ldd,
+                                                     (do_swizzle_a) ? stride_da : stride_a,
+                                                     stride_b,
+                                                     stride_c,
+                                                     stride_d,
+                                                     extepilogue,
+                                                     extinputs[b],
+                                                     extproblemtype));
             }
             else
             {
@@ -2918,21 +2946,22 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(arg.use_ext_setproblem)
                 {
                     for(int32_t b = 0; b < block_count; b++)
-                        CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(M[0],
-                                                                    N[0],
-                                                                    K[0],
-                                                                    num_batches[0],
-                                                                    lda[0],
-                                                                    ldb[0],
-                                                                    ldc[0],
-                                                                    ldd[0],
-                                                                    (do_swizzle_a) ? stride_da[0] : stride_a[0],
-                                                                    stride_b[0],
-                                                                    stride_c[0],
-                                                                    stride_d[0],
-                                                                    extepilogue[0],
-                                                                    extinputs[b][0],
-                                                                    extproblemtype));
+                        CHECK_HIPBLASLT_ERROR(
+                            gemmVec[b].setProblem(M[0],
+                                                  N[0],
+                                                  K[0],
+                                                  num_batches[0],
+                                                  lda[0],
+                                                  ldb[0],
+                                                  ldc[0],
+                                                  ldd[0],
+                                                  (do_swizzle_a) ? stride_da[0] : stride_a[0],
+                                                  stride_b[0],
+                                                  stride_c[0],
+                                                  stride_d[0],
+                                                  extepilogue[0],
+                                                  extinputs[b][0],
+                                                  extproblemtype));
                 }
                 else
                 {
@@ -3007,21 +3036,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 auto num_batches_64 = std::vector<int64_t>{num_batches.begin(), num_batches.end()};
                 for(int32_t b = 0; b < block_count; b++)
-                    CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(M,
-                                                                       N,
-                                                                       K,
-                                                                       num_batches_64,
-                                                                       lda,
-                                                                       ldb,
-                                                                       ldc,
-                                                                       ldd,
-                                                                       (do_swizzle_a) ? stride_da : stride_a,
-                                                                       stride_b,
-                                                                       stride_c,
-                                                                       stride_d,
-                                                                       extepilogue,
-                                                                       extinputs[b],
-                                                                       extproblemtype));
+                    CHECK_HIPBLASLT_ERROR(
+                        groupedGemmVec[b].setProblem(M,
+                                                     N,
+                                                     K,
+                                                     num_batches_64,
+                                                     lda,
+                                                     ldb,
+                                                     ldc,
+                                                     ldd,
+                                                     (do_swizzle_a) ? stride_da : stride_a,
+                                                     stride_b,
+                                                     stride_c,
+                                                     stride_d,
+                                                     extepilogue,
+                                                     extinputs[b],
+                                                     extproblemtype));
             }
             else
             {

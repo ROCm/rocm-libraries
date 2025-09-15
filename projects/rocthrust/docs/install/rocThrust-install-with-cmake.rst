@@ -5,26 +5,26 @@
 .. _install-with-cmake:
 
 ********************************************************************
-Building and installing rocThrust on Windows and Linux with CMake 
+Building and installing rocThrust on Windows and Linux with CMake
 ********************************************************************
 
 You can build and install rocThrust with CMake on either Windows or Linux.
 
-Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` depending on the compiler you'll be using, and set ``CMAKE_CXX_COMPILER`` to the compiler's absolute path. For example: 
+Before you begin, set ``CXX`` to ``amdclang++`` or ``hipcc`` depending on the compiler you'll be using, and set ``CMAKE_CXX_COMPILER`` to the compiler's absolute path. For example:
 
 .. code:: shell
 
     CXX=amdclang++
     CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
 
-Create the ``build`` directory inside the ``rocThrust`` directory, then change directory to the ``build`` directory:
+After :doc:`cloning the project <./rocThrust-install-overview>`, create the ``build`` directory under the ``rocthrust`` root directory, then change directory to the ``build`` directory:
 
 .. code:: shell
 
     mkdir build
     cd build
 
-Generate the rocThrust makefile using the ``cmake`` command: 
+Generate the rocThrust makefile using the ``cmake`` command:
 
 .. code:: shell
 
@@ -35,10 +35,11 @@ The available build options are:
 * ``BUILD_BENCHMARK``. Set this to ``ON`` to build rocThrust benchmarks. Off by default.
 * ``BUILD_EXAMPLE``. Set this to ``ON`` to build rocThrust examples. Off by default.
 * ``BUILD_TEST``. Set to ``ON`` to enable rocThrust tests. Off by default.
-* ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default. 
+* ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default.
 * ``DISABLE_WERROR``. Set this to ``OFF`` to pass ``-Werror`` to the compiler. On by default.
 * ``DOWNLOAD_ROCPRIM``. Set this to ``ON`` to download rocPRIM regardless of whether or not rocPRIM is already installed. Off by default.
-* ``SQLITE_USE_SYSTEM_PACKAGE``. Set to ``ON`` to use the ``SQLite`` libaray provided by the system. Off by default - a copy of the library will then be downloaded. ``SQLite`` is needed for bitwise-reproducibility tests. For this option to take effect, either ``BUILD_TEST`` or ``BUILD_HIPSTDPAR_TEST`` must be set to ``ON``.
+* ``SQLITE_USE_SYSTEM_PACKAGE``. Set to ``ON`` to use the ``SQLite`` library provided by the system. Off by default - a copy of the library will then be downloaded. ``SQLite`` is needed for bitwise-reproducibility tests. For this option to take effect, either ``BUILD_TEST`` or ``BUILD_HIPSTDPAR_TEST`` must be set to ``ON``.
+* ``USE_SYSTEM_LIB``. Set to ``ON`` to use the installed ``ROCm`` libraries when building the tests. Off by default. For this option to take effect, ``BUILD_TEST`` must be ``ON`` and the ``rocprim`` and ``rocthrust`` install must be compatible with the version of the tests.
 * ``RNG_SEED_COUNT``. Set this to the non-repeatable random dataset count. Set to 0 by default.
 * ``PRNG_SEEDS``. Set this to the RNG seeds. The seeds are passed as a semicolon-delimited array of 32-bit unsigned integers. To avoid command line parsing errors, enclose the entire option in quotation marks. For example, ``cmake "-DPRNG_SEEDS=1;2;3;4"``. Set to 1 by default.
 
@@ -47,7 +48,7 @@ Build rocThrust using the generated make file:
 .. code:: shell
 
     make -j4
-    
+
 After you've built rocThrust, you can optionally generate tar, zip, and deb packages:
 
 .. code:: shell
