@@ -1453,7 +1453,7 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: true
     EnableMatrixInstruction: true
-    ExpandPointerSwap: true
+    ExpandPointerSwap: 0
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
     GlobalReadPerMfma: 1
@@ -4589,7 +4589,7 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: true
     EnableMatrixInstruction: true
-    ExpandPointerSwap: true
+    ExpandPointerSwap: 0
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
     GlobalReadPerMfma: 1
