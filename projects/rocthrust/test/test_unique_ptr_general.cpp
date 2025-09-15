@@ -11,13 +11,14 @@
 class A {
 public:    
     __host__ __device__ A() : finished(nullptr), arr(nullptr), n(0) {}
+    __host__ __device__ A(thrust::device_ptr<bool> dev_p, int num): finished(dev_p), arr(nullptr), n(num) {}
+    
     __host__ __device__ A(int num): finished(nullptr), n(num) {
-        arr = thrust::device_new<int>(10);
+        arr = thrust::device_new<int>(10); // This ctor can only be used with custom deleter, otherwise memory will be leaked
     }
     __host__ __device__ A(thrust::device_ptr<bool> dev_p): finished(dev_p), n(0) {
-        arr = thrust::device_new<int>(10);
+        arr = thrust::device_new<int>(10); // This ctor can only be used with custom deleter, otherwise memory will be leaked
     }
-    __host__ __device__ A(thrust::device_ptr<bool> dev_p, int num): finished(dev_p), arr(nullptr), n(num) {}
 
     __host__ __device__ int number() { return n; }
 
@@ -148,12 +149,18 @@ TEST(UniquePtrGeneralTests, TestUniquePtrMoveAsgnArray)
 
     // Move assignment for arrays
     {
-        void* raw_addr = nullptr;
+        thrust::device_ptr<bool> finished = thrust::device_new<bool>(1);
+        *finished = false;
 
-        thrust::unique_ptr<int[]> p1 = thrust::make_unique<int[]>(5);
-        int* raw_p1 = p1.get_raw();;
+        thrust::unique_ptr<A[]> p1 = thrust::make_unique<A[]>(5);
+        for (int i = 0; i < 5; ++i)
+            p1[i] = A(finished, i);
+        A* raw_p1 = p1.get_raw();;
         {
-            thrust::unique_ptr<int[]> p2 = thrust::make_unique<int[]>(10);
+            thrust::unique_ptr<A[]> p2 = thrust::make_unique<A[]>(10);
+            for (int i = 0; i < 10; ++i)
+                p2[i] = A(finished, i);
+
             ASSERT_NE(p1.get_raw(), nullptr);
             ASSERT_NE(p2.get_raw(), nullptr);
 
@@ -162,11 +169,11 @@ TEST(UniquePtrGeneralTests, TestUniquePtrMoveAsgnArray)
             ASSERT_EQ(p2.get_raw(), raw_p1);
             ASSERT_EQ(p1.get_raw(), nullptr);
 
-            raw_addr = static_cast<void*>(p2.get_raw());
+            ASSERT_EQ(*finished, true);
+            *finished = false;
         }
-        size_t dummy = 0;
-        hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
-        ASSERT_EQ(st, hipErrorInvalidValue);
+        ASSERT_EQ(*finished, true);
+        thrust::device_delete(finished);
     }
 }
 
@@ -223,24 +230,22 @@ TEST(UniquePtrGeneralTests, TestUniquePtrNullAsgnArray)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     
     // NULL assignment for array
-    void* raw_addr = nullptr;
-    size_t sz = 0;
+    thrust::device_ptr<bool> finished = thrust::device_new<bool>(1);
+    *finished = false;
     {
-        thrust::unique_ptr<int[]> p = thrust::make_unique<int[]>(5);
+        thrust::unique_ptr<A[]> p = thrust::make_unique<A[]>(3);
         ASSERT_NE(p, nullptr);
 
-        hipError_t st = hipMemPtrGetInfo(static_cast<void*>(p.get_raw()), &sz);
-        ASSERT_EQ(st, hipSuccess);
-        ASSERT_GE(sz, 5 * sizeof(int));
-        raw_addr = static_cast<void*>(p.get_raw());
+        p[0] = A(finished, 1);
+        p[1] = A(finished, 2);
+        p[2] = A(finished, 3);
 
         p = nullptr;
 
         ASSERT_EQ(p, nullptr);
         
-        size_t dummy = 0;
-        st = hipMemPtrGetInfo(raw_addr, &dummy);
-        ASSERT_EQ(st, hipErrorInvalidValue);
+        ASSERT_EQ(*finished, true);
+        thrust::device_delete(finished);
     }
 }
 
@@ -422,16 +427,14 @@ TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptrArray)
     
     // Array
     {
-        void* raw_addr = nullptr;
+        thrust::device_ptr<bool> finished = thrust::device_new<bool>(1);
+        *finished = false;
         {
             thrust::unique_ptr<int[]> p(nullptr);
             ASSERT_EQ(p, nullptr);
-
-            raw_addr = static_cast<void*>(p.get_raw());
         }
-        size_t dummy = 0;
-        hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
-        ASSERT_EQ(st, hipErrorInvalidValue);
+        ASSERT_EQ(*finished, false);
+        thrust::device_delete(finished);    
     }
 }
 
@@ -460,28 +463,17 @@ TEST(UniquePtrGeneralTests, TestUniquePtrModifierReleaseArray)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // Array
-    void* raw_addr = nullptr;
-    size_t sz = 0;
     {
         thrust::unique_ptr<int[]> p = thrust::make_unique<int[]>(7);
         int* raw_p = p.get_raw();
         ASSERT_NE(raw_p, nullptr);
-        
-        hipError_t st = hipMemPtrGetInfo(static_cast<void*>(raw_p), &sz);
-        ASSERT_EQ(st, hipSuccess);
-        ASSERT_GE(sz, 7 * sizeof(int));
 
         thrust::device_ptr<int> released_p = p.release();
 
         ASSERT_EQ(p, nullptr);
         ASSERT_EQ(thrust::raw_pointer_cast(released_p), raw_p);
 
-        raw_addr = static_cast<void*>(thrust::raw_pointer_cast(released_p));
-
         thrust::device_delete(released_p);
-        
-        st = hipMemPtrGetInfo(raw_addr, &sz);
-        ASSERT_EQ(st, hipErrorInvalidValue);
     }
 }
 
@@ -537,46 +529,51 @@ TEST(UniquePtrGeneralTests, TestUniquePtrModifierResetArray)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // reset(new pointer) for array
-    void* raw_addr = nullptr;
+    thrust::device_ptr<bool> finished = thrust::device_new<bool>(1);
+    *finished = false;
     {
-        thrust::unique_ptr<int[]> p = thrust::make_unique<int[]>(10);
+        thrust::unique_ptr<A[]> p = thrust::make_unique<A[]>(10);
+        for (int i = 0; i < 10; ++i)
+            p[i] = A(finished, i);
 
-        thrust::device_ptr<int> new_p = thrust::device_new<int>(15);
+        thrust::device_ptr<A> new_p = thrust::device_new<A>(15);
+        for (int i = 0; i < 15; ++i)
+            new_p[i] = A(finished, i);
 
         p.reset(new_p);
         ASSERT_EQ(p.get(), new_p);
+        ASSERT_EQ(*finished, true);
 
-        raw_addr = static_cast<void*>(p.get_raw());
+        *finished = false;
     }
-    size_t dummy = 0;
-    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
-    ASSERT_EQ(st, hipErrorInvalidValue);
+    ASSERT_EQ(*finished, true);
 
     // reset(nullptr) for array
-    raw_addr = nullptr;
+    *finished = false;
     {
-        thrust::unique_ptr<int[]> p = thrust::make_unique<int[]>(10);
-        raw_addr = static_cast<void*>(p.get_raw());
+        thrust::unique_ptr<A[]> p = thrust::make_unique<A[]>(10);
+        for (int i = 0; i < 10; ++i)
+            p[i] = A(finished, i);
 
         p.reset(nullptr);
         ASSERT_EQ(p, nullptr);
             
-        st = hipMemPtrGetInfo(raw_addr, &dummy);
-        ASSERT_EQ(st, hipErrorInvalidValue);
+        ASSERT_EQ(*finished, true);
     }
 
     // reset() for array
-    raw_addr = nullptr;
+    *finished = false;
     {
-        thrust::unique_ptr<int[]> p = thrust::make_unique<int[]>(10);
-        raw_addr = static_cast<void*>(p.get_raw());
+        thrust::unique_ptr<A[]> p = thrust::make_unique<A[]>(10);
+        for (int i = 0; i < 10; ++i)
+            p[i] = A(finished, i);
 
         p.reset();
         ASSERT_EQ(p, nullptr);
             
-        st = hipMemPtrGetInfo(raw_addr, &dummy);
-        ASSERT_EQ(st, hipErrorInvalidValue);   
+        ASSERT_EQ(*finished, true);  
     }
+    thrust::device_delete(finished);
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.observers/dereference.single.pass.cpp
@@ -794,45 +791,15 @@ TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeDefaultDeleterArray)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    void* raw_addr = nullptr;
+    thrust::device_ptr<bool> finished = thrust::device_new<bool>(1);
+    *finished = false;
     {
         thrust::device_ptr<A> dev_ptr = thrust::device_malloc<A>(3);
-        thrust::device_new<A>(dev_ptr, A(), 3);
+        dev_ptr[0] = A(finished, 1);
+        dev_ptr[1] = A(finished, 2);
+        dev_ptr[2] = A(finished, 3);
 
         thrust::unique_ptr<A[]> p(dev_ptr, 3);
-
-        A host_p0 = p[0];
-        A host_p1 = p[1];
-        A host_p2 = p[2];
-
-        ASSERT_EQ(host_p0.n, 0);
-        ASSERT_EQ(host_p1.n, 0);
-        ASSERT_EQ(host_p2.n, 0);
-        
-        ASSERT_EQ(host_p0.arr, nullptr);
-        ASSERT_EQ(host_p1.arr, nullptr);
-        ASSERT_EQ(host_p2.arr, nullptr);
-
-        raw_addr = static_cast<void*>(p.get_raw());
-    }
-    size_t dummy = 0;
-    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
-    ASSERT_EQ(st, hipErrorInvalidValue);
-}
-
-TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleterArray)
-{
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-    void* raw_addr = nullptr;
-    {
-        thrust::device_ptr<A> dev_ptr = thrust::device_malloc<A>(3);
-        thrust::device_new<A>(dev_ptr, A(), 3);
-
-        thrust::unique_ptr<A[], A_deleter<A[]>> p(dev_ptr, 3);
-        p[0] = A(1);
-        p[1] = A(2);
-        p[2] = A(3);
 
         A host_p0 = p[0];
         A host_p1 = p[1];
@@ -841,16 +808,43 @@ TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleterArray)
         ASSERT_EQ(host_p0.n, 1);
         ASSERT_EQ(host_p1.n, 2);
         ASSERT_EQ(host_p2.n, 3);
+        
+        ASSERT_EQ(host_p0.arr, nullptr);
+        ASSERT_EQ(host_p1.arr, nullptr);
+        ASSERT_EQ(host_p2.arr, nullptr);
+    }
+    ASSERT_EQ(*finished, true);
+    thrust::device_delete(finished);
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleterArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    thrust::device_ptr<bool> finished = thrust::device_new<bool>(1);
+    *finished = false;
+    {
+        thrust::device_ptr<A> dev_ptr = thrust::device_malloc<A>(3);
+        dev_ptr[0] = A(finished);
+        dev_ptr[1] = A(finished);
+        dev_ptr[2] = A(finished);
+
+        thrust::unique_ptr<A[], A_deleter<A[]>> p(dev_ptr, 3);
+
+        A host_p0 = p[0];
+        A host_p1 = p[1];
+        A host_p2 = p[2];
+
+        ASSERT_EQ(host_p0.n, 0);
+        ASSERT_EQ(host_p1.n, 0);
+        ASSERT_EQ(host_p2.n, 0);
 
         ASSERT_NE(host_p0.arr, nullptr);
         ASSERT_NE(host_p1.arr, nullptr);
         ASSERT_NE(host_p2.arr, nullptr);
-        
-        raw_addr = static_cast<void*>(thrust::raw_pointer_cast(p.get()));
     }
-    size_t dummy = 0;
-    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
-    ASSERT_EQ(st, hipErrorInvalidValue);
+    ASSERT_EQ(*finished, true);
+    thrust::device_delete(finished);
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.observers/get_deleter.pass.cpp
