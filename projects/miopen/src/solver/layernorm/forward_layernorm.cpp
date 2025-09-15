@@ -52,33 +52,9 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
         auto dtype        = problem.GetXDesc().GetType();
         auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
         auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
-        auto dims         = problem.GetXDesc().GetLengths();
-
-        auto layout   = problem.GetXDesc().GetLayoutEnum();
-        size_t stride = 1;
-        if(problem.GetNormalizedDim() > 1 && layout.has_value() &&
-           (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
-        {
-            stride = problem.GetXDesc().GetLengths()[1]; // stride = C
-        }
-
-        size_t outer_size = 1;
-        for(size_t i = 0; i < problem.GetNormalizedDim(); i++)
-        {
-            if(!(stride > 1 && i == 1))
-            {
-                outer_size *= dims[i];
-            }
-        }
-
-        size_t inner_size = 1;
-        for(size_t i = problem.GetNormalizedDim(); i < dims.size(); i++)
-        {
-            inner_size *= dims[i];
-        }
 
         size_t xlocalsize = config.local_size;
-        size_t xgridsize  = outer_size * stride * xlocalsize;
+        size_t xgridsize  = problem.outer_size * problem.stride * xlocalsize;
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;
@@ -95,9 +71,9 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
             {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
             {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-            {"OUTER_SIZE", outer_size},
-            {"INNER_SIZE", inner_size},
-            {"STRIDE", stride},
+            {"OUTER_SIZE", problem.outer_size},
+            {"INNER_SIZE", problem.inner_size},
+            {"STRIDE", problem.stride},
             {"PARALLEL_SIZE", 1},
             {"LOCAL_SIZE", config.local_size},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},

@@ -78,6 +78,9 @@ miopenStatus_t LayerNormForward(const Handle& handle,
         tmp.epsilon        = epsilon;
         tmp.normalized_dim = normalized_dim;
         tmp.mode           = mode;
+        tmp.stride         = problem.stride;
+        tmp.outer_size     = problem.outer_size;
+        tmp.inner_size     = problem.inner_size;
         return tmp;
     }();
 
@@ -170,6 +173,9 @@ miopenStatus_t LayerNormBackward(const Handle& handle,
         tmp.db             = db;
         tmp.mode           = mode;
         tmp.normalized_dim = normalized_dim;
+        tmp.stride         = problem.stride;
+        tmp.outer_size     = problem.outer_size;
+        tmp.inner_size     = problem.inner_size;
         return tmp;
     }();
 

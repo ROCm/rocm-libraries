@@ -1,11 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "miopen/execution_context.hpp"
 #include "miopen/layernorm/problem_description.hpp"
 #include <miopen/datatype.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include "miopen/mlo_internal.hpp"
-#include <miopen/generic_search.hpp>
 #include <miopen/layernorm.hpp>
 #include <miopen/layernorm/solvers.hpp>
 #include <miopen/layernorm/invoke_params.hpp>
@@ -23,7 +23,7 @@ PerformanceConfigLayernorm LayernormBase::GetDefaultPerformanceConfig(
 {
     PerformanceConfigLayernorm config;
     config.HeuristicInit(problem);
-    config.local_size = PerformanceConfigLayernorm::default_local_size;
+    config.local_size = PerformanceConfigLayernorm::default_local_size(problem);
     MIOPEN_LOG_I(config.ToString());
     return config;
 }
@@ -35,7 +35,7 @@ bool LayernormBase::IsValidPerformanceConfig(const ExecutionContext& context,
     return config.IsValid(context, problem);
 }
 
-bool LayernormBase::IsApplicable(const ExecutionContext&,
+bool LayernormBase::IsApplicable(const ExecutionContext& context,
                                  const miopen::layernorm::ProblemDescription& problem) const
 {
     if(!problem.IsSameType())
@@ -46,7 +46,15 @@ bool LayernormBase::IsApplicable(const ExecutionContext&,
         return false;
     if(!problem.IsRightNormDim())
         return false;
-    if(!(sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize()))
+    if(!(sizeof_local_memory(
+             problem,
+             is_parallelism(get_reqd_work_item_cnt(
+                                context, PerformanceConfigLayernorm::max_parallel_local_size),
+                            problem.inner_size,
+                            problem.outer_size)
+                 ? PerformanceConfigLayernorm::max_parallel_local_size
+                 : PerformanceConfigLayernorm::max_local_size) <=
+         TargetProperties::GetMaxLocalMemorySize()))
         return false;
     return true;
 }
@@ -101,7 +109,20 @@ bool PerformanceConfigLayernorm::IsValidValue() const
     return local_size > 0 && local_size <= max_local_size;
 }
 
-bool PerformanceConfigLayernorm::IsValid(const ExecutionContext&,
+bool PerformanceConfigLayernorm::CheckParallelKernelBounds(
+    const ExecutionContext& context, const miopen::layernorm::ProblemDescription& problem) const
+{
+    // Max local size of the parallel backwards kernel is less than the max local size of the normal
+    // backwards kernel
+    return !(problem.GetDirection() == miopen::layernorm::Direction::Backward &&
+             local_size > PerformanceConfigLayernorm::max_parallel_local_size &&
+             is_parallelism(get_reqd_work_item_cnt(
+                                context, PerformanceConfigLayernorm::max_parallel_local_size),
+                            problem.inner_size,
+                            problem.outer_size));
+}
+
+bool PerformanceConfigLayernorm::IsValid(const ExecutionContext& context,
                                          const miopen::layernorm::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
@@ -112,7 +133,7 @@ bool PerformanceConfigLayernorm::IsValid(const ExecutionContext&,
     {
     case miopenHalf:
     case miopenFloat:
-    case miopenBFloat16: return true;
+    case miopenBFloat16: return CheckParallelKernelBounds(context, problem);
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:

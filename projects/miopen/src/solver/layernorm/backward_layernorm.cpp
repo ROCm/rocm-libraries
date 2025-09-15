@@ -49,32 +49,13 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
     auto dtype        = problem.GetDYDesc().GetType();
     auto input_dtype  = miopen::GetDataType(problem.GetDYDesc().GetType());
     auto output_dtype = miopen::GetDataType(problem.GetDXDesc().GetType());
-    auto dims         = problem.GetDYDesc().GetLengths();
 
-    auto layout   = problem.GetXDesc().GetLayoutEnum();
-    size_t stride = 1;
-    if(problem.GetNormalizedDim() > 1 && layout.has_value() &&
-       (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
-    {
-        stride = problem.GetXDesc().GetLengths()[1]; // stride = C
-    }
-
-    size_t outer_size = 1;
-    for(size_t i = 0; i < problem.GetNormalizedDim(); i++)
-    {
-        if(!(stride > 1 && i == 1))
-        {
-            outer_size *= dims[i];
-        }
-    }
-    auto inner_size = std::accumulate(
-        dims.begin() + problem.GetNormalizedDim(), dims.end(), 1ULL, std::multiplies<size_t>());
-
-    auto reqd_work_item_cnt = get_reqd_work_item_cnt(context);
+    auto reqd_work_item_cnt =
+        get_reqd_work_item_cnt(context, PerformanceConfigLayernorm::max_parallel_local_size);
 
     {
         size_t xlocalsize = config.local_size;
-        size_t xgridsize  = outer_size * stride * xlocalsize;
+        size_t xgridsize  = problem.outer_size * problem.stride * xlocalsize;
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;
@@ -91,9 +72,9 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
             {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
             {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-            {"OUTER_SIZE", outer_size},
-            {"INNER_SIZE", inner_size},
-            {"STRIDE", stride},
+            {"OUTER_SIZE", problem.outer_size},
+            {"INNER_SIZE", problem.inner_size},
+            {"STRIDE", problem.stride},
             {"LOCAL_SIZE", config.local_size},
             {"PARALLEL_SIZE", 1},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
@@ -117,13 +98,14 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
         result.construction_params.push_back(kernel);
     }
 
-    if(is_parallelism(reqd_work_item_cnt, inner_size, outer_size))
+    if(is_parallelism(reqd_work_item_cnt, problem.inner_size, problem.outer_size))
     {
-        auto parallelism_size = get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
+        auto parallelism_size =
+            get_parallelism_size(reqd_work_item_cnt, problem.inner_size, problem.outer_size);
 
         {
             size_t xlocalsize = config.local_size;
-            size_t xgridsize  = AlignUp(parallelism_size * inner_size, xlocalsize);
+            size_t xgridsize  = AlignUp(parallelism_size * problem.inner_size, xlocalsize);
             size_t ylocalsize = 1;
             size_t ygridsize  = 1;
             size_t zlocalsize = 1;
@@ -140,9 +122,9 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
                 {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
                 {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-                {"OUTER_SIZE", outer_size},
-                {"INNER_SIZE", inner_size},
-                {"STRIDE", stride},
+                {"OUTER_SIZE", problem.outer_size},
+                {"INNER_SIZE", problem.inner_size},
+                {"STRIDE", problem.stride},
                 {"PARALLEL_SIZE", parallelism_size},
                 {"LOCAL_SIZE", config.local_size},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
@@ -168,7 +150,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
 
         {
             size_t xlocalsize = config.local_size;
-            size_t xgridsize  = AlignUp(inner_size, xlocalsize);
+            size_t xgridsize  = AlignUp(problem.inner_size, xlocalsize);
             size_t ylocalsize = 1;
             size_t ygridsize  = 1;
             size_t zlocalsize = 1;
@@ -185,9 +167,9 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
                 {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
                 {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-                {"OUTER_SIZE", outer_size},
-                {"INNER_SIZE", inner_size},
-                {"STRIDE", stride},
+                {"OUTER_SIZE", problem.outer_size},
+                {"INNER_SIZE", problem.inner_size},
+                {"STRIDE", problem.stride},
                 {"PARALLEL_SIZE", parallelism_size},
                 {"LOCAL_SIZE", config.local_size},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
@@ -214,7 +196,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
     else
     {
         size_t xlocalsize = config.local_size;
-        size_t xgridsize  = inner_size;
+        size_t xgridsize  = problem.inner_size;
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;
@@ -231,9 +213,9 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
             {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
             {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-            {"OUTER_SIZE", outer_size},
-            {"INNER_SIZE", inner_size},
-            {"STRIDE", stride},
+            {"OUTER_SIZE", problem.outer_size},
+            {"INNER_SIZE", problem.inner_size},
+            {"STRIDE", problem.stride},
             {"PARALLEL_SIZE", 1},
             {"LOCAL_SIZE", config.local_size},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
@@ -257,7 +239,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
         result.construction_params.push_back(kernel);
     }
 
-    if(is_parallelism(reqd_work_item_cnt, inner_size, outer_size))
+    if(is_parallelism(reqd_work_item_cnt, problem.inner_size, problem.outer_size))
     {
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
@@ -266,31 +248,10 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 decltype(auto) weight_bias_kernel          = handle_.Run(kernels[2]);
                 decltype(auto) params = raw_params.CastTo<miopen::layernorm::BwdInvokeParams>();
 
-                auto dims     = params.dyDesc->GetLengths();
-                auto layout   = params.dyDesc->GetLayoutEnum();
-                size_t stride = 1;
-                if(params.normalized_dim > 1 && layout.has_value() &&
-                   (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
-                {
-                    stride = dims[1]; // stride = C
-                }
-
-                size_t outer_size = 1;
-                for(size_t i = 0; i < params.normalized_dim; i++)
-                {
-                    if(!(stride > 1 && i == 1))
-                    {
-                        outer_size *= dims[i];
-                    }
-                }
-                auto inner_size = std::accumulate(dims.begin() + params.normalized_dim,
-                                                  dims.end(),
-                                                  1ULL,
-                                                  std::multiplies<size_t>());
-
-                auto reqd_work_item_cnt = get_reqd_work_item_cnt(handle_);
+                auto reqd_work_item_cnt = get_reqd_work_item_cnt(
+                    handle_, PerformanceConfigLayernorm::max_parallel_local_size);
                 auto parallelism_size =
-                    get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
+                    get_parallelism_size(reqd_work_item_cnt, params.inner_size, params.outer_size);
 
                 auto elapsed = 0.f;
                 HipEventPtr start;
@@ -380,21 +341,16 @@ std::size_t
 LayernormBackward::GetWorkspaceSize(const ExecutionContext& context,
                                     const miopen::layernorm::ProblemDescription& problem) const
 {
-    auto dims = problem.GetDYDesc().GetLengths();
+    auto reqd_work_item_cnt =
+        get_reqd_work_item_cnt(context, PerformanceConfigLayernorm::max_parallel_local_size);
 
-    auto outer_size = std::accumulate(
-        dims.begin(), dims.begin() + problem.GetNormalizedDim(), 1ULL, std::multiplies<size_t>());
-
-    auto inner_size = std::accumulate(
-        dims.begin() + problem.GetNormalizedDim(), dims.end(), 1ULL, std::multiplies<size_t>());
-
-    auto reqd_work_item_cnt = get_reqd_work_item_cnt(context);
-
-    if(is_parallelism(reqd_work_item_cnt, inner_size, outer_size))
+    if(is_parallelism(reqd_work_item_cnt, problem.inner_size, problem.outer_size))
     {
-        auto parallelism_size = get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
+        auto parallelism_size =
+            get_parallelism_size(reqd_work_item_cnt, problem.inner_size, problem.outer_size);
 
-        return 2 * parallelism_size * inner_size * get_data_size(problem.GetXDesc().GetType());
+        return 2 * parallelism_size * problem.inner_size *
+               get_data_size(problem.GetXDesc().GetType());
     }
 
     return 0;
