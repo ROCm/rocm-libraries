@@ -23,16 +23,18 @@
 
 #include "device_partition.hpp"
 #include "lookback_scan_state.hpp"
+#include "ordered_block_id.hpp"
 
+#include "../../config.hpp"
 #include "../../detail/binary_op_wrappers.hpp"
 #include "../../detail/various.hpp"
 #include "../../functional.hpp"
+#include "../../intrinsics/arch.hpp"
 #include "../../intrinsics/thread.hpp"
 #include "../../thread/thread_reduce.hpp"
 #include "../../thread/thread_scan.hpp"
 #include "../../type_traits.hpp"
 #include "../../warp/warp_scan.hpp"
-#include "rocprim/intrinsics/arch.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -831,7 +833,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             const RunsCountOutputIterator,
                             const LookbackScanState,
                             const size_t,
-                            const size_t)
+                            const size_t,
+                            ordered_block_id<>)
         -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
 {
     // No need to build the kernel with sleep on a device that does not require it
@@ -851,7 +854,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             const RunsCountOutputIterator  runs_count_output,
                             const LookbackScanState        scan_state,
                             const size_t              grid_size,
-                            const size_t              size)
+                            const size_t              size,
+                            ordered_block_id<>        ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
     static constexpr non_trivial_runs_config_params params     = ArchConfig::params;
@@ -879,7 +883,9 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         storage;
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
-    const size_t block_id = flat_block_id<block_size, 1, 1>();
+        ROCPRIM_SHARED_MEMORY
+    typename ordered_block_id<>::storage_type ordered_bid_storage;
+    const size_t block_id = ordered_bid.get(rocprim::flat_tile_thread_id(), ordered_bid_storage);
 
     const size_t        block_offset = block_id * items_per_block;
     const InputIterator block_input  = input + block_offset;

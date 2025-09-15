@@ -26,9 +26,11 @@
 
 #include "detail/device_config_helper.hpp"
 #include "detail/device_run_length_encode.hpp"
+#include "detail/ordered_block_id.hpp"
 
 #include "../common.hpp"
 #include "../config.hpp"
+#include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../iterator/constant_iterator.hpp"
 #include "../type_traits.hpp"
@@ -108,6 +110,7 @@ inline hipError_t launch_non_trivial(detail::target_arch           arch,
                                      const LookbackScanState       scan_state,
                                      const std::size_t             grid_size,
                                      const std::size_t             size,
+                                     ordered_block_id<>            ordered_bid,
                                      dim3                          grid,
                                      dim3                          block,
                                      size_t                        shmem,
@@ -122,7 +125,8 @@ inline hipError_t launch_non_trivial(detail::target_arch           arch,
             runs_count_output,
             scan_state,
             grid_size,
-            size);
+            size,
+            ordered_bid);
     };
 
     return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
@@ -170,12 +174,17 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
     detail::temp_storage::layout layout{};
     ROCPRIM_RETURN_ON_ERROR(scan_state_type::get_temp_storage_layout(grid_size, stream, layout));
 
+    using ordered_bid_type = ordered_block_id<unsigned int>;
+    ordered_bid_type::id_type* ordered_bid_storage;
+
     hipError_t result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
         detail::temp_storage::make_linear_partition(
             // This is valid even with scan_state_with_sleep_type
-            detail::temp_storage::make_partition(&scan_state_storage, layout)));
+            detail::temp_storage::make_partition(&scan_state_storage, layout),
+            detail::temp_storage::make_partition(&ordered_bid_storage,
+                                                 ordered_bid_type::get_temp_storage_layout())));
 
     if(result != hipSuccess || temporary_storage == nullptr)
     {
@@ -193,6 +202,8 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                                                                scan_state_storage,
                                                                grid_size,
                                                                stream));
+
+    auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
 
     auto with_scan_state
         = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
@@ -234,13 +245,10 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
         {
             const unsigned int init_block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
             const std::size_t  init_grid_size  = detail::ceiling_div(grid_size, init_block_size);
-            hipLaunchKernelGGL(init_lookback_scan_state_kernel,
-                               dim3(init_grid_size),
-                               dim3(init_block_size),
-                               0,
-                               stream,
-                               scan_state,
-                               grid_size);
+            init_lookback_scan_state_kernel<<<init_grid_size, init_block_size, 0, stream>>>(
+                scan_state,
+                grid_size,
+                ordered_bid);
         });
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
                                                 grid_size,
@@ -258,6 +266,7 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                 scan_state,
                 grid_size,
                 size,
+                ordered_bid,
                 dim3(grid_size),
                 dim3(block_size),
                 0,

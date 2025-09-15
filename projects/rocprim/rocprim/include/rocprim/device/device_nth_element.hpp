@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_NTH_ELEMENT_HPP_
 
 #include "detail/device_nth_element.hpp"
+#include "detail/ordered_block_id.hpp"
 
 #include "../detail/temp_storage.hpp"
 
@@ -84,6 +85,9 @@ hipError_t
 
     key_type* keys_buffer = nullptr;
 
+    using ordered_bid_type = ordered_block_id<unsigned int>;
+    ordered_bid_type::id_type* ordered_bid_storage;
+
     {
         using namespace temp_storage;
 
@@ -99,7 +103,10 @@ hipError_t
                                 ptr_aligned_array(&buckets, num_buckets),
                                 ptr_aligned_array(&keys_buffer, size),
                                 ptr_aligned_array(&nth_element_data, 1),
-                                ptr_aligned_array(&lookback_states, num_partitions * num_blocks)));
+                                ptr_aligned_array(&lookback_states, num_partitions * num_blocks),
+                                detail::temp_storage::make_partition(
+                                    &ordered_bid_storage,
+                                    ordered_bid_type::get_temp_storage_layout())));
         }
         else
         {
@@ -111,7 +118,10 @@ hipError_t
                                 ptr_aligned_array(&equality_buckets, num_buckets),
                                 ptr_aligned_array(&buckets, num_buckets),
                                 ptr_aligned_array(&nth_element_data, 1),
-                                ptr_aligned_array(&lookback_states, num_partitions * num_blocks)));
+                                ptr_aligned_array(&lookback_states, num_partitions * num_blocks),
+                                detail::temp_storage::make_partition(
+                                    &ordered_bid_storage,
+                                    ordered_bid_type::get_temp_storage_layout())));
             keys_buffer = keys_double_buffer;
         }
 
@@ -141,6 +151,8 @@ hipError_t
         std::cout << "storage_size: " << storage_size << '\n';
     }
 
+    auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+
     return nth_element_keys_impl<config, num_partitions>(target_arch,
                                                          keys,
                                                          keys_buffer,
@@ -157,7 +169,8 @@ hipError_t
                                                          nth_element_data,
                                                          compare_function,
                                                          stream,
-                                                         debug_synchronous);
+                                                         debug_synchronous,
+                                                         ordered_bid);
 }
 
 } // namespace detail

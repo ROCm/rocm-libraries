@@ -474,7 +474,7 @@ private:
 
             union shared_t
             {
-                ordered_block_id<>::storage_type ordered_bid;
+                typename ordered_block_id<>::storage_type ordered_bid;
 
                 union analysis_t
                 {
@@ -955,7 +955,10 @@ public:
 
         block_scan_state.initialize_prefix(flat_thread_id, num_tiles);
 
-        ordered_bid.reset();
+        if(flat_thread_id == 0)
+        {
+            ordered_bid.reset();
+        }
     }
 
     template<class ArchConfig>
@@ -1137,7 +1140,6 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
     uint8_t* blev_buffer_scan_data;
     uint8_t* blev_block_scan_state_data;
 
-    
     using ordered_bid_type = ordered_block_id<unsigned int>;
     ordered_bid_type::id_type* ordered_bid_storage;
 
