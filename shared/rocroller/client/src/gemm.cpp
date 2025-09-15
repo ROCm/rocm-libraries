@@ -1661,6 +1661,24 @@ int main(int argc, const char* argv[])
         Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
     }
 
+    if(solution.macK < solution.waveK || solution.macM < solution.waveM
+       || solution.macN < solution.waveN)
+    {
+        Throw<FatalError>("Macro tile sizes must be greater than or equal to MI tile sizes. ",
+                          "macM: ",
+                          solution.macM,
+                          " waveM: ",
+                          solution.waveM,
+                          " macN: ",
+                          solution.macN,
+                          " waveN: ",
+                          solution.waveN,
+                          " macK: ",
+                          solution.macK,
+                          " waveK: ",
+                          solution.waveK);
+    }
+
     if(types.scaleSkipPermlane)
     {
         AssertFatal(types.transA == Client::GEMMClient::TransposeType::T, ShowValue(types));
