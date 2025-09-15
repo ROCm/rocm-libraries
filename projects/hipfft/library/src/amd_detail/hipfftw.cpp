@@ -136,53 +136,6 @@ namespace
             return rocfft_array_type_real;
     }
 
-    struct hipfftw_raii_event
-    {
-    private:
-        hipEvent_t ev;
-
-    public:
-        hipfftw_raii_event()
-        {
-            auto hip_status = hipEventCreate(&ev);
-            if(hip_status != hipSuccess)
-            {
-                throw hipfftw_runtime_error("an event could not be created.", hip_status);
-            }
-        }
-
-        hipfftw_raii_event& record()
-        {
-            auto hip_status = hipEventRecord(ev);
-            if(hip_status != hipSuccess)
-            {
-                throw hipfftw_runtime_error("an event could not be recorded.", hip_status);
-            }
-            return *this;
-        }
-
-        hipfftw_raii_event& sync()
-        {
-            auto hip_status = hipEventSynchronize(ev);
-            if(hip_status != hipSuccess)
-            {
-                throw hipfftw_runtime_error("an event synchronization failed.", hip_status);
-            }
-            return *this;
-        }
-
-        ~hipfftw_raii_event()
-        {
-            (void)hipEventDestroy(ev);
-        }
-
-        // disable copies and moves
-        hipfftw_raii_event(hipfftw_raii_event&& other) = delete;
-        hipfftw_raii_event& operator=(hipfftw_raii_event&& other) = delete;
-        hipfftw_raii_event(const hipfftw_raii_event& other)       = delete;
-        hipfftw_raii_event& operator=(const hipfftw_raii_event& other) = delete;
-    };
-
     enum class hipfftw_memcpy_kind : std::underlying_type_t<hipMemcpyKind>
     {
         H2D = static_cast<std::underlying_type_t<hipMemcpyKind>>(hipMemcpyHostToDevice),
@@ -758,8 +711,19 @@ namespace
             if(exec_out.is_host_accessible())
             {
                 // results must be accessible from the host upon completion
-                hipfftw_raii_event synchronizing_event;
-                synchronizing_event.record().sync();
+                hipEvent_t synchronizing_event = nullptr;
+                auto       hip_status          = hipEventCreate(&synchronizing_event);
+                if(hip_status != hipSuccess)
+                    throw hipfftw_runtime_error("an event could not be created.", hip_status);
+                hip_status = hipEventRecord(synchronizing_event);
+                if(hip_status != hipSuccess)
+                    throw hipfftw_runtime_error("an event could not be recorded.", hip_status);
+                hip_status = hipEventSynchronize(synchronizing_event);
+                if(hip_status != hipSuccess)
+                    throw hipfftw_runtime_error("an event synchronization failed.", hip_status);
+                hip_status = hipEventDestroy(synchronizing_event);
+                if(hip_status != hipSuccess)
+                    throw hipfftw_runtime_error("an event could not be destroyed.", hip_status);
             }
             return;
         }
