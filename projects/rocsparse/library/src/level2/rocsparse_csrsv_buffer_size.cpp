@@ -125,11 +125,11 @@ rocsparse_status rocsparse::csrsv_buffer_size_template(rocsparse_handle         
         // Determine rocprim buffer size
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<J, I>(
             handle, nnz, startbit, endbit, &transpose_size)));
-	
-	transpose_size += 256;
-	transpose_size += ((sizeof(int) * m - 1) / 256 + 1) * 256;
 
-	// rocPRIM does not support in-place sorting, so we need an additional buffer
+        transpose_size += 256;
+        transpose_size += ((sizeof(int) * m - 1) / 256 + 1) * 256;
+
+        // rocPRIM does not support in-place sorting, so we need an additional buffer
         transpose_size += ((sizeof(J) * nnz - 1) / 256 + 1) * 256;
         transpose_size += ((rocsparse::max(sizeof(I), sizeof(T)) * nnz - 1) / 256 + 1) * 256;
 
