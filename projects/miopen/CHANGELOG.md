@@ -2,6 +2,10 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
+## MIOpen 3.5.0 for ROCm 7.1.0
+### Optimized
+* [Conv] Improve Composable Kernel (CK) kernel selection during tuning
+
 ## MIOpen 3.5.0 for ROCm 7.0.0
 ### Added
 * [Conv] Added misa kernels for gfx950
