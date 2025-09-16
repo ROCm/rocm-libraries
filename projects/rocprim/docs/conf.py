@@ -33,7 +33,7 @@ with open('../CMakeLists.txt', encoding='utf-8') as f:
     version_number = match[1]
 
 project = "rocPRIM Documentation"
-html_title = f"rocPRIM {version_number} Documentation"
+html_title = f"rocPRIM 4.0.0 Documentation"
 author = "Advanced Micro Devices, Inc."
 copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
