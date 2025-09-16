@@ -30,16 +30,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponentTemplateSpec(SubtractGenerator, Register::Type::Scalar, DataType::Int32);
-    RegisterComponentTemplateSpec(SubtractGenerator, Register::Type::Vector, DataType::Int32);
-    RegisterComponentTemplateSpec(SubtractGenerator, Register::Type::Scalar, DataType::UInt32);
-    RegisterComponentTemplateSpec(SubtractGenerator, Register::Type::Vector, DataType::UInt32);
-    RegisterComponentTemplateSpec(SubtractGenerator, Register::Type::Scalar, DataType::Int64);
-    RegisterComponentTemplateSpec(SubtractGenerator, Register::Type::Vector, DataType::Int64);
-    RegisterComponentTemplateSpec(SubtractGenerator, Register::Type::Vector, DataType::Float);
-    RegisterComponentTemplateSpec(SubtractGenerator, Register::Type::Vector, DataType::Double);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Subtract>>
         GetGenerator<Expression::Subtract>(Register::ValuePtr dst,

@@ -238,10 +238,9 @@ namespace rocRoller
                                             .outOfRegisters     = 1000000000.0,
                                             .zeroFreeBarriers   = true};
 
-        RegisterComponent(LinearWeightedCost);
         static_assert(Component::Component<LinearWeightedCost>);
 
-        inline LinearWeightedCost::LinearWeightedCost(ContextPtr ctx, CostFunction fn)
+        LinearWeightedCost::LinearWeightedCost(ContextPtr ctx, CostFunction fn)
             : Cost{ctx}
             , m_weights(loadWeights(ctx, fn))
         {
@@ -301,14 +300,14 @@ namespace rocRoller
             return m_weights;
         }
 
-        inline bool LinearWeightedCost::Match(Argument arg)
+        bool LinearWeightedCost::Match(Argument arg)
         {
             auto [costFn, ctx] = arg;
             return costFn == CostFunction::LinearWeighted
                    || costFn == CostFunction::LinearWeightedSimple;
         }
 
-        inline std::shared_ptr<Cost> LinearWeightedCost::Build(Argument arg)
+        std::shared_ptr<Cost> LinearWeightedCost::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -318,13 +317,13 @@ namespace rocRoller
             return std::make_shared<LinearWeightedCost>(ctx, costFn);
         }
 
-        inline std::string LinearWeightedCost::name() const
+        std::string LinearWeightedCost::name() const
         {
             return Name;
         }
 
-        inline float LinearWeightedCost::cost(Instruction const&       inst,
-                                              InstructionStatus const& status) const
+        float LinearWeightedCost::cost(Instruction const&       inst,
+                                       InstructionStatus const& status) const
         {
 
             auto nops = static_cast<float>(status.nops);
