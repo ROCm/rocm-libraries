@@ -95,7 +95,7 @@ namespace MemoryTracerTest
             auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
 
             // All visited nodes only access 4 banks in this graph
-            for(const auto& [tag, access] : summary.accesses)
+            for(const auto& [tag, access] : summary.tagToAccess)
             {
                 CHECK(access.accessedBanks.size() == 4);
             }
@@ -204,7 +204,7 @@ namespace MemoryTracerTest
         }
 
         auto        detailed   = model.doOperationsAnalysis(GPUArchitectureGFX::GFX950);
-        const auto& opAccesses = detailed.accesses.at(operationTag);
+        const auto& opAccesses = detailed.tagToAccess.at(operationTag);
 
         // TODO: currently fix test when operation disconnected from instruction
 

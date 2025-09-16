@@ -128,7 +128,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 }
             }
 
-            summary.accesses[operationTag] = access;
+            summary.tagToAccess[operationTag] = access;
         }
 
         return summary;
@@ -357,7 +357,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 opAccesses.instructions.push_back(instr);
             }
 
-            detailed.accesses[operationTag] = opAccesses;
+            detailed.tagToAccess[operationTag] = opAccesses;
         }
 
         return detailed;
@@ -366,7 +366,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     std::string Summary::toString() const
     {
         std::stringstream ss;
-        for(auto const& [tag, access] : this->accesses)
+        for(auto const& [tag, access] : this->tagToAccess)
         {
             auto const& [ldsTag, accessedBanks, banksToWorkitems] = access;
             ss << fmt::format("Operation tag {} accesses LDS {}:\n", tag, ldsTag);
@@ -485,7 +485,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         ss << rocRoller::toString(gfx) << "\n";
 
-        for(const auto& [operationTag, opAccesses] : accesses)
+        for(const auto& [operationTag, opAccesses] : tagToAccess)
         {
             ss << fmt::format("Operation Tag: {}, LDS Tag: {}\n", operationTag, opAccesses.ldsTag);
 

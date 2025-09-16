@@ -58,7 +58,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
             std::vector<std::vector<int>> banksToWorkitems;
         };
 
-        std::map<int, Access> accesses;
+        std::map<int, Access> tagToAccess;
         std::set<int>         imbalancedTags;
 
         std::string toString() const;
@@ -82,7 +82,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     struct OperationsAnalysis
     {
-        std::map<int, OperationAccesses> accesses;
+        std::map<int, OperationAccesses> tagToAccess;
         GPUArchitectureGFX               gfx;
 
         std::string toString() const;
