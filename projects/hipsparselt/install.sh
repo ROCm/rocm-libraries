@@ -654,7 +654,7 @@ pushd .
 
   tensile_opt=""
   if [[ "${build_tensile}" == false ]]; then
-      printf "Building hipsparsel with tensile is no longer supported.\n"
+      printf "Building hipsparselt with tensile is no longer supported.\n"
       exit 1
    else
     tensile_opt="${tensile_opt} -DHIPSPARSELT_ENABLE_HIP=ON"
