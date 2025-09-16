@@ -16,11 +16,11 @@ To use the HIPSTDPAR headers, compile your code with the ``--hipstdpar`` flag. F
 
 Both the AMD fork of LLVM and the upstream LLVM support offloading parallel algorithms.
 
-Tests for validating HIPSTDPAR implementations are enabled when rocThrust is built with ``BUILD_HIPSTDPAR_TEST=ON``. 
+Tests for validating HIPSTDPAR implementations are enabled when rocThrust is built with ``BUILD_HIPSTDPAR_TEST=ON``.
 
 HIPSTDPAR requires rocThrust, `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_, and `TBB <https://www.intel.com/content/www/us/en/developer/tools/oneapi/onetbb.html>`_.
 
 
-.. note:: 
+.. note::
 
     If you're using libstdc++ 9 or libstdc++ 10, your application might fail to compile due to incompatibilities between legacy TBB and oneTBB. See the `oneAPI Threading Building Blocks Release Notes <https://www.intel.com/content/www/us/en/developer/articles/release-notes/intel-oneapi-threading-building-blocks-release-notes.html>`_ for more information.

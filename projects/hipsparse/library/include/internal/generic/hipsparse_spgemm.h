@@ -58,12 +58,12 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  \details
 *  \p hipsparseSpGEMM_workEstimation is called twice. We call it to compute the size of the first required user allocated
 *  buffer. After this buffer size is determined, the user allocates it and calls \p hipsparseSpGEMM_workEstimation
-*  a second time with the newly allocated buffer passed in. This second call inspects the matrices \f$A\f$ and \f$B\f$ to 
+*  a second time with the newly allocated buffer passed in. This second call inspects the matrices \f$A\f$ and \f$B\f$ to
 *  determine the number of intermediate products that will result from multipltying \f$A\f$ and \f$B\f$ together.
 *
-*  \p hipsparseSpGEMM_workEstimation supports multiple combinations of data types and compute types. See \ref hipsparseSpGEMM_copy 
+*  \p hipsparseSpGEMM_workEstimation supports multiple combinations of data types and compute types. See \ref hipsparseSpGEMM_copy
 *  for a complete listing of all the data type and compute type combinations available.
-*  
+*
 *  @param[in]
 *  handle           handle to the hipsparse library context queue.
 *  @param[in]
@@ -87,12 +87,12 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  @param[in]
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
-*  bufferSize1      number of bytes of the temporary storage buffer. 
+*  bufferSize1      number of bytes of the temporary storage buffer.
 *  @param[in]
 *  externalBuffer1  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC
 *                                         or \p bufferSize1 pointer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
@@ -102,7 +102,7 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *
 *  \par Example (See full example below)
 *  \code{.c}
-*    void*  dBuffer1  = NULL; 
+*    void*  dBuffer1  = NULL;
 *    size_t bufferSize1 = 0;
 *
 *    hipsparseSpGEMMDescr_t spgemmDesc;
@@ -164,12 +164,12 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  \details
 *  \p hipsparseSpGEMM_compute is called twice. First to compute the size of the second required user allocated
 *  buffer. After this buffer size is determined, the user allocates it and calls \p hipsparseSpGEMM_compute
-*  a second time with the newly allocated buffer passed in. This second call performs the actual computation 
+*  a second time with the newly allocated buffer passed in. This second call performs the actual computation
 *  of \f$C' = \alpha \cdot A \cdot B\f$ (the result is stored in the temporary buffers).
 *
-*  \p hipsparseSpGEMM_compute supports multiple combinations of data types and compute types. See \ref hipsparseSpGEMM_copy 
+*  \p hipsparseSpGEMM_compute supports multiple combinations of data types and compute types. See \ref hipsparseSpGEMM_copy
 *  for a complete listing of all the data type and compute type combinations available.
-*  
+*
 *  @param[in]
 *  handle           handle to the hipsparse library context queue.
 *  @param[in]
@@ -193,12 +193,12 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  @param[in]
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
-*  bufferSize2      number of bytes of the temporary storage buffer. 
+*  bufferSize2      number of bytes of the temporary storage buffer.
 *  @param[in]
 *  externalBuffer2  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC
 *                                         or \p bufferSize2 pointer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
@@ -208,7 +208,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *
 *  \par Example (See full example below)
 *  \code{.c}
-*    void*  dBuffer2  = NULL; 
+*    void*  dBuffer2  = NULL;
 *    size_t bufferSize2 = 0;
 *
 *    size_t bufferSize2 = 0;
@@ -258,16 +258,16 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Copy step of the sparse matrix sparse matrix product: 
+*  \brief Copy step of the sparse matrix sparse matrix product:
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
 *  where \f$C'\f$, \f$A\f$, \f$B\f$, \f$C\f$ are sparse matrices and \f$C'\f$ and \f$C\f$ have the same sparsity pattern.
 *
 *  \details
-*  \p hipsparseSpGEMM_copy is called once to copy the results (that are currently stored in the temporary arrays) 
-*  to the output sparse matrix. If \f$\beta != 0\f$, then the \f$beta \cdot C\f$ portion of the computation: 
-*  \f$C' = \alpha \cdot A \cdot B + \beta * C\f$ is handled. This is possible because \f$C'\f$ and \f$C\f$ must have 
+*  \p hipsparseSpGEMM_copy is called once to copy the results (that are currently stored in the temporary arrays)
+*  to the output sparse matrix. If \f$\beta != 0\f$, then the \f$beta \cdot C\f$ portion of the computation:
+*  \f$C' = \alpha \cdot A \cdot B + \beta * C\f$ is handled. This is possible because \f$C'\f$ and \f$C\f$ must have
 *  the same sparsity pattern.
 *
 *  \p hipsparseSpGEMM_copy supports multiple combinations of data types and compute types. The tables below indicate the currently
@@ -285,7 +285,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \p hipsparseSpGEMM_copy supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions 
+*  \p hipsparseSpGEMM_copy supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions
 *  for storing the row pointer and row/column indices arrays of the sparse matrices.
 *
 *  \note The two user allocated temporary buffers can only be freed after the call to \p hipsparseSpGEMM_copy
@@ -320,14 +320,14 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
-*  
+*
 *  \par Example (Full example)
 *  \code{.c}
 *    hipsparseHandle_t     handle = NULL;
 *    hipsparseSpMatDescr_t matA, matB, matC;
-*    void*  dBuffer1  = NULL; 
+*    void*  dBuffer1  = NULL;
 *    void*  dBuffer2  = NULL;
-*    size_t bufferSize1 = 0;  
+*    size_t bufferSize1 = 0;
 *    size_t bufferSize2 = 0;
 *
 *    hipsparseCreate(&handle);
@@ -356,7 +356,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *                                        spgemmDesc, &bufferSize1, NULL);
 *    hipMalloc((void**) &dBuffer1, bufferSize1);
 *
-*    // Inspect the matrices A and B to determine the number of intermediate product in 
+*    // Inspect the matrices A and B to determine the number of intermediate product in
 *    // C = alpha * A * B
 *    hipsparseSpGEMM_workEstimation(handle, opA, opB,
 *                                        &alpha, matA, matB, &beta, matC,
@@ -398,7 +398,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *    hipsparseDestroySpMat(matB);
 *    hipsparseDestroySpMat(matC);
 *    hipsparseDestroy(handle);
-* 
+*
 *    // Free device memory
 *    hipFree(dBuffer1);
 *    hipFree(dBuffer2);

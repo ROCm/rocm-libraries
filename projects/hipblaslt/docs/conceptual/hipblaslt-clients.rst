@@ -15,7 +15,7 @@ The following client executables are available for use with hipBLASLt:
 *  ``hipblaslt-bench``
 
 To build these clients, follow the instructions in :doc:`Building and installing hipBLASLt <../install/building-installing-hipblaslt>`.
-After building the hipBLASLt clients, you can find them in the ``hipBLASLt/build/release/clients/staging`` directory.
+After building the hipBLASLt clients, you can find them in the ``hipBLASLt/build/release/clients`` directory.
 
 Here is a brief explanation of each hipBLASLt client and how to use it.
 

@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-# Generates four rocblas-bench input files from the library logic files: beta 0/1 + rotating buffer 0/1. The cold and hot iteration counts are based on the performance in the library logic. 
+# Generates four rocblas-bench input files from the library logic files: beta 0/1 + rotating buffer 0/1. The cold and hot iteration counts are based on the performance in the library logic.
 
 # Usage:
 # $ python3 rocblas-benchInputCreator.py [-v] [-i <init>] <lib logic dir> <output dir>
@@ -211,10 +211,10 @@ def createYaml(args, outputfile, problem, sizeMappings, verify):
     problemParams = getProblemType(problem)
     transA = problem["TransposeA"]
     transB = problem["TransposeB"]
-    
+
     # check if this is f8/b8:
     f8gemm = True if (problem["DataType"]>=10) else False
-    
+
     if verify:
         otherParams_verify = {"alpha": 1, "beta": 1, "iters": 1, "cold_iters": 0, "norm_check": 1}
 
@@ -236,7 +236,7 @@ def createYaml(args, outputfile, problem, sizeMappings, verify):
     for (size, perf) in sizeMappings: # size[0] = M, size[1] = N, size[2] = batch_count, size[3] = K, size[4] = ldc, size[5] = ldd, size[6] = lda, size[7] = ldb
 
         params = {}
- 
+
         if (not generalBatched and size[2] == 1 and not f8gemm):  # non-f8, non-batched gemm (serves both HPA and non-HPA)
             params["rocblas_function"] = "rocblas_gemm_ex"
         elif (not generalBatched and size[2] != 1 and not f8gemm): # non-f8, strided_batched gemm (serves both HPA and non-HPA)
@@ -260,7 +260,7 @@ def createYaml(args, outputfile, problem, sizeMappings, verify):
             cold_iters = 2
             iters = 10
             coe = 1
-        
+
         otherParams = {"alpha": 1, "beta": 1, "iters": iters, "cold_iters": cold_iters}
         otherParams_rotating = {**otherParams, "flush_memory_size": 536870812}
 
@@ -285,7 +285,7 @@ def createYaml(args, outputfile, problem, sizeMappings, verify):
             benchGeneralBatched_beta0.append({**params, **otherParams_beta0})
             benchGeneralBatched_beta0_rotating.append({**params, **otherParams_beta0_rotating})
             if verify:
-                benchGeneralBatched_verify.append({**params, **otherParams_verify})            
+                benchGeneralBatched_verify.append({**params, **otherParams_verify})
         else:
             benchStrided.append({**params, **otherParams})
             benchStrided_rotating.append({**params, **otherParams_rotating})
@@ -344,4 +344,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

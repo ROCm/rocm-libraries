@@ -33,7 +33,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/Command.hpp>
-#include <Tensile/analytical/Utils.hpp>
+#include <origami/utils.hpp>
 
 /**
  * @brief KernelType
@@ -167,7 +167,7 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType 
 
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
 constexpr auto generateTileList() {
-    std::array<TensileLite::analytical::TileTuple, possibleTileSizes.size()> tileList{};
+    std::array<origami::tile_tuple, possibleTileSizes.size()> tileList{};
 
     for (size_t i = 0; i < possibleTileSizes.size(); ++i) {
         const auto& wgt = possibleTileSizes[i];
@@ -183,17 +183,18 @@ constexpr auto generateTileList() {
         tileList[i] = std::make_tuple(
             wgt.m, wgt.n, wgtk * unroll,
             MI.m, MI.n, MI.k,
-            1 // occupancy
+            1, // occupancy
+            6 // WGM
         );
     }
 
     return tileList;
 }
 
-using TileListGeneratorFn = std::vector<TensileLite::analytical::TileTuple>(*)();
+using TileListGeneratorFn = std::vector<origami::tile_tuple>(*)();
 
 template <rocRoller::DataType A, rocRoller::DataType B>
-std::vector<TensileLite::analytical::TileTuple> generateTileListWrapper() {
+std::vector<origami::tile_tuple> generateTileListWrapper() {
     constexpr auto arr = generateTileList<A, B>();
     return {arr.begin(), arr.end()};
 }
@@ -222,7 +223,7 @@ const std::map<std::pair<rocRoller::DataType, rocRoller::DataType>, TileListGene
     INSTANTIATE_TILE_LIST_FOR(FP6)
 };
 
-std::vector<TensileLite::analytical::TileTuple> getTileListForKernelType(KernelType kernelType)
+std::vector<origami::tile_tuple> getTileListForKernelType(KernelType kernelType)
 {
     auto key = std::make_pair(kernelType.typeA, kernelType.typeB);
     auto it = tileListGenerators.find(key);

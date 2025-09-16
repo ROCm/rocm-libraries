@@ -17,9 +17,7 @@ target_include_directories(hipblaslt-clients-common
 add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
-    target_link_libraries(hipblaslt-clients-common PRIVATE BLIS::BLIS)
-else()
-    target_link_libraries(hipblaslt-clients-common PUBLIC ${BLAS_LIBRARIES})
+    target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
 endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
@@ -31,7 +29,7 @@ target_link_libraries(hipblaslt-clients-common
 )
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
-    if(NOT ROCM_LIBRARIES_SUPERBUILD)
+    if(NOT ROCM_LIBS_SUPERBUILD)
         if(HIPBLASLT_ENABLE_FETCH)
             FetchContent_Declare(
                 mxDataGenerator
@@ -106,7 +104,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(rocm_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
     endif()
-    target_link_libraries(hipblaslt-test 
+    target_link_libraries(hipblaslt-test
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
@@ -123,3 +121,8 @@ endif()
 if(HIPBLASLT_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()
+
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/hipblaslt_gentest.py" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_gentest.py" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/hipblaslt_common.yaml" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_common.yaml" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/data/hipblaslt_template.yaml" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt_template.yaml" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/bench/sequence.yaml" "${CMAKE_CURRENT_BINARY_DIR}/sequence.yaml" COPYONLY)

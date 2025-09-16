@@ -71,7 +71,7 @@ extern "C" {
 *                    \ref HIPSPARSE_HYB_PARTITION_MAX.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p userEllWidth, \p partitionType, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p userEllWidth, \p partitionType,
 *              \p descrA, \p hybA, \p csrSortedValA, \p csrSortedRowPtrA or \p csrSortedColIndA pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the HYB matrix could not be
 *              allocated.
@@ -94,7 +94,7 @@ extern "C" {
 *    //     6 0 0 7 8
 *    int hcsrRowPtr[4] = {0, 3, 5, 8};
 *    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
+*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
 *
 *    int m         = 3;
 *    int n         = 5;
@@ -122,7 +122,7 @@ extern "C" {
 *    hipFree(dcsrColInd);
 *    hipFree(dcsrVal);
 *
-*    hipsparseDestroyHybMat(hyb);    
+*    hipsparseDestroyHybMat(hyb);
 *    hipsparseDestroyMatDescr(descr);
 *
 *    hipsparseDestroy(handle);

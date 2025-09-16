@@ -154,7 +154,7 @@ program example_fortran_gemm_ex
 
     real :: gpu_time_used = 0.0
 
-    integer(c_int) :: i, element    
+    integer(c_int) :: i, element
 
     ! Create hipBLAS handle
     type(c_ptr), target :: handle
@@ -208,7 +208,7 @@ program example_fortran_gemm_ex
                                      bType, ldb, c_loc(beta), dC, Ctype,&
                                      ldc, computeType, algo))
     call HIP_CHECK(hipDeviceSynchronize())
-    
+
     ! Stop time
     call date_and_time(values = tend)
 

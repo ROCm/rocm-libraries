@@ -49,29 +49,101 @@ Alternatively, build with CMake:
 cmake -DBUILD_DOCS=ON ...
 ```
 
+## Configure, build and install
 
-## Requirements
+This section describes how to configure, build and install **hipblaslt**. We assume the user has a
+ROCm installation, Python 3.8 or newer and CMake 3.25.0 or newer.
 
-To install hipBLASLt, you must meet the following requirements:
 
-Required hardware:
+### Using CMake
 
-* gfx90a card
-* gfx94x card
-* gfx110x card
+**hipblaslt** provides modern CMake support and relies on native CMake fnuctionality with exception of
+some project specific options. As such, users are advised to refer to the CMake documentation for
+general usage questions. Below are usage examples to get started. For details on all configuration
+options see the options section.
 
-Required software:
+It isn't a requirement, but below we assume there is a ROCm install in `/opt/rocm`.
 
-* Git
-* CMake 3.16.8 or later
-* python3.8 or later
-* python3.8-venv or later
-* AMD [ROCm](https://github.com/ROCm/ROCm), version 5.5 or later
-* [hipBLAS-common](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common)
-* [roctracer](https://github.com/ROCm/roctracer)
+**Full build of** ***hipblaslt***
+```
+cd projects/hipblaslt
+# configure
+cmake -B build                                       \
+      -S .                                           \
+      -D CMAKE_BUILD_TYPE=Release                    \
+      -D GPU_TARGETS=gfx950                          \
+      --prefix opt-rocm
+# build
+cmake --build build --parallel 32
+```
 
-## Build and install
+**Building device libraries**
+```
+cd projects/hipblaslt
+# configure
+cmake -B build \
+      -S .     \
+      --prefix gemm-libs
+# build
+cmake --build build --parallel 32
+```
 
+> [!NOTE]
+> Refer to the CMakePresets.json for additional presets.
+
+> [!NOTE]
+> Refer to the README in the tensilelite diretory for instructions on building for the tensile workflow.
+
+**Options**
+
+*CMake options*:
+* `CMAKE_BUILD_TYPE`: Any of Release, Debug, RelWithDebInfo, MinSizeRel
+* `CMAKE_INSTALL_PREFIX`: Base installation directory
+* `CMAKE_PREFIX_PATH`: Find package search path (consider setting to ``$ROCM_PATH``)
+
+*Project wide options*:
+
+* `HIPBLASLT_ENABLE_BLIS`: Enable BLIS support (default `ON`)
+* `HIPBLASLT_ENABLE_HIP`: Use the HIP runtime (default `ON`)
+* `HIPBLASLT_ENABLE_LLVM`: Use msgpack for parsing configuration files (default `OFF`)
+* `HIPBLASLT_ENABLE_MSGPACK` Use msgpack for parsing configuration files (default `ON`)
+* `HIPBLASLT_ENABLE_OPENMP`: "Use OpenMP to improve performance (default `ON`)
+* `HIPBLASLT_ENABLE_ROCROLLER:` Use RocRoller library (default `OFF`)
+* `GPU_TARGETS:` Semicolon separated list of gfx targets to build
+
+*hipblaslt options*
+
+* `HIPBLASLT_ENABLE_HOST`: Enables generation of host library (default: `ON`)
+* `HIPBLASLT_ENABLE_DEVICE`: Enables generation of device libraries (default: `ON`)
+* `HIPBLASLT_ENABLE_CLIENT`: Enables generation of client applications (default: `ON`)
+* `HIPBLASLT_BUILD_TESTING:` Build hipblaslt client tests (default `ON`)
+* `HIPBLASLT_ENABLE_SAMPLES:` Build client samples (default `ON`)
+* `HIPBLASLT_ENABLE_LAZY_LOAD` Enable lazy loading of runtime code oject files to reduce init costs (default: `ON`)
+
+*tensilelite options*
+
+* `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
+* `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
+* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts that set PYTHONPATH and trigger rebuilds of rocisa (default: `OFF`)
+* `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
+
+*Device libraries options:*
+
+* `TENSILELITE_BUILD_PARALLEL_LEVEL` Number of CPU cores to use for building device libraries (will use nproc if unset)
+* `TENSILELITE_KEEP_BUILD_TMP` OFF CACHE STRING Keep temporary build directory for device libraries (default: see below)
+* `TENSILELITE_LIBLOGIC_PATH` Path to library logic files (will use 'library' if unset) (default: `Off`)
+* `TENSILELITE_LIBRARY_FORMAT` Format of master solution library files (msgpack or yaml) (default: see below)
+* `TENSILELITE_ASM_DEBUG` Keep debug information for built code objects (default: see below)
+* `TENSILELITE_LOGIC_FILTER` Cutomsized logic filter, default is *, i.e. all logics (default: see below)
+* `TENSILELITE_NO_COMPRESS` Do not compress device code object files (default: see below)
+* `TENSILELITE_EXPERIMENTAL` Process experimental logic files (default: see below)
+* `HIPBLASLT_TENSILE_LIBPATH` Path to output the device gemm libraries (default: `build/Tensile`)
+
+> [!NOTE]
+> To determine defaults for the `TensileCreateLibrary` command generated when building the device
+> libraries, run `Tensile/bin/TensileCreateLibrary --help` from the tensilelite directory.
+
+### Installation script
 You can build hipBLASLt using the `install.sh` script:
 
 > [!NOTE]
@@ -105,22 +177,13 @@ python3 -m pip install -r tensilelite/requirements.txt
 
 ## Unit tests
 
-All unit tests are located in `build/release/clients/staging/`. To build these tests, you must build
+All unit tests are located in `build/release/clients/`. To build these tests, you must build
 hipBLASLt with `--clients`.
 
 You can find more information at the following links:
 
 * [hipblaslt-test](clients/gtest/README.md)
 * [hipblaslt-bench](clients/benchmarks/README.md)
-
-## TensileLite Host Library Tests
-To build and run TensileLite Host Library Tests, use the following commands:
-``` 
- cd tensilelite && mkdir build && cd build
- cmake -DTENSILE_DISABLE_CTEST=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DTensile_ROOT=$(pwd)/../Tensile ../HostLibraryTests
- make -j
- ./TensileTests 
-```
 
 ## Contribute
 

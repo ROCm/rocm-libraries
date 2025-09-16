@@ -24,11 +24,6 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Properties.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/SolutionLibrary.hpp"
 
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/analytical/AnalyticalGemm.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/analytical/Hardware.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/analytical/StreamK.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/analytical/Utils.hpp"
-
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPU.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPUPredicates.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPU_Detail.hpp"

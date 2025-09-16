@@ -1783,6 +1783,10 @@ void testing_aux_auxiliary_func(const Arguments& arg)
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU") == HIPBLASLT_EPILOGUE_GELU);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_BIAS")
                 == HIPBLASLT_EPILOGUE_GELU_BIAS);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU_AUX")
+                == HIPBLASLT_EPILOGUE_RELU_AUX);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU_AUX_BIAS")
+                == HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX")
                 == HIPBLASLT_EPILOGUE_GELU_AUX);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX_BIAS")
@@ -1796,6 +1800,15 @@ void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_SWISH_EXT);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT")
                 == HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_EXT")
+                == HIPBLASLT_EPILOGUE_CLAMP_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT")
+                == HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT")
+                == HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT")
+                == HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT);
+
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DEFAULT")
                 == HIPBLASLT_EPILOGUE_DEFAULT);
     ASSERT_TRUE(string_to_epilogue_type("test") == static_cast<hipblasLtEpilogue_t>(0));

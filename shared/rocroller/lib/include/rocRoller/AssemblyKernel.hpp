@@ -133,8 +133,9 @@ namespace rocRoller
 
         std::shared_ptr<KernelGraph::KernelGraph> kernel_graph() const;
 
-        AssemblyKernelArgument const& findArgument(std::string const& name) const;
-        bool                          hasArgument(std::string const& name) const;
+        AssemblyKernelArgument const&       findArgument(std::string const& name) const;
+        bool                                hasArgument(std::string const& name) const;
+        std::vector<AssemblyKernelArgument> resetArguments();
 
         /**
          * If a kernel argument exists with an expression equivalent to `exp`, return an

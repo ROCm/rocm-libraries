@@ -183,9 +183,6 @@ foreach( target ${TEST_TARGETS} )
     $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-    if( HIPFFT_BUILD_SCOPE )
-      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
-    endif()
   )
 
   target_link_libraries( ${target}
@@ -223,10 +220,11 @@ endforeach()
 
 find_package( GTest 1.11.0 )
 
-if( GTEST_FOUND )
+if( GTest_FOUND )
   target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
-  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+  target_link_libraries( hipfft-test PRIVATE GTest::gtest )
 else()
+  # gtest build by the hipFFT
   add_dependencies( hipfft-test gtest )
   target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
   target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
@@ -236,8 +234,11 @@ endif()
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
   target_compile_options( hipfft-test PRIVATE -dc )
 else()
-  target_compile_options( hipfft-test PRIVATE -fgpu-rdc )
-  target_link_options( hipfft-test PRIVATE -fgpu-rdc )
+  # -fgpu-rdc causes failure at link stage on Windows
+  if (NOT WIN32)
+    target_compile_options( hipfft-test PRIVATE -fgpu-rdc )
+    target_link_options( hipfft-test PRIVATE -fgpu-rdc )
+  endif()
 endif()
 
 if(FFTW_MULTITHREAD)

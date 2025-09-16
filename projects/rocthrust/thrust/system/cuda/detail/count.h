@@ -28,10 +28,19 @@
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
 #  include <thrust/distance.h>
+#  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/cuda/detail/reduce.h>
 #  include <thrust/system/cuda/detail/util.h>
 
@@ -44,7 +53,7 @@ typename iterator_traits<InputIt>::difference_type _CCCL_HOST_DEVICE
 count_if(execution_policy<Derived>& policy, InputIt first, InputIt last, UnaryPred unary_pred)
 {
   using size_type       = typename iterator_traits<InputIt>::difference_type;
-  using flag_iterator_t = transform_input_iterator_t<size_type, InputIt, UnaryPred>;
+  using flag_iterator_t = transform_iterator<UnaryPred, InputIt, size_type, size_type>;
 
   return cuda_cub::reduce_n(
     policy, flag_iterator_t(first, unary_pred), thrust::distance(first, last), size_type(0), plus<size_type>());

@@ -28,114 +28,27 @@
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 
 #  include <thrust/system/cuda/config.h>
 
-#  include <thrust/detail/type_traits/result_of_adaptable_function.h>
+#  include <cub/device/device_for.cuh>
+
 #  include <thrust/system/cuda/detail/cdp_dispatch.h>
-#  include <thrust/system/cuda/detail/core/agent_launcher.h>
-#  include <thrust/system/cuda/detail/par_to_seq.h>
 #  include <thrust/system/cuda/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub
 {
-
-namespace __parallel_for
-{
-
-template <int _BLOCK_THREADS, int _ITEMS_PER_THREAD = 1>
-struct PtxPolicy
-{
-  enum
-  {
-    BLOCK_THREADS    = _BLOCK_THREADS,
-    ITEMS_PER_THREAD = _ITEMS_PER_THREAD,
-    ITEMS_PER_TILE   = BLOCK_THREADS * ITEMS_PER_THREAD,
-  };
-}; // struct PtxPolicy
-
-template <class Arch, class F>
-struct Tuning;
-
-template <class F>
-struct Tuning<sm30, F>
-{
-  using type = PtxPolicy<256, 2>;
-};
-
-template <class F, class Size>
-struct ParallelForAgent
-{
-  template <class Arch>
-  struct PtxPlan : Tuning<Arch, F>::type
-  {
-    using tuning = Tuning<Arch, F>;
-  };
-  using ptx_plan = core::specialize_plan<PtxPlan>;
-
-  enum
-  {
-    ITEMS_PER_THREAD = ptx_plan::ITEMS_PER_THREAD,
-    ITEMS_PER_TILE   = ptx_plan::ITEMS_PER_TILE,
-    BLOCK_THREADS    = ptx_plan::BLOCK_THREADS
-  };
-
-  template <bool IS_FULL_TILE>
-  static void THRUST_DEVICE_FUNCTION consume_tile(F f, Size tile_base, int items_in_tile)
-  {
-#  pragma unroll
-    for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
-    {
-      Size idx = BLOCK_THREADS * ITEM + threadIdx.x;
-      if (IS_FULL_TILE || idx < items_in_tile)
-      {
-        f(tile_base + idx);
-      }
-    }
-  }
-
-  THRUST_AGENT_ENTRY(F f, Size num_items, char* /*shmem*/)
-  {
-    Size tile_base     = static_cast<Size>(blockIdx.x) * ITEMS_PER_TILE;
-    Size num_remaining = num_items - tile_base;
-    Size items_in_tile = static_cast<Size>(num_remaining < ITEMS_PER_TILE ? num_remaining : ITEMS_PER_TILE);
-
-    if (items_in_tile == ITEMS_PER_TILE)
-    {
-      // full tile
-      consume_tile<true>(f, tile_base, ITEMS_PER_TILE);
-    }
-    else
-    {
-      // partial tile
-      consume_tile<false>(f, tile_base, items_in_tile);
-    }
-  }
-}; // struct ParallelForEagent
-
-template <class F, class Size>
-THRUST_RUNTIME_FUNCTION cudaError_t parallel_for(Size num_items, F f, cudaStream_t stream)
-{
-  if (num_items == 0)
-  {
-    return cudaSuccess;
-  }
-  using core::AgentLauncher;
-  using core::AgentPlan;
-
-  using parallel_for_agent    = AgentLauncher<ParallelForAgent<F, Size>>;
-  AgentPlan parallel_for_plan = parallel_for_agent::get_plan(stream);
-
-  parallel_for_agent pfa(parallel_for_plan, num_items, stream, "transform::agent");
-  pfa.launch(f, num_items);
-  CUDA_CUB_RET_IF_FAIL(cudaPeekAtLastError());
-
-  return cudaSuccess;
-}
-} // namespace __parallel_for
 
 _CCCL_EXEC_CHECK_DISABLE
 template <class Derived, class F, class Size>
@@ -149,7 +62,7 @@ void _CCCL_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Size
   // clang-format off
   THRUST_CDP_DISPATCH(
     (cudaStream_t stream = cuda_cub::stream(policy);
-     cudaError_t  status = __parallel_for::parallel_for(count, f, stream);
+     cudaError_t  status = cub::DeviceFor::Bulk(count, f, stream);
      cuda_cub::throw_on_error(status, "parallel_for failed");
      status = cuda_cub::synchronize_optional(policy);
      cuda_cub::throw_on_error(status, "parallel_for: failed to synchronize");),

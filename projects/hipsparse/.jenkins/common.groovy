@@ -15,7 +15,7 @@ def runCompileCommand(platform, project, boolean sameOrg=false)
         }
     }
     String centos7 = platform.jenkinsLabel.contains('centos7') ? 'source scl_source enable devtoolset-7' : ':'
-    
+
     command = """#!/usr/bin/env bash
                 set -x
                 ${centos7}
@@ -23,7 +23,7 @@ def runCompileCommand(platform, project, boolean sameOrg=false)
                 ${getDependenciesCommand}
                 CXX=${project.compiler.compiler_path} ${project.paths.build_command}
             """
- 
+
     platform.runCommand(this, command)
 }
 
