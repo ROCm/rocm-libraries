@@ -35,13 +35,13 @@ extern "C" {
 *  \p hipsparseXcsr2csr_compress converts a CSR matrix into a compressed CSR matrix by
 *  removing entries in the input CSR matrix that are below a non-negative threshold \p tol:
 *
-*  \f[ 
+*  \f[
 *   C(i,j) = A(i, j) \text{  if |A(i, j)| > tol}
 *  \f]
 *
-*  The user must first call \ref hipsparseSnnz_compress "hipsparseXnnz_compress()" to determine the number 
-*  of nonzeros per row as well as the total number of nonzeros that will exist in resulting compressed CSR 
-*  matrix. The user then uses this information to allocate the column indices array \p csrColIndC and the 
+*  The user must first call \ref hipsparseSnnz_compress "hipsparseXnnz_compress()" to determine the number
+*  of nonzeros per row as well as the total number of nonzeros that will exist in resulting compressed CSR
+*  matrix. The user then uses this information to allocate the column indices array \p csrColIndC and the
 *  values array \p csrValC. The user then calls \p hipsparseXcsr2csr_compress to complete the conversion.
 *
 *  \note
@@ -102,14 +102,14 @@ extern "C" {
 *    //     6 0 0 7 8
 *    int hcsrRowPtrA[4] = {0, 3, 5, 8};
 *    int hcsrColIndA[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrValA[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
+*    float hcsrValA[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
 *
 *    int m    = 3;
 *    int n    = 5;
 *    int nnzA = 8;
 *
 *    float tol = 5.9f;
-*    
+*
 *    int* dcsrRowPtrA = nullptr;
 *    int* dcsrColIndA = nullptr;
 *    float* dcsrValA = nullptr;
@@ -154,7 +154,7 @@ extern "C" {
 *    hipFree(dcsrRowPtrA);
 *    hipFree(dcsrColIndA);
 *    hipFree(dcsrValA);
-*    
+*
 *    hipFree(dcsrRowPtrC);
 *    hipFree(dcsrColIndC);
 *    hipFree(dcsrValC);

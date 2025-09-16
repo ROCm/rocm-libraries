@@ -487,7 +487,7 @@ inline T convertToTypeSR(float value, uint seed)
         float maxVal = getDataMax<DTYPE>();
 
         cvt t;
-        
+
         // cppcheck-suppress redundantAssignment
         t.num     = maxVal;
         uint bMax = t.bRep;

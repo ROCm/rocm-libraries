@@ -82,6 +82,16 @@ namespace rocRoller
                 m_lastResult = std::make_shared<Expression>(expr);
             }
 
+            template <CNary T>
+            Generator<Instruction> operator()(T expr)
+            {
+                for(auto&& operand : expr.operands)
+                {
+                    co_yield call(operand);
+                }
+                m_lastResult = std::make_shared<Expression>(std::move(expr));
+            }
+
             Generator<Instruction> operator()(ScaledMatrixMultiply expr)
             {
                 co_yield call(expr.matA);

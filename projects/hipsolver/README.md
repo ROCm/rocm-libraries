@@ -24,7 +24,7 @@ python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 
 To download the hipSOLVER source code, clone this repository with the command:
 
-    git clone https://github.com/ROCmSoftwarePlatform/hipSOLVER.git
+    git clone https://github.com/ROCm/hipSOLVER.git
 
 hipSOLVER requires either cuSOLVER or rocSOLVER + SuiteSparse to be installed on the system. Once these are installed, the following commands will build hipSOLVER and install to `/opt/rocm`:
 
@@ -33,7 +33,18 @@ hipSOLVER requires either cuSOLVER or rocSOLVER + SuiteSparse to be installed on
 
 Once installed, hipSOLVER can be used just like any other library with a C API. The header file will need to be included in the user code, and the hipSOLVER library will become a link-time and run-time dependency for the user application.
 
-For more information on building and installing hipSOLVER, see the [hipSOLVER install guide](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/installation/index.html)
+For more information on building and installing hipSOLVER, see the [hipSOLVER install guide](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/installation/install.html).
+
+### Building hipSOLVER for the NVIDIA CUDA platform
+
+For the purpose of porting an application from NVIDIA CUDA to ROCm, it's possible to build hipSOLVER to run on NVIDIA hardware.
+To build the library on a NVIDIA CUDA-enabled machine, with CUDA cuSOLVER as the backend, run the following install command.
+The NVIDIA CUDA backend has a dependency on cuSOLVER. Consult the [hipSOLVER install guide](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/installation/install.html) for more information.
+
+    ./install.sh --cuda
+
+> [!NOTE]
+Running hipSOLVER on NVIDIA hardware is for development purposes only.
 
 ## Using the hipSOLVER Interface
 

@@ -26,5 +26,3 @@ if( HIP_PLATFORM STREQUAL nvidia )
 else()
   option( LINK_BLIS "Link AOCL Blis reference library" ON )
 endif()
-
-

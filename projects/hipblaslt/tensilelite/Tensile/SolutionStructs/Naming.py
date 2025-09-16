@@ -133,6 +133,9 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   else:
     requiredParametersTemp.add("ThreadTile")
 
+  if state["UseCustomMainLoopSchedule"]:
+    components.append('CMS')
+
   components.append('SN')
   for key in sorted(state.keys()):
     if key[0] != '_' and key != "CustomKernelName" and key in requiredParametersTemp:
@@ -176,4 +179,3 @@ def getSolutionNameMin(solution, splitGSU: bool):
 
 def getSolutionNameFull(state, splitGSU: bool):
   return _getName(state, getRequiredParametersFull(), splitGSU, False)
-

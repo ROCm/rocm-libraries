@@ -70,7 +70,7 @@ namespace rocblaslt
 #ifndef HIPBLASLT_ENABLE_MARKER
             if(m_printMarker)
                 printf("HIPBLASLT_ENABLE_MARKER is not defined. Please rebuild with -DHIPBLASLT_ENABLE_MARKER=ON\n");
-#endif  
+#endif
         }
 
         const char* hipblaslt_bench = std::getenv("HIPBLASLT_BENCH_PRINT_COMMAND");

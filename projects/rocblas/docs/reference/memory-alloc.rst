@@ -181,4 +181,3 @@ Switching streams without synchronization
 ----------------------------------------------
 
 Stream-order memory allocation lets the application switch streams without having to call ``hipStreamSynchronize()``.
-

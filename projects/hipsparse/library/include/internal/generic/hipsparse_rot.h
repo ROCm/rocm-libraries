@@ -49,7 +49,7 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p hipsparseRot supports the following uniform precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \p hipsparseRot supports the following uniform precision data types for the sparse and dense vectors \f$x\f$ and
 *  \f$y\f$ and compute types for the scalars \f$c\f$ and \f$s\f$.
 *
 *  \par Uniform Precisions:

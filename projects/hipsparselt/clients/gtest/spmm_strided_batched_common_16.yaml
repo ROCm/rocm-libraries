@@ -71,5 +71,3 @@ Spmm Matrix Strided Batched Sizes:
   - { M: 8192, N: 16, K: 512, lda: 8192, ldb: 512, ldc: 8192, ldd: 8192, stride_a: 4194304, stride_b: 0, stride_c: 131072, stride_d: 131072 }
   - { M: 8192, N: 16, K: 528, lda: 8192, ldb: 528, ldc: 8192, ldd: 8192, stride_a: 4325376, stride_b: 0, stride_c: 131072, stride_d: 131072 }
   - { M: 8192, N: 16, K: 832, lda: 8192, ldb: 832, ldc: 8192, ldd: 8192, stride_a: 6815744, stride_b: 0, stride_c: 131072, stride_d: 131072 }
-
-

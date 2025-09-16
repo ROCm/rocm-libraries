@@ -25,6 +25,7 @@
 #include "../../shared/environment.h"
 #include "../../shared/precision_type.h"
 #include "../../shared/ptrdiff.h"
+#include "../../shared/rocfft_params.h"
 #include "assignment_policy.h"
 #include "enum_printer.h"
 #include "function_pool.h"
@@ -756,31 +757,81 @@ catch(...)
 
 std::string rocfft_bench_command(rocfft_plan plan)
 {
+    rocfft_params params;
+
+    params.nbatch         = plan->batch;
+    params.placement      = fft_result_placement_from_rocfft_result_placement(plan->placement);
+    params.transform_type = fft_transform_type_from_rocfft_transform_type(plan->transformType);
+    params.precision      = fft_precision_from_rocfft_precision(plan->precision);
+    params.itype          = fft_array_type_from_rocfft_array_type(plan->desc.inArrayType);
+    params.otype          = fft_array_type_from_rocfft_array_type(plan->desc.outArrayType);
+    params.idist          = plan->desc.inDist;
+    params.odist          = plan->desc.outDist;
+    params.scale_factor   = plan->desc.storeOps.scale_factor;
+
+    for(auto idx = plan->lengths.size(); idx-- > 0;)
+    {
+        params.length.push_back(plan->lengths[idx]);
+    }
+    for(auto val : plan->desc.inStrides)
+    {
+        params.istride.push_back(val);
+    }
+    for(auto val : plan->desc.outStrides)
+    {
+        params.ostride.push_back(val);
+    }
+    for(auto val : plan->desc.inOffset)
+    {
+        params.ioffset.push_back(val);
+    }
+    for(auto val : plan->desc.outOffset)
+    {
+        params.ooffset.push_back(val);
+    }
+
+    params.ifields.resize(plan->desc.inFields.size());
+    for(size_t fidx = 0; fidx < plan->desc.inFields.size(); ++fidx)
+    {
+        params.ifields[fidx].bricks.resize(plan->desc.inFields[fidx].bricks.size());
+        for(size_t bidx = 0; bidx < plan->desc.inFields[fidx].bricks.size(); ++bidx)
+        {
+            for(auto val : plan->desc.inFields[fidx].bricks[bidx].lower)
+                params.ifields[fidx].bricks[bidx].lower.push_back(val);
+            for(auto val : plan->desc.inFields[fidx].bricks[bidx].upper)
+                params.ifields[fidx].bricks[bidx].upper.push_back(val);
+            for(auto val : plan->desc.inFields[fidx].bricks[bidx].stride)
+                params.ifields[fidx].bricks[bidx].stride.push_back(val);
+            params.ifields[fidx].bricks[bidx].rank
+                = plan->desc.inFields[fidx].bricks[bidx].location.comm_rank;
+            params.ifields[fidx].bricks[bidx].device
+                = plan->desc.inFields[fidx].bricks[bidx].location.device;
+        }
+    }
+
+    params.ofields.resize(plan->desc.outFields.size());
+    for(size_t fidx = 0; fidx < plan->desc.outFields.size(); ++fidx)
+    {
+        params.ofields[fidx].bricks.resize(plan->desc.outFields[fidx].bricks.size());
+        for(size_t bidx = 0; bidx < plan->desc.outFields[fidx].bricks.size(); ++bidx)
+        {
+            for(auto val : plan->desc.outFields[fidx].bricks[bidx].lower)
+                params.ofields[fidx].bricks[bidx].lower.push_back(val);
+            for(auto val : plan->desc.outFields[fidx].bricks[bidx].upper)
+                params.ofields[fidx].bricks[bidx].upper.push_back(val);
+            for(auto val : plan->desc.outFields[fidx].bricks[bidx].stride)
+                params.ofields[fidx].bricks[bidx].stride.push_back(val);
+            params.ofields[fidx].bricks[bidx].rank
+                = plan->desc.outFields[fidx].bricks[bidx].location.comm_rank;
+            params.ofields[fidx].bricks[bidx].device
+                = plan->desc.outFields[fidx].bricks[bidx].location.device;
+        }
+    }
+
     std::stringstream bench;
-    bench << "rocfft-bench --length ";
-    std::ostream_iterator<size_t> bench_iter(bench, " ");
-    std::copy(plan->lengths.rbegin(), plan->lengths.rend(), bench_iter);
-    bench << "-b " << plan->batch << " ";
+    bench << "rocfft-bench --token ";
+    bench << params.token();
 
-    if(plan->placement == rocfft_placement_notinplace)
-        bench << "-o ";
-
-    bench << "-t " << plan->transformType << " ";
-
-    bench << "--precision ";
-    bench << precision_name(plan->precision) << " ";
-    bench << "--itype " << plan->desc.inArrayType << " ";
-    bench << "--otype " << plan->desc.outArrayType << " ";
-    bench << "--istride ";
-    std::copy(plan->desc.inStrides.rbegin(), plan->desc.inStrides.rend(), bench_iter);
-    bench << "--ostride ";
-    std::copy(plan->desc.outStrides.rbegin(), plan->desc.outStrides.rend(), bench_iter);
-    bench << "--idist " << plan->desc.inDist << " ";
-    bench << "--odist " << plan->desc.outDist << " ";
-    bench << "--ioffset ";
-    std::copy(plan->desc.inOffset.begin(), plan->desc.inOffset.end(), bench_iter);
-    bench << "--ooffset ";
-    std::copy(plan->desc.outOffset.begin(), plan->desc.outOffset.end(), bench_iter);
     return bench.str();
 }
 

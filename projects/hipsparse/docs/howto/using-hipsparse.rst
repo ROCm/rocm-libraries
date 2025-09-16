@@ -44,7 +44,7 @@ hipSPARSE handle using :ref:`hipsparse_set_stream_`. The hipSPARSE routines invo
 A hipSPARSE handle is always associated with a stream, which hipSPARSE passes to the kernels inside the routine.
 One hipSPARSE routine only takes one stream in a single invocation.
 If you create a stream, you are responsible for destroying it.
-See the `HIP stream management API <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___stream.html>`_ for more information. 
+See the `HIP stream management API <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___stream.html>`_ for more information.
 
 Asynchronous execution
 ======================
@@ -87,11 +87,11 @@ You are responsible for copying data to and from the host and device memory.
 Storage formats
 ===============
 
-This section describes the supported matrix storage formats.  
+This section describes the supported matrix storage formats.
 
 .. note::
 
-   The different storage formats support indexing with a base of 0 or 1, as described in :ref:`index_base`. 
+   The different storage formats support indexing with a base of 0 or 1, as described in :ref:`index_base`.
 
 COO storage format
 ------------------
@@ -469,7 +469,7 @@ then scalar parameters must be allocated on the device.
 There are two types of scalar parameter:
 
 #. Scaling parameters, such as ``alpha`` and ``beta``, that are used, for example, in :cpp:func:`hipsparseScsrmv` and :cpp:func:`hipsparseSbsrmv`
-#. Scalar results from functions such as :cpp:func:`hipsparseSdoti` or :cpp:func:`hipsparseCdotci` 
+#. Scalar results from functions such as :cpp:func:`hipsparseSdoti` or :cpp:func:`hipsparseCdotci`
 
 For scalar parameters such as ``alpha`` and ``beta``, memory can be allocated on the host heap or stack
 when :cpp:enum:`hipsparsePointerMode_t` is equal to :cpp:enumerator:`HIPSPARSE_POINTER_MODE_HOST`.

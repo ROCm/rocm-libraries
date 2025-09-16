@@ -34,11 +34,11 @@ extern "C" {
 *  \p hipsparseXcsrgemmNnz computes the total CSR non-zero elements and the CSR row
 *  offsets, that point to the start of every row of the sparse CSR matrix, of the
 *  resulting multiplied matrix \f$C\f$. It is assumed that \p csrRowPtrC has been allocated
-*  with size \p m+1. The desired index base in the output CSR matrix \f$C\f$ is set in the 
+*  with size \p m+1. The desired index base in the output CSR matrix \f$C\f$ is set in the
 *  \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
 *
 *  \note
-*  As indicated, \p nnzTotalDevHostPtr can point either to host or device memory. This is controlled 
+*  As indicated, \p nnzTotalDevHostPtr can point either to host or device memory. This is controlled
 *  by setting the pointer mode. See \ref hipsparseSetPointerMode().
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -104,8 +104,8 @@ extern "C" {
 *                     matrix \f$C\f$. \p nnzTotalDevHostPtr can be a host or device pointer.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB, \p nnzC, 
-*          \p descrA, \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrRowPtrB, \p csrColIndB, 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB, \p nnzC,
+*          \p descrA, \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrRowPtrB, \p csrColIndB,
 *          \p descrC, \p csrRowPtrC or \p nnzTotalDevHostPtr is invalid.
 *  \retval HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED
 *          \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
@@ -168,9 +168,9 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
 *
 *  This computation involves a multi step process. First the user must allocate \p csrRowPtrC
 *  to have size \p m+1. The user then calls \ref hipsparseXcsrgemmNnz which fills in the \p csrRowPtrC
-*  array as well as computes the total number of nonzeros in C, \p nnzC. The user then allocates both 
-*  arrays \p csrColIndC and \p csrValC to have size \p nnzC and calls \p hipsparseXcsrgemm to complete 
-*  the computation. The desired index base in the output CSR matrix C is set in the 
+*  array as well as computes the total number of nonzeros in C, \p nnzC. The user then allocates both
+*  arrays \p csrColIndC and \p csrValC to have size \p nnzC and calls \p hipsparseXcsrgemm to complete
+*  the computation. The desired index base in the output CSR matrix C is set in the
 *  \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
 *
 *  \note Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
@@ -237,8 +237,8 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB,
-*          \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrValB, 
-*          \p csrRowPtrB, \p csrColIndB, \p descrC, \p csrValC, \p csrRowPtrC, \p csrColIndC 
+*          \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrValB,
+*          \p csrRowPtrB, \p csrColIndB, \p descrC, \p csrValC, \p csrRowPtrC, \p csrColIndC
 *          is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
@@ -336,25 +336,25 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
 *    hipMalloc((void**)&dcsrColIndC, sizeof(int) * nnzC);
 *    hipMalloc((void**)&dcsrValC, sizeof(float) * nnzC);
 *
-*    hipsparseScsrgemm(handle, 
-*                      transA, 
-*                      transB, 
-*                      m, 
-*                      n, 
-*                      k, 
-*                      descrA, 
-*                      nnzA, 
-*                      dcsrValA, 
-*                      dcsrRowPtrA, 
-*                      dcsrColIndA, 
-*                      descrB, 
-*                      nnzB, 
-*                      dcsrValB, 
-*                      dcsrRowPtrB, 
-*                      dcsrColIndB, 
-*                      descrC, 
-*                      dcsrValC, 
-*                      dcsrRowPtrC, 
+*    hipsparseScsrgemm(handle,
+*                      transA,
+*                      transB,
+*                      m,
+*                      n,
+*                      k,
+*                      descrA,
+*                      nnzA,
+*                      dcsrValA,
+*                      dcsrRowPtrA,
+*                      dcsrColIndA,
+*                      descrB,
+*                      nnzB,
+*                      dcsrValB,
+*                      dcsrRowPtrB,
+*                      dcsrColIndB,
+*                      descrC,
+*                      dcsrValC,
+*                      dcsrRowPtrC,
 *                      dcsrColIndC);
 *
 *    hipFree(dcsrRowPtrA);
@@ -469,7 +469,7 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
 /*! \ingroup extra_module
 *  \details
 *  \p hipsparseXcsrgemm2_bufferSizeExt returns the size of the temporary storage buffer
-*  in bytes that is required by \ref hipsparseXcsrgemm2Nnz() and \ref hipsparseScsrgemm2 
+*  in bytes that is required by \ref hipsparseXcsrgemm2Nnz() and \ref hipsparseScsrgemm2
 *  "hipsparseXcsrgemm2()". The temporary storage buffer must be allocated by the user.
 *
 *  \note
@@ -540,9 +540,9 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
 *                     hipsparseCcsrgemm2() and hipsparseZcsrgemm2().
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB, \p nnz_D, 
-*          \p alpha, \p beta, \p descrA, \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrRowPtrB, 
-*          \p csrColIndB, \p descrD, \p csrRowPtrD, \p csrColIndD, \p info or \p pBufferSizeInBytes 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB, \p nnz_D,
+*          \p alpha, \p beta, \p descrA, \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrRowPtrB,
+*          \p csrColIndB, \p descrD, \p csrRowPtrD, \p csrColIndD, \p info or \p pBufferSizeInBytes
 *          is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -645,13 +645,13 @@ hipsparseStatus_t hipsparseZcsrgemm2_bufferSizeExt(hipsparseHandle_t         han
 *  \p hipsparseXcsrgemm2Nnz computes the total CSR non-zero elements and the CSR row
 *  offsets, that point to the start of every row of the sparse CSR matrix, of the
 *  resulting multiplied matrix \f$C\f$. It is assumed that \p csrRowPtrC has been allocated
-*  with size \p m+1. The required buffer size can be obtained by 
-*  \ref hipsparseScsrgemm2_bufferSizeExt "hipsparseXcsrgemm2_bufferSizeExt()". The desired 
-*  index base in the output CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t \p descrC. 
+*  with size \p m+1. The required buffer size can be obtained by
+*  \ref hipsparseScsrgemm2_bufferSizeExt "hipsparseXcsrgemm2_bufferSizeExt()". The desired
+*  index base in the output CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t \p descrC.
 *  See \ref hipsparseSetMatIndexBase().
 *
 *  \note
-*  As indicated, \p nnzTotalDevHostPtr can point either to host or device memory. This is controlled 
+*  As indicated, \p nnzTotalDevHostPtr can point either to host or device memory. This is controlled
 *  by setting the pointer mode. See \ref hipsparseSetPointerMode().
 *
 *  \note
@@ -723,13 +723,13 @@ hipsparseStatus_t hipsparseZcsrgemm2_bufferSizeExt(hipsparseHandle_t         han
 *  info            structure that holds meta data for the sparse CSR matrix \f$C\f$.
 *  @param[in]
 *  pBuffer         temporary storage buffer allocated by the user, size is returned
-*                  by hipsparseScsrgemm2_bufferSizeExt(), hipsparseDcsrgemm2_bufferSizeExt(), 
+*                  by hipsparseScsrgemm2_bufferSizeExt(), hipsparseDcsrgemm2_bufferSizeExt(),
 *                  hipsparseZcsrgemm2_bufferSizeExt() or hipsparseZcsrgemm2_bufferSizeExt().
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB, \p nnzD,
 *          \p descrA, \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrRowPtrB, \p csrColIndB,
-*          \p descrD, \p csrRowPtrD, \p csrColIndD, \p descrC, \p csrRowPtrC, \p nnzTotalDevHostPtr, 
+*          \p descrD, \p csrRowPtrD, \p csrColIndD, \p descrC, \p csrRowPtrC, \p nnzTotalDevHostPtr,
 *          \p info or \p pBuffer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
@@ -778,13 +778,13 @@ hipsparseStatus_t hipsparseXcsrgemm2Nnz(hipsparseHandle_t         handle,
 *  \f]
 *
 *  This computation involves a multi step process. First the user must call
-*  \ref hipsparseScsrgemm2_bufferSizeExt "hipsparseXcsrgemm2_bufferSizeExt()" in order to 
-*  determine the required user allocated temporary buffer size. The user then allocates this 
-*  buffer and also allocates \p csrRowPtrC to have size \p m+1. Both the temporary storage 
-*  buffer and \p csrRowPtrC array are then passed to \ref hipsparseXcsrgemm2Nnz which fills 
-*  in the \p csrRowPtrC array as well as computes the total number of nonzeros in C, \p nnzC. 
-*  The user then allocates both arrays \p csrColIndC and \p csrValC to have size \p nnzC and 
-*  calls \p hipsparseXcsrgemm2 to complete the computation. The desired index base in the output 
+*  \ref hipsparseScsrgemm2_bufferSizeExt "hipsparseXcsrgemm2_bufferSizeExt()" in order to
+*  determine the required user allocated temporary buffer size. The user then allocates this
+*  buffer and also allocates \p csrRowPtrC to have size \p m+1. Both the temporary storage
+*  buffer and \p csrRowPtrC array are then passed to \ref hipsparseXcsrgemm2Nnz which fills
+*  in the \p csrRowPtrC array as well as computes the total number of nonzeros in C, \p nnzC.
+*  The user then allocates both arrays \p csrColIndC and \p csrValC to have size \p nnzC and
+*  calls \p hipsparseXcsrgemm2 to complete the computation. The desired index base in the output
 *  CSR matrix C is set in the \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
 *
 *  \note If \f$\alpha == 0\f$, then \f$C = \beta \cdot D\f$ will be computed.
@@ -866,14 +866,14 @@ hipsparseStatus_t hipsparseXcsrgemm2Nnz(hipsparseHandle_t         handle,
 *  info            structure that holds meta data for the sparse CSR matrix \f$C\f$.
 *  @param[in]
 *  pBuffer         temporary storage buffer allocated by the user, size is returned
-*                  by hipsparseScsrgemm2_bufferSizeExt(), hipsparseDcsrgemm2_bufferSizeExt(), 
+*                  by hipsparseScsrgemm2_bufferSizeExt(), hipsparseDcsrgemm2_bufferSizeExt(),
 *                  hipsparseCcsrgemm2_bufferSizeExt() or hipsparseZcsrgemm2_bufferSizeExt().
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB, 
-*          \p nnzD, \p alpha, \p beta, \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA, 
-*          \p descrB, \p csrValB, \p csrRowPtrB, \p csrColIndB, \p descrD, \p csrValD, 
-*          \p csrRowPtrD, \p csrColIndD, \p csrValC, \p csrRowPtrC, \p csrColIndC, \p info 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB,
+*          \p nnzD, \p alpha, \p beta, \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA,
+*          \p descrB, \p csrValB, \p csrRowPtrB, \p csrColIndB, \p descrD, \p csrValD,
+*          \p csrRowPtrD, \p csrColIndD, \p csrValC, \p csrRowPtrC, \p csrColIndC, \p info
 *          or \p pBuffer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
@@ -1023,30 +1023,30 @@ hipsparseStatus_t hipsparseXcsrgemm2Nnz(hipsparseHandle_t         handle,
 *    hipMalloc((void**)&dcsrColIndC, sizeof(int) * nnzC);
 *    hipMalloc((void**)&dcsrValC, sizeof(float) * nnzC);
 *
-*    hipsparseScsrgemm2(handle, 
-*                      m, 
-*                      n, 
+*    hipsparseScsrgemm2(handle,
+*                      m,
+*                      n,
 *                      k,
-*                      &alpha, 
-*                      descrA, 
-*                      nnzA, 
-*                      dcsrValA, 
-*                      dcsrRowPtrA, 
-*                      dcsrColIndA, 
-*                      descrB, 
-*                      nnzB, 
-*                      dcsrValB, 
-*                      dcsrRowPtrB, 
-*                      dcsrColIndB, 
+*                      &alpha,
+*                      descrA,
+*                      nnzA,
+*                      dcsrValA,
+*                      dcsrRowPtrA,
+*                      dcsrColIndA,
+*                      descrB,
+*                      nnzB,
+*                      dcsrValB,
+*                      dcsrRowPtrB,
+*                      dcsrColIndB,
 *                      &beta,
 *                      descrD,
 *                      nnzD,
-*                      dcsrValD, 
-*                      dcsrRowPtrD, 
-*                      dcsrColIndD, 
-*                      descrC, 
-*                      dcsrValC, 
-*                      dcsrRowPtrC, 
+*                      dcsrValD,
+*                      dcsrRowPtrD,
+*                      dcsrColIndD,
+*                      descrC,
+*                      dcsrValC,
+*                      dcsrRowPtrC,
 *                      dcsrColIndC,
 *                      info,
 *                      dbuffer);
