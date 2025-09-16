@@ -50,7 +50,6 @@ namespace origami
                                                             size_t          workspace_size_per_elem_c,
                                                             int             occupancy,
                                                             int             dynamic_grid_version,
-                                                            bool            debug,
                                                             size_t          split)
     {
         // Number of output MTs
@@ -117,7 +116,7 @@ namespace origami
             splitFactor  = safe_ceil_div(numWGs, numMTs);
         }
 
-        if(debug || hardware_t::is_debug_enabled())
+        if(hardware_t::is_debug_enabled())
         {
             hardware.log_debug("numMTs", numMTs);
             hardware.log_debug("numWGs", numWGs);
@@ -139,8 +138,7 @@ namespace origami
                                                 size_t          MT_K,
                                                 size_t          MI_M,
                                                 size_t          MI_N,
-                                                size_t          MI_K,
-                                                bool            debug)
+                                                size_t          MI_K)
     {
         // Compute the number of Matrix Instructions required in each dim
         size_t N_MI_M = safe_ceil_div(MT_M, MI_M);
@@ -172,8 +170,7 @@ namespace origami
                                                 size_t          MI_N,
                                                 size_t          MI_K,
                                                 size_t          element_size_A,
-                                                size_t          element_size_B,
-                                                bool            debug)
+                                                size_t          element_size_B)
     {
         // Wave tile sizes
         // TODO: Use kernel's actual wavetiles.
@@ -249,12 +246,11 @@ namespace origami
                                         size_t          MI_K,
                                         size_t          element_size_A,
                                         size_t          element_size_B,
-                                        data_type_t     mi_datatype,
-                                        bool            debug)
+                                        data_type_t     mi_datatype)
     {
         // Compute the number of matrix instructions
         size_t N_MI = compute_number_matrix_instructions(
-            hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, debug);
+            hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K);
         // Latency of a single MT_MxMT_NxMT_k tile is the latency of one MI multiplied by
         // number of MI per MT_MxMT_NxMT_k.
         size_t L_MI = hardware.get_mi_latency(MI_M, MI_N, MI_K, mi_datatype);
@@ -339,12 +335,11 @@ namespace origami
                             size_t          MT_M,
                             size_t          MT_N,
                             size_t          MT_K,
-                            size_t          element_size,
-                            bool            debug)
+                            size_t          element_size)
     {
         // A and B size
-        size_t Ld_A_value = compute_A_loads(MT_M, MT_K, debug);
-        size_t Ld_B_value = compute_B_loads(MT_N, MT_K, debug);
+        size_t Ld_A_value = compute_A_loads(MT_M, MT_K);
+        size_t Ld_B_value = compute_B_loads(MT_N, MT_K);
         // Size of those in bytes
         size_t LDS_usage = (Ld_A_value + Ld_B_value) * (element_size / 8);
 
@@ -359,7 +354,7 @@ namespace origami
     }
 
     // Compute the amount of data loaded from A to produce a MT_MxMT_NxMT_K tile.
-    size_t compute_A_loads(size_t MT_M, size_t MT_K, bool debug)
+    size_t compute_A_loads(size_t MT_M, size_t MT_K)
     {
         // Compute the size of loads from A for a single MT_MxMT_NxMT_K tiles
         size_t Ld_A_value = MT_M * MT_K;
@@ -368,7 +363,7 @@ namespace origami
     }
 
     // Compute the amount of data loaded from B to produce a MT_MxMT_NxMT_K tile.
-    size_t compute_B_loads(size_t MT_N, size_t MT_K, bool debug)
+    size_t compute_B_loads(size_t MT_N, size_t MT_K)
     {
         // Compute the size of loads from B for a single MT_MxMT_NxMT_K tiles
         size_t Ld_B_value = MT_N * MT_K;
@@ -553,8 +548,7 @@ namespace origami
                                     size_t          mx_block_size,
                                     int             WGM,
                                     size_t          numActiveCUs,
-                                    size_t          splittingFactor,
-                                    bool            debug)
+                                    size_t          splittingFactor)
     {
         // 1) Estimate L2 hit-rate
         double H_mem1
@@ -565,8 +559,8 @@ namespace origami
             = estimate_mall_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, WGM, numActiveCUs, splittingFactor);
 
         // 3) Total loads are loads from A and loads from B
-        size_t Ld_A_value  = compute_A_loads(MT_M, MT_K, debug);
-        size_t Ld_B_value  = compute_B_loads(MT_N, MT_K, debug);
+        size_t Ld_A_value  = compute_A_loads(MT_M, MT_K);
+        size_t Ld_B_value  = compute_B_loads(MT_N, MT_K);
         size_t Ld_CU_bytes = (Ld_A_value * safe_ceil_div(element_size_A, 8)) // A Bytes
                                 + (Ld_B_value * safe_ceil_div(element_size_B, 8)); //B Bytes
 
@@ -672,7 +666,7 @@ namespace origami
             }
         }
 
-        if(debug || hardware_t::is_debug_enabled())
+        if(hardware_t::is_debug_enabled())
         {
             hardware.log_debug("mem1_perf_ratio", hardware.mem1_perf_ratio);
             hardware.log_debug("mem2_perf_ratio", hardware.mem2_perf_ratio);
@@ -716,8 +710,7 @@ namespace origami
                                 size_t          mx_block_size,
                                 int             WGM,
                                 size_t          numActiveCUs,
-                                size_t          splittingFactor,
-                                bool            debug)
+                                size_t          splittingFactor)
     {            
         // 1) Compute per-tile latencies
         double L_compute = compute_mt_compute_latency(hardware,
@@ -734,8 +727,7 @@ namespace origami
                                                         MI_K,
                                                         element_size_A,
                                                         element_size_B,
-                                                        mi_datatype,
-                                                        debug);
+                                                        mi_datatype);
 
         double L_mem = compute_memory_latency(hardware,
                                                 M,
@@ -752,8 +744,7 @@ namespace origami
                                                 mx_block_size,
                                                 WGM,
                                                 numActiveCUs,
-                                                splittingFactor,
-                                                debug);
+                                                splittingFactor);
 
         // 2) Work-group setup & iteration latencies
         double L_WG_setup = 1; // WG_setup_Latency
@@ -797,8 +788,7 @@ namespace origami
                                             MI_N,
                                             MI_K,
                                             element_size_A,
-                                            element_size_B,
-                                            debug);
+                                            element_size_B);
         }
 
         // 5) Single-tile latency (always additive)
@@ -818,7 +808,7 @@ namespace origami
                                 + L_WG_setup
                                 + (28 * num_iter); // 7 instructions (each with 4 cycles) at the end of the loop
 
-        if(debug || hardware_t::is_debug_enabled())
+        if(hardware_t::is_debug_enabled())
         {
             hardware.log_debug("L_compute", L_compute);
             hardware.log_debug("L_mem", L_mem);
@@ -855,8 +845,7 @@ namespace origami
                                 size_t          mx_block_size,
                                 int             WGM,
                                 size_t          numActiveCUs,
-                                size_t          splittingFactor,
-                                bool            debug)
+                                size_t          splittingFactor)
     {
         // Assume latency of a wave is latency of a single k-complete output tile.
         double L_wave = compute_tile_latency(hardware,
@@ -879,8 +868,7 @@ namespace origami
                                                 mx_block_size,
                                                 WGM,
                                                 numActiveCUs,
-                                                splittingFactor,
-                                                debug);
+                                                splittingFactor);
 
         return L_wave;
     }
@@ -906,10 +894,9 @@ namespace origami
                                     data_type_t     mi_datatype,
                                     size_t          mx_block_size,
                                     int             WGM,
-                                    size_t          split,
-                                    bool            debug)
+                                    size_t          split)
     {
-        if(debug || hardware_t::is_debug_enabled())
+        if(hardware_t::is_debug_enabled())
         {
             hardware.log_debug("Problem_Size",
                                 std::to_string(int(M)) + "x" + std::to_string(int(N)) + "x"
@@ -970,7 +957,6 @@ namespace origami
                                                                                 std::numeric_limits<size_t>::max(), // workspace per c
                                                                                 0, // occupancy
                                                                                 6, // dynamic_grid
-                                                                                debug,
                                                                                 split);
 
         // 2) Compute latency of a wave
@@ -995,8 +981,7 @@ namespace origami
                                                 mx_block_size,
                                                 WGM,
                                                 numActiveCUs,
-                                                splittingFactor,
-                                                debug);
+                                                splittingFactor);
         // Compute latency for all waves and return it as the latency for the MT/problem
         double total_latency = L_wave * numWaves;
 
@@ -1183,8 +1168,7 @@ namespace origami
                                 size_t          element_size_B,
                                 size_t          element_size_out,
                                 data_type_t     mi_datatype,
-                                int             WGM,
-                                bool            debug)
+                                int             WGM)
     {
         // Compute total FLOPs
         double total_FLOPs = 2.0 * M * N * K; // For GEMM, each multiply-add is 2 FLOPs
@@ -1210,8 +1194,7 @@ namespace origami
                                                             element_size_out,
                                                             mi_datatype,
                                                             mx_block_size,
-                                                            WGM,
-                                                            debug);
+                                                            WGM);
         double total_time_seconds = latency_cycles / cycles_per_second;
         // Compute performance in FLOPS
         double FLOPS = total_FLOPs / total_time_seconds;
