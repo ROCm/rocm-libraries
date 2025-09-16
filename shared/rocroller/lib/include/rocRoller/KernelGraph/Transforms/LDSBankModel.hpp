@@ -43,8 +43,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     struct Summary
     {
-        static constexpr bool echoBanks = false;
-
         struct Banks
         {
             uint   bankIndex;

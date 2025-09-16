@@ -379,18 +379,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
                                   workitemsAccessed,
                                   imbalanced ? "(imbalanced)" : "");
             }
-            if constexpr(echoBanks)
-            {
-                for(size_t bankIndex = 0; bankIndex < banksToWorkitems.size(); ++bankIndex)
-                {
-                    ss << fmt::format("  Bank {:2d}: ", bankIndex);
-                    for(auto workitem : banksToWorkitems[bankIndex])
-                    {
-                        ss << fmt::format("{:2d} ", workitem);
-                    }
-                    ss << '\n';
-                }
-            }
         }
         ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
         return ss.str();
