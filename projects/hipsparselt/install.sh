@@ -576,7 +576,7 @@ pushd .
   # #################################################
   cmake_common_options="-DGPU_TARGETS=${gpu_architecture}"
   if [[ "${install_dependencies}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DHIPSARSELT_ENABLE_FETCH=ON"
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_FETCH=ON"
   fi
 
   cmake_client_options=""
