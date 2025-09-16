@@ -40,7 +40,7 @@ def get_branch_name(){
 def utils
 
 def withWorkingDir(Closure body) {
-    utils.show_node_info()
+    echo "NODE_NAME = ${env.NODE_NAME}"
     checkout scm
     dir("${env.WORKSPACE}/${env.REPO_DIR}") {
         body()
