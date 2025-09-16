@@ -30,7 +30,6 @@ import functools
 import os
 
 import rrperf.args as args
-import rrperf.rrsuites
 import rrperf.utils as utils
 
 

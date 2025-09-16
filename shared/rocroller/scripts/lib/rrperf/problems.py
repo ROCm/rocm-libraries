@@ -23,11 +23,10 @@
 #
 ################################################################################
 
-import json
 import pathlib
 from dataclasses import dataclass, field, fields, asdict
 from typing import Any, List, Optional
-from hashlib import sha1
+from rrperf.utils import get_dataclass_id
 import yaml
 
 
@@ -238,12 +237,7 @@ class GEMM(GEMMProblem, GEMMSolution):
 
     @property
     def id(self):
-        self_dict = asdict(self)
-        for f in fields(self):
-            if not f.compare:
-                del self_dict[f.name]
-        data_str = json.dumps(self_dict, sort_keys=True)
-        return sha1(data_str.encode()).hexdigest()
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):
@@ -420,12 +414,7 @@ class CodeGen:
 
     @property
     def id(self):
-        self_dict = asdict(self)
-        for f in fields(self):
-            if not f.compare:
-                del self_dict[f.name]
-        data_str = json.dumps(self_dict, sort_keys=True)
-        return sha1(data_str.encode()).hexdigest()
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):

@@ -1528,13 +1528,9 @@ int main(int argc, const char* argv[])
     }
 
     if(solution.workgroupSizeX == -1)
-    {
         solution.workgroupSizeX = 2 * arch.GetCapability(GPUCapability::DefaultWavefrontSize);
-    }
     if(solution.workgroupSizeY == -1)
-    {
         solution.workgroupSizeY = 2;
-    }
 
     AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
                 || (types.typeAcc == "bf16"));
@@ -1664,19 +1660,15 @@ int main(int argc, const char* argv[])
     if(solution.macK < solution.waveK || solution.macM < solution.waveM
        || solution.macN < solution.waveN)
     {
-        Throw<FatalError>("Macro tile sizes must be greater than or equal to MI tile sizes. ",
-                          "macM: ",
-                          solution.macM,
-                          " waveM: ",
-                          solution.waveM,
-                          " macN: ",
-                          solution.macN,
-                          " waveN: ",
-                          solution.waveN,
-                          " macK: ",
-                          solution.macK,
-                          " waveK: ",
-                          solution.waveK);
+        Throw<FatalError>(
+            fmt::format("Macro tile sizes must be greater than or equal to MI tile sizes. "
+                        "macM: {} waveM: {} macN: {} waveN: {} macK: {} waveK: {}",
+                        solution.macM,
+                        solution.waveM,
+                        solution.macN,
+                        solution.waveN,
+                        solution.macK,
+                        solution.waveK));
     }
 
     if(types.scaleSkipPermlane)
