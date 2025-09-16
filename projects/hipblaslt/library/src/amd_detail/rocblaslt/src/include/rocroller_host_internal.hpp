@@ -180,11 +180,17 @@ constexpr auto generateTileList() {
 
         int unroll = preferredUnrolling(typeA, typeB, wgt);
 
+        int default_wgm = 6;
+        int non_temporal_a = 0;
+        int non_temporal_b = 0;
+
         tileList[i] = std::make_tuple(
             wgt.m, wgt.n, wgtk * unroll,
             MI.m, MI.n, MI.k,
             1, // occupancy
-            6 // WGM
+            default_wgm, // WGM
+            non_temporal_a, // nontemporal_a
+            non_temporal_b // nontemporal_b
         );
     }
 

@@ -213,14 +213,16 @@ namespace origami
 
             for(const auto& mt : MT_list)
             {
-                size_t MT_M      = std::get<0>(mt);
-                size_t MT_N      = std::get<1>(mt);
-                size_t MT_K      = std::get<2>(mt);
-                size_t MI_M      = std::get<3>(mt);
-                size_t MI_N      = std::get<4>(mt);
-                size_t MI_K      = std::get<5>(mt);
-                size_t occupancy = std::get<6>(mt);
-                size_t WGM       = std::get<7>(mt);
+                size_t MT_M             = std::get<0>(mt);
+                size_t MT_N             = std::get<1>(mt);
+                size_t MT_K             = std::get<2>(mt);
+                size_t MI_M             = std::get<3>(mt);
+                size_t MI_N             = std::get<4>(mt);
+                size_t MI_K             = std::get<5>(mt);
+                size_t occupancy        = std::get<6>(mt);
+                size_t WGM              = std::get<7>(mt);
+                size_t non_temporal_a   = std::get<8>(mt);
+                size_t non_temporal_b   = std::get<9>(mt);
 
                 if(debug)
                 {
@@ -254,7 +256,7 @@ namespace origami
                                                                  debug);
 
                     valid_results.emplace_back(
-                        Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy, WGM);
+                        Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy, WGM, non_temporal_a, non_temporal_b);
                 }
                 else if(debug)
                 {
@@ -311,9 +313,11 @@ namespace origami
                 {
                     std::cout << M << "x" << N << "x" << K
                               << "Selected Macro-Tile: Latency=" << std::get<0>(tile)
-                              << ", MT_M=" << std::get<1>(tile) << ", MT_N=" << std::get<2>(tile)
-                              << ", MT_K=" << std::get<3>(tile) << ", MI_M=" << std::get<4>(tile)
-                              << ", MI_N=" << std::get<5>(tile) << ", MI_K=" << std::get<6>(tile)
+                              << ", MT_M=" << std::get<0>(tile) << ", MT_N=" << std::get<1>(tile)
+                              << ", MT_K=" << std::get<2>(tile) << ", MI_M=" << std::get<3>(tile)
+                              << ", MI_N=" << std::get<4>(tile) << ", MI_K=" << std::get<5>(tile)
+                              << ", Occupancy=" << std::get<6>(tile) << ", WGM=" << std::get<7>(tile)
+                              << ", NonTemporalA=" << std::get<8>(tile) << ", NonTemporalB=" << std::get<9>(tile)
                               << "\n";
                 }
             }
