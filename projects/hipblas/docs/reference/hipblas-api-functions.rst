@@ -2149,4 +2149,3 @@ hipblasGetAtomicsMode
 hipblasStatusToString
 ----------------------
 .. doxygenfunction:: hipblasStatusToString
-

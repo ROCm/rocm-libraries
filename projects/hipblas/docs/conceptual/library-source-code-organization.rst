@@ -49,13 +49,13 @@ clients/gtest
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Code for the hipblas-test client. This client is used to test hipBLAS. For
-more information, see :ref:`hipblas-clients`. 
+more information, see :ref:`hipblas-clients`.
 
 clients/benchmarks
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Code for the hipblas-bench client. This client is used to benchmark hipBLAS functions.
-For more information, see :ref:`hipblas-clients`. 
+For more information, see :ref:`hipblas-clients`.
 
 clients/include
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -81,7 +81,7 @@ The following utilities support the hipBLAS infrastructure:
 *  Doxygen, Breathe, Sphinx, and ReadTheDocs generate the documentation. The following sources supply
    content for the documentation:
 
-   *  Doxygen comments in the include files in the ``library/include`` directory 
+   *  Doxygen comments in the include files in the ``library/include`` directory
    *  Files in the ``docs`` directory
 
 *  Jenkins is used to automate continuous integration (CI) testing.

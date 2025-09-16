@@ -64,9 +64,9 @@ hipsparseStatus_t
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level2_module
 *  \details
-*  \p hipsparseXcsrsv2_bufferSize returns the size of the temporary storage buffer in bytes 
+*  \p hipsparseXcsrsv2_bufferSize returns the size of the temporary storage buffer in bytes
 *  that is required by \ref hipsparseScsrsv2_analysis "hipsparseScsrsv2_analysis()" and
-*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must 
+*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must
 *  be allocated by the user.
 *
 *  @param[in]
@@ -95,7 +95,7 @@ hipsparseStatus_t
 *                     \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
 *              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info or \p pBufferSizeInBytes is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -156,9 +156,9 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSize(hipsparseHandle_t         handle,
 
 /*! \ingroup level2_module
 *  \details
-*  \p hipsparseXcsrsv2_bufferSizeExt returns the size of the temporary storage buffer in bytes 
-*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and 
-*  \ref hipsparseScsrsv2_solve "hipsparseScsrsv2_solve()". The temporary storage buffer must be 
+*  \p hipsparseXcsrsv2_bufferSizeExt returns the size of the temporary storage buffer in bytes
+*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
+*  \ref hipsparseScsrsv2_solve "hipsparseScsrsv2_solve()". The temporary storage buffer must be
 *  allocated by the user.
 *
 *  @param[in]
@@ -187,7 +187,7 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSize(hipsparseHandle_t         handle,
 *                     \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
 *              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info or \p pBufferSizeInBytes is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -244,9 +244,9 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level2_module
 *  \details
-*  \p hipsparseXcsrsv2_analysis performs the analysis step for 
-*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". It is expected that this 
-*  function will be executed only once for a given matrix and particular operation 
+*  \p hipsparseXcsrsv2_analysis performs the analysis step for
+*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". It is expected that this
+*  function will be executed only once for a given matrix and particular operation
 *  type.
 *
 *  \note
@@ -281,8 +281,8 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  pBuffer     temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descr, 
-*              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info or \p pBuffer is 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descr,
+*              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info or \p pBuffer is
 *              invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -367,31 +367,31 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *    \right.
 *  \f]
 *
-*  Performing the above operation requires three steps. First, the user calls 
-*  \ref hipsparseScsrsv2_bufferSize "hipsparseXcsrsv2_bufferSize()" (or 
-*  \ref hipsparseScsrsv2_bufferSizeExt "hipsparseXcsrsv2_bufferSizeExt()") which will determine the size of the 
-*  required temporary storage buffer. The user then allocates this buffer and calls 
-*  \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" which will perform analysis on the sparse matrix 
-*  \f$op(A)\f$. Finally, the user completes the computation by calling \p hipsparseXcsrsv2_solve. The buffer size, 
-*  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$ while the 
-*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. Once all calls to 
-*  \p hipsparseXcsrsv2_solve are complete, the temporary buffer can be deallocated. 
+*  Performing the above operation requires three steps. First, the user calls
+*  \ref hipsparseScsrsv2_bufferSize "hipsparseXcsrsv2_bufferSize()" (or
+*  \ref hipsparseScsrsv2_bufferSizeExt "hipsparseXcsrsv2_bufferSizeExt()") which will determine the size of the
+*  required temporary storage buffer. The user then allocates this buffer and calls
+*  \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" which will perform analysis on the sparse matrix
+*  \f$op(A)\f$. Finally, the user completes the computation by calling \p hipsparseXcsrsv2_solve. The buffer size,
+*  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$ while the
+*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. Once all calls to
+*  \p hipsparseXcsrsv2_solve are complete, the temporary buffer can be deallocated.
 *
-*  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is 
+*  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is
 *  missing the diagonal entry (referred to as a structural zero) or the diagonal entry is zero (referred to as a numerical zero)
-*  then a division by zero would occur. \p hipsparseXcsrsv2_solve tracks the location of the first zero pivot (either numerical 
-*  or structural zero). The zero pivot status can be checked calling \ref hipsparseXcsrsv2_zeroPivot(). If 
-*  \ref hipsparseXcsrsv2_zeroPivot() returns \ref HIPSPARSE_STATUS_SUCCESS, then no zero pivot was found and therefore 
+*  then a division by zero would occur. \p hipsparseXcsrsv2_solve tracks the location of the first zero pivot (either numerical
+*  or structural zero). The zero pivot status can be checked calling \ref hipsparseXcsrsv2_zeroPivot(). If
+*  \ref hipsparseXcsrsv2_zeroPivot() returns \ref HIPSPARSE_STATUS_SUCCESS, then no zero pivot was found and therefore
 *  the matrix does not have a structural or numerical zero.
 *
-*  The user can specify that the sparse matrix should be interpreted as having ones on the diagonal by setting the diagonal type 
-*  on the descriptor \p descrA to \ref HIPSPARSE_DIAG_TYPE_UNIT using \ref hipsparseSetMatDiagType. If 
-*  \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for 
+*  The user can specify that the sparse matrix should be interpreted as having ones on the diagonal by setting the diagonal type
+*  on the descriptor \p descrA to \ref HIPSPARSE_DIAG_TYPE_UNIT using \ref hipsparseSetMatDiagType. If
+*  \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for
 *  some \f$j\f$.
 *
-*  The sparse CSR matrix passed to \p hipsparseXcsrsv2_solve does not actually have to be a triangular matrix. Instead the 
-*  triangular upper or lower part of the sparse matrix is solved based on \ref hipsparseFillMode_t set on the descriptor 
-*  \p descrA. If the fill mode is set to \ref HIPSPARSE_FILL_MODE_LOWER, then the lower triangular matrix is solved. If the 
+*  The sparse CSR matrix passed to \p hipsparseXcsrsv2_solve does not actually have to be a triangular matrix. Instead the
+*  triangular upper or lower part of the sparse matrix is solved based on \ref hipsparseFillMode_t set on the descriptor
+*  \p descrA. If the fill mode is set to \ref HIPSPARSE_FILL_MODE_LOWER, then the lower triangular matrix is solved. If the
 *  fill mode is set to \ref HIPSPARSE_FILL_MODE_UPPER then the upper triangular matrix is solved.
 *
 *  \note
@@ -439,8 +439,8 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *  pBuffer     temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, 
-*              \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA,
+*              \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
 *              \p f or \p x is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
@@ -485,7 +485,7 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *      // Matrix descriptor
 *      hipsparseMatDescr_t descr;
 *      hipsparseCreateMatDescr(&descr);
-*   
+*
 *      // Set index base on descriptor
 *      hipsparseSetMatIndexBase(descr, HIPSPARSE_INDEX_BASE_ZERO);
 *

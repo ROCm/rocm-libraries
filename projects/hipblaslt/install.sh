@@ -38,6 +38,7 @@ function display_help()
   echo "    [-t|--test_local_path] Specify a local path for Tensile instead of remote GIT repo"
   echo "    [-a|--architecture] Set GPU architecture target(s), e.g., all, gfx90a:xnack+;gfx90a:xnack-"
   echo "    [--cpu_ref_lib <lib>] specify library to use for CPU reference code in testing (blis or lapack)"
+  echo "    [--use-system-packages] use the system installed msgpack/blas/lapack libraries (requires -d)"
   echo "    [-c|--clients] build library clients too (combines with -i & -d)"
   echo "    [-r|--relocatable] create a package to support relocatable ROCm"
   echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
@@ -118,7 +119,12 @@ install_yum_packages( )
   for package in "${package_dependencies[@]}"; do
     if [[ $(yum list installed ${package} &> /dev/null; echo $? ) -ne 0 ]]; then
       printf "\033[32mInstalling \033[33m${package}\033[32m from distro package manager\033[0m\n"
-      elevate_if_not_root yum -y --nogpgcheck install ${package}
+      if [[ ( ${package} == "openblas-devel" ) && ( ${ID} == "centos" ) ]]; then
+        extra_opts="--enablerepo=crb"
+      else
+        extra_opts=""
+      fi
+      elevate_if_not_root yum -y --nogpgcheck install ${package} ${extra_opts}
     fi
   done
 }
@@ -163,24 +169,43 @@ install_packages( )
   fi
 
   # dependencies needed for library and clients to build
-  local library_dependencies_ubuntu=( "gfortran" "make" "pkg-config" "libnuma1" "git")
+  local library_dependencies_ubuntu=( "make" "pkg-config" "libnuma1" "git")
   local library_dependencies_centos=( "epel-release" "make" "gcc-c++" "rpm-build" )
   local library_dependencies_centos8=( "epel-release" "make" "gcc-c++" "rpm-build" "numactl-libs" )
-  local library_dependencies_fedora=( "gcc-gfortran" "make" "gcc-c++" "libcxx-devel" "rpm-build" "numactl-libs" )
-  local library_dependencies_sles=( "gcc-fortran" "make" "gcc-c++" "libcxxtools9" "rpm-build" )
-  local library_dependencies_mariner=( "gfortran" "make" "rpm-build" )
+  local library_dependencies_fedora=( "make" "gcc-c++" "libcxx-devel" "rpm-build" "numactl-libs" )
+  local library_dependencies_sles=( "make" "gcc-c++" "libcxxtools9" "rpm-build" )
+  local library_dependencies_mariner=( "make" "rpm-build" )
 
   local client_dependencies_ubuntu=( "python3" "python3-yaml" "libopenblas-dev")
-  local client_dependencies_centos=( "python36" "python3-pip" "epel-release" "openblas-devel --enablerepo=crb")
-  local client_dependencies_centos8=( "python39" "python3-virtualenv" "epel-release" "openblas-devel --enablerepo=crb")
-  local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip" "openblas-devel")
-  local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip" "openblas-devel")
-  local client_dependencies_mariner=( "python3" "python3-yaml" "openblas-devel")
+  local client_dependencies_centos=( "python36" "python3-pip")
+  local client_dependencies_centos8=( "python39" "python3-virtualenv")
+  local client_dependencies_fedora=( "python36" "PyYAML" "python3-pip")
+  local client_dependencies_sles=( "pkg-config" "dpkg" "python3-pip")
+  local client_dependencies_mariner=( "python3" "python3-yaml")
 
-  if [[ "${tensile_msgpack_backend}" == true ]]; then
-    library_dependencies_ubuntu+=("libmsgpack-dev")
-    library_dependencies_centos8+=("msgpack-devel")
-    library_dependencies_fedora+=("msgpack-devel")
+  if [[ "${use_system_packages}" == true ]]; then
+      client_dependencies_ubuntu+=("libopenblas-dev")
+      client_dependencies_centos+=("openblas-devel")
+      client_dependencies_centos8+=("openblas-devel")
+      client_dependencies_fedora+=("openblas-devel")
+      client_dependencies_sles=( "openblas-devel")
+      client_dependencies_mariner=("openblas-devel")
+
+     if [[ "${tensile_msgpack_backend}" == true ]]; then
+       library_dependencies_centos+=("msgpack-devel")
+       library_dependencies_centos8+=("msgpack-devel")
+       library_dependencies_fedora+=("msgpack-devel")
+     fi
+  fi
+
+  library_dependencies_ubuntu+=("libmsgpack-dev")
+
+  if [[ "${build_clients}" == true ]]; then
+    library_dependencies_ubuntu+=( "gfortran" )
+    library_dependencies_centos+=( "devtoolset-7-gcc-gfortran" )
+    library_dependencies_centos8+=( "gcc-gfortran" )
+    library_dependencies_fedora+=( "gcc-gfortran" )
+    library_dependencies_sles+=( "gcc-fortran" "pkg-config" "dpkg" )
   fi
 
   if [[ "${use_rocroller}" == true ]]; then
@@ -223,14 +248,6 @@ install_packages( )
     else
       client_dependencies_centos8+=( "PyYAML" )
     fi
-  fi
-
-  if [[ "${build_clients}" == true ]]; then
-    library_dependencies_ubuntu+=( "gfortran" )
-    library_dependencies_centos+=( "devtoolset-7-gcc-gfortran" )
-    library_dependencies_centos8+=( "gcc-gfortran" )
-    library_dependencies_fedora+=( "gcc-gfortran" )
-    library_dependencies_sles+=( "gcc-fortran" "pkg-config" "dpkg" )
   fi
 
   case "${ID}" in
@@ -408,6 +425,7 @@ matrices_dir=
 matrices_dir_install=
 gpu_architecture=all
 cpu_ref_lib=blis
+use_system_packages=false
 tensile_logic=
 tensile_cov="4"
 tensile_threads=$(nproc)
@@ -445,7 +463,7 @@ fi
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,no-lazy-library-loading,no_tensile,no-tensile,client-only,msgpack,no-msgpack,logic:,cov:,fork:,branch:,test_local_path:,cpu_ref_lib:,build_dir:,use-custom-version:,architecture:,tensile-verbose:,gprof,keep-build-tmp,no-compress,experimental,quiet,legacy_hipblas_direct,disable-hipblaslt-marker,enable-tensile-marker,skip_rocroller,logic-yaml-filter: --options hicdgrka:j:o:l:f:b:nu:t: -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,no-lazy-library-loading,no_tensile,no-tensile,client-only,msgpack,no-msgpack,logic:,cov:,fork:,branch:,test_local_path:,cpu_ref_lib:,use-system-packages,build_dir:,use-custom-version:,architecture:,tensile-verbose:,gprof,keep-build-tmp,no-compress,experimental,quiet,legacy_hipblas_direct,disable-hipblaslt-marker,enable-tensile-marker,skip_rocroller,logic-yaml-filter: --options hicdgrka:j:o:l:f:b:nu:t: -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -501,6 +519,9 @@ while true; do
         --cpu_ref_lib)
             cpu_ref_lib=${2}
             shift 2 ;;
+        --use-system-packages)
+            use_system_packages=true
+            shift ;;
         --prefix)
             install_prefix=${2}
             shift 2 ;;
@@ -584,10 +605,10 @@ while true; do
     esac
 done
 
-if [[ "${cpu_ref_lib}" == blis ]]; then
-  LINK_BLIS=true
-elif [[ "${cpu_ref_lib}" == lapack ]]; then
-  LINK_BLIS=false
+if [[ "${cpu_ref_lib}" == "blis" ]]; then
+  cmake_client_options=" -DHIPBLASLT_ENABLE_BLIS=ON"
+elif [[ "${cpu_ref_lib}" == "lapack" ]]; then
+  cmake_client_options=" -DHIPBLASLT_ENABLE_BLIS=OFF"
 else
   echo "Currently the only CPU library options are blis and lapack"
       exit 2
@@ -675,17 +696,21 @@ if [[ "${install_dependencies}" == true ]]; then
   # cmake is needed to install msgpack
   case "${ID}" in
     centos|rhel|sles|opensuse-leap|almalinux)
-      if [[ "${tensile_msgpack_backend}" == true ]]; then
+      if [[ "${tensile_msgpack_backend}" == true && "${use_system_packages}" == false ]]; then
         install_msgpack_from_source
       fi
       ;;
   esac
 
   # The following builds googletest from source, installs into cmake default /usr/local
+  build_lapack="ON"
+  if [ "${use_system_packages}" == true ]; then
+    build_lapack="OFF"
+  fi
   pushd .
     printf "\033[32mBuilding \033[33mgoogletest\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} -DBUILD_LAPACK=OFF ${root_path}/deps
+    ${cmake_executable} -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_LAPACK=${build_lapack} ${root_path}/deps
     make -j$(nproc)
     elevate_if_not_root make install
   popd
@@ -755,7 +780,9 @@ pushd .
   if [[ "${build_clients}" == true ]]; then
     pushd .
     mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    install_blis
+    if [[ "${cpu_ref_lib}" == "blis" ]]; then
+      install_blis
+    fi
     popd
   fi
 
@@ -831,22 +858,30 @@ pushd .
   fi
 
   if [[ "${build_clients}" == false ]]; then
-    cmake_client_options="HIPBLASLT_ENABLE_CLIENTS=OFF"
+    cmake_client_options=" -DHIPBLASLT_ENABLE_CLIENT=OFF"
+  else
+    if [[ ( "${use_system_packages}" == false ) && ( "${install_dependencies}" == true ) ]]; then
+        cmake_client_options=" -DBLAS_LIBRARIES=/usr/local/lib/libblas.a -DLAPACK_LIBRARIES='/usr/local/lib/liblapack.a;/usr/local/lib/libblas.a' -DBLA_STATIC=ON"
+    fi
   fi
 
-  echo $cmake_common_options ${cmake_client_options}
   # Build library with AMD toolchain because of existense of device kernels
   if [[ "${build_relocatable}" == true ]]; then
+    echo cmake command relocatable: FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${rocm_path} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DROCM_DISABLE_LDCONFIG=ON -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
+
     FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF \
       -DCMAKE_INSTALL_PREFIX=${rocm_path} \
       -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} \
       -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" \
-      -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
+      -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" \
       -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
       -DROCM_DISABLE_LDCONFIG=ON \
+      -DCMAKE_INSTALL_LIBDIR="lib" \
       -DROCM_PATH="${rocm_path}" ${root_path}
   else
-    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DROCM_PATH="${rocm_path}" ${root_path}
+    echo cmake command: FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
+
+    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCMAKE_PREFIX_PATH="${rocm_path};${rocm_path}/hcc;${rocm_path}/hip" -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DCMAKE_INSTALL_LIBDIR="lib" -DROCM_PATH="${rocm_path}" ${root_path}
   fi
   check_exit_code "$?"
 

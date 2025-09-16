@@ -59,7 +59,7 @@ extern "C" {
 *  @param[in]
 *  threshold   pointer to the pruning non-negative threshold which can exist in either host or device memory.
 *  @param[in]
-*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and 
+*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and
 *              also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  csr_val     array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
@@ -110,7 +110,7 @@ rocsparse_status rocsparse_dprune_dense2csr_buffer_size(rocsparse_handle        
 *  \p rocsparse_prune_dense2csr_nnz computes the number of nonzero elements per row and the total
 *  number of nonzero elements in a sparse CSR matrix once elements less than the threshold are
 *  pruned from the matrix.
-* 
+*
 *  \note
 *  The routine does support asynchronous execution if the pointer mode is set to device.
 *
@@ -136,7 +136,7 @@ rocsparse_status rocsparse_dprune_dense2csr_buffer_size(rocsparse_handle        
 *  @param[out]
 *  nnz_total_dev_host_ptr total number of nonzero elements in device or host memory.
 *  @param[out]
-*  temp_buffer            buffer allocated by the user whose size is determined by calling 
+*  temp_buffer            buffer allocated by the user whose size is determined by calling
 *                         \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
@@ -178,15 +178,15 @@ rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle          handle
 *  This function converts the dense matrix \f$A\f$ into a sparse CSR matrix \f$C\f$ by pruning values in \f$A\f$
 *  that are less than a threshold.
 *
-*  The conversion involves three steps. The user first calls 
-*  \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()" 
-*  to determine the size of the temporary storage buffer. The user allocates this buffer as well as the array 
-*  \p csr_row_ptr to have \p m+1 elements. The user then calls 
+*  The conversion involves three steps. The user first calls
+*  \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()"
+*  to determine the size of the temporary storage buffer. The user allocates this buffer as well as the array
+*  \p csr_row_ptr to have \p m+1 elements. The user then calls
 *  \ref rocsparse_sprune_dense2csr_nnz "rocsparse_Xprune_dense2csr_nnz()" which fills
 *  in the \p csr_row_ptr array and stores the number of elements that are larger than the pruning \p threshold
-*  in \p nnz_total_dev_host_ptr. Now that the number of nonzeros larger than the pruning \p threshold is known, the 
+*  in \p nnz_total_dev_host_ptr. Now that the number of nonzeros larger than the pruning \p threshold is known, the
 *  user uses this information to allocate the \p csr_col_ind and \p csr_val arrays and then calls
-*  \p rocsparse_prune_dense2csr to complete the conversion. Once the conversion is complete, the temporary storage 
+*  \p rocsparse_prune_dense2csr to complete the conversion. Once the conversion is complete, the temporary storage
 *  buffer can be freed.
 *
 *  \note
@@ -208,7 +208,7 @@ rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle          handle
 *  @param[in]
 *  threshold   pointer to the non-negative pruning threshold which can exist in either host or device memory.
 *  @param[in]
-*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and 
+*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and
 *              also any valid value of the \ref rocsparse_index_base.
 *  @param[out]
 *  csr_val     array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.

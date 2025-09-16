@@ -24,5 +24,3 @@ for m in 1024 2048 4096; do
     done
   done
 done
-
-

@@ -112,9 +112,9 @@ THRUST_HOST_DEVICE
                  BinaryPredicate binary_pred)
 {
   thrust::detail::head_flags<ForwardIterator, BinaryPredicate> stencil(first, last, binary_pred);
-  
+
   using namespace thrust::placeholders;
-  
+
   return thrust::count_if(exec, stencil.begin(), stencil.end(), _1);
 } // end unique_copy()
 
@@ -136,4 +136,3 @@ THRUST_HOST_DEVICE
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

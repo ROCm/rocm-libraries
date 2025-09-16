@@ -34,4 +34,3 @@ RUN yum -y install centos-release-scl
 RUN yum -y install devtoolset-7
 
 RUN echo -e "\nsource /opt/rh/devtoolset-7/enable" >> /etc/skel/.bashrc
-

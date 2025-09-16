@@ -75,7 +75,7 @@ class KernelWriterStreamKInit(KernelWriterBase):
     kStr += self.endLine
 
     kStr += "  Flags[id] = 0;" + self.endLine
-    
+
     ########################################
     # end
     kStr += "}%s" % self.endLine

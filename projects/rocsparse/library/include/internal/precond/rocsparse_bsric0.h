@@ -75,12 +75,12 @@ rocsparse_status rocsparse_bsric0_zero_pivot(rocsparse_handle   handle,
 /*! \ingroup precond_module
  *  \details
  *  \p rocsparse_bsric0_buffer_size returns the size of the temporary storage buffer
- *  that is required by \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()" and 
- *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". The temporary storage buffer must be 
- *  allocated by the user. The size of the temporary storage buffer is identical to the size 
+ *  that is required by \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()" and
+ *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". The temporary storage buffer must be
+ *  allocated by the user. The size of the temporary storage buffer is identical to the size
  *  returned by \ref rocsparse_sbsrsv_buffer_size "rocsparse_Xbsrsv_buffer_size()" and
- *  \ref rocsparse_sbsrilu0_buffer_size "rocsparse_Xbsrilu0_buffer_size()" if the matrix sparsity 
- *  pattern is identical. The user allocated buffer can thus be shared between subsequent calls 
+ *  \ref rocsparse_sbsrilu0_buffer_size "rocsparse_Xbsrilu0_buffer_size()" if the matrix sparsity
+ *  pattern is identical. The user allocated buffer can thus be shared between subsequent calls
  *  to those functions.
  *
  *  \note
@@ -182,9 +182,9 @@ rocsparse_status rocsparse_zbsric0_buffer_size(rocsparse_handle                h
 
 /*! \ingroup precond_module
  *  \details
- *  \p rocsparse_bsric0_analysis performs the analysis step for 
- *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". It is expected that this function will 
- *  be executed only once for a given matrix and particular operation type. The analysis 
+ *  \p rocsparse_bsric0_analysis performs the analysis step for
+ *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". It is expected that this function will
+ *  be executed only once for a given matrix and particular operation type. The analysis
  *  meta data can be cleared by \ref rocsparse_bsric0_clear().
  *
  *  \p rocsparse_bsric0_analysis can share its meta data with
@@ -310,7 +310,7 @@ rocsparse_status rocsparse_zbsric0_analysis(rocsparse_handle                hand
 /*! \ingroup precond_module
  *  \details
  *  \p rocsparse_bsric0_clear deallocates all memory that was allocated by
- *  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()". This is especially useful, 
+ *  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()". This is especially useful,
  *  if memory is an issue and the analysis data is not required for further computation.
  *
  *  \note
@@ -347,17 +347,17 @@ rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_i
  *    A \approx LL^T
  *  \f]
  *
- *  Computing the above incomplete Cholesky factorization requires three steps to complete. First, 
+ *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
  *  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_sbsric0_buffer_size,
- *  \ref rocsparse_dbsric0_buffer_size, \ref rocsparse_cbsric0_buffer_size, or \ref rocsparse_zbsric0_buffer_size. Once 
+ *  \ref rocsparse_dbsric0_buffer_size, \ref rocsparse_cbsric0_buffer_size, or \ref rocsparse_zbsric0_buffer_size. Once
  *  this buffer size has been determined, the user allocates the buffer and passes it to \ref rocsparse_sbsric0_analysis,
- *  \ref rocsparse_dbsric0_analysis, \ref rocsparse_cbsric0_analysis, or \ref rocsparse_zbsric0_analysis. This will 
- *  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsric0, 
- *  \p rocsparse_dbsric0, \p rocsparse_cbsric0, or \p rocsparse_zbsric0 to perform the actual factorization. The calculation 
- *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern 
- *  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls 
+ *  \ref rocsparse_dbsric0_analysis, \ref rocsparse_cbsric0_analysis, or \ref rocsparse_zbsric0_analysis. This will
+ *  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsric0,
+ *  \p rocsparse_dbsric0, \p rocsparse_cbsric0, or \p rocsparse_zbsric0 to perform the actual factorization. The calculation
+ *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
+ *  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
  *  to \ref rocsparse_sbsric0 "rocsparse_Xbsric0()" are complete, the temporary buffer can be deallocated.
- *  
+ *
  *  \p rocsparse_bsric0 reports the first zero pivot (either numerical or structural zero).
  *  The zero pivot status can be obtained by calling \ref rocsparse_bsric0_zero_pivot().
  *

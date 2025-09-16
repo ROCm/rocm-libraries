@@ -52,7 +52,7 @@ rocblas_status rocsolver_syevd_heevd_batched_impl(rocblas_handle handle,
 
     // argument checking
     rocblas_status st
-        = rocsolver_syev_heev_argCheck(handle, evect, uplo, n, A, lda, D, E, info, batch_count);
+        = rocsolver_syevd_heevd_argCheck(handle, evect, uplo, n, A, lda, D, E, info, batch_count);
     if(st != rocblas_status_continue)
         return st;
 

@@ -196,7 +196,7 @@ program example_fortran_gemv
     call ROCBLAS_CHECK(rocblas_dgemv(handle, transA, m, n, c_loc(alpha), dA,&
                                      lda, dx, 1, c_loc(beta), dy, 1))
     call HIP_CHECK(hipDeviceSynchronize())
-    
+
     ! Stop time
     call date_and_time(values = tend)
 

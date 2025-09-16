@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_csrilu0_zero_pivot returns \ref rocsparse_status_zero_pivot, if either a
-*  structural or numerical zero has been found during \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()" 
+*  structural or numerical zero has been found during \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()"
 *  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same index
 *  base as the CSR matrix.
 *
@@ -131,7 +131,7 @@ rocsparse_status rocsparse_csrilu0_get_tolerance(rocsparse_handle   handle,
 *  \details
 *  \p rocsparse_csrilu0_singular_pivot() returns the position of a
 *  near numerical zero entry that has been found during \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()"
-*  computation. The first singular pivot \f$j\f$ at \f$|A_{j,j}| \leq \text{tolerance}\f$  is stored 
+*  computation. The first singular pivot \f$j\f$ at \f$|A_{j,j}| \leq \text{tolerance}\f$  is stored
 *  in \p position, using same index base as the CSR matrix.
 *
 *  \p position can be in host or device memory. If no singular pivot has been found,
@@ -244,10 +244,10 @@ rocsparse_status rocsparse_dccsrilu0_numeric_boost(rocsparse_handle             
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_csrilu0_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_scsrilu0_analysis "rocsparse_Xcsrilu0_analysis()" and 
-*  \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()". The temporary storage buffer must be allocated 
-*  by the user. The size of the temporary storage buffer is identical to the size returned by 
-*  \ref rocsparse_scsrsv_buffer_size "rocsparse_Xcsrsv_buffer_size()" if the matrix sparsity pattern 
+*  that is required by \ref rocsparse_scsrilu0_analysis "rocsparse_Xcsrilu0_analysis()" and
+*  \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()". The temporary storage buffer must be allocated
+*  by the user. The size of the temporary storage buffer is identical to the size returned by
+*  \ref rocsparse_scsrsv_buffer_size "rocsparse_Xcsrsv_buffer_size()" if the matrix sparsity pattern
 *  is identical. The user allocated buffer can thus be shared between subsequent calls to those functions.
 *
 *  \note
@@ -337,7 +337,7 @@ rocsparse_status rocsparse_zcsrilu0_buffer_size(rocsparse_handle                
 
 /*! \ingroup precond_module
 *  \details
-*  \p rocsparse_csrilu0_analysis performs the analysis step for \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()". 
+*  \p rocsparse_csrilu0_analysis performs the analysis step for \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()".
 *  It is expected that this function will be executed only once for a given matrix and particular
 *  operation type. The analysis meta data can be cleared by \ref rocsparse_csrilu0_clear().
 *
@@ -498,19 +498,19 @@ rocsparse_status rocsparse_csrilu0_clear(rocsparse_handle handle, rocsparse_mat_
 *  \f]
 *  for each entry found in the CSR matrix \f$A\f$.
 *
-*  Computing the above incomplete \f$LU\f$ factorization requires three steps to complete. First, 
-*  the user determines the size of the required temporary storage buffer by calling 
-*  \ref rocsparse_scsrilu0_buffer_size "rocsparse_Xcsrilu0_buffer_size()". Once this buffer size has been determined, 
-*  the user allocates the buffer and passes it to \ref rocsparse_scsrilu0_analysis "rocsparse_Xcsrilu0_analysis()". 
-*  This will perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_scsrilu0, 
-*  \p rocsparse_dcsrilu0, \p rocsparse_ccsrilu0, or \p rocsparse_zcsrilu0 to perform the actual factorization. The calculation 
-*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern 
-*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls 
+*  Computing the above incomplete \f$LU\f$ factorization requires three steps to complete. First,
+*  the user determines the size of the required temporary storage buffer by calling
+*  \ref rocsparse_scsrilu0_buffer_size "rocsparse_Xcsrilu0_buffer_size()". Once this buffer size has been determined,
+*  the user allocates the buffer and passes it to \ref rocsparse_scsrilu0_analysis "rocsparse_Xcsrilu0_analysis()".
+*  This will perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_scsrilu0,
+*  \p rocsparse_dcsrilu0, \p rocsparse_ccsrilu0, or \p rocsparse_zcsrilu0 to perform the actual factorization. The calculation
+*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
+*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
 *  to \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()" are complete, the temporary buffer can be deallocated.
-*  
+*
 *  When computing the \f$LU\f$ factorization, it is possible that \f$U_{jj} == 0\f$ which would result in a division by zero.
-*  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because 
-*  \f$A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times U_{kj} == 0\f$ (referred to as a numerical zero). For example, running the 
+*  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because
+*  \f$A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times U_{kj} == 0\f$ (referred to as a numerical zero). For example, running the
 *  \f$LU\f$ factorization on the following matrix:
 *  \f[
 *    \begin{bmatrix}
@@ -537,14 +537,14 @@ rocsparse_status rocsparse_csrilu0_clear(rocsparse_handle handle, rocsparse_mat_
 *               &= 0
 *    \end{array}
 *  \f]
-*  The user can detect the presence of a structural zero by calling \ref rocsparse_csrilu0_zero_pivot() after 
-*  \ref rocsparse_scsrilu0_analysis "rocsparse_Xcsrilu0_analysis()" and/or the presence of a structural or 
+*  The user can detect the presence of a structural zero by calling \ref rocsparse_csrilu0_zero_pivot() after
+*  \ref rocsparse_scsrilu0_analysis "rocsparse_Xcsrilu0_analysis()" and/or the presence of a structural or
 *  numerical zero by calling \ref rocsparse_csrilu0_zero_pivot() after \ref rocsparse_scsrilu0 "rocsparse_Xcsric0()".
-*  In both cases, \ref rocsparse_csrilu0_zero_pivot() will report the first zero pivot (either numerical or structural) 
-*  found. See example below. The user can also set the diagonal type to be \f$1\f$ using \ref rocsparse_set_mat_diag_type() 
-*  which will interpret the matrix \f$A\f$ as having ones on its diagonal (even if no nonzero exists in the sparsity pattern). 
+*  In both cases, \ref rocsparse_csrilu0_zero_pivot() will report the first zero pivot (either numerical or structural)
+*  found. See example below. The user can also set the diagonal type to be \f$1\f$ using \ref rocsparse_set_mat_diag_type()
+*  which will interpret the matrix \f$A\f$ as having ones on its diagonal (even if no nonzero exists in the sparsity pattern).
 *
-*  \p rocsparse_csrilu0 computes the \f$LU\f$ factorization inplace meaning that the values array \p csr_val of the \f$A\f$ 
+*  \p rocsparse_csrilu0 computes the \f$LU\f$ factorization inplace meaning that the values array \p csr_val of the \f$A\f$
 *  matrix is overwritten with the \f$L\f$ matrix stored in the strictly lower triangular part of \f$A\f$ and the \f$U\f$ matrix
 *  stored in the upper part of \f$A\f$:
 *
@@ -563,7 +563,7 @@ rocsparse_status rocsparse_csrilu0_clear(rocsparse_handle handle, rocsparse_mat_
 *    \end{bmatrix}
 *    \end{align}
 *  \f]
-*  The row pointer array \p csr_row_ptr and the column indices array \p csr_col_ind remain the same for \f$A\f$ and \f$LU\f$ as 
+*  The row pointer array \p csr_row_ptr and the column indices array \p csr_col_ind remain the same for \f$A\f$ and \f$LU\f$ as
 *  the incomplete factorization does not generate new nonzeros in \f$LU\f$ which do not already exist in \f$A\f$.
 *
 *  The performance of computing \f$LU\f$ factorization with rocSPARSE greatly depends on the sparisty pattern

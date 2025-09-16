@@ -56,7 +56,7 @@ namespace rocRoller
     /**
      * If [coordBegin, coordEnd) represents coordinate x within the
      * linearization, updates it to represent coordinate x+1.
-     * 
+     *
      * If [coordBegin, coordEnd) represents the last coordinate within the
      * linearization, it will be reset to all 0s and false will be returned.
      */
@@ -225,9 +225,9 @@ namespace rocRoller
      * `dst` and `src` must be two TensorDescriptors with the same data type
      * and dimension sizes (i.e. dst.sizes() == src.sizes()). They should have
      * different strides (or this function is a no-op).
-     * 
+     *
      * `input` must contain data arranged according to `src`.
-     * 
+     *
      * Returns `input` rearranged according to the strides in `dst`.
      */
     template <typename T>

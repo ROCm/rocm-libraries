@@ -110,6 +110,12 @@ namespace rocRoller::KernelGraph
             }
         }
 
+        template <Expression::CNary Expr>
+        void operator()(Expr const& expr)
+        {
+            std::ranges::for_each(expr.operands, [this](auto const& op) { call(op); });
+        }
+
         void operator()(Expression::DataFlowTag const& expr)
         {
             tags.insert(expr.tag);

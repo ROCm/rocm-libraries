@@ -73,9 +73,22 @@ cmake_dependent_option(BUILD_DOCS "Build documentation (requires sphinx)" OFF "N
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
+option(BUILD_OFFLOAD_COMPRESS "Build rocPRIM with offload compression" ON)
+cmake_dependent_option(USE_SYSTEM_LIB "Use installed ROCm libs when building tests" OFF BUILD_TEST OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
+
+include(CheckCXXCompilerFlag)
+
+if(BUILD_OFFLOAD_COMPRESS)
+  check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+  else()
+    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
+  endif()
+endif()
 
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
@@ -149,10 +162,17 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+  endif()
+endif()
+
+# Compressed offload binaries are currently not working with the SPIR-V target
+if("amdgcnspirv" IN_LIST GPU_TARGETS)
+  if(BUILD_OFFLOAD_COMPRESS)
+    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
   endif()
 endif()
 
@@ -169,7 +189,7 @@ if(BUILD_CODE_COVERAGE)
 endif()
 
 # Setup VERSION
-set(VERSION_STRING "4.0.0")
+set(VERSION_STRING "4.1.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 
@@ -186,6 +206,13 @@ endif()
 
 # Tests
 if(BUILD_TEST)
+  if(USE_SYSTEM_LIB)
+    find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+    if (NOT ${rocprim_VERSION} VERSION_EQUAL ${VERSION_STRING})
+      message(WARNING "The installed rocprim version, ${rocprim_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+    endif()
+  endif()
+
   if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
     rocm_package_setup_client_component(tests)
   endif()
@@ -227,7 +254,7 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
 
-  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
+  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
   set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
   set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )

@@ -194,9 +194,24 @@ public:
             }
             for(size_t step_id = 0; step_id < num_steps; step_id++)
             {
+#ifdef __HIP_PLATFORM_NVIDIA__
+                size_t stream_start_idx_real = 0;
+#endif
                 for(size_t stream_id = 0; stream_id < num_streams; stream_id++)
                 {
+#ifdef __HIP_PLATFORM_NVIDIA__
+                    if(stream_start_idx_real % 2)
+                        throw unsupported_case("Unaligned I/O data for cuFFT backend");
+#endif
+
                     auto sub_dft = make_sub_dft_params(step_id, stream_id);
+#ifdef __HIP_PLATFORM_NVIDIA__
+                    if(sub_dft.is_real())
+                    {
+                        const auto real_dist = is_inverse() ? sub_dft.odist : sub_dft.idist;
+                        stream_start_idx_real += real_dist * sub_dft.nbatch;
+                    }
+#endif
                 }
             }
         }
@@ -286,11 +301,6 @@ public:
     }
 };
 
-static void mark_stream_work_done_callback(hipStream_t, hipError_t, void* usr_ptr)
-{
-    *(static_cast<int*>(usr_ptr)) = 1; // raise integer flag
-};
-
 template <typename real_data_type>
 static void init_data(hostbuf&                       hostbuffer,
                       const ParamsForMultiStreamDFT& params,
@@ -308,7 +318,7 @@ static void init_data(hostbuf&                       hostbuffer,
                     const std::vector<size_t>& h,
                     const std::vector<size_t>& l) {
         real_data_type ret = 0;
-        for(auto i = 0; i < k.size(); i++)
+        for(size_t i = 0; i < k.size(); i++)
             ret += static_cast<real_data_type>((k[i] * h[i]) % l[i])
                    / static_cast<real_data_type>(l[i]);
         return 2.0 * M_PI * ret;
@@ -460,31 +470,64 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
     if(!parameters.is_supported())
         GTEST_SKIP() << "Test not supported yet";
     // RAII encapsulation struct for hip streams:
-    struct raii_stream_t
+    struct sub_dft_stream_t
     {
+    private:
+        bool sub_dft_is_done;
+        bool cb_is_enqueued;
+
+    public:
         struct init_failure : public std::exception
         {
         };
-
         hipStream_t hip_stream;
-        raii_stream_t()
+        sub_dft_stream_t()
+            : sub_dft_is_done(false)
+            , cb_is_enqueued(false)
         {
             auto ret = hipStreamCreate(&hip_stream);
             if(ret != hipSuccess)
                 throw init_failure();
         }
-        ~raii_stream_t()
+        hipError_t enqueue_host_callback()
         {
+            if(cb_is_enqueued)
+                throw std::runtime_error("a callback is already enqueued for this stream");
+            auto mark_stream_work_done_callback = [](hipStream_t, hipError_t, void* work_done_ptr) {
+                *(static_cast<bool*>(work_done_ptr)) = true; // raise flag
+            };
+            const auto hip_status = hipStreamAddCallback(
+                hip_stream, mark_stream_work_done_callback, &sub_dft_is_done, 0 /* must be 0 */);
+            if(hip_status == hipSuccess)
+                cb_is_enqueued = true;
+            return hip_status;
+        }
+
+        ~sub_dft_stream_t()
+        {
+            if(cb_is_enqueued)
+            {
+                (void)hipStreamSynchronize(hip_stream);
+            }
             (void)hipStreamDestroy(hip_stream);
+        }
+
+        bool done() const
+        {
+            return sub_dft_is_done;
+        }
+        void reset_flags()
+        {
+            sub_dft_is_done = cb_is_enqueued = false;
         }
     };
     // create the test streams
-    std::vector<raii_stream_t> test_streams;
+    std::vector<sub_dft_stream_t> test_streams;
     try
     {
         test_streams.resize(ParamsForMultiStreamDFT::num_streams);
     }
-    catch(const raii_stream_t::init_failure& e)
+    catch(const sub_dft_stream_t::init_failure& e)
     {
         n_hip_failures++;
         info.str("");
@@ -625,7 +668,7 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
     // a (host) callback invoked upon completion of every stream's task.
     void* step_stream_input_data_ptr  = nullptr;
     void* step_stream_output_data_ptr = nullptr;
-    for(auto step_id = 0; step_id < ParamsForMultiStreamDFT::num_steps; step_id++)
+    for(size_t step_id = 0; step_id < ParamsForMultiStreamDFT::num_steps; step_id++)
     {
         const size_t elementary_itype_size
             = parameters.real_scalar_type_size()
@@ -649,9 +692,7 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
             step_stream_output_data_ptr
                 = step_id == 1 || !parameters.is_inverse() ? output_buf.data() : input_buf.data();
         }
-        // define integer flags for each stream being used
-        std::vector<int> stream_is_done(ParamsForMultiStreamDFT::num_streams, 0);
-        for(auto stream_id = 0; stream_id < ParamsForMultiStreamDFT::num_streams; stream_id++)
+        for(size_t stream_id = 0; stream_id < ParamsForMultiStreamDFT::num_streams; stream_id++)
         {
             hipfft_params& dft_op = sub_dft[step_id][stream_id];
             fft_error_code
@@ -661,10 +702,8 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
                 GTEST_FAIL() << "execution failed for step id " << step_id << " and stream id "
                              << stream_id;
             }
-            hip_error_code = hipStreamAddCallback(test_streams[stream_id].hip_stream,
-                                                  mark_stream_work_done_callback,
-                                                  stream_is_done.data() + stream_id,
-                                                  0 /* must be 0 */);
+
+            hip_error_code = test_streams[stream_id].enqueue_host_callback();
             if(hip_error_code != hipSuccess)
             {
                 n_hip_failures++;
@@ -691,9 +730,9 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
         size_t           time_waited_us            = 0;
         constexpr size_t sleep_time_us             = 1000; // 1 ms
         constexpr size_t failure_time_threshold_us = 10000000; // 10^7 us := 10 s
-        while(std::any_of(stream_is_done.begin(),
-                          stream_is_done.end(),
-                          [](const decltype(stream_is_done)::value_type& val) { return val == 0; })
+        while(std::any_of(test_streams.begin(),
+                          test_streams.end(),
+                          [](const sub_dft_stream_t& stream) { return !stream.done(); })
               && time_waited_us <= failure_time_threshold_us)
         {
 #ifdef WIN32
@@ -708,6 +747,13 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
             // The added callback probably was never invoked, i.e., the above set_stream
             // was not taken into consideration by some sub_dft plan.
             GTEST_FAIL() << "Time limit exceeded";
+        }
+        else
+        {
+            for(auto& stream : test_streams)
+            {
+                stream.reset_flags();
+            }
         }
     }
     // verify results:

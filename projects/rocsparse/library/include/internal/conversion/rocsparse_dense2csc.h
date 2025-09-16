@@ -52,7 +52,7 @@ extern "C" {
 *  @param[in]
 *  n                number of columns of the column-oriented dense matrix \p A.
 *  @param[in]
-*  descr            the descriptor of the column-oriented dense matrix \p A, the supported matrix type is 
+*  descr            the descriptor of the column-oriented dense matrix \p A, the supported matrix type is
 *                   \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  A                column-oriented dense matrix of dimensions (\p ld, \p n)
@@ -63,10 +63,10 @@ extern "C" {
 *  @param[out]
 *  csc_val          array of nnz ( = \p csc_col_ptr[n] - \p csc_col_ptr[0] ) nonzero elements of matrix \p A.
 *  @param[out]
-*  csc_col_ptr      integer array of \p n+1 elements that contains the start of every column and the end of the last column 
+*  csc_col_ptr      integer array of \p n+1 elements that contains the start of every column and the end of the last column
 *                   plus one.
 *  @param[out]
-*  csc_row_ind      integer array of nnz ( = \p csc_col_ptr[n] - \p csc_col_ptr[0] ) column indices of the non-zero elements 
+*  csc_row_ind      integer array of nnz ( = \p csc_col_ptr[n] - \p csc_col_ptr[0] ) column indices of the non-zero elements
 *                   of matrix \p A.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.

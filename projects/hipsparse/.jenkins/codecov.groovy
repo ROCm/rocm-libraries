@@ -56,7 +56,7 @@ ci: {
     def jobNameList = [:]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
-    propertyList.each 
+    propertyList.each
     {
         jobName, property->
         if (urlJobName == jobName)
@@ -64,7 +64,7 @@ ci: {
     }
 
     Set seenJobNames = []
-    jobNameList.each 
+    jobNameList.each
     {
         jobName, nodeDetails->
         seenJobNames.add(jobName)
@@ -77,6 +77,6 @@ ci: {
     if(!seenJobNames.contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * *')])]))
-        runCI([], urlJobName)       
+        runCI([], urlJobName)
     }
 }
