@@ -1946,8 +1946,8 @@ namespace
             return "device";
             break;
         default:
-            throw std::runtime_error("internal error: unexpected value of mem_tye in "
-                                     "hipfftw_data_mem_type_to_string");
+            throw std::runtime_error(
+                "internal error: unexpected value of mem_type in hipfftw_data_mem_type_to_string");
             break;
         }
     };
@@ -1998,6 +1998,13 @@ namespace
                 ilengths.back() = ilengths.back() / 2 + 1;
             return ilengths;
         }
+        std::vector<size_t> get_olengths() const
+        {
+            auto olengths = get_lengths();
+            if(plan_helper.get_dft_kind() == fft_transform_type_real_forward)
+                olengths.back() = olengths.back() / 2 + 1;
+            return olengths;
+        }
         int get_rank() const
         {
             return plan_helper.get_rank();
@@ -2022,17 +2029,22 @@ namespace
         {
             return plan_helper.template get_nbatch_as<size_t>();
         }
-        std::vector<size_t> get_contiguous_istride() const
+        std::vector<size_t> get_contiguous_istrides() const
         {
-            // equivalent to plan's strides for now, to be reconsidered once more general
-            // configurations are enabled
-            return plan_helper.template get_strides_as<size_t>(fft_io::fft_io_in);
+            std::vector<size_t> contiguous_istrides(params.get_rank());
+            const auto          ilen   = get_ilengths();
+            contiguous_istrides.back() = 1;
+            for(auto dim = get_rank() - 1; dim-- > 0;)
+            {
+                contiguous_istrides[dim] = contiguous_istrides[dim + 1] * ilength[dim + 1];
+            }
+            return contiguous_istrides;
         }
         size_t get_contiguous_idist() const
         {
-            // equivalent to plan's strides for now, to be reconsidered once more general
-            // configurations are enabled
-            return plan_helper.template get_dist_as<size_t>(fft_io::fft_io_in);
+            const auto cont_istrides = get_contiguous_istrides();
+            const auto ilen          = get_ilengths();
+            return ilen.front() * cont_istrides.front();
         }
 
         bool can_be_tested() const
@@ -2196,28 +2208,19 @@ namespace
                     GTEST_FAIL() << "Verification IO buffer incorrectly initialized";
                 // generate input data
                 const std::vector<size_t> field_lower(params.get_rank(), 0);
-                const auto                ilength = params.get_ilengths();
-                std::vector<size_t>       contiguous_istride(params.get_rank());
-                size_t                    val = 1;
-                for(int dim = params.get_rank() - 1; dim >= 0; dim--)
-                {
-                    contiguous_istride[dim] = val;
-                    val *= ilength[dim];
-                }
-                const auto contiguous_idist = val;
                 set_input<hostbuf, hipfftw_real_t<prec>>(verification_input,
                                                          fft_input_random_generator_host,
                                                          params.get_array_type(fft_io::fft_io_in),
                                                          params.get_lengths(),
-                                                         ilength,
+                                                         params.get_ilengths(),
                                                          params.get_istride(),
                                                          params.get_idist(),
                                                          params.get_nbatch(),
                                                          get_curr_device_prop(),
                                                          field_lower,
                                                          0 /* field_lower_batch */,
-                                                         contiguous_istride,
-                                                         contiguous_idist);
+                                                         params.get_contiguous_istrides(),
+                                                         params.get_contiguous_idist());
                 // create the reference plan (systematically using the most general guru64 creation)
                 reference_plan = params.plan_helper.get_reference_plan(
                     verification_input[0].data(),
@@ -2414,17 +2417,14 @@ namespace
                 // compare results
                 if(reference_cpu_dft.valid())
                     reference_cpu_dft.get();
-                const auto test_lengths  = params.get_lengths();
-                auto       test_olengths = test_lengths;
-                if(params.get_dft_kind() == fft_transform_type_real_forward)
-                    test_olengths.back() = test_olengths.back() / 2 + 1;
+                const auto  test_lengths     = params.get_lengths();
                 const auto  total_length     = product(test_lengths.begin(), test_lengths.end());
                 const auto& reference_output = params.get_placement() == fft_placement_inplace
                                                    ? verification_input
                                                    : verification_output;
 
                 const auto   ref_norm = norm(reference_output,
-                                           test_olengths,
+                                           params.get_olengths(),
                                            params.get_nbatch(),
                                            prec,
                                            params.get_array_type(fft_io::fft_io_out),
@@ -2437,7 +2437,7 @@ namespace
                 // compare results
                 const auto diff = distance(reference_output,
                                            execution_results_on_host,
-                                           test_olengths,
+                                           params.get_olengths(),
                                            params.get_nbatch(),
                                            prec,
                                            params.get_array_type(fft_io::fft_io_out),
@@ -2503,28 +2503,78 @@ namespace
         std::vector<hipfftw_functional_validation_params<prec>> full_list;
         hipfftw_functional_validation_params<prec>              to_add;
         std::uniform_int_distribution<int>                      coin_toss(0, 1);
+        std::uniform_int_distribution<ptrdiff_t> stride_rng(1, upper_bound_elementary_stride);
+
         const auto& possible_mem_types = get_possible_data_mem_types();
         while(full_list.size() < desired_full_suite_size)
         {
-            to_add.execution_io  = coin_toss(get_pseudo_rng()) == 0
-                                       ? hipfftw_execution_io_args::use_creation_io
-                                       : hipfftw_execution_io_args::clean_new_io;
-            const auto dft_kind  = get_random_element_in(trans_type_range_full);
-            const auto rank      = get_random_rank<valid_value, 1, 3>();
-            const auto placement = get_random_element_in(place_range);
-            const auto batches
-                = get_random_vector<valid_value, int>(1, max_nbatch_for_hipfftw_test);
+            to_add.execution_io     = coin_toss(get_pseudo_rng()) == 0
+                                          ? hipfftw_execution_io_args::use_creation_io
+                                          : hipfftw_execution_io_args::clean_new_io;
+            const auto creation_fun = get_random_element_in(hipfftw_plan_creation_func_candidates);
+            const auto dft_kind     = get_random_element_in(trans_type_range_full);
+            const auto rank         = get_random_rank<valid_value, 1, 3>();
+            const auto placement    = get_random_element_in(place_range);
             const bool is_real_inplace = is_real(dft_kind) && placement == fft_placement_inplace;
-            const ptrdiff_t max_len
-                = std::min(get_default_layout_len_threshold_for_max_byte_size<prec>(
-                               max_byte_size_for_hipfftw_tests(), rank, is_real_inplace, batches),
-                           static_cast<ptrdiff_t>(max_length_for_hipfftw_test));
-            to_add.plan_helper.set_creation_args(dft_kind,
-                                                 rank,
-                                                 get_random_vector<valid_value, int>(rank, max_len),
-                                                 placement,
-                                                 is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
-                                                 FFTW_ESTIMATE);
+            constexpr int batch_rank   = 1;
+            switch(creation_fun)
+            {
+            case hipfftw_plan_creation_func::PLAN_DFT:
+                [[fallthrough]];
+            case hipfftw_plan_creation_func::PLAN_DFT_ND:
+            {
+                const ptrdiff_t max_len
+                    = std::min(get_default_layout_len_threshold_for_max_byte_size<prec>(
+                                   max_byte_size_for_hipfftw_tests(), rank, is_real_inplace),
+                               static_cast<ptrdiff_t>(max_length_for_hipfftw_test));
+                plan_helper.set_creation_args(dft_kind,
+                                              rank,
+                                              get_random_vector<valid_value, int>(rank, max_len),
+                                              placement,
+                                              is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
+                                              FFTW_ESTIMATE);
+                break;
+            }
+            case hipfftw_plan_creation_func::PLAN_MANY:
+            {
+                auto       fwd_stride = stride_rng(get_pseudo_rng());
+                const auto batches
+                    = get_random_vector<valid_value>(batch_rank, max_nbatch_for_hipfftw_test, 1);
+                const size_t max_fwd_embed_byte_size
+                    = max_byte_size_for_hipfftw_tests()
+                      / (fwd_stride * batches[0]
+                         * (is_real(dft_kind) ? sizeof(hipfftw_real_t<prec>)
+                                              : sizeof(hipfftw_complex_t<prec>)));
+                const ptrdiff_t max_fwd_nembed
+                    = std::min(static_cast<ptrdiff_t>(max_length_for_hipfftw_test),
+                               get_default_layout_len_threshold_for_max_byte_size<prec>(
+                                   max_fwd_embed_byte_size, rank, is_real(dft_kind), batches));
+
+                plan_helper.set_creation_args(dft_kind,
+                                              rank,
+                                              lengths,
+                                              placement,
+                                              is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
+                                              FFTW_ESTIMATE,
+                                              istrides,
+                                              ostrides,
+                                              batch_rank,
+                                              batches,
+                                              idist,
+                                              odist);
+
+                break;
+            }
+            case hipfftw_plan_creation_func::PLAN_GURU:
+                [[fallthrough]];
+            case hipfftw_plan_creation_func::PLAN_GURU64:
+                continue; // not available yet
+                break;
+            default:
+                throw std::runtime_error(
+                    "unexpected value of creation_fun in params_for_functional_tests");
+                break;
+            }
             for(auto step : {hipfftw_step::plan_creation, hipfftw_step::plan_execution})
             {
                 if(step == hipfftw_step::plan_execution
