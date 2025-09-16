@@ -71,12 +71,12 @@ if(HIPSPARSELT_ENABLE_HIP)
     target_compile_definitions(hipsparselt PRIVATE __HIP_HCC_COMPAT_MODE__=1)
     target_include_directories(
         hipsparselt PUBLIC $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}> # Needed?
-                           $<BUILD_INTERFACE:${HIPSPARSE_INCLUDE_DIRS}> # Needed?
+                           # Don't link against hipsparse, only include the headers. Otherwise a
+                           # transitive dependency on rocsparse will be introduced.
+                           $<BUILD_INTERFACE:${HIPSPARSE_INCLUDE_DIRS}>
     )
     target_link_libraries(hipsparselt PRIVATE hip::host hip::device)
 endif()
-
-target_link_libraries(hipsparselt PRIVATE roc::hipsparse)
 
 add_subdirectory(include)
 add_subdirectory(src)
