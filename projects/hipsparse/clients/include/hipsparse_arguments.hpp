@@ -107,6 +107,7 @@ struct Arguments
     double boostval;
     double boostvali;
 
+    int slice_size;
     int ell_width;
     int permute;
     int gtsv_alg;
@@ -183,6 +184,7 @@ struct Arguments
         this->boostval     = 1.0;
         this->boostvali    = 0.0;
 
+        this->slice_size = 2;
         this->ell_width = 0;
         this->permute   = 0;
         this->gtsv_alg  = 0;

@@ -116,6 +116,7 @@ set(HIPSPARSE_TEST_SOURCES
   test_spmv_coo.cpp
   test_spmv_coo_aos.cpp
   test_spmv_csr.cpp
+  test_spmv_sell.cpp
   test_axpby.cpp
   test_gather.cpp
   test_scatter.cpp
