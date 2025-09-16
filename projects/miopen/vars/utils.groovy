@@ -336,7 +336,7 @@ def buildHipClangJob(Map conf=[:]){
         def variant = env.STAGE_NAME
 
         def needs_gpu = conf.get("needs_gpu", true)
-        def lfs_pull = conf.get("lfs_pull", false)
+        def dvc_checkout = conf.get("dvc_checkout", false)
 
         def retimage
         def credentialsID = env.monorepo_status_wrapper_creds
@@ -376,10 +376,10 @@ def buildHipClangJob(Map conf=[:]){
             withDockerContainer(image: image, args: dockerOpts + " -v=${remote_root}:${remote_root}") {
                 timeout(time: 420, unit:'MINUTES')
                 {
-                    if (lfs_pull) {
+                    if (dvc_checkout) {
                         sh """
                             cd ${env.WORKSPACE}/${env.REPO_DIR}
-                            git lfs pull --exclude=
+                            dvc checkout
                            """.stripIndent()
                     }
                     cmake_build(conf)
