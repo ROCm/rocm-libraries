@@ -82,6 +82,7 @@ def run_problems(
         if problem in already_run:
             continue
 
+        id = getattr(problem, "id", None)
         yaml = (work_dir / f"{problem.group}-{i:06d}.yaml").resolve()
         problem.set_output(yaml)
         cmd = problem.command()
@@ -95,7 +96,8 @@ def run_problems(
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")
-            print(f"  id: {problem.id}")
+            if id is not None:
+                print(f"  id: {id}")
             print(f"  command: {scmd}")
             print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
