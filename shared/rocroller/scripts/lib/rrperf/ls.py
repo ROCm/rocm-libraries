@@ -27,7 +27,7 @@
 
 import argparse
 import functools
-import os
+import shutil
 
 import rrperf.args as args
 import rrperf.utils as utils
@@ -35,7 +35,7 @@ import rrperf.utils as utils
 
 @functools.cache
 def hline():
-    width = os.get_terminal_size().columns
+    width = shutil.get_terminal_size(fallback=(80, 20)).columns
     return "-" * width
 
 
