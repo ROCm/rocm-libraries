@@ -84,4 +84,3 @@ if(BLIS_FOUND)
 endif()
 
 message(STATUS "Found BLIS: ${BLIS_LIB}")
-

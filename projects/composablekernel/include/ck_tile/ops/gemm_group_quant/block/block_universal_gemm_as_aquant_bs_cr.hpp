@@ -12,7 +12,7 @@
 namespace ck_tile {
 
 template <typename Problem, index_t UnaryOpSize_ = 8>
-struct BlockGemmQuantBase
+struct BlockGemmAQuantBase
 {
     using AQDataType      = remove_cvref_t<typename Problem::AQDataType>;
     using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
@@ -67,7 +67,7 @@ struct BlockGemmQuantBase
 // B is block window on shared memory
 // C is block distributed tensor
 template <typename Problem_, typename Policy_ = BlockGemmASmemBSmemCRegV1DefaultPolicy>
-struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
+struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
 {
     private:
     template <typename PipelineProblem_, typename GemmPolicy_>
@@ -103,13 +103,13 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
         using I1 = number<1>;
 
         static_assert(MWarp == BlockGemmShape::BlockWarps::at(I0{}),
-                      "Error! WarpGemm's MWarp is not consisten with BlockGemmShape!");
+                      "Error! WarpGemm's MWarp is not consistent with BlockGemmShape!");
         static_assert(NWarp == BlockGemmShape::BlockWarps::at(I1{}),
-                      "Error! WarpGemm's NWarp is not consisten with BlockGemmShape!");
+                      "Error! WarpGemm's NWarp is not consistent with BlockGemmShape!");
         static_assert(WarpGemm::kM == BlockGemmShape::WarpTile::at(I0{}),
-                      "Error! WarpGemm's M is not consisten with BlockGemmShape!");
+                      "Error! WarpGemm's M is not consistent with BlockGemmShape!");
         static_assert(WarpGemm::kN == BlockGemmShape::WarpTile::at(I1{}),
-                      "Error! WarpGemm's N is not consisten with BlockGemmShape!");
+                      "Error! WarpGemm's N is not consistent with BlockGemmShape!");
 
         static constexpr index_t MIterPerWarp = MPerBlock / (MWarp * WarpGemm::kM);
         static constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WarpGemm::kN);
@@ -170,7 +170,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
     using ComputeDataType = remove_cvref_t<typename Traits::ComputeDataType>;
     using CDataType       = remove_cvref_t<typename Traits::CDataType>;
 
-    using Base = BlockGemmQuantBase<Problem_>;
+    using Base = BlockGemmAQuantBase<Problem_>;
 
     using WarpGemm = remove_cvref_t<typename Traits::WarpGemm>;
 
@@ -181,9 +181,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
     static constexpr index_t MWarp = Traits::MWarp;
     static constexpr index_t NWarp = Traits::NWarp;
 
-    static constexpr auto Scheduler       = Traits::Scheduler;
-    static constexpr uint8_t kA_cvt_scale = std::is_same_v<ADataType, pk_int4_t> ? 16 : 1;
-    static constexpr uint8_t kB_cvt_scale = std::is_same_v<BDataType, pk_int4_t> ? 16 : 1;
+    static constexpr auto Scheduler = Traits::Scheduler;
 
     using AWarpDstr = typename WarpGemm::AWarpDstr;
     using BWarpDstr = typename WarpGemm::BWarpDstr;
@@ -323,7 +321,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
                                        [[maybe_unused]] BSmemBlockWindow& b_block_window)
         {
             static_assert(std::is_same_v<CDataType, typename CBlockTensor::DataType>,
-                          "The CDataType as defined in traits should be the same as correspoinding "
+                          "The CDataType as defined in traits should be the same as corresponding "
                           "C block tensor data type!");
             constexpr auto warp_size = get_warp_size();
 
@@ -360,10 +358,11 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
 
                         if constexpr(Traits::PreshuffleQuant)
                         {
+                            static_assert(false,
+                                          "It is not supported yet to enable both Preshuffle and "
+                                          "TransposeC.");
                             if constexpr(Traits::TransposeC) // transposed C
                             {
-                                static_assert(false,
-                                              "It is not supported yet to enable both Preshuffle.");
                                 // TODO:
                                 // A new tile distribution is needed for the Preshuffle and
                                 // Transpose combination. For instance, with mnk at 16x16x32, lanes
@@ -451,13 +450,13 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
 
                                         c_block_tensor.get_thread_buffer()[tbuf_offset + c_row] +=
                                             (c_warp_tensor.get_thread_buffer()[c_row] *
-                                             scale_reg_f * kA_cvt_scale * kB_cvt_scale);
+                                             scale_reg_f);
                                     });
                             }
                         }
                         else
                         {
-                            if(Traits::TransposeC) // transposed C
+                            if constexpr(Traits::TransposeC) // transposed C
                             {
                                 constexpr index_t reg_offset = mIter * Traits::AQPerBlock + kQScale;
                                 constexpr auto tbuf_offset   = number<
@@ -471,7 +470,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
                                     [&](auto c_row) {
                                         c_block_tensor.get_thread_buffer()[tbuf_offset + c_row] +=
                                             (c_warp_tensor.get_thread_buffer()[c_row] *
-                                             scale_reg_f * kA_cvt_scale * kB_cvt_scale);
+                                             scale_reg_f);
                                     });
                             }
                             else
@@ -556,7 +555,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase<Problem_>
                                                                        reg_offset_for_row_data] +=
                                         (c_warp_tensor
                                              .get_thread_buffer()[reg_offset_for_row_data] *
-                                         scale_reg_f * kA_cvt_scale * kB_cvt_scale);
+                                         scale_reg_f);
                                 });
                             }
                         }

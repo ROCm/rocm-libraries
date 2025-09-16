@@ -109,7 +109,7 @@ def cmake_build(Map conf=[:]){
 
     if (conf.get("vcache_enable","") == "true"){
         //grab root of node workspace. not guaranteed to be /var/jenkins
-        String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/")) 
+        String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
         def vcache = conf.get(vcache_path,"${remote_root}/.cache/miopen/vcache")
         build_envs = " MIOPEN_VERIFY_CACHE_PATH='${vcache}' " + build_envs
     } else{
@@ -390,7 +390,7 @@ def buildHipClangJob(Map conf=[:]){
             }
 
             //grab root of node workspace. not guaranteed to be /var/jenkins
-            String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/")) 
+            String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
             withDockerContainer(image: image, args: dockerOpts + " -v=${remote_root}:${remote_root}") {
                 timeout(time: build_timeout, unit:'MINUTES')
                 {
@@ -438,7 +438,7 @@ def RunPerfTest(Map conf=[:]){
         docker_image.pull()
         echo "docker image: ${docker_image}"
         //grab root of node workspace. not guaranteed to be /var/jenkins
-        String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/")) 
+        String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
         docker_image.inside(dockerOpts + " -v=${remote_root}:${remote_root}")
         {
             timeout(time: 100, unit: 'MINUTES')
