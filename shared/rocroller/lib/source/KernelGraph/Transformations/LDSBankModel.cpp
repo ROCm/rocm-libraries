@@ -25,7 +25,11 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <sstream>
+#include <unordered_map>
+
 #include <fmt/format.h>
+
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
@@ -34,8 +38,6 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
-#include <sstream>
-#include <unordered_map>
 
 namespace rocRoller::KernelGraph::MemoryTracer
 {
@@ -327,7 +329,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         const auto threadGroupBankMappings = computeThreadGroupBankMappings(instr, gfx);
         uint       cycles = calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
 
-        // Add address transfer overhead only for Store operations
+        // Add address transfer overhead for write due to shared addr and data bus
         if(instr.memoryOp.direction == LdsDirection::Write)
         {
             cycles += 4;
