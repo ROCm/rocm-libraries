@@ -315,7 +315,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         {
             cycles += calculateBankConflictCycles(bankMapping);
         }
-        return cycles + 4; // address transfer
+        return cycles;
     }
 
     uint LDSBankModel::getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
@@ -325,7 +325,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
                     rocRoller::toString(gfx));
 
         const auto threadGroupBankMappings = computeThreadGroupBankMappings(instr, gfx);
-        return calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
+        uint       cycles = calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
+
+        // Add address transfer overhead only for Store operations
+        if(instr.memoryOp.direction == Direction::Store)
+        {
+            cycles += 4;
+        }
+
+        return cycles;
     }
 
     OperationsAnalysis LDSBankModel::doOperationsAnalysis(GPUArchitectureGFX gfx) const
@@ -452,7 +460,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 i++;
             }
         }
-        cycles += 4;
+
+        // Add address transfer overhead only for Store operations
+        if(instr.memoryOp.direction == Direction::Store)
+        {
+            cycles += 4;
+        }
 
         const auto instructionTotalClocks = LDSBankModel::getClockCount(instr, gfx);
 

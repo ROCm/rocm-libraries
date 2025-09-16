@@ -350,8 +350,8 @@ namespace MemoryTracerTest
             {{3, 1}, {4, 1}, {5, 1}}, // Group 2: max 1 access (no conflicts)
             {{0, 3}, {1, 3}, {2, 3}} // Group 3: max 3 accesses
         };
-        // 5 + 1 + 3 + 4 = 13 cycles total
-        CHECK(LDSBankModel::calculateTotalCyclesFromBankMappings(mappings) == 13);
+        // 5 + 1 + 3 = 9 cycles
+        CHECK(LDSBankModel::calculateTotalCyclesFromBankMappings(mappings) == 9);
     }
 
     TEST_CASE("LDS model get clock count", "[lds-bank-model]")
@@ -360,16 +360,26 @@ namespace MemoryTracerTest
         using namespace rocRoller::KernelGraph::MemoryTracer;
 
         RuntimeLDSInstruction instr;
-        instr.memoryOp      = MemoryOpLDS{Direction::Load};
         instr.dwords        = 2;
         instr.baseAddresses = {0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120};
 
         const auto gfx = GPUArchitectureGFX::GFX942;
 
-        const auto mappings       = LDSBankModel::computeThreadGroupBankMappings(instr, gfx);
-        const auto expectedCycles = LDSBankModel::calculateTotalCyclesFromBankMappings(mappings);
+        const auto mappings   = LDSBankModel::computeThreadGroupBankMappings(instr, gfx);
+        const auto baseCycles = LDSBankModel::calculateTotalCyclesFromBankMappings(mappings);
 
-        const auto cycles = LDSBankModel::getClockCount(instr, gfx);
-        CHECK(cycles == expectedCycles);
+        SECTION("Load operations - no address transfer overhead")
+        {
+            instr.memoryOp    = MemoryOpLDS{Direction::Load};
+            const auto cycles = LDSBankModel::getClockCount(instr, gfx);
+            CHECK(cycles == baseCycles); // No +4 for Load operations
+        }
+
+        SECTION("Store operations - includes 4 cycle address transfer overhead")
+        {
+            instr.memoryOp    = MemoryOpLDS{Direction::Store};
+            const auto cycles = LDSBankModel::getClockCount(instr, gfx);
+            CHECK(cycles == baseCycles + 4); // +4 for Store operations
+        }
     }
 }
