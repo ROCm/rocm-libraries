@@ -599,21 +599,7 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::launchKernel");
 
-        AssertFatal(m_context, "Unable to launch kernel: CommandKernel must have a Context.");
-        AssertFatal(m_context->kernel(),
-                    "Unable to launch kernel: Context must have an AssemblyKernel.");
-        AssertFatal(matchesPredicates(args, LogLevel::Error),
-                    "Unable to launch kernel: all CommandKernel predicates must match.");
-
-        if(m_launchParameters)
-        {
-            if(m_launchParameters->getManualWorkitemCount())
-                m_context->kernel()->setWorkitemCount(
-                    *m_launchParameters->getManualWorkitemCount());
-        }
-
-        auto kargs = getKernelArguments(args);
-        auto inv   = getKernelInvocation(args);
+        auto [kargs, inv] = prepKernel(args);
 
         loadKernel();
 
