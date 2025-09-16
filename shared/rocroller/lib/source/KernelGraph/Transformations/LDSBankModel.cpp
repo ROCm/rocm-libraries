@@ -158,25 +158,25 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         uint instructionDwords = event.bytesRequested / 4;
 
-        // TODO: Use the workitem to figure out which instruction this belongs to
-        RuntimeLDSInstruction* targetInstruction = nullptr;
-        for(auto& instr : opAccesses.instructions)
-        {
-            if(instr.dwords == instructionDwords && instr.memoryOp.direction == ldsOp->direction)
-            {
-                targetInstruction = &instr;
-                break;
-            }
-        }
-
-        if(!targetInstruction)
+        // When workItem is 0, start a new instruction
+        if(event.workItem == 0)
         {
             RuntimeLDSInstruction newInstr;
             newInstr.memoryOp = *ldsOp;
             newInstr.dwords   = instructionDwords;
             opAccesses.instructions.push_back(newInstr);
-            targetInstruction = &opAccesses.instructions.back();
         }
+
+        // Double-check that the instruction being appended to is consistent
+        AssertFatal(!opAccesses.instructions.empty(),
+                    "No instructions available - workItem 0 should have created one");
+        RuntimeLDSInstruction* targetInstruction = &opAccesses.instructions.back();
+        AssertFatal(targetInstruction->dwords == instructionDwords,
+                    "Inconsistent dword count within wave",
+                    ShowValue(instructionDwords),
+                    ShowValue(targetInstruction->dwords));
+        AssertFatal(targetInstruction->memoryOp.direction == ldsOp->direction,
+                    "Inconsistent memory direction within wave");
 
         targetInstruction->baseAddresses.push_back(event.byteOffset);
     }

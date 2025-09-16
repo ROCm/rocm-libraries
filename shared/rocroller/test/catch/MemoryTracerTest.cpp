@@ -90,47 +90,44 @@ namespace MemoryTracerTest
             kgraph = kgraph.transform(t);
 
         KernelInvocation inv{.workgroupSize = {64, 1, 1}};
-        SUPPORTED_ARCH_SECTION(arch)
+        SECTION("memoryTrace")
         {
-            SECTION("Old Summary") // TODO: rename
-            {
-                auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
+            auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
 
-                for(const auto& [tag, access] : summary.tagToAccess)
+            for(const auto& [tag, access] : summary.tagToAccess)
+            {
+                // All visited nodes only access 4 or 8 banks in this graph
+                if(context->targetArchitecture().target().isGFX12GPU())
                 {
-                    // All visited nodes only access 4 or 8 banks in this graph
-                    if(arch.isGFX12GPU())
-                    {
-                        CHECK(access.accessedBanks.size() == 8);
-                    }
-                    else
-                    {
-                        CHECK(access.accessedBanks.size() == 4);
-                    }
+                    CHECK(access.accessedBanks.size() == 8);
                 }
-
-                std::string summaryStr = summary.toString();
-                CHECK(summaryStr.find("Operation tag") != std::string::npos);
-                CHECK(summaryStr.find("accesses LDS") != std::string::npos);
+                else
+                {
+                    CHECK(access.accessedBanks.size() == 4);
+                }
             }
 
-            SECTION("Detailed summary of kernel graph")
-            {
-                auto tracer = MemoryTracer::MemoryTracer(kgraph);
-                tracer.trace();
+            std::string summaryStr = summary.toString();
+            CHECK(summaryStr.find("Operation tag") != std::string::npos);
+            CHECK(summaryStr.find("accesses LDS") != std::string::npos);
+        }
 
-                auto model = MemoryTracer::LDSBankModel(4, 32, 512);
+        SECTION("bank model")
+        {
+            auto tracer = MemoryTracer::MemoryTracer(kgraph);
+            tracer.trace();
 
-                auto workgroups            = 1;
-                auto workitemsPerWorkgroup = product(inv.workgroupSize);
-                tracer.simulateLaunch(model, workgroups, workitemsPerWorkgroup);
+            auto model = MemoryTracer::LDSBankModel(4, 32, 512);
 
-                auto detailed = model.doOperationsAnalysis(GPUArchitectureGFX::GFX942);
+            auto workgroups            = 1;
+            auto workitemsPerWorkgroup = product(inv.workgroupSize);
+            tracer.simulateLaunch(model, workgroups, workitemsPerWorkgroup);
 
-                std::string detailedStr = detailed.toString();
-                CHECK(detailedStr.find("Operation Tag:") != std::string::npos);
-                CHECK(detailedStr.find("gfx942") != std::string::npos);
-            }
+            auto analysis = model.doOperationsAnalysis(GPUArchitectureGFX::GFX942);
+
+            std::string analysisStr = analysis.toString();
+            CHECK(analysisStr.find("Operation Tag:") != std::string::npos);
+            CHECK(analysisStr.find("gfx942") != std::string::npos);
         }
     }
 
@@ -196,20 +193,22 @@ namespace MemoryTracerTest
         // Simulate 64 threads each reading 16 bytes then 4 bytes
         for(uint32_t threadId = 0; threadId < 64; ++threadId)
         {
-            const auto baseAddr = threadId * 32;
             model.simulate(MemoryEventSimulated{operationTag,
                                                 sourceTag,
                                                 destinationTag,
                                                 ldsRead,
-                                                baseAddr,
+                                                threadId * 32,
                                                 16,
                                                 workGroup,
                                                 threadId});
+        }
+        for(uint32_t threadId = 0; threadId < 64; ++threadId)
+        {
             model.simulate(MemoryEventSimulated{operationTag,
                                                 sourceTag,
                                                 destinationTag,
                                                 ldsRead,
-                                                baseAddr + 16,
+                                                threadId * 32 + 16,
                                                 4,
                                                 workGroup,
                                                 threadId});
@@ -217,8 +216,6 @@ namespace MemoryTracerTest
 
         auto        detailed   = model.doOperationsAnalysis(GPUArchitectureGFX::GFX950);
         const auto& opAccesses = detailed.tagToAccess.at(operationTag);
-
-        // TODO: currently fix test when operation disconnected from instruction
 
         std::string detailedStr = detailed.toString();
         CHECK(detailedStr.find("gfx950") != std::string::npos);
