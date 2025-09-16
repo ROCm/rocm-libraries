@@ -109,8 +109,9 @@ namespace MemoryTracerTest
                     }
                 }
 
-                if constexpr(false)
-                    std::cout << "\nSummary:\n" << summary.toString() << std::endl;
+                std::string summaryStr = summary.toString();
+                CHECK(summaryStr.find("Operation tag") != std::string::npos);
+                CHECK(summaryStr.find("accesses LDS") != std::string::npos);
             }
 
             SECTION("Detailed summary of kernel graph")
@@ -126,8 +127,9 @@ namespace MemoryTracerTest
 
                 auto detailed = model.doOperationsAnalysis(GPUArchitectureGFX::GFX942);
 
-                if constexpr(false)
-                    std::cout << "\nDetailed Summary:\n" << detailed << std::endl;
+                std::string detailedStr = detailed.toString();
+                CHECK(detailedStr.find("Operation Tag:") != std::string::npos);
+                CHECK(detailedStr.find("gfx942") != std::string::npos);
             }
         }
     }
@@ -219,8 +221,10 @@ namespace MemoryTracerTest
         // TODO: currently fix test when operation disconnected from instruction
 
         std::string detailedStr = detailed.toString();
-        if constexpr(true)
-            std::cout << detailedStr << std::endl;
+        CHECK(detailedStr.find("gfx950") != std::string::npos);
+        CHECK(detailedStr.find("Operation Tag: 1") != std::string::npos);
+        CHECK(detailedStr.find("LDS Tag: 10") != std::string::npos);
+        CHECK(!detailedStr.empty());
     }
 
     TEST_CASE("LDS model make bank to address counts", "[lds-bank-model]")

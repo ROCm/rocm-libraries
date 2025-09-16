@@ -24,39 +24,6 @@
  *
  *******************************************************************************/
 
-/**
- * Memory tracer for the rocRoller kernel graph.
- *
- * This file implements a memory tracer that simulates memory accesses
- * in a kernel graph.
- *
- * The general idea is:
- *
- * 1. Instantiate a `MemoryTracer()` object with the kernel graph.
- *
- * 2. Call `trace()` to walk the control graph and generate a list of
- *    memory events.  Each memory event roughly corresponds to a
- *    memory instruction that the code-generator will emit.
- *
- *    This step is done once.
- *
- * 3. For each memory effect that you want to simulate, instantiate a
- *    "model".
- *
- *    For example, the `LDSBankModel()` focuses on LDS read/writes,
- *    and tries to predict LDS bank conflicts.
- *
- *    a. Call the tracer's `simulateLaunch()` and provide your model.
- *
- *    b. The `simulateLaunch()` method will "blow up" all memory
- *       events by evaluating the indexing expression for a collection
- *       of `Workgroup` and `Workitem` values into a large collection
- *       of `MemoryEventSimulated` objects.
- *
- *    c. Each of these simulated memory events will be passed to your
- *       model through the `simulate()` method.
- */
-
 #include <map>
 #include <unordered_set>
 #include <variant>

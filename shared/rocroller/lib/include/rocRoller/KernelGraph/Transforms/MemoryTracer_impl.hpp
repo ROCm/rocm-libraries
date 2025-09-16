@@ -52,9 +52,6 @@ namespace rocRoller
             namespace Expression = rocRoller::Expression;
             using ExpressionPtr  = Expression::ExpressionPtr;
 
-            /**
-             * @brief Simulate memory launches with given model
-             */
             template <typename Model>
             void MemoryTracer::simulateLaunch(Model& model, uint numWorkgroups, uint numWorkitems)
             {
