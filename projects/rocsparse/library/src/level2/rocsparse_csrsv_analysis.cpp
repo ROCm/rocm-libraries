@@ -528,6 +528,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
             ? rocsparse_indextype_u16
             : ((sizeof(J) == sizeof(int32_t)) ? rocsparse_indextype_i32 : rocsparse_indextype_i64));
 
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
     return rocsparse_status_success;
 }
 
