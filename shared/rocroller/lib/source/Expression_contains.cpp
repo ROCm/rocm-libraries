@@ -67,6 +67,13 @@ namespace rocRoller
                 return call(expr.lhs) || call(expr.r1hs) || call(expr.r2hs);
             }
 
+            template <CNary U>
+            requires(!std::same_as<T, U>) bool operator()(U const& expr)
+            {
+                return std::ranges::any_of(expr.operands,
+                                           [this](auto const& operand) { return call(operand); });
+            }
+
             template <std::same_as<ScaledMatrixMultiply> U>
             requires(!std::same_as<T, U>) bool operator()(U const& expr)
             {
@@ -162,6 +169,14 @@ namespace rocRoller
             {
                 return identical(expr, subExpr) || call(expr.lhs) || call(expr.r1hs)
                        || call(expr.r2hs);
+            }
+
+            template <CNary Expr>
+            bool operator()(Expr const& expr) const
+            {
+                return identical(expr, subExpr)
+                       || std::ranges::any_of(
+                           expr.operands, [this](auto const& operand) { return call(operand); });
             }
 
             template <CValue U>

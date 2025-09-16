@@ -39,8 +39,8 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
-#include <Tensile/analytical/StreamK.hpp>
-#include <Tensile/analytical/Utils.hpp>
+#include <origami/streamk.hpp>
+#include <origami/utils.hpp>
 
 using namespace rocRoller;
 
@@ -579,28 +579,28 @@ rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_t
     }
 }
 
-TensileLite::analytical::DataType rocroller_type_to_analytical_type(rocRoller::DataType type)
+origami::data_type_t rocroller_type_to_analytical_type(rocRoller::DataType type)
 {
     switch(type)
     {
         case rocRoller::DataType::Half:
-            return TensileLite::analytical::DataType::Half;
+            return origami::data_type_t::Half;
         case rocRoller::DataType::Float:
-            return TensileLite::analytical::DataType::Float;
+            return origami::data_type_t::Float;
         case rocRoller::DataType::BFloat16:
-            return TensileLite::analytical::DataType::BFloat16;
+            return origami::data_type_t::BFloat16;
         case rocRoller::DataType::FP8:
-            return TensileLite::analytical::DataType::Float8;
+            return origami::data_type_t::Float8;
         case rocRoller::DataType::BF8:
-            return TensileLite::analytical::DataType::BFloat8;
+            return origami::data_type_t::BFloat8;
         case rocRoller::DataType::FP6:
-            return TensileLite::analytical::DataType::Float6;
+            return origami::data_type_t::Float6;
         case rocRoller::DataType::BF6:
-            return TensileLite::analytical::DataType::BFloat6;
+            return origami::data_type_t::BFloat6;
         case rocRoller::DataType::FP4:
-            return TensileLite::analytical::DataType::Float4;
+            return origami::data_type_t::Float4;
         default:
-            return TensileLite::analytical::DataType::None;
+            return origami::data_type_t::None;
     }
 }
 
@@ -654,23 +654,23 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 {
     std::vector<SolutionIndexParameters> params;
 
-    std::vector<TensileLite::analytical::TileTuple> tile_list = getTileListForKernelType(kernelType);
+    std::vector<origami::tile_tuple> tile_list = getTileListForKernelType(kernelType);
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
     size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits;
 
-    TensileLite::analytical::DataType dataType;
+    origami::data_type_t dataType;
     if (elementSizeA_bits < elementSizeB_bits)
         dataType = rocroller_type_to_analytical_type(kernelType.typeB);
     else
         dataType = rocroller_type_to_analytical_type(kernelType.typeA);
 
-    const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
+    const origami::hardware_t analaytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
     int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
 
-    auto selected_tiles = TensileLite::analytical::select_best_macro_tile_size(
+    auto selected_tiles = origami::select_best_macro_tile_size(
         prob.m,
         prob.n,
         prob.k,
@@ -736,26 +736,26 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
                           const RocblasltContractionProblem& prob)
 {
-    const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
+    const origami::hardware_t analaytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeB).elementBits;
     size_t elementSizeD_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeD).elementBits;
     size_t elementSizeAcc = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeAcc).elementBytes;
 
-    TensileLite::analytical::DataType dataType;
+    origami::data_type_t dataType;
     if (elementSizeA_bits < elementSizeB_bits)
         dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeB);
     else
         dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA);
 
-    auto reduction_type = TensileLite::analytical::streamk::select_streamk_reduction(prob.m, prob.n, prob.k, prob.batch_count,
+    auto reduction_type = origami::streamk::select_reduction(prob.m, prob.n, prob.k, prob.batch_count,
         gemm->params->workgroupTile.m, gemm->params->workgroupTile.n, gemm->params->workgroupTile.k, analaytical_hardware, DEFAULT_DYNAMIC_MODE);
     // Override reduction type to tree reduction for now.
     // When Parallel reduction is available, this line can be removed
-    reduction_type = TensileLite::analytical::streamk::ReductionType::Tree;
+    reduction_type = origami::streamk::reduction_type::Tree;
 
-    auto result = TensileLite::analytical::streamk::select_streamk_grid(prob.m,
+    auto result = origami::streamk::select_grid(prob.m,
         prob.n,
         prob.k,
         prob.batch_count,

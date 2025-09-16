@@ -42,6 +42,7 @@ from Tensile.Common.GlobalParameters import defaultSolution, \
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
+from Tensile.Components.CustomSchedule import hasCustomSchedule
 
 from .Utilities import reject, roundupRatio, pvar
 
@@ -410,6 +411,13 @@ class Solution(collections.abc.Mapping):
     else:
       state["reorderGRInstForDTVA"] = False
       state["reorderGRInstForDTVB"] = False
+
+    state["UsePLRPack"] = False
+    state["SwapGlobalReadOrder"] = False
+    state["MfmaInitCVgprs"] = False
+
+    hasCMS,_ = hasCustomSchedule(state)
+    state["UseCustomMainLoopSchedule"] = hasCMS
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -3273,7 +3281,8 @@ class Solution(collections.abc.Mapping):
     #Need to force disabling PreloadKernArgs if compiler does not support
     #Can not just reject the solution since the user library may find any solutions
     if state["PreloadKernArgs"]:
-      if not (rocmVersion.major >= 6 and rocmVersion.patch >= 32650 and (isa == (9, 0, 10) or isa[:2] == (9, 4) or isa == (9, 5, 0))):
+      if (rocmVersion.major < 6 or (rocmVersion.major == 6 and rocmVersion.patch < 32650)) or \
+          not (isa == (9, 0, 10) or isa[:2] == (9, 4) or isa == (9, 5, 0)):
         #print("Force to Disable PreloadKernArgs since this hipcc version doesn't support",)
         state["PreloadKernArgs"] = 0
 

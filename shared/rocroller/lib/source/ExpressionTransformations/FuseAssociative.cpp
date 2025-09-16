@@ -223,6 +223,14 @@ namespace rocRoller
                 return std::make_shared<Expression>(cpy);
             }
 
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression>(std::move(cpy));
+            }
+
             template <CShift Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {

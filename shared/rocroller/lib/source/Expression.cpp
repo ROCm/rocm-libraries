@@ -88,6 +88,24 @@ namespace rocRoller
                 return matA && matB && matC && scaleA && scaleB;
             }
 
+            template <CNary Expr>
+            bool operator()(Expr const& a, Expr const& b)
+            {
+                if(a.operands.size() != b.operands.size())
+                {
+                    return false;
+                }
+
+                bool result = true;
+                for(size_t i = 0; i < a.operands.size(); ++i)
+                {
+                    auto const& operandA = a.operands.at(i);
+                    auto const& operandB = b.operands.at(i);
+                    result               = result && call(operandA, operandB);
+                }
+                return result;
+            }
+
             template <CTernary T>
             bool operator()(T const& a, T const& b)
             {
@@ -283,6 +301,24 @@ namespace rocRoller
                 return matA && matB && matC && scaleA && scaleB;
             }
 
+            template <CNary Expr>
+            bool operator()(Expr const& a, Expr const& b)
+            {
+                if(a.operands.size() != b.operands.size())
+                {
+                    return false;
+                }
+
+                bool result = true;
+                for(size_t i = 0; i < a.operands.size(); ++i)
+                {
+                    auto const& operandA = a.operands.at(i);
+                    auto const& operandB = b.operands.at(i);
+                    result               = result && call(operandA, operandB);
+                }
+                return result;
+            }
+
             template <CTernary T>
             bool operator()(T const& a, T const& b)
             {
@@ -445,7 +481,8 @@ namespace rocRoller
             bool        throwIfNotSupported = true;
 
             template <typename Expr>
-            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) void operator()(Expr& expr)
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr> || CNary<Expr>) void
+                operator()(Expr& expr)
             {
                 expr.comment = std::move(comment);
             }
@@ -641,6 +678,17 @@ namespace rocRoller
             int operator()(Expr const& expr) const
             {
                 return Expr::Complexity + call(expr.lhs) + call(expr.r1hs) + call(expr.r2hs);
+            }
+
+            template <CNary Expr>
+            int operator()(Expr const& expr) const
+            {
+                auto complexity = Expr::Complexity;
+                for(auto const& operand : expr.operands)
+                {
+                    complexity = complexity + call(operand);
+                }
+                return complexity;
             }
 
             int operator()(ScaledMatrixMultiply const& expr) const

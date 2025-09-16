@@ -2,7 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.24.4)
-project(rocroller VERSION 1.0.0 LANGUAGES CXX)
+set(ROCROLLER_VERSION 1.0.0)
+set(ROCROLLER_SOVERSION 1)
+project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -157,6 +159,11 @@ else()
     add_library(rocroller STATIC)
     set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
+set_target_properties(rocroller
+    PROPERTIES
+        VERSION ${ROCROLLER_VERSION}
+        SOVERSION ${ROCROLLER_SOVERSION}
+)
 add_library(roc::rocroller ALIAS rocroller)
 
 add_library(rocroller-interface INTERFACE)
@@ -233,9 +240,9 @@ endif()
 
 target_link_libraries(rocroller
     PUBLIC
-       Boost::headers
        hip::host
     PRIVATE
+        $<BUILD_INTERFACE:Boost::headers>
         ${msgpack_libs}
         amd_comgr
 )

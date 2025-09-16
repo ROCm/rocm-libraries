@@ -44,6 +44,7 @@ if(TENSILELITE_ENABLE_HOST)
     target_link_libraries(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
+            roc::origami
         PRIVATE
             hip::device
     )
