@@ -227,6 +227,33 @@ namespace rocRoller::KernelGraph::MemoryTracer
          */
         static uint calculateBankConflictCycles(const std::map<uint, uint>& bankToAddressCounts);
 
+        /**
+         * @brief Compute bank-to-address mappings for each thread group
+         * 
+         * This function divides the instruction's base addresses into thread groups
+         * and computes the bank-to-address count mapping for each group.
+         * 
+         * @param instr The LDS instruction containing memory operation details and addresses
+         * @param gfx The GPU architecture
+         * @return Vector of bank-to-address count mappings, one per thread group
+         */
+        static std::vector<std::map<uint, uint>>
+            computeThreadGroupBankMappings(const RuntimeLDSInstruction& instr,
+                                           GPUArchitectureGFX           gfx);
+
+        /**
+         * @brief Calculate total cycles from bank mappings
+         * 
+         * Takes the per-thread-group bank mappings and calculates the total
+         * number of cycles needed, including bank conflict resolution and
+         * address transfer overhead.
+         * 
+         * @param threadGroupBankMappings Vector of bank-to-address count mappings
+         * @return Total number of clock cycles including 4-cycle address transfer overhead
+         */
+        static uint calculateTotalCyclesFromBankMappings(
+            const std::vector<std::map<uint, uint>>& threadGroupBankMappings);
+
     private:
         std::map<int, OperationAccesses> m_tagToOperationAccesses;
     };

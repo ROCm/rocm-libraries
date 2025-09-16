@@ -38,7 +38,7 @@
 
 namespace MemoryTracerTest
 {
-    TEST_CASE("LDS bank conflicts", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS model kernel graph bank conflicts", "[kernel-graph][lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph;
@@ -122,7 +122,7 @@ namespace MemoryTracerTest
         }
     }
 
-    TEST_CASE("LDS threads per clock", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS model get threads per clock", "[lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
@@ -165,7 +165,7 @@ namespace MemoryTracerTest
         }
     }
 
-    TEST_CASE("LDS summary 5 dwords per thread", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS model summary 5 dwords per thread", "[lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph;
@@ -211,7 +211,7 @@ namespace MemoryTracerTest
             std::cout << detailedStr << std::endl;
     }
 
-    TEST_CASE("createBankToAddressCounts", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS model make bank to address counts", "[lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
@@ -256,7 +256,7 @@ namespace MemoryTracerTest
         }
     }
 
-    TEST_CASE("calculateBankConflictCycles", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS model calculate bank conflict cycles", "[lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
@@ -277,7 +277,7 @@ namespace MemoryTracerTest
         CHECK(LDSBankModel::calculateBankConflictCycles(bankToAddressCounts) == 3);
     }
 
-    TEST_CASE("divideIntoThreadGroups", "[kernel-graph][lds-bank-model]")
+    TEST_CASE("LDS model divide into thread groups", "[lds-bank-model]")
     {
         using namespace rocRoller;
         using namespace rocRoller::KernelGraph::MemoryTracer;
@@ -307,5 +307,24 @@ namespace MemoryTracerTest
         CHECK(groups[2][1] == 36);
         CHECK(groups[2][2] == 40);
         CHECK(groups[2][3] == 44);
+    }
+
+    TEST_CASE("LDS model get clock count", "[lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        RuntimeLDSInstruction instr;
+        instr.memoryOp      = MemoryOpLDS{Direction::Load};
+        instr.dwords        = 2;
+        instr.baseAddresses = {0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120};
+
+        const auto gfx = GPUArchitectureGFX::GFX942;
+
+        const auto mappings       = LDSBankModel::computeThreadGroupBankMappings(instr, gfx);
+        const auto expectedCycles = LDSBankModel::calculateTotalCyclesFromBankMappings(mappings);
+
+        const auto cycles = LDSBankModel::getClockCount(instr, gfx);
+        CHECK(cycles == expectedCycles);
     }
 }

@@ -289,20 +289,43 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return maxAddressesPerBank;
     }
 
+    std::vector<std::map<uint, uint>>
+        LDSBankModel::computeThreadGroupBankMappings(const RuntimeLDSInstruction& instr,
+                                                     GPUArchitectureGFX           gfx)
+    {
+        std::vector<std::map<uint, uint>> threadGroupBankMappings;
+
+        const auto threadGroupAddresses = divideIntoThreadGroups(
+            instr.baseAddresses, getThreadsPerClock(instr.memoryOp, instr.dwords, gfx));
+
+        for(const auto& groupAddresses : threadGroupAddresses)
+        {
+            threadGroupBankMappings.push_back(
+                createBankToAddressCounts(groupAddresses, instr.dwords, gfx));
+        }
+
+        return threadGroupBankMappings;
+    }
+
+    uint LDSBankModel::calculateTotalCyclesFromBankMappings(
+        const std::vector<std::map<uint, uint>>& threadGroupBankMappings)
+    {
+        uint cycles = 0;
+        for(const auto& bankMapping : threadGroupBankMappings)
+        {
+            cycles += calculateBankConflictCycles(bankMapping);
+        }
+        return cycles + 4; // address transfer
+    }
+
     uint LDSBankModel::getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
     {
         AssertFatal(rocRoller::toString(gfx).starts_with("gfx9"),
                     "Unsupported GPU architecture: {}",
                     rocRoller::toString(gfx));
 
-        uint cycles = 0;
-        for(const auto& groupAddresses : divideIntoThreadGroups(
-                instr.baseAddresses, getThreadsPerClock(instr.memoryOp, instr.dwords, gfx)))
-        {
-            cycles += calculateBankConflictCycles(
-                createBankToAddressCounts(groupAddresses, instr.dwords, gfx));
-        }
-        return cycles + 4; // address transfer
+        const auto threadGroupBankMappings = computeThreadGroupBankMappings(instr, gfx);
+        return calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
     }
 
     OperationsAnalysis LDSBankModel::doOperationsAnalysis(GPUArchitectureGFX gfx) const
