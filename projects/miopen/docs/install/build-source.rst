@@ -230,17 +230,13 @@ To format the code per commit, install githooks:
 Storing large file using Git Large File Storage
 =========================================================
 
-`Data Versioning System (DVS) <https://dvc.org/>` replaces large
-files, such as audio samples, videos, datasets, and graphics with text
-pointers inside Git, while storing the file contents on a remote server.
-In MIOpen, we use DVC to store our large files, such as our kernel
-database files (\*.kdb) that are normally > 0.5 GB.
+`Data Versioning System (DVS) <https://dvc.org/>` replaces large files, such as audio samples, videos, datasets, and 
+graphics with text pointers inside Git, while storing the file contents on a remote server. In MIOpen, we use DVC to 
+store our large files, such as our kernel database files (\*.kdb) that are normally > 0.5 GB.
 
-You can install DVC using the `instructions provided for your platform
-here <https://dvc.org/doc/install>`.
+You can install DVC using the `instructions provided for your platform here <https://dvc.org/doc/install>`.
 
-You can `pull <https://dvc.org/doc/command-reference/pull>` all large
-files or a single large file using:
+You can `pull <https://dvc.org/doc/command-reference/pull>` all large files or a single large file using:
 
 .. code:: shell
 
