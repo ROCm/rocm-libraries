@@ -513,7 +513,7 @@ amdhsa.kernels:
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
             // _b96 requires 64-bit alignment for dst, _b96 has huge penalty if not 64-bit aligned for LDS addr
             const auto alignment = instrDwords == 3 ? 4 : instrDwords;
-            const auto regCount  = (256 - 4) / 4;
+            const auto regCount  = 256 - 4;
 
             auto dst = Register::Value::Placeholder(
                 m_context,
@@ -529,7 +529,7 @@ amdhsa.kernels:
             auto lds = Register::Value::AllocateLDS(
                 m_context,
                 DataType::Raw32,
-                m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) / 4 / 4);
+                m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) / 4);
             auto ldsWithOffset = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
             auto workitemIndex = m_context->kernel()->workitemIndex()[0];
