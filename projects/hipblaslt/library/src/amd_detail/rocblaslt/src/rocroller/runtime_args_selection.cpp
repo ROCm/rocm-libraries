@@ -28,33 +28,33 @@
 #include "gemm.hpp"
 #include "runtime_args_selection.hpp"
 
-#include <Tensile/analytical/StreamK.hpp>
+#include <origami/streamk.hpp>
 
 const int DEFAULT_DYNAMIC_MODE = 6;
 
 int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
                           const RocblasltContractionProblem& prob)
 {
-    const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
+    const origami::hardware_t analaytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeB).elementBits;
     size_t elementSizeD_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeD).elementBits;
     size_t elementSizeAcc = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeAcc).elementBytes;
 
-    TensileLite::analytical::DataType dataType;
+    origami::data_type_t dataType;
     if (elementSizeA_bits < elementSizeB_bits)
         dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeB);
     else
         dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA);
 
-    auto reduction_type = TensileLite::analytical::streamk::select_streamk_reduction(prob.m, prob.n, prob.k, prob.batch_count,
+    auto reduction_type = origami::streamk::select_reduction(prob.m, prob.n, prob.k, prob.batch_count,
         gemm->params->workgroupTile.m, gemm->params->workgroupTile.n, gemm->params->workgroupTile.k, analaytical_hardware, DEFAULT_DYNAMIC_MODE);
     // Override reduction type to tree reduction for now.
     // When Parallel reduction is available, this line can be removed
-    reduction_type = TensileLite::analytical::streamk::ReductionType::Tree;
+    reduction_type = origami::streamk::reduction_type::Tree;
 
-    auto result = TensileLite::analytical::streamk::select_streamk_grid(prob.m,
+    auto result = origami::streamk::select_grid(prob.m,
         prob.n,
         prob.k,
         prob.batch_count,

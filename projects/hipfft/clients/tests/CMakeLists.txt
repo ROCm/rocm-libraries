@@ -220,10 +220,11 @@ endforeach()
 
 find_package( GTest 1.11.0 )
 
-if( GTEST_FOUND )
+if( GTest_FOUND )
   target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
-  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+  target_link_libraries( hipfft-test PRIVATE GTest::gtest )
 else()
+  # gtest build by the hipFFT
   add_dependencies( hipfft-test gtest )
   target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
   target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )

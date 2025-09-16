@@ -31,7 +31,7 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponentBase(Scheduler);
+        const std::string Scheduler::Basename = "Scheduler";
 
         std::ostream& operator<<(std::ostream& stream, StreamId val)
         {

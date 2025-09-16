@@ -66,6 +66,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/LoadPackedTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MEMObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MultipleLDSAllocationTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/NaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberGenerationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTagManagerTest.cpp"
