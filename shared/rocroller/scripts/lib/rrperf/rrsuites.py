@@ -1123,6 +1123,7 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         storeLDS_D=False,
         prefetch=True,
         prefetchInFlight=3,
+        unroll_k=4,
         prefetchLDSFactor=1,
         prefetchScale=True,
         swizzleScale=True,

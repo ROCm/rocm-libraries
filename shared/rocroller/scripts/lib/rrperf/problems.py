@@ -187,6 +187,7 @@ class GEMMSolution:
 
     unroll_x: int = 0
     unroll_y: int = 0
+    unroll_k: int = 0
 
     loadLDS_A: bool = True
     loadLDS_B: bool = True

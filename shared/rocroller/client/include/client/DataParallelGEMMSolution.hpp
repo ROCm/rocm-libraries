@@ -447,16 +447,19 @@ namespace rocRoller
 
                     params->unrollX       = solutionParams.unrollX;
                     params->unrollY       = solutionParams.unrollY;
+                    params->unrollK       = solutionParams.unrollK;
                     params->swizzleScale  = solutionParams.swizzleScale;
                     params->prefetchScale = solutionParams.prefetchScale;
 
                     if(solutionParams.prefetch)
                     {
                         params->prefetch          = true;
-                        params->unrollK           = solutionParams.prefetchInFlight + 1;
                         params->prefetchInFlight  = solutionParams.prefetchInFlight;
                         params->prefetchLDSFactor = solutionParams.prefetchLDSFactor;
                         params->prefetchMixMemOps = solutionParams.prefetchMixMemOps;
+
+                        if(params->unrollK == 0)
+                            params->unrollK = params->prefetchInFlight + 1;
                     }
                     else
                     {

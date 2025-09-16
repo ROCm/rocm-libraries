@@ -1123,6 +1123,7 @@ int main(int argc, const char* argv[])
 
         .unrollX = 0,
         .unrollY = 0,
+        .unrollK = 0,
 
         .scheduler         = "Priority",
         .matchMemoryAccess = true,
@@ -1301,6 +1302,7 @@ int main(int argc, const char* argv[])
                    "Force an XCC-aware workgroup remapping value. (Optional)");
     app.add_option("--unroll_x", solution.unrollX, "Unroll size in X.");
     app.add_option("--unroll_y", solution.unrollY, "Unroll size in Y.");
+    app.add_option("--unroll_k", solution.unrollK, "Unroll size in K.");
     app.add_flag("--loadLDS_A", solution.loadLDSA, "Use LDS when loading A.");
     app.add_flag("--loadLDS_B", solution.loadLDSB, "Use LDS when loading B.");
     app.add_flag("--storeLDS_D", solution.storeLDSD, "Use LDS when storing D.");
