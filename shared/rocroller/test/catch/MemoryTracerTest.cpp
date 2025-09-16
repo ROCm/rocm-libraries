@@ -34,6 +34,7 @@
 
 #include <common/CommonGraphs.hpp>
 
+#include "CustomSections.hpp"
 #include "TestContext.hpp"
 
 namespace MemoryTracerTest
@@ -89,36 +90,45 @@ namespace MemoryTracerTest
             kgraph = kgraph.transform(t);
 
         KernelInvocation inv{.workgroupSize = {64, 1, 1}};
-
-        SECTION("Old Summary") // TODO: rename
+        SUPPORTED_ARCH_SECTION(arch)
         {
-            auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
-
-            // All visited nodes only access 4 banks in this graph
-            for(const auto& [tag, access] : summary.tagToAccess)
+            SECTION("Old Summary") // TODO: rename
             {
-                CHECK(access.accessedBanks.size() == 4);
+                auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
+
+                for(const auto& [tag, access] : summary.tagToAccess)
+                {
+                    // All visited nodes only access 4 or 8 banks in this graph
+                    if(arch.isGFX12GPU())
+                    {
+                        CHECK(access.accessedBanks.size() == 8);
+                    }
+                    else
+                    {
+                        CHECK(access.accessedBanks.size() == 4);
+                    }
+                }
+
+                if constexpr(false)
+                    std::cout << "\nSummary:\n" << summary.toString() << std::endl;
             }
 
-            if constexpr(true)
-                std::cout << "\nSummary:\n" << summary.toString() << std::endl;
-        }
+            SECTION("Detailed summary of kernel graph")
+            {
+                auto tracer = MemoryTracer::MemoryTracer(kgraph);
+                tracer.trace();
 
-        SECTION("Detailed summary of kernel graph")
-        {
-            auto tracer = MemoryTracer::MemoryTracer(kgraph);
-            tracer.trace();
+                auto model = MemoryTracer::LDSBankModel(4, 32, 512);
 
-            auto model = MemoryTracer::LDSBankModel(4, 32, 512);
+                auto workgroups            = 1;
+                auto workitemsPerWorkgroup = product(inv.workgroupSize);
+                tracer.simulateLaunch(model, workgroups, workitemsPerWorkgroup);
 
-            auto workgroups            = 1;
-            auto workitemsPerWorkgroup = product(inv.workgroupSize);
-            tracer.simulateLaunch(model, workgroups, workitemsPerWorkgroup);
+                auto detailed = model.doOperationsAnalysis(GPUArchitectureGFX::GFX942);
 
-            auto detailed = model.doOperationsAnalysis(GPUArchitectureGFX::GFX942);
-
-            if constexpr(true)
-                std::cout << "\nDetailed Summary:\n" << detailed << std::endl;
+                if constexpr(false)
+                    std::cout << "\nDetailed Summary:\n" << detailed << std::endl;
+            }
         }
     }
 

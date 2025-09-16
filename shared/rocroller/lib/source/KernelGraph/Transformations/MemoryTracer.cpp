@@ -25,9 +25,7 @@
  *******************************************************************************/
 
 /**
- * @file MemoryTracer.cpp
- * @author rocRoller Developers
- * @brief Memory tracer for the rocRoller kernel graph.
+ * Memory tracer for the rocRoller kernel graph.
  *
  * This file implements a memory tracer that simulates memory accesses
  * in a kernel graph.
