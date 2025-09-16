@@ -487,7 +487,7 @@ amdhsa.kernels:
         const auto one  = std::make_shared<Expression::Expression>(1u);
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
-        const auto workgroupSize = 32u;
+        const auto workgroupSize = 256u;
         auto       workitemCount = Expression::literal(256 * 64); // one hit per CU on MI350x
         k->setWorkgroupSize({workgroupSize, 1, 1});
         k->setWorkitemCount({workitemCount, one, one});
