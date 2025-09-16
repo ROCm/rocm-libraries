@@ -22,6 +22,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ########################################################################
 
+@PACKAGE_INIT@
 include(CMakeFindDependencyMacro)
 find_dependency(OpenMP)
 include("${CMAKE_CURRENT_LIST_DIR}/mxDataGenerator-targets.cmake")

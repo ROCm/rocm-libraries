@@ -132,7 +132,7 @@
         /*tolerance * eps = 2 * 0.0625; 2*eps needed for SR*/               \
     } while(0)
 
-    
+
 #define ASSERT_BF8_EQ(a, b)                                                 \
     do                                                                      \
     {                                                                       \
