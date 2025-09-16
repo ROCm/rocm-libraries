@@ -906,6 +906,8 @@ namespace origami
                                     data_type_t     mi_datatype,
                                     size_t          mx_block_size,
                                     int             WGM,
+                                    size_t non_temporal_a,
+                                    size_t non_temporal_b,
                                     size_t          split,
                                     bool            debug)
     {
@@ -1035,8 +1037,25 @@ namespace origami
             }
         }
 
+        //Big N and MT_M == M 
+        if((non_temporal_a!=0 && non_temporal_b !=0))
+        {
+            total_latency *= 20;
+        }
+        else if(M<1024 &&  N > 16384 && non_temporal_b !=0)
+        {
+            total_latency = total_latency * 0.2;
+        }
+        else if(non_temporal_b ==3)
+        {
+            total_latency = total_latency * 2;
+        }
+
+
         if(heuristics && !tf32_emu)
         {
+            
+
             // Penalize tiles that lead to edge waste
             const size_t numMT_M = safe_ceil_div(M, MT_M);
             const size_t numMT_N = safe_ceil_div(N, MT_N);
@@ -1156,6 +1175,8 @@ namespace origami
         if(hardware_t::is_debug_enabled())
         {
             hardware.log_debug("Total_latency (with heuristics)", total_latency);
+            hardware.log_debug("nontemporal A", non_temporal_a);
+            hardware.log_debug("nontemporal B", non_temporal_b);
 
             hardware.print_debug_info();
         }
@@ -1211,6 +1232,7 @@ namespace origami
                                                             mi_datatype,
                                                             mx_block_size,
                                                             WGM,
+                                                            0,0,
                                                             debug);
         double total_time_seconds = latency_cycles / cycles_per_second;
         // Compute performance in FLOPS

@@ -192,6 +192,8 @@ namespace origami
                                      data_type_t     mi_datatype,
                                      size_t          mx_block_size,
                                      int             WGM,
+                                     size_t non_temporal_a,
+                                     size_t non_temporal_b,
                                      size_t          split = 0,
                                      bool            debug = false);
 
