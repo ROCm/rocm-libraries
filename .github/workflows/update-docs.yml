@@ -56,7 +56,7 @@ jobs:
 
       - name: Trigger RTD build
         if: steps.diff.outputs.changed_projects
-        env: 
+        env:
           changed_projects: ${{ steps.diff.outputs.changed_projects }}
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |

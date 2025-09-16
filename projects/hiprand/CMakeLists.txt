@@ -185,7 +185,7 @@ if(BUILD_TEST)
     add_subdirectory(test)
 endif()
 
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 if(WIN32)
     set(CPACK_SOURCE_GENERATOR "ZIP")
@@ -222,7 +222,7 @@ endif()
 
 rocm_create_package(
         NAME ${package_name}
-        DESCRIPTION "A GPU-based random number generation library, written in HIP"
+        DESCRIPTION "GPU-based random number generation library, written in HIP"
         MAINTAINER "hipRAND Maintainer <hiprand-maintainer@amd.com>"
         LDCONFIG
         LDCONFIG_DIR ${HIPRAND_CONFIG_DIR}

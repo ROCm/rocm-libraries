@@ -90,7 +90,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<128, 26>
+                      && (sizeof(value_type) > 1))>> : kernel_config<128, 25>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -158,7 +158,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<128, 31>
+                      && (sizeof(value_type) > 1))>> : kernel_config<128, 29>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -204,7 +204,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : kernel_config<256, 26>
+    : kernel_config<256, 25>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -215,7 +215,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<256, 32>
+    : kernel_config<256, 29>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -238,7 +238,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<128, 31>
+    : kernel_config<128, 29>
 {};
 
 // Based on key_type = rocprim::half, value_type = empty_type
@@ -260,7 +260,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : kernel_config<256, 13>
+                      && (sizeof(value_type) > 8))>> : kernel_config<128, 13>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = int64_t
@@ -271,7 +271,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 15>
+                      && (sizeof(value_type) > 4))>> : kernel_config<128, 15>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = int
@@ -305,7 +305,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<128, 16>
+    : kernel_config<64, 18>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = empty_type
@@ -350,7 +350,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<128, 30>
+                      && (sizeof(value_type) > 2))>> : kernel_config<128, 28>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -361,7 +361,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<128, 29>
+                      && (sizeof(value_type) > 1))>> : kernel_config<128, 28>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -418,7 +418,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<128, 29>
+                      && (sizeof(value_type) > 2))>> : kernel_config<128, 28>
 {};
 
 // Based on key_type = int, value_type = short
@@ -429,7 +429,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<128, 31>
+                      && (sizeof(value_type) > 1))>> : kernel_config<128, 30>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -441,7 +441,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<128, 31>
+    : kernel_config<128, 30>
 {};
 
 // Based on key_type = int, value_type = empty_type
@@ -475,7 +475,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 26>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 25>
 {};
 
 // Based on key_type = short, value_type = int
@@ -486,7 +486,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 32>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 30>
 {};
 
 // Based on key_type = short, value_type = short
@@ -509,7 +509,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<64, 31>
+    : kernel_config<128, 30>
 {};
 
 // Based on key_type = short, value_type = empty_type
@@ -554,7 +554,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 30>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -565,7 +565,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : kernel_config<256, 31>
+    : kernel_config<256, 30>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -757,7 +757,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<128, 30>
+    : kernel_config<256, 23>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -847,7 +847,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 15>
+    : kernel_config<128, 16>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = empty_type
@@ -938,7 +938,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : kernel_config<256, 4>
+                      && (sizeof(value_type) > 8))>> : kernel_config<256, 15>
 {};
 
 // Based on key_type = int, value_type = int64_t
@@ -1538,7 +1538,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<64, 28>
+                      && (sizeof(value_type) > 4))>> : kernel_config<64, 22>
 {};
 
 // Based on key_type = double, value_type = int
@@ -1584,7 +1584,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<128, 32>
+    : kernel_config<128, 25>
 {};
 
 // Based on key_type = float, value_type = int64_t
@@ -1708,7 +1708,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<64, 28>
+                      && (sizeof(value_type) > 4))>> : kernel_config<64, 22>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -2048,7 +2048,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 15>
+    : kernel_config<256, 14>
 {};
 
 // Based on key_type = float, value_type = empty_type
@@ -2071,7 +2071,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : kernel_config<512, 4>
+    : kernel_config<256, 8>
 {};
 
 // Based on key_type = rocprim::half, value_type = int64_t
@@ -2138,7 +2138,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : kernel_config<256, 4>
+                      && (sizeof(value_type) > 8))>> : kernel_config<256, 6>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = int64_t
@@ -2217,7 +2217,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 11>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -2228,7 +2228,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 11>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -2239,7 +2239,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 13>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 12>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -2488,7 +2488,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 11>
 {};
 
 // Based on key_type = double, value_type = int
@@ -2499,7 +2499,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 11>
 {};
 
 // Based on key_type = double, value_type = short
@@ -2510,7 +2510,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 13>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 12>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -2522,7 +2522,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 12>
+    : kernel_config<512, 15>
 {};
 
 // Based on key_type = double, value_type = empty_type
@@ -2556,7 +2556,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<512, 15>
 {};
 
 // Based on key_type = float, value_type = int
@@ -2567,7 +2567,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<512, 31>
+                      && (sizeof(value_type) > 2))>> : kernel_config<512, 30>
 {};
 
 // Based on key_type = float, value_type = short
@@ -2578,7 +2578,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 31>
+                      && (sizeof(value_type) > 1))>> : kernel_config<1024, 15>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -2590,7 +2590,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 29>
 {};
 
 // Based on key_type = float, value_type = empty_type
@@ -2624,7 +2624,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : kernel_config<256, 12>
+    : kernel_config<512, 15>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -2635,7 +2635,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 28>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -2646,7 +2646,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : kernel_config<512, 32>
+    : kernel_config<1024, 18>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -2759,7 +2759,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<512, 15>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -2770,7 +2770,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 11>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -2793,7 +2793,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 12>
+    : kernel_config<256, 11>
 {};
 
 // Based on key_type = int64_t, value_type = empty_type
@@ -2827,7 +2827,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<512, 14>
 {};
 
 // Based on key_type = int, value_type = int
@@ -2849,7 +2849,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 31>
+                      && (sizeof(value_type) > 1))>> : kernel_config<512, 30>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -2861,7 +2861,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 29>
 {};
 
 // Based on key_type = int, value_type = empty_type
@@ -2906,7 +2906,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<512, 31>
+                      && (sizeof(value_type) > 2))>> : kernel_config<512, 30>
 {};
 
 // Based on key_type = short, value_type = short
@@ -2917,7 +2917,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 32>
+                      && (sizeof(value_type) > 1))>> : kernel_config<1024, 18>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -2929,7 +2929,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 32>
+    : kernel_config<1024, 16>
 {};
 
 // Based on key_type = short, value_type = empty_type
@@ -2941,7 +2941,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<1024, 23>
+    : kernel_config<1024, 22>
 {};
 
 // Based on key_type = int8_t, value_type = rocprim::int128_t
@@ -2974,7 +2974,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 30>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -2985,7 +2985,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : kernel_config<512, 32>
+    : kernel_config<1024, 16>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -2997,7 +2997,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 32>
+    : kernel_config<1024, 15>
 {};
 
 // Based on key_type = int8_t, value_type = empty_type
@@ -3030,7 +3030,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 15>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 10>
 {};
 
 // Based on key_type = double, value_type = int
@@ -3041,7 +3041,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 15>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = double, value_type = short
@@ -3052,7 +3052,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 15>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -3064,7 +3064,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 15>
+    : kernel_config<256, 16>
 {};
 
 // Based on key_type = double, value_type = empty_type
@@ -3109,7 +3109,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 21>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = float, value_type = short
@@ -3120,7 +3120,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 15>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -3132,7 +3132,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 21>
+    : kernel_config<256, 14>
 {};
 
 // Based on key_type = float, value_type = empty_type
@@ -3177,7 +3177,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<256, 31>
+    : kernel_config<256, 29>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -3188,7 +3188,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : kernel_config<512, 19>
+    : kernel_config<512, 18>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -3200,7 +3200,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<256, 29>
 {};
 
 // Based on key_type = rocprim::half, value_type = empty_type
@@ -3301,7 +3301,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 15>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 10>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -3312,7 +3312,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 15>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -3323,7 +3323,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 15>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -3335,7 +3335,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 15>
+    : kernel_config<256, 16>
 {};
 
 // Based on key_type = int64_t, value_type = empty_type
@@ -3369,7 +3369,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 15>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 10>
 {};
 
 // Based on key_type = int, value_type = int
@@ -3380,7 +3380,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 21>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = int, value_type = short
@@ -3391,7 +3391,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 15>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -3403,7 +3403,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 21>
+    : kernel_config<256, 30>
 {};
 
 // Based on key_type = int, value_type = empty_type
@@ -3448,7 +3448,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<512, 15>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 30>
 {};
 
 // Based on key_type = short, value_type = short
@@ -3459,7 +3459,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 32>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 23>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -3471,7 +3471,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<256, 30>
 {};
 
 // Based on key_type = short, value_type = empty_type
@@ -3483,7 +3483,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<256, 27>
 {};
 
 // Based on key_type = int8_t, value_type = rocprim::int128_t
@@ -3516,7 +3516,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<512, 13>
+    : kernel_config<256, 30>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -3527,7 +3527,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : kernel_config<512, 16>
+    : kernel_config<256, 21>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -3539,7 +3539,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<256, 23>
 {};
 
 // Based on key_type = int8_t, value_type = empty_type
@@ -3550,7 +3550,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 32>
+    : kernel_config<256, 29>
 {};
 
 // Based on key_type = double, value_type = rocprim::int128_t
@@ -3572,7 +3572,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 11>
 {};
 
 // Based on key_type = double, value_type = int
@@ -3583,7 +3583,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 11>
 {};
 
 // Based on key_type = double, value_type = short
@@ -3594,7 +3594,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 13>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 12>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -3606,7 +3606,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 12>
+    : kernel_config<512, 15>
 {};
 
 // Based on key_type = double, value_type = empty_type
@@ -3640,7 +3640,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<512, 15>
 {};
 
 // Based on key_type = float, value_type = int
@@ -3651,7 +3651,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<512, 31>
+                      && (sizeof(value_type) > 2))>> : kernel_config<512, 30>
 {};
 
 // Based on key_type = float, value_type = short
@@ -3662,7 +3662,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 31>
+                      && (sizeof(value_type) > 1))>> : kernel_config<1024, 15>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -3674,7 +3674,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 29>
 {};
 
 // Based on key_type = float, value_type = empty_type
@@ -3708,7 +3708,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : kernel_config<256, 12>
+    : kernel_config<512, 15>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -3719,7 +3719,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 28>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -3730,7 +3730,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : kernel_config<512, 32>
+    : kernel_config<1024, 18>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -3843,7 +3843,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<512, 15>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -3854,7 +3854,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 11>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -3877,7 +3877,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 12>
+    : kernel_config<256, 11>
 {};
 
 // Based on key_type = int64_t, value_type = empty_type
@@ -3911,7 +3911,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 12>
+                      && (sizeof(value_type) > 4))>> : kernel_config<512, 14>
 {};
 
 // Based on key_type = int, value_type = int
@@ -3933,7 +3933,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 31>
+                      && (sizeof(value_type) > 1))>> : kernel_config<512, 30>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -3945,7 +3945,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 29>
 {};
 
 // Based on key_type = int, value_type = empty_type
@@ -3990,7 +3990,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<512, 31>
+                      && (sizeof(value_type) > 2))>> : kernel_config<512, 30>
 {};
 
 // Based on key_type = short, value_type = short
@@ -4001,7 +4001,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 32>
+                      && (sizeof(value_type) > 1))>> : kernel_config<1024, 18>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -4013,7 +4013,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 32>
+    : kernel_config<1024, 16>
 {};
 
 // Based on key_type = short, value_type = empty_type
@@ -4025,7 +4025,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<1024, 23>
+    : kernel_config<1024, 22>
 {};
 
 // Based on key_type = int8_t, value_type = rocprim::int128_t
@@ -4058,7 +4058,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<512, 31>
+    : kernel_config<512, 30>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -4069,7 +4069,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : kernel_config<512, 32>
+    : kernel_config<1024, 16>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -4081,7 +4081,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 32>
+    : kernel_config<1024, 15>
 {};
 
 // Based on key_type = int8_t, value_type = empty_type
@@ -4114,7 +4114,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 16>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 8>
 {};
 
 // Based on key_type = double, value_type = int
@@ -4125,7 +4125,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 16>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 8>
 {};
 
 // Based on key_type = double, value_type = short
@@ -4136,7 +4136,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 16>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 8>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -4148,7 +4148,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 16>
+    : kernel_config<256, 8>
 {};
 
 // Based on key_type = double, value_type = empty_type
@@ -4160,7 +4160,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 16>
+    : kernel_config<256, 8>
 {};
 
 // Based on key_type = float, value_type = rocprim::int128_t
@@ -4193,7 +4193,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<512, 16>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 21>
 {};
 
 // Based on key_type = float, value_type = short
@@ -4204,7 +4204,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 32>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -4216,7 +4216,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<256, 29>
 {};
 
 // Based on key_type = float, value_type = empty_type
@@ -4261,7 +4261,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : kernel_config<256, 32>
+    : kernel_config<512, 14>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -4284,7 +4284,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<512, 14>
 {};
 
 // Based on key_type = rocprim::half, value_type = empty_type
@@ -4295,7 +4295,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 22>
+    : kernel_config<512, 21>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
@@ -4317,7 +4317,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 8>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 5>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = int
@@ -4328,7 +4328,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 8>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 5>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = short
@@ -4339,7 +4339,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 8>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 5>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = int8_t
@@ -4351,7 +4351,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 8>
+    : kernel_config<256, 5>
 {};
 
 // Based on key_type = rocprim::int128_t, value_type = empty_type
@@ -4385,7 +4385,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : kernel_config<256, 16>
+                      && (sizeof(value_type) > 4))>> : kernel_config<256, 8>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -4407,7 +4407,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 16>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 8>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -4419,7 +4419,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 16>
+    : kernel_config<256, 8>
 {};
 
 // Based on key_type = int64_t, value_type = empty_type
@@ -4431,7 +4431,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 16>
+    : kernel_config<256, 8>
 {};
 
 // Based on key_type = int, value_type = rocprim::int128_t
@@ -4464,7 +4464,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 32>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 21>
 {};
 
 // Based on key_type = int, value_type = short
@@ -4475,7 +4475,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<256, 32>
+                      && (sizeof(value_type) > 1))>> : kernel_config<256, 16>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -4487,7 +4487,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<256, 19>
 {};
 
 // Based on key_type = int, value_type = empty_type
@@ -4499,7 +4499,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<256, 21>
 {};
 
 // Based on key_type = short, value_type = rocprim::int128_t
@@ -4532,7 +4532,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : kernel_config<256, 32>
+                      && (sizeof(value_type) > 2))>> : kernel_config<256, 29>
 {};
 
 // Based on key_type = short, value_type = short
@@ -4543,7 +4543,7 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : kernel_config<512, 19>
+                      && (sizeof(value_type) > 1))>> : kernel_config<512, 18>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -4555,7 +4555,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<256, 32>
+    : kernel_config<512, 15>
 {};
 
 // Based on key_type = short, value_type = empty_type
@@ -4567,7 +4567,7 @@ struct default_radix_sort_block_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 23>
+    : kernel_config<512, 22>
 {};
 
 // Based on key_type = int8_t, value_type = rocprim::int128_t
@@ -4634,7 +4634,152 @@ struct default_radix_sort_block_sort_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
-    : kernel_config<512, 22>
+    : kernel_config<512, 21>
+{};
+
+// Based on key_type = double, value_type = rocprim::int128_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                      && (sizeof(value_type) > 8))>> : kernel_config<64, 16>
+{};
+
+// Based on key_type = float, value_type = rocprim::int128_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                      && (sizeof(value_type) > 8))>> : kernel_config<256, 15>
+{};
+
+// Based on key_type = rocprim::half, value_type = rocprim::int128_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
+    : kernel_config<256, 15>
+{};
+
+// Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
+                      && (sizeof(value_type) > 8))>> : kernel_config<128, 16>
+{};
+
+// Based on key_type = rocprim::int128_t, value_type = int64_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
+                      && (sizeof(value_type) > 4))>> : kernel_config<64, 17>
+{};
+
+// Based on key_type = rocprim::int128_t, value_type = int
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
+                      && (sizeof(value_type) > 2))>> : kernel_config<64, 16>
+{};
+
+// Based on key_type = rocprim::int128_t, value_type = short
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
+                      && (sizeof(value_type) > 1))>> : kernel_config<64, 16>
+{};
+
+// Based on key_type = rocprim::int128_t, value_type = int8_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<64, 16>
+{};
+
+// Based on key_type = rocprim::int128_t, value_type = empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                      && (sizeof(key_type) > 8)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<64, 16>
+{};
+
+// Based on key_type = int64_t, value_type = rocprim::int128_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                      && (sizeof(value_type) > 8))>> : kernel_config<64, 16>
+{};
+
+// Based on key_type = int, value_type = rocprim::int128_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                      && (sizeof(value_type) > 8))>> : kernel_config<256, 15>
+{};
+
+// Based on key_type = short, value_type = rocprim::int128_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
+                      && (sizeof(value_type) > 8))>> : kernel_config<256, 15>
+{};
+
+// Based on key_type = int8_t, value_type = rocprim::int128_t
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
+    : kernel_config<256, 15>
 {};
 
 } // end namespace detail

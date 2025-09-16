@@ -177,7 +177,7 @@ python3 -m pip install -r tensilelite/requirements.txt
 
 ## Unit tests
 
-All unit tests are located in `build/release/clients/staging/`. To build these tests, you must build
+All unit tests are located in `build/release/clients/`. To build these tests, you must build
 hipBLASLt with `--clients`.
 
 You can find more information at the following links:

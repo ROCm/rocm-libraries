@@ -350,4 +350,3 @@ def moveMIoutToArch(kernel, startVgprAlphaTmp):
   imod = Module("MulAlpha")
   imod.setItems(itemList)
   return imod
-

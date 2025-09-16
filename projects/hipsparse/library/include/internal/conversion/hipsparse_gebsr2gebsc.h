@@ -33,8 +33,8 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXgebsr2gebsc_bufferSize returns the size of the temporary storage buffer
-*  required by \ref hipsparseSgebsr2gebsc "hipsparseXgebsr2gebsc()" and is the first step 
-*  in converting a sparse matrix in GEBSR format to a sparse matrix in GEBSC format. Once 
+*  required by \ref hipsparseSgebsr2gebsc "hipsparseXgebsr2gebsc()" and is the first step
+*  in converting a sparse matrix in GEBSR format to a sparse matrix in GEBSC format. Once
 *  the size of the temporary storage buffer has been determined, it must be allocated by the user.
 *
 *  See hipsparseSgebsr2gebsc() for a complete code example.
@@ -48,7 +48,7 @@ extern "C" {
 *  @param[in]
 *  nnzb               number of non-zero entries of the sparse GEneral BSR matrix.
 *  @param[in]
-*  bsrVal             array of \p nnzb*rowBlockDim*colBlockDim containing the values of the sparse GEneral 
+*  bsrVal             array of \p nnzb*rowBlockDim*colBlockDim containing the values of the sparse GEneral
 *                     BSR matrix.
 *  @param[in]
 *  bsrRowPtr          array of \p mb+1 elements that point to the start of every row of the
@@ -66,7 +66,7 @@ extern "C" {
 *                     hipsparseZgebsr2gebsc().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrRowPtr, \p bsrColInd 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrRowPtr, \p bsrColInd
 *              or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 */
@@ -128,36 +128,36 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *  or not (\ref HIPSPARSE_ACTION_SYMBOLIC).
 *
 *  \p hipsparseXgebsr2gebsc requires extra temporary storage buffer that has to be allocated
-*  by the user. Storage buffer size can be determined by \ref hipsparseSgebsr2gebsc_bufferSize 
+*  by the user. Storage buffer size can be determined by \ref hipsparseSgebsr2gebsc_bufferSize
 *  "hipsparseXgebsr2gebsc_bufferSize()".
 *
 *  For example, given the GEBSR matrix:
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c} 
-*       1 & 2 \\ 
-*       3 & 4 \\
-*       6 & 0 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 2 \\ 
-*       0 & 0 \\
-*       3 & 4 
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c} 
-*       5 & 0 \\ 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
 *       1 & 2 \\
-*       3 & 4 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       6 & 7 \\ 
 *       3 & 4 \\
-*       3 & 4 
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*       6 & 0
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0 \\
+*       3 & 4
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  represented with the arrays:
@@ -178,8 +178,8 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *    \end{align}
 *  \f]
 *
-*  The GEBSC arrays, \p bscRowInd, \p bscColPtr, and \p bscVal must be allocated by the user prior 
-*  to calling \p hipsparseXgebsr2gebsc(). The \p bscRowInd array has size \p nnzb, the \p bscColPtr 
+*  The GEBSC arrays, \p bscRowInd, \p bscColPtr, and \p bscVal must be allocated by the user prior
+*  to calling \p hipsparseXgebsr2gebsc(). The \p bscRowInd array has size \p nnzb, the \p bscColPtr
 *  array has size \p nb+1, and the \p bscVal array has size \p nnzb*rowBlockDim*colBlockDim.
 *
 *  \note
@@ -226,7 +226,7 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *              \ref hipsparseSgebsr2gebsc_bufferSize "hipsparseXgebsr2gebsc_bufferSize()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrVal, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrVal,
 *              \p bsrRowPtr, \p bsrColInd, \p bscVal, \p bscRowInd, \p bscColPtr or
 *              \p temp_buffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
@@ -239,21 +239,21 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *    hipsparseCreate(&handle);
 *
 *    // Sparse matrix in BSR format
-*    //     1 2 | 0 3 | 0 0 
+*    //     1 2 | 0 3 | 0 0
 *    //     0 4 | 5 0 | 0 1
 *    // A = 6 0 | 0 7 | 8 0
-*    //     --------------- 
+*    //     ---------------
 *    //     0 0 | 3 0 | 2 2
-*    //     1 0 | 0 0 | 4 3 
+*    //     1 0 | 0 0 | 4 3
 *    //     7 2 | 0 0 | 1 4
 *    int hbsrRowPtr[3] = {0, 3, 6};
 *    int hbsrColInd[6] = {0, 1, 2, 0, 1, 2};
-*    float hbsrVal[36]  = {1.0f, 2.0f, 0.0f, 4.0f, 6.0f, 0.0f, 
-*                           0.0f, 3.0f, 5.0f, 0.0f, 0.0f, 7.0f, 
-*                           0.0f, 0.0f, 0.0f, 1.0f, 8.0f, 0.0f, 
+*    float hbsrVal[36]  = {1.0f, 2.0f, 0.0f, 4.0f, 6.0f, 0.0f,
+*                           0.0f, 3.0f, 5.0f, 0.0f, 0.0f, 7.0f,
+*                           0.0f, 0.0f, 0.0f, 1.0f, 8.0f, 0.0f,
 *                           0.0f, 0.0f, 1.0f, 0.0f, 7.0f, 2.0f,
 *                           3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-*                           2.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f}; 
+*                           2.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f};
 *
 *    int m           = 6;
 *    int n           = 6;
@@ -286,40 +286,40 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *    hipMalloc((void**)&dbscVal, sizeof(float) * rowBlockDim * colBlockDim * nnzb);
 *
 *    size_t bufferSize;
-*    hipsparseSgebsr2gebsc_bufferSize(handle, 
-*                                     mb, 
-*                                     nb, 
-*                                     nnzb, 
-*                                     dbsrVal, 
-*                                     dbsrRowPtr, 
-*                                     dbsrColInd, 
-*                                     rowBlockDim, 
-*                                     colBlockDim, 
+*    hipsparseSgebsr2gebsc_bufferSize(handle,
+*                                     mb,
+*                                     nb,
+*                                     nnzb,
+*                                     dbsrVal,
+*                                     dbsrRowPtr,
+*                                     dbsrColInd,
+*                                     rowBlockDim,
+*                                     colBlockDim,
 *                                     &bufferSize);
 *
 *    void* dbuffer = nullptr;
 *    hipMalloc((void**)&dbuffer, bufferSize);
 *
-*    hipsparseSgebsr2gebsc(handle, 
-*                          mb, 
-*                          nb, 
-*                          nnzb, 
-*                          dbsrVal, 
-*                          dbsrRowPtr, 
-*                          dbsrColInd, 
-*                          rowBlockDim, 
-*                          colBlockDim, 
-*                          dbscVal, 
-*                          dbscRowInd, 
-*                          dbscColPtr, 
-*                          action, 
-*                          base, 
+*    hipsparseSgebsr2gebsc(handle,
+*                          mb,
+*                          nb,
+*                          nnzb,
+*                          dbsrVal,
+*                          dbsrRowPtr,
+*                          dbsrColInd,
+*                          rowBlockDim,
+*                          colBlockDim,
+*                          dbscVal,
+*                          dbscRowInd,
+*                          dbscColPtr,
+*                          action,
+*                          base,
 *                          dbuffer);
 *
 *    hipFree(dbsrRowPtr);
 *    hipFree(dbsrColInd);
 *    hipFree(dbsrVal);
-*    
+*
 *    hipFree(dbscRowInd);
 *    hipFree(dbscColPtr);
 *    hipFree(dbscVal);

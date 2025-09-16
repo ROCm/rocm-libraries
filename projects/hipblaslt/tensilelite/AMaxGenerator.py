@@ -887,4 +887,3 @@ if __name__ == '__main__':
 
     output_path_basename = os.path.splitext(output_path)[0]
     amax.dump('yaml', f'{output_path_basename}.yaml')
-
