@@ -92,11 +92,11 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
     struct LDSBankAccess
     {
-        int       operationTag;
-        int       ldsTag;
-        Direction direction;
-        uint      workitem;
-        uint      bankIndex;
+        int          operationTag;
+        int          ldsTag;
+        LdsDirection direction;
+        uint         workitem;
+        uint         bankIndex;
     };
 
     /**

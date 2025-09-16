@@ -76,7 +76,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
             LDSBankAccess bankAccess;
             bankAccess.operationTag = event.operationTag;
             bankAccess.ldsTag
-                = ldsOp->direction == Direction::Load ? event.sourceTag : event.destinationTag;
+                = ldsOp->direction == LdsDirection::Read ? event.sourceTag : event.destinationTag;
             bankAccess.direction = ldsOp->direction;
             bankAccess.workitem  = event.workItem;
             bankAccess.bankIndex = bankIndex;
@@ -150,7 +150,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         auto& opAccesses        = m_tagToOperationAccesses[event.operationTag];
         opAccesses.operationTag = event.operationTag;
         opAccesses.ldsTag
-            = ldsOp->direction == Direction::Load ? event.sourceTag : event.destinationTag;
+            = ldsOp->direction == LdsDirection::Read ? event.sourceTag : event.destinationTag;
 
         AssertFatal(std::clamp(event.bytesRequested / 4u, 1u, 4u) == event.bytesRequested / 4u,
                     "Unsupported LDS access size: {}",
@@ -187,7 +187,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     {
         // Assumes aligned assesses (e.g. b128 is 16-byte aligned)
         // In future, when linked to codegen, update interface check alignment of allocation
-        if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == Direction::Load)
+        if(gfx == GPUArchitectureGFX::GFX950 && memoryOp.direction == LdsDirection::Read)
         {
             switch(dwords)
             {
@@ -328,7 +328,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         uint       cycles = calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
 
         // Add address transfer overhead only for Store operations
-        if(instr.memoryOp.direction == Direction::Store)
+        if(instr.memoryOp.direction == LdsDirection::Write)
         {
             cycles += 4;
         }
@@ -407,7 +407,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         std::stringstream ss;
 
         std::string instructionName;
-        if(instr.memoryOp.direction == Direction::Load)
+        if(instr.memoryOp.direction == LdsDirection::Read)
         {
             instructionName = fmt::format("ds_read_b{}", instr.dwords * 32);
         }
@@ -462,7 +462,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
         }
 
         // Add address transfer overhead only for Store operations
-        if(instr.memoryOp.direction == Direction::Store)
+        if(instr.memoryOp.direction == LdsDirection::Write)
         {
             cycles += 4;
         }

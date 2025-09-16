@@ -129,7 +129,7 @@ namespace MemoryTracerTest
 
         SECTION("GFX950 read operations")
         {
-            auto ldsRead = MemoryOpLDS{Direction::Load};
+            auto ldsRead = MemoryOpLDS{LdsDirection::Read};
 
             CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 1, GPUArchitectureGFX::GFX950) == 32);
             CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 2, GPUArchitectureGFX::GFX950) == 32);
@@ -139,7 +139,7 @@ namespace MemoryTracerTest
 
         SECTION("GFX950 write operations")
         {
-            auto ldsWrite = MemoryOpLDS{Direction::Store};
+            auto ldsWrite = MemoryOpLDS{LdsDirection::Write};
 
             CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 1, GPUArchitectureGFX::GFX950) == 32);
             CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 2, GPUArchitectureGFX::GFX950) == 16);
@@ -148,7 +148,7 @@ namespace MemoryTracerTest
 
         SECTION("Non-GFX950 operations")
         {
-            auto ldsRead = MemoryOpLDS{Direction::Load};
+            auto ldsRead = MemoryOpLDS{LdsDirection::Read};
 
             CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 1, GPUArchitectureGFX::GFX942) == 32);
             CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 2, GPUArchitectureGFX::GFX942) == 16);
@@ -157,7 +157,7 @@ namespace MemoryTracerTest
 
         SECTION("Invalid dword count")
         {
-            auto ldsRead = MemoryOpLDS{Direction::Load};
+            auto ldsRead = MemoryOpLDS{LdsDirection::Read};
 
             CHECK_THROWS_AS(
                 LDSBankModel::getThreadsPerClock(ldsRead, 5, GPUArchitectureGFX::GFX950),
@@ -172,7 +172,7 @@ namespace MemoryTracerTest
         using namespace rocRoller::KernelGraph::MemoryTracer;
 
         auto model   = LDSBankModel(4, 32, 512);
-        auto ldsRead = MemoryOpLDS{Direction::Load};
+        auto ldsRead = MemoryOpLDS{LdsDirection::Read};
 
         const int  operationTag   = 1;
         const int  sourceTag      = 10;
@@ -315,7 +315,7 @@ namespace MemoryTracerTest
         using namespace rocRoller::KernelGraph::MemoryTracer;
 
         RuntimeLDSInstruction instr;
-        instr.memoryOp = MemoryOpLDS{Direction::Load};
+        instr.memoryOp = MemoryOpLDS{LdsDirection::Read};
         instr.dwords   = 2; // 2 dwords, 16 threads per clock on GFX942
 
         for(int i = 0; i < 64; ++i) // 64 threads
@@ -370,14 +370,14 @@ namespace MemoryTracerTest
 
         SECTION("Load operations - no address transfer overhead")
         {
-            instr.memoryOp    = MemoryOpLDS{Direction::Load};
+            instr.memoryOp    = MemoryOpLDS{LdsDirection::Read};
             const auto cycles = LDSBankModel::getClockCount(instr, gfx);
             CHECK(cycles == baseCycles); // No +4 for Load operations
         }
 
         SECTION("Store operations - includes 4 cycle address transfer overhead")
         {
-            instr.memoryOp    = MemoryOpLDS{Direction::Store};
+            instr.memoryOp    = MemoryOpLDS{LdsDirection::Write};
             const auto cycles = LDSBankModel::getClockCount(instr, gfx);
             CHECK(cycles == baseCycles + 4); // +4 for Store operations
         }

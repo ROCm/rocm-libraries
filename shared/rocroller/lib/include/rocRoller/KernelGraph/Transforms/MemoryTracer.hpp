@@ -50,23 +50,18 @@ namespace rocRoller
             namespace Expression = rocRoller::Expression;
             using ExpressionPtr  = Expression::ExpressionPtr;
 
-            enum class Direction
+            enum class LdsDirection
             {
-                Load,
-                Store
-            };
-
-            struct MemoryOpGlobal
-            {
-                Direction direction;
+                Read,
+                Write
             };
 
             struct MemoryOpLDS
             {
-                Direction direction;
+                LdsDirection direction;
             };
 
-            using MemoryOp = std::variant<MemoryOpGlobal, MemoryOpLDS>;
+            using MemoryOp = std::variant<MemoryOpLDS>;
 
             /**
              * @brief Memory event expression.
