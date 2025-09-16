@@ -9162,7 +9162,10 @@ class KernelWriterAssembly(KernelWriter):
 
             # Need refactor, the pattern < glvw in fp8 is not the same as the original.
             # Thus the offset calculation here does not match global read.
-            if tP["glvw"] <= 2:
+            if tP["bpeGR"] == 4 and tP["bpeDS"] == 2:
+              # float to fp16/bf16, keep idx in the lower idx.
+              g2lIdx = int((i * blockWidth) * metadataScalar) * 2
+            elif tP["glvw"] <= 2:
               # In Metadata use metadataScalar to group # of i
               g2lIdx = (i * blockWidth) * metadataScalar
               if isBpeInputLarger:
@@ -9536,6 +9539,17 @@ class KernelWriterAssembly(KernelWriter):
                     elif blockWidth == 0.5:
                       localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
                   self.vgprPool.checkIn(vgprTmp)
+              elif (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isBFloat16()):
+                newBlockWidth = (tP["bpeGR"] / tP["bpe"]) * blockWidth
+                if newBlockWidth == 1:
+                  new_src = deepcopy(paramList[0])
+                  if isHigh16Bits:
+                    new_src.regName.addOffset(1)
+                  localWriteCVTCode.add(VCvtPkF32toBF16(dst=paramList[0], src0=new_src, src1=new_src, comment="convert one fp32 to bf16 idx=%d"%g2lIdx))
+                else:
+                  for vi in range(0, int(newBlockWidth)):
+                    if vi%2 == 0:
+                      localWriteCVTCode.add(VCvtPkF32toBF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), src1=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi+1)), comment="convert/pack fp32 to bf16"))
               else:
                 printExit("Unsupported combination DataType%s (%s) -> DataType (%s)"%(tc, kernel["ProblemType"]["DataType%s"%tc].toChar(), kernel["ProblemType"]["DataType"].toChar()))
 
