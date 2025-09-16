@@ -41,7 +41,7 @@
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
-#include <Tensile/analytical/StreamK.hpp>
+#include <origami/streamk.hpp>
 
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
@@ -162,7 +162,7 @@ namespace TensileLite
 
     struct StreamKSettings
     {
-        analytical::streamk::ReductionType reduction = analytical::streamk::ReductionType::Tree;
+        origami::streamk::reduction_type reduction = origami::streamk::reduction_type::Tree;
         size_t grid = 0;
     };
 
@@ -299,8 +299,8 @@ namespace TensileLite
 
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
-        analytical::streamk::ReductionType getSKReduction(Problem const& problem, Hardware const& hardware) const;
-        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, analytical::streamk::ReductionType reductionStrat) const;
+        origami::streamk::reduction_type getSKReduction(Problem const& problem, Hardware const& hardware) const;
+        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::streamk::reduction_type reductionStrat) const;
         size_t partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);

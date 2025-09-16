@@ -199,6 +199,7 @@ if(HIPBLASLT_ENABLE_MSGPACK)
     endif()
 endif()
 
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
 add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
