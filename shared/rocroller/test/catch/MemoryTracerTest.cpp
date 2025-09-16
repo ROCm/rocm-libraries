@@ -309,6 +309,51 @@ namespace MemoryTracerTest
         CHECK(groups[2][3] == 44);
     }
 
+    TEST_CASE("LDS model compute thread group bank mappings", "[lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        RuntimeLDSInstruction instr;
+        instr.memoryOp = MemoryOpLDS{Direction::Load};
+        instr.dwords   = 2; // 2 dwords, 16 threads per clock on GFX942
+
+        for(int i = 0; i < 64; ++i) // 64 threads
+        {
+            instr.baseAddresses.push_back(i * 8); // Each address is 8 bytes apart
+            // Therefore no bank conflicts occur (note the 2 dwords per access)
+        }
+
+        auto mappings
+            = LDSBankModel::computeThreadGroupBankMappings(instr, GPUArchitectureGFX::GFX942);
+
+        CHECK(mappings.size() == 4); // 32 addresses / 16 threads per clock = 4 groups
+
+        for(size_t i = 0; i < mappings.size(); ++i)
+        {
+            CHECK(mappings[i].size() == 32); // All 32 banks accessed in each group
+
+            for(const auto& [bank, count] : mappings[i])
+            {
+                CHECK(count == 1);
+            }
+        }
+    }
+
+    TEST_CASE("LDS model calculate total cycles from bank mappings", "[lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        std::vector<std::map<uint, uint>> mappings = {
+            {{0, 5}, {1, 2}, {2, 1}}, // Group 1: max 5 accesses
+            {{3, 1}, {4, 1}, {5, 1}}, // Group 2: max 1 access (no conflicts)
+            {{0, 3}, {1, 3}, {2, 3}} // Group 3: max 3 accesses
+        };
+        // 5 + 1 + 3 + 4 = 13 cycles total
+        CHECK(LDSBankModel::calculateTotalCyclesFromBankMappings(mappings) == 13);
+    }
+
     TEST_CASE("LDS model get clock count", "[lds-bank-model]")
     {
         using namespace rocRoller;
