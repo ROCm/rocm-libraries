@@ -131,28 +131,30 @@ namespace MemoryTracerTest
         {
             auto ldsRead = MemoryOpLDS{LdsDirection::Read};
 
-            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 1, GPUArchitectureGFX::GFX950) == 32);
-            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 2, GPUArchitectureGFX::GFX950) == 32);
-            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 3, GPUArchitectureGFX::GFX950) == 8);
-            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 4, GPUArchitectureGFX::GFX950) == 16);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 1, GPUArchitectureGFX::GFX950) == 16);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 2, GPUArchitectureGFX::GFX950) == 16);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 3, GPUArchitectureGFX::GFX950) == 4);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 4, GPUArchitectureGFX::GFX950) == 8);
         }
 
         SECTION("GFX950 write operations")
         {
             auto ldsWrite = MemoryOpLDS{LdsDirection::Write};
 
-            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 1, GPUArchitectureGFX::GFX950) == 32);
-            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 2, GPUArchitectureGFX::GFX950) == 16);
-            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 4, GPUArchitectureGFX::GFX950) == 8);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 1, GPUArchitectureGFX::GFX950) == 16);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 2, GPUArchitectureGFX::GFX950) == 8);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 3, GPUArchitectureGFX::GFX950) == 4);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsWrite, 4, GPUArchitectureGFX::GFX950) == 4);
         }
 
         SECTION("Non-GFX950 operations")
         {
             auto ldsRead = MemoryOpLDS{LdsDirection::Read};
 
-            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 1, GPUArchitectureGFX::GFX942) == 32);
-            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 2, GPUArchitectureGFX::GFX942) == 16);
-            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 4, GPUArchitectureGFX::GFX942) == 8);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 1, GPUArchitectureGFX::GFX942) == 16);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 2, GPUArchitectureGFX::GFX942) == 8);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 3, GPUArchitectureGFX::GFX942) == 4);
+            CHECK(LDSBankModel::getThreadsPerClock(ldsRead, 4, GPUArchitectureGFX::GFX942) == 4);
         }
 
         SECTION("Invalid dword count")
@@ -316,7 +318,7 @@ namespace MemoryTracerTest
 
         RuntimeLDSInstruction instr;
         instr.memoryOp = MemoryOpLDS{LdsDirection::Read};
-        instr.dwords   = 2; // 2 dwords, 16 threads per clock on GFX942
+        instr.dwords   = 2;
 
         for(int i = 0; i < 64; ++i) // 64 threads
         {
@@ -327,11 +329,11 @@ namespace MemoryTracerTest
         auto mappings
             = LDSBankModel::computeThreadGroupBankMappings(instr, GPUArchitectureGFX::GFX942);
 
-        CHECK(mappings.size() == 4); // 32 addresses / 16 threads per clock = 4 groups
+        CHECK(mappings.size() == 8); // 64 threads / 16 threads per clock = 8 groups
 
         for(size_t i = 0; i < mappings.size(); ++i)
         {
-            CHECK(mappings[i].size() == 32); // All 32 banks accessed in each group
+            CHECK(mappings[i].size() == 16); // 8 threads * 2 dwords each = 16 banks accessed
 
             for(const auto& [bank, count] : mappings[i])
             {

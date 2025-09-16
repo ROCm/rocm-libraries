@@ -192,15 +192,15 @@ namespace rocRoller::KernelGraph::MemoryTracer
             switch(dwords)
             {
             case 1:
-                return 32;
+                return 16;
             case 2:
-                return 32;
+                return 16;
             case 3:
                 // ds_read_b96 on gfx950 retains the same peak throughput as gfx942
                 // and is thus slower than ds_read_b128
-                return 8;
+                return 4;
             case 4:
-                return 16;
+                return 8;
             }
         }
         else
@@ -208,12 +208,12 @@ namespace rocRoller::KernelGraph::MemoryTracer
             switch(dwords)
             {
             case 1:
-                return 32;
-            case 2:
                 return 16;
+            case 2:
+                return 8;
             case 3:
             case 4:
-                return 8;
+                return 4;
             }
         }
         Throw<FatalError>("Unsupported dword count: ", dwords);
