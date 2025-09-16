@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <compare>
+#include <deque>
 #include <map>
 #include <ranges>
 #include <unordered_set>
@@ -232,52 +233,32 @@ namespace rocRoller
 
             AssertFatal(isModificationAllowed(index), "addElement is disallowed on this graph");
 
-            if(elementType == ElementType::Edge)
+            for(int src : inputs)
             {
-                int incidentOrder = 0;
-                for(int src : inputs)
-                {
-                    m_incidence.insert({src, index, incidentOrder++});
-                }
-                AssertFatal(Hyper || incidentOrder <= 1);
-                incidentOrder = 0;
-                for(int dst : outputs)
-                {
-                    m_incidence.insert({index, dst, incidentOrder++});
-                }
-                AssertFatal(Hyper || incidentOrder <= 1);
+                int incidentOrder
+                    = connectingType == ElementType::Edge
+                          ? std::count_if(m_incidence.begin(),
+                                          m_incidence.end(),
+                                          [src](auto const& i) { return i.src == src; })
+                          : std::count_if(m_incidence.begin(),
+                                          m_incidence.end(),
+                                          [index](auto const& i) { return i.src == index; });
+
+                m_incidence.insert({src, index, incidentOrder});
             }
-            else
+
+            for(int dst : outputs)
             {
-                auto const& bySrc = m_incidence.template get<BySrc>();
-                for(int src : inputs)
-                {
-                    int incidentOrder = 0;
+                int incidentOrder
+                    = connectingType == ElementType::Edge
+                          ? std::count_if(m_incidence.begin(),
+                                          m_incidence.end(),
+                                          [dst](auto const& i) { return i.dst == dst; })
+                          : std::count_if(m_incidence.begin(),
+                                          m_incidence.end(),
+                                          [index](auto const& i) { return i.dst == index; });
 
-                    auto lastSrcIter = bySrc.lower_bound(std::make_tuple(src + 1, 0));
-                    if(lastSrcIter != bySrc.begin())
-                        lastSrcIter--;
-                    if(lastSrcIter != bySrc.end() && lastSrcIter->src == src)
-                        incidentOrder = lastSrcIter->edgeOrder + 1;
-
-                    AssertFatal(Hyper || incidentOrder == 0);
-                    m_incidence.insert({src, index, incidentOrder});
-                }
-
-                auto const& byDst = m_incidence.template get<ByDst>();
-                for(int dst : outputs)
-                {
-                    int incidentOrder = 0;
-
-                    auto lastDstIter = byDst.lower_bound(std::make_tuple(dst + 1, 0));
-                    if(lastDstIter != byDst.begin())
-                        lastDstIter--;
-                    if(lastDstIter != byDst.end() && lastDstIter->dst == dst)
-                        incidentOrder = lastDstIter->edgeOrder + 1;
-
-                    AssertFatal(Hyper || incidentOrder == 0);
-                    m_incidence.insert({index, dst, incidentOrder});
-                }
+                m_incidence.insert({index, dst, incidentOrder});
             }
         }
 
@@ -286,25 +267,10 @@ namespace rocRoller
         {
             AssertFatal(isModificationAllowed(index), "deleteElement is disallowed on this graph");
 
-            auto elem = getElement(index);
-
             clearCache(GraphModification::DeleteElement);
 
-            auto& src = m_incidence.template get<BySrc>();
-
-            for(auto iter = src.lower_bound(std::make_tuple(index, 0));
-                iter != src.end() && iter->src == index;)
-            {
-                iter = src.erase(iter);
-            }
-
-            auto& dst = m_incidence.template get<ByDst>();
-
-            for(auto iter = dst.lower_bound(std::make_tuple(index, 0));
-                iter != dst.end() && iter->dst == index;)
-            {
-                iter = dst.erase(iter);
-            }
+            std::erase_if(m_incidence,
+                          [index](auto const& i) { return i.src == index || i.dst == index; });
 
             m_elements.erase(index);
         }
@@ -461,29 +427,27 @@ namespace rocRoller
             rv.element = m_elements.at(index);
 
             {
-                // Incoming: Find the src for incidents whose dst is our node.
-                auto const& incomingLookup = m_incidence.template get<ByDst>();
-
-                auto incomingBegin = incomingLookup.lower_bound(std::make_tuple(index, 0));
-                auto incomingEnd   = incomingLookup.lower_bound(std::make_tuple(index + 1, 0));
-
-                std::transform(incomingBegin,
-                               incomingEnd,
+                std::vector<Incident> tmp;
+                std::copy_if(m_incidence.begin(),
+                             m_incidence.end(),
+                             std::back_inserter(tmp),
+                             [index](auto const& i) { return i.dst == index; });
+                std::transform(tmp.begin(),
+                               tmp.end(),
                                std::back_inserter(rv.incoming),
-                               [](auto const& inc) { return inc.src; });
+                               [](auto const& i) { return i.src; });
             }
 
             {
-                // Outgoing: Find the dst for incidents whose src is our node.
-                auto const& outgoingLookup = m_incidence.template get<BySrc>();
-
-                auto outgoingBegin = outgoingLookup.lower_bound(std::make_tuple(index, 0));
-                auto outgoingEnd   = outgoingLookup.lower_bound(std::make_tuple(index + 1, 0));
-
-                std::transform(outgoingBegin,
-                               outgoingEnd,
+                std::vector<Incident> tmp;
+                std::copy_if(m_incidence.begin(),
+                             m_incidence.end(),
+                             std::back_inserter(tmp),
+                             [index](auto const& i) { return i.src == index; });
+                std::transform(tmp.begin(),
+                               tmp.end(),
                                std::back_inserter(rv.outgoing),
-                               [](auto const& inc) { return inc.dst; });
+                               [](auto const& i) { return i.dst; });
             }
 
             m_locationCache[index] = rv;
@@ -494,13 +458,12 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::roots() const
         {
-            auto const& lookup = m_incidence.template get<ByDst>();
-
             for(auto const& pair : m_elements)
             {
-                int  index = pair.first;
-                auto iter  = lookup.lower_bound(std::make_tuple(index, 0));
-                if(iter == lookup.end() || iter->dst != index)
+                int index = pair.first;
+                if(!std::any_of(m_incidence.begin(), m_incidence.end(), [index](auto const& i) {
+                       return i.dst == index;
+                   }))
                     co_yield index;
             }
         }
@@ -508,13 +471,12 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::leaves() const
         {
-            auto const& lookup = m_incidence.template get<BySrc>();
-
             for(auto const& pair : m_elements)
             {
-                int  index = pair.first;
-                auto iter  = lookup.lower_bound(std::make_tuple(index, 0));
-                if(iter == lookup.end() || iter->src != index)
+                int index = pair.first;
+                if(!std::any_of(m_incidence.begin(), m_incidence.end(), [index](auto const& i) {
+                       return i.src == index;
+                   }))
                     co_yield index;
             }
         }
@@ -684,31 +646,35 @@ namespace rocRoller
 
             co_yield start;
 
-            auto chain = [](auto& iters, auto end) -> Generator<int> {
-                for(int i = 0; i < iters.size(); i++)
-                {
-                    int src = iters[i].second;
-                    for(auto iter = iters[i].first; iter != end && iter->src == src; iter++)
-                    {
-                        co_yield iter->dst;
-                    }
-                }
-            };
+            std::deque<Incident>                                    toExplore;
+            std::set<Incident, Incident::CompareHypergraphIncident> noted = {};
 
-            auto const& lookup = m_incidence.template get<BySrc>();
+            std::copy_if(m_incidence.begin(),
+                         m_incidence.end(),
+                         std::back_inserter(toExplore),
+                         [start](auto const& i) { return i.src == start; });
 
-            auto startIter = lookup.lower_bound(std::make_tuple(start, 0));
-            auto iters     = std::vector{std::make_pair(startIter, start)};
-
-            for(int node : chain(iters, lookup.end()))
+            while(!toExplore.empty())
             {
-                if(visitedNodes.count(node))
+                auto i    = toExplore.front();
+                auto node = i.dst;
+                toExplore.pop_front();
+                if(visitedNodes.count(node) > 0)
                     continue;
 
                 visitedNodes.insert(node);
                 co_yield node;
 
-                iters.emplace_back(lookup.lower_bound(std::make_tuple(node, 0)), node);
+                noted.insert(i);
+
+                for(auto const& candidate : m_incidence)
+                {
+                    if(node == candidate.src && !noted.contains(candidate))
+                    {
+                        toExplore.push_back(candidate);
+                        noted.insert(candidate);
+                    }
+                }
             }
         }
 
@@ -721,31 +687,35 @@ namespace rocRoller
 
             co_yield start;
 
-            auto chain = [](auto& iters, auto end) -> Generator<int> {
-                for(int i = 0; i < iters.size(); i++)
-                {
-                    int dst = iters[i].second;
-                    for(auto iter = iters[i].first; iter != end && iter->dst == dst; iter++)
-                    {
-                        co_yield iter->src;
-                    }
-                }
-            };
+            std::deque<Incident>                                    toExplore;
+            std::set<Incident, Incident::CompareHypergraphIncident> noted = {};
 
-            auto const& lookup = m_incidence.template get<ByDst>();
+            std::copy_if(m_incidence.begin(),
+                         m_incidence.end(),
+                         std::back_inserter(toExplore),
+                         [start](auto const& i) { return i.dst == start; });
 
-            auto startIter = lookup.lower_bound(std::make_tuple(start, 0));
-            auto iters     = std::vector{std::make_pair(startIter, start)};
-
-            for(int node : chain(iters, lookup.end()))
+            while(!toExplore.empty())
             {
-                if(visitedNodes.count(node))
+                auto i    = toExplore.front();
+                auto node = i.src;
+                toExplore.pop_front();
+                if(visitedNodes.count(node) > 0)
                     continue;
 
                 visitedNodes.insert(node);
                 co_yield node;
 
-                iters.emplace_back(lookup.lower_bound(std::make_tuple(node, 0)), node);
+                noted.insert(i);
+
+                for(auto const& candidate : m_incidence)
+                {
+                    if(node == candidate.dst && !noted.contains(candidate))
+                    {
+                        toExplore.push_back(candidate);
+                        noted.insert(candidate);
+                    }
+                }
             }
         }
 
@@ -897,24 +867,28 @@ namespace rocRoller
         {
             if constexpr(Dir == Direction::Downstream)
             {
-                auto const& lookup = m_incidence.template get<BySrc>();
+                std::vector<Incident> rv;
+                std::copy_if(m_incidence.begin(),
+                             m_incidence.end(),
+                             std::back_inserter(rv),
+                             [element](auto const& i) { return i.src == element; });
 
-                for(auto iter = lookup.lower_bound(std::make_tuple(element, 0));
-                    iter != lookup.end() && iter->src == element;
-                    iter++)
+                for(auto const& i : rv)
                 {
-                    co_yield iter->dst;
+                    co_yield i.dst;
                 }
             }
             else
             {
-                auto const& lookup = m_incidence.template get<ByDst>();
+                std::vector<Incident> rv;
+                std::copy_if(m_incidence.begin(),
+                             m_incidence.end(),
+                             std::back_inserter(rv),
+                             [element](auto const& i) { return i.dst == element; });
 
-                for(auto iter = lookup.lower_bound(std::make_tuple(element, 0));
-                    iter != lookup.end() && iter->dst == element;
-                    iter++)
+                for(auto const& i : rv)
                 {
-                    co_yield iter->src;
+                    co_yield i.src;
                 }
             }
         }
@@ -974,8 +948,7 @@ namespace rocRoller
                 msg << "];" << std::endl;
             }
 
-            auto const& container = m_incidence.template get<BySrc>();
-            for(auto const& incident : container)
+            for(auto const& incident : m_incidence)
             {
                 msg << '"' << prefix << incident.src << "\" -> \"" << prefix << incident.dst << '"'
                     << std::endl;
@@ -1277,21 +1250,20 @@ namespace rocRoller
         {
             static_assert(!Hyper, "findEdge not supported for hypergraphs.");
 
-            auto const& bySrcDst = m_incidence.template get<BySrcDst>();
-            auto const& byDst    = m_incidence.template get<ByDst>();
+            std::vector<Incident> candidates;
+            std::copy_if(m_incidence.begin(),
+                         m_incidence.end(),
+                         std::back_inserter(candidates),
+                         [head](auto const& i) { return i.dst == head; });
 
-            auto dstIter = byDst.lower_bound(std::make_tuple(head, 0));
-            while(dstIter != byDst.end() && dstIter->dst == head)
+            for(auto const& candidate : candidates)
             {
-                auto theEdge = dstIter->src;
-
-                auto sdIter = bySrcDst.lower_bound(std::make_tuple(tail, theEdge));
-                if(sdIter != bySrcDst.end() && sdIter->src == tail && sdIter->dst == theEdge)
-                {
+                auto theEdge = candidate.src;
+                if(std::any_of(
+                       m_incidence.begin(), m_incidence.end(), [theEdge, tail](auto const& i) {
+                           return i.src == tail && i.dst == theEdge;
+                       }))
                     return theEdge;
-                }
-
-                ++dstIter;
             }
 
             return std::nullopt;

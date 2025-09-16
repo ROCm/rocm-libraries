@@ -131,11 +131,9 @@ namespace rocRoller
 
                 if(iot::outputting(io))
                 {
-                    auto const& container = graph.m_incidence.template get<typename HG::BySrc>();
-
-                    incidence.reserve(container.size());
+                    incidence.reserve(graph.m_incidence.size());
                     std::copy(
-                        container.begin(), container.end(), std::back_insert_iterator(incidence));
+                        graph.m_incidence.begin(), graph.m_incidence.end(), std::back_insert_iterator(incidence));
                 }
 
                 iot::mapRequired(io, "incidence", incidence);

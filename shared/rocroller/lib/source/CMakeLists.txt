@@ -85,7 +85,6 @@ target_link_libraries(rocroller-no-rtti
         hip::host
         $<BUILD_INTERFACE:spdlog::spdlog_header_only>
         fmt::fmt-header-only
-        Boost::headers
 )
 
 target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:rocroller-no-rtti>)

@@ -26,12 +26,6 @@
 
 #pragma once
 
-#include <boost/multi_index/identity.hpp>
-#include <boost/multi_index/key.hpp>
-#include <boost/multi_index/member.hpp>
-#include <boost/multi_index/ordered_index.hpp>
-#include <boost/multi_index_container.hpp>
-
 #include <functional>
 #include <map>
 #include <ranges>
@@ -82,13 +76,27 @@ namespace rocRoller
 
         std::string toString(GraphModification m);
 
-        namespace mi = boost::multi_index;
-
         struct HypergraphIncident
         {
             int src;
             int dst;
             int edgeOrder;
+
+            struct CompareHypergraphIncident
+            {
+                bool operator()(const HypergraphIncident& a, const HypergraphIncident& b) const
+                {
+                    if(a.edgeOrder != b.edgeOrder)
+                    {
+                        return a.edgeOrder > b.edgeOrder;
+                    }
+                    if(a.src != b.src)
+                    {
+                        return a.src > b.src;
+                    }
+                    return a.dst > b.dst;
+                }
+            };
         };
 
         template <typename Node, typename Edge, bool Hyper = true>
@@ -442,28 +450,7 @@ namespace rocRoller
             // TODO: May need to replace with multi_index for in-place rewriting.
             std::map<int, Element> m_elements;
 
-            struct BySrc
-            {
-            };
-            struct ByDst
-            {
-            };
-            struct BySrcDst
-            {
-            };
-
-            using Incidence = mi::multi_index_container<
-                Incident,
-                mi::indexed_by<
-                    mi::ordered_non_unique<mi::tag<BySrc>,
-                                           mi::key<&Incident::src, &Incident::edgeOrder>>,
-                    mi::ordered_non_unique<mi::tag<ByDst>,
-                                           mi::key<&Incident::dst, &Incident::edgeOrder>>,
-                    // This prevents parallel incidents.
-                    mi::ordered_unique<mi::tag<BySrcDst>,
-                                       mi::key<&Incident::src, &Incident::dst>>>>;
-
-            Incidence m_incidence;
+            std::set<HypergraphIncident, HypergraphIncident::CompareHypergraphIncident> m_incidence;
 
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;

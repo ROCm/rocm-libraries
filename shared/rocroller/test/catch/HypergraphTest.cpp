@@ -147,7 +147,7 @@ namespace HypergraphTest
     using myHypergraph = Graph::Hypergraph<TestDimension, TestTransform>;
     using myCalmGraph  = Graph::Hypergraph<TestDimension, TestTransform, false>;
 
-    TEST_CASE("Calm graph find edge", "[hypergraph]")
+    TEST_CASE("Calm graph find edge", "[kernel-graph]")
     {
         myCalmGraph g;
         auto        n0 = g.addElement(TestUser{});
