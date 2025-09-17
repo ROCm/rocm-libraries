@@ -54,7 +54,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
   SCmpKGeU32, SCmpKGtU32, SCmpKLGU32, SCmpLeI32, SCmpLeU32, SCmpLgU32, SCmpLtU32, SCmpLtI32, \
-  SEndpgm, SFf1B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
+  SEndpgm, SFf1B32, SGetRegB32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
   SLShiftRightB64, SLoadB32, SLoadB64, SMFMAInstruction, SMemLoadInstruction, SMinI32, \
   SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, \
@@ -65,7 +65,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
-  VLShiftLeftB64, VLShiftRightB32, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMulF32, \
+  VLShiftLeftB64, VLShiftRightB32, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
   VPrngB32, VReadfirstlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128
 
@@ -692,7 +692,7 @@ class KernelWriterAssembly(KernelWriter):
           for iui in range(0, kernel["InnerUnroll"]):
             moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
             ri += self.states.a.numVgprValuPerBlock
-          if (tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]):
+          if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not (kernel["UsePLRPack"] and self.states.numItersPLR):
             ri = 0
         ri = 0
         if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
@@ -702,6 +702,8 @@ class KernelWriterAssembly(KernelWriter):
               for data in range(0,kernel["MIInputPerThreadA"]):
                 moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuA_X0_I0_D0_PACK", ri))
                 ri += ceil(kernel["VectorWidthA"] * tPA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"]
+            if (kernel["UsePLRPack"] and self.states.numItersPLR):
+              ri = 0
       else:
         moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
         for bi in range(0,numBiFactor): # buffer indices
@@ -731,7 +733,7 @@ class KernelWriterAssembly(KernelWriter):
           for iui in range(0, kernel["InnerUnroll"]):
             moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
             ri += self.states.b.numVgprValuPerBlock
-          if (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]):
+          if (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) and not (kernel["UsePLRPack"] and self.states.numItersPLR):
             ri = 0
         ri = 0
         if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
@@ -741,6 +743,8 @@ class KernelWriterAssembly(KernelWriter):
               for data in range(0,kernel["MIInputPerThreadB"]):
                 moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuB_X0_I0_D0_PACK", ri))
                 ri += ceil(kernel["VectorWidthB"] * tPB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"]
+            if (kernel["UsePLRPack"] and self.states.numItersPLR):
+              ri = 0
       else:
         moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_BASE", "vgprBase", self.states.b.startVgprValu - self.states.startVgpr))
         for bi in range(0,numBiFactor): # buffer indices
@@ -4293,20 +4297,43 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment1("initC: remove ValuA/B vgpr buffer [%u...%u) from pool"%(self.states.a.startVgprValu , self.states.lastValuAB))
     numCVgpr = self.states.c.numVgprValu + numAccvgprs
 
-    if kernel["LdsInitCVgprs"]:
-      tmpAddr = self.vgprPool.checkOut(1,"tmp vgpr for lds init C registers")
-      module.add(VMovB32(dst=vgpr(tmpAddr), src=self.consts.ldsOOB, comment="set out-of-bound addr"))
+    if kernel["MfmaInitCVgprs"] == True and self.states.asmCaps["HasMFMA_f8f6f4"] and numCVgpr >= 32:
+      tmpVgpr = self.vgprPool.checkOutAligned(2,2,"tmp vgpr for lds init C registers")
+      module.add(VMovB64(dst=vgpr(tmpVgpr,2), src=0, comment="A/B=0"))
 
-    for i in range(0, numCVgpr):
-      copyInst = VMovB32 if i >= numAccvgprs else VAccvgprWrite
-      regStr = vgpr("ValuC+%u"%(i-numAccvgprs)) if i >= numAccvgprs else accvgpr(i)
-      if not kernel["LdsInitCVgprs"]:
+      chunkSize = 16
+      for i in range(0, min(16, numCVgpr)):
+        copyInst = VMovB32 if i >= numAccvgprs else VAccvgprWrite
+        regStr = vgpr("ValuC+%u"%(i-numAccvgprs)) if i >= numAccvgprs else accvgpr(i)
         module.add(copyInst(dst=regStr, src=0, comment="initC"))
-      else:
-        module.add(DSLoadB32(dst=regStr, src=vgpr(tmpAddr), ds=DSModifiers(offset=0), comment="initC"))
 
-    if kernel["LdsInitCVgprs"]:
-      self.vgprPool.checkIn(tmpAddr)
+      for i in range(min(16, numCVgpr), numCVgpr, 16):
+        if i + 16 <= numCVgpr:
+          module.add(MFMAInstruction(instType=InstType.INST_I8, accType=InstType.INST_I32, variant=[32,32,16,1], mfma1k=False, \
+                                     acc=accvgpr(i,16), a=vgpr(tmpVgpr,2), b=vgpr(tmpVgpr,2), acc2=accvgpr(0,16), \
+                                     comment="initC: [%u, %u]"%(i, i+15)))
+        else:
+          for j in range(i,min(i+16, numCVgpr)):
+            copyInst = VMovB32 if j >= numAccvgprs else VAccvgprWrite
+            regStr = vgpr("ValuC+%u"%(j-numAccvgprs)) if j >= numAccvgprs else accvgpr(j)
+            module.add(copyInst(dst=regStr, src=0, comment="initC"))
+
+      self.vgprPool.checkIn(tmpVgpr)
+    else:
+      if kernel["LdsInitCVgprs"]:
+        tmpAddr = self.vgprPool.checkOut(1,"tmp vgpr for lds init C registers")
+        module.add(VMovB32(dst=vgpr(tmpAddr), src=self.consts.ldsOOB, comment="set out-of-bound addr"))
+
+      for i in range(0, numCVgpr):
+        copyInst = VMovB32 if i >= numAccvgprs else VAccvgprWrite
+        regStr = vgpr("ValuC+%u"%(i-numAccvgprs)) if i >= numAccvgprs else accvgpr(i)
+        if not kernel["LdsInitCVgprs"]:
+          module.add(copyInst(dst=regStr, src=0, comment="initC"))
+        else:
+          module.add(DSLoadB32(dst=regStr, src=vgpr(tmpAddr), ds=DSModifiers(offset=0), comment="initC"))
+
+      if kernel["LdsInitCVgprs"]:
+        self.vgprPool.checkIn(tmpAddr)
 
     return module
 
@@ -4584,6 +4611,8 @@ class KernelWriterAssembly(KernelWriter):
           if self.states.packDTVA:
             # pack DTV case, double the number
             numVgprValuPackA *= 2
+          elif (kernel["UsePLRPack"] and self.states.numItersPLR):
+            numVgprValuPackA //= 2
         else:
           numVgprValuPackA = self.states.a.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * (int(4/tensorParametersA["bpeDS"]) - 1)
       vgprBaseA = self.vgprPool.checkOutAligned(numValuA + numVgprValuPackA, 2)
@@ -4605,8 +4634,11 @@ class KernelWriterAssembly(KernelWriter):
           if self.states.packDTVB:
             # pack DTV case, double the number
             numVgprValuPackB *= 2
+          elif (kernel["UsePLRPack"] and self.states.numItersPLR):
+            numVgprValuPackB //= 2
         else:
           numVgprValuPackB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * (int(4/tensorParametersB["bpeDS"]) - 1)
+
       vgprBaseB = self.vgprPool.checkOutAligned(numValuB + numVgprValuPackB, 2)
       imodB.add(RegSet("v", "vgprValuB_X0_I0_BASE", vgprBaseB))
       imodB.add(self.moduleVgprMacroValuB)
@@ -13800,6 +13832,8 @@ class KernelWriterAssembly(KernelWriter):
     elif (not kernel["DirectToLdsA"]) and kernel["DirectToLdsB"]:
       # (no DTLA) + DTLB (need to put DTLB first)
       return True
+    elif kernel["SwapGlobalReadOrder"] == True:
+      return True
     return False
 
   ##############################################################################
@@ -13826,6 +13860,62 @@ class KernelWriterAssembly(KernelWriter):
       accK *= 2
 
     module.addSpaceLine()
+    return module
+
+  def simdSpecDispatch(self, kernel, numCodePath):
+    module = Module()
+
+    loopLabelBegin = []
+    loopLabelSkipBegin = []
+
+    loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
+
+    if numCodePath == 1:
+      module.add(TextBlock("MAINLOOP 0\n"))
+      module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
+      module.add(Label("LoopEnd%s"%(loopChar), "" ))
+      return module
+
+
+    module.addComment0("SIMD specialized dispatch")
+
+    for l in range(numCodePath):
+      loopLabelBegin.append(Label("LoopBegin%s_%u"%(loopChar, l), "" ))
+      loopLabelSkipBegin.append(Label("LoopSkipBegin%s_%u"%(loopChar, l), "" ))
+    loopLabelEnd = Label("LoopEnd%s"%(loopChar), "" )
+
+    tmpSgpr = self.sgprPool.checkOut(1)
+    module.add(SGetRegB32(dst=sgpr(tmpSgpr), src="hwreg(HW_REG_HW_ID, 4, 1)"))
+
+    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all PGR to complete"))
+    tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2)
+    sgprPC = ContinuousRegister(tmpSgpr1, 3)
+    for l in range(numCodePath):
+      module.addComment0("Branch to code-path %u logic"%l)
+      module.add(SCmpEQU32(src0=sgpr(tmpSgpr), src1=hex(l), comment="" ))
+      #module.add(SCBranchSCC1(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
+      module.add(SCLongBranchScc1(loopLabelBegin[l], sgprPC, \
+                                  loopLabelSkipBegin[l].getLabelName(), \
+                                  loopLabelBegin[l].getLabelName()))
+    self.sgprPool.checkIn(tmpSgpr1)
+    self.sgprPool.checkIn(tmpSgpr)
+
+    for l in range(numCodePath):
+      module.addComment0("SIMD %u code-path"%l)
+      module.add(loopLabelBegin[l])
+      module.add(TextBlock("MAINLOOP %u\n"%l))
+      module.add(SCBranchSCC0(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
+      tmpSgpr1 = self.sgprPool.checkOutAligned(2, 2)
+      sgprPC = ContinuousRegister(tmpSgpr1, 3)
+      #module.add(SBranch(labelName=loopLabelEnd.getLabelName(), comment="" ))
+      module.add(SLongBranchPositive(loopLabelEnd, sgprPC))
+      self.sgprPool.checkIn(tmpSgpr1)
+
+    # close unrolled loop
+    endStr = ""
+    module.addComment2("Unrolled Loop - End%s"%(endStr))
+    module.add(loopLabelEnd)
+
     return module
 
   ##############################################################################
