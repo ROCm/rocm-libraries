@@ -45,8 +45,9 @@ fs::path LockFilePath(const fs::path& filename_)
 {
     try
     {
+        bool near_file = !filename_.parent_path().empty();
         auto directory = fs::temp_directory_path() / "miopen-lockfiles";
-        if(!filename_.parent_path().empty())
+        if(near_file)
             directory = filename_.parent_path() / "miopen-lockfiles";
 
 
@@ -56,7 +57,9 @@ fs::path LockFilePath(const fs::path& filename_)
             fs::permissions(directory, FS_ENUM_PERMS_ALL);
         }
         const auto hash = md5(filename_.parent_path().string());
-        const auto file = directory / (hash + "_" + filename_.filename() + ".lock");
+        auto file = directory / (hash + "_" + filename_.filename() + ".lock");
+        if(near_file)
+            file = directory / (filename_.filename() + ".lock");
 
         return file;
     }
