@@ -379,7 +379,7 @@ def buildHipClangJob(Map conf=[:]){
                     if (dvc_pull) {
                         sh """
                             cd ${env.WORKSPACE}/${env.REPO_DIR}
-                            dvc pull
+                            dvc pull -v
                            """.stripIndent()
                     }
                     cmake_build(conf)
