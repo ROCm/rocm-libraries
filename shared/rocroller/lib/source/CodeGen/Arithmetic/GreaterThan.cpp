@@ -31,18 +31,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Scalar, DataType::Int32);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Scalar, DataType::UInt32);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Vector, DataType::Int32);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Vector, DataType::UInt32);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Scalar, DataType::Int64);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Scalar, DataType::UInt64);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Vector, DataType::Int64);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Vector, DataType::UInt64);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Vector, DataType::Float);
-    RegisterComponentTemplateSpec(GreaterThanGenerator, Register::Type::Vector, DataType::Double);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::GreaterThan>>
         GetGenerator<Expression::GreaterThan>(Register::ValuePtr dst,
