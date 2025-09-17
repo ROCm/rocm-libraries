@@ -1182,7 +1182,7 @@ namespace rocRoller
         Generator<Instruction> LoadStoreTileGenerator::moveTile(LoadStoreTileInfo& info,
                                                                 Transformer&       coords)
         {
-            rocRoller::Log::getLogger()->info(
+            rocRoller::Log::getLogger()->debug(
                 "KernelGraph::LoadStoreTileGenerator::moveTile<{}>({}) {}x{}",
                 toString(Dir),
                 info.tag,
