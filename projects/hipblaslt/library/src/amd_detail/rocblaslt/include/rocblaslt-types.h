@@ -168,22 +168,26 @@ typedef int32_t rocblasltInt32;
  */
 typedef enum rocblaslt_epilogue_
 {
-    ROCBLASLT_EPILOGUE_DEFAULT        = 1,
-    ROCBLASLT_EPILOGUE_RELU           = 2,
-    ROCBLASLT_EPILOGUE_BIAS           = 4,
-    ROCBLASLT_EPILOGUE_RELU_BIAS      = 6,
-    ROCBLASLT_EPILOGUE_GELU           = 32,
-    ROCBLASLT_EPILOGUE_GELU_BIAS      = 36,
-    ROCBLASLT_EPILOGUE_GELU_AUX       = 160,
-    ROCBLASLT_EPILOGUE_GELU_AUX_BIAS  = 164,
-    ROCBLASLT_EPILOGUE_DGELU          = 192,
-    ROCBLASLT_EPILOGUE_DGELU_BGRAD    = 208,
-    ROCBLASLT_EPILOGUE_BGRADA         = 256,
-    ROCBLASLT_EPILOGUE_BGRADB         = 512,
-    ROCBLASLT_EPILOGUE_SWISH_EXT      = 65536,
-    ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,
-    ROCBLASLT_EPILOGUE_CLAMP_EXT      = 131072,
-    ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT = 131076,
+    ROCBLASLT_EPILOGUE_DEFAULT            = 1,
+    ROCBLASLT_EPILOGUE_RELU               = 2,
+    ROCBLASLT_EPILOGUE_BIAS               = 4,
+    ROCBLASLT_EPILOGUE_RELU_BIAS          = 6,
+    ROCBLASLT_EPILOGUE_GELU               = 32,
+    ROCBLASLT_EPILOGUE_GELU_BIAS          = 36,
+    ROCBLASLT_EPILOGUE_RELU_AUX           = 130,
+    ROCBLASLT_EPILOGUE_RELU_AUX_BIAS      = 134,
+    ROCBLASLT_EPILOGUE_GELU_AUX           = 160,
+    ROCBLASLT_EPILOGUE_GELU_AUX_BIAS      = 164,
+    ROCBLASLT_EPILOGUE_DGELU              = 192,
+    ROCBLASLT_EPILOGUE_DGELU_BGRAD        = 208,
+    ROCBLASLT_EPILOGUE_BGRADA             = 256,
+    ROCBLASLT_EPILOGUE_BGRADB             = 512,
+    ROCBLASLT_EPILOGUE_SWISH_EXT          = 65536,
+    ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT     = 65540,
+    ROCBLASLT_EPILOGUE_CLAMP_EXT          = 131072,
+    ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT     = 131076,
+    ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT      = 131200,
+    ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT = 131204,
 } rocblaslt_epilogue;
 
 /*! \ingroup types_module
@@ -650,8 +654,8 @@ namespace rocblaslt
             = RocblasltContractionProblem::ScalingFormat::None;
         RocblasltContractionProblem::ScalingFormat scaling_b_type
             = RocblasltContractionProblem::ScalingFormat::None;
-        float                                      act0 = 0.f;
-        float                                      act1 = 0.f;
+        float act0 = 0.f;
+        float act1 = 0.f;
     };
 
     class RocTuningV2

@@ -251,8 +251,8 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSizeExt(hipsparseHand
  *                     \ref hipsparseSpruneCsr2csrByPercentage_bufferSize "hipsparseXpruneCsr2csrByPercentage_bufferSize()".
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC, 
- *              \p info, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr or \p buffer 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC,
+ *              \p info, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr or \p buffer
  *              pointer is invalid.
  */
 /**@{*/
@@ -299,9 +299,9 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnzByPercentage(hipsparseHandle_t       
  *  \details
  *  This function converts the sparse CSR matrix A into a sparse CSR matrix C by pruning values in A
  *  that are less than the threshold. All the parameters are assumed to have been pre-allocated by the user.
- *  The user first calls \ref hipsparseSpruneCsr2csr_bufferSize "hipsparseXpruneCsr2csr_bufferSize()" to 
- *  determine the size of the buffer used by \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()" and 
- *  \p hipsparseXpruneCsr2csr() which the user then allocates. The user then allocates \p csrRowPtrC to have 
+ *  The user first calls \ref hipsparseSpruneCsr2csr_bufferSize "hipsparseXpruneCsr2csr_bufferSize()" to
+ *  determine the size of the buffer used by \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()" and
+ *  \p hipsparseXpruneCsr2csr() which the user then allocates. The user then allocates \p csrRowPtrC to have
  *  \p m+1 elements and then calls \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()" which fills
  *  in the \p csrRowPtrC array stores then number of elements that are larger than the pruning \p threshold
  *  in \p nnzTotalDevHostPtr. The user then calls \p hipsparseXpruneCsr2csr() to complete the conversion. It
@@ -341,12 +341,12 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnzByPercentage(hipsparseHandle_t       
  *  @param[in]
  *  info          prune info structure.
  *  @param[in]
- *  buffer        buffer allocated by the user whose size is determined by calling 
+ *  buffer        buffer allocated by the user whose size is determined by calling
  *                \ref hipsparseSpruneCsr2csrByPercentage_bufferSize "hipsparseXpruneCsr2csrByPercentage_bufferSize()".
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC, \p info, 
- *              \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC or \p buffer pointer is 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC, \p info,
+ *              \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC or \p buffer pointer is
  *              invalid.
  */
 /**@{*/

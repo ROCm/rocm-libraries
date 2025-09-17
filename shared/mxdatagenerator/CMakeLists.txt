@@ -24,8 +24,8 @@
 #
 ################################################################################
 
-cmake_minimum_required(VERSION 3.16)
-project(FPDataGeneration VERSION 0.1.0)
+cmake_minimum_required(VERSION 3.25.2)
+project(mxDataGenerator VERSION 0.1.0)
 set(CMAKE_CXX_STANDARD 20)
 
 include(GNUInstallDirs)
@@ -134,16 +134,20 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY ExactVersion
   )
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/mxDataGeneratorConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGeneratorConfig.cmake"
-    COPYONLY
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/mxDataGeneratorConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGeneratorConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/mxDataGenerator
+    PATH_VARS CMAKE_INSTALL_INCLUDEDIR
 )
+
 install(
     TARGETS mxDataGenerator
     EXPORT mxDataGenerator-targets
     COMPONENT mxDataGenerator_Development
 )
+
 install(
     EXPORT mxDataGenerator-targets
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/mxDataGenerator"
@@ -151,20 +155,25 @@ install(
     COMPONENT mxDataGenerator_Development
     FILE mxDataGenerator-targets.cmake
 )
+
+
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGeneratorConfig-version.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGeneratorConfig.cmake"
-    COMPONENT mxDataGenerator_Development 
+    COMPONENT mxDataGenerator_Development
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/mxDataGenerator
 )
+
 install(
     FILES ${mxdatagenerator_headers_public}
     COMPONENT mxDataGenerator_Development
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
     COMPONENT mxDataGenerator_Docs
     DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 )
+
 export(EXPORT mxDataGenerator-targets FILE mxDataGeneratorConfig.cmake)
