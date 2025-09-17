@@ -183,7 +183,8 @@ endif()
 include(CheckCXXCompilerFlag)
 
 if(BUILD_OFFLOAD_COMPRESS)
-  check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP. 
+  check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
   else()
