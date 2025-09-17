@@ -235,28 +235,66 @@ namespace rocRoller
 
             for(int src : inputs)
             {
-                int incidentOrder
-                    = connectingType == ElementType::Edge
-                          ? std::count_if(m_incidence.begin(),
-                                          m_incidence.end(),
-                                          [src](auto const& i) { return i.src == src; })
-                          : std::count_if(m_incidence.begin(),
-                                          m_incidence.end(),
-                                          [index](auto const& i) { return i.src == index; });
+                std::vector<Incident> connectedIncidents;
+
+                std::copy_if(m_incidence.begin(),
+                             m_incidence.end(),
+                             std::back_inserter(connectedIncidents),
+                             [elementType, index, src](auto const& i) {
+                                 return elementType == ElementType::Edge ? i.dst == index
+                                                                         : i.src == src;
+                             });
+
+                int incidentOrder = 0;
+                if(!connectedIncidents.empty())
+                {
+                    incidentOrder = std::max_element(connectedIncidents.begin(),
+                                                     connectedIncidents.end(),
+                                                     [](auto const& a, auto const& b) {
+                                                         return a.edgeOrder < b.edgeOrder;
+                                                     })
+                                        ->edgeOrder
+                                    + 1;
+
+                    AssertFatal(Hyper || incidentOrder == 0,
+                                "Too many incidents for edge connection",
+                                ShowValue(elementType),
+                                ShowValue(index),
+                                ShowValue(src));
+                }
 
                 m_incidence.insert({src, index, incidentOrder});
             }
 
             for(int dst : outputs)
             {
-                int incidentOrder
-                    = connectingType == ElementType::Edge
-                          ? std::count_if(m_incidence.begin(),
-                                          m_incidence.end(),
-                                          [dst](auto const& i) { return i.dst == dst; })
-                          : std::count_if(m_incidence.begin(),
-                                          m_incidence.end(),
-                                          [index](auto const& i) { return i.dst == index; });
+                std::vector<Incident> connectedIncidents;
+
+                std::copy_if(m_incidence.begin(),
+                             m_incidence.end(),
+                             std::back_inserter(connectedIncidents),
+                             [elementType, index, dst](auto const& i) {
+                                 return elementType == ElementType::Edge ? i.src == index
+                                                                         : i.dst == dst;
+                             });
+
+                int incidentOrder = 0;
+                if(!connectedIncidents.empty())
+                {
+                    incidentOrder = std::max_element(connectedIncidents.begin(),
+                                                     connectedIncidents.end(),
+                                                     [](auto const& a, auto const& b) {
+                                                         return a.edgeOrder < b.edgeOrder;
+                                                     })
+                                        ->edgeOrder
+                                    + 1;
+
+                    AssertFatal(Hyper || incidentOrder == 0,
+                                "Too many incidents for edge connection",
+                                ShowValue(elementType),
+                                ShowValue(index),
+                                ShowValue(dst));
+                }
 
                 m_incidence.insert({index, dst, incidentOrder});
             }
@@ -432,6 +470,7 @@ namespace rocRoller
                              m_incidence.end(),
                              std::back_inserter(tmp),
                              [index](auto const& i) { return i.dst == index; });
+                sortBySrc(tmp);
                 std::transform(tmp.begin(),
                                tmp.end(),
                                std::back_inserter(rv.incoming),
@@ -444,6 +483,7 @@ namespace rocRoller
                              m_incidence.end(),
                              std::back_inserter(tmp),
                              [index](auto const& i) { return i.src == index; });
+                sortByDst(tmp);
                 std::transform(tmp.begin(),
                                tmp.end(),
                                std::back_inserter(rv.outgoing),
@@ -648,9 +688,11 @@ namespace rocRoller
 
             std::deque<Incident>                                    toExplore;
             std::set<Incident, Incident::CompareHypergraphIncident> noted = {};
+            std::vector<Incident> candidates(m_incidence.begin(), m_incidence.end());
+            sortBySrc(candidates);
 
-            std::copy_if(m_incidence.begin(),
-                         m_incidence.end(),
+            std::copy_if(candidates.begin(),
+                         candidates.end(),
                          std::back_inserter(toExplore),
                          [start](auto const& i) { return i.src == start; });
 
@@ -667,7 +709,7 @@ namespace rocRoller
 
                 noted.insert(i);
 
-                for(auto const& candidate : m_incidence)
+                for(auto const& candidate : candidates)
                 {
                     if(node == candidate.src && !noted.contains(candidate))
                     {
@@ -689,9 +731,11 @@ namespace rocRoller
 
             std::deque<Incident>                                    toExplore;
             std::set<Incident, Incident::CompareHypergraphIncident> noted = {};
+            std::vector<Incident> candidates(m_incidence.begin(), m_incidence.end());
+            sortByDst(candidates);
 
-            std::copy_if(m_incidence.begin(),
-                         m_incidence.end(),
+            std::copy_if(candidates.begin(),
+                         candidates.end(),
                          std::back_inserter(toExplore),
                          [start](auto const& i) { return i.dst == start; });
 
@@ -708,7 +752,7 @@ namespace rocRoller
 
                 noted.insert(i);
 
-                for(auto const& candidate : m_incidence)
+                for(auto const& candidate : candidates)
                 {
                     if(node == candidate.dst && !noted.contains(candidate))
                     {
@@ -872,6 +916,7 @@ namespace rocRoller
                              m_incidence.end(),
                              std::back_inserter(rv),
                              [element](auto const& i) { return i.src == element; });
+                sortBySrc(rv);
 
                 for(auto const& i : rv)
                 {
@@ -885,6 +930,7 @@ namespace rocRoller
                              m_incidence.end(),
                              std::back_inserter(rv),
                              [element](auto const& i) { return i.dst == element; });
+                sortByDst(rv);
 
                 for(auto const& i : rv)
                 {
@@ -1269,5 +1315,20 @@ namespace rocRoller
             return std::nullopt;
         }
 
+        template <typename Node, typename Edge, bool Hyper>
+        void Hypergraph<Node, Edge, Hyper>::sortBySrc(
+            std::vector<HypergraphIncident>& incidents) const
+        {
+            std::sort(
+                incidents.begin(), incidents.end(), Incident::CompareHypergraphIncident::bySrc);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        void Hypergraph<Node, Edge, Hyper>::sortByDst(
+            std::vector<HypergraphIncident>& incidents) const
+        {
+            std::sort(
+                incidents.begin(), incidents.end(), Incident::CompareHypergraphIncident::byDst);
+        }
     }
 }

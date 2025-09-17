@@ -86,15 +86,33 @@ namespace rocRoller
             {
                 bool operator()(const HypergraphIncident& a, const HypergraphIncident& b) const
                 {
-                    if(a.edgeOrder != b.edgeOrder)
-                    {
-                        return a.edgeOrder > b.edgeOrder;
-                    }
+                    return bySrc(a, b);
+                }
+
+                static bool bySrc(const HypergraphIncident& a, const HypergraphIncident& b)
+                {
                     if(a.src != b.src)
                     {
-                        return a.src > b.src;
+                        return a.src < b.src;
                     }
-                    return a.dst > b.dst;
+                    if(a.edgeOrder != b.edgeOrder)
+                    {
+                        return a.edgeOrder < b.edgeOrder;
+                    }
+                    return a.dst < b.dst;
+                }
+
+                static bool byDst(const HypergraphIncident& a, const HypergraphIncident& b)
+                {
+                    if(a.dst != b.dst)
+                    {
+                        return a.dst < b.dst;
+                    }
+                    if(a.edgeOrder != b.edgeOrder)
+                    {
+                        return a.edgeOrder < b.edgeOrder;
+                    }
+                    return a.src < b.src;
                 }
             };
         };
@@ -454,6 +472,9 @@ namespace rocRoller
 
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
+
+            void sortBySrc(std::vector<HypergraphIncident>& incidents) const;
+            void sortByDst(std::vector<HypergraphIncident>& incidents) const;
         };
 
         template <typename Node, typename Edge, bool Hyper>
