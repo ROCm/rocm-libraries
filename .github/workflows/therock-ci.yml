@@ -71,7 +71,7 @@ jobs:
           python .github/scripts/therock_configure_ci.py
 
   therock-ci-linux:
-    name: Linux ${{ matrix.projects.project_to_test }}
+    name: Linux (${{ matrix.projects.project_to_test }})
     permissions:
       contents: read
       id-token: write
@@ -89,7 +89,7 @@ jobs:
       subtree_checkout: ${{ matrix.projects.subtree_checkout }}
 
   therock-ci-windows:
-    name: Windows ${{ matrix.projects.project_to_test }}
+    name: Windows (${{ matrix.projects.project_to_test }})
     permissions:
       contents: read
       id-token: write
