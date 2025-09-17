@@ -237,12 +237,12 @@ namespace rocRoller
                     info.rowOffsetReg = m_context->registerTagManager()->getRegister(offsetTag);
                 }
 
-                rowOffsetExpr = getOffsetExpr(tag, direct2LDS, coords);
+                rowOffsetExpr = getOffsetExpr(info.tag, direct2LDS, coords);
             }
             else
             {
                 auto baseTag = -1;
-                for(auto const& c : m_graph->mapper.getConnections(tag))
+                for(auto const& c : m_graph->mapper.getConnections(info.tag))
                 {
                     if(!std::holds_alternative<Connections::BaseOffset>(c.connection))
                         continue;
@@ -280,7 +280,7 @@ namespace rocRoller
                     co_yield m_context->copier()->copy(info.rowOffsetReg, baseReg);
                 }
 
-                rowOffsetExpr = getOffsetExpr(tag, direct2LDS, coords);
+                rowOffsetExpr = getOffsetExpr(info.tag, direct2LDS, coords);
             }
 
             if(direct2LDS)
