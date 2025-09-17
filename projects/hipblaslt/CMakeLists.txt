@@ -267,6 +267,7 @@ if(HIPBLASLT_ENABLE_HOST)
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include"
     )
 
     set_target_properties(hipblaslt

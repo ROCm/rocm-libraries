@@ -157,7 +157,6 @@ namespace rocRoller
             };
 
         private:
-            std::map<int, int>               m_baseOffsets;
             ContextPtr                       m_context;
             KernelGraphPtr                   m_graph;
             Expression::ExpressionTransducer m_fastArith;
@@ -168,7 +167,8 @@ namespace rocRoller
 
             // Index calculation Helpers
             std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
-            Expression::ExpressionPtr         getOffsetExpr(int                                 offsetTag,
+            Expression::ExpressionPtr         getOffsetExpr(int  opTag,
+                                                            bool isDirect2LDS,
                                                             CoordinateGraph::Transformer const& coords);
             Generator<Instruction>            getOffset(LoadStoreTileInfo&           info,
                                                         CoordinateGraph::Transformer coords,

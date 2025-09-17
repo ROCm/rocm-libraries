@@ -32,11 +32,9 @@
 #pragma once
 
 /*****************************************************************************
- * WARNING: rocRoller-specific data types, functions and macros should only be *
- * referenced from rocroller_host.cpp. This header file defines the interface  *
- * that the rest of rocBLAS uses to access rocRoller. If another rocRoller       *
- * feature needs to be accessed, the API for accessing it should be defined  *
- * in this file, without referencing any rocRoller-specific identifiers here.  *
+ * WARNING: rocRoller-specific data types, functions and macros should only  *
+ * be referenced from other files within the rocroller directory. They       *
+ * should not be used in this header file.                                    *
  *****************************************************************************/
 
 #include "rocblaslt.h"
