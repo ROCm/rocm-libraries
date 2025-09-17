@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   therock-build-linux:
-    name: Build Linux Packages
+    name: Build
     runs-on: azure-linux-scale-rocm
     permissions:
       id-token: write
@@ -40,7 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 7385280c1391c23a9a023d0c7e25fdf615cf5af6
+          ref: 7385280c1391c23a9a023d0c7e25fdf615cf5af6 # 2025-09-15 commit
 
       - name: Runner Health Settings
         run: |
