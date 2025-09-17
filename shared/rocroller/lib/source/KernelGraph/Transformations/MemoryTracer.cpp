@@ -239,7 +239,7 @@ namespace rocRoller::KernelGraph
                                                ldsTag,
                                                tileTag,
                                                MemoryOpLDS{LdsDirection::Read},
-                                               index * Expression::literal(numBits),
+                                               index * Expression::literal(numBytes),
                                                numBytes});
                 }
             }
