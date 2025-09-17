@@ -352,6 +352,7 @@ namespace rocRoller
             std::optional<int>              numInFlight;
             std::map<int, std::vector<int>> nextIterPrefetch;
             std::map<int, std::vector<int>> exchangePrefetch;
+            std::map<int, std::vector<int>> copy;
             auto                            isInsideLoop = false;
 
             for(auto const loadTag : loads)
@@ -380,19 +381,76 @@ namespace rocRoller
                     replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
                     nextIterPrefetch[subiter].push_back(topOp);
 
-                    auto exchanges   = getExchangesForLoad(loadTag, graph);
-                    auto unrollKSize = getUnrollSize(graph, unrollKDim);
-                    for(auto const exchange : exchanges)
+                    // Copy loaded data into a new set of VGPRs
+                    DataType dataType;
+                    size_t   numVGPRs;
                     {
-                        std::cout << loadTag << " : " << exchange << std::endl;
-                        replaceWith(graph, exchange, graph.control.addElement(NOP()), false);
-                        exchangePrefetch[subiter].push_back(exchange);
+                        auto waveTileTag = graph.mapper.get<WaveTile>(loadTag);
+                        auto waveTile    = graph.coordinates.get<WaveTile>(waveTileTag);
+                        auto elements    = waveTile.value().elements();
 
-                        if(subiter == 0)
+                        auto varType = getVariableType(graph, loadTag);
+                        // TODO: This assumes that eventually (after
+                        // LoadPacked) the incoming data will be
+                        // packed
+                        auto maybePacked = DataTypeInfo::Get(varType).packedVariableType();
+                        if(maybePacked)
+                            varType = *maybePacked;
+                        auto packFactor = DataTypeInfo::Get(varType).packing;
+
+                        uint wfs = context->kernel()->wavefront_size();
+
+                        dataType = varType.dataType;
+                        numVGPRs = elements / wfs / packFactor;
+                    }
+                    auto copyExpr = std::make_shared<Expression::Expression>(
+                        Expression::DataFlowTag{macTileTag, Register::Type::Vector, dataType});
+                    auto copyTag = graph.control.addElement(
+                        Assign{Register::Type::Vector, copyExpr, numVGPRs});
+                    auto destMacTileTag = graph.coordinates.addElement(MacroTile());
+                    // macTile is being copied into destMacTile through this assign node
+                    graph.coordinates.addElement(DataFlow(), {macTileTag}, {destMacTileTag});
+                    graph.mapper.connect(copyTag, destMacTileTag, NaryArgument::DEST);
+
+                    auto unrollKSize = getUnrollSize(graph, unrollKDim);
+                    // update the indexes of the associated exchange macrotiles
+                    auto location = graph.coordinates.getLocation(macTileTag);
+                    for(auto const& input : location.incoming)
+                    {
+                        auto edge       = graph.coordinates.getElement(input);
+                        auto maybeIndex = graph.coordinates.get<Index>(input);
+                        if(!maybeIndex.has_value())
+                            continue;
+                        auto exchangeTileTag = only(
+                            graph.coordinates.getNeighbours<Graph::Direction::Upstream>(input));
+                        AssertFatal(exchangeTileTag.has_value());
+                        graph.coordinates.deleteElement(input);
+                        graph.coordinates.addElement(
+                            edge, {exchangeTileTag.value()}, {destMacTileTag});
+
+                        for(auto const c :
+                            graph.mapper.getCoordinateConnections(exchangeTileTag.value()))
                         {
-                            auto exchangeDup = duplicateControlNode(graph, exchange);
-                            exchangePrefetch[unrollKSize].push_back(exchangeDup);
+                            auto maybeExchange = graph.control.get<Exchange>(c.control);
+                            if(maybeExchange)
+                            {
+                                auto exchange = c.control;
+                                std::cout << loadTag << " : " << exchange << std::endl;
+                                replaceWith(
+                                    graph, exchange, graph.control.addElement(NOP()), false);
+                                exchangePrefetch[subiter].push_back(exchange);
+
+                                if(subiter == 0)
+                                {
+                                    auto exchangeDup = duplicateControlNode(graph, exchange);
+                                    exchangePrefetch[unrollKSize].push_back(exchangeDup);
+                                    auto copyDup = duplicateControlNode(graph, copyTag);
+                                    copy[unrollKSize].push_back(copyDup);
+                                }
+                                break;
+                            }
                         }
+                        copy[subiter].push_back(copyTag);
                     }
 
                     if(subiter < numInFlight.value())
@@ -485,6 +543,11 @@ namespace rocRoller
             {
                 auto preNOP = graph.control.addElement(NOP());
                 auto prev   = preNOP;
+                for(auto const c : copy[subiter])
+                {
+                    graph.control.addElement(Sequence(), {prev}, {c});
+                    prev = c;
+                }
                 for(auto const next : exchangeNodes)
                 {
                     graph.control.addElement(Sequence(), {prev}, {next});
