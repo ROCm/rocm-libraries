@@ -192,7 +192,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
     int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
 
-    auto selected_tiles = TensileLite::analytical::select_best_macro_tile_size(
+    auto selected_tiles = origami::select_best_macro_tile_size(
         prob.m,
         prob.n,
         prob.k,
