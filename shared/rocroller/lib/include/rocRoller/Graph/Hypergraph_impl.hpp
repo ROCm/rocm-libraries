@@ -248,6 +248,15 @@ namespace rocRoller
                 int incidentOrder = 0;
                 if(!connectedIncidents.empty())
                 {
+                    if(std::any_of(
+                           connectedIncidents.begin(),
+                           connectedIncidents.end(),
+                           [index, src](auto const& i) { return i.dst == index && i.src == src; }))
+                    {
+                        // Skip duplicate incident
+                        continue;
+                    }
+
                     incidentOrder = std::max_element(connectedIncidents.begin(),
                                                      connectedIncidents.end(),
                                                      [](auto const& a, auto const& b) {
@@ -281,6 +290,15 @@ namespace rocRoller
                 int incidentOrder = 0;
                 if(!connectedIncidents.empty())
                 {
+                    if(std::any_of(
+                           connectedIncidents.begin(),
+                           connectedIncidents.end(),
+                           [index, dst](auto const& i) { return i.src == index && i.dst == dst; }))
+                    {
+                        // Skip duplicate incident
+                        continue;
+                    }
+
                     incidentOrder = std::max_element(connectedIncidents.begin(),
                                                      connectedIncidents.end(),
                                                      [](auto const& a, auto const& b) {
@@ -470,7 +488,7 @@ namespace rocRoller
                              m_incidence.end(),
                              std::back_inserter(tmp),
                              [index](auto const& i) { return i.dst == index; });
-                sortBySrc(tmp);
+                sortByDst(tmp);
                 std::transform(tmp.begin(),
                                tmp.end(),
                                std::back_inserter(rv.incoming),
@@ -483,7 +501,7 @@ namespace rocRoller
                              m_incidence.end(),
                              std::back_inserter(tmp),
                              [index](auto const& i) { return i.src == index; });
-                sortByDst(tmp);
+                sortBySrc(tmp);
                 std::transform(tmp.begin(),
                                tmp.end(),
                                std::back_inserter(rv.outgoing),
