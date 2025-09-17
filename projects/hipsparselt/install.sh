@@ -595,9 +595,9 @@ pushd .
 
   # cuda
   if [[ "${build_cuda}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DHIPBLASLT_ENABLE_CUDA=ON"
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_CUDA=ON"
   else
-    cmake_common_options="${cmake_common_options} -DHIPBLASLT_ENABLE_CUDA=OFF"
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_CUDA=OFF"
   fi
 
 
@@ -630,7 +630,7 @@ pushd .
       mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
       install_blis
       popd
-      cmake_client_options="${cmake_client_options} -DHIPSPARSELT_ENABLE_SAMPLES=ON -DHIPSPARSELT_ENABLE_TESTING=ON -DHIPSPARSELT_ENABLE_BENCHMARKS=ON -DHIPSPARSELT_ENABLE_BLIS=${LINK_BLIS}"
+      cmake_client_options="${cmake_client_options} -DHIPSPARSELT_ENABLE_SAMPLES=ON -DHIPSPARSELT_BUILD_TESTING=ON -DHIPSPARSELT_ENABLE_BENCHMARKS=ON -DHIPSPARSELT_ENABLE_BLIS=${LINK_BLIS}"
       if [[ -n "${blis_dir}" ]]; then
         cmake_common_options="${cmake_common_options} -DHIPSPARSELT_BLIS_DIR=${blis_dir}"
       fi
