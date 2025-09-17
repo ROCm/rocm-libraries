@@ -422,13 +422,13 @@ def initAsmCapsCache(cacheFile: str) -> Optional[dict]:
       cacheFile: Cache file (YAML format).
 
     Returns:
-      newcache:  If cachFile is empty, None. Otherwise, if file exists, a dictionary containing 
+      newcache:  If cachFile is empty, None. Otherwise, if file exists, a dictionary containing
                  capabilities cache; if not, an empty dict
     """
     # if cacheFile str is empty, do not use cache
     if not cacheFile:
         return None
-    
+
     cacheExists = os.path.exists(cacheFile)
     if not cacheExists:
         return {}

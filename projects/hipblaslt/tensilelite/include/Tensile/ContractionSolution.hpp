@@ -41,6 +41,8 @@
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <origami/streamk.hpp>
+
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
 namespace TensileLite
@@ -156,6 +158,12 @@ namespace TensileLite
         int MathClocksUnrolledLoop = 0;
 
         size_t synchronizerSizePerWG = 0;
+    };
+
+    struct StreamKSettings
+    {
+        origami::streamk::reduction_type reduction = origami::streamk::reduction_type::Tree;
+        size_t grid = 0;
     };
 
     /**
@@ -289,9 +297,10 @@ namespace TensileLite
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
                                                  Hardware const& hardware) const;
 
-        size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;                                         
+        size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
-        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles) const;
+        origami::streamk::reduction_type getSKReduction(Problem const& problem, Hardware const& hardware) const;
+        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::streamk::reduction_type reductionStrat) const;
         size_t partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -387,7 +396,8 @@ namespace TensileLite
                             Hardware const*          hardware,
                             dim3 const&              problemNumGroupTiles,
                             dim3 const&              numWorkGroups,
-                            KA&                      args) const;
+                            KA&                      args,
+                            StreamKSettings const&   sk) const;
 
         // Common kernel related arguments (e.g. gemm_count, arg type, MT, GSU...)
         template <bool T_Debug, bool Legacy, typename KA>
@@ -409,7 +419,8 @@ namespace TensileLite
         template <bool T_Debug>
         KernelInvocation generateSingleCall(Problem const&           problem,
                                             ContractionInputs const& inputs,
-                                            Hardware const&          hardware) const;
+                                            Hardware const&          hardware,
+                                            StreamKSettings const&   sk) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation generateSingleCallGroupedGemm(std::vector<Problem> const& problems,
@@ -432,7 +443,8 @@ namespace TensileLite
         void outputConversionCallArgs(Problem const&           problem,
                                       ContractionInputs const& inputs,
                                       uint32_t const&          workspaceOffsetInByte,
-                                      KA&                      args) const;
+                                      KA&                      args,
+                                      StreamKSettings const&   sk) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -445,7 +457,8 @@ namespace TensileLite
 
         template <bool T_Debug>
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
-                                                      ContractionInputs const& inputs) const;
+                                                      ContractionInputs const& inputs,
+                                                      StreamKSettings const&   sk) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation

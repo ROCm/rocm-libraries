@@ -4,7 +4,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/elementwise.hpp"
 #include "ck_tile/host/reference/reference_elementwise.hpp"
-#include "json_dump.hpp"
+#include "ck_tile/utility/json_dump.hpp"
 #include "elementwise_common.hpp"
 
 auto create_args(int argc, char* argv[])
@@ -84,8 +84,7 @@ bool run(const ck_tile::ArgParser& arg_parser)
     for(auto d : problem_shape)
         total_elements *= d;
 
-    constexpr ck_tile::index_t kBlockSize =
-        ck_tile::get_warp_size() * BlockWarps::at(ck_tile::number<0>{});
+    const ck_tile::index_t kBlockSize = Kernel::BlockSize();
 
     constexpr ck_tile::index_t kBlockPerCu = 2;
 
