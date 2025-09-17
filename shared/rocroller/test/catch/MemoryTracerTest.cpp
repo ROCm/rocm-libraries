@@ -53,7 +53,7 @@ namespace MemoryTracerTest
 
         example.setTileSize(128, 256, 8);
         example.setMFMA(32, 32, 2, 1);
-        example.setUseLDS(true, false, false); // For easier assertions
+        example.setUseLDS(true, false, false); // For simpler assertions
 
         auto kgraph  = example.getKernelGraph();
         auto params  = example.getCommandParameters();
@@ -254,7 +254,7 @@ namespace MemoryTracerTest
         SECTION("Wrap around")
         {
             std::vector<uint32_t> addresses = {124}; // 124 / 4 mod 32 = 31
-            uint                  dwords    = 4; // Accesses 31, 0, 1, 2
+            uint                  dwords    = 4; // Accesses banks 31, 0, 1, 2
 
             auto bankCounts = LDSBankModel::createBankToAddressCounts(
                 addresses, dwords, GPUArchitectureGFX::GFX942);
@@ -298,7 +298,7 @@ namespace MemoryTracerTest
 
         auto groups = LDSBankModel::divideIntoThreadGroups(addresses, threadsPerClock);
 
-        // Should have 3 groups of 4 addresses each
+        // 3 groups of 4 addresses each
         CHECK(groups.size() == 3);
         CHECK(groups[0].size() == 4);
         CHECK(groups[1].size() == 4);
@@ -338,7 +338,7 @@ namespace MemoryTracerTest
         auto mappings
             = LDSBankModel::computeThreadGroupBankMappings(instr, GPUArchitectureGFX::GFX942);
 
-        CHECK(mappings.size() == 8); // 64 threads / 16 threads per clock = 8 groups
+        CHECK(mappings.size() == 8); // 64 threads / 8 threads per clock = 8 groups
 
         for(size_t i = 0; i < mappings.size(); ++i)
         {
@@ -379,18 +379,18 @@ namespace MemoryTracerTest
         const auto mappings   = LDSBankModel::computeThreadGroupBankMappings(instr, gfx);
         const auto baseCycles = LDSBankModel::calculateTotalCyclesFromBankMappings(mappings);
 
-        SECTION("Load operations - no address transfer overhead")
+        SECTION("Read")
         {
             instr.memoryOp    = MemoryOpLDS{LdsDirection::Read};
             const auto cycles = LDSBankModel::getClockCount(instr, gfx);
-            CHECK(cycles == baseCycles); // No +4 for Load operations
+            CHECK(cycles == baseCycles);
         }
 
-        SECTION("Store operations - includes 4 cycle address transfer overhead")
+        SECTION("Write")
         {
             instr.memoryOp    = MemoryOpLDS{LdsDirection::Write};
             const auto cycles = LDSBankModel::getClockCount(instr, gfx);
-            CHECK(cycles == baseCycles + 4); // +4 for Store operations
+            CHECK(cycles == baseCycles + 4); // +4 for write operations
         }
     }
 }
