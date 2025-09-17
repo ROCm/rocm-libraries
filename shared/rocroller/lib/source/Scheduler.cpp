@@ -223,7 +223,8 @@ namespace rocRoller
             AssertFatal(dep == Dependency::None || topDep <= dep,
                         "Out of order dependency lock can't be acquired.",
                         ShowValue(topDep),
-                        ShowValue(dep));
+                        ShowValue(dep),
+                        ShowValue(streamId));
 
             if(m_streamToStack.empty())
                 return true;

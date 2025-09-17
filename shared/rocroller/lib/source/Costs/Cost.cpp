@@ -47,6 +47,8 @@ namespace rocRoller
                 return "WaitCntNop";
             case CostFunction::LinearWeighted:
                 return "LinearWeighted";
+            case CostFunction::LinearWeightedSimple:
+                return "LinearWeightedSimple";
             case CostFunction::Count:
                 return "Count";
             }

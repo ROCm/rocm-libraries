@@ -188,7 +188,6 @@ namespace TensileLite
                 miDataType,
                 0,   // mx_block_size -> MX Data types come from rocroller.
                 0.8, // L2 hit-rate (not used anymore -- should be removed)
-                debug,
                 false,
                 defaultWGM);
             for(const auto& tile : selected_tiles)
