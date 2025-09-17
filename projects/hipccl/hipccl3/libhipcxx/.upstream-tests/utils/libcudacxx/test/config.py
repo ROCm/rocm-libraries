@@ -279,6 +279,34 @@ class Configuration(object):
     def configure_target_info(self):
         self.target_info = make_target_info(self)
 
+    def get_rocm_version(self):
+        # 1. Find rocm_version.h
+        out, err, code = libcudacxx.util.executeCommand(
+            ["hipconfig", "--path"]  # find HIP base path
+        )
+        if code != 0:
+            return None
+        hip_path = out.strip()
+        out, err, code = libcudacxx.util.executeCommand(
+            ["find", hip_path, "-name", "rocm_version.h"]
+        )
+        if code != 0:
+            return None
+        rocm_version_h = out.strip()
+        # 2. Extract major, minor, patch using grep
+        with open(rocm_version_h, "r") as f:
+            content = f.read()
+        major_match = re.search(r"ROCM_VERSION_MAJOR\s+(\d+)", content)
+        minor_match = re.search(r"ROCM_VERSION_MINOR\s+(\d+)", content)
+        patch_match = re.search(r"ROCM_VERSION_PATCH\s+(\d+)", content)
+        if not (major_match and minor_match and patch_match):
+            return None
+        rocm_version_major = int(major_match.group(1))
+        rocm_version_minor = int(minor_match.group(1))
+        rocm_version_patch = int(patch_match.group(1))
+
+        return rocm_version_major, rocm_version_minor, rocm_version_patch
+
     def configure_cxx(self):
         # Gather various compiler parameters.
         cxx = self.get_lit_conf('cxx_under_test')
@@ -340,6 +368,15 @@ class Configuration(object):
             self.lit_config.note("detected cxx.default_dialect as: {}".format(
                                 self.cxx.default_dialect))
             self.cxx.compile_env = dict(os.environ)
+            
+            # NOTE(AMD/HIP): Get rocm version and define attributes to unsupport tests based on ROCm version.
+            rocm_version = self.get_rocm_version()  # (major, minor, patch) as ints
+            if rocm_version is None:
+                print("Warning: rocm_version could not be identified, some tests may fail\
+                    (e.g., std/algorithms/alg.modifying/alg.unique/unique_pred.pass.cpp)!")
+            elif rocm_version < (7, 0, 3):
+                self.config.available_features.add("rocm_lt_7.0.2")
+
         # If compiler is *not* HIPRTCC
         else:
             # If no specific cxx_under_test was given, attempt to infer it as
