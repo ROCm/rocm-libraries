@@ -212,7 +212,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def makeSchedule(self, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, uDu=0, skipGlobalReadInc=False, firstIter=False, lastLoop=False, lastLc=False):
 
-    currentIsa = globalParameters["CurrentISA"]
+    if "ISA" in kernel:
+      currentIsa = tuple(kernel["ISA"])
+    else:
+      currentIsa = globalParameters["CurrentISA"]
+      print( f"error: kernel had no ISA, using global CurrentISA {globalParameters['CurrentISA']}" )
+
     maxVmcnt = globalParameters["AsmCaps"][currentIsa]["MaxVmcnt"]
 
     self.unrollLoopHeaderCode = Code.Module()

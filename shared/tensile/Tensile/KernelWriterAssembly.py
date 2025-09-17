@@ -842,9 +842,12 @@ class KernelWriterAssembly(KernelWriter):
     self.combineLocalAddresses = 0
 
     # ISA version, such as 803
-    self.version = globalParameters["CurrentISA"]
     if "ISA" in kernel:
       self.version = tuple(kernel["ISA"])
+    else:
+      self.version = globalParameters["CurrentISA"]
+      print( f"error: kernel had no ISA, using global CurrentISA {globalParameters['CurrentISA']}" )
+
     if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
       defaultIsa = (9,0,0)
       print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)
