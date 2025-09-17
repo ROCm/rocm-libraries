@@ -46,12 +46,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return std::holds_alternative<MemoryOpLDS>(event.memoryOp);
     }
 
-    OperationBankConflicts::OperationBankConflicts(uint entryWidthInBytes,
-                                                   uint numBanks,
-                                                   uint numEntriesPerBank)
+    OperationBankConflicts::OperationBankConflicts(uint entryWidthInBytes, uint numBanks)
         : m_entryWidthInBytes(entryWidthInBytes)
         , m_numBanks(numBanks)
-        , m_numEntriesPerBank(numEntriesPerBank)
     {
     }
 
@@ -516,7 +513,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
 
         Log::info("MemoryTracer::OperationBankConflicts()");
         uint numBanks = LDSBankModel::getNumLDSBanks(gfx);
-        auto model    = OperationBankConflicts(4, numBanks, 512);
+        auto model    = OperationBankConflicts(4, numBanks);
 
         // For LDS, just simulate using 1 workgroup
         auto workgroups            = 1;

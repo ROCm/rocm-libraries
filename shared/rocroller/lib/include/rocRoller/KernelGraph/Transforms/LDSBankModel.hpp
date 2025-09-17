@@ -106,7 +106,7 @@ namespace rocRoller::KernelGraph::MemoryTracer
     struct OperationBankConflicts
     {
     public:
-        OperationBankConflicts(uint entryWidthInBytes, uint numBanks, uint numEntriesPerBank);
+        OperationBankConflicts(uint entryWidthInBytes, uint numBanks);
 
         bool filter(MemoryEventExpression event);
         void simulate(MemoryEventSimulated event);
@@ -119,7 +119,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
     private:
         uint                                      m_entryWidthInBytes;
         uint                                      m_numBanks;
-        uint                                      m_numEntriesPerBank;
         std::map<int, std::vector<LDSBankAccess>> m_bankAccesses;
     };
 
