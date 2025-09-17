@@ -1,6 +1,6 @@
 .. meta::
   :description: rocThrust documentation and API reference
-  :keywords: rocThrust, ROCm, API, referenc
+  :keywords: rocThrust, ROCm, API, reference
 
 .. _bitwise-repro:
 
@@ -62,3 +62,4 @@ If one or more of the three factors changes - suppose we now want to run on gfx1
 After that we can test in the same manner as before:
 
 ``ROCTHRUST_BWR_PATH=/path/to/repro.db reproducibility.hip``
+
