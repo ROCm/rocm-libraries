@@ -1375,8 +1375,8 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 #      if defined(__gfx908__) || defined(__gfx90a__)
 #        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 25000000
 #        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 40 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
-// gfx940 gfx941 and gfx942: 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
-#      elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+// gfx940 gfx941,gfx942 and gfx950: 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
+#      elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
 #        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
 #        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
 // gfx1030 : no info from the RDNA2 ISA docs
