@@ -354,6 +354,7 @@ def buildHipClangJob(Map conf=[:]){
 
         def needs_gpu = conf.get("needs_gpu", true)
         def dvc_pull = conf.get("dvc_pull", false)
+        def build_timeout = conf.get("build_timeout", 420)
 
         def retimage
         def credentialsID = env.monorepo_status_wrapper_creds
