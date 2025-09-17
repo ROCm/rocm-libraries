@@ -21,8 +21,6 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
     * :doc:`Install rocPRIM on Linux <install/rocPRIM-build-install-linux>`
     * :doc:`Install rocPRIM on Windows <install/rocPRIM-build-install-windows>`
   
-.. grid:: 2
-
   .. grid-item-card:: Conceptual
 
     * :doc:`Scope of rocPRIM operations <./conceptual/rocPRIM-scope>`
