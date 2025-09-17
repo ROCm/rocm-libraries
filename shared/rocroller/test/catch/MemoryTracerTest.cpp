@@ -97,12 +97,8 @@ namespace MemoryTracerTest
 
             for(const auto& [tag, access] : summary.tagToAccess)
             {
-                // All visited nodes only access 4 or 8 banks in this graph
-                if(context->targetArchitecture().target().isRDNA4GPU()
-                   || context->targetArchitecture().target().isCDNA35GPU())
-                    CHECK(access.accessedBanks.size() == 32);
-                else
-                    CHECK(access.accessedBanks.size() == 16);
+                // All visited access 32 banks in this graph
+                CHECK(access.accessedBanks.size() == 32);
             }
 
             std::string summaryStr = summary.toString();
