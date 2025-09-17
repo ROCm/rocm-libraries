@@ -500,6 +500,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
         handle, m, startbit, endbit, &rocprim_size)));
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::radix_sort_pairs(
         handle, keys, vals, m, startbit, endbit, rocprim_size, rocprim_buffer));
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
 
     if(vals.current() != row_map)
     {
@@ -528,7 +529,6 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
             ? rocsparse_indextype_u16
             : ((sizeof(J) == sizeof(int32_t)) ? rocsparse_indextype_i32 : rocsparse_indextype_i64));
 
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
     return rocsparse_status_success;
 }
 
