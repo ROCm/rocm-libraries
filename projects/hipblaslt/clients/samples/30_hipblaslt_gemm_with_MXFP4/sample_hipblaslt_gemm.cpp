@@ -155,6 +155,21 @@ size_t getDim1(size_t m, size_t k, bool unrollMajor)
     return unrollMajor ? m : k;
 }
 
+template <typename T>
+hipblasLtMatmulMatrixScale_t getScaleMode(size_t bk)
+{
+    if (std::is_same<T, hipblaslt_e8>::value)
+        if (bk == 32)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+        else
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
+    else
+        if (bk == 32)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
+        else
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+}
+
 template<typename T>
 void GPUMatMul(float* d, hipblaslt_f4x2* a, hipblaslt_f4x2* b, T* sa, T* sb, size_t m, size_t n, size_t k, size_t bk, bool transA, bool transB)
 {
@@ -199,12 +214,7 @@ void GPUMatMul(float* d, hipblaslt_f4x2* a, hipblaslt_f4x2* b, T* sa, T* sb, siz
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &trans_a, sizeof(int32_t)));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &trans_b, sizeof(int32_t)));
 
-    auto mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-    if (std::is_same<T, hipblaslt_e8>::value)
-        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-    else
-        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
-
+    auto mode = getScaleMode<T>(bk);
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(uint32_t)));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &d_sa, sizeof(void*)));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &mode, sizeof(uint32_t)));
@@ -370,6 +380,18 @@ int main(int argc, char** argv)
     MXF4Test<hipblaslt_e8>(M, N, K, 32, false, false);
     MXF4Test<hipblaslt_e8>(M, N, K, 32, true,  true);
     MXF4Test<hipblaslt_e8>(M, N, K, 32, false, true);
+
+    /*----- MX32 F8 F4 Tests ----*/
+    MXF4Test<hipblaslt_f8>(M, N, K, 32, true,  false);
+    MXF4Test<hipblaslt_f8>(M, N, K, 32, false, false);
+    MXF4Test<hipblaslt_f8>(M, N, K, 32, true,  true);
+    MXF4Test<hipblaslt_f8>(M, N, K, 32, false, true);
+
+    /*----- MX16 E8 F4 Tests ----*/
+    MXF4Test<hipblaslt_e8>(M, N, K, 16, true,  false);
+    MXF4Test<hipblaslt_e8>(M, N, K, 16, false, false);
+    MXF4Test<hipblaslt_e8>(M, N, K, 16, true,  true);
+    MXF4Test<hipblaslt_e8>(M, N, K, 16, false, true);
 
     /*----- MX16 F8 F4 Tests ----*/
     MXF4Test<hipblaslt_f8>(M, N, K, 16, true,  false);
