@@ -83,10 +83,17 @@ namespace AddPrefetchTest
         SECTION("findPrefetch")
         {
             auto prefetchLoops = findPrefetch(graph);
-            CHECK(prefetchLoops.size() == 1);
+            if(prefetchInFlight > 0)
+            {
+                CHECK(prefetchLoops.size() == 1);
 
-            auto numUnroll = (*prefetchLoops.cbegin()).second;
-            CHECK(numUnroll == prefetchInFlight + 1);
+                auto numUnroll = (*prefetchLoops.cbegin()).second;
+                CHECK(numUnroll == prefetchInFlight + 1);
+            }
+            else
+            {
+                CHECK(prefetchLoops.size() == 0);
+            }
         }
     }
 }
