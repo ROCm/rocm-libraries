@@ -96,8 +96,7 @@ def run_problems(
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")
-            if id is not None:
-                print(f"  id: {id}")
+            print(f"  id: {id}")
             print(f"  command: {scmd}")
             print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
@@ -116,6 +115,11 @@ def run_problems(
         already_run.add(problem)
 
     if len(failed) > 0:
+        ids = [getattr(problem, "id", None) for i, problem in failed]
+        print("")
+        print(f"Failed {len(failed)} problems ids:")
+        print(" ".join([str(id) for id in ids]))
+        print("")
         print(f"Failed {len(failed)} problems:")
         for i, problem in failed:
             cmd = list(map(str, problem.command()))

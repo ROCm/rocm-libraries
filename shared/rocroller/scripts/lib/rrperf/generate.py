@@ -49,6 +49,7 @@ def generate_kernels(
         if problem in already_run:
             continue
 
+        id = getattr(problem, "id", None)
         cmd = problem.command(architecture=architecture, generate_only=True)
         log = (work_dir / f"{problem.group}-{i:06d}.log").resolve()
         rr_env = {k: str(v) for k, v in env.items() if k.startswith("ROC")}
@@ -59,6 +60,7 @@ def generate_kernels(
             print(f"# command: {sjoin(cmd)}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")
+            print(f"  id: {id}")
             print(f"  command: {sjoin(cmd)}")
             print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
@@ -74,6 +76,11 @@ def generate_kernels(
         already_run.add(problem)
 
     if len(failed) > 0:
+        ids = [getattr(problem, "id", None) for i, problem in failed]
+        print("")
+        print(f"Failed {len(failed)} problems ids:")
+        print(" ".join([str(id) for id in ids]))
+        print("")
         print(f"Failed {len(failed)} problems:")
         for i, problem in failed:
             cmd = list(map(str, problem.command()))
