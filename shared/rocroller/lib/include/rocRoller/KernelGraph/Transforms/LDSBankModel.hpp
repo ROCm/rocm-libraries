@@ -244,7 +244,10 @@ namespace rocRoller::KernelGraph::MemoryTracer
      * 
      * @param original The original kernel graph to analyze
      * @param invocation The kernel invocation parameters
+     * @param gfx The GPU architecture
      * @return Summary of LDS bank access patterns and conflicts
      */
-    Summary memoryTrace(KernelGraph const& original, KernelInvocation const& invocation);
+    Summary memoryTrace(KernelGraph const&      original,
+                        KernelInvocation const& invocation,
+                        GPUArchitectureGFX      gfx);
 }

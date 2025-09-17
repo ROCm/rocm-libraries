@@ -635,7 +635,8 @@ namespace rocRoller
     {
         auto [_, inv] = prepKernel(args);
 
-        return KernelGraph::MemoryTracer::memoryTrace(*m_kernelGraph, inv);
+        auto gfx = m_context->targetArchitecture().target().gfx;
+        return KernelGraph::MemoryTracer::memoryTrace(*m_kernelGraph, inv, gfx);
     }
 
     void CommandKernel::loadKernelFromAssembly(const std::string& fileName,

@@ -92,19 +92,17 @@ namespace MemoryTracerTest
         KernelInvocation inv{.workgroupSize = {64, 1, 1}};
         SECTION("memoryTrace")
         {
-            auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv);
+            auto gfx     = context->targetArchitecture().target().gfx;
+            auto summary = rocRoller::KernelGraph::MemoryTracer::memoryTrace(kgraph, inv, gfx);
 
             for(const auto& [tag, access] : summary.tagToAccess)
             {
                 // All visited nodes only access 4 or 8 banks in this graph
-                if(context->targetArchitecture().target().isGFX12GPU())
-                {
+                if(context->targetArchitecture().target().isRDNA4GPU()
+                   || context->targetArchitecture().target().isCDNA35GPU())
                     CHECK(access.accessedBanks.size() == 8);
-                }
                 else
-                {
                     CHECK(access.accessedBanks.size() == 4);
-                }
             }
 
             std::string summaryStr = summary.toString();

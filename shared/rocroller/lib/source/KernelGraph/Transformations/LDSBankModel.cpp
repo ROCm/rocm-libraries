@@ -504,7 +504,9 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return stream << summary.toString();
     }
 
-    Summary memoryTrace(KernelGraph const& original, KernelInvocation const& invocation)
+    Summary memoryTrace(KernelGraph const&      original,
+                        KernelInvocation const& invocation,
+                        GPUArchitectureGFX      gfx)
     {
         Log::info("MemoryTracer::memoryTrace()");
 
@@ -513,8 +515,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
         tracer.trace();
 
         Log::info("MemoryTracer::OperationBankConflicts()");
-        // 64KiB bank model: 4 bytes per bank entry, 32 banks, 512 entries per bank
-        auto model = OperationBankConflicts(4, 32, 512);
+        uint numBanks = LDSBankModel::getNumLDSBanks(gfx);
+        auto model    = OperationBankConflicts(4, numBanks, 512);
 
         // For LDS, just simulate using 1 workgroup
         auto workgroups            = 1;
