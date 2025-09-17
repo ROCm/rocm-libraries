@@ -25,27 +25,31 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
 
   .. grid-item-card:: Conceptual
 
-    * :ref:`rocprim-intro`
+    * :doc:`Scope of rocPRIM operations <./conceptual/rocPRIM-scope>`
+    * :doc:`rocPRIM operations <./conceptual/rocPRIM-operations>`
+    * :doc:`rocPRIM performance tuning <./conceptual/rocPRIM-performance-tuning>`
+    * :doc:`Block and stripe arrangements <./conceptual/rocPRIM-stripe-block>`
+
+  .. grid-item-card:: How-to
+
+    * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
+   
+  .. grid-item-card:: Reference
+
     * :ref:`glossary`
-    * :ref:`tuning`
-    * :ref:`developer`
-    * :ref:`spirv`
-
-  .. grid-item-card:: API reference
-
-    * :ref:`ops-summary`
     * :ref:`data-type-support`
+    * :ref:`types`
+    * :ref:`type_traits`
+    * :ref:`iterators` 
+    * :ref:`intrinsics` 
     * :ref:`dev-index`
     * :ref:`block-index`
     * :ref:`warp-index` 
     * :ref:`thread-index`
-    * :ref:`iterators` 
-    * :ref:`intrinsics` 
-    * :ref:`type_traits`
+    * :ref:`developer`
+
 
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
-
-
 

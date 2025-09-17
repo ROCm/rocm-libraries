@@ -12,6 +12,7 @@ Create the ``build`` directory under the :doc:`cloned <./rocPRIM-install-overvie
 
 .. code:: shell
     
+
     mkdir build
     cd build
 

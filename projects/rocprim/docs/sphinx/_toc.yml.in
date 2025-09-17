@@ -6,6 +6,7 @@ subtrees:
 - caption: Installation
   entries:
   - file: install/rocPRIM-prerequisites.rst
+
     title: Prerequisites
   - file: install/rocPRIM-install-overview.rst
     title: Installation overview

@@ -12,6 +12,7 @@ rocPRIM is installed on Windows using the ``rmake.py`` Python script. ``rmake.py
 
 In the :doc:`cloned <./rocPRIM-install-overview>` ``rocprim`` directory, run ``rmake.py -i`` to install rocPRIM to ``C:\hipSDK\include\``:
 
+
 .. code:: shell
 
     cd rocPRIM
