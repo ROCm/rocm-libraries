@@ -240,7 +240,7 @@ You can `pull <https://dvc.org/doc/command-reference/pull>`_ all large files or 
 
 .. code:: shell
 
-   dvc pull "filename"
+   dvc pull
 
 or
 
