@@ -36,6 +36,35 @@ def find_csv_files(directory):
     return sorted(csv_files, key=parse_directory_name)
 
 
+def extract_specific_lines(csv_file):
+    """Extract data from lines 3, 4, 5, and 6 of a CSV file."""
+    lines_data = []
+
+    try:
+        with open(csv_file, "r") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+            # Skip header (row 0) and get rows 2, 3, 4, 5 (lines 3, 4, 5, 6)
+            for i in [2, 3, 4, 5]:
+                if i < len(rows):
+                    row = rows[i]
+                    if len(row) >= 5:
+                        # Extract Instruction (index 2) and Latency (index 4)
+                        instruction = row[2]
+                        latency = row[4]
+                        lines_data.append((instruction, latency))
+                    else:
+                        lines_data.append(("N/A", "N/A"))
+                else:
+                    lines_data.append(("N/A", "N/A"))
+
+        return lines_data
+    except Exception as e:
+        print(f"Error reading lines from {csv_file}: {e}")
+        return [("N/A", "N/A"), ("N/A", "N/A"), ("N/A", "N/A"), ("N/A", "N/A")]
+
+
 def calculate_median_latency(csv_file):
     """Calculate mode latency divided by mode hitcount from a CSV file."""
     latencies = []
@@ -104,14 +133,18 @@ def main():
 
     # Adjust formatting based on whether path is shown
     if args.hide_path:
-        separator_width = 50
+        separator_width = 227
         print("-" * separator_width)
-        print(f"{'Latency':>10} | {'Directory':<35}")
+        print(
+            f"{'Directory':<35} | {'Latency':>10} | {'Line 3 Instruction':>40} | {'Line 4 Instruction':>40} | {'Line 5 Instruction':>40} | {'Line 6 Instruction':>40}"
+        )
         print("-" * separator_width)
     else:
-        separator_width = 100
+        separator_width = 280
         print("-" * separator_width)
-        print(f"{'Latency':>10} | {'Directory':<35} | {'Full Path':<50}")
+        print(
+            f"{'Directory':<35} | {'Latency':>10} | {'Line 3 Instruction':>40} | {'Line 4 Instruction':>40} | {'Line 5 Instruction':>40} | {'Line 6 Instruction':>40} | {'Full Path':<50}"
+        )
         print("-" * separator_width)
 
     for csv_file in csv_files:
@@ -121,16 +154,33 @@ def main():
         dir_name = os.path.basename(os.path.dirname(csv_file))
         median_latency = calculate_median_latency(csv_file)
 
+        # Extract data from lines 3, 4, 5, and 6
+        lines_data = extract_specific_lines(csv_file)
+
+        # Format line data for display (instruction only, no latency)
+        line_3_str = lines_data[0][0][:40] if lines_data[0][0] != "N/A" else "N/A"
+        line_4_str = lines_data[1][0][:40] if lines_data[1][0] != "N/A" else "N/A"
+        line_5_str = lines_data[2][0][:40] if lines_data[2][0] != "N/A" else "N/A"
+        line_6_str = lines_data[3][0][:40] if lines_data[3][0] != "N/A" else "N/A"
+
         if args.hide_path:
             if median_latency is not None:
-                print(f"{median_latency:>10.1f} | {dir_name:<35}")
+                print(
+                    f"{dir_name:<35} | {median_latency:>10.1f} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40}"
+                )
             else:
-                print(f"{'N/A':>10} | {dir_name:<35}")
+                print(
+                    f"{dir_name:<35} | {'N/A':>10} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40}"
+                )
         else:
             if median_latency is not None:
-                print(f"{median_latency:>10.1f} | {dir_name:<35} | {absolute_path}")
+                print(
+                    f"{dir_name:<35} | {median_latency:>10.1f} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {absolute_path}"
+                )
             else:
-                print(f"{'N/A':>10} | {dir_name:<35} | {absolute_path}")
+                print(
+                    f"{dir_name:<35} | {'N/A':>10} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {absolute_path}"
+                )
 
     print("-" * separator_width)
 
