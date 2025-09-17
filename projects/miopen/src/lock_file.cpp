@@ -49,7 +49,6 @@ fs::path LockFilePath(const fs::path& filename_)
         if(!filename_.parent_path().empty())
             directory = filename_.parent_path() / "miopen-lockfiles";
 
-
         if(!fs::exists(directory))
         {
             fs::create_directories(directory);
