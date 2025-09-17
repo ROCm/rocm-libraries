@@ -144,7 +144,7 @@ namespace rocRoller
         class LinearWeightedCost : public Cost
         {
         public:
-            LinearWeightedCost(ContextPtr);
+            LinearWeightedCost(ContextPtr ctx, CostFunction fn);
 
             using Base = Cost;
 
@@ -174,7 +174,7 @@ namespace rocRoller
             Weights const& getWeights() const;
 
         private:
-            Weights loadWeights(ContextPtr context) const;
+            Weights loadWeights(ContextPtr ctx, CostFunction fn) const;
 
             Weights m_weights;
         };

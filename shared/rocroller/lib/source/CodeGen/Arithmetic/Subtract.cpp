@@ -150,14 +150,13 @@ namespace rocRoller
 
         auto borrow = m_context->getVCC();
 
-        co_yield(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Int64 sub, locking VCC"));
-
         co_yield VectorSubUInt32CarryOut(
-            m_context, dest->subset({0}), l0, r0, "least significant half");
-        co_yield VectorSubUInt32CarryInOut(
-            m_context, dest->subset({1}), l1, r1, "most significant half");
+            m_context, dest->subset({0}), l0, r0, "least significant half")
+            .lock(Scheduling::Dependency::VCC, "Start of Int64 sub, locking VCC");
 
-        co_yield(Instruction::Unlock("End of Int64 sub, unlocking VCC"));
+        co_yield VectorSubUInt32CarryInOut(
+            m_context, dest->subset({1}), l1, r1, "most significant half")
+            .unlock("End of Int64 sub, unlocking VCC");
     }
 
     template <>

@@ -81,6 +81,8 @@ namespace rocRoller
                 float minCost = std::numeric_limits<float>::max();
                 minCostIdx    = -1;
 
+                EnumBitset<CoexecCategory> categories;
+
                 for(size_t idx = 0; idx < numSeqs; idx++)
                 {
                     if(iterators[idx] == seqs[idx].end())
@@ -90,6 +92,9 @@ namespace rocRoller
 
                     if(!m_lockstate.isSchedulable(instr, idx))
                         continue;
+
+                    auto cat = instr.getCategory();
+                    categories.set(cat);
 
                     float myCost = (*m_cost)(instr);
 

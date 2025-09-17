@@ -24,48 +24,53 @@
  *
  *******************************************************************************/
 
-/**
- */
-
-#include <string>
-
-#include <rocRoller/AssemblyKernelArgument.hpp>
-#include <rocRoller/Utilities/Utils.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
 
 namespace rocRoller
 {
-    bool AssemblyKernelArgument::operator==(AssemblyKernelArgument const& rhs) const
+    void combineCoexec(DisallowedCycles& dst, DisallowedCycles const& src, int offset)
     {
-        return name == rhs.name //
-               && variableType == rhs.variableType //
-               && dataDirection == rhs.dataDirection //
-               && equivalent(expression, rhs.expression) //
-               && offset == rhs.offset //
-               && size == rhs.size;
+        auto bakSrc = toString(src);
+        auto bakDst = toString(dst);
+        for(auto srcIter = src.begin(); srcIter != src.end(); ++srcIter)
+        {
+            auto cycle = srcIter->first + offset;
+
+            auto dstIter = dst.lower_bound(cycle);
+
+            if(dstIter == dst.end() || dstIter->first > cycle)
+            {
+                dst.emplace_hint(dstIter, cycle, srcIter->second);
+            }
+            else
+            {
+                AssertFatal(dstIter->first == cycle,
+                            ShowValue(bakSrc),
+                            ShowValue(bakDst),
+                            ShowValue(offset));
+                dstIter->second |= srcIter->second;
+            }
+        }
     }
 
-    std::string AssemblyKernelArgument::toString() const
+    std::string toString(DisallowedCycles const& vals)
     {
-        auto rv = concatenate("KernelArg{", name, ", ", variableType);
+        std::string rv = "{";
 
-        if(dataDirection != DataDirection::ReadOnly)
-            rv += concatenate(", ", dataDirection);
+        bool first = true;
 
-        rv += concatenate(", ", expression);
-        if(expression)
-            rv += concatenate("(c ", complexity(expression), ")");
+        for(auto const& [cycle, categories] : vals)
+        {
+            if(!first)
+                rv += ", ";
 
-        if(offset != -1)
-            rv += concatenate(", o:", offset);
+            rv += fmt::format("[+{}: {}]", cycle, shortString(categories));
 
-        if(size != -1)
-            rv += concatenate(", s:", size);
+            first = false;
+        }
 
         return rv + "}";
     }
 
-    std::ostream& operator<<(std::ostream& stream, AssemblyKernelArgument const& arg)
-    {
-        return stream << arg.toString();
-    }
 }
