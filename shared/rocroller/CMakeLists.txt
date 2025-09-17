@@ -195,11 +195,7 @@ if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
     set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH};ASAN_OPTIONS=detect_leaks=0")
 endif()
 
-if(ROCROLLER_BUILD_SHARED_LIBS)
-    target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
-else()
-    target_link_libraries(rocroller-interface INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,roc::rocroller>)
-endif()
+target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
