@@ -139,8 +139,6 @@ namespace rocRoller
                 uint     bytesRequested; //< Number of bytes requested (max 16 bytes/4 dwords)
                 uint     workGroup; //< Workgroup index
                 uint     workItem; //<Workitem index
-                uint     instructionIndex; //< Instruction index within the operation
-                uint     instructionCount; //< Total number of instructions for this operation
 
                 // For future: consider adding SMEM vs VMEM, ie, if VMEM, this has a Workitem dependency
                 // If VMEM, possibly remove workItem and just keep a stride?
