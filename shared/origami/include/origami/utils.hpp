@@ -50,7 +50,6 @@ namespace origami
                                      data_type_t     mi_datatype,
                                      size_t          mx_block_size,
                                      double          H_L2,
-                                     bool            debug,
                                      size_t          WGM,
                                      size_t          biggest_allowable_split = 8);
 
@@ -68,7 +67,6 @@ namespace origami
                                                              data_type_t mi_datatype,
                                                              size_t mx_block_size,
                                                              double H_L2,
-                                                             bool   debug,
                                                              bool   print,
                                                              size_t WGM);
 
@@ -86,7 +84,6 @@ namespace origami
                                                         size_t    step_MT_N    = 32,
                                                         size_t    step_MT_K    = 32,
                                                         double    H_L2         = 0.8,
-                                                        bool      debug        = false,
                                                         const std::vector<tile_tuple>& tiles_to_add
                                                         = {},
                                                         bool print = false);
@@ -106,14 +103,12 @@ namespace origami
             const std::vector<size_t>& WGM_list,
             size_t                     element_size,
             double H_L2, // not needed for L2 hit rate but retained if your code expects it
-            bool   debug,
             bool   print);
 
         double compute_tflops_from_latency(double latency_cycles,
                                            size_t M,
                                            size_t N,
                                            size_t K,
-                                           double clock_GHz,
-                                           bool   debug = false);
+                                           double clock_GHz);
 
 } // namespace origami

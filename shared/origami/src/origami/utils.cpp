@@ -135,7 +135,6 @@ namespace origami
                                      data_type_t     mi_datatype,
                                      size_t          mx_block_size,
                                      double          H_L2,
-                                     bool            debug,
                                      size_t          WGM,
                                      size_t          biggest_allowable_split)
         {
@@ -171,8 +170,7 @@ namespace origami
                                                        mi_datatype,
                                                        mx_block_size,
                                                        WGM,
-                                                       split,
-                                                       debug);
+                                                       split);
 
                 if(latency < best_latency)
                 {
@@ -201,7 +199,6 @@ namespace origami
                                                              data_type_t mi_datatype,
                                                              size_t   mx_block_size,
                                                              double   H_L2,
-                                                             bool     debug,
                                                              bool     print,
                                                              size_t   defaultWGM)
         {
@@ -222,14 +219,14 @@ namespace origami
                 size_t occupancy = std::get<6>(mt);
                 size_t WGM       = std::get<7>(mt);
 
-                if(debug)
+                if(hardware_t::is_debug_enabled())
                 {
                     std::cout << "Evaluating MT_M=" << MT_M << ", MT_N=" << MT_N
                               << ", MT_K=" << MT_K << ", MI_M=" << MI_M << ", MI_N=" << MI_N
                               << ", MI_K=" << MI_K << "\n";
                 }
 
-                if(check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size_A, debug))
+                if(check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size_A))
                 {
                     double Total_latency = compute_total_latency(hardware,
                                                                  M,
@@ -250,13 +247,12 @@ namespace origami
                                                                  mi_datatype,
                                                                  mx_block_size,
                                                                  WGM,
-                                                                 0, // split will be picked automatically
-                                                                 debug);
+                                                                 0); // split will be picked automatically
 
                     valid_results.emplace_back(
                         Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy, WGM);
                 }
-                else if(debug)
+                else if(hardware_t::is_debug_enabled())
                 {
                     std::cout << "Skipping MT_M=" << MT_M << ", MT_N=" << MT_N << ", MT_K=" << MT_K
                               << " due to LDS capacity\n";
@@ -331,7 +327,6 @@ namespace origami
          * \param[in] element_size
          * \param[in] H_L2       - some hardware-related constant or factor (no longer used here,
          *                         but kept if your signature or other usage requires it)
-         * \param[in] debug      - whether to print debug messages
          * \param[in] print      - whether to print the final best result
          *
          * \return A pair: (best_l2_hit_rate, best_WGM).
@@ -351,7 +346,6 @@ namespace origami
             const std::vector<size_t>& WGM_list,
             size_t                     element_size,
             double H_L2, // not needed for L2 hit rate but retained if your code expects it
-            bool   debug,
             bool   print)
         {
             using WGMResult = std::pair<double, size_t>; // (l2_hit_rate, WGM)
@@ -362,7 +356,7 @@ namespace origami
             // Iterate over all candidate WGM values
             for(const auto& candidate_wgm : WGM_list)
             {
-                if(debug)
+                if(hardware_t::is_debug_enabled())
                 {
                     std::cout << "Evaluating WGM=" << candidate_wgm << "\n";
                 }
@@ -370,9 +364,9 @@ namespace origami
                 // Optionally ensure we do not exceed LDS capacity
                 // (If you want to factor in WGM, add it to your check_lds_capacity signature.)
                 // For now, let's just check the tile itself:
-                if(!check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size, debug))
+                if(!check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size))
                 {
-                    if(debug)
+                    if(hardware_t::is_debug_enabled())
                     {
                         std::cout << "Skipping WGM=" << candidate_wgm << " due to LDS capacity.\n";
                     }
@@ -425,8 +419,7 @@ namespace origami
             size_t                                                         K,
             hardware_t&                                                    hardware,
             std::function<double(size_t, size_t, size_t, size_t, size_t, size_t, hardware_t&)>
-                 tie_breaker_fn,
-            bool debug)
+                 tie_breaker_fn)
         {
             std::vector<std::tuple<double, size_t, size_t, size_t>> tie_breaker_results;
 
@@ -460,7 +453,6 @@ namespace origami
                 size_t                        element_size,
                 data_type_t                   mi_datatype,
                 double                        H_L2,
-                bool                          debug,
                 bool                          print,
                 size_t                        WGM,
                 std::function<double(size_t, size_t, size_t, size_t, size_t, size_t, hardware_t&)>
@@ -479,14 +471,14 @@ namespace origami
                 size_t MI_N = std::get<4>(MT_list[i]);
                 size_t MI_K = std::get<5>(MT_list[i]);
 
-                if(debug)
+                if(hardware_t::is_debug_enabled())
                 {
                     std::cout << "Evaluating MT_M=" << MT_M << ", MT_N=" << MT_N
                               << ", MT_K=" << MT_K << ", MI_M=" << MI_M << ", MI_N=" << MI_N
                               << ", MI_K=" << MI_K << "\n";
                 }
 
-                if(check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size, debug))
+                if(check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size))
                 {
                     size_t split         = 1;
                     size_t mx_block_size = 0;
@@ -510,13 +502,12 @@ namespace origami
                                                 mi_datatype,
                                                 mx_block_size,
                                                 WGM,
-                                                split,
-                                                debug);
+                                                split);
 
                     results.push_back(
                         std::make_tuple(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K));
                 }
-                else if(debug)
+                else if(hardware_t::is_debug_enabled())
                 {
                     std::cout << "Skipping MT_M=" << MT_M << ", MT_N=" << MT_N << ", MT_K=" << MT_K
                               << " due to LDS capacity\n";
@@ -544,7 +535,7 @@ namespace origami
 
                 if(top_results.size() > 1)
                 {
-                    if(debug)
+                    if(hardware_t::is_debug_enabled())
                     {
                         std::cout << "Tie detected among top-ranked tile sizes. Applying "
                                      "tie-breaker...\n";
@@ -619,7 +610,7 @@ namespace origami
         }
 
         double compute_tflops_from_latency(
-            double latency_cycles, size_t M, size_t N, size_t K, double clock_GHz, bool debug)
+            double latency_cycles, size_t M, size_t N, size_t K, double clock_GHz)
         {
             // Compute total FLOPs
             double total_FLOPs = 2.0 * M * N * K; // For GEMM, each multiply-add is 2 FLOPs
@@ -631,7 +622,7 @@ namespace origami
             // Convert to TFLOPS
             double TFLOPS = FLOPS / 1e12; // 1 TFLOP = 1e12 FLOPs
 
-            if(debug)
+            if(hardware_t::is_debug_enabled())
             {
                 std::cout << "Total FLOPs: " << total_FLOPs << "\n";
                 std::cout << "Total Time: " << total_time_seconds << " seconds\n";
