@@ -610,9 +610,9 @@ namespace
                     path += "/../Tensile/library";
                 else if(TestPath(path + "../hipsparselt/library"))
                     path += "../hipsparselt/library";
-                else if(TestPath(path + "../hipblaslt/Tensile/library"))
+                else if(TestPath(path + "/../hipblaslt/Tensile/library"))
                     // Only for new build system where hipblaslt is added as a subdirectory
-                    path += "../hipsparselt/library";
+                    path += "/../hipblaslt/Tensile/library";
                 else
                     path += "/hipsparselt/library";
 
