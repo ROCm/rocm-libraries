@@ -77,74 +77,21 @@ namespace rocRoller
                         {
                             setWorkitem(0, wi);
 
-                            // Might want to cache these
                             auto offsetValue = Expression::evaluate(event.index, runtimeArguments);
                             auto offset = std::visit([](auto x) { return (size_t)x; }, offsetValue);
-
-                            // Break down the event into instruction-level events
-                            // Each instruction can handle max 4 dwords (16 bytes)
-                            uint remainingBytes   = event.bytesRequested;
-                            uint currentOffset    = static_cast<uint>(offset);
-                            uint instructionIndex = 0;
-
-                            // Calculate total number of instructions needed
-                            uint instructionCount = 0;
-                            uint tempBytes        = event.bytesRequested;
-                            while(tempBytes > 0)
-                            {
-                                uint instructionBytes = (tempBytes >= 16)  ? 16
-                                                        : (tempBytes >= 8) ? 8
-                                                        : (tempBytes >= 4) ? 4
-                                                                           : 4;
-                                instructionCount++;
-                                tempBytes -= std::min(tempBytes, instructionBytes);
-                            }
-
-                            // Generate instruction-level events
-                            while(remainingBytes > 0)
-                            {
-                                // Determine instruction size (try to maximize width)
-                                uint instructionBytes;
-                                if(remainingBytes >= 16)
-                                {
-                                    instructionBytes = 16; // 4 dwords (b128)
-                                }
-                                else if(remainingBytes >= 8)
-                                {
-                                    instructionBytes = 8; // 2 dwords (b64)
-                                }
-                                else if(remainingBytes >= 4)
-                                {
-                                    instructionBytes = 4; // 1 dword (b32)
-                                }
-                                else
-                                {
-                                    // Round up to 1 dword for sub-dword accesses
-                                    instructionBytes = 4;
-                                }
-
-                                auto simulated = MemoryEventSimulated{event.operationTag,
-                                                                      event.sourceTag,
-                                                                      event.destinationTag,
-                                                                      event.memoryOp,
-                                                                      currentOffset,
-                                                                      instructionBytes,
-                                                                      wg,
-                                                                      wi,
-                                                                      instructionIndex,
-                                                                      instructionCount};
-                                model.simulate(simulated);
-
-                                // Move to next instruction
-                                remainingBytes -= instructionBytes;
-                                currentOffset += instructionBytes;
-                                instructionIndex++;
-                            }
+                            auto simulated = MemoryEventSimulated{event.operationTag,
+                                                                  event.sourceTag,
+                                                                  event.destinationTag,
+                                                                  event.memoryOp,
+                                                                  static_cast<uint>(offset),
+                                                                  event.bytesRequested,
+                                                                  wg,
+                                                                  wi};
+                            model.simulate(simulated);
                         }
                     }
                 }
             }
-
         }
     }
 }
