@@ -79,7 +79,7 @@ cmake --build --preset default
 > [!TIP]
 > By default, the configure presets will generate build artifacts to the `build` directory; override this by setting `-B <build-dir>`.
 > In addition, all configure presets use the `linux-amdclang.cmake` toolchain; override this by setting `-D CMAKE_TOOLCHAIN_FILE=<toolchain-file>`.
-> Otherwise, none of the configure or build presets make assumptions about additional flags. 
+> Otherwise, none of the configure or build presets make assumptions about additional flags.
 > For example, to speed up the build, add `-j`/`--parallel`, or to debug the build, add `--verbose`.
 
 If you wish to have granular control over the build, use `-D ROCM_LIBS_ENABLE_COMPONENTS="list;of;components"` to selectively enable the desired projects and dependencies. For example, to build rocroller without its preset:

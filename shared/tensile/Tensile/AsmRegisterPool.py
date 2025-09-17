@@ -184,10 +184,10 @@ class RegisterPool:
 
 
   def findFreeRange(
-    self, 
-    size: int, 
-    alignment: int, 
-    preventOverflow: int=-1, 
+    self,
+    size: int,
+    alignment: int,
+    preventOverflow: int=-1,
     wantedStatus: Status=Status.Available
   ) -> Optional[int]:
     """Find a free range of registers of a given size, alignment, and status from the register pool.
@@ -200,10 +200,10 @@ class RegisterPool:
         wantedStatus: The status of the block to be found.
 
     Returns:
-        1. The starting index of the block if found. 
+        1. The starting index of the block if found.
         2. None if preventOverflow is set and no block is found.
         3. The start of the last available block rounded up to the alignment if preventOverflow is
-            not set and no block is found. 
+            not set and no block is found.
     """
     if preventOverflow == -1:
       preventOverflow = self.defaultPreventOverflow

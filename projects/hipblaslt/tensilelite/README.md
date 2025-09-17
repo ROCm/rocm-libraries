@@ -3,12 +3,12 @@
 ## Building and Running Tests
 
 While full test suites can be run with a single `tox` command, developers may wish to
-build the hipBLASLt tensilelite client executable (`tensilelite-client`) and run individual tests separately. 
+build the hipBLASLt tensilelite client executable (`tensilelite-client`) and run individual tests separately.
 This is useful for debugging specific problems or isolating issues in a specific test.
 
 ### Run Full Test Suite with Tox
 
-The standard workflow for running the entire test suite is to use `tox`. This command will build 
+The standard workflow for running the entire test suite is to use `tox`. This command will build
 `tensilelite-client` and execute all tests.
 
 ```
@@ -61,7 +61,7 @@ This workflow uses `tox` with custom CMake arguments, which is useful for creati
 specialized builds (e.g., Debug builds) and setting the architecture.
 
 ```
-# build the client using tox with custom CMake flags 
+# build the client using tox with custom CMake flags
 cd rocm-libraries/projects/hipblaslt/tensilelite
 TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
 ```
@@ -76,7 +76,7 @@ TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e
 
 ## How to Rebuild Object Codes Directly from Assembly
 
-During the tuning process, it is of interest to modify an assembly file/s and rebuild the corresponding object file/s and then relink the corresponding co file. Currently, we generate additional source files and a script to provide this workflow. 
+During the tuning process, it is of interest to modify an assembly file/s and rebuild the corresponding object file/s and then relink the corresponding co file. Currently, we generate additional source files and a script to provide this workflow.
 
 A new `Makefile` is added that manages rebuilding a co file during iterative development when tuning. One modifies an assembly file of interest, then runs `make` and make will detect what file/s changed and rebuild accordingly.
 
