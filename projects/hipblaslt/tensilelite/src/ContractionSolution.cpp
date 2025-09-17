@@ -1253,7 +1253,6 @@ namespace TensileLite
                                                                    wgmList,
                                                                    elementSize,
                                                                    H_L2,
-                                                                   false,
                                                                    false);
                         defaultWGM         = bestWGM.second;
                         if(T_Debug)

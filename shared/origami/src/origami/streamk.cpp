@@ -392,7 +392,6 @@ namespace origami
                             mi_datatype,
                             0,
                             0.0,
-                            false,
                             workgroup_mapping,
                             10);
             }
