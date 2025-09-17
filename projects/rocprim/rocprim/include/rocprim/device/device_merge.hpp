@@ -194,8 +194,7 @@ inline hipError_t merge_impl(void*                temporary_storage,
         using merge_kernel_impl_t = merge_kernel_impl_<decltype(arch_config), key_type, value_type>;
 
         using VSmemHelperT = detail::vsmem_helper_impl<merge_kernel_impl_t>;
-        ROCPRIM_SHARED_MEMORY
-        typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
         // Get temporary storage
         typename merge_kernel_impl_t::storage_type& storage
             = VSmemHelperT::get_temp_storage(static_temp_storage, vsm);

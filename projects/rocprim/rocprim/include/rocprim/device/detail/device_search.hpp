@@ -131,14 +131,12 @@ void search_kernel_shared_impl(InputIterator1 input,
     const unsigned int flat_id       = rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = rocprim::detail::block_id<0>();
 
-    const size_t                                     block_offset = flat_block_id * items_per_block;
-    const size_t                                     offset       = flat_id * items_per_thread;
-    bool                                             find_pattern = false;
+    const size_t block_offset = flat_block_id * items_per_block;
+    const size_t offset       = flat_id * items_per_thread;
+    bool find_pattern = false;
 
-    ROCPRIM_SHARED_MEMORY
-    uninitialized_array<key_type, max_shared_key>    local_keys_;
-    ROCPRIM_SHARED_MEMORY
-    uninitialized_array<value_type, items_per_block> local_input_;
+    ROCPRIM_SHARED_MEMORY uninitialized_array<key_type, max_shared_key> local_keys_;
+    ROCPRIM_SHARED_MEMORY uninitialized_array<value_type, items_per_block> local_input_;
 
     // Check if a key was already found in a place before this block
     if(block_offset > atomic_load(output))

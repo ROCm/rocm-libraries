@@ -190,8 +190,7 @@ inline hipError_t merge_sort_block_merge_impl(
                         = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile;
 
                     const OffsetT keys1_beg = rocprim::min(size, tilegroup_start);
-                    const OffsetT keys1_end
-                        = rocprim::min(size, tilegroup_start + block);
+                    const OffsetT keys1_end = rocprim::min(size, tilegroup_start + block);
                     const OffsetT keys2_beg = keys1_end;
                     const OffsetT keys2_end = rocprim::min(size, keys2_beg + block);
 
@@ -525,14 +524,13 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
         const unsigned int valid_in_last_block = size - block_offset;
         const bool         is_incomplete_block = flat_block_id == (size / items_per_block);
 
-        using sort_impl    = block_sort_impl<key_type,
-                                             value_type,
-                                             params.kernel_config.block_size,
-                                             params.kernel_config.items_per_thread>;
+        using sort_impl = block_sort_impl<key_type,
+                                          value_type,
+                                          params.kernel_config.block_size,
+                                          params.kernel_config.items_per_thread>;
         using VSmemHelperT = detail::vsmem_helper_impl<sort_impl>;
 
-        ROCPRIM_SHARED_MEMORY
-        typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
 
         typename sort_impl::storage_type& storage
             = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
