@@ -30,8 +30,6 @@
 
 namespace rocRoller
 {
-    RegisterComponent(MultiplyAddGenerator);
-
     template <>
     std::shared_ptr<TernaryArithmeticGenerator<Expression::MultiplyAdd>>
         GetGenerator<Expression::MultiplyAdd>(Register::ValuePtr dst,
