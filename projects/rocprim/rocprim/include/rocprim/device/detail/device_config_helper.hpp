@@ -229,16 +229,17 @@ struct reduce_config_tag
 
 // Calculate kernel configurations, such that it will not exceed shared memory maximum
 template<class Key, class Value>
-struct radix_sort_onesweep_config_base
+constexpr radix_sort_onesweep_config_params radix_sort_onesweep_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 4;
 
-    static constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 4;
-    using type                               = radix_sort_onesweep_config<
-        kernel_config<256, 12>,
-        kernel_config<block_size, ::rocprim::max(1u, 65000u / block_size / item_scale)>,
-        4>;
-};
+    return radix_sort_onesweep_config_params{
+        kernel_config_params{256, 12},
+        kernel_config_params{block_size, ::rocprim::max(1u, 65000u / block_size / item_scale)},
+        4
+    };
+}
 
 struct reduce_config_params
 {
