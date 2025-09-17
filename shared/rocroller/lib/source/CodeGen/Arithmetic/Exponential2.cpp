@@ -29,9 +29,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponentTemplateSpec(Exponential2Generator, Register::Type::Vector, DataType::Float);
-
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::Exponential2>>
         GetGenerator<Expression::Exponential2>(Register::ValuePtr dst,
