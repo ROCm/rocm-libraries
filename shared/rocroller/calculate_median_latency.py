@@ -80,6 +80,12 @@ def main():
         default="output",
         help="Directory to search for CSV files",
     )
+    parser.add_argument(
+        "--hide-path",
+        "-H",
+        action="store_true",
+        help="Hide the full path column in the output (default: show path)",
+    )
     args = parser.parse_args()
 
     output_dir = args.directory
@@ -95,9 +101,18 @@ def main():
         return
 
     print(f"Found {len(csv_files)} CSV files to process\n")
-    print("-" * 100)
-    print(f"{'Latency':>10} | {'Directory':<35} | {'Full Path':<50}")
-    print("-" * 100)
+
+    # Adjust formatting based on whether path is shown
+    if args.hide_path:
+        separator_width = 50
+        print("-" * separator_width)
+        print(f"{'Latency':>10} | {'Directory':<35}")
+        print("-" * separator_width)
+    else:
+        separator_width = 100
+        print("-" * separator_width)
+        print(f"{'Latency':>10} | {'Directory':<35} | {'Full Path':<50}")
+        print("-" * separator_width)
 
     for csv_file in csv_files:
         # Get absolute path
@@ -106,12 +121,18 @@ def main():
         dir_name = os.path.basename(os.path.dirname(csv_file))
         median_latency = calculate_median_latency(csv_file)
 
-        if median_latency is not None:
-            print(f"{median_latency:>10.1f} | {dir_name:<35} | {absolute_path}")
+        if args.hide_path:
+            if median_latency is not None:
+                print(f"{median_latency:>10.1f} | {dir_name:<35}")
+            else:
+                print(f"{'N/A':>10} | {dir_name:<35}")
         else:
-            print(f"{'N/A':>10} | {dir_name:<35} | {absolute_path}")
+            if median_latency is not None:
+                print(f"{median_latency:>10.1f} | {dir_name:<35} | {absolute_path}")
+            else:
+                print(f"{'N/A':>10} | {dir_name:<35} | {absolute_path}")
 
-    print("-" * 100)
+    print("-" * separator_width)
 
 
 if __name__ == "__main__":
