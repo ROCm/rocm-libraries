@@ -40,6 +40,21 @@ if(NOT WIN32)
   endif()
 endif()
 
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_common.yaml"
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_common.yaml" COPYONLY
+)
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_template.yaml"
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_template.yaml" COPYONLY
+)
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_gentest.py" COPYONLY
+)
+
 set(hipsparselt_test_install_program
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"
 )
