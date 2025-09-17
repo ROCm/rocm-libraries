@@ -133,17 +133,17 @@ def main():
 
     # Adjust formatting based on whether path is shown
     if args.hide_path:
-        separator_width = 227
+        separator_width = 235
         print("-" * separator_width)
         print(
-            f"{'Directory':<35} | {'Latency':>10} | {'Line 3 Instruction':>40} | {'Line 4 Instruction':>40} | {'Line 5 Instruction':>40} | {'Line 6 Instruction':>40}"
+            f"{'Directory':<35} | {'Median Latency':>14} | {'Line 3 Instruction':>40} | {'Line 4 Instruction':>40} | {'Line 5 Instruction':>40} | {'Line 6 Instruction':>40} | {'':>3}"
         )
         print("-" * separator_width)
     else:
-        separator_width = 280
+        separator_width = 288
         print("-" * separator_width)
         print(
-            f"{'Directory':<35} | {'Latency':>10} | {'Line 3 Instruction':>40} | {'Line 4 Instruction':>40} | {'Line 5 Instruction':>40} | {'Line 6 Instruction':>40} | {'Full Path':<50}"
+            f"{'Directory':<35} | {'Median Latency':>14} | {'Line 3 Instruction':>40} | {'Line 4 Instruction':>40} | {'Line 5 Instruction':>40} | {'Line 6 Instruction':>40} | {'':>3} | {'Full Path':<50}"
         )
         print("-" * separator_width)
 
@@ -166,20 +166,20 @@ def main():
         if args.hide_path:
             if median_latency is not None:
                 print(
-                    f"{dir_name:<35} | {median_latency:>10.1f} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40}"
+                    f"{dir_name:<35} | {median_latency:>14.1f} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {'...':>3}"
                 )
             else:
                 print(
-                    f"{dir_name:<35} | {'N/A':>10} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40}"
+                    f"{dir_name:<35} | {'N/A':>14} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {'...':>3}"
                 )
         else:
             if median_latency is not None:
                 print(
-                    f"{dir_name:<35} | {median_latency:>10.1f} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {absolute_path}"
+                    f"{dir_name:<35} | {median_latency:>14.1f} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {'...':>3} | {absolute_path}"
                 )
             else:
                 print(
-                    f"{dir_name:<35} | {'N/A':>10} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {absolute_path}"
+                    f"{dir_name:<35} | {'N/A':>14} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {'...':>3} | {absolute_path}"
                 )
 
     print("-" * separator_width)
