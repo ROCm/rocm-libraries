@@ -189,27 +189,23 @@ namespace MemoryTracerTest
         const uint workGroup      = 0;
 
         // Simulate 64 threads each reading 16 bytes then 4 bytes
+        auto makeMemoryEventSimulated = [&](uint32_t threadId, uint32_t address, uint32_t size) {
+            return MemoryEventSimulated{operationTag,
+                                        sourceTag,
+                                        destinationTag,
+                                        ldsRead,
+                                        address,
+                                        size,
+                                        workGroup,
+                                        threadId};
+        };
         for(uint32_t threadId = 0; threadId < 64; ++threadId)
         {
-            model.simulate(MemoryEventSimulated{operationTag,
-                                                sourceTag,
-                                                destinationTag,
-                                                ldsRead,
-                                                threadId * 32,
-                                                16,
-                                                workGroup,
-                                                threadId});
+            model.simulate(makeMemoryEventSimulated(threadId, threadId * 32, 16));
         }
         for(uint32_t threadId = 0; threadId < 64; ++threadId)
         {
-            model.simulate(MemoryEventSimulated{operationTag,
-                                                sourceTag,
-                                                destinationTag,
-                                                ldsRead,
-                                                threadId * 32 + 16,
-                                                4,
-                                                workGroup,
-                                                threadId});
+            model.simulate(makeMemoryEventSimulated(threadId, threadId * 32 + 16, 4));
         }
 
         auto        detailed   = model.doOperationsAnalysis(GPUArchitectureGFX::GFX950);
