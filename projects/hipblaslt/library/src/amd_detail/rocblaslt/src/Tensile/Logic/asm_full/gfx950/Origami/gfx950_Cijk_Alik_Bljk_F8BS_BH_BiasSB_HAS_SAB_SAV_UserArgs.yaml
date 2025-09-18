@@ -90,7 +90,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Custom_Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_NTD_SK3_UserArgs_MT256x256x128_MI16x16x1_shortname0_gfx950
+    BaseName: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgF7dVdDfawbhEsBcRbMpB6brsGtuasHwwFi8lnNT2dLQ=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -98,7 +98,7 @@
     ClusterLocalRead: 0
     CodeObjectVersion: '4'
     ConvertAfterDS: false
-    CustomKernelName: 'Custom_Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_NTD_SK3_UserArgs_MT256x256x128_MI16x16x1_shortname0_gfx950'
+    CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 128
     DirectToLds: true
@@ -108,7 +108,6 @@
     DirectToVgprB: false
     DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
-    EnableF32XEmulationLds: false
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: 0
@@ -133,7 +132,7 @@
       SupportUserGSU: false, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_NTD_SK3_UserArgs_MT256x256x128_MI16x16x1_shortname0_gfx950
+    KernelNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_MT256x256x128_MI16x16x1_CMS_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA16_GRVWB16_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB1024_LBSPPM0_LPA32_LPB32_LPM0_LRVW16_LWPMn1_MIAV0_MIWT8_8_MO40_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL0_PGR2_PLR0_PKA1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW8_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -201,7 +200,8 @@
     MatrixInstruction: [16, 16, 128, 1]
     MaxLDS: 163840
     MaxOccupancy: 40
-    MbskPrefetchOpt: 0
+    MbskPrefetchMethod: 0
+    MfmaInitCVgprs: true
     NoLdsWriteCode: true
     NoReject: false
     NoTailLoop: false
@@ -238,7 +238,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Custom_Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_NTD_SK3_UserArgs_MT256x256x128_MI16x16x1_shortname0_gfx950
+    SolutionNameMin: Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SAB_SAV_UserArgs_MT256x256x128_MI16x16x1_CMS_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA16_GRVWB16_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA1024_LBSPPB1024_LBSPPM0_LPA32_LPB32_LPM0_LRVW16_LWPMn1_MIAV0_MIWT8_8_MO40_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL0_PGR2_PLR0_PKA1_SIA3_SS1_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW8_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM16_WGMXCC2_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 0
     StaggerUMapping: 0
@@ -256,6 +256,7 @@
     SubGroupA: 8
     SubGroupB: 32
     SuppressNoLoadLoop: false
+    SwapGlobalReadOrder: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
     ThreadTile1: 8
@@ -269,9 +270,12 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
+    UseCustomMainLoopSchedule: true
+    UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
+    UsePLRPack: false
     UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
@@ -283,8 +287,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 32
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 16
+    WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
