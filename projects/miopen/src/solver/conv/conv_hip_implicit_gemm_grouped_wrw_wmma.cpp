@@ -232,82 +232,13 @@ bool ConvHipImplicitGemmGroupWrwWmma::CheckCKApplicability(const ProblemDescript
 {
     return IsCKApplicable<DeviceOpGWrwPtrs<DataType>, CKArgs>(problem);
 }
-
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
-static std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
-{
-    std::vector<std::string> tokens;
-    std::string token;
-    std::istringstream tokenStream(
-        kernel.substr(kernel.find('<') + 1, kernel.find('>') - kernel.find('<') - 1));
-    while(std::getline(tokenStream, token, ','))
-    {
-        token.erase(remove_if(token.begin(), token.end(), isspace),
-                    token.end()); // strip whitespace
-        tokens.push_back(token);
-    }
-    return tokens;
-}
-
-/**
- * @param type is the kernel type predicted by the parameter prediction model
- */
-void PerformanceConfigHipImplicitGemmGroupWrwWmma::InitHeuristicKernelIDs(const std::string& type)
-{
-    for(int i = 0; i < valid_kernels.size(); i++)
-    {
-        if(valid_kernels[i].find(type) != std::string::npos)
-        {
-            heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
-        }
-    }
-}
-
-bool PerformanceConfigHipImplicitGemmGroupWrwWmma::ModelApplyToken(
-    int idx, std::string value, const std::string& arch, const ProblemDescription& problem)
-{
-    // TODO once the AI model is trained/available
-    return false;
-}
-
-static std::vector<float> GetFeatures(const ProblemDescription& problem, const std::string& arch)
-{
-    // TODO - Extract convolution problem characteristics and format them as numerical features for
-    // the AI model
-    std::size_t n = 0;
-    std::vector<float> features(n * n, 0.0f);
-    return features;
-}
-
-template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupWrwWmma::RunParameterPredictionModel(
-    const ExecutionContext& ctx, const ProblemDescription& problem)
-{
-    // TODO once the AI model is trained/available
-    return false;
-}
-#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
-#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-
-bool PerformanceConfigHipImplicitGemmGroupWrwWmma::IsModelApplicable(
-    const ExecutionContext& ctx, const ProblemDescription& problem) const
-{
-    // TODO once the AI model is trained/available
-    return false;
-}
+#endif
 
 void PerformanceConfigHipImplicitGemmGroupWrwWmma::HeuristicInit(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(IsModelApplicable(ctx, problem))
-    {
-        // TODO once the AI model is trained/available
-    }
-#endif
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
