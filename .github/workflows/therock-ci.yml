@@ -107,7 +107,7 @@ jobs:
       subtree_checkout: ${{ matrix.projects.subtree_checkout }}
 
   therock_ci_summary:
-    name: Summary
+    name: TheRock CI Summary
     if: always()
     needs:
       - setup
