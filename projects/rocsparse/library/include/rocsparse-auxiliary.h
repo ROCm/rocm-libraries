@@ -1555,7 +1555,7 @@ rocsparse_status rocsparse_sptrsv_set_input(rocsparse_handle       handle,
  *  @param[out]
  *  data        output data
  *  @param[in]
- *  data_size   output data size in bytes.
+ *  data_size_in_bytes   output data size in bytes.
  *  @param[out]
  *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
  *
@@ -1643,7 +1643,7 @@ rocsparse_status rocsparse_sptrsm_set_input(rocsparse_handle       handle,
  *  @param[out]
  *  data        output data
  *  @param[in]
- *  data_size   output data size in bytes.
+ *  data_size_in_bytes   output data size in bytes.
  *  @param[out]
  *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
  *

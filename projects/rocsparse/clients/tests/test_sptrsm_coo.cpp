@@ -38,5 +38,7 @@ TEST_ROUTINE_WITH_CONFIG(sptrsm_coo,
                          arg.diag,
                          arg.uplo,
                          arg.sptrsm_alg,
+			 arg.orderB,
+			 arg.orderC,
                          arg.matrix,
                          arg.graph_test);

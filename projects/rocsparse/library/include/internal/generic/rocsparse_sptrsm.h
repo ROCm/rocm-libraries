@@ -70,7 +70,7 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
                                               rocsparse_const_dnmat_descr Y,
                                               rocsparse_sptrsm_stage      sptrsm_stage,
                                               size_t*                     buffer_size_in_bytes,
-                                              rocsparse_error*            error);
+                                              rocsparse_error*            p_error);
 
 /*! \ingroup generic_module
 *  \brief Sparse triangular system solve with multiple right-hand sides
@@ -115,13 +115,13 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  temporary storage buffers, use row order for the matrix \f$Y\f$ and row order for the matrix \f$X\f$ (or column order if
 *  \f$X\f$ is being transposed).
 *
-*  \p rocsparse_spsm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the
-*  row pointer and column indices arrays of the sparse matrices. \p rocsparse_spsm supports the following data types for
+*  \p rocsparse_sptrsm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the
+*  row pointer and column indices arrays of the sparse matrices. \p rocsparse_sptrsm supports the following data types for
 *  \f$op(A)\f$, \f$op(X)\f$, \f$Y\f$ and compute types for \f$\alpha\f$:
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spsm_uniform">Uniform Precisions</caption>
+*  <caption id="sptrsm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / X / Y / compute_type
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
@@ -133,20 +133,22 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
 *
 *  \note
-*  Only the \ref rocsparse_spsm_stage_buffer_size stage and the \ref rocsparse_spsm_stage_compute stage are non blocking
+*  Only the \ref rocsparse_sptrsm_stage_compute stage are non blocking
 *  and executed asynchronously with respect to the host. They may return before the actual computation has finished.
-*  The \ref rocsparse_spsm_stage_preprocess stage is blocking with respect to the host.
+*  The \ref rocsparse_sptrsm_stage_analysis stage is blocking with respect to the host.
 *
 *  \note
 *  Currently, only \p trans_A == \ref rocsparse_operation_none and \p trans_A == \ref rocsparse_operation_transpose is supported.
 *  Currently, only \p trans_X == \ref rocsparse_operation_none and \p trans_X == \ref rocsparse_operation_transpose is supported.
 *
 *  \note
-*  Only the \ref rocsparse_spsm_stage_buffer_size stage and the \ref rocsparse_spsm_stage_compute stage
-*  support execution in a hipGraph context. The \ref rocsparse_spsm_stage_preprocess stage does not support hipGraph.
+*  Only the stage \ref rocsparse_sptrsm_stage_compute
+*  support execution in a hipGraph context. The \ref rocsparse_sptrsm_stage_analysis stage does not support hipGraph.
 *
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
+*  @param[in]
+*  sptrsm_descr           sptrsm routine descriptor.
 *  @param[in]
 *  A           sparse matrix descriptor.
 *  @param[in]
@@ -154,24 +156,21 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  @param[inout]
 *  Y           dense matrix descriptor.
 *  @param[in]
-*  compute_type floating point precision for the SpSM computation.
-*  @param[in]
-*  alg          SpSM algorithm for the SpSM computation.
-*  @param[in]
-*  stage        SpSM stage for the SpSM computation.
+*  sptrsm_stage Sptrsm stage for the Sptrsm computation.
 *  @param[out]
-*  buffer_size  number of bytes of the temporary storage buffer.
+*  buffer_size_in_bytes  number of bytes of the temporary storage buffer.
 *  @param[in]
-*  temp_buffer  temporary storage buffer allocated by the user. When the
-*               \ref rocsparse_spsm_stage_buffer_size stage is passed,
-*               the required allocation size (in bytes) is written to \p buffer_size and
-*               function returns without performing the SpSM operation.
+*  buffer  temporary storage buffer allocated by the user.
+*  @param[out]
+*  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval      rocsparse_status_invalid_pointer \p A, X, \p Y, \p sptrsm_descr or
 *               \p buffer_size pointer is invalid.
 *  \retval      rocsparse_status_not_implemented the configuration of the descriptor \p sptrsm_descr is currently not supported.
+*  \par Example
+*  \snippet example_rocsparse_sptrsm.cpp doc example
 *
 */
 ROCSPARSE_EXPORT
@@ -183,7 +182,7 @@ rocsparse_status rocsparse_sptrsm(rocsparse_handle            handle,
                                   rocsparse_sptrsm_stage      sptrsm_stage,
                                   size_t                      buffer_size_in_bytes,
                                   void*                       buffer,
-                                  rocsparse_error*            error);
+                                  rocsparse_error*            p_error);
 
 #ifdef __cplusplus
 }
