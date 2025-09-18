@@ -668,7 +668,7 @@ public:
     {
         static_assert(detail::is_power_of_two(VirtualWaveSize)
                           && VirtualWaveSize <= arch::wavefront::max_size(),
-                      "VirtualWaveSize must be a power of two and equal or less"
+                      "VirtualWaveSize must be a power of two and equal or less "
                       "than the size of hardware warp.");
         assert(VirtualWaveSize <= arch::wavefront::size());
 

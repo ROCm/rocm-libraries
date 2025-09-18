@@ -3,6 +3,12 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
+## hipSPARSE for ROCm 7.1.0 (Unreleased)
+
+### Added
+
+* Added documentation for installing and building hipSPARSE on Microsoft Windows.
+
 ## hipSPARSE 4.0.1 for ROCm 7.0.0
 
 ### Added
@@ -87,7 +93,7 @@ Documentation for hipSPARSE is available at
 
 ### Optimizations
 
-* Improved user manual 
+* Improved user manual
 * Improved contribution guidelines
 
 ### Known issues

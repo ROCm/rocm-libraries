@@ -30,7 +30,19 @@
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(state) ASSERT_EQ(state, hipSuccess)
+// GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
+// The lambda is invoked immediately as assertions that generate a fatal failure can
+// only be used in void-returning functions.
+#define HIP_CHECK(condition)                                                                \
+    {                                                                                       \
+        hipError_t error = condition;                                                       \
+        if(error != hipSuccess)                                                             \
+        {                                                                                   \
+            [error]()                                                                       \
+                { FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); }(); \
+            exit(error);                                                                    \
+        }                                                                                   \
+    }
 
 #define HIP_CHECK_NON_VOID(condition)         \
 {                                    \
@@ -40,6 +52,13 @@
         exit(error); \
     } \
 }
+
+#ifdef __HIP_PLATFORM_NVCC__
+    #include <cuda/std/cmath>
+    #define POWF(...) cuda::std::powf(__VA_ARGS__)
+#else
+    #define POWF(...) std::powf(__VA_ARGS__)
+#endif
 
 #ifdef _MSC_VER
 inline bool is_environment_variable_set_to_1(const char* name)

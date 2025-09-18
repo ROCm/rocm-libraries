@@ -14,17 +14,19 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-find_package(mxDataGenerator QUIET)
-if(NOT mxDataGenerator_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            mxDataGenerator
-            GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
-            GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
-        )
-        FetchContent_MakeAvailable(mxDataGenerator)
-    else()
-        message(FATAL_ERROR "Failed to find mxDataGenerator")
+if(NOT ROCM_LIBS_SUPERBUILD)
+    find_package(mxDataGenerator QUIET)
+    if(NOT mxDataGenerator_FOUND)
+        if(ROCROLLER_ENABLE_FETCH)
+            FetchContent_Declare(
+                mxDataGenerator
+                GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
+                GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
+            )
+            FetchContent_MakeAvailable(mxDataGenerator)
+        else()
+            message(FATAL_ERROR "Failed to find mxDataGenerator")
+        endif()
     endif()
 endif()
 
@@ -44,9 +46,9 @@ if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     # to ensure that the command supplied to execute_process is interpreted as a list
     # of strings rather than one white space delimited string.
     if(ROCROLLER_ENABLE_ASAN)
-        rocroller_target_configure_sanitizers(rocroller-test-catch PRIVATE)
+        rocroller_target_configure_sanitizers(rocroller-tests-catch PRIVATE)
         set_target_properties(rocroller-tests-catch
-            PROPERTIES 
+            PROPERTIES
                 CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
         )
     endif()
@@ -58,12 +60,12 @@ add_executable(component-test)
 if(ROCROLLER_ENABLE_ASAN)
     rocroller_target_configure_sanitizers(component-test PRIVATE)
     set_target_properties(component-test
-        PROPERTIES 
+        PROPERTIES
             CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
     )
     rocroller_target_configure_sanitizers(rocroller-tests PRIVATE)
     set_target_properties(rocroller-tests
-        PROPERTIES 
+        PROPERTIES
             CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
     )
 endif()

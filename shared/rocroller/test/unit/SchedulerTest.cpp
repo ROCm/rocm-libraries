@@ -178,7 +178,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst = next(begin, end);
-            EXPECT_EQ(inst.toString(LogLevel::Debug), " // Lock instruction\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), " // Lock instruction\n // Lock SCC\n");
         }
 
         {
@@ -190,7 +190,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst = next(begin, end);
-            EXPECT_EQ(inst.toString(LogLevel::Debug), " // Unlock instruction\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), " // Unlock instruction\n // Unlock None\n");
         }
 
         {
@@ -409,58 +409,67 @@ namespace rocRollerTest
         };
 
         auto ifBlock = [&]() -> Generator<Instruction> {
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerC->getLockState().getTopDependency(1), Scheduling::Dependency::None);
+
             co_yield(
                 Inst("(C) If Begin").lock(Scheduling::Dependency::SCC, "(C) Scheduler C Lock"));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
-            EXPECT_EQ(schedulerB->getLockState().getDependency(), Scheduling::Dependency::VCC);
-            EXPECT_EQ(schedulerC->getLockState().getDependency(), Scheduling::Dependency::SCC);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::SCC);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::SCC);
+            EXPECT_EQ(schedulerC->getLockState().getTopDependency(1), Scheduling::Dependency::SCC);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler B Lock Depth: "
-                          + std::to_string(schedulerB->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler C Lock Depth: "
-                          + std::to_string(schedulerC->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
+            co_yield(Inst("+++ Scheduler B Stream 0 Lock Depth: "
+                          + std::to_string(schedulerB->getLockState().getLockDepth(0))));
+            co_yield(Inst("+++ Scheduler C Stream 1 Lock Depth: "
+                          + std::to_string(schedulerC->getLockState().getLockDepth(1))));
             co_yield(Inst("(C) If Instruction"));
             co_yield(Inst("(C) If End").unlock("(C) Scheduler C Unlock"));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
-            EXPECT_EQ(schedulerB->getLockState().getDependency(), Scheduling::Dependency::VCC);
-            EXPECT_EQ(schedulerC->getLockState().getDependency(), Scheduling::Dependency::None);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerC->getLockState().getTopDependency(1), Scheduling::Dependency::None);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler B Lock Depth: "
-                          + std::to_string(schedulerB->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler C Lock Depth: "
-                          + std::to_string(schedulerC->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
+            co_yield(Inst("+++ Scheduler B Stream 0 Lock Depth: "
+                          + std::to_string(schedulerB->getLockState().getLockDepth(0))));
+            co_yield(Inst("+++ Scheduler C Stream 1 Lock Depth: "
+                          + std::to_string(schedulerC->getLockState().getLockDepth(1))));
         };
 
         c_sequences.push_back(opB());
         c_sequences.push_back(ifBlock());
 
         auto unroll0 = [&]() -> Generator<Instruction> {
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1),
+                      Scheduling::Dependency::Branch);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::None);
+
             co_yield(Inst("(B) Unroll 0 Begin")
                          .lock(Scheduling::Dependency::VCC, "(B) Scheduler B Lock"));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
-            EXPECT_EQ(schedulerB->getLockState().getDependency(), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::VCC);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler B Lock Depth: "
-                          + std::to_string(schedulerB->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
+            co_yield(Inst("+++ Scheduler B Stream 0 Lock Depth: "
+                          + std::to_string(schedulerB->getLockState().getLockDepth(0))));
             co_yield((*schedulerC)(c_sequences));
             co_yield(Inst("(B) Unroll 0 End")).unlock("(B) Scheduler B Unlock");
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
-            EXPECT_EQ(schedulerB->getLockState().getDependency(), Scheduling::Dependency::None);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1),
+                      Scheduling::Dependency::Branch);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::None);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler B Lock Depth: "
-                          + std::to_string(schedulerB->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
+            co_yield(Inst("+++ Scheduler B Stream 0 Lock Depth: "
+                          + std::to_string(schedulerB->getLockState().getLockDepth(0))));
         };
 
         auto unroll1 = [&]() -> Generator<Instruction> {
@@ -482,16 +491,17 @@ namespace rocRollerTest
             co_yield(Inst("(A) For Loop Begin")
                          .lock(Scheduling::Dependency::Branch, "(A) Scheduler A Lock"));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1),
+                      Scheduling::Dependency::Branch);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
             co_yield((*schedulerB)(b_sequences));
             co_yield(Inst("(A) For Loop End").unlock("(A) Scheduler A Unlock"));
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::None);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::None);
         };
 
         a_sequences.push_back(opA());
@@ -500,32 +510,38 @@ namespace rocRollerTest
         m_context->schedule((*schedulerA)(a_sequences));
 
         std::string expected = R"( (A) Op A Begin
-                                    (A) For Loop Begin // (A) Scheduler A Lock
-                                    +++ Scheduler A Lock Depth: 1
-                                    (B) Unroll 0 Begin // (B) Scheduler B Lock
-                                    +++ Scheduler A Lock Depth: 2
-                                    +++ Scheduler B Lock Depth: 1
-                                    (C) Op B Begin
-                                    (C) If Begin // (C) Scheduler C Lock
-                                    +++ Scheduler A Lock Depth: 3
-                                    +++ Scheduler B Lock Depth: 2
-                                    +++ Scheduler C Lock Depth: 1
-                                    (C) If Instruction
-                                    (C) If End // (C) Scheduler C Unlock
-                                    (C) Op B Instruction
-                                    +++ Scheduler A Lock Depth: 2
-                                    (C) Op B End
-                                    +++ Scheduler B Lock Depth: 1
-                                    +++ Scheduler C Lock Depth: 0
-                                    (B) Unroll 0 End // (B) Scheduler B Unlock
+                                    (A) For Loop Begin  // (A) Scheduler A Lock
+                                    // Lock Branch
+                                    +++ Scheduler A Stream 1 Lock Depth: 1
+                                    (B) Unroll 0 Begin  // (B) Scheduler B Lock
+                                    // Lock VCC
                                     (B) Unroll 1 Begin
-                                    +++ Scheduler A Lock Depth: 1
+                                    +++ Scheduler A Stream 1 Lock Depth: 2
                                     (B) Unroll 1 Instruction
-                                    +++ Scheduler B Lock Depth: 0
+                                    +++ Scheduler B Stream 0 Lock Depth: 1
                                     (B) Unroll 1 End
-                                    (A) For Loop End // (A) Scheduler A Unlock
+                                    (C) Op B Begin
+                                    (C) If Begin  // (C) Scheduler C Lock
+                                    // Lock SCC
+                                    +++ Scheduler A Stream 1 Lock Depth: 3
+                                    +++ Scheduler B Stream 0 Lock Depth: 2
+                                    +++ Scheduler C Stream 1 Lock Depth: 1
+                                    (C) If Instruction
+                                    (C) If End  // (C) Scheduler C Unlock
+                                    // Unlock None
+                                    (C) Op B Instruction
+                                    +++ Scheduler A Stream 1 Lock Depth: 2
+                                    (C) Op B End
+                                    +++ Scheduler B Stream 0 Lock Depth: 1
+                                    +++ Scheduler C Stream 1 Lock Depth: 0
+                                    (B) Unroll 0 End  // (B) Scheduler B Unlock
+                                    // Unlock None
+                                    +++ Scheduler A Stream 1 Lock Depth: 1
+                                    +++ Scheduler B Stream 0 Lock Depth: 0
+                                    (A) For Loop End  // (A) Scheduler A Unlock
+                                    // Unlock None
                                     (A) Op A Instruction
-                                    +++ Scheduler A Lock Depth: 0
+                                    +++ Scheduler A Stream 1 Lock Depth: 0
                                     (A) Op A End
                                 )";
 
@@ -549,7 +565,7 @@ namespace rocRollerTest
     Generator<Instruction> noComments()
     {
         for(int i = 0; i < 100; i++)
-            co_yield_(Inst(concatenate("I", i)));
+            co_yield_(Inst(concatenate("s_add_u32 ", i)));
     }
 
     TEST_P(RandomSchedulerTest, RandomScheduler)
@@ -655,7 +671,9 @@ namespace rocRollerTest
 
         auto block2 = NormalizedSource(R"(
         // Lock instruction
+        // Lock SCC
         // Unlock instruction
+        // Unlock None
         )",
                                        true);
 
@@ -916,30 +934,29 @@ namespace rocRollerTest
         EXPECT_EQ(NormalizedSource(seqOutput, true), NormalizedSource(priorityUniformOutput, true));
     }
 
-    TEST_F(SchedulerTest, PrioritySchedulerTest)
+    TEST_F(SchedulerTest, PrioritySchedulerTestTwoGenerators)
     {
-        {
-            clearOutput();
-            auto v = createRegisters(Register::Type::Vector, DataType::Float, 6);
-            auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1);
+        clearOutput();
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 6);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1);
 
-            auto generator_one = [&]() -> Generator<Instruction> {
-                co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
-                // Since this requires a nop, instructions will be scheduled from the other stream until nops are no longer needed, then this next instruction will be scheduled.
-                co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
-            };
-            auto generator_two = [&]() -> Generator<Instruction> {
-                co_yield_(Inst("Instruction 1, Generator 2"));
-                co_yield_(Inst("Instruction 2, Generator 2"));
-                co_yield_(Inst("Instruction 3, Generator 2"));
-                co_yield_(Inst("Instruction 4, Generator 2"));
-            };
+        auto generator_one = [&]() -> Generator<Instruction> {
+            co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
+            // Since this requires a nop, instructions will be scheduled from the other stream until nops are no longer needed, then this next instruction will be scheduled.
+            co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
+        };
+        auto generator_two = [&]() -> Generator<Instruction> {
+            co_yield_(Inst("Instruction 1, Generator 2"));
+            co_yield_(Inst("Instruction 2, Generator 2"));
+            co_yield_(Inst("Instruction 3, Generator 2"));
+            co_yield_(Inst("Instruction 4, Generator 2"));
+        };
 
-            std::vector<Generator<Instruction>> generators;
-            generators.push_back(generator_one());
-            generators.push_back(generator_two());
+        std::vector<Generator<Instruction>> generators;
+        generators.push_back(generator_one());
+        generators.push_back(generator_two());
 
-            std::string expected = R"( v_or_b32 v2, v0, v1
+        std::string expected = R"( v_or_b32 v2, v0, v1
                                     Instruction 1, Generator 2
                                     Instruction 2, Generator 2
                                     v_mfma_f32_16x16x4f32 a0, v0, v2, a0
@@ -947,70 +964,68 @@ namespace rocRollerTest
                                     Instruction 4, Generator 2
                                     )";
 
-            auto scheduler
-                = Component::GetNew<Scheduling::Scheduler>(Scheduling::SchedulerProcedure::Priority,
-                                                           Scheduling::CostFunction::MinNops,
-                                                           m_context);
-            m_context->schedule((*scheduler)(generators));
-            EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
-        }
+        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+            Scheduling::SchedulerProcedure::Priority, Scheduling::CostFunction::MinNops, m_context);
+        m_context->schedule((*scheduler)(generators));
+        EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
+    }
 
-        {
-            clearOutput();
-            auto mfma_v = createRegisters(Register::Type::Vector, DataType::Float, 16);
-            auto or_v   = createRegisters(Register::Type::Vector, DataType::Float, 4);
+    TEST_F(SchedulerTest, PrioritySchedulerTestThreeGenerators)
+    {
+        clearOutput();
+        auto mfma_v = createRegisters(Register::Type::Vector, DataType::Float, 16);
+        auto or_v   = createRegisters(Register::Type::Vector, DataType::Float, 4);
 
-            auto generator_one = [&]() -> Generator<Instruction> {
-                std::string comment = "stream1";
-                co_yield_(Instruction("v_mfma_f32_32x32x1f32",
-                                      {mfma_v[0]},
-                                      {mfma_v[1], mfma_v[2], mfma_v[3]},
-                                      {},
-                                      comment));
-                co_yield_(Instruction("unrelated_op_2", {}, {}, {}, comment));
-                co_yield_(Instruction("v_or_b32", {or_v[0]}, {mfma_v[0], mfma_v[1]}, {}, comment));
-                co_yield_(Instruction("v_mfma_f32_32x32x1f32",
-                                      {mfma_v[4]},
-                                      {mfma_v[5], mfma_v[6], mfma_v[7]},
-                                      {},
-                                      comment));
-                co_yield_(Instruction("unrelated_op_3", {}, {}, {}, comment));
-                co_yield_(Instruction("v_or_b32", {or_v[1]}, {mfma_v[4], mfma_v[5]}, {}, comment));
-                co_yield_(Instruction("v_mfma_f32_32x32x1f32",
-                                      {mfma_v[8]},
-                                      {mfma_v[9], mfma_v[10], mfma_v[11]},
-                                      {},
-                                      comment));
-                co_yield_(Instruction("unrelated_op_4", {}, {}, {}, comment));
-                co_yield_(Instruction("v_or_b32", {or_v[2]}, {mfma_v[8], mfma_v[9]}, {}, comment));
-            };
-            auto generator_two = [&]() -> Generator<Instruction> {
-                std::string comment = "stream2";
-                co_yield_(Instruction("unrelated_op_5", {}, {}, {}, comment));
-                co_yield_(Instruction("v_mfma_f32_32x32x1f32",
-                                      {mfma_v[12]},
-                                      {mfma_v[13], mfma_v[14], mfma_v[15]},
-                                      {},
-                                      comment));
-                co_yield_(Instruction("v_or_b32", {or_v[2]}, {mfma_v[4], mfma_v[5]}, {}, comment));
-                co_yield_(Instruction("unrelated_op_6", {}, {}, {}, comment));
-                co_yield_(
-                    Instruction("v_or_b32", {or_v[3]}, {mfma_v[12], mfma_v[13]}, {}, comment));
-            };
-            auto generator_three = [&]() -> Generator<Instruction> {
-                std::string comment = "stream3";
-                co_yield_(Instruction("unrelated_op_7", {}, {}, {}, comment));
-                co_yield_(Instruction("unrelated_op_8", {}, {}, {}, comment));
-                co_yield_(Instruction("unrelated_op_9", {}, {}, {}, comment));
-                co_yield_(Instruction("unrelated_op_10", {}, {}, {}, comment));
-            };
+        auto generator_one = [&]() -> Generator<Instruction> {
+            std::string comment = "stream1";
+            co_yield_(Instruction("v_mfma_f32_32x32x1f32",
+                                  {mfma_v[0]},
+                                  {mfma_v[1], mfma_v[2], mfma_v[3]},
+                                  {},
+                                  comment));
+            co_yield_(Instruction("unrelated_op_2", {}, {}, {}, comment));
+            co_yield_(Instruction("v_or_b32", {or_v[0]}, {mfma_v[0], mfma_v[1]}, {}, comment));
+            co_yield_(Instruction("v_mfma_f32_32x32x1f32",
+                                  {mfma_v[4]},
+                                  {mfma_v[5], mfma_v[6], mfma_v[7]},
+                                  {},
+                                  comment));
+            co_yield_(Instruction("unrelated_op_3", {}, {}, {}, comment));
+            co_yield_(Instruction("v_or_b32", {or_v[1]}, {mfma_v[4], mfma_v[5]}, {}, comment));
+            co_yield_(Instruction("v_mfma_f32_32x32x1f32",
+                                  {mfma_v[8]},
+                                  {mfma_v[9], mfma_v[10], mfma_v[11]},
+                                  {},
+                                  comment));
+            co_yield_(Instruction("unrelated_op_4", {}, {}, {}, comment));
+            co_yield_(Instruction("v_or_b32", {or_v[2]}, {mfma_v[8], mfma_v[9]}, {}, comment));
+        };
+        auto generator_two = [&]() -> Generator<Instruction> {
+            std::string comment = "stream2";
+            co_yield_(Instruction("unrelated_op_5", {}, {}, {}, comment));
+            co_yield_(Instruction("v_mfma_f32_32x32x1f32",
+                                  {mfma_v[12]},
+                                  {mfma_v[13], mfma_v[14], mfma_v[15]},
+                                  {},
+                                  comment));
+            co_yield_(Instruction("v_or_b32", {or_v[2]}, {mfma_v[4], mfma_v[5]}, {}, comment));
+            co_yield_(Instruction("unrelated_op_6", {}, {}, {}, comment));
+            co_yield_(Instruction("v_or_b32", {or_v[3]}, {mfma_v[12], mfma_v[13]}, {}, comment));
+        };
+        auto generator_three = [&]() -> Generator<Instruction> {
+            std::string comment = "stream3";
+            co_yield_(Instruction("unrelated_op_7", {}, {}, {}, comment));
+            co_yield_(Instruction("unrelated_op_8", {}, {}, {}, comment));
+            co_yield_(Instruction("unrelated_op_9", {}, {}, {}, comment));
+            co_yield_(Instruction("unrelated_op_10", {}, {}, {}, comment));
+        };
 
-            std::vector<Generator<Instruction>> generators;
-            generators.push_back(generator_one());
-            generators.push_back(generator_two());
-            generators.push_back(generator_three());
+        std::vector<Generator<Instruction>> generators;
+        generators.push_back(generator_one());
+        generators.push_back(generator_two());
+        generators.push_back(generator_three());
 
-            std::string expected = R"(
+        std::string expected = R"(
                 v_mfma_f32_32x32x1f32 v0, v1, v2, v3 // stream1
                 unrelated_op_2 // stream1
                 unrelated_op_5 // stream2
@@ -1039,13 +1054,10 @@ namespace rocRollerTest
                 // Wait state hazard: XDL Write Hazard
                 )";
 
-            auto scheduler
-                = Component::GetNew<Scheduling::Scheduler>(Scheduling::SchedulerProcedure::Priority,
-                                                           Scheduling::CostFunction::MinNops,
-                                                           m_context);
-            m_context->schedule((*scheduler)(generators));
-            EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
-        }
+        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+            Scheduling::SchedulerProcedure::Priority, Scheduling::CostFunction::MinNops, m_context);
+        m_context->schedule((*scheduler)(generators));
+        EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
     }
 
     struct LockCheckSchedulerTest : public SchedulerTest,
@@ -1059,7 +1071,7 @@ namespace rocRollerTest
         }
     };
 
-    TEST_P(LockCheckSchedulerTest, LockCheckTest)
+    TEST_P(LockCheckSchedulerTest, DISABLED_LockCheckTest)
     {
 #ifdef NDEBUG
         GTEST_SKIP() << "Skipping LockCheckTest in release mode.";

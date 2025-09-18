@@ -61,9 +61,7 @@ namespace rocRoller::KernelGraph
             if(not maybeForLoop)
                 return;
 
-            std::vector<int> dependenciesVec(lastRWOps.begin(), lastRWOps.end());
-            std::sort(dependenciesVec.begin(), dependenciesVec.end(), compare);
-            auto lastDependency = dependenciesVec.back();
+            auto lastDependency = std::ranges::max(lastRWOps, compare);
 
             auto downstreamBarriers = filter(original.control.isElemType<Barrier>(),
                                              original.control.depthFirstVisit(lastDependency))
@@ -75,8 +73,7 @@ namespace rocRoller::KernelGraph
                 return;
             }
 
-            std::sort(downstreamBarriers.begin(), downstreamBarriers.end(), compare);
-            dependencies.insert(downstreamBarriers.front());
+            dependencies.insert(std::ranges::min(downstreamBarriers, compare));
         }
 
         std::set<int> getContainingForLoops(std::set<int> controls, KernelGraph const& graph)
@@ -214,6 +211,26 @@ namespace rocRoller::KernelGraph
 
             removeRedundantSequenceEdges(graph);
         }
+
+        void deleteUnusedArguments(AssemblyKernelPtr                kernel,
+                                   ControlFlowArgumentTracer const& argTracer)
+        {
+            auto arguments = kernel->resetArguments();
+
+            auto const& neverReferencedArguments = argTracer.neverReferencedArguments();
+
+            auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
+                                      return !neverReferencedArguments.contains(arg.name);
+                                  });
+
+            for(auto& arg : referencedArgs)
+            {
+                kernel->addArgument({std::move(arg.name),
+                                     arg.variableType,
+                                     arg.dataDirection,
+                                     std::move(arg.expression)});
+            }
+        }
     }
 
     using namespace AddDeallocateDetail;
@@ -283,12 +300,11 @@ namespace rocRoller::KernelGraph
         return deallocateNodes;
     }
 
-    std::vector<int>
-        addArgumentDeallocates(KernelGraph& graph, LastRWTracer const& tracer, ContextPtr context)
+    std::vector<int> addArgumentDeallocates(KernelGraph&                     graph,
+                                            LastRWTracer const&              tracer,
+                                            ControlFlowArgumentTracer const& argTracer,
+                                            ContextPtr                       context)
     {
-
-        ControlFlowArgumentTracer argTracer(graph, context->kernel());
-
         auto locations = tracer.lastArgLocations(argTracer);
 
         std::map<std::set<int>, std::vector<std::string>> deallocateNodesToAdd;
@@ -397,7 +413,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateDataFlow::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateDataFlow");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocateDataFlow()");
 
         auto graph = original;
@@ -411,13 +426,15 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateArguments::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateArguments");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocate()");
 
-        auto graph  = original;
-        auto tracer = LastRWTracer(graph);
+        auto graph = original;
 
-        auto deallocateNodes = addArgumentDeallocates(graph, tracer, m_context);
+        ControlFlowArgumentTracer argTracer(graph, m_context->kernel());
+        deleteUnusedArguments(m_context->kernel(), argTracer);
+
+        auto tracer          = LastRWTracer(graph);
+        auto deallocateNodes = addArgumentDeallocates(graph, tracer, argTracer, m_context);
 
         sequenceDeallocatesBeforeOtherNodes(deallocateNodes, graph);
 
@@ -426,7 +443,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph MergeAdjacentDeallocates::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::mergeAdjacentDeallocates");
         rocRoller::Log::getLogger()->debug("KernelGraph::mergeAdjacentDeallocates()");
 
         auto graph = original;

@@ -33,6 +33,8 @@ option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 # Find CUDA if the user wants a CUDA version.
 option(BUILD_CUDA "Look for CUDA and use that as a backend if found" OFF)
+option(BUILD_USE_LOCAL_TENSILE "Build hipSparseLt with local tensilelite" OFF)
+option(BUILD_USE_LOCAL_TENSILE_HIPBLASLT_NEXT_CMAKE "Build hipSparseLt with local tensilelite (hipblaslt next cmake)" ON)
 include(CMakeDependentOption)
 cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Enable roctx marker in hipSPARSELt" ON "BUILD_SHARED_LIBS" OFF)
 
@@ -41,6 +43,10 @@ if(BUILD_CUDA)
     set(BUILD_CLIENTS_TESTS OFF)
     set(HIPSPARSELT_ENABLE_MARKER OFF)
 endif()
+
+set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
+    CACHE PATH "Path to hipblaslt directory."
+)
 
 # This will add compile option: -std=c++17
 set(CMAKE_CXX_STANDARD 17 )
@@ -155,6 +161,51 @@ else()
     option( BUILD_WITH_TENSILE "Build full functionality which requires tensile?" ON )
 
     if( BUILD_WITH_TENSILE )
+      if( BUILD_USE_LOCAL_TENSILE_HIPBLASLT_NEXT_CMAKE )
+          set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
+          if(NOT EXISTS "${HIPBLASLT_PATH}")
+              message(
+                  FATAL_ERROR
+                      "hipBLASLt required but not found at ${HIPBLASLT_PATH}."
+              )
+          endif()
+
+          block(SCOPE_FOR VARIABLES)
+          set(HIPBLASLT_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL "" FORCE)
+          set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
+          set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
+          # Builds tensilelite's device libraries (.co/.dat)
+          set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
+          # Builds tensilelite::tensilelite-host target
+          set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+          if( Tensile_NO_LAZY_LIBRARY_LOADING )
+            set( HIPBLASLT_ENABLE_LAZY_LOAD OFF)
+          else()
+            set( HIPBLASLT_ENABLE_LAZY_LOAD ON)
+          endif()
+          set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
+          set(HIPBLASLT_LIBLOGIC_PATH
+              "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+              CACHE STRING "" FORCE
+          )
+          set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
+              CACHE FILEPATH "License file for package" FORCE
+          )
+          if(WIN32)
+              set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
+                  CACHE PATH "path to tensile library" FORCE
+              )
+          else()
+              set(HIPBLASLT_TENSILE_LIBRARY_DIR
+                  "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
+                  CACHE PATH "path to tensile library" FORCE
+              )
+          endif()
+
+          add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
+          endblock()
+      endif()
+    else()
       # we will have expanded "all" for tensile to ensure consistency as we have local rules
       set( Tensile_ARCHITECTURE "${AMDGPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
 
@@ -196,6 +247,16 @@ else()
 
       if (NOT Tensile_BUILD_ID)
         set(Tensile_BUILD_ID "sha1" CACHE STRING "Build ID Kind for Tensile" FORCE)
+      endif()
+
+      if ( NOT Tensile_TEST_LOCAL_PATH AND BUILD_USE_LOCAL_TENSILE )
+        find_path(TensileLite NAMES tensilelite PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../hipBLASLt")
+        if ( ${TensileLite} STREQUAL "TensileLite-NOTFOUND" )
+          find_path(TensileLite NAMES tensilelite PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt" REQUIRED)
+        endif()
+        set(Tensile_TEST_LOCAL_PATH "${TensileLite}/tensilelite")
+        message(STATUS "Found TensileLite: ${TensileLite}/tensilelite")
+        message(STATUS "Set Tensile_TEST_LOCAL_PATH: ${TensileLite}/tensilelite")
       endif()
 
       include(virtualenv)
@@ -350,6 +411,7 @@ else()
 endif( )
 
 set( CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" "\${CPACK_PACKAGING_INSTALL_PREFIX}/lib" )
+set( CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /opt/rocm/llvm/bin/llvm-strip" ) # need to generalize this
 
 # Give hipsparselt compiled for CUDA backend a different name
 if( NOT BUILD_CUDA )
@@ -380,6 +442,25 @@ if(BUILD_CODE_COVERAGE)
   #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
   #  > make coverage_output (generate html documentation)
   #
+  if(NOT DEFINED LLVM_COV_BIN_DIR)
+    message(STATUS "Hint: Use LLVM_COV_BIN_DIR to specify the desired versions of llvm-cov and llvm-profdata:")
+    message(STATUS "      -DLLVM_COV_BIN_DIR=/path/to/llvm/cov+profdata/bin")
+  endif()
+
+  find_program(LLVM_COV_EXECUTABLE llvm-cov HINTS ${LLVM_COV_BIN_DIR} REQUIRED)
+  message(STATUS "using llvm-cov: ${LLVM_COV_EXECUTABLE}")
+
+  find_program(LLVM_PROFDATA_EXECUTABLE llvm-profdata HINTS ${LLVM_COV_BIN_DIR} REQUIRED)
+  message(STATUS "using llvm-profdata: ${LLVM_PROFDATA_EXECUTABLE}")
+
+  target_compile_options(hipsparselt PRIVATE
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+
+  target_link_options(hipsparselt PUBLIC
+    -fprofile-instr-generate
+  )
 
   #
   # Run coverage analysis
@@ -388,33 +469,42 @@ if(BUILD_CODE_COVERAGE)
 
   add_custom_target(coverage_analysis
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipsparselt-test_%m.profraw
+            ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+  )
 
   add_dependencies(coverage_analysis hipsparselt)
 
   #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
+  # Generate coverage output using llvm-cov
   #
+  set(LLVM_COV_COMMON_ARGS
+    -object ./library/libhipsparselt.so
+    -instr-profile=./coverage_test.profdata
+    --ignore-filename-regex=.*/build/.*
+  )
+
   add_custom_target(coverage_output
     DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
-    )
+    COMMAND ${CMAKE_COMMAND} -E env
+            /bin/sh -c
+            "\"${LLVM_PROFDATA_EXECUTABLE}\" merge -sparse \
+             \"${CMAKE_BINARY_DIR}\"/*.profraw \
+             -o \"${CMAKE_BINARY_DIR}/coverage_test.profdata\""
 
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory ${CMAKE_BINARY_DIR} --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" "'*/Tensile/Source/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage --prefix ${CMAKE_BINARY_DIR}
-    )
+    COMMAND ${LLVM_COV_EXECUTABLE} report ${LLVM_COV_COMMON_ARGS}
+    COMMAND ${LLVM_COV_EXECUTABLE} show ${LLVM_COV_COMMON_ARGS}
+            -format=html -output-dir=coverage-report
+
+    COMMAND ${LLVM_COV_EXECUTABLE} export ${LLVM_COV_COMMON_ARGS}
+            -format=lcov > ${CMAKE_BINARY_DIR}/coverage_test.info
+
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    VERBATIM
+  )
 
   add_custom_target(coverage DEPENDS coverage_output)
 
@@ -422,8 +512,10 @@ if(BUILD_CODE_COVERAGE)
   # Coverage cleanup
   #
   add_custom_target(coverage_cleanup
-    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-endif()
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/*.profraw
+                                      ${CMAKE_BINARY_DIR}/coverage_test.profdata
+                                      ${CMAKE_BINARY_DIR}/coverage_test.info
 
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/coverage-report
+  )
+endif() # BUILD_CODE_COVERAGE

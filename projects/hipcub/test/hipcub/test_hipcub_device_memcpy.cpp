@@ -26,8 +26,8 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_types.hpp"
 
-#include "hipcub/device/device_memcpy.hpp"
-#include "hipcub/thread/thread_operators.hpp"
+#include <hipcub/device/device_memcpy.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
 #include <gtest/gtest-typed-test.h>
 #include <gtest/gtest.h>
@@ -71,8 +71,10 @@ using DeviceBatchMemcpyTestsParams = ::testing::Types<
     DeviceBatchMemcpyParams<uint8_t, uint32_t, false>,
     DeviceBatchMemcpyParams<uint32_t, uint32_t, false>,
     DeviceBatchMemcpyParams<uint64_t, uint32_t, false>,
-    // size_type: uint16_t
+// size_type: uint16_t
+#ifdef __HIP_PLATFORM_AMD__ // Nvcc doesn't support uint16 as SizeType
     DeviceBatchMemcpyParams<uint8_t, uint16_t, false, 1024, 1024>,
+#endif // __HIP_PLATFORM_AMD__
     // size_type: int64_t
     DeviceBatchMemcpyParams<uint8_t, int64_t, false, 1024, 64 * 1024>,
     DeviceBatchMemcpyParams<uint8_t, int64_t, false, 1024, 128 * 1024>,
@@ -87,8 +89,10 @@ using DeviceBatchMemcpyTestsParams = ::testing::Types<
     DeviceBatchMemcpyParams<uint8_t, uint32_t, true>,
     DeviceBatchMemcpyParams<uint32_t, uint32_t, true>,
     DeviceBatchMemcpyParams<uint64_t, uint32_t, true>,
-    // size_type: uint16_t
+// size_type: uint16_t
+#ifdef __HIP_PLATFORM_AMD__ // Nvcc doesn't support uint16 as SizeType
     DeviceBatchMemcpyParams<uint8_t, uint16_t, true, 1024, 1024>,
+#endif // __HIP_PLATFORM_AMD__
     // size_type: int64_t
     DeviceBatchMemcpyParams<uint8_t, int64_t, true, 1024, 64 * 1024>,
     DeviceBatchMemcpyParams<uint8_t, int64_t, true, 1024, 128 * 1024>>;

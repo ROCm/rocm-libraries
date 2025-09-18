@@ -1,0 +1,146 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#pragma once
+
+#include "RunListener.hpp"
+
+#include <chrono>
+#include <cstddef>
+
+#include <boost/program_options.hpp>
+
+#include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionSolution.hpp>
+
+namespace TensileLite
+{
+    namespace Client
+    {
+        namespace po = boost::program_options;
+
+        class BenchmarkTimer : public RunListener
+        {
+        public:
+            using clock = std::chrono::steady_clock;
+
+            BenchmarkTimer(po::variables_map const& args,
+                           Hardware const&          hardware,
+                           float                    flushTimeUs);
+
+            virtual bool needMoreBenchmarkRuns() const override;
+            virtual void preBenchmarkRun() override;
+            virtual void postBenchmarkRun() override;
+
+            virtual void preProblem(ContractionProblem* const problem) override;
+            virtual void postProblem() override;
+
+            virtual void preSolution(ContractionSolution const& solution) override;
+            virtual void postSolution() override;
+
+            virtual bool needMoreRunsInSolution() const override;
+
+            virtual size_t numWarmupRuns() override;
+            virtual void   setNumWarmupRuns(size_t count) override;
+            virtual void   preWarmup() override;
+            virtual void   postWarmup(TimingEvents const& startEvents,
+                                      TimingEvents const& stopEvents,
+                                      hipStream_t const&  stream) override;
+            virtual void   validateWarmups(std::shared_ptr<ProblemInputs> inputs,
+                                           TimingEvents const&            startEvents,
+                                           TimingEvents const&            stopEvents) override;
+
+            virtual size_t numSyncs() override;
+            virtual void   setNumSyncs(size_t count) override;
+            virtual void   preSyncs() override;
+            virtual void   postSyncs() override;
+
+            virtual size_t numEnqueuesPerSync() override;
+            virtual void   setNumEnqueuesPerSync(size_t count) override;
+            virtual void   preEnqueues(hipStream_t const& stream) override;
+            virtual void   postEnqueues(TimingEvents const& startEvents,
+                                        TimingEvents const& stopEvents,
+                                        hipStream_t const&  stream) override;
+            virtual void   validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
+                                            TimingEvents const&            startEvents,
+                                            TimingEvents const&            stopEvents) override;
+
+            virtual void finalizeReport() override;
+            virtual int  error() const override;
+            void         setIFlushTimeUs(float timeUs)
+            {
+                m_flushTimeUs = timeUs;
+            }
+
+        private:
+            const int    m_numWarmups;
+            const int    m_numBenchmarks;
+            const int    m_numEnqueuesPerSync;
+            const int    m_maxEnqueuesPerSync;
+            const int    m_numSyncsPerBenchmark;
+            const int    m_numEnqueuesPerSolution;
+            const size_t m_minFlopsPerSync = 0;
+
+            const bool m_useGPUTimer;
+            const bool m_syncAfterWarmups = true;
+            const int  m_sleepPercent;
+
+            int m_numBenchmarksRun = 0;
+
+            Hardware const&     m_hardware;
+            ContractionProblem* m_problem;
+            ContractionSolution m_solution;
+
+            int m_numEnqueuesInSolution = 0;
+            int m_numSyncsInBenchmark   = 0;
+            int m_curNumEnqueuesPerSync = 0;
+
+            clock::time_point m_startTime;
+            clock::time_point m_endTime;
+
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+
+            using double_millis = std::chrono::duration<double, std::milli>;
+            using double_micros = std::chrono::duration<double, std::micro>;
+            using double_nanos  = std::chrono::duration<double, std::nano>;
+            using prob_sol_map  = std::map<int, int>;
+
+            double_millis m_timeInSolution;
+            double_millis m_totalGPUTime;
+            double_millis m_currentBestWarmUpTime;
+            float         m_flushTimeUs;
+            float         m_skip_slow_solution_ratio;
+            bool          m_skip_slow_solution;
+            size_t        m_numSolutionSkip;
+            prob_sol_map  m_prob_sol_map;
+            bool          m_skiprun_from_map;
+            int           m_currProblemIdx;
+            int           m_currSolutionIdx;
+            int           m_probOnlyRunSolIdx;
+        };
+    } // namespace Client
+} // namespace TensileLite

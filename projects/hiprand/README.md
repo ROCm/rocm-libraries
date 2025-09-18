@@ -8,8 +8,7 @@ application and the backend RAND library, where it marshals inputs to the backen
 application. hipRAND exports an interface that doesn't require the client to change, regardless of the
 chosen backend.
 
-hipRAND supports [rocRAND](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand) and
-[NVIDIA CUDA cuRAND](https://developer.nvidia.com/curand).
+hipRAND supports [rocRAND](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand).
 
 ## Requirements
 
@@ -19,9 +18,6 @@ You must have the following installed to use hipRAND:
 * For AMD GPUs:
   * AMD ROCm Software (5.0.0 or later)
   * rocRAND library
-* For NVIDIA GPUs:
-  * CUDA Toolkit 11.5.1 or newer
-  * cuRAND library
 
 ## Build and install
 
@@ -48,18 +44,9 @@ supported platforms):
 
 * Manual build:
 
-  If you use a distribution other than Ubuntu, or want more control over the build process, the
-  [hipRAND build wiki](https://github.com/ROCm/hipRAND/wiki/Build) has helpful
-  information on how to configure CMake and build manually.
-
   For information on cloning and building the hipRAND library, see the
-  [hipRAND installation documentation](https://rocm.docs.amd.com/projects/hipRAND/en/latest/install/installation.html) for version 7.0 or later.
+  [hipRAND installation documentation](https://rocm.docs.amd.com/projects/hipRAND/en/latest/install/installation.html) for version 7.0 or later. It has helpful information on how to configure CMake and build manually.
 
-### Supported functions
-
-You can find a list of
-[exported functions](https://github.com/ROCm/hipRAND/wiki/Exported-functions) on
-the wiki.
 
 ## Interface examples
 

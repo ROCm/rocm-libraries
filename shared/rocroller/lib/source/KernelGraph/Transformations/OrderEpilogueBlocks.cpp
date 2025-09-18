@@ -132,7 +132,6 @@ namespace rocRoller
 
         KernelGraph OrderEpilogueBlocks::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::OrderEpilogueBlocks");
             auto graph = original;
 
             // Exclude Unrolls that aren't associated with

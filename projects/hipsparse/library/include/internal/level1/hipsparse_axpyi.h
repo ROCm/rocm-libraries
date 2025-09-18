@@ -114,7 +114,7 @@ extern "C" {
 *      // Copy result back to host
 *      hipMemcpy(hy, dy, sizeof(double) * 9, hipMemcpyDeviceToHost);
 *
-*      // Clear hipSPARSE 
+*      // Clear hipSPARSE
 *      hipsparseDestroy(handle);
 *
 *      // Clear device memory

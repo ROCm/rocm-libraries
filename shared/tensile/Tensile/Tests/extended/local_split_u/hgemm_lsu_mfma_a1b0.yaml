@@ -195,4 +195,3 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 252, 252, 1, 2050]
-

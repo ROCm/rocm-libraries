@@ -51,7 +51,7 @@ extern "C" {
 *  @param[in]
 *  n            number of columns of the column-oriented dense matrix \p A.
 *  @param[in]
-*  descr        the descriptor of the column-oriented dense matrix \p A, the supported matrix type is 
+*  descr        the descriptor of the column-oriented dense matrix \p A, the supported matrix type is
 *               \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  A            column-oriented dense matrix of dimensions (\p ld, \p n)
@@ -72,6 +72,9 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_size \p m or \p n or \p ld is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p A or \p nnz_per_rows or \p coo_val \p coo_col_ind or \p coo_row_ind
 *              pointer is invalid.
+*
+*  \par Example
+*  \snippet example_rocsparse_dense2coo.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

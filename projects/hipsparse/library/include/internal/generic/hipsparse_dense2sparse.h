@@ -30,12 +30,12 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseDenseToSparse_bufferSize computes the required user allocated buffer size needed when converting 
-*  a dense matrix to a sparse matrix. This routine currently accepts the sparse matrix descriptor \p matB in CSR, 
-*  CSC, or COO format. This routine is used to determine the size of the buffer 
+*  \p hipsparseDenseToSparse_bufferSize computes the required user allocated buffer size needed when converting
+*  a dense matrix to a sparse matrix. This routine currently accepts the sparse matrix descriptor \p matB in CSR,
+*  CSC, or COO format. This routine is used to determine the size of the buffer
 *  needed in \ref hipsparseDenseToSparse_analysis and \ref hipsparseDenseToSparse_convert.
 *
-*  \p hipsparseDenseToSparse_bufferSize supports different data types for the dense and sparse matrices. See 
+*  \p hipsparseDenseToSparse_bufferSize supports different data types for the dense and sparse matrices. See
 *  \ref hipsparseDenseToSparse_convert for a complete listing of all the data types available.
 *
 *  @param[in]
@@ -47,7 +47,7 @@ extern "C" {
 *  @param[in]
 *  alg                 algorithm for the dense to sparse computation.
 *  @param[out]
-*  pBufferSizeInBytes  number of bytes of the temporary storage buffer. 
+*  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p pBufferSizeInBytes
@@ -71,12 +71,12 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseDenseToSparse_analysis performs analysis that is later used in \ref hipsparseDenseToSparse_convert when 
-*  converting a dense matrix to sparse matrix. This routine currently accepts the sparse matrix descriptor \p matB in CSR, 
-*  CSC, or COO format. This routine takes a user allocated buffer whose size must first be computed 
+*  \p hipsparseDenseToSparse_analysis performs analysis that is later used in \ref hipsparseDenseToSparse_convert when
+*  converting a dense matrix to sparse matrix. This routine currently accepts the sparse matrix descriptor \p matB in CSR,
+*  CSC, or COO format. This routine takes a user allocated buffer whose size must first be computed
 *  using \ref hipsparseDenseToSparse_bufferSize.
 *
-*  \p hipsparseDenseToSparse_analysis supports different data types for the dense and sparse matrices. See 
+*  \p hipsparseDenseToSparse_analysis supports different data types for the dense and sparse matrices. See
 *  \ref hipsparseDenseToSparse_convert for a complete listing of all the data types available.
 *
 *  @param[in]
@@ -88,7 +88,7 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
 *  @param[in]
 *  alg             algorithm for the dense to sparse computation.
 *  @param[out]
-*  externalBuffer  temporary storage buffer allocated by the user. 
+*  externalBuffer  temporary storage buffer allocated by the user.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p externalBuffer
@@ -114,14 +114,14 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *  \brief Dense matrix to sparse matrix conversion
 *
 *  \details
-*  \p hipsparseDenseToSparse_convert converts a dense matrix to a sparse matrix. This routine currently accepts 
+*  \p hipsparseDenseToSparse_convert converts a dense matrix to a sparse matrix. This routine currently accepts
 *  the sparse matrix descriptor \p matB in CSR, CSC, or COO format. This routine requires a user allocated buffer
 *  whose size must be determined by first calling \ref hipsparseDenseToSparse_bufferSize.
 *
-*  The conversion of a dense matrix into a sparse one involves three steps. First, the user creates the dense and 
-*  sparse matrix descriptors. Because the number of non-zeros that will exist in the sparse matrix is not known apriori, 
+*  The conversion of a dense matrix into a sparse one involves three steps. First, the user creates the dense and
+*  sparse matrix descriptors. Because the number of non-zeros that will exist in the sparse matrix is not known apriori,
 *  when creating the sparse matrix descriptor, the user simply sets the arrays to \p NULL and the non-zero count to zero.
-*  For example, in the case of a CSR sparse matrix, this would look like:  
+*  For example, in the case of a CSR sparse matrix, this would look like:
 *  \code{.c}
 *  hipsparseCreateCsr(&matB,
 *                     m,
@@ -149,11 +149,11 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *                     idxBaseB,
 *                     dataTypeB);
 *  \endcode
-*  Once the descriptors have been created, the user calls \ref hipsparseDenseToSparse_bufferSize. This routine will 
+*  Once the descriptors have been created, the user calls \ref hipsparseDenseToSparse_bufferSize. This routine will
 *  determine the size of the required temporary storage buffer. The user then allocates this buffer and passes it to
-*  \ref hipsparseDenseToSparse_analysis which will perform analysis on the dense matrix in order to determine the number 
-*  of non-zeros that will exist in the sparse matrix. Once this \ref hipsparseDenseToSparse_analysis routine has been 
-*  called, the non-zero count is stored in the sparse matrix descriptor \p matB. In order to allocate our remaining sparse 
+*  \ref hipsparseDenseToSparse_analysis which will perform analysis on the dense matrix in order to determine the number
+*  of non-zeros that will exist in the sparse matrix. Once this \ref hipsparseDenseToSparse_analysis routine has been
+*  called, the non-zero count is stored in the sparse matrix descriptor \p matB. In order to allocate our remaining sparse
 *  matrix arrays, we query the sparse matrix descriptor \p matB for this non-zero count:
 *  \code{.c}
 *    // Grab the non-zero count from the B matrix decriptor
@@ -162,11 +162,11 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *    int64_t nnz;
 *    hipsparseSpMatGetSize(matB, &rows, &cols, &nnz);
 *  \endcode
-*  The remaining arrays are then allocated and set on the sparse matrix descriptor \p matB. Finally, we complete the 
-*  conversion by calling \ref hipsparseDenseToSparse_convert. Once the conversion is complete, the user is free to deallocate 
+*  The remaining arrays are then allocated and set on the sparse matrix descriptor \p matB. Finally, we complete the
+*  conversion by calling \ref hipsparseDenseToSparse_convert. Once the conversion is complete, the user is free to deallocate
 *  the storage buffer. See full example below for details.
 *
-*  \p hipsparseDenseToSparse_convert supports the following uniform precision data types for the dense and sparse matrices \f$A\f$ 
+*  \p hipsparseDenseToSparse_convert supports the following uniform precision data types for the dense and sparse matrices \f$A\f$
 *  and \f$B\f$:
 *
 *  \par Uniform Precisions:
@@ -174,6 +174,7 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *  <caption id="dense2sparse_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B
 *  <tr><td>HIP_R_16F
+*  <tr><td>HIP_R_16BF
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
 *  <tr><td>HIP_C_32F
@@ -191,7 +192,7 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *  @param[in]
 *  alg             algorithm for the dense to sparse computation.
 *  @param[out]
-*  externalBuffer  temporary storage buffer allocated by the user. 
+*  externalBuffer  temporary storage buffer allocated by the user.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p externalBuffer
@@ -206,9 +207,9 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *    int m   = 4;
 *    int n   = 4;
 *
-*    std::vector<float> hdenseA = {1.0f, 4.0f, 0.0f, 9.0f, 
-*                                  0.0f, 2.0f, 3.0f, 0.0f, 
-*                                  0.0f, 0.0f, 7.0f, 0.0f, 
+*    std::vector<float> hdenseA = {1.0f, 4.0f, 0.0f, 9.0f,
+*                                  0.0f, 2.0f, 3.0f, 0.0f,
+*                                  0.0f, 0.0f, 7.0f, 0.0f,
 *                                  0.0f, 4.0f, 0.0f, 1.0f};
 *
 *    float* ddenseA;

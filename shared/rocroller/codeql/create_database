@@ -62,6 +62,6 @@ codeql database create "${DIR}rr-database-new" --source-root="$(readlink -f .)" 
 
 # Only overwrite old dirs at end
 rm -rf "${DIR}rr-database"
-rm -rf "${DIR}rr-build" 
+rm -rf "${DIR}rr-build"
 mv -f "${DIR}rr-database-new" "${DIR}rr-database"
 mv -f "${DIR}rr-build-new" "${DIR}rr-build"

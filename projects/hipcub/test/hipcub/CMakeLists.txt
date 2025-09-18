@@ -43,11 +43,17 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
     PRIVATE
       GTest::gtest
       GTest::gtest_main
-      hipcub
   )
 
+  if(USE_SYSTEM_LIB)
+    target_link_libraries(${TEST_TARGET} PRIVATE hip::hipcub)
+  else()
+    target_link_libraries(${TEST_TARGET} PRIVATE hipcub)
+  endif()
+
   if(HIP_COMPILER STREQUAL "nvcc")
-    set_property(TARGET ${TEST_TARGET} PROPERTY CUDA_STANDARD 14)
+    # For test/hipcub, std::exclusive_scan is used, which is a c++ 17 feature
+    target_compile_features(${TEST_TARGET} PUBLIC cuda_std_17)
     set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE CUDA)
     target_link_libraries(${TEST_TARGET}
       PRIVATE
@@ -200,6 +206,9 @@ endfunction()
 
 # HIP basic test, which also checks if there are no linkage problems when there are multiple sources
 add_hipcub_test("hipcub.BasicTest" "test_hipcub_basic.cpp;detail/get_hipcub_version.cpp")
+
+# This test checks if hipCUB can compile with the __HIP_NO_HALF_CONVERSIONS__ and __HIP_NO_HALF_OPERATORS__ flags.
+add_hipcub_test("hipcub.NoHalfOperators" test_hipcub_no_half_operators.cpp)
 
 add_hipcub_test("hipcub.CachingDeviceAllocator" test_hipcub_caching_device_allocator.cpp)
 add_hipcub_test("hipcub.BlockAdjacentDifference" test_hipcub_block_adjacent_difference.cpp)

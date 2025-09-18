@@ -373,9 +373,9 @@ void testing_spgemm_reuse_csr(const Arguments& arg)
         hC_gold.near_check(dC);
 
         // Change values in input matrices
-        rocsparse_init<T>(hA.val, 1, hA.nnz, 1);
-        rocsparse_init<T>(hB.val, 1, hB.nnz, 1);
-        rocsparse_init<T>(hD.val, 1, hD.nnz, 1);
+        rocsparse_init<T>(hA.val, 1, hA.nnz, 1, arg.convert_to_int);
+        rocsparse_init<T>(hB.val, 1, hB.nnz, 1, arg.convert_to_int);
+        rocsparse_init<T>(hD.val, 1, hD.nnz, 1, arg.convert_to_int);
 
         dA.transfer_from(hA);
         dB.transfer_from(hB);
