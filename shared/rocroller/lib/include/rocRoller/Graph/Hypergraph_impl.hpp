@@ -235,35 +235,26 @@ namespace rocRoller
 
             for(int src : inputs)
             {
-                std::vector<Incident> connectedIncidents;
-
-                std::copy_if(m_incidence.begin(),
-                             m_incidence.end(),
-                             std::back_inserter(connectedIncidents),
-                             [elementType, index, src](auto const& i) {
-                                 return elementType == ElementType::Edge ? i.dst == index
-                                                                         : i.src == src;
-                             });
+                auto connectedIncidents
+                    = m_incidence | std::views::filter([elementType, index, src](auto const& i) {
+                          return elementType == ElementType::Edge ? i.dst == index : i.src == src;
+                      });
 
                 int incidentOrder = 0;
-                if(!connectedIncidents.empty())
+                if(!std::ranges::empty(connectedIncidents))
                 {
-                    if(std::any_of(
-                           connectedIncidents.begin(),
-                           connectedIncidents.end(),
-                           [index, src](auto const& i) { return i.dst == index && i.src == src; }))
+                    if(std::ranges::any_of(connectedIncidents, [index, src](auto const& i) {
+                           return i.dst == index && i.src == src;
+                       }))
                     {
                         // Skip duplicate incident
                         continue;
                     }
 
-                    incidentOrder = std::max_element(connectedIncidents.begin(),
-                                                     connectedIncidents.end(),
-                                                     [](auto const& a, auto const& b) {
-                                                         return a.edgeOrder < b.edgeOrder;
-                                                     })
-                                        ->edgeOrder
-                                    + 1;
+                    incidentOrder
+                        = std::ranges::max_element(connectedIncidents, {}, &Incident::edgeOrder)
+                              ->edgeOrder
+                          + 1;
 
                     AssertFatal(Hyper || incidentOrder == 0,
                                 "Too many incidents for edge connection",
@@ -277,35 +268,26 @@ namespace rocRoller
 
             for(int dst : outputs)
             {
-                std::vector<Incident> connectedIncidents;
-
-                std::copy_if(m_incidence.begin(),
-                             m_incidence.end(),
-                             std::back_inserter(connectedIncidents),
-                             [elementType, index, dst](auto const& i) {
-                                 return elementType == ElementType::Edge ? i.src == index
-                                                                         : i.dst == dst;
-                             });
+                auto connectedIncidents
+                    = m_incidence | std::views::filter([elementType, index, dst](auto const& i) {
+                          return elementType == ElementType::Edge ? i.src == index : i.dst == dst;
+                      });
 
                 int incidentOrder = 0;
-                if(!connectedIncidents.empty())
+                if(!std::ranges::empty(connectedIncidents))
                 {
-                    if(std::any_of(
-                           connectedIncidents.begin(),
-                           connectedIncidents.end(),
-                           [index, dst](auto const& i) { return i.src == index && i.dst == dst; }))
+                    if(std::ranges::any_of(connectedIncidents, [index, dst](auto const& i) {
+                           return i.src == index && i.dst == dst;
+                       }))
                     {
                         // Skip duplicate incident
                         continue;
                     }
 
-                    incidentOrder = std::max_element(connectedIncidents.begin(),
-                                                     connectedIncidents.end(),
-                                                     [](auto const& a, auto const& b) {
-                                                         return a.edgeOrder < b.edgeOrder;
-                                                     })
-                                        ->edgeOrder
-                                    + 1;
+                    incidentOrder
+                        = std::ranges::max_element(connectedIncidents, {}, &Incident::edgeOrder)
+                              ->edgeOrder
+                          + 1;
 
                     AssertFatal(Hyper || incidentOrder == 0,
                                 "Too many incidents for edge connection",
@@ -483,29 +465,20 @@ namespace rocRoller
             rv.element = m_elements.at(index);
 
             {
-                std::vector<Incident> tmp;
-                std::copy_if(m_incidence.begin(),
-                             m_incidence.end(),
-                             std::back_inserter(tmp),
-                             [index](auto const& i) { return i.dst == index; });
-                sortByDst(tmp);
-                std::transform(tmp.begin(),
-                               tmp.end(),
-                               std::back_inserter(rv.incoming),
-                               [](auto const& i) { return i.src; });
+                std::set<Incident, Incident::byDst> tmp;
+                std::ranges::copy_if(m_incidence,
+                                     std::inserter(tmp, tmp.begin()),
+                                     [index](auto const& i) { return i.dst == index; });
+
+                std::ranges::copy(tmp | std::views::transform([](auto const& i) { return i.src; }),
+                                  std::back_inserter(rv.incoming));
             }
 
             {
-                std::vector<Incident> tmp;
-                std::copy_if(m_incidence.begin(),
-                             m_incidence.end(),
-                             std::back_inserter(tmp),
-                             [index](auto const& i) { return i.src == index; });
-                sortBySrc(tmp);
-                std::transform(tmp.begin(),
-                               tmp.end(),
-                               std::back_inserter(rv.outgoing),
-                               [](auto const& i) { return i.dst; });
+                std::ranges::copy(m_incidence | std::views::filter([index](auto const& i) {
+                                      return i.src == index;
+                                  }) | std::views::transform([](auto const& i) { return i.dst; }),
+                                  std::back_inserter(rv.outgoing));
             }
 
             m_locationCache[index] = rv;
@@ -704,15 +677,8 @@ namespace rocRoller
 
             co_yield start;
 
-            std::deque<Incident>                                    toExplore;
-            std::set<Incident, Incident::CompareHypergraphIncident> noted = {};
-            std::vector<Incident> candidates(m_incidence.begin(), m_incidence.end());
-            sortBySrc(candidates);
-
-            std::copy_if(candidates.begin(),
-                         candidates.end(),
-                         std::back_inserter(toExplore),
-                         [start](auto const& i) { return i.src == start; });
+            std::deque<Incident>                toExplore;
+            std::set<Incident, Incident::bySrc> noted = {};
 
             while(!toExplore.empty())
             {
@@ -727,7 +693,7 @@ namespace rocRoller
 
                 noted.insert(i);
 
-                for(auto const& candidate : candidates)
+                for(auto const& candidate : m_incidence)
                 {
                     if(node == candidate.src && !noted.contains(candidate))
                     {
@@ -747,15 +713,8 @@ namespace rocRoller
 
             co_yield start;
 
-            std::deque<Incident>                                    toExplore;
-            std::set<Incident, Incident::CompareHypergraphIncident> noted = {};
-            std::vector<Incident> candidates(m_incidence.begin(), m_incidence.end());
-            sortByDst(candidates);
-
-            std::copy_if(candidates.begin(),
-                         candidates.end(),
-                         std::back_inserter(toExplore),
-                         [start](auto const& i) { return i.dst == start; });
+            std::deque<Incident>                toExplore;
+            std::set<Incident, Incident::bySrc> noted = {};
 
             while(!toExplore.empty())
             {
@@ -770,7 +729,7 @@ namespace rocRoller
 
                 noted.insert(i);
 
-                for(auto const& candidate : candidates)
+                for(auto const& candidate : m_incidence)
                 {
                     if(node == candidate.dst && !noted.contains(candidate))
                     {
@@ -929,26 +888,20 @@ namespace rocRoller
         {
             if constexpr(Dir == Direction::Downstream)
             {
-                std::vector<Incident> rv;
-                std::copy_if(m_incidence.begin(),
-                             m_incidence.end(),
-                             std::back_inserter(rv),
-                             [element](auto const& i) { return i.src == element; });
-                sortBySrc(rv);
-
-                for(auto const& i : rv)
+                for(auto const& i : m_incidence | std::views::filter([element](auto const& i) {
+                                        return i.src == element;
+                                    }))
                 {
                     co_yield i.dst;
                 }
             }
             else
             {
-                std::vector<Incident> rv;
+                std::set<Incident, Incident::byDst> rv;
                 std::copy_if(m_incidence.begin(),
                              m_incidence.end(),
-                             std::back_inserter(rv),
+                             std::inserter(rv, rv.begin()),
                              [element](auto const& i) { return i.dst == element; });
-                sortByDst(rv);
 
                 for(auto const& i : rv)
                 {
@@ -1314,16 +1267,11 @@ namespace rocRoller
         {
             static_assert(!Hyper, "findEdge not supported for hypergraphs.");
 
-            std::vector<Incident> candidates;
-            std::copy_if(m_incidence.begin(),
-                         m_incidence.end(),
-                         std::back_inserter(candidates),
-                         [head](auto const& i) { return i.dst == head; });
-
-            for(auto const& candidate : candidates)
+            for(auto const& candidate : m_incidence)
             {
                 auto theEdge = candidate.src;
-                if(std::any_of(
+                if(candidate.dst == head
+                   && std::any_of(
                        m_incidence.begin(), m_incidence.end(), [theEdge, tail](auto const& i) {
                            return i.src == tail && i.dst == theEdge;
                        }))
@@ -1331,22 +1279,6 @@ namespace rocRoller
             }
 
             return std::nullopt;
-        }
-
-        template <typename Node, typename Edge, bool Hyper>
-        void Hypergraph<Node, Edge, Hyper>::sortBySrc(
-            std::vector<HypergraphIncident>& incidents) const
-        {
-            std::sort(
-                incidents.begin(), incidents.end(), Incident::CompareHypergraphIncident::bySrc);
-        }
-
-        template <typename Node, typename Edge, bool Hyper>
-        void Hypergraph<Node, Edge, Hyper>::sortByDst(
-            std::vector<HypergraphIncident>& incidents) const
-        {
-            std::sort(
-                incidents.begin(), incidents.end(), Incident::CompareHypergraphIncident::byDst);
         }
     }
 }

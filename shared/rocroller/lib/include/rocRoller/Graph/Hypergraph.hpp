@@ -29,6 +29,7 @@
 #include <functional>
 #include <map>
 #include <ranges>
+#include <set>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -82,14 +83,9 @@ namespace rocRoller
             int dst;
             int edgeOrder;
 
-            struct CompareHypergraphIncident
+            struct bySrc
             {
                 bool operator()(const HypergraphIncident& a, const HypergraphIncident& b) const
-                {
-                    return bySrc(a, b);
-                }
-
-                static bool bySrc(const HypergraphIncident& a, const HypergraphIncident& b)
                 {
                     if(a.src != b.src)
                     {
@@ -101,8 +97,11 @@ namespace rocRoller
                     }
                     return a.dst < b.dst;
                 }
+            };
 
-                static bool byDst(const HypergraphIncident& a, const HypergraphIncident& b)
+            struct byDst
+            {
+                bool operator()(const HypergraphIncident& a, const HypergraphIncident& b) const
                 {
                     if(a.dst != b.dst)
                     {
@@ -468,13 +467,10 @@ namespace rocRoller
             // TODO: May need to replace with multi_index for in-place rewriting.
             std::map<int, Element> m_elements;
 
-            std::set<HypergraphIncident, HypergraphIncident::CompareHypergraphIncident> m_incidence;
+            std::set<HypergraphIncident, HypergraphIncident::bySrc> m_incidence;
 
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
-
-            void sortBySrc(std::vector<HypergraphIncident>& incidents) const;
-            void sortByDst(std::vector<HypergraphIncident>& incidents) const;
         };
 
         template <typename Node, typename Edge, bool Hyper>
