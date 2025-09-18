@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_common.h"
+#include "rocsparse_csrmv.hpp"
 #include "rocsparse_sellmv.hpp"
 
 #include "rocsparse_control.hpp"
@@ -38,7 +39,7 @@ namespace rocsparse
               typename X,
               typename Y,
               typename T>
-    ROCSPARSE_KERNEL(16 * THREADS_PER_ROW)
+    ROCSPARSE_KERNEL(128 * THREADS_PER_ROW)
     void sellmvn_kernel(J m,
                         J n,
                         I nnz,
@@ -74,6 +75,49 @@ namespace rocsparse
         }
     }
 
+    template <uint32_t BLOCKSIZE,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void sellmvn_large_slice_kernel(J m,
+                                    J n,
+                                    I nnz,
+                                    J slice_size,
+                                    I sell_colval_size,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                    const I* __restrict__ sell_slice_offsets,
+                                    const J* __restrict__ sell_col_ind,
+                                    const A* __restrict__ sell_val,
+                                    const X* __restrict__ x,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                    Y* __restrict__ y,
+                                    rocsparse_index_base idx_base,
+                                    bool                 is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(alpha != 0 || beta != 1)
+        {
+            rocsparse::sellmvn_large_slice_device<BLOCKSIZE>(m,
+                                                             n,
+                                                             nnz,
+                                                             slice_size,
+                                                             sell_colval_size,
+                                                             alpha,
+                                                             sell_slice_offsets,
+                                                             sell_col_ind,
+                                                             sell_val,
+                                                             x,
+                                                             beta,
+                                                             y,
+                                                             idx_base);
+        }
+    }
+
     template <uint32_t THREADS_PER_ROW,
               typename I,
               typename J,
@@ -81,7 +125,7 @@ namespace rocsparse
               typename X,
               typename Y,
               typename T>
-    ROCSPARSE_KERNEL(16 * THREADS_PER_ROW)
+    ROCSPARSE_KERNEL(128 * THREADS_PER_ROW)
     void sellmvt_kernel(rocsparse_operation trans,
                         J                   m,
                         J                   n,
@@ -116,6 +160,48 @@ namespace rocsparse
         }
     }
 
+    template <uint32_t BLOCKSIZE,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void sellmvt_large_slice_kernel(rocsparse_operation trans,
+                                    J                   m,
+                                    J                   n,
+                                    I                   nnz,
+                                    J                   slice_size,
+                                    I                   sell_colval_size,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                    const I* __restrict__ sell_slice_offsets,
+                                    const J* __restrict__ sell_col_ind,
+                                    const A* __restrict__ sell_val,
+                                    const X* __restrict__ x,
+                                    Y* __restrict__ y,
+                                    rocsparse_index_base idx_base,
+                                    bool                 is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        if(alpha != 0)
+        {
+            rocsparse::sellmvt_large_slice_device<BLOCKSIZE>(trans,
+                                                             m,
+                                                             n,
+                                                             nnz,
+                                                             slice_size,
+                                                             sell_colval_size,
+                                                             alpha,
+                                                             sell_slice_offsets,
+                                                             sell_col_ind,
+                                                             sell_val,
+                                                             x,
+                                                             y,
+                                                             idx_base);
+        }
+    }
+
     template <typename I, typename J, typename A, typename X, typename Y, typename T>
     rocsparse_status sellmv_dispatch(rocsparse_handle          handle,
                                      rocsparse_operation       trans,
@@ -145,52 +231,104 @@ namespace rocsparse
 
         if(trans == rocsparse_operation_none)
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::sellmvn_kernel<8>),
-                dim3(blocks_x, blocks_y, 1),
-                dim3(slice_size, 8),
-                slice_size * 8 * sizeof(T),
-                stream,
-                m,
-                n,
-                nnz,
-                slice_size,
-                sell_colval_size,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                sell_slice_offsets,
-                sell_col_ind,
-                sell_val,
-                x,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                y,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            if(slice_size <= 128)
+            {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::sellmvn_kernel<8>),
+                    dim3(blocks_x, blocks_y, 1),
+                    dim3(slice_size, 8),
+                    slice_size * 8 * sizeof(T),
+                    stream,
+                    m,
+                    n,
+                    nnz,
+                    slice_size,
+                    sell_colval_size,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                    sell_slice_offsets,
+                    sell_col_ind,
+                    sell_val,
+                    x,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                    y,
+                    descr->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+            }
+            else
+            {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::sellmvn_large_slice_kernel<256>),
+                    dim3(nslices),
+                    dim3(256),
+                    0,
+                    stream,
+                    m,
+                    n,
+                    nnz,
+                    slice_size,
+                    sell_colval_size,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                    sell_slice_offsets,
+                    sell_col_ind,
+                    sell_val,
+                    x,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                    y,
+                    descr->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+            }
         }
         else
         {
             // Scale y with beta
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, n, beta_device_host, y));
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::sellmvt_kernel<8>),
-                dim3(blocks_x, blocks_y, 1),
-                dim3(slice_size, 8),
-                0,
-                stream,
-                trans,
-                m,
-                n,
-                nnz,
-                slice_size,
-                sell_colval_size,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                sell_slice_offsets,
-                sell_col_ind,
-                sell_val,
-                x,
-                y,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            if(slice_size <= 128)
+            {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::sellmvt_kernel<8>),
+                    dim3(blocks_x, blocks_y, 1),
+                    dim3(slice_size, 8),
+                    0,
+                    stream,
+                    trans,
+                    m,
+                    n,
+                    nnz,
+                    slice_size,
+                    sell_colval_size,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                    sell_slice_offsets,
+                    sell_col_ind,
+                    sell_val,
+                    x,
+                    y,
+                    descr->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+            }
+            else
+            {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::sellmvt_large_slice_kernel<256>),
+                    dim3(nslices),
+                    dim3(256),
+                    0,
+                    stream,
+                    trans,
+                    m,
+                    n,
+                    nnz,
+                    slice_size,
+                    sell_colval_size,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                    sell_slice_offsets,
+                    sell_col_ind,
+                    sell_val,
+                    x,
+                    y,
+                    descr->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+            }
         }
 
         return rocsparse_status_success;
@@ -286,6 +424,30 @@ rocsparse_status rocsparse::sellmv_template(rocsparse_handle          handle, //
     ROCSPARSE_CHECKARG_POINTER(11, sell_col_ind);
     ROCSPARSE_CHECKARG_POINTER(12, x);
     ROCSPARSE_CHECKARG_POINTER(14, y);
+
+    if(slice_size == 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csrmv_template<T, I, J, A, X, Y>(handle,
+                                                         trans,
+                                                         rocsparse::csrmv_alg_rowsplit,
+                                                         m,
+                                                         n,
+                                                         nnz,
+                                                         alpha_device_host,
+                                                         descr,
+                                                         sell_val,
+                                                         sell_slice_offsets,
+                                                         sell_slice_offsets + 1,
+                                                         sell_col_ind,
+                                                         nullptr,
+                                                         x,
+                                                         beta_device_host,
+                                                         y,
+                                                         false,
+                                                         false)));
+        return rocsparse_status_success;
+    }
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sellmv_dispatch(handle,
                                                          trans,

@@ -3770,10 +3770,10 @@ try
     ROCSPARSE_CHECKARG_POINTER(11, idx_base);
     ROCSPARSE_CHECKARG_POINTER(12, data_type);
 
-    *rows       = descr->rows;
-    *cols       = descr->cols;
-    *nnz        = descr->nnz;
-    *slice_size = descr->slice_size;
+    *rows             = descr->rows;
+    *cols             = descr->cols;
+    *nnz              = descr->nnz;
+    *slice_size       = descr->slice_size;
     *sell_colval_size = descr->sell_colval_size;
 
     *sell_slice_offsets = descr->row_data;
@@ -3826,11 +3826,11 @@ try
     ROCSPARSE_CHECKARG_POINTER(11, idx_base);
     ROCSPARSE_CHECKARG_POINTER(12, data_type);
 
-    *rows       = descr->rows;
-    *cols       = descr->cols;
-    *nnz        = descr->nnz;
-    *slice_size = descr->slice_size;
-    *slice_size = descr->sell_colval_size;
+    *rows             = descr->rows;
+    *cols             = descr->cols;
+    *nnz              = descr->nnz;
+    *slice_size       = descr->slice_size;
+    *sell_colval_size = descr->sell_colval_size;
 
     *sell_slice_offsets = descr->const_row_data;
     *sell_col_ind       = descr->const_col_data;

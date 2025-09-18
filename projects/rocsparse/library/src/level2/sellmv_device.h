@@ -118,6 +118,71 @@ namespace rocsparse
         }
     }
 
+    // Sliced ELL SpMV for general, non-transposed matrices, large slice size
+    template <uint32_t BLOCKSIZE,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
+    ROCSPARSE_DEVICE_ILF void sellmvn_large_slice_device(J                    m,
+                                                         J                    n,
+                                                         I                    nnz,
+                                                         J                    slice_size,
+                                                         I                    sell_colval_size,
+                                                         T                    alpha,
+                                                         const I*             sell_slice_offsets,
+                                                         const J*             sell_col_ind,
+                                                         const A*             sell_val,
+                                                         const X*             x,
+                                                         T                    beta,
+                                                         Y*                   y,
+                                                         rocsparse_index_base idx_base)
+    {
+        const uint32_t tid     = hipThreadIdx_x;
+        const uint32_t sliceid = hipBlockIdx_x;
+
+        const J iter = (slice_size - 1) / BLOCKSIZE + 1;
+
+        for(J p = 0; p < iter; p++)
+        {
+            const J local_row = (BLOCKSIZE * p + tid);
+
+            const J row = slice_size * sliceid + (BLOCKSIZE * p + tid);
+
+            const I start
+                = (row < m && local_row < slice_size) ? sell_slice_offsets[sliceid] - idx_base : 0;
+            const I end = (row < m && local_row < slice_size)
+                              ? sell_slice_offsets[sliceid + 1] - idx_base
+                              : 0;
+
+            T sum = static_cast<T>(0);
+
+            for(I j = start + local_row; j < end; j += slice_size)
+            {
+                const J col = sell_col_ind[j] - idx_base;
+
+                if(col >= 0)
+                {
+                    sum = rocsparse::fma<T>(sell_val[j], x[col], sum);
+                }
+            }
+
+            if(row < m && local_row < slice_size)
+            {
+                if(beta == static_cast<T>(0))
+                {
+                    y[row] = alpha * sum;
+                }
+                else
+                {
+                    y[row] = rocsparse::fma<T>(beta, y[row], alpha * sum);
+                }
+            }
+        }
+    }
+
     // Sliced ELL SpMV for general, transposed matrices
     template <uint32_t THREADS_PER_ROW,
               typename I,
@@ -168,6 +233,66 @@ namespace rocsparse
                 }
 
                 rocsparse::atomic_add(&y[col], static_cast<T>(val) * row_val);
+            }
+        }
+    }
+
+    // Sliced ELL SpMV for general, transposed matrices, large slice size
+    template <uint32_t BLOCKSIZE,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
+    ROCSPARSE_DEVICE_ILF void sellmvt_large_slice_device(rocsparse_operation  trans,
+                                                         J                    m,
+                                                         J                    n,
+                                                         I                    nnz,
+                                                         J                    slice_size,
+                                                         I                    sell_colval_size,
+                                                         T                    alpha,
+                                                         const I*             sell_slice_offsets,
+                                                         const J*             sell_col_ind,
+                                                         const A*             sell_val,
+                                                         const X*             x,
+                                                         Y*                   y,
+                                                         rocsparse_index_base idx_base)
+    {
+        const uint32_t tid     = hipThreadIdx_x;
+        const uint32_t sliceid = hipBlockIdx_x;
+
+        const J iter = (slice_size - 1) / BLOCKSIZE + 1;
+
+        for(J p = 0; p < iter; p++)
+        {
+            const J local_row = (BLOCKSIZE * p + tid);
+
+            const J row = slice_size * sliceid + (BLOCKSIZE * p + tid);
+
+            const I start
+                = (row < m && local_row < slice_size) ? sell_slice_offsets[sliceid] - idx_base : 0;
+            const I end = (row < m && local_row < slice_size)
+                              ? sell_slice_offsets[sliceid + 1] - idx_base
+                              : 0;
+
+            T row_val = (row < m && local_row < slice_size) ? alpha * x[row] : static_cast<T>(0);
+
+            for(I j = start + local_row; j < end; j += slice_size)
+            {
+                const J col = sell_col_ind[j] - idx_base;
+
+                if(col >= 0)
+                {
+                    A val = sell_val[j];
+
+                    if(trans == rocsparse_operation_conjugate_transpose)
+                    {
+                        val = rocsparse::conj(val);
+                    }
+
+                    rocsparse::atomic_add(&y[col], static_cast<T>(val) * row_val);
+                }
             }
         }
     }

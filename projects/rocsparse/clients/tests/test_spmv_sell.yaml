@@ -160,3 +160,22 @@ Tests:
   matrix: [rocsparse_matrix_random]
   graph_test: true
   call_stage_analysis: [false, true]
+
+- name: spmv_sell_file
+  category: nightly
+  function: spmv_sell
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  slice_size: [17, 43, 133, 456]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             bmwcra_1,
+             sme3Dc,
+             shipsec1,
+             ASIC_320k,
+             rma10]
