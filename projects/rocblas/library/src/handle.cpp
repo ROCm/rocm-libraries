@@ -328,7 +328,6 @@ void _rocblas_handle::init_check_numerics()
     }
 }
 
-
 /*******************************************************************************
  * Set the external data packet pointer
  ******************************************************************************/
@@ -470,7 +469,10 @@ static rocblas_status free_existing_device_memory(rocblas_handle handle)
 extern "C" rocblas_status rocblas_set_device_memory_size(rocblas_handle handle, size_t size)
 try
 {
-    return rocblas_status_not_implemented;
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    
+        return rocblas_status_success;
 }
 catch(...)
 {
