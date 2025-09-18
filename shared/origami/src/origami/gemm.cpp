@@ -995,7 +995,7 @@ namespace origami
                         && (hardware.arch == hardware_t::architecture_t::gfx950));
         if(tf32_emu && heuristics)
         {
-            double bytes_per_element = element_size_A / 8;
+            double bytes_per_element = static_cast<double>(element_size_A) / 8.0;
             double arith = arithmetic_intensity(M, N, K, bytes_per_element);
             double compute_threshold = 1000; // threshold empirically determined.
 
