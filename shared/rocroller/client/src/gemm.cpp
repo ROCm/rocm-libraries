@@ -1675,7 +1675,7 @@ int main(int argc, const char* argv[])
 
     AssertFatal(solution.waveM > 0 && solution.waveN > 0 && solution.waveK > 0
                     && solution.waveB > 0,
-                fmt::format("MI tile sizes must be set and greater than zero. "
+                fmt::format("MI tile sizes must be set greater than zero. "
                             "waveM: {} waveN: {} waveK: {} waveB: {}",
                             solution.waveM,
                             solution.waveN,
