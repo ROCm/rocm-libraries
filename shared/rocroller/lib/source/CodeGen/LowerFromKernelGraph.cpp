@@ -87,7 +87,7 @@ namespace rocRoller
                 // TODO: Remove this when RemoveSetCoordinate transformation is enabled
                 //       as RemoveSetCoordinate will build all transformers.
                 //
-                if(m_graph->getAllTransformers().empty())
+                if(!m_context->kernelOptions()->removeSetCoordinate)
                     m_graph->buildAllTransformers();
 
                 //
@@ -627,56 +627,70 @@ namespace rocRoller
                     concatenate("Assign dim(", dimTag, ") = ", assign.expression));
 
                 auto scope = m_context->getScopeManager();
-                scope->addRegister(dimTag);
 
-                auto deferred = expressionHasNoneDT(assign.expression)
-                                && !m_context->registerTagManager()->hasRegister(dimTag);
-
-                Register::ValuePtr dest;
-                if(!deferred)
+                if(assign.strideExpressionAttributes)
                 {
-                    auto valueCount = assign.valueCount;
-                    if(valueCount == 0)
-                    {
-                        auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
-                        valueCount = tmp->valueCount();
-                    }
-
-                    auto varType = resultVariableType(assign.expression);
-                    if(assign.variableType)
-                    {
-                        varType = assign.variableType.value();
-                        // For non-packed types, the denominator is 1.
-                        valueCount /= DataTypeInfo::Get(varType).packing;
-                    }
-
-                    Log::debug("  immediate: count {}", assign.valueCount);
-                    if(assign.regType == Register::Type::Accumulator
-                       || assign.regType == Register::Type::Vector)
-                    {
-                        dest = m_context->registerTagManager()->getRegister(
-                            dimTag,
-                            assign.regType,
-                            varType,
-                            valueCount,
-                            Register::AllocationOptions{.contiguousChunkWidth
-                                                        = static_cast<int>(valueCount)});
-                    }
-                    else
-                    {
-                        dest = m_context->registerTagManager()->getRegister(
-                            dimTag, assign.regType, varType, valueCount);
-                    }
-                    if(dest->name().empty())
-                        dest->setName(concatenate("DataFlowTag", dimTag));
+                    co_yield Instruction::Comment("Assign stride expression");
+                    m_context->registerTagManager()->addExpression(
+                        dimTag,
+                        m_fastArith(assign.expression),
+                        assign.strideExpressionAttributes.value());
+                    scope->addRegister(dimTag);
                 }
-                co_yield Expression::generate(dest, assign.expression, m_context);
-
-                if(deferred)
+                else
                 {
-                    m_context->registerTagManager()->addRegister(dimTag, dest);
-                    if(dest->name().empty())
-                        dest->setName(concatenate("DataFlowTag", dimTag));
+                    scope->addRegister(dimTag);
+
+                    auto deferred = expressionHasNoneDT(assign.expression)
+                                    && !m_context->registerTagManager()->hasRegister(dimTag);
+
+                    Register::ValuePtr dest;
+                    if(!deferred)
+                    {
+                        auto valueCount = assign.valueCount;
+                        if(valueCount == 0)
+                        {
+                            auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
+                            valueCount = tmp->valueCount();
+                        }
+
+                        auto varType = resultVariableType(assign.expression);
+                        if(assign.variableType)
+                        {
+                            varType = assign.variableType.value();
+                            // For non-packed types, the denominator is 1.
+                            valueCount /= DataTypeInfo::Get(varType).packing;
+                        }
+
+                        Log::debug("  immediate: count {}", assign.valueCount);
+                        if(assign.regType == Register::Type::Accumulator
+                           || assign.regType == Register::Type::Vector)
+                        {
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag,
+                                assign.regType,
+                                varType,
+                                valueCount,
+                                Register::AllocationOptions{.contiguousChunkWidth
+                                                            = static_cast<int>(valueCount)});
+                        }
+                        else
+                        {
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag, assign.regType, varType, valueCount);
+                        }
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
+                    }
+
+                    co_yield Expression::generate(dest, assign.expression, m_context);
+
+                    if(deferred)
+                    {
+                        m_context->registerTagManager()->addRegister(dimTag, dest);
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
+                    }
                 }
             }
 

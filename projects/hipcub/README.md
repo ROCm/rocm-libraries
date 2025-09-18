@@ -4,14 +4,13 @@
 > The published hipCUB documentation is available [here](https://rocm.docs.amd.com/projects/hipCUB/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 hipCUB is a thin wrapper library on top of
-[rocPRIM](https://github.com/ROCm/rocPRIM) or
-[CUB](https://github.com/thrust/cub). You can use it to port a CUB project into
+[rocPRIM](https://github.com/ROCm/rocm-libraries) or
+[CUB](https://github.com/nvidia/cccl). You can use it to port a CUB project into
 [HIP](https://github.com/ROCm/HIP) so you can use AMD hardware (and
 [ROCm](https://rocm.docs.amd.com/en/latest/) software).
 
 In the [ROCm](https://rocm.docs.amd.com/en/latest/)
-environment, hipCUB uses the rocPRIM library as the backend. On CUDA platforms, it uses CUB as the
-backend.
+environment, hipCUB uses the rocPRIM library as the backend.
 
 ## Requirements
 
@@ -21,14 +20,9 @@ backend.
   * AMD [ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/native-install/index.html) software (1.8.0 or later)
     * The [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler (you
       must, set this as the C++ compiler for ROCm)
-  * The [rocPRIM](https://github.com/ROCm/rocPRIM) library
+  * The [rocPRIM](https://github.com/ROCm/rocm-libraries) library
     * Automatically downloaded and built by the CMake script
     * Requires CMake 3.16.9 or later
-* For NVIDIA GPUs:
-  * CUDA Toolkit
-  * CCCL library (>= 2.8.2)
-    * Automatically downloaded and built by the CMake script
-    * Requires CMake 3.18 or later
 * Python 3.6 or higher (for HIP on Windows only; this is only required for install scripts)
 * Visual Studio 2019 with Clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
@@ -42,31 +36,53 @@ GoogleTest and Google Benchmark are automatically downloaded and built by the CM
 
 ## Build and install
 
-To build and install hipCub, run the following code:
+### Obtaining the source code
+
+hipCUB can be cloned in two ways:
+
+1.  Clone hipCUB along with other ROCm libraries that are frequently used together (note that this may take some time to complete):
+```sh
+git clone https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries
+```
+
+2. To clone hipCUB individually (faster, but requires git version 2.25+):
+```sh
+git clone --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries
+git sparse-checkout init --cone
+git sparse-checkout set projects/hipcub
+git checkout develop
+```
+
+### Building the library
 
 ```shell
-git clone https://github.com/ROCm/hipCUB.git
+# Go to the hipCUB directory.
+cd projects/hipcub
 
-# Go to hipCUB directory, create and go to the build directory.
-cd hipCUB; mkdir build; cd build
+# Create a directory for the build and navigate to it.
+mkdir build; cd build
 
 # Configure hipCUB, setup options for your system.
 # Build options:
-#   BUILD_TEST - OFF by default,
-#   BUILD_BENCHMARK - OFF by default.
-#   DEPENDENCIES_FORCE_DOWNLOAD - OFF by default and at ON the dependencies will be downloaded to build folder,
+#   BUILD_TEST                   - OFF by default,
+#   BUILD_BENCHMARK              - OFF by default.
+#   ROCPRIM_FETCH_METHOD         - One of PACKAGE (default), DOWNLOAD, and MONOREPO. See below for a description of each.
+#   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (eg. Google Test / Benchmark).
+#   DOWNLOAD_CUB                 - OFF by default, (Nvidia CUB backend only) forces download of CUB instead of searching for an installed package.
+#   BUILD_OFFLOAD_COMPRESS       - ON by default, compresses device code to reduce the size of the generated binary.
+#   BUILD_EXAMPLE                - OFF by default, builds examples.
+#   BUILD_ADDRESS_SANITIZER      - OFF by default, builds with clang address sanitizer enabled.
+#   BUILD_COMPUTE_SANITIZER      - OFF by default, (Nvidia CUB backend only) builds tests with CUDA's compute sanitizer enabled.
+#   USE_SYSTEM_LIB               - OFF by default, builds tests using the installed hipCUB provided by the system. This only takes effect when BUILD_TEST is ON.
+#   USE_HIPCXX                   - OFF by default, builds with CMake HIP language support. This eliminates the need to set CXX.
 #
 # ! IMPORTANT !
 # Set C++ compiler to HIP-aware clang. You can do it by adding 'CXX=<path-to-compiler>'
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
 #
 [CXX=hipcc] cmake ../. # or cmake-gui ../.
-
-# To configure hipCUB for Nvidia platforms, 'CXX=<path-to-nvcc>', `CXX=nvcc` or omitting the flag
-# entirely before 'cmake' is sufficient
-[CXX=nvcc] cmake -DBUILD_TEST=ON ../. # or cmake-gui ../.
-# or
-cmake -DBUILD_TEST=ON ../. # or cmake-gui ../.
 # or to build benchmarks
 cmake -DBUILD_BENCHMARK=ON ../.
 
@@ -83,20 +99,31 @@ make package
 [sudo] make install
 ```
 
+`ROCPRIM_FETCH_METHOD` can be used to control how hipCUB obtains the rocPRIM dependency. It must be set to one of the following values:
+* `PACKAGE` (default) - Searches for an installed package on the system that meets the minimum version requirement. If it is not found, the build will fall back using option `DOWNLOAD`.
+* `DOWNLOAD` - Clones rocPRIM from the upstream repository. If git >= 2.25 is present, this option uses a sparse checkout that avoids downloading more than it needs to. If not, the whole monorepo is downloaded (this may take some time).
+* `MONOREPO` - This value is intended to be used if you are building hipCUB from within a copy of the rocm-libraries repository that you have cloned (and therefore already contains rocPRIM). When selected, the build will try find the dependency in the local repository tree. If it cannot be found, the build will attempt to use git to perform a sparse-checkout of rocPRIM. If that also fails, it will fall back to using the `DOWNLOAD` option described above.
+
 ### HIP on Windows
 
 Initial support for HIP on Windows is available. You can install it using the provided `rmake.py` Python
-script:
+script. To do this, first, clone rocThrust using the steps described in [obtaining the source code](#obtaining-the-source-code).
+Next:
 
 ```shell
-git clone https://github.com/ROCm/hipCUB.git
-cd hipCUB
+cd projects/hipcub
 
 # the -i option will install rocPRIM to C:\hipSDK by default
 python rmake.py -i
 
 # the -c option will build all clients including unit tests
 python rmake.py -c
+
+# to build for a specific architecture only, use the -a option
+python rmake.py -ci -a gfx1100
+
+# for a full list of available options, please refer to the help documentation
+python rmake.py -h
 ```
 
 ### Using hipCUB
@@ -112,8 +139,6 @@ find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/lib/cmake/hipcub")
 
 ...
 # On ROCm: includes hipCUB headers and roc::rocprim_hip target
-# On CUDA: includes only hipCUB headers, user has to include CUB directory
-target_link_libraries(<your_target> hip::hipcub)
 ```
 
 Include only the main header file:
@@ -128,7 +153,7 @@ Depending on your current HIP platform, hipCUB includes CUB or rocPRIM headers.
 
 ```shell
 # Go to hipCUB build directory
-cd hipCUB; cd build
+cd projects/hipcub; cd build
 
 # To run all tests
 ctest
@@ -139,7 +164,7 @@ ctest
 
 ### Using custom seeds for the tests
 
-Go to the `hipCUB/test/hipcub/test_seed.hpp` file.
+Go to the `projects/hipcub/test/hipcub/test_seed.hpp` file.
 
 ```cpp
 //(1)
@@ -168,7 +193,7 @@ static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
 
 ```shell
 # Go to hipCUB build directory
-cd hipCUB; cd build
+cd projects/hipcub; cd build
 
 # To run benchmark for warp functions:
 # Further option can be found using --help
@@ -226,9 +251,11 @@ pyenv activate venv_hipcub
 
 ### Building
 
-After cloning this repository, and `cd`ing into it:
+After cloning this repository (see [obtaining the source code](#obtaining-the-source-code)):
 
 ```shell
+cd rocm-libraries/projects/hipcub
+
 # Install Python dependencies
 python3 -m pip install -r docs/sphinx/requirements.txt
 
@@ -240,8 +267,11 @@ You can then open `docs/_build/html/index.html` in your browser to view the docu
 
 ## Support
 
-Bugs and feature requests can be reported through the
-[GitHub issue tracker](https://github.com/ROCm/hipCUB/issues).
+You can report bugs and feature requests through the GitHub
+[issue tracker](https://github.com/ROCm/rocm-libraries/issues).
+To help ensure that your issue is seen by the right team more quickly, when creating your issue, please apply the label `project: hipcub`.
+Similarly, to filter the exising issue list down to only those affecting rocThrust, you can add the filter `label:"project: hipcub"`,
+or follow [this link](https://github.com/ROCm/rocm-libraries/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22project%3A%20hipcub%22).
 
 ## Contributing
 
