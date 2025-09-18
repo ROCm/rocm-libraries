@@ -2,7 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.24.4)
-project(rocroller VERSION 1.0.0 LANGUAGES CXX)
+set(ROCROLLER_VERSION 1.0.0)
+set(ROCROLLER_SOVERSION 1)
+project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -157,6 +159,11 @@ else()
     add_library(rocroller STATIC)
     set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
+set_target_properties(rocroller
+    PROPERTIES
+        VERSION ${ROCROLLER_VERSION}
+        SOVERSION ${ROCROLLER_SOVERSION}
+)
 add_library(roc::rocroller ALIAS rocroller)
 
 add_library(rocroller-interface INTERFACE)
@@ -188,11 +195,7 @@ if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
     set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH};ASAN_OPTIONS=detect_leaks=0")
 endif()
 
-if(ROCROLLER_BUILD_SHARED_LIBS)
-    target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
-else()
-    target_link_libraries(rocroller-interface INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,roc::rocroller>)
-endif()
+target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
@@ -233,9 +236,9 @@ endif()
 
 target_link_libraries(rocroller
     PUBLIC
-       Boost::headers
        hip::host
     PRIVATE
+        $<BUILD_INTERFACE:Boost::headers>
         ${msgpack_libs}
         amd_comgr
 )
@@ -256,8 +259,8 @@ target_link_libraries(rocroller
         ${llvm_libs}
 )
 
-target_include_directories(rocroller 
-    PUBLIC 
+target_include_directories(rocroller
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
 )
 

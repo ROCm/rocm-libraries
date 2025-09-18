@@ -62,6 +62,7 @@ namespace TensileLite
             , m_flushTimeUs(flushTimeUs)
             , m_skip_slow_solution_ratio(args["skip-slow-solution-ratio"].as<float>())
             , m_skip_slow_solution(0)
+            , m_skiprun_from_map(0)
             , m_numSolutionSkip(0)
             , m_prob_sol_map(args["prob-sol-map"].as<prob_sol_map>())
         {

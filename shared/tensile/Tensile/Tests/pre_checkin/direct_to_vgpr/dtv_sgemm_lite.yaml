@@ -124,4 +124,3 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [512, 512, 1, 512]
           - Exact: [511, 511, 1, 511]
-

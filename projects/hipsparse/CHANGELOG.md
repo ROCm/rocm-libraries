@@ -101,7 +101,7 @@ Documentation for hipSPARSE is available at
 
 ### Optimizations
 
-* Improved user manual 
+* Improved user manual
 * Improved contribution guidelines
 
 ### Known issues
