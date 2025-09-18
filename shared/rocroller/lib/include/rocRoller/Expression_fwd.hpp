@@ -90,6 +90,8 @@ namespace rocRoller
 
         struct Convert;
 
+        struct Concatenate;
+
         template <DataType DATATYPE>
         struct SRConvert;
 
@@ -123,6 +125,8 @@ namespace rocRoller
             LessThanEqual,
             Equal,
             NotEqual,
+
+            Concatenate,
 
             // --- Stochastic Rounding Convert (also binary) ---
             SRConvert<DataType::FP8>,

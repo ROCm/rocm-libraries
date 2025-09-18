@@ -22,7 +22,7 @@
 
 #include "common_test_header.hpp"
 
-#include "hipcub/warp/warp_load.hpp"
+#include <hipcub/warp/warp_load.hpp>
 
 #include <type_traits>
 

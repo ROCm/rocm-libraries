@@ -30,20 +30,19 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponent(WaitCntNopCost);
         static_assert(Component::Component<WaitCntNopCost>);
 
-        inline WaitCntNopCost::WaitCntNopCost(ContextPtr ctx)
+        WaitCntNopCost::WaitCntNopCost(ContextPtr ctx)
             : Cost{ctx}
         {
         }
 
-        inline bool WaitCntNopCost::Match(Argument arg)
+        bool WaitCntNopCost::Match(Argument arg)
         {
             return std::get<0>(arg) == CostFunction::WaitCntNop;
         }
 
-        inline std::shared_ptr<Cost> WaitCntNopCost::Build(Argument arg)
+        std::shared_ptr<Cost> WaitCntNopCost::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -51,13 +50,12 @@ namespace rocRoller
             return std::make_shared<WaitCntNopCost>(std::get<1>(arg));
         }
 
-        inline std::string WaitCntNopCost::name() const
+        std::string WaitCntNopCost::name() const
         {
             return Name;
         }
 
-        inline float WaitCntNopCost::cost(Instruction const&       inst,
-                                          InstructionStatus const& status) const
+        float WaitCntNopCost::cost(Instruction const& inst, InstructionStatus const& status) const
         {
             auto const& architecture = m_ctx.lock()->targetArchitecture();
 

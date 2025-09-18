@@ -26,9 +26,11 @@
 
 #pragma once
 
+#include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
+#include <stdexcept>
 
 namespace rocRoller
 {
@@ -94,6 +96,12 @@ namespace rocRoller
             using Factory = ComponentFactory<typename Comp::Base>;
             auto& factory = Factory::Instance();
             return factory.template registerComponent<Comp>();
+        }
+
+        template <ComponentBase Base>
+        ComponentFactory<Base>::ComponentFactory()
+        {
+            ComponentFactory<Base>::registerImplementations();
         }
 
         template <ComponentBase Base>
@@ -199,6 +207,8 @@ namespace rocRoller
                                                        Matcher<Base>      matcher,
                                                        Builder<Base>      builder)
         {
+            if(name == "")
+                throw std::runtime_error(concatenate("Empty ", Base::Basename, " component name"));
             auto sameName = [&name](auto const& entry) { return entry.name == name; };
             if(std::any_of(m_entries.begin(), m_entries.end(), sameName))
                 throw std::runtime_error(

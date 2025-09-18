@@ -41,7 +41,7 @@ find_package_handle_standard_args(BLIS
 if(BLIS_FOUND)
     set(BLIS_LIBRARIES ${BLIS_LIBRARY})
     set(BLIS_INCLUDE_DIRS ${BLIS_INCLUDE_DIR})
-    
+
     if(NOT TARGET BLIS::blis)
         add_library(BLIS::blis UNKNOWN IMPORTED)
         set_target_properties(BLIS::blis PROPERTIES
@@ -51,4 +51,4 @@ if(BLIS_FOUND)
     endif()
 endif()
 
-mark_as_advanced(BLIS_INCLUDE_DIR BLIS_LIBRARY) 
+mark_as_advanced(BLIS_INCLUDE_DIR BLIS_LIBRARY)

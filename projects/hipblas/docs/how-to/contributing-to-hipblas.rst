@@ -40,7 +40,7 @@ Coding guidelines:
       its ``static`` local variables.
 
    .. note::
-   
+
       ``static`` ``class`` member functions defined in header files are okay.
 
 *  Use ``static`` for ``constexpr`` ``template`` variables until C++17. After C++17,

@@ -38,9 +38,9 @@ extern "C" {
 *  \details
 *  \p hipsparseSpGEMMreuse_workEstimation is called twice. We call it to compute the size of the first required user allocated
 *  buffer. After this buffer size is determined, the user allocates it and calls \p hipsparseSpGEMMreuse_workEstimation
-*  a second time with the newly allocated buffer passed in. This second call inspects the matrices \f$A\f$ and \f$B\f$ to 
+*  a second time with the newly allocated buffer passed in. This second call inspects the matrices \f$A\f$ and \f$B\f$ to
 *  determine the number of intermediate products that will result from multipltying \f$A\f$ and \f$B\f$ together.
-*  
+*
 *  @param[in]
 *  handle           handle to the hipsparse library context queue.
 *  @param[in]
@@ -58,7 +58,7 @@ extern "C" {
 *  @param[in]
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
-*  bufferSize1      number of bytes of the temporary storage buffer. 
+*  bufferSize1      number of bytes of the temporary storage buffer.
 *  @param[in]
 *  externalBuffer1  temporary storage buffer allocated by the user.
 *
@@ -72,7 +72,7 @@ extern "C" {
 *
 *  \par Example (See full example below)
 *  \code{.c}
-*    void*  dBuffer1  = NULL; 
+*    void*  dBuffer1  = NULL;
 *    size_t bufferSize1 = 0;
 *
 *    hipsparseSpGEMMDescr_t spgemmDesc;
@@ -80,13 +80,13 @@ extern "C" {
 *
 *    size_t bufferSize1 = 0;
 *    hipsparseSpGEMMreuse_workEstimation(handle, opA, opB, matA, matB, matC,
-*                                        HIPSPARSE_SPGEMM_DEFAULT, spgemmDesc, 
+*                                        HIPSPARSE_SPGEMM_DEFAULT, spgemmDesc,
 *                                        &bufferSize1, NULL);
 *    hipMalloc((void**) &dBuffer1, bufferSize1);
 *
 *    // Determine number of intermediate product when computing A * B
 *    hipsparseSpGEMMreuse_workEstimation(handle, opA, opB, matA, matB, matC,
-*                                        HIPSPARSE_SPGEMM_DEFAULT, spgemmDesc, 
+*                                        HIPSPARSE_SPGEMM_DEFAULT, spgemmDesc,
 *                                        &bufferSize1, dBuffer1);
 *  \endcode
 */
@@ -140,20 +140,20 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
 *  @param[in]
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
-*  bufferSize2      number of bytes of the temporary storage \p externalBuffer2. 
+*  bufferSize2      number of bytes of the temporary storage \p externalBuffer2.
 *  @param[in]
 *  externalBuffer2  temporary storage buffer allocated by the user.
 *  @param[out]
-*  bufferSize3      number of bytes of the temporary storage \p externalBuffer3. 
+*  bufferSize3      number of bytes of the temporary storage \p externalBuffer3.
 *  @param[in]
 *  externalBuffer3  temporary storage buffer allocated by the user.
 *  @param[out]
-*  bufferSize4      number of bytes of the temporary storage \p externalBuffer4. 
+*  bufferSize4      number of bytes of the temporary storage \p externalBuffer4.
 *  @param[in]
 *  externalBuffer4  temporary storage buffer allocated by the user.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, \p bufferSize2, \p bufferSize3 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, \p matC, \p bufferSize2, \p bufferSize3
 *                                         or \p bufferSize4 pointer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
@@ -221,7 +221,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Copy step of the sparse matrix sparse matrix product: 
+*  \brief Copy step of the sparse matrix sparse matrix product:
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
@@ -244,7 +244,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *  @param[in]
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
-*  bufferSize5      number of bytes of the temporary storage \p externalBuffer5. 
+*  bufferSize5      number of bytes of the temporary storage \p externalBuffer5.
 *  @param[in]
 *  externalBuffer5  temporary storage buffer allocated by the user.
 *
@@ -265,7 +265,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *    // Allocate matrix C
 *    hipMalloc((void**) &dcsrColIndC, sizeof(int) * nnzC);
 *    hipMalloc((void**) &dcsrValC,  sizeof(float) * nnzC);
-*    
+*
 *    // Update matC with the new pointers. The C values array can be filled with data here
 *    // which is used if beta != 0.
 *    hipsparseCsrSetPointers(matC, dcsrRowPtrC, dcsrColIndC, dcsrValC);
@@ -276,12 +276,12 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *                                 &bufferSize5, NULL);
 *
 *    hipMalloc((void**) &dBuffer5, bufferSize5);
-*    
+*
 *    // Copy data from temporary buffers to the newly allocated C matrix
 *    hipsparseSpGEMMreuse_copy(handle, opA, opB, matA, matB, matC,
 *                                 HIPSPARSE_SPGEMM_DEFAULT, spgemmDesc,
 *                                 &bufferSize5, dBuffer5);
-*    
+*
 *    // We can now free buffer 3
 *    hipFree(dBuffer3);
 *  \endcode
@@ -313,7 +313,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Copy step of the sparse matrix sparse matrix product: 
+*  \brief Copy step of the sparse matrix sparse matrix product:
 *  \f[
 *    C' := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
@@ -343,7 +343,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
 *  spgemmDescr      SpGEMM descriptor.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, or \p matC 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, or \p matC
 *                                         pointer is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.

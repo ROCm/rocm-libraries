@@ -34,7 +34,7 @@ extern "C" {
 *  \details
 *  \p hipsparseXcoo2csr converts the COO array containing the row indices into a
 *  CSR array of row offsets, that point to the start of every row.
-*  It is assumed that the COO row index array is sorted and that all arrays have been allocated 
+*  It is assumed that the COO row index array is sorted and that all arrays have been allocated
 *  prior to calling hipsparseXcoo2csr.
 *
 *  For example, given the COO row indices array:

@@ -110,9 +110,9 @@ extern "C" {
 *              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p blockDim, 
-*              \p sizeOfMask, \p descr, \p alpha, \p bsrVal, \p bsrRowPtr, \p bsrEndPtr, 
-*              \p bsrColInd, \p x, \p beta or \p y is invalid or if \p sizeOfMask is greater 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p blockDim,
+*              \p sizeOfMask, \p descr, \p alpha, \p bsrVal, \p bsrRowPtr, \p bsrEndPtr,
+*              \p bsrColInd, \p x, \p beta or \p y is invalid or if \p sizeOfMask is greater
 *              than \p mb.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

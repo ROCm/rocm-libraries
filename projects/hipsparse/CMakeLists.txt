@@ -171,7 +171,7 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
       RPM "${OPENMP_RPM}"
   )
   endif()
-  
+
   add_subdirectory( clients )
 
   if(NOT WIN32)
@@ -286,6 +286,3 @@ if(BUILD_CODE_COVERAGE)
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()
-
-
-

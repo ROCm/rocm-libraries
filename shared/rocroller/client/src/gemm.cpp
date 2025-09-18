@@ -380,6 +380,10 @@ namespace rocRoller::Client::GEMMClient
                   << (double)problemParams.m * problemParams.n * problemParams.k * 2.0 / averageTime
                          * 1.e-9
                   << std::endl;
+        std::cerr << "Average GFLOPS:      "
+                  << (double)problemParams.m * problemParams.n * problemParams.k * 2.0 / averageTime
+                         * 1.e-9
+                  << std::endl;
 
         result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
@@ -756,6 +760,12 @@ namespace rocRoller::Client::GEMMClient
         {
             auto schedulerValue = fromString<Scheduling::SchedulerProcedure>(solution.scheduler);
             Settings::getInstance()->set(Settings::Scheduler, schedulerValue);
+        }
+
+        if(solution.schedulerCost != "")
+        {
+            auto cost = fromString<Scheduling::CostFunction>(solution.schedulerCost);
+            Settings::getInstance()->set(Settings::SchedulerCost, cost);
         }
 
         auto context
@@ -1299,6 +1309,8 @@ int main(int argc, const char* argv[])
     app.add_flag(
         "--betaInFma", solution.betaInFma, "Use beta in FMA instruction instead of alpha.");
     app.add_option("--scheduler", solution.scheduler, "Which scheduler to use.");
+    app.add_option(
+        "--schedulerCost", solution.schedulerCost, "Which scheduler cost function to use.");
     app.add_flag("--matchMemoryAccess",
                  solution.matchMemoryAccess,
                  "Match memory access to transpose.  Currently decreases performance.");
@@ -1365,7 +1377,7 @@ int main(int argc, const char* argv[])
                  benchmarkParams.visualize,
                  "Dump out volumes describing memory access patterns.");
 
-    app.add_flag("--no-check", noCheckResult, "Do not verify GEMM results against OpenBLAS.");
+    app.add_flag("--noCheck", noCheckResult, "Do not verify GEMM results against OpenBLAS.");
 
     app.add_option("--yaml", io.resultsPath, "Save results to file.");
 

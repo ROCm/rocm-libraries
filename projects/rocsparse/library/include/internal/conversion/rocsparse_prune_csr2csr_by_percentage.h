@@ -36,7 +36,7 @@ extern "C" {
  *  \details
  *  \p rocsparse_prune_csr2csr_by_percentage_buffer_size returns the size of the temporary buffer that
  *  is required by \ref rocsparse_sprune_csr2csr_nnz_by_percentage "rocsparse_Xprune_csr2csr_nnz_by_percentage()"
- *  and \ref rocsparse_sprune_csr2csr_by_percentage "rocsparse_Xprune_csr2csr_by_percentage()". The temporary 
+ *  and \ref rocsparse_sprune_csr2csr_by_percentage "rocsparse_Xprune_csr2csr_by_percentage()". The temporary
  *  storage buffer must be allocated by the user.
  *
  *  \note
@@ -79,7 +79,7 @@ extern "C" {
  *  @param[in]
  *  info          prune info structure.
  *  @param[out]
- *  buffer_size   number of bytes of the temporary storage buffer required by 
+ *  buffer_size   number of bytes of the temporary storage buffer required by
  *                \ref rocsparse_sprune_csr2csr_nnz_by_percentage "rocsparse_Xprune_csr2csr_nnz_by_percentage()" and
  *                \ref rocsparse_sprune_csr2csr_by_percentage "rocsparse_Xprune_csr2csr_by_percentage()"
  *
@@ -130,9 +130,9 @@ rocsparse_status
 /*! \ingroup conv_module
  *  \details
  *  \p rocsparse_prune_csr2csr_nnz_by_percentage computes the number of nonzero elements per row and the total
- *  number of nonzero elements in a sparse CSR matrix once a \p percentage of the smallest magnitude elements 
- *  have been pruned from the sparse CSR input matrix. See 
- *  \ref rocsparse_sprune_csr2csr_by_percentage "rocsparse_sprune_csr2csr_by_percentage()" for a more detailed 
+ *  number of nonzero elements in a sparse CSR matrix once a \p percentage of the smallest magnitude elements
+ *  have been pruned from the sparse CSR input matrix. See
+ *  \ref rocsparse_sprune_csr2csr_by_percentage "rocsparse_sprune_csr2csr_by_percentage()" for a more detailed
  *  description of how this pruning based on \p percentage works.
  *
  *  \note The routine does support asynchronous execution if the pointer mode is set to device.
@@ -227,7 +227,7 @@ rocsparse_status rocsparse_dprune_csr2csr_nnz_by_percentage(rocsparse_handle    
  *  \f[
  *    csr\_val\_A\_sorted = sort(abs(csr\_val\_A))
  *  \f]
- *  
+ *
  *  <b>Step 2</b>: Next we use the \p percentage parameter to determine the threshold:
  *  \f[
  *    pos = ceil(nnz\_A \times (percentage/100)) - 1 \\
@@ -235,19 +235,19 @@ rocsparse_status rocsparse_dprune_csr2csr_nnz_by_percentage(rocsparse_handle    
  *    pos = \max(pos, 0) \\
  *    threshold = csr\_val\_A\_sorted[pos]
  *  \f]
- *  
- *  <b>Step 3</b>: Finally, we use this threshold with the routine 
+ *
+ *  <b>Step 3</b>: Finally, we use this threshold with the routine
  *  \ref rocsparse_sprune_csr2csr "rocsparse_Xprune_csr2csr()" to complete the conversion.
  *
- *  The conversion involves three steps. The user first calls 
- *  \ref rocsparse_sprune_csr2csr_by_percentage_buffer_size "rocsparse_Xprune_csr2csr_by_percentage_buffer_size()" 
- *  to determine the size of the temporary storage buffer. The user allocates this buffer as well as the array 
- *  \p csr_row_ptr_C to have \p m+1 elements. The user then calls 
+ *  The conversion involves three steps. The user first calls
+ *  \ref rocsparse_sprune_csr2csr_by_percentage_buffer_size "rocsparse_Xprune_csr2csr_by_percentage_buffer_size()"
+ *  to determine the size of the temporary storage buffer. The user allocates this buffer as well as the array
+ *  \p csr_row_ptr_C to have \p m+1 elements. The user then calls
  *  \ref rocsparse_sprune_csr2csr_nnz_by_percentage "rocsparse_Xprune_csr2csr_nnz_by_percentage()" which fills
  *  in the \p csr_row_ptr_C array and stores the number of elements that are larger than the pruning threshold
- *  in \p nnz_total_dev_host_ptr. Now that the number of nonzeros larger than the pruning threshold is known, the 
+ *  in \p nnz_total_dev_host_ptr. Now that the number of nonzeros larger than the pruning threshold is known, the
  *  user uses this information to allocate the \p csr_col_ind_C and \p csr_val_C arrays and then calls
- *  \p rocsparse_prune_csr2csr_by_percentage to complete the conversion. Once the conversion is complete, the 
+ *  \p rocsparse_prune_csr2csr_by_percentage to complete the conversion. Once the conversion is complete, the
  *  temporary storage buffer can be freed.
  *
  *  \note
@@ -289,7 +289,7 @@ rocsparse_status rocsparse_dprune_csr2csr_nnz_by_percentage(rocsparse_handle    
  *  @param[in]
  *  info          prune info structure.
  *  @param[in]
- *  temp_buffer   buffer allocated by the user whose size is determined by calling 
+ *  temp_buffer   buffer allocated by the user whose size is determined by calling
  *                \ref rocsparse_sprune_csr2csr_buffer_size "rocsparse_Xprune_csr2csr_buffer_size()".
  *
  *  \retval     rocsparse_status_success the operation completed successfully.

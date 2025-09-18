@@ -42,7 +42,7 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p hipsparseScatter supports the following uniform precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \p hipsparseScatter supports the following uniform precision data types for the sparse and dense vectors \f$x\f$ and
 *  \f$y\f$.
 *
 *  \par Uniform Precisions:

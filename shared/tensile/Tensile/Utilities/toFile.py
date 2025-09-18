@@ -27,17 +27,17 @@ from pathlib import Path
 from typing import List, Union
 
 def toFile(outputFile: Union[Path, TextIOWrapper], contents: List[str], delimiter: str = "\n") -> None:
-    """Generates a user specified delimited file. 
+    """Generates a user specified delimited file.
 
     Writes the elements of a List of strings with a given delimiter. The state of
     the file is inspected to determine if it should be opened. If the file is
     already opened, the file is not closed after writing.
-    
-    Args: 
+
+    Args:
         outputFile: Path to file for writing manifest.
         contents: List of items to write manifest.
         delimiter: Symbol used to delimit elements when writing file.
-    
+
     Raises:
         AssertionError: If contents is not a List[str]
 
@@ -65,5 +65,3 @@ def toFile(outputFile: Union[Path, TextIOWrapper], contents: List[str], delimite
 
     if not isTextIO:
         f.close()
-
-    

@@ -35,13 +35,13 @@ extern "C" {
 *  \p hipsparseXcsr2csr_compress converts a CSR matrix into a compressed CSR matrix by
 *  removing entries in the input CSR matrix that are below a non-negative threshold \p tol:
 *
-*  \f[ 
+*  \f[
 *   C(i,j) = A(i, j) \text{  if |A(i, j)| > tol}
 *  \f]
 *
-*  The user must first call \ref hipsparseSnnz_compress "hipsparseXnnz_compress()" to determine the number 
-*  of nonzeros per row as well as the total number of nonzeros that will exist in resulting compressed CSR 
-*  matrix. The user then uses this information to allocate the column indices array \p csrColIndC and the 
+*  The user must first call \ref hipsparseSnnz_compress "hipsparseXnnz_compress()" to determine the number
+*  of nonzeros per row as well as the total number of nonzeros that will exist in resulting compressed CSR
+*  matrix. The user then uses this information to allocate the column indices array \p csrColIndC and the
 *  values array \p csrValC. The user then calls \p hipsparseXcsr2csr_compress to complete the conversion.
 *
 *  \note

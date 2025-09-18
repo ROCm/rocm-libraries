@@ -90,8 +90,8 @@ Static library
 ----------------
 
 To build static libraries with ``install.sh``, use the ``--static`` option.
-This produces a non-standard static library build. This means it has an additional runtime dependency 
-consisting of the entire ``hipblaslt/`` subdirectory, which is located in the ``/opt/rocm/lib`` folder. 
+This produces a non-standard static library build. This means it has an additional runtime dependency
+consisting of the entire ``hipblaslt/`` subdirectory, which is located in the ``/opt/rocm/lib`` folder.
 You can move this folder, but you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH``
 to the new location.
 

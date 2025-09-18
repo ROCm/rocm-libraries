@@ -52,7 +52,7 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_rot supports the following uniform precision data types for the sparse and dense vectors x and 
+*  \p rocsparse_rot supports the following uniform precision data types for the sparse and dense vectors x and
 *  y and compute types for the scalars \f$c\f$ and \f$s\f$.
 *
 *  \par Uniform Precisions:

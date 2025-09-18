@@ -33,7 +33,7 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXcscsort_bufferSizeExt returns the size of the temporary storage buffer
-*  in bytes required by hipsparseXcscsort(). The temporary storage buffer must be 
+*  in bytes required by hipsparseXcscsort(). The temporary storage buffer must be
 *  allocated by the user.
 *
 *  @param[in]
@@ -73,8 +73,8 @@ hipsparseStatus_t hipsparseXcscsort_bufferSizeExt(hipsparseHandle_t handle,
 *  \details
 *  \p hipsparseXcscsort sorts a matrix in CSC format. The sorted permutation vector
 *  \p P can be used to obtain sorted \p cscVal array. In this case, \p P must be
-*  initialized as the identity permutation, see \ref hipsparseCreateIdentityPermutation(). To 
-*  apply the permutation vector to the CSC values, see hipsparse \ref hipsparseSgthr 
+*  initialized as the identity permutation, see \ref hipsparseCreateIdentityPermutation(). To
+*  apply the permutation vector to the CSC values, see hipsparse \ref hipsparseSgthr
 *  "hipsparseXgthr()".
 *
 *  \p hipsparseXcscsort requires extra temporary storage buffer that has to be allocated by
@@ -112,7 +112,7 @@ hipsparseStatus_t hipsparseXcscsort_bufferSizeExt(hipsparseHandle_t handle,
 *                  \ref hipsparseXcscsort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p descrA, \p cscColPtr, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p descrA, \p cscColPtr,
 *              \p cscRowInd or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_ADJACENT_FIND_HPP_
 #define ROCPRIM_DEVICE_DEVICE_ADJACENT_FIND_HPP_
 
+#include "config_types.hpp"
 #include "detail/device_adjacent_find.hpp"
 #include "detail/device_config_helper.hpp"
 #include "device_adjacent_find_config.hpp"
@@ -87,8 +88,7 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
     using zip_it_t       = rocprim::zip_iterator<tuple_t>;
     using transform_it_t = rocprim::transform_iterator<zip_it_t, decltype(wrapped_equal_op)>;
 
-    using adjacent_find_kernels = adjacent_find_impl_kernels<config,
-                                                             transform_it_t,
+    using adjacent_find_kernels = adjacent_find_impl_kernels<transform_it_t,
                                                              index_type*,
                                                              reduce_op_type,
                                                              ordered_tile_id_type>;
@@ -136,26 +136,37 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
         auto transformed_input
             = ::rocprim::make_transform_iterator(wrapped_input, wrapped_equal_op);
 
-        auto adjacent_find_block_reduce_kernel = adjacent_find_kernels::block_reduce_kernel;
-
         target_arch target_arch;
         ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-        const adjacent_find_config_params params     = dispatch_target_arch<config>(target_arch);
-        const unsigned int                block_size = params.kernel_config.block_size;
+        const adjacent_find_config_params params = dispatch_target_arch<config, false>(target_arch);
+        const unsigned int                block_size       = params.kernel_config.block_size;
         const unsigned int                items_per_thread = params.kernel_config.items_per_thread;
         const unsigned int                items_per_block  = block_size * items_per_thread;
         const unsigned int grid_size        = (size + items_per_block - 1) / items_per_block;
         const unsigned int shared_mem_bytes = 0; /*no dynamic shared mem*/
 
+        auto kernel = [=](auto arch_config)
+        {
+            adjacent_find_kernels::template block_reduce_kernel<decltype(arch_config)>(
+                transformed_input,
+                reduce_output,
+                size,
+                reduce_op_type{},
+                ordered_tile_id);
+        };
+
+        auto adjacent_find_block_reduce_kernel = make_launch_plan<config>(target_arch, kernel);
+
         // Get grid size for maximum occupancy, as we may not be able to schedule all the blocks
         // at the same time
         int min_grid_size      = 0;
         int optimal_block_size = 0;
-        ROCPRIM_RETURN_ON_ERROR(hipOccupancyMaxPotentialBlockSize(&min_grid_size,
-                                                                  &optimal_block_size,
-                                                                  adjacent_find_block_reduce_kernel,
-                                                                  shared_mem_bytes,
-                                                                  int(block_size)));
+        ROCPRIM_RETURN_ON_ERROR(
+            hipOccupancyMaxPotentialBlockSize(&min_grid_size,
+                                              &optimal_block_size,
+                                              adjacent_find_block_reduce_kernel.kernel,
+                                              shared_mem_bytes,
+                                              int(block_size)));
         min_grid_size = std::min(static_cast<unsigned int>(min_grid_size), grid_size);
 
         if(debug_synchronous)
@@ -164,12 +175,10 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
         }
 
         // Launch adjacent_find_impl_kernels::block_reduce_kernel
-        adjacent_find_block_reduce_kernel<<<min_grid_size, block_size, shared_mem_bytes, stream>>>(
-            transformed_input,
-            reduce_output,
-            size,
-            reduce_op_type{},
-            ordered_tile_id);
+        adjacent_find_block_reduce_kernel.launch(min_grid_size,
+                                                 block_size,
+                                                 shared_mem_bytes,
+                                                 stream);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
             "rocprim::detail::adjacent_find::block_reduce_kernel",
             size,

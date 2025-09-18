@@ -112,8 +112,8 @@ extern "C" {
  *              \f$\max{(1, k)}\f$ where \p k=blockDim*kb otherwise.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p n, \p kb, \p nnzb, \p ldb, 
- *              \p ldc, \p descr, \p alpha, \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p n, \p kb, \p nnzb, \p ldb,
+ *              \p ldc, \p descr, \p alpha, \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
  *              \p B, \p beta or \p C is invalid.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

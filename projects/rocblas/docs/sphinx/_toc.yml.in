@@ -7,21 +7,21 @@ subtrees:
   - file: what-is-rocblas.rst
     title: What is rocBLAS?
 
-- caption: Install 
+- caption: Install
   entries:
   - file: install/Linux_Install_Guide
     title: Install rocBLAS on Linux
   - file: install/Windows_Install_Guide
     title: Install rocBLAS on Windows
 
-- caption: Conceptual 
+- caption: Conceptual
   entries:
   - file: conceptual/rocblas-design-notes
     title: rocBLAS design notes
   - file: conceptual/blas-operations-intro
     title: BLAS operations introduction
 
-- caption: How to 
+- caption: How to
   entries:
   - file: how-to/Programmers_Guide
     title: Program with rocBLAS
@@ -54,7 +54,7 @@ subtrees:
       - file: reference/memory-alloc.rst
       - file: reference/deprecations.rst
 
-- caption: About 
+- caption: About
   entries:
   - file: license.rst
     title: rocBLAS license
@@ -62,4 +62,3 @@ subtrees:
     title: References
   - file: reference/acknowledge.rst
     title: Acknowledgements
-

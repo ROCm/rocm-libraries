@@ -6,7 +6,7 @@
 The rocRAND project provides functions that generate pseudorandom and quasirandom numbers.
 The rocRAND library is implemented in the [HIP](https://github.com/ROCm/HIP)
 programming language and optimized for AMD's latest discrete GPUs. It is designed to run on top
-of AMD's [ROCm](https://rocm.docs.amd.com) runtime, but it also works on CUDA-enabled GPUs.
+of AMD's [ROCm](https://rocm.docs.amd.com) runtime.
 
 Prior to ROCm version 5.0, this project included the
 [hipRAND](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand) wrapper. As of version 5.0, it was
@@ -39,9 +39,6 @@ split into a separate library. As of version 6.0, hipRAND can no longer be built
   * [ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/native-install/index.html) (1.7 or later)
   * [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler, which must be
     set as C++ compiler on ROCm platform.
-* For CUDA platforms:
-  * [HIP](https://github.com/ROCm/HIP)
-  * Latest CUDA SDK
 * Python 3.6 or higher (HIP on Windows only, only required for install script)
 * Visual Studio 2019 with clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
@@ -88,14 +85,6 @@ cd rocm-libraries/projects/rocrand; mkdir build; cd build
 # The python interface do not work with static library.
 #
 [CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../. -DCMAKE_PREFIX_PATH=/opt/rocm # or cmake-gui ../.
-
-# To configure rocRAND for NVIDIA platforms, the CXX compiler must be set to a host compiler. The CUDA compiler can
-# be set explicitly using `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>`.
-# Additionally, the path to FindHIP.cmake should be passed via CMAKE_MODULE_PATH. By default, this is module is
-# installed in /opt/rocm/hip/cmake.
-cmake -DBUILD_BENCHMARK=ON ../. -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_MODULE_PATH=/opt/rocm/hip/cmake # or cmake-gui ../.
-# or
-[CXX=g++] cmake -DBUILD_BENCHMARK=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_MODULE_PATH=/opt/rocm/hip/cmake ../. # or cmake-gui ../.
 
 # Build
 make -j4

@@ -369,7 +369,7 @@ def _verifyPredicate(predicateSpec: str, gfx: str) -> str:
 def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[Dict[str, List[str]]]]:
     """
     Splits a list of architecture specifications into architectures and their predicates.
-    
+
     Example inputs:
         ["gfx942"]  # No predicates
         ["gfx942[id=74a0,id=74a1]"]  # With device IDs
@@ -386,14 +386,14 @@ def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[
     """
     # Match predicates in square brackets, e.g., [id=74a0,cu=80]
     pattern = re.compile(r"\[(.*?)\]")
-    
+
     architectures = set()
     predicateMap = collections.defaultdict(list)
 
     for spec in archSpecs:
         spec = spec.strip()
         arch = spec  # Default to full spec if no predicates
-        
+
         match = re.search(pattern, spec)
         if match:
             arch = spec[:match.start()].strip()
@@ -402,7 +402,7 @@ def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[
 
         if arch not in architectureMap:
             raise ValueError(f"Architecture {spec} not supported")
-            
+
         architectures.add(arch)
 
     return list(architectures), predicateMap or None
@@ -435,12 +435,12 @@ def _populateVariantMap(
 ):
     """
     Populates a predicate map with logic files, handling both exact matches and fallbacks.
-    
+
     For each logic file:
     1. First tries to match against specific predicates (device IDs, CU counts)
     2. If matched to any specific predicate, removes from fallbacks
     3. If no specific matches, tries to add to fallbacks based on fallback rules
-    
+
     Args:
         predicateMap: Nested dict mapping architectures to their predicate sets
         targetLogicFile: Logic file to process

@@ -33,7 +33,7 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXcoosort_bufferSizeExt returns the size of the temporary storage buffer
-*  in bytes required by \ref hipsparseXcoosortByRow() and \ref hipsparseXcoosortByColumn(). 
+*  in bytes required by \ref hipsparseXcoosortByRow() and \ref hipsparseXcoosortByColumn().
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]
@@ -55,7 +55,7 @@ extern "C" {
 *                      hipsparseXcoosortByRow() and hipsparseXcoosortByColumn().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
 *              \p cooCols or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -75,7 +75,7 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *  \p hipsparseXcoosortByRow sorts a matrix in COO format by row. The sorted
 *  permutation vector \p P can be used to obtain sorted \p cooVal array. In this
 *  case, \p P must be initialized as the identity permutation, see
-*  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO 
+*  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO
 *  values, see hipsparse \ref hipsparseSgthr "hipsparseXgthr()".
 *
 *  \p hipsparseXcoosortByRow requires extra temporary storage buffer that has to be
@@ -111,7 +111,7 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *                  \ref hipsparseXcoosort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
 *              \p cooCols or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
@@ -135,7 +135,7 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *  \p hipsparseXcoosortByColumn sorts a matrix in COO format by column. The sorted
 *  permutation vector \p P can be used to obtain sorted \p cooVal array. In this
 *  case, \p P must be initialized as the identity permutation, see
-*  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO 
+*  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO
 *  values, see hipsparse \ref hipsparseSgthr "hipsparseXgthr()".
 *
 *  \p hipsparseXcoosortByColumn requires extra temporary storage buffer that has to be
@@ -171,7 +171,7 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *                  \ref hipsparseXcoosort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
 *              \p cooCols or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *

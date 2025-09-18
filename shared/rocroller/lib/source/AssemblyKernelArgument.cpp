@@ -52,6 +52,8 @@ namespace rocRoller
             rv += concatenate(", ", dataDirection);
 
         rv += concatenate(", ", expression);
+        if(expression)
+            rv += concatenate("(c ", complexity(expression), ")");
 
         if(offset != -1)
             rv += concatenate(", o:", offset);

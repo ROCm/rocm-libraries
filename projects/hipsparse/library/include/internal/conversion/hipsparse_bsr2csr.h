@@ -40,27 +40,27 @@ extern "C" {
 *
 *  For example, given the BSR matrix using block dimension 2:
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c} 
-*       1 & 0 \\ 
-*       3 & 4 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 2 \\ 
-*       0 & 0 
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c} 
-*       5 & 0 \\ 
-*       1 & 2 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       6 & 7 \\ 
-*       3 & 4 
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  The resulting CSR matrix row pointer, column indices, and values arrays are:

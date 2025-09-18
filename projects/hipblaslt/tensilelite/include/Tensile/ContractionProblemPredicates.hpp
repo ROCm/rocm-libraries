@@ -242,9 +242,6 @@ namespace TensileLite
                     if(problem.groupedGemm())
                         ret = ret && (problem.groupedGemmCount() <= 16);
 
-                    ret = ret && (problem.c().strides()[1] == problem.freeSizeA(0));
-                    ret = ret && (problem.d().strides()[1] == problem.freeSizeA(0));
-
                     return ret;
                 }
 
@@ -1913,6 +1910,37 @@ namespace TensileLite
                     return rv;
                 }
             };
+
+            struct RangeMatching
+                : public Predicate_CRTP<RangeMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                RangeMatching() = default;
+
+                static std::string Type()
+                {
+                    return "RangeMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    stream << rv << ": " << this->type() << std::endl;
+                    return rv;
+                }
+            };
+
 
             struct FreeSizeMatching
                 : public Predicate_CRTP<FreeSizeMatching, ContractionProblemGemm>

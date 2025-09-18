@@ -431,10 +431,10 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddDirect2LDS>(m_context, m_commandParameters));
-        transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
+        transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
 
@@ -446,10 +446,11 @@ namespace rocRoller
             transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
             transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         }
+        transforms.push_back(std::make_shared<KernelGraph::AssignComputeIndex>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
+        transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
-        transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());

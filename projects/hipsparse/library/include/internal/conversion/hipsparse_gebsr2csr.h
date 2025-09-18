@@ -33,8 +33,8 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXgebsr2csr converts a GEBSR matrix into a CSR matrix. It is assumed,
-*  that \p csrValC, \p csrColIndC and \p csrRowPtrC are already allocated prior to 
-*  calling \p hipsparseXgebsr2csr. Allocation size for \p csrRowPtrC equals 
+*  that \p csrValC, \p csrColIndC and \p csrRowPtrC are already allocated prior to
+*  calling \p hipsparseXgebsr2csr. Allocation size for \p csrRowPtrC equals
 *  \p m+1 where:
 *
 *  \f[
@@ -44,46 +44,46 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  Allocation size for \p csrValC and \p csrColIndC is computed by the the number of blocks in the GEBSR 
+*  Allocation size for \p csrValC and \p csrColIndC is computed by the the number of blocks in the GEBSR
 *  matrix, \p nnzb, multiplied by the product of the block dimensions, i.e. \p nnz=nnzb*rocBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c | c} 
-*      \begin{array}{c c} 
-*       6 & 2 \\ 
-*       1 & 4 \\ 
-*       5 & 4 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 3 \\ 
-*       5 & 0 \\ 
-*       0 & 7 
+*   \left[
+*    \begin{array}{c | c | c}
+*      \begin{array}{c c}
+*       6 & 2 \\
+*       1 & 4 \\
+*       5 & 4
 *      \end{array} &
-*      \begin{array}{c c} 
-*       0 & 0 \\ 
-*       0 & 0 \\ 
-*       0 & 0 
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c} 
-*       0 & 0 \\ 
-*       0 & 0 \\ 
-*       0 & 0 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       3 & 0 \\ 
-*       0 & 0 \\ 
-*       0 & 7 
+*      \begin{array}{c c}
+*       0 & 3 \\
+*       5 & 0 \\
+*       0 & 7
 *      \end{array} &
-*      \begin{array}{c c} 
-*       2 & 2 \\ 
-*       4 & 3 \\ 
-*       1 & 4 
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*      \begin{array}{c c}
+*       0 & 0 \\
+*       0 & 0 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       0 & 0 \\
+*       0 & 0 \\
+*       0 & 0
+*      \end{array} &
+*      \begin{array}{c c}
+*       3 & 0 \\
+*       0 & 0 \\
+*       0 & 7
+*      \end{array} &
+*      \begin{array}{c c}
+*       2 & 2 \\
+*       4 & 3 \\
+*       1 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  \note

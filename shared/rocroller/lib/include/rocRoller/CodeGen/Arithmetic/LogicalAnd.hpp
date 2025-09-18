@@ -85,7 +85,8 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::LogicalAnd const&);
 
-        static const std::string Name;
+        inline static const std::string Name = concatenate(
+            "LogicalAndGenerator<", toString(REGISTER_TYPE), ", ", toString(DATATYPE), ">");
     };
 
     // Specializations for supported Register Type / DataType combinations

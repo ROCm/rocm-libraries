@@ -65,7 +65,7 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  The CSC arrays, \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the 
+*  The CSC arrays, \p cscSortedRowInd, \p cscSortedColPtr, and \p cscSortedVal must be allocated by the
 *  user prior to calling \p hipsparseXcsr2csc().
 *
 *  \note
@@ -179,7 +179,7 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
 *  when converting a sparse CSR matrix into a sparse CSC matrix.
 *
 *  \details
-*  \p hipsparseCsr2cscEx2_bufferSize calculates the required user allocated temporary buffer needed 
+*  \p hipsparseCsr2cscEx2_bufferSize calculates the required user allocated temporary buffer needed
 *  by \ref hipsparseCsr2cscEx2 to convert a CSR matrix into a CSC matrix. \ref hipsparseCsr2cscEx2
 *  can also be used to convert a CSC matrix into a CSR matrix. \p copyValues decides
 *  whether \p cscVal is being filled during conversion (\ref HIPSPARSE_ACTION_NUMERIC)
@@ -217,7 +217,7 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
 *  cscRowInd          array of \p nnz elements containing the row indices of the sparse
 *                     CSC matrix.
 *  @param[in]
-*  valType            The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F, 
+*  valType            The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F,
 *                     HIP_R_64F, HIP_C_32F or HIP_C_64F
 *  @param[in]
 *  copyValues         \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
@@ -294,7 +294,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *  cscRowInd   array of \p nnz elements containing the row indices of the sparse
 *              CSC matrix.
 *  @param[in]
-*  valType     The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F, 
+*  valType     The data type of the values arrays \p csrVal and \p cscVal. Can be HIP_R_32F,
 *              HIP_R_64F, HIP_C_32F or HIP_C_64F
 *  @param[in]
 *  copyValues  \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.

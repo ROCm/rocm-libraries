@@ -73,8 +73,8 @@ hipsparseStatus_t hipsparseXcsrsort_bufferSizeExt(hipsparseHandle_t handle,
 *  \details
 *  \p hipsparseXcsrsort sorts a matrix in CSR format. The sorted permutation vector
 *  \p P can be used to obtain sorted \p csrVal array. In this case, \p P must be
-*  initialized as the identity permutation, see \ref hipsparseCreateIdentityPermutation(). To 
-*  apply the permutation vector to the CSR values, see hipsparse \ref hipsparseSgthr 
+*  initialized as the identity permutation, see \ref hipsparseCreateIdentityPermutation(). To
+*  apply the permutation vector to the CSR values, see hipsparse \ref hipsparseSgthr
 *  "hipsparseXgthr()".
 *
 *  \p hipsparseXcsrsort requires extra temporary storage buffer that has to be allocated by
@@ -112,7 +112,7 @@ hipsparseStatus_t hipsparseXcsrsort_bufferSizeExt(hipsparseHandle_t handle,
 *                  \ref hipsparseXcsrsort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p descrA, \p csrRowPtr, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p descrA, \p csrRowPtr,
 *              \p csrColInd or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

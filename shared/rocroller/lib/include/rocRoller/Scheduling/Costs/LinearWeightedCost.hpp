@@ -144,12 +144,12 @@ namespace rocRoller
         class LinearWeightedCost : public Cost
         {
         public:
-            LinearWeightedCost(ContextPtr);
+            LinearWeightedCost(ContextPtr ctx, CostFunction fn);
 
             using Base = Cost;
 
-            static const std::string Basename;
-            static const std::string Name;
+            static const std::string        Basename;
+            inline static const std::string Name = "LinearWeightedCost";
 
             /**
              * Returns true if `CostFunction` is LinearWeighted
@@ -174,7 +174,7 @@ namespace rocRoller
             Weights const& getWeights() const;
 
         private:
-            Weights loadWeights(ContextPtr context) const;
+            Weights loadWeights(ContextPtr ctx, CostFunction fn) const;
 
             Weights m_weights;
         };

@@ -3,24 +3,28 @@
 ## Building and Running Tests
 
 While full test suites can be run with a single `tox` command, developers may wish to
-build the hipBLASLt tensilelite client executable (`tensilelite-client`) and run individual tests separately. 
+build the hipBLASLt tensilelite client executable (`tensilelite-client`) and run individual tests separately.
 This is useful for debugging specific problems or isolating issues in a specific test.
 
 ### Run Full Test Suite with Tox
 
-The standard workflow for running the entire test suite is to use `tox`. This command will build `tensilelite-client` and execute all 
-tests.
+The standard workflow for running the entire test suite is to use `tox`. This command will build
+`tensilelite-client` and execute all tests.
 
 ```
+cd rocm-libraries/projects/hipblaslt/tensilelite
 tox -e py3 -- Tensile/Tests -m common
 ```
 
-### Build with invoke and Run a Test (Default Path)
+### Build client with invoke and Run a Test (Default Path)
 
-This workflow uses `invoke` to build the client into the default `build_tmp` directory. 
-The executable will automatically be found when using the default build directory.
+This workflow uses `invoke` to build the client into the default `build_tmp` directory.
+Tensile will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
+is not specified.
 
 ```
+cd rocm-libraries/projects/hipblaslt/tensilelite
+
 # install invoke and rocisa if you haven't already
 pip3 install invoke
 
@@ -33,20 +37,21 @@ Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
 
 **3. Build with CMake (Custom Location) and Run Test with Path Flag**
 
-This workflow is for when you need to build the client in a location other
-than the default `build_tmp` directory by using CMake. The `--prebuilt-client` flag is then 
-used to specify this custom path when running a test. Make sure to do this in the `hipblaslt` directory.
+This workflow is for when you need to build the client in a location other than the default
+`build_tmp` directory. The `--prebuilt-client` flag is then used to specify this custom path when
+running a test. Be sure to pass the root directory of the hipblaslt project when configuring.
 
 ```
+cd rocm-libraries/projects/hipblaslt/tensilelite
+
 # configure in a custom directory (e.g., my-custom-build)
-cmake --preset tensilelite -S . -B tensilelite/my-custom-build -DHIPBLASLT_ENABLE_LLVM=ON
+cmake --preset tensilelite -S .. -B my-custom-build
 
 # build
-cmake --build tenstilelite/my-custom-build --parallel
+cmake --build my-custom-build --parallel
 
 # run a test, specifying the custom client path with --prebuilt-client
-cd tensilelite
-./my-custom-build/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
+./my-custom-build/Tensile.sh Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
                           --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
 ```
 
@@ -56,21 +61,22 @@ This workflow uses `tox` with custom CMake arguments, which is useful for creati
 specialized builds (e.g., Debug builds) and setting the architecture.
 
 ```
-# build the client using tox with custom CMake flags 
+# build the client using tox with custom CMake flags
+cd rocm-libraries/projects/hipblaslt/tensilelite
 TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
 ```
 
-## Options
+### Options
 
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
-* `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `OFF`)
-* `TENSILELITE_ENABLE_AUTOBUILD`: Build the tensilelite host library tests (default: `OFF`)
+* `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
+* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts that set PYTHONPATH and trigger rebuilds of rocisa (default: `OFF`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
 ## How to Rebuild Object Codes Directly from Assembly
 
-During the tuning process, it is of interest to modify an assembly file/s and rebuild the corresponding object file/s and then relink the corresponding co file. Currently, we generate additional source files and a script to provide this workflow. 
+During the tuning process, it is of interest to modify an assembly file/s and rebuild the corresponding object file/s and then relink the corresponding co file. Currently, we generate additional source files and a script to provide this workflow.
 
 A new `Makefile` is added that manages rebuilding a co file during iterative development when tuning. One modifies an assembly file of interest, then runs `make` and make will detect what file/s changed and rebuild accordingly.
 
