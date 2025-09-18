@@ -27,6 +27,7 @@
 #include "../../shared/test_params.h"
 
 #include <cstdint>
+#include <cstring>
 #include <fftw3.h>
 #include <future>
 #include <gtest/gtest.h>
@@ -1442,14 +1443,12 @@ namespace
                                                          hipfftw_data_memory_type::device};
 #ifndef WIN32
             // "managed" may or may not be supported
-            int managed_mem_is_supported = 0;
-            if(hipDeviceGetAttribute(&managed_mem_is_supported,
-                                     hipDeviceAttributeManagedMemory,
-                                     get_current_device_id())
-                   == hipSuccess
-               && managed_mem_is_supported)
+            hipDeviceProp_t props;
+            if(hipGetDeviceProperties(&props, get_current_device_id()) == hipSuccess)
             {
-                ret.push_back(hipfftw_data_memory_type::managed);
+                // explicitly ruling out gfx908 (MI100)
+                if(std::strstr(props.gcnArchName, "gfx908") == nullptr && props.managedMemory == 1)
+                    ret.push_back(hipfftw_data_memory_type::managed);
             }
 #endif
             return ret;
