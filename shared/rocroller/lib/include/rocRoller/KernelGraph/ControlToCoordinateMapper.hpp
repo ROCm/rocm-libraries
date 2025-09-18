@@ -75,6 +75,22 @@ namespace rocRoller::KernelGraph
             return a.id < b.id;
         }
 
+        struct UnrollStride
+        {
+            std::string unrollStride;
+            int         unrollDimension;
+
+            bool operator<=>(UnrollStride const& other) const = default;
+        };
+
+        struct BaseOffset
+        {
+            std::string base;
+            int         subdimension;
+
+            bool operator<=>(BaseOffset const& other) const = default;
+        };
+
         struct TypeAndNaryArgument
         {
             std::string  id;
@@ -133,7 +149,9 @@ namespace rocRoller::KernelGraph
                                             JustNaryArgument,
                                             ComputeIndex,
                                             TypeAndSubDimension,
-                                            TypeAndNaryArgument>;
+                                            TypeAndNaryArgument,
+                                            UnrollStride,
+                                            BaseOffset>;
 
         std::string   name(ConnectionSpec const& cs);
         std::string   toString(ConnectionSpec const& cs);
@@ -147,13 +165,19 @@ namespace rocRoller::KernelGraph
         int                         coordinate;
     };
 
+    template <typename T, typename SpecType>
+    inline DeferredConnection makeConnection(int coordinate, int sdim = 0)
+    {
+        DeferredConnection rv;
+        rv.connectionSpec = SpecType{name<T>(), sdim};
+        rv.coordinate     = coordinate;
+        return rv;
+    }
+
     template <typename T>
     inline DeferredConnection DC(int coordinate, int sdim = 0)
     {
-        DeferredConnection rv;
-        rv.connectionSpec = Connections::TypeAndSubDimension{name<T>(), sdim};
-        rv.coordinate     = coordinate;
-        return rv;
+        return makeConnection<T, Connections::TypeAndSubDimension>(coordinate, sdim);
     }
 
     /**
@@ -268,6 +292,12 @@ namespace rocRoller::KernelGraph
          * @brief Get all connections incoming to the coordinate `coordinate`.
          */
         std::vector<Connection> getCoordinateConnections(int coordinate) const;
+
+        /**
+         * @brief Get the subdimension of the coordinate that is
+         * connected to the control operation
+         */
+        int getConnectionSubdimension(int control, int coordinate) const;
 
         /**
          * @brief Emit DOT representation of connections.

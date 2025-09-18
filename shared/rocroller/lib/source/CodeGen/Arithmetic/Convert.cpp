@@ -31,9 +31,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponent(ConvertGenerator);
-
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::Convert>>
         GetGenerator<Expression::Convert>(Register::ValuePtr dst,
@@ -515,9 +512,6 @@ namespace rocRoller
     {
         Throw<FatalError>("Convert to Double not supported");
     }
-
-    RegisterComponentTemplateSpec(SRConvertGenerator, DataType::FP8);
-    RegisterComponentTemplateSpec(SRConvertGenerator, DataType::BF8);
 
 #define DefineSpecializedGetGeneratorSRConvert(dtype)                                             \
     template <>                                                                                   \

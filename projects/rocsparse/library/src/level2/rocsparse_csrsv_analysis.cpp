@@ -131,8 +131,7 @@ namespace rocsparse
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());
         }
-        // LCOV_EXCL_STOP
-
+        // LCOV_EXCL_STOP    
         return rocsparse_status_success;
     }
 }

@@ -41,9 +41,10 @@ if(TENSILELITE_ENABLE_HOST)
             "${CMAKE_CURRENT_BINARY_DIR}/include"
     )
 
-    target_link_libraries(tensilelite-host 
+    target_link_libraries(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
+            roc::origami
         PRIVATE
             hip::device
     )

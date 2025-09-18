@@ -9,7 +9,6 @@ if(HIPBLASLT_ENABLE_MSGPACK)
     add_subdirectory(msgpack)
 endif()
 
-add_subdirectory(analytical)
 add_subdirectory(hip)
 
 target_sources(tensilelite-host

@@ -365,6 +365,8 @@ constexpr auto rocsparse_spmvalg2string(rocsparse_spmv_alg alg)
         return "cooatomic";
     case rocsparse_spmv_alg_csr_lrb:
         return "csrlrb";
+    case rocsparse_spmv_alg_csr_nnzsplit:
+        return "csrnnzsplit";
     }
     return "invalid";
 }
