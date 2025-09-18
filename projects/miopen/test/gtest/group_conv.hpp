@@ -452,6 +452,22 @@ public:
         }
     }
 
+    void RunWmmaSolver()
+    {
+        // For now, only 2D WRW has WMMA implementation
+        if constexpr(NDIM == 2u && CONV_DIR == Direction::BackwardWeights)
+        {
+            DispatchSolver<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops, // Placeholder
+                           miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops, // Placeholder
+                           miopen::solver::conv::ConvHipImplicitGemmGroupWrwWmma>();
+        }
+        else
+        {
+            test_skipped = true;
+            GTEST_SKIP() << "WMMA solver only supports 2D BackwardWeights";
+        }
+    }
+
 protected:
     void SetUp() override
     {
@@ -630,3 +646,27 @@ std::vector<float> GetBetaValues()
     DEFINE_GROUP_CONV_TEST(2, type, naming_type, dir)
 #define DEFINE_GROUP_CONV3D_TEST(type, naming_type, dir) \
     DEFINE_GROUP_CONV_TEST(3, type, naming_type, dir)
+
+#define DEFINE_GROUP_CONV_WMMA_TEST(ndim, type, naming_type, dir)                       \
+    struct GPU_GroupConvWmma##ndim##D_##dir##_##naming_type                             \
+        : GroupConvTestFix<ndim, type, Direction::dir>                                  \
+    {                                                                                   \
+    };                                                                                  \
+    TEST_P(GPU_GroupConvWmma##ndim##D_##dir##_##naming_type,                            \
+           GroupConvWmma##ndim##D_##dir##_##type##_Test)                                \
+    {                                                                                   \
+        RunWmmaSolver();                                                                \
+    }                                                                                   \
+    INSTANTIATE_TEST_SUITE_P(                                                           \
+        Full,                                                                           \
+        GPU_GroupConvWmma##ndim##D_##dir##_##naming_type,                               \
+        testing::Combine(                                                               \
+            testing::ValuesIn(GroupConvTestConfig<ndim>::GetConfigs<Direction::dir>()), \
+            testing::ValuesIn(GetAlphaValues<ndim>()),                                  \
+            testing::ValuesIn(GetBetaValues<ndim>()),                                   \
+            testing::ValuesIn(GetLayoutValues<ndim>())));
+
+#define DEFINE_GROUP_CONV2D_WMMA_TEST(type, naming_type, dir) \
+    DEFINE_GROUP_CONV_WMMA_TEST(2, type, naming_type, dir)
+#define DEFINE_GROUP_CONV3D_WMMA_TEST(type, naming_type, dir) \
+    DEFINE_GROUP_CONV_WMMA_TEST(3, type, naming_type, dir)
