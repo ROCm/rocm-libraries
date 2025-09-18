@@ -56,6 +56,10 @@ void initF4(hipblaslt_f4x2* packedData, size_t size)
 template<typename T>
 void initScale(T* data, size_t Z)
 {
+    for(size_t z=0; z<Z; z++)
+    {
+        data[z] = rand() % 7;
+    }
 }
 
 void initScale(hipblaslt_e8* data, size_t Z)
@@ -63,14 +67,6 @@ void initScale(hipblaslt_e8* data, size_t Z)
     for(size_t z=0; z<Z; z++)
     {
         data[z].data = (rand() % 7 - 3) + 127;
-    }
-}
-
-void initScale(hipblaslt_f8* data, size_t Z)
-{
-    for(size_t z=0; z<Z; z++)
-    {
-        data[z] = rand() % 7;
     }
 }
 
@@ -158,16 +154,21 @@ size_t getDim1(size_t m, size_t k, bool unrollMajor)
 template <typename T>
 hipblasLtMatmulMatrixScale_t getScaleMode(size_t bk)
 {
-    if (std::is_same<T, hipblaslt_e8>::value)
+    if(std::is_same<T, hipblaslt_e5m3>::value)
         if (bk == 32)
-            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
         else
-            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
-    else
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
+    else if(std::is_same<T, hipblaslt_f8>::value)
         if (bk == 32)
             return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
         else
             return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+    else
+        if (bk == 32)
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+        else
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
 }
 
 template<typename T>
@@ -302,9 +303,22 @@ void GPUMatMul(float* d, hipblaslt_f4x2* a, hipblaslt_f4x2* b, T* sa, T* sb, siz
 }
 
 template<typename T>
+const char* getTypeName()
+{
+    if (std::is_same<T, hipblaslt_e8>::value)
+        return "E8";
+    else if (std::is_same<T, hipblaslt_f8>::value)
+        return "UF8";
+    else if (std::is_same<T, hipblaslt_e5m3>::value)
+        return "E5M3";
+    else
+        return "N/A";
+}
+
+template<typename T>
 void outputResult(size_t M, size_t N, size_t K, size_t B, bool transA, bool transB, size_t ret)
 {
-    std::cout << "Test MX" << B << (std::is_same<T, hipblaslt_e8>::value ? "E8" : "UF8") << " F4 ";
+    std::cout << "Test MX" << B << getTypeName<T>() << " F4 ";
     std::cout << (transA ? "T" : "N") << (transB ? "T" : "N") << " GEMM";
     std::cout << " M " << M;
     std::cout << " N " << N;
@@ -387,6 +401,12 @@ int main(int argc, char** argv)
     MXF4Test<hipblaslt_f8>(M, N, K, 32, true,  true);
     MXF4Test<hipblaslt_f8>(M, N, K, 32, false, true);
 
+    /*----- MX32 E5M3 F4 Tests ----*/
+    MXF4Test<hipblaslt_e5m3>(M, N, K, 32, true,  false);
+    MXF4Test<hipblaslt_e5m3>(M, N, K, 32, false, false);
+    MXF4Test<hipblaslt_e5m3>(M, N, K, 32, true,  true);
+    MXF4Test<hipblaslt_e5m3>(M, N, K, 32, false, true);
+
     /*----- MX16 E8 F4 Tests ----*/
     MXF4Test<hipblaslt_e8>(M, N, K, 16, true,  false);
     MXF4Test<hipblaslt_e8>(M, N, K, 16, false, false);
@@ -398,6 +418,12 @@ int main(int argc, char** argv)
     MXF4Test<hipblaslt_f8>(M, N, K, 16, false, false);
     MXF4Test<hipblaslt_f8>(M, N, K, 16, true,  true);
     MXF4Test<hipblaslt_f8>(M, N, K, 16, false, true);
+
+    /*----- MX16 E5M3 F4 Tests ----*/
+    MXF4Test<hipblaslt_e5m3>(M, N, K, 16, true,  false);
+    MXF4Test<hipblaslt_e5m3>(M, N, K, 16, false, false);
+    MXF4Test<hipblaslt_e5m3>(M, N, K, 16, true,  true);
+    MXF4Test<hipblaslt_e5m3>(M, N, K, 16, false, true);
 
     return 0;
 }
