@@ -995,22 +995,33 @@ namespace origami
                         && (hardware.arch == hardware_t::architecture_t::gfx950));
         if(tf32_emu && heuristics)
         {
+            size_t arith = arithmetic_intensity(M, N, K, 4);
+
             // The kernel for this is more optimized (Custom kernel NT)
             if((!transA && transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.6;
+                if (arith < 1000)
+                    total_latency = total_latency * 0.6;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // The kernel for this is more optimized (Custom kernel NN)
             if((!transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.8;
+                if (arith < 1000)
+                    total_latency = total_latency * 0.8;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // The kernel for this is more optimized (Custom kernel TN)
             if((transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.8;
+                if (arith < 1000)
+                    total_latency = total_latency * 0.8;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // Bias large DU where K-dimension is large and M and N are small.
