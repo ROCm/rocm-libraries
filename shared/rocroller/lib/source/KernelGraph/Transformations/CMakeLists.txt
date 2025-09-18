@@ -14,6 +14,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamK.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddTransposeLoadCT.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTags.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AssignComputeIndex.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CleanArguments.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CleanLoops.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConnectWorkgroups.cpp"
