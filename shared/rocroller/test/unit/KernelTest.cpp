@@ -488,7 +488,7 @@ amdhsa.kernels:
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
         const auto workgroupSize = 256u;
-        auto       workitemCount = Expression::literal(256 * 64 * 8);
+        auto       workitemCount = Expression::literal(256 * workgroupSize);
         k->setWorkgroupSize({workgroupSize, 1, 1});
         k->setWorkitemCount({workitemCount, one, one});
         k->setDynamicSharedMemBytes(zero);
@@ -513,7 +513,7 @@ amdhsa.kernels:
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
             // _b96 requires 64-bit alignment for dst, _b96 has huge penalty if not 64-bit aligned for LDS addr
             const auto alignment = instrDwords == 3 ? 4 : instrDwords;
-            const auto regCount  = 256 - 4;
+            const auto regCount  = 256 - 4; // leave a few
 
             auto dst = Register::Value::Placeholder(
                 m_context,
@@ -541,12 +541,12 @@ amdhsa.kernels:
                                                 % lds->getLDSAllocation()->size()),
                 m_context);
 
-            auto i = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::UInt64, 1);
-            co_yield Expression::generate(i, Expression::literal(loops + 1), m_context);
+            // auto i = Register::Value::Placeholder(
+            //     m_context, Register::Type::Scalar, DataType::UInt64, 1);
+            // co_yield Expression::generate(i, Expression::literal(loops + 1), m_context);
 
-            auto label = m_context->labelAllocator()->label("label");
-            co_yield Instruction::Label(label);
+            // auto label = m_context->labelAllocator()->label("label");
+            // co_yield Instruction::Label(label);
 
             auto getSubset = [](size_t n, size_t m, size_t i) -> std::pair<size_t, size_t> {
                 size_t num_complete_chunks = n / m;
@@ -559,7 +559,12 @@ amdhsa.kernels:
                 return {start, start + m};
             };
 
-            for(int i = 0; i < 200; ++i)
+            const int ITERS            = 8;
+            const int ALREADY_FINISHED = 2 + instrDwords;
+
+            co_yield m_context->mem()->barrier({});
+
+            for(int i = 0; i < ITERS; ++i)
             {
                 const auto [start, end] = getSubset(regCount, instrDwords, i);
                 const auto numBytes     = instrDwords * 4;
@@ -576,9 +581,12 @@ amdhsa.kernels:
                 }
             }
 
-            co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
-            co_yield Expression::generate(i, i->expression() - Expression::literal(1), m_context);
-            co_yield m_context->brancher()->branchIfNonZero(label, i);
+            for(int i = ITERS - 1 - ALREADY_FINISHED; i >= 0; --i)
+            {
+                co_yield Instruction::Wait(WaitCount::DSCnt(m_context->targetArchitecture(), i));
+            }
+            // co_yield Expression::generate(i, i->expression() - Expression::literal(1), m_context);
+            // co_yield m_context->brancher()->branchIfNonZero(label, i);
         };
 
         m_context->schedule(kb());
