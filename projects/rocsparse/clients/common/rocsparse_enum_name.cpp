@@ -233,6 +233,7 @@ const char* rocsparse_spmv_alg_name(rocsparse_spmv_alg value)
         CASE(rocsparse_spmv_alg_sell);
         CASE(rocsparse_spmv_alg_coo_atomic);
         CASE(rocsparse_spmv_alg_csr_lrb);
+        CASE(rocsparse_spmv_alg_csr_nnzsplit);
     }
     RETURN_INVALID;
 }

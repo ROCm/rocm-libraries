@@ -49,7 +49,7 @@ Tests:
   function: spmv_sell
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [44, 170]
+  M: [1, 44, 170]
   N: [89, 243]
   slice_size: [1, 2, 3]
   alpha_beta: *alpha_beta_range_quick

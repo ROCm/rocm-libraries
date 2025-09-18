@@ -121,7 +121,8 @@ DEF(rocsparse_spmv_alg,
     rocsparse_spmv_alg_ell,
     rocsparse_spmv_alg_sell,
     rocsparse_spmv_alg_coo_atomic,
-    rocsparse_spmv_alg_csr_lrb);
+    rocsparse_spmv_alg_csr_lrb,
+    rocsparse_spmv_alg_csr_nnzsplit);
 
 DEF(rocsparse_spsv_alg, rocsparse_spsv_alg_default);
 
@@ -428,6 +429,7 @@ bool rocsparse_spmv_alg_from_name(rocsparse_spmv_alg value, const char* name)
             CASE(rocsparse_spmv_alg_sell);
             CASE(rocsparse_spmv_alg_coo_atomic);
             CASE(rocsparse_spmv_alg_csr_lrb);
+            CASE(rocsparse_spmv_alg_csr_nnzsplit);
         }
     }
     return false;
