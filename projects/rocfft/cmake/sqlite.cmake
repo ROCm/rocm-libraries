@@ -48,7 +48,7 @@ else()
   endif()
 
   FetchContent_Declare(sqlite_local
-    URL      ${SQLITE_3_50_2_SRC_URL}
+    URL ${SQLITE_3_50_2_SRC_URL}
     URL_HASH SHA3_256=${SQLITE_SRC_3_50_2_SHA3_256}
   )
   FetchContent_MakeAvailable(sqlite_local)
