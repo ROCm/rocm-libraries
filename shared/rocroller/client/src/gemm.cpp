@@ -1544,8 +1544,14 @@ int main(int argc, const char* argv[])
     if(solution.workgroupSizeY == -1)
         solution.workgroupSizeY = 2;
 
-    AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
-                || (types.typeAcc == "bf16"));
+    const DataType typeA   = fromString<DataType>(solution.types.typeA);
+    const DataType typeB   = fromString<DataType>(solution.types.typeB);
+    const DataType typeC   = fromString<DataType>(solution.types.typeC);
+    const DataType typeD   = fromString<DataType>(solution.types.typeD);
+    const DataType typeAcc = fromString<DataType>(solution.types.typeAcc);
+
+    AssertFatal((typeAcc == DataType::Float) || (typeAcc == DataType::Half)
+                || (typeAcc == DataType::BFloat16));
 
     // TODO: Reevaluate the relationship between problem and solution params.
     problem.workgroupMappingDim = solution.workgroupMappingDim;
@@ -1561,8 +1567,8 @@ int main(int argc, const char* argv[])
         if(solution.macK == -1)
             solution.macK = 64;
 
-        if(types.typeA == "float" && types.typeB == "float" && types.typeC == "float"
-           && types.typeD == "float")
+        if(typeA == DataType::Float && typeB == DataType::Float && typeC == DataType::Float
+           && typeD == DataType::Float)
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1573,7 +1579,7 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if(types.typeA == "half" && types.typeB == "half")
+        else if(typeA == DataType::Half && typeB == DataType::Half)
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1584,7 +1590,7 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if(types.typeA == "bf16" && types.typeB == "bf16")
+        else if(typeA == DataType::BFloat16 && typeB == DataType::BFloat16)
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1595,8 +1601,8 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if((types.typeA == "fp8" && types.typeB == "fp8")
-                || (types.typeA == "bf8" && types.typeB == "bf8"))
+        else if((typeA == DataType::FP8 && typeB == DataType::FP8)
+                || (typeA == DataType::BF8 && typeB == DataType::BF8))
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1615,12 +1621,12 @@ int main(int argc, const char* argv[])
             if(solution.macK == -1)
                 solution.macK = 64;
 
-            if((types.typeA == "half" && types.typeB == "half")
-               || (types.typeA == "bf16" && types.typeB == "bf16")
-               || (types.typeA == "fp8" && types.typeB == "fp8")
-               || (types.typeA == "bf8" && types.typeB == "bf8")
-               || (types.typeA == "bf8" && types.typeB == "fp8")
-               || (types.typeA == "fp8" && types.typeB == "bf8"))
+            if((typeA == DataType::Half && typeB == DataType::Half)
+               || (typeA == DataType::BFloat16 && typeB == DataType::BFloat16)
+               || (typeA == DataType::FP8 && typeB == DataType::FP8)
+               || (typeA == DataType::BF8 && typeB == DataType::BF8)
+               || (typeA == DataType::BF8 && typeB == DataType::FP8)
+               || (typeA == DataType::FP8 && typeB == DataType::BF8))
             {
                 if(solution.waveM == -1)
                     solution.waveM = 16;
@@ -1645,8 +1651,8 @@ int main(int argc, const char* argv[])
     if(arch.target().isRDNA4GPU())
     {
         // Override default settings for the `example` and `generate` subcommands.
-        if((example->parsed() || generate->parsed()) && types.typeA == "float"
-           && types.typeB == "float")
+        if((example->parsed() || generate->parsed()) && typeA == DataType::Float
+           && typeB == DataType::Float)
         {
             std::cout << "Warning: A and B types and wave sizes have been overridden for RDNA4."
                       << std::endl;
