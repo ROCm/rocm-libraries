@@ -128,7 +128,7 @@ namespace GEMMDriverTest
                       existingFileCount + 1,
                       writeOnFailLimit);
 
-            valuesFile << fmt::format("RNorm is {} (acceptable {}, iteration {})",
+            valuesFile << fmt::format("RNorm is {:.17g} (acceptable {:.17g}, iteration {})",
                                       res.relativeNormL2,
                                       res.acceptableError.relativeL2Tolerance,
                                       iteration)
@@ -143,34 +143,44 @@ namespace GEMMDriverTest
                     auto b = h_result[i * N + j];
                     if((a - b) * (a - b) / (b * b) > res.acceptableError.relativeL2Tolerance)
                     {
-                        valuesFile << std::setw(8) << i << std::setw(8) << j //
-                                   << std::setw(16) << std::scientific << a //
-                                   << std::setw(16) << std::scientific << b //
-                                   << std::setw(16) << std::scientific << a - b //
-                                   << std::endl;
+                        valuesFile
+                            << std::setw(8) << i << std::setw(8) << j //
+                            << std::setw(24) << std::scientific
+                            << std::setprecision(std::numeric_limits<decltype(a)>::max_digits10)
+                            << a //
+                            << std::setw(24) << std::scientific
+                            << std::setprecision(std::numeric_limits<decltype(b)>::max_digits10)
+                            << b //
+                            << std::setw(24) << std::scientific
+                            << std::setprecision(std::numeric_limits<decltype(a - b)>::max_digits10)
+                            << a - b //
+                            << std::endl;
                     }
                 }
             }
 
-            const auto logMatrixFloats
-                = [&valuesFile](const auto& name, const auto& matrix, const auto I, const auto J) {
-                      const auto floatMatrix = unpackToFloat(matrix);
-                      AssertFatal(floatMatrix.size() == I * J,
-                                  ShowValue(floatMatrix.size()),
-                                  ShowValue(I),
-                                  ShowValue(J));
-                      valuesFile << name << std::endl;
-                      for(size_t i = 0; i < I; i++)
-                      {
-                          for(size_t j = 0; j < J; j++)
-                          {
-                              auto v = floatMatrix[i * J + j];
-                              valuesFile << std::setw(16) << std::scientific << v << " ";
-                          }
-                          valuesFile << std::endl;
-                      }
-                      valuesFile << std::endl;
-                  };
+            const auto logMatrixFloats =
+                [&valuesFile](const auto& name, const auto& matrix, const auto I, const auto J) {
+                    const auto floatMatrix = unpackToFloat(matrix);
+                    AssertFatal(floatMatrix.size() == I * J,
+                                ShowValue(floatMatrix.size()),
+                                ShowValue(I),
+                                ShowValue(J));
+                    valuesFile << name << std::endl;
+                    for(size_t i = 0; i < I; i++)
+                    {
+                        for(size_t j = 0; j < J; j++)
+                        {
+                            auto v = floatMatrix[i * J + j];
+                            valuesFile
+                                << std::setw(24) << std::scientific
+                                << std::setprecision(std::numeric_limits<decltype(v)>::max_digits10)
+                                << v << " ";
+                        }
+                        valuesFile << std::endl;
+                    }
+                    valuesFile << std::endl;
+                };
 
             valuesFile << "Values as floats:\n";
             logMatrixFloats("A", hostA, M, K);
@@ -950,6 +960,7 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
+                res.ok = false;
                 if(!res.ok)
                 {
                     writeGEMMFailureDetails(res,
