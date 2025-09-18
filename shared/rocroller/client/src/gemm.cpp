@@ -1566,6 +1566,8 @@ int main(int argc, const char* argv[])
     {
         if(solution.macK == -1)
             solution.macK = 64;
+        if(solution.waveB == -1)
+            solution.waveB = 1;
 
         if(typeA == DataType::Float && typeB == DataType::Float && typeC == DataType::Float
            && typeD == DataType::Float)
@@ -1576,8 +1578,6 @@ int main(int argc, const char* argv[])
                 solution.waveN = 32;
             if(solution.waveK == -1)
                 solution.waveK = 2;
-            if(solution.waveB == -1)
-                solution.waveB = 1;
         }
         else if(typeA == DataType::Half && typeB == DataType::Half)
         {
@@ -1587,8 +1587,6 @@ int main(int argc, const char* argv[])
                 solution.waveN = 32;
             if(solution.waveK == -1)
                 solution.waveK = 8;
-            if(solution.waveB == -1)
-                solution.waveB = 1;
         }
         else if(typeA == DataType::BFloat16 && typeB == DataType::BFloat16)
         {
@@ -1598,8 +1596,6 @@ int main(int argc, const char* argv[])
                 solution.waveN = 16;
             if(solution.waveK == -1)
                 solution.waveK = 8;
-            if(solution.waveB == -1)
-                solution.waveB = 1;
         }
         else if((typeA == DataType::FP8 && typeB == DataType::FP8)
                 || (typeA == DataType::BF8 && typeB == DataType::BF8))
@@ -1610,37 +1606,40 @@ int main(int argc, const char* argv[])
                 solution.waveN = 16;
             if(solution.waveK == -1)
                 solution.waveK = 32;
-            if(solution.waveB == -1)
-                solution.waveB = 1;
         }
     }
     else if(arch.HasCapability(GPUCapability::HasWMMA))
     {
-        if(arch.target().isRDNA4GPU())
+        if(solution.waveM == -1)
+            solution.waveM = 16;
+        if(solution.waveN == -1)
+            solution.waveN = 16;
+        if(solution.waveB == -1)
+            solution.waveB = 1;
+
+        if((typeA == DataType::Half && typeB == DataType::Half)
+           || (typeA == DataType::BFloat16 && typeB == DataType::BFloat16))
         {
             if(solution.macK == -1)
                 solution.macK = 64;
 
-            if((typeA == DataType::Half && typeB == DataType::Half)
-               || (typeA == DataType::BFloat16 && typeB == DataType::BFloat16)
-               || (typeA == DataType::FP8 && typeB == DataType::FP8)
-               || (typeA == DataType::BF8 && typeB == DataType::BF8)
-               || (typeA == DataType::BF8 && typeB == DataType::FP8)
-               || (typeA == DataType::FP8 && typeB == DataType::BF8))
+            if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f16))
             {
-                if(solution.waveM == -1)
-                    solution.waveM = 16;
-                if(solution.waveN == -1)
-                    solution.waveN = 16;
                 if(solution.waveK == -1)
                     solution.waveK = 16;
-                if(solution.waveB == -1)
-                    solution.waveB = 1;
             }
         }
-        else
+        else if(isUnpackedF8(fromString<DataType>(solution.types.typeA))
+                && isUnpackedF8(fromString<DataType>(solution.types.typeB)))
         {
-            Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
+            if(solution.macK == -1)
+                solution.macK = 64;
+
+            if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f8))
+            {
+                if(solution.waveK == -1)
+                    solution.waveK = 16;
+            }
         }
     }
     else
@@ -1664,6 +1663,7 @@ int main(int argc, const char* argv[])
             solution.waveN = 16;
             solution.waveK = 16;
             solution.waveB = 1;
+            solution.macK  = 64;
         }
 
         if(solution.prefetch)
