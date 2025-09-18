@@ -3,7 +3,7 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
-## hipSPARSE for ROCm 7.1.0 (Unreleased)
+## hipSPARSE 4.1.0 for ROCm 7.1.0
 
 ### Added
 
