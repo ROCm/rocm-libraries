@@ -94,21 +94,21 @@ static void set_bricks(const std::vector<size_t>& length,
         // lower idx starts at origin, upper is one-past-the-end
         brick.field_lower.resize(dim);
         brick.field_upper.resize(dim);
-        
+
         std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
 
         // All of the remainders get put on the low-index bricks.
         brick.field_lower[split_dim] = length[split_dim] / bricks.size() * idx
-            + std::min(idx, length[split_dim] % bricks.size());
+                                       + std::min(idx, length[split_dim] % bricks.size());
 
         // length of the brick along the split dimension
-        size_t split_len = length[split_dim] / bricks.size()
-            + (idx < length[split_dim] % bricks.size() ? 1 : 0);
+        size_t split_len
+            = length[split_dim] / bricks.size() + (idx < length[split_dim] % bricks.size() ? 1 : 0);
 
-        brick.field_upper = length;        
+        brick.field_upper = length;
         if(idx != bricks.size() - 1)
             brick.field_upper[split_dim] = brick.field_lower[split_dim] + split_len;
-        
+
         brick.set_contiguous_stride();
 
         // work out how big a buffer we need to allocate
@@ -136,8 +136,8 @@ static void set_io_bricks(const std::vector<size_t>& inLength,
 
     // For batched FFT, split input on batch, otherwise split input
     // on fastest FFT dim and output on slowest FFT dim
-    const size_t in_split_dim   = inLengthWithBatch.size() - (batch > 1 ? 1 : 2);
-    const size_t out_split_dim  = outLengthWithBatch.size() - (batch > 1 ? 1 : 2);
+    const size_t in_split_dim  = inLengthWithBatch.size() - (batch > 1 ? 1 : 2);
+    const size_t out_split_dim = outLengthWithBatch.size() - (batch > 1 ? 1 : 2);
 
     set_bricks(inLengthWithBatch, inBricks, in_split_dim);
     set_bricks(outLengthWithBatch, outBricks, out_split_dim);
