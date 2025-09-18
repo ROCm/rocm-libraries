@@ -995,12 +995,14 @@ namespace origami
                         && (hardware.arch == hardware_t::architecture_t::gfx950));
         if(tf32_emu && heuristics)
         {
-            size_t arith = arithmetic_intensity(M, N, K, 4);
+            double bytes_per_element = element_size_A / 8;
+            double arith = arithmetic_intensity(M, N, K, bytes_per_element);
+            double compute_threshold = 1000; // threshold empirically determined.
 
             // The kernel for this is more optimized (Custom kernel NT)
             if((!transA && transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                if (arith < 1000)
+                if (arith < compute_threshold)
                     total_latency = total_latency * 0.6;
                 else
                     total_latency = total_latency * 0.4;
@@ -1009,7 +1011,7 @@ namespace origami
             // The kernel for this is more optimized (Custom kernel NN)
             if((!transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                if (arith < 1000)
+                if (arith < compute_threshold)
                     total_latency = total_latency * 0.8;
                 else
                     total_latency = total_latency * 0.4;
@@ -1018,7 +1020,7 @@ namespace origami
             // The kernel for this is more optimized (Custom kernel TN)
             if((transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                if (arith < 1000)
+                if (arith < compute_threshold)
                     total_latency = total_latency * 0.8;
                 else
                     total_latency = total_latency * 0.4;
