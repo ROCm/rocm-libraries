@@ -17,7 +17,6 @@ if(TENSILELITE_ENABLE_HOST)
             POSITION_INDEPENDENT_CODE ON
     )
     target_compile_options(tensilelite-host PUBLIC -fvisibility=hidden)
-    #target_link_options(tensilelite-host INTERFACE "-Wl,--exclude-libs,tensilelite-host.a")
     target_compile_features(tensilelite-host PUBLIC cxx_std_17)
     target_compile_definitions(tensilelite-host
         PUBLIC
