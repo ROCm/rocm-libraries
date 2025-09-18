@@ -1631,33 +1631,6 @@ int main(int argc, const char* argv[])
                 if(solution.waveB == -1)
                     solution.waveB = 1;
             }
-            else
-            {
-                // Override default settings for the `example` and `generate` subcommands.
-                if(example->parsed() || generate->parsed())
-                {
-                    types.typeA    = "half";
-                    types.typeB    = "half";
-                    types.typeC    = "half";
-                    types.typeD    = "half";
-                    solution.waveM = 16;
-                    solution.waveN = 16;
-                    solution.waveK = 16;
-                    solution.waveB = 1;
-                }
-                else
-                {
-                    Throw<FatalError>("Unsupported MI on: ",
-                                      arch.target().toString(),
-                                      ShowValue(types.typeA),
-                                      ShowValue(types.typeB),
-                                      ShowValue(types.typeC),
-                                      ShowValue(types.typeD),
-                                      ShowValue(types.typeAcc));
-                }
-            }
-            // TODO Support prefetch on gfx12
-            solution.prefetch = false;
         }
         else
         {
@@ -1668,6 +1641,40 @@ int main(int argc, const char* argv[])
     {
         Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
     }
+
+    if(arch.target().isRDNA4GPU())
+    {
+        // Override default settings for the `example` and `generate` subcommands.
+        if((example->parsed() || generate->parsed()) && types.typeA == "float"
+           && types.typeB == "float")
+        {
+            std::cout << "Warning: A and B types and wave sizes have been overridden for RDNA4."
+                      << std::endl;
+            types.typeA    = "half";
+            types.typeB    = "half";
+            types.typeC    = "half";
+            types.typeD    = "half";
+            solution.waveM = 16;
+            solution.waveN = 16;
+            solution.waveK = 16;
+            solution.waveB = 1;
+        }
+
+        if(solution.prefetch)
+        {
+            std::cout << "Warning: disabling prefetching for RDNA4." << std::endl;
+            solution.prefetch = false;
+        }
+    }
+
+    AssertFatal(solution.waveM > 0 && solution.waveN > 0 && solution.waveK > 0
+                    && solution.waveB > 0,
+                fmt::format("MI tile sizes must be set and greater than zero. "
+                            "waveM: {} waveN: {} waveK: {} waveB: {}",
+                            solution.waveM,
+                            solution.waveN,
+                            solution.waveK,
+                            solution.waveB));
 
     AssertFatal(solution.macK >= solution.waveK && solution.macM >= solution.waveM
                     && solution.macN >= solution.waveN,
