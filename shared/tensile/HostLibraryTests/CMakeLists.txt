@@ -217,7 +217,7 @@ if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
         COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${coverage_dir}/profraw/tensile-host-coverage_%m.profraw"
-                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG 
+                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG
                                         $<TARGET_FILE:TensileTests>
                                         "--gtest_filter=-*Extended*:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/504:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/505:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/506:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/507:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/508:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/509"
       )
@@ -241,7 +241,7 @@ if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/tensile-host-coverage_*.profraw" -o "${coverage_dir}/tensile-host.profdata"
         COMMAND ${LLVM_COV} report -object $<TARGET_FILE:TensileHost> -instr-profile="${coverage_dir}/tensile-host.profdata"
         COMMAND ${LLVM_COV} show -object $<TARGET_FILE:TensileHost> -instr-profile="${coverage_dir}/tensile-host.profdata" -format=html -output-dir="${coverage_dir}"
-        
+
         COMMENT "Generating TensileHost coverage report... HTML report in ${coverage_dir}/index.html"
     )
 

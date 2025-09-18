@@ -47,4 +47,3 @@ for f in glob.glob("%s/*aml"%targetDir):
 
     outfile.write ("def %s(tmpdir):\n" % (testName))
     outfile.write (' Tensile.Tensile([Tensile.TensileTestPath("%s"), tmpdir.strpath])\n\n' % (f))
-

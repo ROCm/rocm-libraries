@@ -95,4 +95,3 @@ const error_category &cuda_category(void)
 } // end namespace system
 
 THRUST_NAMESPACE_END
-

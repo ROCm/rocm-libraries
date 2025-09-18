@@ -24,7 +24,7 @@ rocblas_status rocsolver_syevd_heevd_impl(rocblas_handle handle,
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_syev_heev_argCheck(handle, evect, uplo, n, A, lda, D, E, info);
+    rocblas_status st = rocsolver_syevd_heevd_argCheck(handle, evect, uplo, n, A, lda, D, E, info);
     if(st != rocblas_status_continue)
         return st;
 
