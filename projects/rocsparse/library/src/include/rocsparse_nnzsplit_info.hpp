@@ -1,8 +1,9 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the Software), to deal
+ * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
@@ -11,7 +12,7 @@
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED AS IS, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -23,12 +24,14 @@
 
 #pragma once
 
-#include "rocsparse_arguments.hpp"
+typedef struct _rocsparse_nnzsplit_info
+{
 
-template <typename I, typename J, typename A, typename X, typename Y, typename T>
-void testing_spmv_csr_bad_arg(const Arguments& arg);
-void testing_spmv_csr_extra(const Arguments& arg);
-template <typename I, typename J, typename A, typename X, typename Y, typename T>
-void testing_spmv_csr(const Arguments& arg);
-template <typename I, typename J, typename A, typename X, typename Y, typename T>
-void testing_spmv_csr_analysis(const Arguments& arg);
+    bool use_starting_block_ids{};
+
+    size_t size{};
+
+    void* starting_ids{};
+    void* starting_block_ids{};
+
+} * rocsparse_nnzsplit_info;
