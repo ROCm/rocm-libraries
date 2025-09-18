@@ -20,40 +20,6 @@ class CpuExecutionPolicy
 {
 public:
     template <typename Op>
-    void executeUnary(const std::vector<const TensorBase<DataType>*>& inputs,
-                      TensorBase<DataType>& output,
-                      Op op)
-    {
-        if(inputs.size() != 1)
-        {
-            throw std::runtime_error("Unary operation requires exactly 1 input tensor.");
-        }
-
-        const auto& input = *inputs[0];
-        const auto& dims = output.dims();
-
-        auto func = [&](const auto&... indices) {
-            std::vector<int64_t> idxVec = {static_cast<int64_t>(indices)...};
-            auto inputVal = input.getHostValue(idxVec);
-            DataType outputVal;
-            op(outputVal, inputVal);
-            output.setHostValue(outputVal, idxVec);
-        };
-
-        if(dims.size() != 4)
-        {
-            throw std::runtime_error("Only 4D tensors are supported, got "
-                                     + std::to_string(dims.size()) + "D");
-        }
-        auto parallelFunc = makeParallelTensorFunctor(func,
-                                                      static_cast<std::size_t>(dims[0]),
-                                                      static_cast<std::size_t>(dims[1]),
-                                                      static_cast<std::size_t>(dims[2]),
-                                                      static_cast<std::size_t>(dims[3]));
-        parallelFunc();
-    }
-
-    template <typename Op>
     void executeBinary(const std::vector<const TensorBase<DataType>*>& inputs,
                        TensorBase<DataType>& output,
                        Op op)
@@ -73,44 +39,6 @@ public:
             auto input2Val = input2.getHostValue(idxVec);
             DataType outputVal;
             op(outputVal, input1Val, input2Val);
-            output.setHostValue(outputVal, idxVec);
-        };
-
-        if(dims.size() != 4)
-        {
-            throw std::runtime_error("Only 4D tensors are supported, got "
-                                     + std::to_string(dims.size()) + "D");
-        }
-        auto parallelFunc = makeParallelTensorFunctor(func,
-                                                      static_cast<std::size_t>(dims[0]),
-                                                      static_cast<std::size_t>(dims[1]),
-                                                      static_cast<std::size_t>(dims[2]),
-                                                      static_cast<std::size_t>(dims[3]));
-        parallelFunc();
-    }
-
-    template <typename Op>
-    void executeTernary(const std::vector<const TensorBase<DataType>*>& inputs,
-                        TensorBase<DataType>& output,
-                        Op op)
-    {
-        if(inputs.size() != 3)
-        {
-            throw std::runtime_error("Ternary operation requires exactly 3 input tensors.");
-        }
-
-        const auto& input1 = *inputs[0];
-        const auto& input2 = *inputs[1];
-        const auto& input3 = *inputs[2];
-        const auto& dims = output.dims();
-
-        auto func = [&](const auto&... indices) {
-            std::vector<int64_t> idxVec = {static_cast<int64_t>(indices)...};
-            auto input1Val = input1.getHostValue(idxVec);
-            auto input2Val = input2.getHostValue(idxVec);
-            auto input3Val = input3.getHostValue(idxVec);
-            DataType outputVal;
-            op(outputVal, input1Val, input2Val, input3Val);
             output.setHostValue(outputVal, idxVec);
         };
 

@@ -53,21 +53,6 @@ public:
         case hipdnn_sdk::data_objects::PointwiseMode::SUB:
             policy.executeBinary(inputs, output, pointwise::Subtract{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::MUL:
-            policy.executeBinary(inputs, output, pointwise::Multiply{});
-            break;
-        case hipdnn_sdk::data_objects::PointwiseMode::IDENTITY:
-            policy.executeUnary(inputs, output, pointwise::Identity{});
-            break;
-        case hipdnn_sdk::data_objects::PointwiseMode::NEG:
-            policy.executeUnary(inputs, output, pointwise::Negate{});
-            break;
-        case hipdnn_sdk::data_objects::PointwiseMode::ABS:
-            policy.executeUnary(inputs, output, pointwise::Abs{});
-            break;
-        case hipdnn_sdk::data_objects::PointwiseMode::BINARY_SELECT:
-            policy.executeTernary(inputs, output, pointwise::BinarySelect{});
-            break;
         default:
             throw std::runtime_error("Unsupported pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
