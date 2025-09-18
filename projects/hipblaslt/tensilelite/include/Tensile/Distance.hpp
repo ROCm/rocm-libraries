@@ -102,6 +102,37 @@ namespace TensileLite
             }
         };
 
+        // Not really a distance, but defined as one for template specialization purposes
+        template <typename Key>
+        struct Range : public Distance<Key>
+        {
+            enum
+            {
+                HasIndex = false,
+                HasValue = false
+            };
+            static std::string Type()
+            {
+                return "Range";
+            }
+            virtual std::string type() const override
+            {
+                return Type();
+            }
+
+            inline bool operator()(Key const& p1, Key const& p2) const
+            {
+                double distance = 0.0;
+
+                for(int i = 0; i < p1.size(); i++)
+                {
+                    double di = p1[i] - p2[i];
+                    distance += di * di;
+                }
+                return distance;
+            }
+        };
+
         template <typename Key>
         struct RatioDistance : public Distance<Key>
         {

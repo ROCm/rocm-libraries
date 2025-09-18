@@ -31,7 +31,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p hipsparseXgtsv2StridedBatch_bufferSizeExt returns the size of the temporary storage
-*  buffer in bytes that is required by \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()". 
+*  buffer in bytes that is required by \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]
@@ -39,13 +39,13 @@ extern "C" {
 *  @param[in]
 *  m                  size of the tri-diagonal linear system.
 *  @param[in]
-*  dl                 lower diagonal of tri-diagonal system where the ith system lower diagonal starts at 
+*  dl                 lower diagonal of tri-diagonal system where the ith system lower diagonal starts at
 *                     \p dl+batchStride*i.
 *  @param[in]
-*  d                  main diagonal of tri-diagonal system where the ith system diagonal starts at 
+*  d                  main diagonal of tri-diagonal system where the ith system diagonal starts at
 *                     \p d+batchStride*i.
 *  @param[in]
-*  du                 upper diagonal of tri-diagonal system where the ith system upper diagonal starts at 
+*  du                 upper diagonal of tri-diagonal system where the ith system upper diagonal starts at
 *                     \p du+batchStride*i.
 *  @param[inout]
 *  x                  Dense array of righthand-sides where the ith righthand-side starts at \p x+batchStride*i.
@@ -58,7 +58,7 @@ extern "C" {
 *                     hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p batchStride, \p dl, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p batchStride, \p dl,
 *              \p d, \p du, \p x or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */

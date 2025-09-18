@@ -62,7 +62,7 @@ class Item2(rocisa.base.Item):
         base_state = super().__getstate__()
         py_state = {key: value for key, value in self.__dict__.items() if not key.startswith("__")}
         return (base_state, py_state)
-    
+
     def __setstate__(self, state):
         base_state, py_state = state
         super().__setstate__(base_state)
@@ -70,7 +70,7 @@ class Item2(rocisa.base.Item):
 
     def __deepcopy__(self, memo):
         assert 0, "Not implemented"
-        
+
     def print(self):
         for i in self.itemList:
             print(i)

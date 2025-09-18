@@ -164,4 +164,3 @@ def analyzeSolutionSelection(problemType, selectionFileNameList, numSolutionsPer
     validSolutions.append((validSolution,dataMap))
 
   return validSolutions
-

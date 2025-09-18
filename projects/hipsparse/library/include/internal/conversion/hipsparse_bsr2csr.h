@@ -40,27 +40,27 @@ extern "C" {
 *
 *  For example, given the BSR matrix using block dimension 2:
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c} 
-*       1 & 0 \\ 
-*       3 & 4 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 2 \\ 
-*       0 & 0 
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c} 
-*       5 & 0 \\ 
-*       1 & 2 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       6 & 7 \\ 
-*       3 & 4 
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  The resulting CSR matrix row pointer, column indices, and values arrays are:
@@ -124,24 +124,24 @@ extern "C" {
 *    hipsparseCreateMatDescr(&bsr_descr);
 *
 *    // Sparse matrix in BSR format
-*    //     1 2 | 0 3 | 0 0 
+*    //     1 2 | 0 3 | 0 0
 *    //     0 4 | 5 0 | 0 1
 *    //     ---------------
-*    // A = 6 0 | 0 7 | 8 0 
+*    // A = 6 0 | 0 7 | 8 0
 *    //     0 0 | 3 0 | 2 2
 *    //     ---------------
-*    //     1 0 | 0 0 | 4 3 
+*    //     1 0 | 0 0 | 4 3
 *    //     7 2 | 0 0 | 1 4
 *    int hbsrRowPtr[4] = {0, 3, 6, 8};
 *    int hbsrColInd[8] = {0, 1, 2, 0, 1, 2, 0, 2};
-*    float hbsrVal[32]  = {1.0f, 2.0f, 0.0f, 4.0f, 
-*                            0.0f, 3.0f, 5.0f, 0.0f, 
+*    float hbsrVal[32]  = {1.0f, 2.0f, 0.0f, 4.0f,
+*                            0.0f, 3.0f, 5.0f, 0.0f,
 *                            0.0f, 0.0f, 0.0f, 1.0f,
-*                            6.0f, 0.0f, 0.0f, 0.0f, 
+*                            6.0f, 0.0f, 0.0f, 0.0f,
 *                            0.0f, 7.0f, 3.0f, 0.0f,
 *                            8.0f, 0.0f, 2.0f, 2.0f,
 *                            1.0f, 0.0f, 7.0f, 2.0f,
-*                            4.0f, 3.0f, 1.0f, 4.0f}; 
+*                            4.0f, 3.0f, 1.0f, 4.0f};
 *
 *    int m        = 6;
 *    int n        = 6;
@@ -170,24 +170,24 @@ extern "C" {
 *    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
 *    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
 *
-*    hipsparseSbsr2csr(handle, 
-*                      dir, 
-*                      mb, 
-*                      nb, 
-*                      bsr_descr, 
-*                      dbsrVal, 
-*                      dbsrRowPtr, 
-*                      dbsrColInd, 
-*                      blockDim, 
-*                      csr_descr, 
-*                      dcsrVal, 
-*                      dcsrRowPtr, 
+*    hipsparseSbsr2csr(handle,
+*                      dir,
+*                      mb,
+*                      nb,
+*                      bsr_descr,
+*                      dbsrVal,
+*                      dbsrRowPtr,
+*                      dbsrColInd,
+*                      blockDim,
+*                      csr_descr,
+*                      dcsrVal,
+*                      dcsrRowPtr,
 *                      dcsrColInd);
 *
 *    hipFree(dbsrRowPtr);
 *    hipFree(dbsrColInd);
 *    hipFree(dbsrVal);
-*    
+*
 *    hipFree(dcsrRowPtr);
 *    hipFree(dcsrColInd);
 *    hipFree(dcsrVal);

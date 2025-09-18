@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup generic_module
    *  \details
    *  \p rocsparse_extract_buffer_size calculates the required buffer size in bytes for a given stage \p stage.
-   *  This routine is used in conjunction with \ref rocsparse_extract_nnz and \ref rocsparse_extract to extract 
+   *  This routine is used in conjunction with \ref rocsparse_extract_nnz and \ref rocsparse_extract to extract
    *  a lower or upper triangular sparse matrix from an input sparse matrix. See \ref rocsparse_extract for more
    *  details.
    *
@@ -72,9 +72,9 @@ rocsparse_status rocsparse_extract_buffer_size(rocsparse_handle            handl
 
 /*! \ingroup generic_module
    *  \details
-   *  \p rocsparse_extract_nnz returns the number of non-zeros in the extracted matrix. The value is 
-   *  available after the analysis phase \ref rocsparse_extract_stage_analysis has been executed. This routine 
-   *  is used in conjunction with \ref rocsparse_extract_buffer_size and \ref rocsparse_extract to extract a lower 
+   *  \p rocsparse_extract_nnz returns the number of non-zeros in the extracted matrix. The value is
+   *  available after the analysis phase \ref rocsparse_extract_stage_analysis has been executed. This routine
+   *  is used in conjunction with \ref rocsparse_extract_buffer_size and \ref rocsparse_extract to extract a lower
    *  or upper triangular sparse matrix from an input sparse matrix. See \ref rocsparse_extract for more
    *  details.
    *
@@ -103,7 +103,7 @@ rocsparse_status
    *  \details
    *  \p rocsparse_extract performs the extraction of the lower or upper part of a sparse matrix into a new matrix.
    *
-   *  \p rocsparse_extract requires multiple steps to complete. First, the user creates the source and target sparse matrix 
+   *  \p rocsparse_extract requires multiple steps to complete. First, the user creates the source and target sparse matrix
    *  descriptors. For example, in the case of CSR matrix format this might look like:
    *  \code{.c}
    *   // Build Source
@@ -136,9 +136,9 @@ rocsparse_status
    *                              rocsparse_index_base_zero,
    *                              rocsparse_datatype_f32_r);
    *  \endcode
-   *  Next, the user creates the extraction descriptor and calls \ref rocsparse_extract_buffer_size with the stage 
-   *  \ref rocsparse_extract_stage_analysis in order to determine the amount of temporary storage required. 
-   *  The user allocates this temporary storage buffer and passes it to \p rocsparse_extract with the stage 
+   *  Next, the user creates the extraction descriptor and calls \ref rocsparse_extract_buffer_size with the stage
+   *  \ref rocsparse_extract_stage_analysis in order to determine the amount of temporary storage required.
+   *  The user allocates this temporary storage buffer and passes it to \p rocsparse_extract with the stage
    *  \ref rocsparse_extract_stage_analysis
    *  \code{.c}
    *  // Create descriptor
@@ -167,22 +167,22 @@ rocsparse_status
    *                    dbuffer);
    *  hipFree(dbuffer);
    *  \endcode
-   *  The user then calls \ref rocsparse_extract_nnz in order to determine the number of non-zeros that will exist in the 
-   *  target matrix. Once determined, the user can allocate the column indices and values arrays of the target sparse 
+   *  The user then calls \ref rocsparse_extract_nnz in order to determine the number of non-zeros that will exist in the
+   *  target matrix. Once determined, the user can allocate the column indices and values arrays of the target sparse
    *  matrix:
    *  \code{.c}
    *  int64_t target_nnz;
    *  rocsparse_extract_nnz(handle, descr, &target_nnz);
-   * 
-   *  void* dtarget_col_ind, 
+   *
+   *  void* dtarget_col_ind,
    *  void* dtarget_val;
    *  hipMalloc(&dtarget_col_ind, sizeof(int32_t) * target_nnz);
    *  hipMalloc(&dtarget_val, sizeof(float) * target_nnz);
    *  rocsparse_csr_set_pointers(target, dtarget_row_ptr, dtarget_col_ind, dtarget_val);
    *  \endcode
-   *  Finally, the user calls \ref rocsparse_extract_buffer_size with the stage \ref rocsparse_extract_stage_compute in order 
-   *  to determine the size of the temporary user allocated storage needed for the computation of the column indices and values 
-   *  in the sparse target. The user allocates this buffer and completes the conversion by calling \p rocsparse_extract using 
+   *  Finally, the user calls \ref rocsparse_extract_buffer_size with the stage \ref rocsparse_extract_stage_compute in order
+   *  to determine the size of the temporary user allocated storage needed for the computation of the column indices and values
+   *  in the sparse target. The user allocates this buffer and completes the conversion by calling \p rocsparse_extract using
    *  the \ref rocsparse_extract_stage_compute stage:
    *  \code{.c}
    *  // Calculation phase
@@ -204,9 +204,9 @@ rocsparse_status
    *  \endcode
    *  The target row pointer, column indices, and values arrays will now be filled with the upper or lower part of the source matrix.
    *
-   *  The source and the target matrices must have the same format (see \ref rocsparse_format) and the same storage mode (see 
-   *  \ref rocsparse_storage_mode). The attributes of the target matrix, the fill mode \ref rocsparse_fill_mode and the diagonal 
-   *  type \ref rocsparse_diag_type are used to parametrise the algorithm. These can be set on the target matrix using 
+   *  The source and the target matrices must have the same format (see \ref rocsparse_format) and the same storage mode (see
+   *  \ref rocsparse_storage_mode). The attributes of the target matrix, the fill mode \ref rocsparse_fill_mode and the diagonal
+   *  type \ref rocsparse_diag_type are used to parametrise the algorithm. These can be set on the target matrix using
    *  \ref rocsparse_spmat_set_attribute. See full example below.
    *
    *  \note

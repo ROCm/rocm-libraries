@@ -1706,7 +1706,7 @@ namespace rocisa
         dscnt: Number of LDS instructions issued but not yet completed.
         kmcnt: Number of constant-fetch (scalar memory read), and message instructions issued but not yet completed.
 
-        In some ISA, VMEM load/store share the same counter(vmcnt). LDS, scalar memory read and message share 
+        In some ISA, VMEM load/store share the same counter(vmcnt). LDS, scalar memory read and message share
         the same counter(lgkmcnt). These counters are combined from the 4 counters above as:
             vmcnt   = vlcnt + vscnt
             lgkmcnt = dscnt + kmcnt
@@ -1715,7 +1715,7 @@ namespace rocisa
 
             If the target ISA has separate counters for load and store, use SWaitCnt(vlcnt=1),
             which means vl_2 is not completed yet.
-            
+
             If the target ISA has a single counter for load and store, use SWaitCnt(vlcnt=1, vscnt=1),
             which means vs_0, vl_2 are not completed yet.
         */
@@ -1782,7 +1782,7 @@ namespace rocisa
             std::vector<std::shared_ptr<Instruction>> instructions;
 
             if(getAsmCaps()["SeparateVscnt"])
-            {  
+            {
                 int lgkmcnt = (dscnt != -1 || kmcnt != -1)? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0) : -1;
                 int vmcnt   = vlcnt; // With SeparateVscnt, vmcnt only counts load instructions
                 if(vlcnt != -1 || lgkmcnt != -1)

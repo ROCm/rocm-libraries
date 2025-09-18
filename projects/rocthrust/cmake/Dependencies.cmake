@@ -306,7 +306,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       UPDATE_DISCONNECTED TRUE
     )
     find_package(TBB REQUIRED CONFIG PATHS ${TBB_ROOT})
-  
+
   endif()
 
   # SQlite (for run-to-run bitwise-reproducibility tests)

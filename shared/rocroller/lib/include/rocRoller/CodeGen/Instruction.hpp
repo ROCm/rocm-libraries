@@ -174,6 +174,8 @@ namespace rocRoller
         std::string const&                                 getOpCode() const;
         std::array<std::string, Instruction::MaxModifiers> getModifiers() const;
 
+        CoexecCategory getCategory() const;
+
         constexpr int getNopCount() const
         {
             return m_nopCount;

@@ -4,6 +4,7 @@
 target_sources(rocroller
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/Cost.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Cost_component.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LinearWeightedCost.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MinNopsCost.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/NoneCost.cpp"

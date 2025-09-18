@@ -29,8 +29,6 @@
 
 namespace rocRoller
 {
-    RegisterComponent(ConditionalGenerator);
-
     template <>
     std::shared_ptr<TernaryArithmeticGenerator<Expression::Conditional>>
         GetGenerator<Expression::Conditional>(Register::ValuePtr dst,

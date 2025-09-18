@@ -1,27 +1,27 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Adds a subdirectory to the build with a status message, 
+# Adds a subdirectory to the build with a status message,
 # and optionally checks for an expected target.
 #
 # Usage:
-#   add_subdirectory_with_message(COMPONENT <component> PATH_PREFIX <prefix> [EXPECT_TARGET <target>])
+#   add_subdirectory_with_message(COMPONENT <component> PREFIX_PATH <prefix> [EXPECT_TARGET <target>])
 #
 # Arguments:
 #   COMPONENT <component>  - Component name (e.g., "mxdatagenerator").
-#   PATH_PREFIX <prefix>   - Path prefix (e.g., "shared", "projects").
+#   PREFIX_PATH <prefix>   - Path prefix (e.g., "shared", "projects").
 #   EXPECT_TARGET <target> - Optional target name produced by the subdirectory.
 function(add_subdirectory_with_message)
-    cmake_parse_arguments(ARG "" "COMPONENT;PATH_PREFIX;EXPECT_TARGET" "" ${ARGN})
+    cmake_parse_arguments(ARG "" "COMPONENT;PREFIX_PATH;EXPECT_TARGET" "" ${ARGN})
 
     if(NOT ARG_COMPONENT)
         message(FATAL_ERROR "add_subdirectory_with_message: COMPONENT is required")
     endif()
-    if(NOT ARG_PATH_PREFIX)
-        message(FATAL_ERROR "add_subdirectory_with_message: PATH_PREFIX is required")
+    if(NOT ARG_PREFIX_PATH)
+        message(FATAL_ERROR "add_subdirectory_with_message: PREFIX_PATH is required")
     endif()
 
-    set(_subdir_path "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_PATH_PREFIX}/${ARG_COMPONENT}")
+    set(_subdir_path "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_PREFIX_PATH}/${ARG_COMPONENT}")
     file(TO_CMAKE_PATH "${_subdir_path}" _subdir_path)
 
     list(APPEND CMAKE_MESSAGE_CONTEXT "${ARG_COMPONENT}")

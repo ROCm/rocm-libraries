@@ -789,7 +789,7 @@ contains
             rocblas_zcopy_64(handle, n, x, incx, y, incy)
         return
     end function rocblas_zcopy_64_fortran
-    
+
     ! copy_batched
     function rocblas_scopy_batched_fortran(handle, n, x, incx, y, incy, batch_count) &
         bind(c, name='rocblas_scopy_batched_fortran')
@@ -3477,7 +3477,7 @@ contains
             rocblas_dzasum_strided_batched_64(handle, n, x, incx, stride_x, batch_count, result)
         return
     end function rocblas_dzasum_strided_batched_64_fortran
-    
+
     ! nrm2
     function rocblas_snrm2_fortran(handle, n, x, incx, result) &
         bind(c, name='rocblas_snrm2_fortran')
@@ -8169,7 +8169,7 @@ contains
         rocblas_tssgemv_batched_64_fortran = &
             rocblas_tssgemv_batched_64(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy, batch_count)
     end function rocblas_tssgemv_batched_64_fortran
-    
+
     ! gemv_strided_batched
     function rocblas_sgemv_strided_batched_fortran(handle, trans, m, n, alpha, A, lda, stride_A, &
                                                    x, incx, stride_x, beta, y, incy, stride_y, batch_count) &
@@ -10303,7 +10303,7 @@ contains
             rocblas_zhpr_strided_batched_64(handle, uplo, n, alpha, x, incx, stride_x, &
                                          AP, stride_AP, batch_count)
     end function rocblas_zhpr_strided_batched_64_fortran
-    
+
     ! hpr2
     function rocblas_chpr2_fortran(handle, uplo, n, alpha, &
                                    x, incx, y, incy, AP) &
@@ -14178,7 +14178,7 @@ contains
         rocblas_dspmv_strided_batched_64_fortran = &
             rocblas_dspmv_strided_batched_64(handle, uplo, n, alpha, &
                                           AP, stride_AP, x, incx, stride_x, beta, y, incy, stride_y, batch_count)
-    end function rocblas_dspmv_strided_batched_64_fortran   
+    end function rocblas_dspmv_strided_batched_64_fortran
 
     ! sbmv
     function rocblas_ssbmv_fortran(handle, uplo, n, k, alpha, A, lda, &
@@ -14277,7 +14277,7 @@ contains
             rocblas_dsbmv_64(handle, uplo, n, k, alpha, &
                           A, lda, x, incx, beta, y, incy)
     end function rocblas_dsbmv_64_fortran
-    
+
     ! sbmv_batched
     function rocblas_ssbmv_batched_fortran(handle, uplo, n, k, alpha, A, lda, &
                                            x, incx, beta, y, incy, batch_count) &
@@ -14625,8 +14625,8 @@ contains
         rocblas_zgerc_fortran = &
             rocblas_zgerc(handle, m, n, alpha, &
                           x, incx, y, incy, A, lda)
-    end function rocblas_zgerc_fortran 
-    
+    end function rocblas_zgerc_fortran
+
     ! ger 64
     function rocblas_sger_64_fortran(handle, m, n, alpha, x, incx, &
                                      y, incy, A, lda) &
@@ -14758,8 +14758,8 @@ contains
         rocblas_zgerc_64_fortran = &
             rocblas_zgerc_64(handle, m, n, alpha, &
             x, incx, y, incy, A, lda)
-    end function rocblas_zgerc_64_fortran    
-    
+    end function rocblas_zgerc_64_fortran
+
     ! ger_batched
     function rocblas_sger_batched_fortran(handle, m, n, alpha, x, incx, &
                                           y, incy, A, lda, batch_count) &
@@ -16107,7 +16107,7 @@ contains
             rocblas_dspr2_strided_batched_64(handle, uplo, n, alpha, &
                                           x, incx, stride_x, y, incy, stride_y, AP, stride_AP, batch_count)
     end function rocblas_dspr2_strided_batched_64_fortran
-    
+
     ! syr
     function rocblas_ssyr_fortran(handle, uplo, n, alpha, x, incx, A, lda) &
         bind(c, name='rocblas_ssyr_fortran')
@@ -20173,7 +20173,7 @@ contains
             rocblas_zhemm_strided_batched(handle, side, uplo, n, k, alpha, &
                                           A, lda, stride_A, B, ldb, stride_B, beta, C, ldc, stride_C, batch_count)
     end function rocblas_zhemm_strided_batched_fortran
-    
+
      ! hemm_64
     function rocblas_chemm_64_fortran(handle, side, uplo, n, k, alpha, &
                                    A, lda, B, ldb, beta, C, ldc) &
@@ -25505,7 +25505,7 @@ contains
                            y, y_type, incy, result, result_type, execution_type)
         return
     end function rocblas_dot_ex_64_fortran
-    
+
     function rocblas_dotc_ex_fortran(handle, n, x, x_type, incx, &
                                      y, y_type, incy, result, result_type, execution_type) &
         bind(c, name='rocblas_dotc_ex_fortran')

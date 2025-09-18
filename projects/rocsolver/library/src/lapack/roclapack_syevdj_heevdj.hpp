@@ -29,8 +29,8 @@
 
 #include "auxiliary/rocauxiliary_ormtr_unmtr.hpp"
 #include "auxiliary/rocauxiliary_stedcj.hpp"
+#include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
-#include "roclapack_syev_heev.hpp"
 #include "roclapack_sytrd_hetrd.hpp"
 #include "rocsolver/rocsolver.h"
 
@@ -209,8 +209,8 @@ rocblas_status rocsolver_syevdj_heevdj_template(rocblas_handle handle,
     // quick return for n = 1 (scalar case)
     if(n == 1)
     {
-        ROCSOLVER_LAUNCH_KERNEL(scalar_case<T>, gridReset, threads, 0, stream, evect, A, strideA, D,
-                                strideD, batch_count);
+        ROCSOLVER_LAUNCH_KERNEL(syev_scalar_case<T>, gridReset, threads, 0, stream, evect, A,
+                                strideA, D, strideD, batch_count);
         return rocblas_status_success;
     }
 

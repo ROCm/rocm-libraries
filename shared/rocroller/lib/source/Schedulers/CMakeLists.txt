@@ -7,5 +7,6 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/PriorityScheduler.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomScheduler.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RoundRobinScheduler.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Scheduler_component.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SequentialScheduler.cpp"
 )

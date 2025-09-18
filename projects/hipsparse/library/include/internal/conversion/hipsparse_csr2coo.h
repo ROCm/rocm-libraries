@@ -33,7 +33,7 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXcsr2coo converts the CSR array containing the row offsets, that point
-*  to the start of every row, into a COO array of row indices. All arrays are assumed 
+*  to the start of every row, into a COO array of row indices. All arrays are assumed
 *  to be allocated by the user prior to calling \p hipsparseXcsr2coo.
 *
 *  For example, given the CSR row pointer array (assuming zero index base):

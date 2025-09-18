@@ -255,5 +255,12 @@ namespace rocRoller
         {
             m_controlOp = op;
         }
+
+        std::string toString(std::vector<Register::RegisterId> const& regs)
+        {
+            std::ostringstream rv;
+            streamJoin(rv, regs, ", ");
+            return rv.str();
+        }
     }
 }

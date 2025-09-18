@@ -13,10 +13,10 @@ GlobalParameters:
   #SyncsPerBenchmark: 1
   #LibraryPrintDebug: False
   #NumElementsToValidate: 16384
-  
-  NumElementsToValidate: -1   # everything 
-  ValidationMaxToPrint: 16384 
-  
+
+  NumElementsToValidate: -1   # everything
+  ValidationMaxToPrint: 16384
+
   #ValidationPrintValids: False
   #ShortNames: False
   #MergeFiles: True
@@ -28,20 +28,20 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   #DataInitTypeA: 3
   #DataInitTypeB: 3
-  
+
   DataInitTypeA: 3
   DataInitTypeB: 3
-  DataInitTypeC: 3  # SerialIdx%4 
+  DataInitTypeC: 3  # SerialIdx%4
 
   #DataInitTypeD: 0
-  DataInitTypeBeta: 1   
+  DataInitTypeBeta: 1
   DataInitTypeAlpha: 2
- 
-  #BoundsCheck: 1 
+
+  #BoundsCheck: 1
 
   #PrintTensorA: 0x1
   #PrintTensorB: 0x1
-  #PrintTensorD: 0x3  ## both init and copy back 
+  #PrintTensorD: 0x3  ## both init and copy back
   NewClient: 2
 
 BenchmarkProblems:
@@ -59,7 +59,7 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      #Fp8NoPackUpConversion: True    # for non-zero beta 
+      #Fp8NoPackUpConversion: True    # for non-zero beta
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -81,7 +81,7 @@ BenchmarkProblems:
         #- VectorWidth: [-1]
         #- AssertSummationElementMultiple: [4]
         #- AssertFree0ElementMultiple: [4]
-        - StoreRemapVectorWidth: [0, 4]    
+        - StoreRemapVectorWidth: [0, 4]
           #- 1LDSBuffer: [0,1]
       JoinParameters:
       BenchmarkJoinParameters:
@@ -94,4 +94,3 @@ BenchmarkProblems:
             #- Exact: [ 111, 111, 1, 64 ]
           - Range : [ [99, 1, 117], [111], [1], [64] ]
           #- Exact: [ 128, 128, 1, 256 ]    # larger K to test clipping
-

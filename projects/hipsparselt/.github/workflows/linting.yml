@@ -2,12 +2,12 @@ name: Linting
 
 on:
   push:
-    branches: 
+    branches:
     - develop
     - master
     - 'docs/*'
   pull_request:
-    branches: 
+    branches:
     - develop
     - master
     - 'docs/*'

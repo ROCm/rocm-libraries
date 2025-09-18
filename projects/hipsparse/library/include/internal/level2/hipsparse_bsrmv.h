@@ -92,8 +92,8 @@ extern "C" {
 *              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, 
-*              \p blockDim, \p descr, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb,
+*              \p blockDim, \p descr, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA,
 *              \p bsrSortedColIndA, \p x, \p beta or \p y is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

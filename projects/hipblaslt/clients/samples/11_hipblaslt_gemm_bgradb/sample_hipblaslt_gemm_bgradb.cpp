@@ -130,15 +130,15 @@ void simpleGemmBgradb(hipblasLtHandle_t  handle,
     hipDataType computeTypeB = HIP_R_16F;
 
     hipblasLtMatmulDescSetAttribute(
-        matmul, 
-        HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT, 
-        &computeTypeA, 
+        matmul,
+        HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT,
+        &computeTypeA,
         sizeof(computeTypeA));
 
     hipblasLtMatmulDescSetAttribute(
-        matmul, 
-        HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT, 
-        &computeTypeB, 
+        matmul,
+        HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
+        &computeTypeB,
         sizeof(computeTypeB));
 
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -155,10 +155,10 @@ void simpleGemmBgradb(hipblasLtHandle_t  handle,
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &bias_data_type, sizeof(hipDataType)));
 
     // Allocate and the bias tensor, the bias gradient will be stored in d_bias buffer
-    
+
     void*                      d_bias;
     CHECK_HIP_ERROR(hipMalloc(&d_bias, k * sizeof(hipblasLtHalf)));
-    
+
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
         matmul, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &d_bias, sizeof(void*)));
 
@@ -212,7 +212,7 @@ void simpleGemmBgradb(hipblasLtHandle_t  handle,
                                           workspace_size,
                                           stream));
 
-   
+
 
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));

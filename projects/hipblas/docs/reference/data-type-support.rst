@@ -10,11 +10,11 @@ Data type support
 
 This topic lists the data type support for the hipBLAS library on AMD GPUs for
 different levels of BLAS operations :ref:`Level 1 <level-1>`,
-:ref:`Level 2 <level-2>`, and :ref:`Level 3 <level-3>`. 
+:ref:`Level 2 <level-2>`, and :ref:`Level 3 <level-3>`.
 
 The hipBLAS library functions are also available with ILP64 interfaces. With
 these interfaces, all ``int`` arguments are replaced by the type name
-``int64_t``. For more information on these ``_64`` functions, see the 
+``int64_t``. For more information on these ``_64`` functions, see the
 :ref:`ILP64 API` section.
 
 The icons representing different levels of support are explained in the
@@ -44,8 +44,8 @@ following table.
       - Full support
 
 
-For more information about data type support for the other ROCm libraries, see 
-:doc:`Data types and precision support page <rocm:reference/precision-support>`. 
+For more information about data type support for the other ROCm libraries, see
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
 
 .. _custom_types:
 
@@ -69,7 +69,7 @@ before including the header file ``<hipblas.h>``.
 
 There is also an option to interpret the API as using the ``hip_bfloat16`` data
 type. This is provided to avoid casting when using the ``hip_bfloat16`` data
-type. To expose the API using ``hip_bfloat16``, define 
+type. To expose the API using ``hip_bfloat16``, define
 ``HIPBLAS_USE_HIP_BFLOAT16`` before including the header file ``<hipblas.h>``.
 
 .. note::
@@ -104,7 +104,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
         :header-rows: 1
         :widths: 15, 45, 10, 10, 10, 10
 
-        * 
+        *
           - Function
           - Description
           - float16
@@ -142,7 +142,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
           - ✅
           - ✅
           - ✅
-          - ✅    
+          - ✅
 
         *
           - :ref:`NRM2 <hipblas_nrm2>`
@@ -189,9 +189,9 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
 
     .. list-table::
         :header-rows: 1
-        :widths: 15, 55, 10, 20 
+        :widths: 15, 55, 10, 20
 
-        * 
+        *
           - Function
           - Description
           - complex
@@ -219,7 +219,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
           - :ref:`Dot <hipblas_dot>`
           - Computes the dot product: :math:`result = x^T y`
           - ✅
-          - ✅      
+          - ✅
 
         *
           - :ref:`NRM2 <hipblas_nrm2>`
@@ -265,7 +265,7 @@ Level-2 functions perform matrix-vector operations.
         :header-rows: 1
         :widths: 15, 45, 10, 10, 10, 10
 
-        * 
+        *
           - Function
           - Description
           - float16
@@ -401,9 +401,9 @@ Level-2 functions perform matrix-vector operations.
 
     .. list-table::
         :header-rows: 1
-        :widths: 15, 55, 10, 20 
+        :widths: 15, 55, 10, 20
 
-        * 
+        *
           - Function
           - Description
           - complex
@@ -431,7 +431,7 @@ Level-2 functions perform matrix-vector operations.
           - :ref:`GERU and GERC <hipblas_ger>`
           - Generalized rank-1 update for unconjugated or conjugated complex numbers: :math:`A = \alpha x y^T + A`
           - ✅
-          - ✅          
+          - ✅
 
         *
           - :ref:`SBMV <hipblas_sbmv>`, :ref:`SPMV <hipblas_spmv>`
@@ -498,11 +498,11 @@ Level-2 functions perform matrix-vector operations.
           - Hermitian packed rank-1 and rank-2 update.
           - ✅
           - ✅
- 
+
 Level 3 functions - matrix-matrix operations
 --------------------------------------------
 
-Level-3 functions perform matix-matrix operations. hipBLAS calls the AMD 
+Level-3 functions perform matix-matrix operations. hipBLAS calls the AMD
 :doc:`Tensile <tensile:src/index>` and :doc:`hipBLASLt <hipblaslt:index>`
 libraries for Level-3 GEMMs (matrix matrix multiplication).
 
@@ -515,7 +515,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
         :header-rows: 1
         :widths: 15, 45, 10, 10, 10, 10
 
-        * 
+        *
           - Function
           - Description
           - float16
@@ -523,7 +523,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - float
           - double
 
-        * 
+        *
           - :ref:`GEMM <hipblas_gemm>`
           - General matrix-matrix multiplication: :math:`C = \alpha A B + \beta C`
           - ✅
@@ -531,7 +531,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYMM <hipblas_symm>`
           - Symmetric matrix-matrix multiplication: :math:`C = \alpha A B + \beta C`
           - ❌
@@ -539,7 +539,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYRK <hipblas_syrk>`, :ref:`SYR2K <hipblas_syr2k>`
           - Update symmetric matrix with one matrix product or by using two matrices.
           - ❌
@@ -547,7 +547,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYRKX <hipblas_syrkx>`
           - SYRKX adds an extra matrix multiplication step before updating the symmetric matrix.
           - ❌
@@ -555,7 +555,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRMM <hipblas_trmm>`
           - Triangular matrix-matrix multiplication.
           - ❌
@@ -563,14 +563,14 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRSM <hipblas_trsm>`
           - Triangular solve with multiple right-hand sides.
           - ❌
           - ❌
           - ✅
           - ✅
-        * 
+        *
           - :ref:`HEMM <hipblas_hemm>`
           - Hermitian matrix-matrix multiplication.
           - NA
@@ -578,7 +578,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - NA
           - NA
 
-        * 
+        *
           - :ref:`HERK <hipblas_herk>`, :ref:`HER2K <hipblas_her2k>`
           - Update Hermitian matrix with one matrix product or by using two matrices.
           - NA
@@ -586,7 +586,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - NA
           - NA
 
-        * 
+        *
           - :ref:`HERKX <hipblas_herkx>`
           - HERKX adds an extra matrix multiplication step before updating the Hermitian matrix.
           - NA
@@ -594,7 +594,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - NA
           - NA
 
-        * 
+        *
           - :ref:`TRTRI <hipblas_trtri>`
           - Triangular matrix inversion.
           - ❌
@@ -602,7 +602,7 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`DGMM <hipblas_dgmm>`
           - Diagonal matrix matrix multiplication.
           - ❌
@@ -617,72 +617,72 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
         :header-rows: 1
         :widths: 15, 55, 10, 20
 
-        * 
+        *
           - Function
           - Description
           - complex
           - double complex
 
-        * 
+        *
           - :ref:`GEMM <hipblas_gemm>`
           - General matrix-matrix multiplication: :math:`C = \alpha A B + \beta C`
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYMM <hipblas_symm>`
           - Symmetric matrix-matrix multiplication: :math:`C = \alpha A B + \beta C`
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYRK <hipblas_syrk>`, :ref:`SYR2K <hipblas_syr2k>`
           - Update symmetric matrix with one matrix product or by using two matrices.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`SYRKX <hipblas_syrkx>`
           - SYRKX adds an extra matrix multiplication step before updating the symmetric matrix.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRMM <hipblas_trmm>`
           - Triangular matrix-matrix multiplication.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRSM <hipblas_trsm>`
           - Triangular solve with multiple right-hand sides.
           - ✅
           - ✅
-        * 
+        *
           - :ref:`HEMM <hipblas_hemm>`
           - Hermitian matrix-matrix multiplication.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`HERK <hipblas_herk>`, :ref:`HER2K <hipblas_her2k>`
           - Update Hermitian matrix with one matrix product or by using two matrices.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`HERKX <hipblas_herkx>`
           - HERKX adds an extra matrix multiplication step before updating the Hermitian matrix.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`TRTRI <hipblas_trtri>`
           - Triangular matrix inversion.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`DGMM <hipblas_dgmm>`
           - Diagonal matrix matrix multiplication.
           - ✅
@@ -695,7 +695,7 @@ Extensions
 The :ref:`extension functions <hipblas_extension>` data type support is listed
 separately for every function for the different backends in the
 :ref:`rocBLAS extensions <rocblas:extension>` and
-`cuBLAS extensions <https://docs.nvidia.com/cuda/cublas/index.html#blas-like-extension>`_ 
+`cuBLAS extensions <https://docs.nvidia.com/cuda/cublas/index.html#blas-like-extension>`_
 documentation.
 
 SOLVER API
@@ -713,7 +713,7 @@ inverses, and performing matrix factorizations.
         :header-rows: 1
         :widths: 15, 45, 10, 10, 10, 10
 
-        * 
+        *
           - Function
           - Description
           - float16
@@ -721,7 +721,7 @@ inverses, and performing matrix factorizations.
           - float
           - double
 
-        * 
+        *
           - :ref:`GETRF <hipblas_getrf>`
           - Compute the LU factorization of a general matrix using partial pivoting with row interchanges.
           - ❌
@@ -729,7 +729,7 @@ inverses, and performing matrix factorizations.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`GETRS <hipblas_getrs>`
           - Solve a system of linear equations :math:`AxX=B` after performing an LU factorization using GETRF.
           - ❌
@@ -737,7 +737,7 @@ inverses, and performing matrix factorizations.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`GETRI <hipblas_getri>`
           - Compute the inverse of a matrix using its LU factorization.
           - ❌
@@ -745,7 +745,7 @@ inverses, and performing matrix factorizations.
           - ⚠️ [#getri]_
           - ⚠️ [#getri]_
 
-        * 
+        *
           - :ref:`GEQRF <hipblas_geqrf>`
           - QR factorization of a general matrix.
           - ❌
@@ -753,7 +753,7 @@ inverses, and performing matrix factorizations.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`GELS <hipblas_gels>`
           - Solve overdetermined or underdetermined linear systems using the QR factorization of a matrix.
           - ❌
@@ -768,37 +768,37 @@ inverses, and performing matrix factorizations.
         :header-rows: 1
         :widths: 15, 55, 10, 20
 
-        * 
+        *
           - Function
           - Description
           - complex
           - double complex
 
-        * 
+        *
           - :ref:`GETRF <hipblas_getrf>`
           - Compute the LU factorization of a general matrix using partial pivoting with row interchanges.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`GETRS <hipblas_getrs>`
           - Solve a system of linear equations :math:`AxX=B` after performing an LU factorization using GETRF.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`GETRI <hipblas_getri>`
           - Compute the inverse of a matrix using its LU factorization.
           - ⚠️ [#getri]_
           - ⚠️ [#getri]_
 
-        * 
+        *
           - :ref:`GEQRF <hipblas_geqrf>`
           - QR factorization of a general matrix.
           - ✅
           - ✅
 
-        * 
+        *
           - :ref:`GELS <hipblas_gels>`
           - Solve overdetermined or underdetermined linear systems using the QR factorization of a matrix.
           - ✅

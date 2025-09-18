@@ -1,0 +1,20 @@
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(hip REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/origami-targets.cmake")
+
+block(SCOPE_FOR VARIABLES)
+    if(NOT TARGET origami::origami)
+        message(FATAL_ERROR "origami::origami target is missing")
+    endif()
+    
+    get_target_property(link_libraries origami::origami INTERFACE_LINK_LIBRARIES)
+
+    if(link_libraries AND "hip::device" IN_LIST link_libraries)
+        message(FATAL_ERROR "Do not export targets with hip::device as an interface link library")
+    endif()
+endblock()
+

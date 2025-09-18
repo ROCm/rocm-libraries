@@ -250,6 +250,12 @@ inline std::map<std::string, int>
     rv["HasLDSTr"] = tryAssembler(
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
 
+    rv["HasGLTr8B64"] = tryAssembler(
+        isaVersion, assemblerPath, "global_load_tr_b64 v[0], v0, s[0:1], offset:0", isDebug);
+
+    rv["HasGLTr16B128"] = tryAssembler(
+        isaVersion, assemblerPath, "global_load_tr_b128 v[0:1], v0, s[0:1], offset:0", isDebug);
+
     rv["v_prng_b32"] = tryAssembler(isaVersion, assemblerPath, "v_prng_b32 v47, v36", isDebug);
 
     rv["HasAtomicAdd"]
@@ -321,7 +327,7 @@ inline std::map<std::string, int>
             rv["MaxVscnt"] = 63;
         }
     }
-    
+
     if(rv["SeparateLGKMcnt"])
     {
         // s_wait_dscnt accept 16 bits immediate, but only use the lowest 6 bits are used, can't use tryAssembler

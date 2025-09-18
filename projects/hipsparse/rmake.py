@@ -118,7 +118,7 @@ def config_cmd():
         # CMAKE_PREFIX_PATH set to rocm_path and HIP_PATH set BY SDK Installer
         raw_rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
         rocm_path = f'"{raw_rocm_path}"' # guard against spaces in path
-       
+
         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append( f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}" )
         toolchain = os.path.join( src_path, "toolchain-windows.cmake" )
@@ -244,4 +244,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

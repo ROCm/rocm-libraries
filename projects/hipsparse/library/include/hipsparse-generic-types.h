@@ -29,7 +29,7 @@
  *
  *  \details
  *  The hipSPARSE descriptor is an opaque structure holding information for a sparse vector. It must
- *  be initialized using hipsparseCreateSpVec() and the returned descriptor 
+ *  be initialized using hipsparseCreateSpVec() and the returned descriptor
  *  is used in hipSPARSE generic API's involving sparse vectors. It should be destroyed at the end using
  *  hipsparseDestroySpVec().
  */
@@ -43,7 +43,7 @@ typedef void* hipsparseSpVecDescr_t;
  *
  *  \details
  *  The hipSPARSE descriptor is an opaque structure holding information for a dense vector. It must
- *  be initialized using hipsparseCreateDnVec() and the returned descriptor 
+ *  be initialized using hipsparseCreateDnVec() and the returned descriptor
  *  is used in hipSPARSE generic API's involving dense vectors. It should be destroyed at the end using
  *  hipsparseDestroyDnVec().
  */
@@ -58,8 +58,8 @@ typedef void* hipsparseDnVecDescr_t;
  *  \details
  *  The hipSPARSE descriptor is an opaque structure holding information for a sparse matrix. It must
  *  be initialized using either hipsparseCreateCoo() (for COO format), hipsparseCreateCooAoS() (for COO AOS format).
- *  hipsparseCreateCsr() (for CSR format), hipsparseCreateCsc() (for CSC format) or hipsparseCreateBlockedEll() 
- *  (for Blocked ELL format). The returned descriptor is used in hipSPARSE generic API's involving sparse matrices. 
+ *  hipsparseCreateCsr() (for CSR format), hipsparseCreateCsc() (for CSC format) or hipsparseCreateBlockedEll()
+ *  (for Blocked ELL format). The returned descriptor is used in hipSPARSE generic API's involving sparse matrices.
  *  It should be destroyed at the end using hipsparseDestroySpMat().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
@@ -71,7 +71,7 @@ typedef struct hipsparseSpMatDescr_st* hipsparseSpMatDescr_t;
  *
  *  \details
  *  The hipSPARSE descriptor is an opaque structure holding information for a dense matrix. It must
- *  be initialized using hipsparseCreateDnMat() and the returned descriptor 
+ *  be initialized using hipsparseCreateDnMat() and the returned descriptor
  *  is used in hipSPARSE generic API's involving dense matrices. It should be destroyed at the end using
  *  hipsparseDestroyDnMat().
  */
@@ -84,7 +84,7 @@ typedef void* hipsparseDnMatDescr_t;
  *
  *  \details
  *  The hipSPARSE (const) descriptor is an opaque structure holding information for a sparse vector. It must
- *  be initialized using hipsparseCreateConstSpVec() and the returned descriptor 
+ *  be initialized using hipsparseCreateConstSpVec() and the returned descriptor
  *  is used in hipSPARSE generic API's involving sparse vectors. It should be destroyed at the end using
  *  hipsparseDestroySpVec().
  */
@@ -97,7 +97,7 @@ typedef void const* hipsparseConstSpVecDescr_t;
  *
  *  \details
  *  The hipSPARSE (const) descriptor is an opaque structure holding information for a dense vector. It must
- *  be initialized using hipsparseCreateConstDnVec() and the returned descriptor 
+ *  be initialized using hipsparseCreateConstDnVec() and the returned descriptor
  *  is used in hipSPARSE generic API's involving dense vectors. It should be destroyed at the end using
  *  hipsparseDestroyDnVec().
  */
@@ -110,7 +110,7 @@ typedef void const* hipsparseConstDnVecDescr_t;
  *
  *  \details
  *  The hipSPARSE (const) descriptor is an opaque structure holding information for a sparse matrix. It must
- *  be initialized using hipsparseCreateConstSpMat() and the returned descriptor 
+ *  be initialized using hipsparseCreateConstSpMat() and the returned descriptor
  *  is used in hipSPARSE generic API's involving sparse matrices. It should be destroyed at the end using
  *  hipsparseDestroySpMat().
  */
@@ -123,7 +123,7 @@ typedef struct hipsparseSpMatDescr_st const* hipsparseConstSpMatDescr_t;
  *
  *  \details
  *  The hipSPARSE (const) descriptor is an opaque structure holding information for a dense matrix. It must
- *  be initialized using hipsparseCreateConstDnMat() and the returned descriptor 
+ *  be initialized using hipsparseCreateConstDnMat() and the returned descriptor
  *  is used in hipSPARSE generic API's involving dense matrices. It should be destroyed at the end using
  *  hipsparseDestroyDnMat().
  */
@@ -142,8 +142,8 @@ struct hipsparseSpSMDescr;
  *  \brief Generic API opaque structure holding information for a SpGEMM calculations
  *
  *  \details
- *  The hipSPARSE descriptor is an opaque structure holding information that is used in hipsparseSpGEMM_workEstimation(), 
- *  hipsparseSpGEMMreuse_workEstimation(), hipsparseSpGEMMreuse_nnz(), hipsparseSpGEMM_compute(), 
+ *  The hipSPARSE descriptor is an opaque structure holding information that is used in hipsparseSpGEMM_workEstimation(),
+ *  hipsparseSpGEMMreuse_workEstimation(), hipsparseSpGEMMreuse_nnz(), hipsparseSpGEMM_compute(),
  *  hipsparseSpGEMMreuse_compute(), hipsparseSpGEMM_copy(), and hipsparseSpGEMMreuse_copy(). It must
  *  be initialized using hipsparseSpGEMM_createDescr(). It should be destroyed at the end using
  *  hipsparseSpGEMM_destroyDescr().
@@ -156,8 +156,8 @@ typedef struct hipsparseSpGEMMDescr* hipsparseSpGEMMDescr_t;
  *  \brief Generic API opaque structure holding information for a SpSV calculations
  *
  *  \details
- *  The hipSPARSE descriptor is an opaque structure holding information that is used in hipsparseSpSV_bufferSize(), 
- *  hipsparseSpSV_analysis(), and hipsparseSpSV_solve(). It must be initialized using hipsparseSpSV_createDescr(). 
+ *  The hipSPARSE descriptor is an opaque structure holding information that is used in hipsparseSpSV_bufferSize(),
+ *  hipsparseSpSV_analysis(), and hipsparseSpSV_solve(). It must be initialized using hipsparseSpSV_createDescr().
  *  It should be destroyed at the end using hipsparseSpSV_destroyDescr().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
@@ -168,8 +168,8 @@ typedef struct hipsparseSpSVDescr* hipsparseSpSVDescr_t;
  *  \brief Generic API opaque structure holding information for a SpSM calculations
  *
  *  \details
- *  The hipSPARSE descriptor is an opaque structure holding information that is used in hipsparseSpSM_bufferSize(), 
- *  hipsparseSpSM_analysis(), and hipsparseSpSM_solve(). It must be initialized using hipsparseSpSM_createDescr(). 
+ *  The hipSPARSE descriptor is an opaque structure holding information that is used in hipsparseSpSM_bufferSize(),
+ *  hipsparseSpSM_analysis(), and hipsparseSpSM_solve(). It must be initialized using hipsparseSpSM_createDescr().
  *  It should be destroyed at the end using hipsparseSpSM_destroyDescr().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)

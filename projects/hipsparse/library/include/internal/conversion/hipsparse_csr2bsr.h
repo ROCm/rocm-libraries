@@ -44,32 +44,32 @@ extern "C" {
 *    \end{bmatrix}
 *  \f]
 *
-*  stored as a sparse CSR matrix. This function computes both the BSR row pointer array as well as the total number 
-*  of non-zero blocks that results when converting the CSR matrix to the BSR format. Assuming a block dimension of 2, 
+*  stored as a sparse CSR matrix. This function computes both the BSR row pointer array as well as the total number
+*  of non-zero blocks that results when converting the CSR matrix to the BSR format. Assuming a block dimension of 2,
 *  the above matrix once converted to BSR format looks like:
 *
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c} 
-*       1 & 0 \\ 
-*       3 & 4 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 2 \\ 
-*       0 & 0 
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c} 
-*       5 & 0 \\ 
-*       1 & 2 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       6 & 7 \\ 
-*       3 & 4 
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  and the resulting BSR row pointer array and total non-zero blocks once \p hipsparseXcsr2bsrNnz has been called:
@@ -81,7 +81,7 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  In general, when converting a CSR matrix of size \p m x \p n to a BSR matrix, the resulting BSR matrix will have size 
+*  In general, when converting a CSR matrix of size \p m x \p n to a BSR matrix, the resulting BSR matrix will have size
 *  \p mb x \p nb where \p mb and \p nb equal:
 *
 *  \f[
@@ -91,37 +91,37 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  In particular, it may be the case that \p blockDim does not divide evenly into \p m and/or \p n. In these cases, the 
-*  CSR matrix is expanded in size in order to fit full BSR blocks. For example, using the original CSR matrix and block 
-*  dimension 3 instead of 2, the function \p hipsparseXcsr2bsrNnz computes the BSR row pointer array and total number of 
+*  In particular, it may be the case that \p blockDim does not divide evenly into \p m and/or \p n. In these cases, the
+*  CSR matrix is expanded in size in order to fit full BSR blocks. For example, using the original CSR matrix and block
+*  dimension 3 instead of 2, the function \p hipsparseXcsr2bsrNnz computes the BSR row pointer array and total number of
 *  non-zero blocks for the BSR matrix:
 *
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c c} 
-*       1 & 0 & 0 \\ 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c c}
+*       1 & 0 & 0 \\
 *       3 & 4 & 0 \\
 *       5 & 0 & 6
-*      \end{array} & 
-*      \begin{array}{c c c} 
-*       2 & 0 & 0 \\ 
+*      \end{array} &
+*      \begin{array}{c c c}
+*       2 & 0 & 0 \\
 *       0 & 0 & 0 \\
 *       7 & 0 & 0
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c c} 
-*       1 & 2 & 3 \\ 
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c c}
+*       1 & 2 & 3 \\
 *       0 & 0 & 0 \\
 *       0 & 0 & 0
-*      \end{array} & 
-*      \begin{array}{c c c} 
-*       4 & 0 & 0 \\ 
+*      \end{array} &
+*      \begin{array}{c c c}
+*       4 & 0 & 0 \\
 *       0 & 0 & 0 \\
 *       0 & 0 & 0
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  See hipsparseScsr2bsr() for full code example.
@@ -154,7 +154,7 @@ extern "C" {
 *  bsrNnzb     total number of nonzero elements in device or host memory.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p csrRowPtrA, \p csrColIndA, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p csrRowPtrA, \p csrColIndA,
 *              \p bsrRowPtrC or \p bsrNnzb pointer is invalid.
 */
 HIPSPARSE_EXPORT
@@ -174,9 +174,9 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *  \brief Convert a sparse CSR matrix into a sparse BSR matrix
 *
 *  \details
-*  \p hipsparseXcsr2bsr completes the conversion of a CSR matrix into a BSR matrix. 
-*  It is assumed, that \p bsrValC, \p bsrColIndC and \p bsrRowPtrC are allocated. The 
-*  allocation size for \p bsrRowPtr is computed as \p mb+1 where \p mb is the number of 
+*  \p hipsparseXcsr2bsr completes the conversion of a CSR matrix into a BSR matrix.
+*  It is assumed, that \p bsrValC, \p bsrColIndC and \p bsrRowPtrC are allocated. The
+*  allocation size for \p bsrRowPtr is computed as \p mb+1 where \p mb is the number of
 *  block rows in the BSR matrix defined as:
 *
 *  \f[
@@ -186,7 +186,7 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *  \f]
 *
 *  The allocation size for \p bsrColIndC, i.e. \p bsrNnzb, is computed using
-*  \ref hipsparseXcsr2bsrNnz() which also fills the \p bsrRowPtrC array. The allocation size 
+*  \ref hipsparseXcsr2bsrNnz() which also fills the \p bsrRowPtrC array. The allocation size
 *  for \p bsrValC is then equal to:
 *
 *  \f[
@@ -205,27 +205,27 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *
 *  The resulting BSR matrix using block dimension 2 would look like:
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c} 
-*      \begin{array}{c c} 
-*       1 & 0 \\ 
-*       3 & 4 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 2 \\ 
-*       0 & 0 
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c} 
-*       5 & 0 \\ 
-*       1 & 2 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       6 & 7 \\ 
-*       3 & 4 
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  The call to \ref hipsparseXcsr2bsrNnz results in the BSR row pointer array:
@@ -286,7 +286,7 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *  bsrColIndC   array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC,
 *              \p bsrColIndC, \p csrValA, \p csrRowPtrA or \p csrColIndA pointer is invalid.
 *
 *  \par Example
@@ -308,7 +308,7 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *    //     6 0 0 7 8
 *    int hcsrRowPtr[4] = {0, 3, 5, 8};
 *    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
+*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
 *
 *    int m         = 3;
 *    int n         = 5;
@@ -346,7 +346,7 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *    hipFree(dcsrRowPtr);
 *    hipFree(dcsrColInd);
 *    hipFree(dcsrVal);
-*   
+*
 *    hipFree(dbsrRowPtr);
 *    hipFree(dbsrColInd);
 *    hipFree(dbsrVal);

@@ -27,7 +27,7 @@ To add hipSPARSE to your code, use CMake.
 Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.
 
 .. note::
-   
+
    You must use quotes because the path contains a space.
 
 .. code-block:: shell
@@ -43,7 +43,7 @@ In your ``CMakeLists.txt`` file, use these lines:
 
 After hipSPARSE is installed, it can be used just like any other library with a C API.
 To call hipSPARSE, the ``hipsparse.h`` header file must be included in the user code.
-This means the hipSPARSE  import library and dynamic link library respectively become link-time and run-time dependencies 
+This means the hipSPARSE  import library and dynamic link library respectively become link-time and run-time dependencies
 for the user application.
 
 After the installation, you can find ``hipsparse.h`` in the HIP SDK ``\\include\\hipsparse``

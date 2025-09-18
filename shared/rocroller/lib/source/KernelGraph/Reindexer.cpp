@@ -120,6 +120,14 @@ namespace rocRoller
                 return std::make_shared<Expression::Expression>(cpy);
             }
 
+            template <Expression::CNary Expr>
+            Expression::ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression::Expression>(std::move(cpy));
+            }
+
             Expression::ExpressionPtr operator()(CommandArgumentPtr const& expr) const
             {
                 return std::make_shared<Expression::Expression>(expr);

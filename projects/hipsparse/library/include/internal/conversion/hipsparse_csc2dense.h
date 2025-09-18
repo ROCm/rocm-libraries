@@ -34,10 +34,10 @@ extern "C" {
 *  \p hipsparseXcsc2dense function converts the sparse matrix in CSC format into a dense matrix.
 *
 *  \details
-*  Given the input CSC matrix of size \p mxn, the routine writes the matrix to the dense array \p A such 
+*  Given the input CSC matrix of size \p mxn, the routine writes the matrix to the dense array \p A such
 *  that \p A has leading dimension \p ld and is column ordered. This means that \p A has size \p ldxn where
-*  \p ld>=m. All the parameters are assumed to have been pre-allocated by the user. If the input CSC matrix 
-*  has index base of one, it must be set in the \ref hipsparseMatDescr_t. See \ref hipsparseSetMatIndexBase() 
+*  \p ld>=m. All the parameters are assumed to have been pre-allocated by the user. If the input CSC matrix
+*  has index base of one, it must be set in the \ref hipsparseMatDescr_t. See \ref hipsparseSetMatIndexBase()
 *  prior to calling \p hipsparseXcsc2dense.
 *
 *  For example, consider the sparse CSC matrix:
@@ -64,7 +64,7 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  It is executed asynchronously with respect to the host and may return control to the application 
+*  It is executed asynchronously with respect to the host and may return control to the application
 *  on the host before the entire result is ready.
 *
 *  @param[in]
@@ -74,7 +74,7 @@ extern "C" {
 *  @param[in]
 *  n           number of columns of the dense matrix \p A.
 *  @param[in]
-*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also 
+*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
 *              any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  cscVal      array of nnz ( = \p cscColPtr[n] - \p cscColPtr[0] ) nonzero elements of matrix \p A.
@@ -88,7 +88,7 @@ extern "C" {
 *  ld          leading dimension of dense array \p A.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p cscVal \p cscColPtr 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p cscVal \p cscColPtr
 *              or \p cscRowInd pointer is invalid.
 */
 /**@{*/

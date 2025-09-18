@@ -48,8 +48,8 @@ namespace rocRoller
 
             using Base = Cost;
 
-            static const std::string Basename;
-            static const std::string Name;
+            static const std::string        Basename;
+            inline static const std::string Name = "UniformCost";
 
             /**
              * Returns true if `CostFunction` is Uniform

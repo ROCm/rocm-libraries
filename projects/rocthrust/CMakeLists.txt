@@ -60,6 +60,7 @@ option(BUILD_EXAMPLE "Build example" OFF)
 option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
+cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 
 check_language(HIP)
@@ -170,7 +171,7 @@ if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
     "THRUST_HOST_SYSTEM must be one of ${THRUST_HOST_SYSTEM_OPTIONS}"
   )
 endif ()
-  
+
 set(COMPILE_OPTIONS -Wall -Wextra)
 if(NOT DISABLE_WERROR)
   list(APPEND COMPILE_OPTIONS -Werror)
@@ -184,7 +185,7 @@ if (WIN32)
   add_compile_options(-xhip)
   add_compile_definitions(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
 endif()
-  
+
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
   list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
@@ -194,10 +195,10 @@ endif()
 # Setup VERSION
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
-  
+
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
-  
+
 if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
@@ -205,14 +206,25 @@ endif()
 if(CODE_COVERAGE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
 endif()
-  
+
 # Tests
+if(BUILD_TEST AND USE_SYSTEM_LIB)
+  find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+  if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
+    message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+  endif()
+  find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
+  if (NOT ${rocthrust_VERSION} VERSION_EQUAL ${VERSION_STRING})
+    message(WARNING "The installed rocthrust version, ${rocthrust_VERSION}, does not match project version ${VERSION_STRING}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+  endif()
+endif()
+
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_client_component(tests)
   if (ENABLE_UPSTREAM_TESTS)
     enable_testing()
   endif()
-  
+
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32 AND BUILD_TEST)
@@ -260,7 +272,7 @@ rocm_create_package(
   MAINTAINER "rocthrust-maintainer@amd.com"
   HEADER_ONLY
 )
-  
+
 # Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()

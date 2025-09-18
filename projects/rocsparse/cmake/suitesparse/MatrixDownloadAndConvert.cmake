@@ -84,7 +84,7 @@ foreach(i RANGE 0 ${len1})
         else()
             message(STATUS "${mat} success.")
         endif()
-        
+
         file(REMOVE_RECURSE ${CMAKE_MATRICES_DIR}/${mat}.tar.gz ${CMAKE_MATRICES_DIR}/${mat} ${CMAKE_MATRICES_DIR}/${mat}.mtx)
     endif()
 endforeach()

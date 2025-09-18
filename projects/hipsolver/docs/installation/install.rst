@@ -41,7 +41,6 @@ Here are some typical examples of using the script:
 
 *  ``./install.sh -id``: Build the library and dependencies and install them (the ``-d`` flag only needs to be passed once on a system).
 *  ``./install.sh -ic``: Build library and clients (tests, benchmarks, and samples) and install them.
-*  ``./install.sh --cuda``: Build the library on a NVIDIA CUDA-enabled machine, with CUDA cuSOLVER as the backend.
 
 To list more options, use the ``-h`` (help) option of the install script.
 
@@ -71,10 +70,6 @@ which is the default location.
 
 Library dependencies
 ---------------------
-
-The hipSOLVER library has two separate sets of dependencies, depending on the backend being used.
-
-The NVIDIA CUDA backend has a dependency on cuSOLVER.
 
 The ROCm (rocSOLVER) backend has the following dependencies:
 
