@@ -23,7 +23,6 @@
  * ************************************************************************ */
 
 #include "test.hpp"
-
 #include "testing_sptrsm_coo.hpp"
 
 TEST_ROUTINE_WITH_CONFIG(sptrsm_coo,
@@ -38,7 +37,7 @@ TEST_ROUTINE_WITH_CONFIG(sptrsm_coo,
                          arg.diag,
                          arg.uplo,
                          arg.sptrsm_alg,
-			 arg.orderB,
-			 arg.orderC,
+                         arg.orderB,
+                         arg.orderC,
                          arg.matrix,
                          arg.graph_test);
