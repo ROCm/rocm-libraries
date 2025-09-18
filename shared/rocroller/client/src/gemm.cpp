@@ -351,30 +351,23 @@ namespace rocRoller::Client::GEMMClient
         result.runParams       = runParams;
         result.benchmarkParams = benchmarkParams;
 
-        auto spanA = rotatingA.next();
-        auto spanB = rotatingB.next();
-        auto spanC = rotatingC.next();
-
         // Benchmark runs
         for(int outer = 0; outer < benchmarkParams.numOuter; ++outer)
         {
             // Warmup runs
             for(int i = 0; i < benchmarkParams.numWarmUp; ++i)
             {
-                commandArgs.setArgument(aTag,
-                                        ArgumentType::Buffer,
-                                        static_cast<int>(spanA.size() * sizeof(PackedTypeA)),
-                                        reinterpret_cast<unsigned char*>(spanA.data()));
+                auto spanA = rotatingA.next();
+                auto spanB = rotatingB.next();
+                auto spanC = rotatingC.next();
+                commandArgs.setArgument(
+                    aTag, ArgumentType::Value, static_cast<int>(spanA.size()), spanA.data());
 
-                commandArgs.setArgument(bTag,
-                                        ArgumentType::Buffer,
-                                        static_cast<int>(spanB.size() * sizeof(PackedTypeB)),
-                                        reinterpret_cast<unsigned char*>(spanB.data()));
+                commandArgs.setArgument(
+                    bTag, ArgumentType::Value, static_cast<int>(spanB.size()), spanB.data());
 
-                commandArgs.setArgument(cTag,
-                                        ArgumentType::Buffer,
-                                        static_cast<int>(spanC.size() * sizeof(C)),
-                                        reinterpret_cast<unsigned char*>(spanC.data()));
+                commandArgs.setArgument(
+                    cTag, ArgumentType::Value, static_cast<int>(spanC.size()), spanC.data());
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs);
             }
@@ -382,20 +375,14 @@ namespace rocRoller::Client::GEMMClient
             HIP_TIMER(t_kernel, "GEMM", benchmarkParams.numInner);
             for(int inner = 0; inner < benchmarkParams.numInner; ++inner)
             {
-                commandArgs.setArgument(aTag,
-                                        ArgumentType::Buffer,
-                                        static_cast<int>(spanA.size() * sizeof(PackedTypeA)),
-                                        reinterpret_cast<unsigned char*>(spanA.data()));
+                commandArgs.setArgument(
+                    aTag, ArgumentType::Value, static_cast<int>(spanA.size()), spanA.data());
 
-                commandArgs.setArgument(bTag,
-                                        ArgumentType::Buffer,
-                                        static_cast<int>(spanB.size() * sizeof(PackedTypeB)),
-                                        reinterpret_cast<unsigned char*>(spanB.data()));
+                commandArgs.setArgument(
+                    bTag, ArgumentType::Value, static_cast<int>(spanB.size()), spanB.data());
 
-                commandArgs.setArgument(cTag,
-                                        ArgumentType::Buffer,
-                                        static_cast<int>(spanC.size() * sizeof(C)),
-                                        reinterpret_cast<unsigned char*>(spanC.data()));
+                commandArgs.setArgument(
+                    cTag, ArgumentType::Value, static_cast<int>(spanC.size()), spanC.data());
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
