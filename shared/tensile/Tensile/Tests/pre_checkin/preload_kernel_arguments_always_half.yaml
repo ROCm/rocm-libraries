@@ -3,7 +3,8 @@ TestParameters:
           skip-gfx1010, skip-gfx1011, skip-gfx1012,
           skip-gfx1030, skip-gfx1031, skip-gfx1032,
           skip-gfx1034, skip-gfx1035, skip-gfx1100,
-          skip-gfx1101, skip-gfx1102, skip-gfx1151]
+          skip-gfx1101, skip-gfx1102,
+          skip-gfx1150, skip-gfx1151]
 
 GlobalParameters:
   MinimumRequiredVersion: 4.2.0

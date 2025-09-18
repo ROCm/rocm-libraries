@@ -49,6 +49,13 @@ rocBLAS documentation is available at
 
 * Deprecated the use of negative indices to indicate the default solution is being used for `gemm_ex` with `rocblas_gemm_algo_solution_index`
 
+## rocBLAS 4.4.2 for ROCm 6.4.3
+
+### Added
+
+* gfx1150 support
+* gfx1151 yaml files
+
 ## rocBLAS 4.4.1 for ROCm 6.4.2
 
 ### Resolved issues
