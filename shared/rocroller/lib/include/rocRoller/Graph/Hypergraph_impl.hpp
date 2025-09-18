@@ -519,9 +519,9 @@ namespace rocRoller
             if(getElementType(parent) == ElementType::Node)
             {
                 std::set<int> visited;
-                for(auto const& edgeIndex : getNeighbours<Direction::Downstream>(parent))
+                for(auto const edgeIndex : getNeighbours<Direction::Downstream>(parent))
                 {
-                    for(auto const& neighbour : getNeighbours<Direction::Downstream>(edgeIndex))
+                    for(auto const neighbour : getNeighbours<Direction::Downstream>(edgeIndex))
                     {
                         if(!visited.contains(neighbour))
                         {
@@ -543,9 +543,9 @@ namespace rocRoller
             if(getElementType(child) == ElementType::Node)
             {
                 std::set<int> visited;
-                for(auto const& edgeIndex : getNeighbours<Direction::Upstream>(child))
+                for(auto const edgeIndex : getNeighbours<Direction::Upstream>(child))
                 {
-                    for(auto const& neighbour : getNeighbours<Direction::Upstream>(edgeIndex))
+                    for(auto const neighbour : getNeighbours<Direction::Upstream>(edgeIndex))
                     {
                         if(!visited.contains(neighbour))
                         {
@@ -887,20 +887,22 @@ namespace rocRoller
         {
             if constexpr(Dir == Direction::Downstream)
             {
-                for(auto const& i : m_incidenceBySrc | std::views::filter([element](auto const& i) {
-                                        return i.src == element;
-                                    }))
+                for(auto const neighbour :
+                    m_incidenceBySrc | std::views::filter([element](auto const& i) {
+                        return i.src == element;
+                    }) | std::views::transform([](auto const& i) { return i.dst; }))
                 {
-                    co_yield i.dst;
+                    co_yield neighbour;
                 }
             }
             else
             {
-                for(auto const& i : m_incidenceByDst | std::views::filter([element](auto const& i) {
-                                        return i.dst == element;
-                                    }))
+                for(auto const neighbour :
+                    m_incidenceByDst | std::views::filter([element](auto const& i) {
+                        return i.dst == element;
+                    }) | std::views::transform([](auto const& i) { return i.src; }))
                 {
-                    co_yield i.src;
+                    co_yield neighbour;
                 }
             }
         }

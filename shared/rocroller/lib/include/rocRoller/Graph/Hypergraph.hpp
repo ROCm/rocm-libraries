@@ -87,15 +87,8 @@ namespace rocRoller
             {
                 bool operator()(const HypergraphIncident& a, const HypergraphIncident& b) const
                 {
-                    if(a.src != b.src)
-                    {
-                        return a.src < b.src;
-                    }
-                    if(a.edgeOrder != b.edgeOrder)
-                    {
-                        return a.edgeOrder < b.edgeOrder;
-                    }
-                    return a.dst < b.dst;
+                    return std::tie(a.src, a.edgeOrder, a.dst)
+                           < std::tie(b.src, b.edgeOrder, b.dst);
                 }
             };
 
@@ -103,15 +96,8 @@ namespace rocRoller
             {
                 bool operator()(const HypergraphIncident& a, const HypergraphIncident& b) const
                 {
-                    if(a.dst != b.dst)
-                    {
-                        return a.dst < b.dst;
-                    }
-                    if(a.edgeOrder != b.edgeOrder)
-                    {
-                        return a.edgeOrder < b.edgeOrder;
-                    }
-                    return a.src < b.src;
+                    return std::tie(a.dst, a.edgeOrder, a.src)
+                           < std::tie(b.dst, b.edgeOrder, b.src);
                 }
             };
         };
