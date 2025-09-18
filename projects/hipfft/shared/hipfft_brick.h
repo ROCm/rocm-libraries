@@ -87,20 +87,28 @@ static void set_bricks(const std::vector<size_t>& length,
 {
     const size_t dim = length.size();
 
-    for(size_t i = 0; i < bricks.size(); ++i)
+    for(size_t idx = 0; idx < bricks.size(); ++idx)
     {
-        auto& brick = bricks[i];
+        auto& brick = bricks[idx];
 
         // lower idx starts at origin, upper is one-past-the-end
         brick.field_lower.resize(dim);
+        brick.field_upper.resize(dim);
+        
         std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
-        brick.field_upper = length;
+
+        // All of the remainders get put on the low-index bricks.
+        brick.field_lower[split_dim] = length[split_dim] / bricks.size() * idx
+            + std::min(idx, length[split_dim] % bricks.size());
 
         // length of the brick along the split dimension
-        size_t split_len             = length[split_dim] / bricks.size();
-        brick.field_lower[split_dim] = split_len * i;
-        if(i != bricks.size() - 1)
+        size_t split_len = length[split_dim] / bricks.size()
+            + (idx < length[split_dim] % bricks.size() ? 1 : 0);
+
+        brick.field_upper = length;        
+        if(idx != bricks.size() - 1)
             brick.field_upper[split_dim] = brick.field_lower[split_dim] + split_len;
+        
         brick.set_contiguous_stride();
 
         // work out how big a buffer we need to allocate
@@ -126,12 +134,10 @@ static void set_io_bricks(const std::vector<size_t>& inLength,
     std::vector<size_t> outLengthWithBatch = outLength;
     outLengthWithBatch.push_back(batch);
 
-    // for batched FFT, split input on batch, otherwise split input
+    // For batched FFT, split input on batch, otherwise split input
     // on fastest FFT dim and output on slowest FFT dim
-    const size_t in_split_dim
-        = batch > 1 ? inLengthWithBatch.size() - 1 : inLengthWithBatch.size() - 2;
-    const size_t out_split_dim
-        = batch > 1 ? outLengthWithBatch.size() - 1 : outLengthWithBatch.size() - 2;
+    const size_t in_split_dim   = inLengthWithBatch.size() - (batch > 1 ? 1 : 2);
+    const size_t out_split_dim  = outLengthWithBatch.size() - (batch > 1 ? 1 : 2);
 
     set_bricks(inLengthWithBatch, inBricks, in_split_dim);
     set_bricks(outLengthWithBatch, outBricks, out_split_dim);
