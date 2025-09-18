@@ -123,7 +123,7 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         bool Hypergraph<Node, Edge, Hyper>::exists(int index) const
         {
-            return m_elements.count(index) == 1;
+            return m_elements.contains(index);
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -236,9 +236,10 @@ namespace rocRoller
             for(int src : inputs)
             {
                 auto connectedIncidents
-                    = m_incidence | std::views::filter([elementType, index, src](auto const& i) {
-                          return elementType == ElementType::Edge ? i.dst == index : i.src == src;
-                      });
+                    = m_incidenceBySrc
+                      | std::views::filter([elementType, index, src](auto const& i) {
+                            return elementType == ElementType::Edge ? i.dst == index : i.src == src;
+                        });
 
                 int incidentOrder = 0;
                 if(!std::ranges::empty(connectedIncidents))
@@ -263,15 +264,17 @@ namespace rocRoller
                                 ShowValue(src));
                 }
 
-                m_incidence.insert({src, index, incidentOrder});
+                m_incidenceBySrc.insert({src, index, incidentOrder});
+                m_incidenceByDst.insert({src, index, incidentOrder});
             }
 
             for(int dst : outputs)
             {
                 auto connectedIncidents
-                    = m_incidence | std::views::filter([elementType, index, dst](auto const& i) {
-                          return elementType == ElementType::Edge ? i.src == index : i.dst == dst;
-                      });
+                    = m_incidenceBySrc
+                      | std::views::filter([elementType, index, dst](auto const& i) {
+                            return elementType == ElementType::Edge ? i.src == index : i.dst == dst;
+                        });
 
                 int incidentOrder = 0;
                 if(!std::ranges::empty(connectedIncidents))
@@ -296,7 +299,8 @@ namespace rocRoller
                                 ShowValue(dst));
                 }
 
-                m_incidence.insert({index, dst, incidentOrder});
+                m_incidenceBySrc.insert({index, dst, incidentOrder});
+                m_incidenceByDst.insert({index, dst, incidentOrder});
             }
         }
 
@@ -307,7 +311,9 @@ namespace rocRoller
 
             clearCache(GraphModification::DeleteElement);
 
-            std::erase_if(m_incidence,
+            std::erase_if(m_incidenceBySrc,
+                          [index](auto const& i) { return i.src == index || i.dst == index; });
+            std::erase_if(m_incidenceByDst,
                           [index](auto const& i) { return i.src == index || i.dst == index; });
 
             m_elements.erase(index);
@@ -336,10 +342,8 @@ namespace rocRoller
                 AssertFatal(getElementType(cIdx) == ElementType::Node, "Requires node handles");
             }
 
-            auto outgoing_edges
-                = getNeighbours<Graph::Direction::Downstream>(inputs[0]).template to<std::vector>();
             auto match = false;
-            for(auto e : outgoing_edges)
+            for(auto e : getNeighbours<Graph::Direction::Downstream>(inputs[0]))
             {
                 auto elem = getElement(e);
                 if(!edgePredicate(std::get<Edge>(elem)))
@@ -403,7 +407,7 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         size_t Hypergraph<Node, Edge, Hyper>::getIncidenceSize() const
         {
-            return m_incidence.size();
+            return m_incidenceBySrc.size();
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -465,17 +469,14 @@ namespace rocRoller
             rv.element = m_elements.at(index);
 
             {
-                std::set<Incident, Incident::byDst> tmp;
-                std::ranges::copy_if(m_incidence,
-                                     std::inserter(tmp, tmp.begin()),
-                                     [index](auto const& i) { return i.dst == index; });
-
-                std::ranges::copy(tmp | std::views::transform([](auto const& i) { return i.src; }),
+                std::ranges::copy(m_incidenceByDst | std::views::filter([index](auto const& i) {
+                                      return i.dst == index;
+                                  }) | std::views::transform([](auto const& i) { return i.src; }),
                                   std::back_inserter(rv.incoming));
             }
 
             {
-                std::ranges::copy(m_incidence | std::views::filter([index](auto const& i) {
+                std::ranges::copy(m_incidenceBySrc | std::views::filter([index](auto const& i) {
                                       return i.src == index;
                                   }) | std::views::transform([](auto const& i) { return i.dst; }),
                                   std::back_inserter(rv.outgoing));
@@ -492,9 +493,9 @@ namespace rocRoller
             for(auto const& pair : m_elements)
             {
                 int index = pair.first;
-                if(!std::any_of(m_incidence.begin(), m_incidence.end(), [index](auto const& i) {
-                       return i.dst == index;
-                   }))
+                if(std::none_of(m_incidenceByDst.begin(),
+                                m_incidenceByDst.end(),
+                                [index](auto const& i) { return i.dst == index; }))
                     co_yield index;
             }
         }
@@ -505,9 +506,9 @@ namespace rocRoller
             for(auto const& pair : m_elements)
             {
                 int index = pair.first;
-                if(!std::any_of(m_incidence.begin(), m_incidence.end(), [index](auto const& i) {
-                       return i.src == index;
-                   }))
+                if(std::none_of(m_incidenceBySrc.begin(),
+                                m_incidenceBySrc.end(),
+                                [index](auto const& i) { return i.src == index; }))
                     co_yield index;
             }
         }
@@ -520,8 +521,7 @@ namespace rocRoller
                 std::set<int> visited;
                 for(auto const& edgeIndex : getNeighbours<Direction::Downstream>(parent))
                 {
-                    auto neighbours = getNeighbours<Direction::Downstream>(edgeIndex);
-                    for(auto const& neighbour : neighbours)
+                    for(auto const& neighbour : getNeighbours<Direction::Downstream>(edgeIndex))
                     {
                         if(!visited.contains(neighbour))
                         {
@@ -545,8 +545,7 @@ namespace rocRoller
                 std::set<int> visited;
                 for(auto const& edgeIndex : getNeighbours<Direction::Upstream>(child))
                 {
-                    auto neighbours = getNeighbours<Direction::Upstream>(edgeIndex);
-                    for(auto const& neighbour : neighbours)
+                    for(auto const& neighbour : getNeighbours<Direction::Upstream>(edgeIndex))
                     {
                         if(!visited.contains(neighbour))
                         {
@@ -685,7 +684,7 @@ namespace rocRoller
                 auto i    = toExplore.front();
                 auto node = i.dst;
                 toExplore.pop_front();
-                if(visitedNodes.count(node) > 0)
+                if(visitedNodes.contains(node))
                     continue;
 
                 visitedNodes.insert(node);
@@ -693,7 +692,7 @@ namespace rocRoller
 
                 noted.insert(i);
 
-                for(auto const& candidate : m_incidence)
+                for(auto const& candidate : m_incidenceBySrc)
                 {
                     if(node == candidate.src && !noted.contains(candidate))
                     {
@@ -721,7 +720,7 @@ namespace rocRoller
                 auto i    = toExplore.front();
                 auto node = i.src;
                 toExplore.pop_front();
-                if(visitedNodes.count(node) > 0)
+                if(visitedNodes.contains(node))
                     continue;
 
                 visitedNodes.insert(node);
@@ -729,7 +728,7 @@ namespace rocRoller
 
                 noted.insert(i);
 
-                for(auto const& candidate : m_incidence)
+                for(auto const& candidate : m_incidenceByDst)
                 {
                     if(node == candidate.dst && !noted.contains(candidate))
                     {
@@ -745,7 +744,7 @@ namespace rocRoller
         Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(
             int start, std::unordered_set<int>& visitedNodes) const
         {
-            if(visitedNodes.count(start))
+            if(visitedNodes.contains(start))
                 co_return;
 
             visitedNodes.insert(start);
@@ -763,7 +762,7 @@ namespace rocRoller
         Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(
             int start, Predicate edgePredicate, std::unordered_set<int>& visitedElements) const
         {
-            if(visitedElements.count(start))
+            if(visitedElements.contains(start))
                 co_return;
 
             visitedElements.insert(start);
@@ -888,7 +887,7 @@ namespace rocRoller
         {
             if constexpr(Dir == Direction::Downstream)
             {
-                for(auto const& i : m_incidence | std::views::filter([element](auto const& i) {
+                for(auto const& i : m_incidenceBySrc | std::views::filter([element](auto const& i) {
                                         return i.src == element;
                                     }))
                 {
@@ -897,13 +896,9 @@ namespace rocRoller
             }
             else
             {
-                std::set<Incident, Incident::byDst> rv;
-                std::copy_if(m_incidence.begin(),
-                             m_incidence.end(),
-                             std::inserter(rv, rv.begin()),
-                             [element](auto const& i) { return i.dst == element; });
-
-                for(auto const& i : rv)
+                for(auto const& i : m_incidenceByDst | std::views::filter([element](auto const& i) {
+                                        return i.dst == element;
+                                    }))
                 {
                     co_yield i.src;
                 }
@@ -965,7 +960,7 @@ namespace rocRoller
                 msg << "];" << std::endl;
             }
 
-            for(auto const& incident : m_incidence)
+            for(auto const& incident : m_incidenceBySrc)
             {
                 msg << '"' << prefix << incident.src << "\" -> \"" << prefix << incident.dst << '"'
                     << std::endl;
@@ -1267,14 +1262,15 @@ namespace rocRoller
         {
             static_assert(!Hyper, "findEdge not supported for hypergraphs.");
 
-            for(auto const& candidate : m_incidence)
+            for(auto const& candidate : m_incidenceBySrc)
             {
                 auto theEdge = candidate.src;
                 if(candidate.dst == head
-                   && std::any_of(
-                       m_incidence.begin(), m_incidence.end(), [theEdge, tail](auto const& i) {
-                           return i.src == tail && i.dst == theEdge;
-                       }))
+                   && std::any_of(m_incidenceBySrc.begin(),
+                                  m_incidenceBySrc.end(),
+                                  [theEdge, tail](auto const& i) {
+                                      return i.src == tail && i.dst == theEdge;
+                                  }))
                     return theEdge;
             }
 

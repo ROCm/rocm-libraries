@@ -131,9 +131,10 @@ namespace rocRoller
 
                 if(iot::outputting(io))
                 {
-                    incidence.reserve(graph.m_incidence.size());
-                    std::copy(
-                        graph.m_incidence.begin(), graph.m_incidence.end(), std::back_insert_iterator(incidence));
+                    incidence.reserve(graph.m_incidenceBySrc.size());
+                    std::copy(graph.m_incidenceBySrc.begin(),
+                              graph.m_incidenceBySrc.end(),
+                              std::back_insert_iterator(incidence));
                 }
 
                 iot::mapRequired(io, "incidence", incidence);
@@ -141,7 +142,7 @@ namespace rocRoller
                 if(!iot::outputting(io))
                 {
                     for(auto& i : incidence)
-                        graph.m_incidence.insert(std::move(i));
+                        graph.m_incidenceBySrc.insert(std::move(i));
                 }
             }
 

@@ -467,7 +467,8 @@ namespace rocRoller
             // TODO: May need to replace with multi_index for in-place rewriting.
             std::map<int, Element> m_elements;
 
-            std::set<HypergraphIncident, HypergraphIncident::bySrc> m_incidence;
+            std::set<HypergraphIncident, HypergraphIncident::bySrc> m_incidenceBySrc;
+            std::set<HypergraphIncident, HypergraphIncident::byDst> m_incidenceByDst;
 
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
