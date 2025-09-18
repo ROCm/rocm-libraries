@@ -44,9 +44,9 @@ namespace rocRoller
         {
             int device;
 
-            int numWarmUp;
-            int numOuter;
-            int numInner;
+            int    numWarmUp;
+            int    numOuter;
+            int    numInner;
             size_t rotatingBuffSize;
 
             bool check;
