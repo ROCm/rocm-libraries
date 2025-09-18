@@ -2466,7 +2466,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
     printWarning("Did not detect SupportedISA: %s; cannot benchmark assembly kernels." % globalParameters["SupportedISA"])
     globalParameters["CurrentISA"] = (9,0,6)
     printWarning("No detected ISA so using (gfx906) as bootstrap ISA")
-  isasWithDisabledHWMonitor = ((9,4,2), (9,5,0), (11,0,0), (11,0,1), (11,0,2), (11,0,3), (12,0,0), (12,0,1))
+  isasWithDisabledHWMonitor = ((9,4,2), (9,5,0), (11,0,0), (11,0,1), (11,0,2), (11,0,3), (11,5,0), (11,5,1), (12,0,0), (12,0,1))
   if globalParameters["CurrentISA"] in isasWithDisabledHWMonitor:
     isaString = ', '.join(map(gfxName, isasWithDisabledHWMonitor))
     printWarning(f"HardwareMonitor currently disabled for {isaString}")

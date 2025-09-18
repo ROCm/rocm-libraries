@@ -268,6 +268,7 @@ def hasCustomSchedule(kernel):
     GRVWA, GRVWB = kernel["GlobalReadVectorWidthA"], kernel["GlobalReadVectorWidthB"]
     LRVW = kernel["LocalReadVectorWidth"]
     MI = kernel["MatrixInstruction"]
+    MIWG = kernel["MIWaveGroup"]
     useLDSTr = kernel["LDSTrInst"]
 
     is256x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 256, 64, 2, 1, True]
@@ -284,7 +285,7 @@ def hasCustomSchedule(kernel):
     isTN = transA == True and transB == False
 
     # Custom main loop scheduling for 256x256x64 16bit
-    if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1]:
+    if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
 
         kernel["MfmaInitCVgprs"] = True
 
@@ -419,7 +420,7 @@ def hasCustomSchedule(kernel):
         numMfma = 128
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode)
         return True, opt1
-    elif is256x256x128DTL and is8bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [16, 16, 16]) and MI == [16,16,128,1]:
+    elif is256x256x128DTL and is8bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [16, 16, 16]) and MI == [16,16,128,1] and MIWG == [2,2]:
 
         kernel["MfmaInitCVgprs"] = True
 
@@ -461,7 +462,7 @@ def hasCustomSchedule(kernel):
                        36,37,38,39, 44,45,46,47, 52,53,54,55, 60,61,62,63]
         opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, mfmaReorder)
         return True, opt1
-    elif is192x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1]:
+    elif is192x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
 
         kernel["MfmaInitCVgprs"] = True
 

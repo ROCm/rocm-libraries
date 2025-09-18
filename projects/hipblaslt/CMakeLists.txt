@@ -114,10 +114,15 @@ else()
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
+    if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+        set(CMAKE_Fortran_COMPILER  "gfortran")
+    endif()
     enable_language(Fortran)
+
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
     endif()
+
     # There is an implicit find_package(BLAS) when finding lapack
     find_package(LAPACK REQUIRED)
 endif()
@@ -262,6 +267,7 @@ if(HIPBLASLT_ENABLE_HOST)
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include"
     )
 
     set_target_properties(hipblaslt
