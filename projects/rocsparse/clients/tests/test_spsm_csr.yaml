@@ -1,0 +1,444 @@
+# ########################################################################
+# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &M_N_range_quick
+    - { M:  50, N:  50 }
+    - { M: 124, N: 124 }
+
+  - &M_N_range_checkin
+    - { M:   0, N:   0 }
+    - { M:   1, N:   1 }
+    - { M:   2, N:   2 }
+    - { M:   8, N:   8 }
+
+  - &M_N_range_checkin_1
+    - { M:  79, N:  79 }
+    - { M: 152, N: 152 }
+
+  - &M_N_range_nightly
+    - { M:  9381, N:  9381 }
+    - { M: 37017, N: 37017 }
+
+  - &alpha_range_quick
+    - { alpha:   1.0, alphai: -0.2 }
+    - { alpha:  -0.5, alphai:  0.1 }
+
+  - &alpha_range_checkin
+    - { alpha:   2.0, alphai:  0.0 }
+    - { alpha:   3.0, alphai: -1.0 }
+
+  - &alpha_range_nightly
+    - { alpha:   0.0,  alphai:  0.05 }
+    - { alpha:  -0.02, alphai: -0.1 }
+
+  - &alpha_range_nightly_one
+    - { alpha:   1.0,  alphai:  0.0 }
+
+  - &alpha_range_stress
+    - { alpha:   1.0, alphai:  0.0}
+
+Tests:
+- name: spsm_csr
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *double_only_precisions
+  M_N: *M_N_range_checkin
+  K: [0, 1]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_row, rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: spsm_csr_bad_arg
+  category: pre_checkin
+  function: spsm_csr_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: spsm_csr
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M_N: *M_N_range_checkin
+  K: [0, 1, 2, 8]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [4]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_row, rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper, rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: spsm_csr
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M_N: *M_N_range_checkin_1
+  K: [7, 16]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: spsm_csr
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M_N: *M_N_range_checkin_1
+  K: [32,96, 244, 764]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [4]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: spsm_csr_file
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  K: [141, 875]
+  ld_multiplier_B: [3]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos5,
+             nos7,
+             mplate]
+
+- name: spsm_csr_file
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  K: [141]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron3]
+
+- name: spsm_csr_file
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  K: [875]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron3]
+  skip_hardware: gfx1151
+  req_memory: 14
+
+- name: spsm_csr_file
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [2, 4]
+  ld_multiplier_B: [3]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10, mc2depi, amazon0312]
+
+- name: spsm_csr
+  category: quick
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  K: [65, 153, 280]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: spsm_csr_file
+  category: quick
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: [1, 76]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6,
+             scircuit]
+
+- name: spsm_csr_file
+  category: quick
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  K: [89]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [3]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+
+- name: spsm_csr
+  category: nightly
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_nightly
+  K: [32, 135]
+  ld_multiplier_B: [3]
+  ld_multiplier_C: [3]
+  alpha_alphai: *alpha_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: spsm_csr_file
+  category: nightly
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [16, 57]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bmwcra_1,
+             amazon0312]
+
+- name: spsm_csr_file
+  category: nightly
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: 1
+  K: [16, 57]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc]
+
+#
+# in test definition above
+# Too sensitive to roundoff errors when normalized, subject to investigation.
+# shipsec1
+#
+
+- name: spsm_csr_file
+  category: nightly
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: [3]
+  ld_multiplier_B: [3]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4, ASIC_320k]
+
+- name: spsm_csr_graph_test
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  K: [65, 153, 280]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+- name: spsm_csr_file
+  category: stress
+  function: spsm_csr
+  hardware: [gfx90a]
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [2]
+  ld_multiplier_B: [6000]
+  ld_multiplier_C: [6000]
+  alpha_alphai: *alpha_range_stress
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit,
+             sme3Dc,
+             shipsec1,
+             bmwcra_1]
+
+- name: spsm_csr
+  category: quick
+  function: spsm_csr_extra

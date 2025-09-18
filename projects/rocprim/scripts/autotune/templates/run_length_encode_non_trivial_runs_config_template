@@ -1,0 +1,28 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_RUN_LENGTH_ENCODE_NON_TRIVIAL_RUNS_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+non_trivial_runs_config<
+    {{ measurement['cfg']['bs'] }},
+    {{ measurement['cfg']['ipt'] }},
+    ::rocprim::{{ measurement['cfg']['load_method'] }},
+    ::rocprim::block_scan_algorithm::using_warp_scan> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, typename key_type, typename enable = void>
+struct default_non_trivial_runs_config : default_non_trivial_runs_config_base<key_type>::type
+{};
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>({{ benchmark_of_architecture.name }}),
+    key_type,
+    {{ fallback_selection_criteria }}> :
+{%- endmacro %}

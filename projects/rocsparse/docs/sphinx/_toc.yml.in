@@ -1,0 +1,57 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+
+- caption: Install
+  entries:
+  - file: install/Linux_Install_Guide
+    title: Linux installation guide
+  - file: install/Windows_Install_Guide
+    title: Windows installation guide
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/rocsparse-design
+    title: rocSPARSE design
+
+- caption: How to
+  entries:
+  - file: how-to/using-rocsparse
+    title: Use rocSPARSE
+  - file: how-to/contribute
+    title: Contribute to rocSPARSE
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse/clients/samples
+    title: Client samples
+
+- caption: API reference
+  entries:
+  - file: reference/reference.rst
+    title: API reference
+    subtrees:
+    - entries:
+      - file: reference/api.rst
+      - file: reference/debugging.rst
+      - file: reference/types.rst
+      - file: reference/precision.rst
+      - file: reference/env_variables.rst
+      - file: reference/roctx.rst
+      - file: reference/enumerations.rst
+      - file: reference/auxiliary.rst
+      - file: reference/level1.rst
+      - file: reference/level2.rst
+      - file: reference/level3.rst
+      - file: reference/extra.rst
+      - file: reference/precond.rst
+      - file: reference/conversion.rst
+      - file: reference/reorder.rst
+      - file: reference/utility.rst
+      - file: reference/generic.rst
+      - file: reference/reproducibility.rst
+
+- caption: About
+  entries:
+  - file: license

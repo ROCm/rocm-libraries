@@ -1,0 +1,11949 @@
+- MinimumRequiredVersion: 4.12.0
+- arcturus
+- gfx908
+- - Device 7380
+  - Device 7388
+  - Device 738c
+  - Device 7390
+- AssignedDerivedParameters: true
+  Batched: true
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  ConvolutionConfig: []
+  DataType: 0
+  DestDataType: 0
+  HighPrecisionAccumulate: false
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index1: 1
+  IndexAssignmentsA:
+  - 0
+  - 3
+  - 2
+  IndexAssignmentsB:
+  - 1
+  - 3
+  - 2
+  IndexAssignmentsLD:
+  - 4
+  - 5
+  - 6
+  - 7
+  IndexUnroll: 3
+  IndexUnrollA: 1
+  IndexUnrollB: 1
+  IndicesBatch:
+  - 2
+  IndicesFree:
+  - 0
+  - 1
+  IndicesSummation:
+  - 3
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesLD: 4
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  SetConstStrideA: []
+  SetConstStrideB: []
+  SilentHighPrecisionAccumulate: false
+  TLUA: true
+  TLUB: true
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileAwareSelection: false
+  TileB: 1
+  TotalIndices: 4
+  TransposeA: false
+  TransposeB: true
+  UseBeta: true
+  UseInitialStridesAB: false
+  ZeroPadA: []
+  ZeroPadB: []
+- - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 3
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 32
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableAtomicFail: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 4
+    GlobalLoadVectorWidthB: 4
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    ISA:
+    - 9
+    - 0
+    - 8
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 64
+    LSCB: 32
+    LSPA: 16
+    LSPB: 32
+    LVCA: 16
+    LVCB: 8
+    LVPA: 4
+    LVPB: 8
+    LdcEqualsLdd: true
+    LdsNumElements: 8192
+    LdsNumElementsAlignedA: 2048
+    LdsNumElementsAlignedB: 1024
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 4096
+    LdsOffsetB: 2048
+    LdsOffsetB_Blk: 6144
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 4
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 8
+    MacroTile0: 64
+    MacroTile1: 32
+    MacroTileA: 64
+    MacroTileB: 32
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MaxVgprNumber: 256
+    MinVgprNumber: 0
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 8
+    NumGlobalWriteVectorsPerThread: 2
+    NumLoadsA: 2
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 2
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    OptNoLoadLoop: 1
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+      ZeroPadA: []
+      ZeroPadB: []
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 0
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT64x32x32_SE_AMAS3_GRVW4_VW4
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 8
+    SubGroup1: 8
+    SubGroupA: 8
+    SubGroupB: 8
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 8
+    - 4
+    ThreadTile0: 8
+    ThreadTile1: 4
+    ThreadTileA: 8
+    ThreadTileB: 4
+    UnrollMemFence: false
+    UseSgprForGRO: false
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 4
+    WorkGroup:
+    - 8
+    - 8
+    - 4
+    WorkGroupMapping: 8
+    WorkGroupMappingType: B
+    _staggerStrideShift: 1
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 3
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableAtomicFail: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: false
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 4
+    GlobalLoadVectorWidthB: 4
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    ISA:
+    - 9
+    - 0
+    - 8
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 64
+    LSCB: 128
+    LSPA: 16
+    LSPB: 8
+    LVCA: 16
+    LVCB: 32
+    LVPA: 4
+    LVPB: 2
+    LdcEqualsLdd: true
+    LdsNumElements: 3072
+    LdsOffsetA: 0
+    LdsOffsetB: 1024
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 16
+    MacroTile0: 64
+    MacroTile1: 128
+    MacroTileA: 64
+    MacroTileB: 128
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MaxVgprNumber: 256
+    MinVgprNumber: 0
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 32
+    NumGlobalWriteVectorsPerThread: 8
+    NumLoadsA: 1
+    NumLoadsB: 2
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 2
+    NumThreads: 256
+    OptNoLoadLoop: 1
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: false
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+      ZeroPadA: []
+      ZeroPadB: []
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 1
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT64x128x16_SE_AMAS3_GRVW4_VW4
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 4
+    - 8
+    ThreadTile0: 4
+    ThreadTile1: 8
+    ThreadTileA: 4
+    ThreadTileB: 8
+    UnrollMemFence: false
+    UseSgprForGRO: false
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 8
+    WorkGroupMappingType: B
+    _staggerStrideShift: 2
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 3
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableAtomicFail: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 4
+    GlobalLoadVectorWidthB: 4
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    ISA:
+    - 9
+    - 0
+    - 8
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 128
+    LSCB: 128
+    LSPA: 8
+    LSPB: 8
+    LVCA: 32
+    LVCB: 32
+    LVPA: 2
+    LVPB: 2
+    LdcEqualsLdd: true
+    LdsNumElements: 8192
+    LdsNumElementsAlignedA: 2048
+    LdsNumElementsAlignedB: 2048
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 4096
+    LdsOffsetB: 2048
+    LdsOffsetB_Blk: 6144
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 16
+    MacroTile0: 128
+    MacroTile1: 128
+    MacroTileA: 128
+    MacroTileB: 128
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MaxVgprNumber: 256
+    MinVgprNumber: 0
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 64
+    NumGlobalWriteVectorsPerThread: 16
+    NumLoadsA: 2
+    NumLoadsB: 2
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 2
+    NumLoadsPerpendicularB: 2
+    NumThreads: 256
+    OptNoLoadLoop: 1
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+      ZeroPadA: []
+      ZeroPadB: []
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 2
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT128x128x16_SE_AMAS3_GRVW4_VW4
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 8
+    - 8
+    ThreadTile0: 8
+    ThreadTile1: 8
+    ThreadTileA: 8
+    ThreadTileB: 8
+    UnrollMemFence: false
+    UseSgprForGRO: false
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 8
+    WorkGroupMappingType: B
+    _staggerStrideShift: 2
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 3
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableAtomicFail: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 4
+    GlobalLoadVectorWidthB: 4
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    ISA:
+    - 9
+    - 0
+    - 8
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 64
+    LSCB: 64
+    LSPA: 16
+    LSPB: 16
+    LVCA: 16
+    LVCB: 16
+    LVPA: 4
+    LVPB: 4
+    LdcEqualsLdd: true
+    LdsNumElements: 4096
+    LdsNumElementsAlignedA: 1024
+    LdsNumElementsAlignedB: 1024
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 2048
+    LdsOffsetB: 1024
+    LdsOffsetB_Blk: 3072
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 16
+    MacroTile0: 64
+    MacroTile1: 64
+    MacroTileA: 64
+    MacroTileB: 64
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MaxVgprNumber: 256
+    MinVgprNumber: 0
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 16
+    NumGlobalWriteVectorsPerThread: 4
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    OptNoLoadLoop: 1
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+      ZeroPadA: []
+      ZeroPadB: []
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 3
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT64x64x16_SE_AMAS3_GRVW4_VW4
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 4
+    - 4
+    ThreadTile0: 4
+    ThreadTile1: 4
+    ThreadTileA: 4
+    ThreadTileB: 4
+    UnrollMemFence: false
+    UseSgprForGRO: false
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 8
+    WorkGroupMappingType: B
+    _staggerStrideShift: 2
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 3
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableAtomicFail: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: false
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 4
+    GlobalLoadVectorWidthB: 4
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    ISA:
+    - 9
+    - 0
+    - 8
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 128
+    LSCB: 64
+    LSPA: 8
+    LSPB: 16
+    LVCA: 32
+    LVCB: 16
+    LVPA: 2
+    LVPB: 4
+    LdcEqualsLdd: true
+    LdsNumElements: 3072
+    LdsOffsetA: 0
+    LdsOffsetB: 2048
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 16
+    MacroTile0: 128
+    MacroTile1: 64
+    MacroTileA: 128
+    MacroTileB: 64
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MaxVgprNumber: 256
+    MinVgprNumber: 0
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 32
+    NumGlobalWriteVectorsPerThread: 8
+    NumLoadsA: 2
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 2
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    OptNoLoadLoop: 1
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: false
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+      ZeroPadA: []
+      ZeroPadB: []
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 4
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT128x64x16_SE_AMAS3_GRVW4_VW4
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 8
+    - 4
+    ThreadTile0: 8
+    ThreadTile1: 4
+    ThreadTileA: 8
+    ThreadTileB: 4
+    UnrollMemFence: false
+    UseSgprForGRO: false
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    _staggerStrideShift: 2
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 3
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 32
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableAtomicFail: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 4
+    GlobalLoadVectorWidthB: 4
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    ISA:
+    - 9
+    - 0
+    - 8
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 32
+    LSCB: 64
+    LSPA: 32
+    LSPB: 16
+    LVCA: 8
+    LVCB: 16
+    LVPA: 8
+    LVPB: 4
+    LdcEqualsLdd: true
+    LdsNumElements: 8192
+    LdsNumElementsAlignedA: 1024
+    LdsNumElementsAlignedB: 2048
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 4096
+    LdsOffsetB: 1024
+    LdsOffsetB_Blk: 5120
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 4
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 8
+    MacroTile0: 32
+    MacroTile1: 64
+    MacroTileA: 32
+    MacroTileB: 64
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MaxVgprNumber: 256
+    MinVgprNumber: 0
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 8
+    NumGlobalWriteVectorsPerThread: 2
+    NumLoadsA: 1
+    NumLoadsB: 2
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 2
+    NumThreads: 256
+    OptNoLoadLoop: 1
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+      ZeroPadA: []
+      ZeroPadB: []
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 5
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT32x64x32_SE_AMAS3_GRVW4_VW4
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 8
+    SubGroup1: 8
+    SubGroupA: 8
+    SubGroupB: 8
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 4
+    - 8
+    ThreadTile0: 4
+    ThreadTile1: 8
+    ThreadTileA: 4
+    ThreadTileB: 8
+    UnrollMemFence: false
+    UseSgprForGRO: false
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 4
+    WorkGroup:
+    - 8
+    - 8
+    - 4
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    _staggerStrideShift: 1
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 3
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 8
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableAtomicFail: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 1
+    GlobalLoadVectorWidthB: 1
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 2
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 1
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    ISA:
+    - 9
+    - 0
+    - 8
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 8
+    LSCB: 8
+    LSPA: 8
+    LSPB: 8
+    LVCA: 8
+    LVCB: 8
+    LVPA: 8
+    LVPB: 8
+    LdcEqualsLdd: true
+    LdsNumElements: 409
+    LdsNumElementsAlignedA: 64
+    LdsNumElementsAlignedB: 64
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 128
+    LdsOffsetB: 64
+    LdsOffsetB_Blk: 192
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 4
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 2
+    MacroTile0: 8
+    MacroTile1: 8
+    MacroTileA: 8
+    MacroTileB: 8
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MaxVgprNumber: 256
+    MinVgprNumber: 0
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 1
+    NumGlobalWriteVectorsPerThread: 1
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 64
+    OptNoLoadLoop: 1
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+      ZeroPadA: []
+      ZeroPadB: []
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 6
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT8x8x8_SE_AMAS3_GRVW2_VW2
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 4
+    SubGroup1: 4
+    SubGroupA: 4
+    SubGroupB: 4
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 2
+    - 2
+    ThreadTile0: 2
+    ThreadTile1: 2
+    ThreadTileA: 2
+    ThreadTileB: 2
+    UnrollMemFence: false
+    UseSgprForGRO: 1
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 2
+    WorkGroup:
+    - 4
+    - 4
+    - 4
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    _staggerStrideShift: 3
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 0
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 8
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableAtomicFail: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 1
+    GlobalLoadVectorWidthB: 1
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 1
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 1
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    ISA:
+    - 9
+    - 0
+    - 8
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 8
+    LSCB: 8
+    LSPA: 8
+    LSPB: 8
+    LVCA: 8
+    LVCB: 8
+    LVPA: 8
+    LVPB: 8
+    LdcEqualsLdd: true
+    LdsNumElements: 409
+    LdsNumElementsAlignedA: 64
+    LdsNumElementsAlignedB: 64
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 128
+    LdsOffsetB: 64
+    LdsOffsetB_Blk: 192
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 4
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 2
+    MacroTile0: 8
+    MacroTile1: 8
+    MacroTileA: 8
+    MacroTileB: 8
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MaxVgprNumber: 256
+    MinVgprNumber: 0
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 1
+    NumGlobalWriteVectorsPerThread: 1
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 64
+    OptNoLoadLoop: 1
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+      ZeroPadA: []
+      ZeroPadB: []
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 7
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT8x8x8_SE_AMAS0_GRVW1_VW1
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 4
+    SubGroup1: 4
+    SubGroupA: 4
+    SubGroupB: 4
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 2
+    - 2
+    ThreadTile0: 2
+    ThreadTile1: 2
+    ThreadTileA: 2
+    ThreadTileB: 2
+    UnrollMemFence: false
+    UseSgprForGRO: 1
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 1
+    WorkGroup:
+    - 4
+    - 4
+    - 4
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    _staggerStrideShift: 3
+- - 2
+  - 3
+  - 0
+  - 1
+- - - - 1408
+      - 704
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 0
+      - 2919.39
+  - - - 4288
+      - 1408
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 3
+      - 3965.21
+  - - - 1856
+      - 256
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 5
+      - 3399.4
+  - - - 1408
+      - 1856
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 3
+      - 3677.9
+  - - - 5056
+      - 704
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 2
+      - 4025.67
+  - - - 3584
+      - 1856
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 1
+      - 4099.34
+  - - - 704
+      - 128
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 5
+      - 687.223
+  - - - 5056
+      - 448
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 0
+      - 3882.38
+  - - - 2944
+      - 1024
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 2
+      - 2991.29
+  - - - 6784
+      - 128
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 3
+      - 3361.73
+  - - - 5056
+      - 256
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 3
+      - 3403.36
+  - - - 2944
+      - 3584
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 4
+      - 4166.96
+  - - - 64
+      - 1856
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 5
+      - 882.062
+  - - - 1408
+      - 128
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 5
+      - 2048.56
+  - - - 4288
+      - 6784
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 1
+      - 4227.19
+  - - - 4288
+      - 64
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 0
+      - 2273.46
+  - - - 4
+      - 6784
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 6
+      - 194.253
+  - - - 256
+      - 5888
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 0
+      - 3475.26
+  - - - 4288
+      - 5056
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 4
+      - 4213.88
+  - - - 4288
+      - 448
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 0
+      - 4202.37
+  - - - 5888
+      - 1856
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 2
+      - 4153.36
+  - - - 704
+      - 2368
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 0
+      - 3619.5
+  - - - 256
+      - 6784
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 3
+      - 3128.03
+  - - - 5056
+      - 4
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 6
+      - 149.186
+  - - - 2368
+      - 128
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 0
+      - 2511.61
+  - - - 4
+      - 1408
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 6
+      - 39.7262
+  - - - 1024
+      - 1856
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 5
+      - 4017.34
+  - - - 5888
+      - 4288
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 4
+      - 4130.97
+  - - - 64
+      - 5888
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 0
+      - 1980.08
+  - - - 64
+      - 64
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 5
+      - 41.1402
+  - - - 256
+      - 2944
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 3
+      - 2489.92
+  - - - 2944
+      - 256
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 0
+      - 3287.9
+  - - - 1408
+      - 6784
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 1
+      - 4140.0
+  - - - 448
+      - 1024
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 5
+      - 3273.89
+  - - - 5888
+      - 256
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 0
+      - 3470.26
+  - - - 4288
+      - 448
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 5
+      - 3790.78
+  - - - 4
+      - 3584
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 6
+      - 128.44
+  - - - 2944
+      - 1024
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 2
+      - 3437.89
+  - - - 4288
+      - 1856
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 3
+      - 4009.11
+  - - - 448
+      - 128
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 5
+      - 669.456
+  - - - 5056
+      - 2944
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 2
+      - 4215.74
+  - - - 1408
+      - 2944
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 3
+      - 3651.59
+  - - - 5056
+      - 4
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 6
+      - 161.666
+  - - - 6784
+      - 6784
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 4
+      - 4422.41
+  - - - 4
+      - 1024
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 6
+      - 38.4202
+  - - - 1024
+      - 1856
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 3
+      - 3710.2
+  - - - 4
+      - 5888
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 6
+      - 196.019
+  - - - 704
+      - 64
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 5
+      - 471.175
+  - - - 2368
+      - 3584
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 4
+      - 4043.78
+  - - - 448
+      - 1024
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 5
+      - 3721.51
+  - - - 3584
+      - 5056
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 1
+      - 4197.94
+  - - - 4288
+      - 1408
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 3
+      - 3770.16
+  - - - 1856
+      - 128
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 5
+      - 1559.53
+  - - - 128
+      - 4
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 6
+      - 5.6044
+  - - - 4
+      - 704
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 6
+      - 21.193
+  - - - 1408
+      - 64
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 5
+      - 940.711
+  - - - 704
+      - 6784
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 3
+      - 3800.68
+  - - - 64
+      - 704
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 0
+      - 525.528
+  - - - 6784
+      - 4
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 6
+      - 160.47
+  - - - 4
+      - 2944
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 6
+      - 83.1375
+  - - - 2944
+      - 256
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 3
+      - 2502.66
+  - - - 5056
+      - 256
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 0
+      - 3773.07
+  - - - 5888
+      - 6784
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 1
+      - 4366.11
+  - - - 704
+      - 4
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 6
+      - 20.9987
+  - - - 4288
+      - 4288
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 4
+      - 4129.09
+  - - - 448
+      - 64
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 0
+      - 333.558
+  - - - 1024
+      - 64
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 5
+      - 789.73
+  - - - 6784
+      - 2944
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 1
+      - 4258.3
+  - - - 5888
+      - 128
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 3
+      - 3066.76
+  - - - 704
+      - 704
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 5
+      - 2265.32
+  - - - 1024
+      - 1408
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 5
+      - 4027.4
+  - - - 448
+      - 4288
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 0
+      - 4095.44
+  - - - 4288
+      - 2368
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 3
+      - 4148.74
+  - - - 6784
+      - 5056
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 4
+      - 4267.51
+  - - - 1024
+      - 5888
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 3
+      - 3943.23
+  - - - 704
+      - 704
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 5
+      - 1764.42
+  - - - 256
+      - 448
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 5
+      - 1189.51
+  - - - 704
+      - 2368
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 5
+      - 3576.62
+  - - - 256
+      - 5056
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 3
+      - 3022.54
+  - - - 4
+      - 2368
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 6
+      - 86.8332
+  - - - 5888
+      - 1408
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 3
+      - 4153.8
+  - - - 2944
+      - 3584
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 4
+      - 4219.31
+  - - - 1408
+      - 3584
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 5
+      - 3646.0
+  - - - 4288
+      - 2368
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 3
+      - 4137.56
+  - - - 5888
+      - 1024
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 4
+      - 3614.3
+  - - - 2368
+      - 2368
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 3
+      - 3987.25
+  - - - 128
+      - 1856
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 5
+      - 2304.16
+  - - - 6784
+      - 64
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 0
+      - 3547.32
+  - - - 128
+      - 4288
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 5
+      - 2766.27
+  - - - 64
+      - 448
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 5
+      - 334.09
+  - - - 256
+      - 4
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 6
+      - 8.75529
+  - - - 1024
+      - 256
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 5
+      - 2169.37
+  - - - 128
+      - 448
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 0
+      - 443.741
+  - - - 448
+      - 2944
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 3
+      - 3463.05
+  - - - 4288
+      - 448
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 5
+      - 4088.07
+  - - - 3584
+      - 2944
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 1
+      - 3992.62
+  - - - 704
+      - 6784
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 3
+      - 3982.47
+  - - - 64
+      - 2944
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 5
+      - 1284.11
+  - - - 128
+      - 5056
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 5
+      - 2771.32
+  - - - 3584
+      - 1024
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 2
+      - 3487.93
+  - - - 6784
+      - 256
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 0
+      - 3806.84
+  - - - 4288
+      - 128
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 0
+      - 1925.42
+  - - - 1408
+      - 2944
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 3
+      - 3911.12
+  - - - 2944
+      - 448
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 3
+      - 3083.38
+  - - - 5888
+      - 704
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 3
+      - 3828.1
+  - - - 2368
+      - 704
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 0
+      - 3364.48
+  - - - 2944
+      - 2368
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 3
+      - 3930.02
+  - - - 3584
+      - 448
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 0
+      - 3522.83
+  - - - 448
+      - 448
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 5
+      - 1344.94
+  - - - 5056
+      - 4288
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 1
+      - 4182.27
+  - - - 4288
+      - 5888
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 1
+      - 4196.28
+  - - - 256
+      - 2944
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 0
+      - 3188.23
+  - - - 2368
+      - 448
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 3
+      - 2522.12
+  - - - 4
+      - 256
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 6
+      - 8.91734
+  - - - 6784
+      - 5056
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 4
+      - 4422.36
+  - - - 2944
+      - 1856
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 3
+      - 3887.18
+  - - - 448
+      - 6784
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 0
+      - 3903.22
+  - - - 1024
+      - 1408
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 3
+      - 3687.66
+  - - - 4288
+      - 5056
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 4
+      - 4181.82
+  - - - 4288
+      - 64
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 0
+      - 2370.45
+  - - - 128
+      - 2368
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 5
+      - 1645.26
+  - - - 5888
+      - 5888
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 2
+      - 4314.85
+  - - - 256
+      - 1856
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 0
+      - 2409.83
+  - - - 1856
+      - 64
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 5
+      - 1433.88
+  - - - 128
+      - 64
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 5
+      - 63.5965
+  - - - 128
+      - 128
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 0
+      - 191.553
+  - - - 6784
+      - 4
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 6
+      - 193.292
+  - - - 256
+      - 4
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 6
+      - 11.4122
+  - - - 2368
+      - 4288
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 3
+      - 4153.91
+  - - - 4
+      - 128
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 6
+      - 5.74574
+  - - - 5056
+      - 6784
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 1
+      - 4401.5
+  - - - 256
+      - 2368
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 0
+      - 2606.89
+  - - - 5888
+      - 704
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 5
+      - 3956.89
+  - - - 4288
+      - 6784
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 1
+      - 4362.62
+  - - - 1408
+      - 448
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 3
+      - 2147.97
+  - - - 704
+      - 1024
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 3
+      - 3002.64
+  - - - 5888
+      - 1856
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 3
+      - 4045.93
+  - - - 6784
+      - 1024
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 2
+      - 3822.18
+  - - - 704
+      - 6784
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 5
+      - 4049.53
+  - - - 5056
+      - 1408
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 3
+      - 4054.63
+  - - - 704
+      - 4288
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 3
+      - 3367.98
+  - - - 2368
+      - 64
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 5
+      - 1737.41
+  - - - 128
+      - 2944
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 0
+      - 3102.42
+  - - - 448
+      - 1856
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 3
+      - 3245.54
+  - - - 4
+      - 1856
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 6
+      - 51.8408
+  - - - 128
+      - 256
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 0
+      - 257.341
+  - - - 64
+      - 256
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 5
+      - 199.222
+  - - - 1856
+      - 4
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 6
+      - 51.9996
+  - - - 704
+      - 2368
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 3
+      - 3029.67
+  - - - 6784
+      - 5888
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 1
+      - 4363.5
+  - - - 5056
+      - 704
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 2
+      - 3966.3
+  - - - 5888
+      - 256
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 0
+      - 3242.83
+  - - - 256
+      - 704
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 5
+      - 2153.58
+  - - - 1856
+      - 5888
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 2
+      - 4119.9
+  - - - 2368
+      - 2944
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 3
+      - 3977.27
+  - - - 64
+      - 704
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 5
+      - 347.421
+  - - - 64
+      - 5056
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 5
+      - 2791.61
+  - - - 4
+      - 4
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 6
+      - 0.181457
+  - - - 4
+      - 1024
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 6
+      - 37.9774
+  - - - 4288
+      - 3584
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 2
+      - 4350.48
+  - - - 4288
+      - 4
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 6
+      - 137.692
+  - - - 128
+      - 1024
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 0
+      - 1341.28
+  - - - 5888
+      - 3584
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 1
+      - 4245.11
+  - - - 1408
+      - 128
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 5
+      - 1799.74
+  - - - 128
+      - 5888
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 3
+      - 2935.41
+  - - - 64
+      - 448
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 0
+      - 223.673
+  - - - 1024
+      - 64
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 5
+      - 680.013
+  - - - 5888
+      - 4
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 6
+      - 168.606
+  - - - 128
+      - 6784
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 0
+      - 3658.8
+  - - - 2368
+      - 6784
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 4
+      - 4213.36
+  - - - 704
+      - 4
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 6
+      - 27.6418
+  - - - 6784
+      - 4288
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 4
+      - 4214.89
+  - - - 1024
+      - 64
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 5
+      - 490.142
+  - - - 3584
+      - 4
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 6
+      - 99.326
+  - - - 2368
+      - 64
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 5
+      - 1537.3
+  - - - 3584
+      - 128
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 5
+      - 2278.34
+  - - - 704
+      - 448
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 5
+      - 1704.64
+  - - - 64
+      - 128
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 5
+      - 95.7
+  - - - 2944
+      - 2944
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 1
+      - 3968.33
+  - - - 64
+      - 4288
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 5
+      - 2277.51
+  - - - 256
+      - 2368
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 3
+      - 2056.4
+  - - - 2368
+      - 5888
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 3
+      - 4018.88
+  - - - 448
+      - 256
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 5
+      - 859.223
+  - - - 256
+      - 4
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 6
+      - 10.6206
+  - - - 6784
+      - 64
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 0
+      - 3712.23
+  - - - 5056
+      - 2368
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 3
+      - 4076.08
+  - - - 5888
+      - 5056
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 1
+      - 4312.58
+  - - - 1408
+      - 3584
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 4
+      - 3394.7
+  - - - 5056
+      - 5888
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 4
+      - 4311.26
+  - - - 2368
+      - 5888
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 3
+      - 4107.54
+  - - - 4
+      - 1024
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 6
+      - 28.4982
+  - - - 5888
+      - 5056
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 4
+      - 4136.75
+  - - - 128
+      - 2944
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 0
+      - 3243.99
+  - - - 448
+      - 448
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 0
+      - 2389.52
+  - - - 64
+      - 4288
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 5
+      - 2038.08
+  - - - 1408
+      - 256
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 5
+      - 1920.05
+  - - - 256
+      - 2944
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 3
+      - 2934.06
+  - - - 1024
+      - 2368
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 5
+      - 4108.74
+  - - - 64
+      - 1024
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 5
+      - 791.749
+  - - - 5056
+      - 448
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 3
+      - 3360.26
+  - - - 4
+      - 2368
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 6
+      - 84.147
+  - - - 128
+      - 5056
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 3
+      - 2191.32
+  - - - 704
+      - 3584
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 0
+      - 3426.21
+  - - - 2368
+      - 256
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 0
+      - 2680.25
+  - - - 2368
+      - 1408
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 3
+      - 3673.83
+  - - - 5056
+      - 4
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 6
+      - 166.453
+  - - - 704
+      - 1408
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 3
+      - 2373.74
+  - - - 1856
+      - 1856
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 2
+      - 3912.6
+  - - - 256
+      - 128
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 5
+      - 343.771
+  - - - 1856
+      - 1408
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 5
+      - 3792.27
+  - - - 4
+      - 448
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 6
+      - 19.7668
+  - - - 128
+      - 6784
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 0
+      - 3783.6
+  - - - 64
+      - 2944
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 5
+      - 2129.29
+  - - - 1408
+      - 5056
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 3
+      - 4049.81
+  - - - 256
+      - 64
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 5
+      - 198.595
+  - - - 448
+      - 6784
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 3
+      - 3388.94
+  - - - 2368
+      - 1024
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 4
+      - 3246.95
+  - - - 2944
+      - 704
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 5
+      - 3735.54
+  - - - 4288
+      - 1856
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 3
+      - 3963.13
+  - - - 2944
+      - 5888
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 4
+      - 4253.42
+  - - - 5888
+      - 704
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 3
+      - 3642.9
+  - - - 3584
+      - 1856
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 3
+      - 3856.09
+  - - - 5056
+      - 1408
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 3
+      - 3868.6
+  - - - 64
+      - 1408
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 5
+      - 939.01
+  - - - 1024
+      - 256
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 5
+      - 1945.21
+  - - - 704
+      - 3584
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 1
+      - 3165.88
+  - - - 256
+      - 3584
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 0
+      - 3983.17
+  - - - 256
+      - 4288
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 0
+      - 3524.27
+  - - - 6784
+      - 2944
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 1
+      - 4222.0
+  - - - 64
+      - 704
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 5
+      - 546.677
+  - - - 256
+      - 2368
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 0
+      - 2868.13
+  - - - 5888
+      - 64
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 5
+      - 2751.86
+  - - - 6784
+      - 2368
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 1
+      - 4161.93
+  - - - 6784
+      - 6784
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 1
+      - 4400.04
+  - - - 704
+      - 2944
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 0
+      - 3535.95
+  - - - 3584
+      - 1024
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 2
+      - 4106.69
+  - - - 2944
+      - 4
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 6
+      - 82.772
+  - - - 256
+      - 1408
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 0
+      - 2654.29
+  - - - 5888
+      - 448
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 3
+      - 3379.49
+  - - - 448
+      - 2368
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 3
+      - 2521.25
+  - - - 2944
+      - 2944
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 1
+      - 4177.8
+  - - - 4
+      - 5056
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 6
+      - 167.599
+  - - - 3584
+      - 5888
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 1
+      - 4228.5
+  - - - 5056
+      - 4288
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 1
+      - 4214.57
+  - - - 448
+      - 1408
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 5
+      - 2539.01
+  - - - 448
+      - 1024
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 5
+      - 3901.52
+  - - - 128
+      - 6784
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 3
+      - 3354.88
+  - - - 4
+      - 256
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 6
+      - 11.4137
+  - - - 1856
+      - 448
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 3
+      - 2765.1
+  - - - 704
+      - 3584
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 0
+      - 3690.82
+  - - - 6784
+      - 1408
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 1
+      - 4184.21
+  - - - 256
+      - 1408
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 0
+      - 3108.57
+  - - - 1408
+      - 6784
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 1
+      - 3976.58
+  - - - 4288
+      - 64
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 5
+      - 1488.62
+  - - - 5888
+      - 2944
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 1
+      - 4125.34
+  - - - 1024
+      - 1024
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 3
+      - 2724.02
+  - - - 3584
+      - 5056
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 1
+      - 4242.95
+  - - - 5888
+      - 704
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 5
+      - 4001.2
+  - - - 4
+      - 4288
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 6
+      - 118.631
+  - - - 1408
+      - 704
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 5
+      - 3209.86
+  - - - 4288
+      - 2944
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 1
+      - 4245.93
+  - - - 5888
+      - 1408
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 3
+      - 3968.21
+  - - - 2368
+      - 128
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 0
+      - 1640.81
+  - - - 1408
+      - 4288
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 3
+      - 3969.99
+  - - - 1408
+      - 5888
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 3
+      - 4128.28
+  - - - 1408
+      - 1856
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 3
+      - 3365.97
+  - - - 64
+      - 64
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 5
+      - 28.656
+  - - - 6784
+      - 6784
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 1
+      - 4301.03
+  - - - 256
+      - 256
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 5
+      - 764.961
+  - - - 1856
+      - 1408
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 3
+      - 3358.94
+  - - - 6784
+      - 4288
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 4
+      - 4356.44
+  - - - 128
+      - 3584
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 0
+      - 2296.4
+  - - - 64
+      - 5888
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 0
+      - 2748.52
+  - - - 256
+      - 5056
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 3
+      - 3403.11
+  - - - 1024
+      - 2944
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 3
+      - 3271.25
+  - - - 2944
+      - 128
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 5
+      - 3106.07
+  - - - 6784
+      - 2368
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 1
+      - 4199.88
+  - - - 1856
+      - 704
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 3
+      - 3064.95
+  - - - 448
+      - 6784
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 5
+      - 3669.47
+  - - - 128
+      - 704
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 5
+      - 1091.74
+  - - - 6784
+      - 256
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 3
+      - 3108.32
+  - - - 1856
+      - 3584
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 4
+      - 4114.57
+  - - - 448
+      - 704
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 5
+      - 1710.41
+  - - - 5056
+      - 1856
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 1
+      - 4048.53
+  - - - 3584
+      - 4288
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 2
+      - 4375.13
+  - - - 704
+      - 1856
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 3
+      - 3056.89
+  - - - 4288
+      - 3584
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 1
+      - 4078.37
+  - - - 4288
+      - 3584
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 2
+      - 4385.26
+  - - - 3584
+      - 5888
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 1
+      - 4266.21
+  - - - 1408
+      - 1408
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 3
+      - 2981.34
+  - - - 2368
+      - 256
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 3
+      - 2384.76
+  - - - 1024
+      - 448
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 0
+      - 3719.08
+  - - - 1408
+      - 704
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 3
+      - 2370.78
+  - - - 704
+      - 5056
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 2
+      - 4030.12
+  - - - 4288
+      - 256
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 0
+      - 3144.93
+  - - - 5888
+      - 2368
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 3
+      - 4014.13
+  - - - 2944
+      - 256
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 0
+      - 3182.26
+  - - - 4
+      - 2944
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 6
+      - 102.866
+  - - - 2368
+      - 2944
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 3
+      - 3928.88
+  - - - 2944
+      - 5888
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 4
+      - 4298.98
+  - - - 128
+      - 5056
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 5
+      - 2552.59
+  - - - 64
+      - 6784
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 0
+      - 3555.36
+  - - - 3584
+      - 3584
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 1
+      - 4062.15
+  - - - 448
+      - 128
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 5
+      - 442.314
+  - - - 1408
+      - 5888
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 3
+      - 4167.2
+  - - - 6784
+      - 2368
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 3
+      - 4072.45
+  - - - 128
+      - 448
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 5
+      - 601.425
+  - - - 128
+      - 3584
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 0
+      - 3903.22
+  - - - 6784
+      - 3584
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 4
+      - 4363.34
+  - - - 1408
+      - 5056
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 3
+      - 3876.46
+  - - - 2368
+      - 4288
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 3
+      - 4142.95
+  - - - 1856
+      - 448
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 5
+      - 3515.64
+  - - - 256
+      - 1024
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 0
+      - 1410.17
+  - - - 2368
+      - 1856
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 5
+      - 4201.36
+  - - - 704
+      - 2944
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 3
+      - 3102.86
+  - - - 6784
+      - 448
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 0
+      - 3897.55
+  - - - 3584
+      - 448
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 3
+      - 2916.8
+  - - - 448
+      - 2368
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 0
+      - 3313.33
+  - - - 1024
+      - 2368
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 0
+      - 4127.77
+  - - - 64
+      - 5056
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 5
+      - 2677.48
+  - - - 2368
+      - 3584
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 4
+      - 4106.38
+  - - - 1408
+      - 3584
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 5
+      - 3759.1
+  - - - 3584
+      - 1408
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 3
+      - 3889.9
+  - - - 5056
+      - 128
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 0
+      - 2766.18
+  - - - 5888
+      - 1024
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 4
+      - 3392.31
+  - - - 2944
+      - 704
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 5
+      - 3652.11
+  - - - 5888
+      - 1856
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 2
+      - 4114.36
+  - - - 704
+      - 5888
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 0
+      - 3931.65
+  - - - 2368
+      - 3584
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 4
+      - 4088.58
+  - - - 5888
+      - 6784
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 1
+      - 4264.6
+  - - - 5056
+      - 64
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 5
+      - 2393.97
+  - - - 4
+      - 128
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 6
+      - 5.77385
+  - - - 4288
+      - 128
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 0
+      - 2702.46
+  - - - 5888
+      - 64
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 5
+      - 3232.71
+  - - - 3584
+      - 4288
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 3
+      - 4016.92
+  - - - 704
+      - 256
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 5
+      - 1795.26
+  - - - 2944
+      - 1408
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 3
+      - 3651.26
+  - - - 128
+      - 256
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 5
+      - 397.985
+  - - - 2944
+      - 256
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 3
+      - 2923.86
+  - - - 2368
+      - 1856
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 3
+      - 4140.71
+  - - - 5056
+      - 5056
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 4
+      - 4087.73
+  - - - 4288
+      - 2944
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 1
+      - 4108.79
+  - - - 3584
+      - 2944
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 1
+      - 4161.96
+  - - - 704
+      - 704
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 0
+      - 2531.6
+  - - - 704
+      - 5888
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 3
+      - 3650.25
+  - - - 1408
+      - 128
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 5
+      - 1248.85
+  - - - 4
+      - 256
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 6
+      - 10.7814
+  - - - 1408
+      - 64
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 5
+      - 1091.32
+  - - - 1408
+      - 448
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 0
+      - 2731.77
+  - - - 448
+      - 1408
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 5
+      - 2705.09
+  - - - 4288
+      - 704
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 5
+      - 3644.53
+  - - - 4288
+      - 448
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 3
+      - 3441.81
+  - - - 6784
+      - 3584
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 4
+      - 4355.7
+  - - - 128
+      - 4288
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 5
+      - 2678.95
+  - - - 2944
+      - 1856
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 3
+      - 3687.53
+  - - - 2368
+      - 4288
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 3
+      - 3997.74
+  - - - 448
+      - 4
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 6
+      - 18.2225
+  - - - 256
+      - 704
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 5
+      - 1796.63
+  - - - 2368
+      - 1856
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 3
+      - 3852.39
+  - - - 1856
+      - 1856
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 2
+      - 3722.71
+  - - - 128
+      - 128
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 5
+      - 122.06
+  - - - 1408
+      - 2368
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 3
+      - 3684.15
+  - - - 4288
+      - 2368
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 3
+      - 3991.39
+  - - - 64
+      - 704
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 0
+      - 471.278
+  - - - 6784
+      - 256
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 0
+      - 3445.52
+  - - - 64
+      - 2368
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 5
+      - 1080.91
+  - - - 2944
+      - 64
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 5
+      - 1284.84
+  - - - 256
+      - 4288
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 0
+      - 3173.46
+  - - - 1024
+      - 4
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 6
+      - 37.2204
+  - - - 256
+      - 6784
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 0
+      - 3457.62
+  - - - 4
+      - 128
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 6
+      - 5.43
+  - - - 128
+      - 2368
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 5
+      - 2514.34
+  - - - 4288
+      - 2944
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 1
+      - 4276.42
+  - - - 128
+      - 3584
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 0
+      - 3274.21
+  - - - 64
+      - 1024
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 0
+      - 760.575
+  - - - 3584
+      - 448
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 0
+      - 3564.22
+  - - - 704
+      - 64
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 5
+      - 546.018
+  - - - 2944
+      - 128
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 5
+      - 3248.47
+  - - - 4
+      - 5056
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 6
+      - 154.793
+  - - - 1408
+      - 1408
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 3
+      - 3298.29
+  - - - 256
+      - 3584
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 3
+      - 2785.95
+  - - - 1856
+      - 1024
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 3
+      - 3645.14
+  - - - 128
+      - 64
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 0
+      - 95.9735
+  - - - 2944
+      - 2944
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 1
+      - 4141.45
+  - - - 1856
+      - 5056
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 3
+      - 3888.62
+  - - - 1024
+      - 128
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 5
+      - 1337.19
+  - - - 2944
+      - 2368
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 3
+      - 3801.51
+  - - - 5056
+      - 6784
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 1
+      - 4377.32
+  - - - 4288
+      - 4
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 6
+      - 127.696
+  - - - 4288
+      - 4
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 6
+      - 142.208
+  - - - 5056
+      - 3584
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 4
+      - 4241.77
+  - - - 4
+      - 6784
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 6
+      - 219.994
+  - - - 1408
+      - 256
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 5
+      - 2978.48
+  - - - 4288
+      - 2368
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 3
+      - 4103.33
+  - - - 3584
+      - 448
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 0
+      - 3374.02
+  - - - 448
+      - 64
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 5
+      - 216.495
+  - - - 704
+      - 1408
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 0
+      - 2915.64
+  - - - 4
+      - 3584
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 6
+      - 100.063
+  - - - 2368
+      - 64
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 5
+      - 1089.32
+  - - - 1024
+      - 3584
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 2
+      - 4118.68
+  - - - 448
+      - 3584
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 3
+      - 2729.9
+  - - - 2368
+      - 448
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 0
+      - 3101.32
+  - - - 3584
+      - 64
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 5
+      - 2207.16
+  - - - 128
+      - 256
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 5
+      - 382.64
+  - - - 704
+      - 6784
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 0
+      - 4087.13
+  - - - 3584
+      - 256
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 0
+      - 3975.75
+  - - - 4288
+      - 256
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 3
+      - 2598.69
+  - - - 4
+      - 64
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 6
+      - 2.85864
+  - - - 3584
+      - 3584
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 1
+      - 4014.94
+  - - - 2368
+      - 2368
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 1
+      - 3977.02
+  - - - 1024
+      - 6784
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 3
+      - 3942.58
+  - - - 448
+      - 256
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 5
+      - 1189.59
+  - - - 64
+      - 4
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 6
+      - 2.78307
+  - - - 704
+      - 128
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 5
+      - 941.598
+  - - - 1856
+      - 2944
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 1
+      - 3872.53
+  - - - 256
+      - 1856
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 0
+      - 3874.81
+  - - - 4288
+      - 1024
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 4
+      - 3603.09
+  - - - 448
+      - 5888
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 3
+      - 3386.81
+  - - - 448
+      - 704
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 5
+      - 2726.63
+  - - - 5888
+      - 3584
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 1
+      - 4275.11
+  - - - 1856
+      - 448
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 3
+      - 3259.95
+  - - - 3584
+      - 1024
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 2
+      - 3951.87
+  - - - 6784
+      - 4288
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 4
+      - 4366.67
+  - - - 64
+      - 1856
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 5
+      - 1434.07
+  - - - 3584
+      - 704
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 5
+      - 3703.12
+  - - - 2944
+      - 6784
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 1
+      - 4221.55
+  - - - 1856
+      - 2944
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 3
+      - 3693.09
+  - - - 1408
+      - 1024
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 3
+      - 3436.38
+  - - - 6784
+      - 1856
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 4
+      - 4077.22
+  - - - 256
+      - 5888
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 0
+      - 3239.3
+  - - - 256
+      - 1024
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 0
+      - 2263.62
+  - - - 64
+      - 3584
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 0
+      - 2182.38
+  - - - 1024
+      - 256
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 5
+      - 1413.49
+  - - - 6784
+      - 128
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 3
+      - 2853.3
+  - - - 1408
+      - 64
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 5
+      - 683.208
+  - - - 128
+      - 4
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 6
+      - 4.35437
+  - - - 64
+      - 2368
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 5
+      - 1733.62
+  - - - 128
+      - 1856
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 5
+      - 2819.97
+  - - - 1024
+      - 4288
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 3
+      - 3793.18
+  - - - 704
+      - 5056
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 2
+      - 3965.06
+  - - - 448
+      - 256
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 5
+      - 1331.51
+  - - - 5056
+      - 64
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 0
+      - 2676.56
+  - - - 256
+      - 2944
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 0
+      - 3290.5
+  - - - 704
+      - 3584
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 5
+      - 3684.08
+  - - - 6784
+      - 448
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 5
+      - 3666.83
+  - - - 64
+      - 2944
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 5
+      - 2247.73
+  - - - 2368
+      - 5056
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 3
+      - 4085.38
+  - - - 4
+      - 2944
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 6
+      - 97.1723
+  - - - 256
+      - 64
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 5
+      - 170.47
+  - - - 1024
+      - 5056
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 3
+      - 3750.12
+  - - - 448
+      - 2944
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 0
+      - 3852.27
+  - - - 2368
+      - 1024
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 4
+      - 3334.32
+  - - - 2944
+      - 1408
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 3
+      - 3909.9
+  - - - 448
+      - 448
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 5
+      - 1975.49
+  - - - 2368
+      - 6784
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 1
+      - 4175.26
+  - - - 5888
+      - 3584
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 1
+      - 4286.17
+  - - - 2368
+      - 128
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 5
+      - 2618.29
+  - - - 704
+      - 5056
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 3
+      - 3504.31
+  - - - 1856
+      - 1024
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 3
+      - 3489.25
+  - - - 5888
+      - 2944
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 1
+      - 4288.48
+  - - - 4
+      - 5888
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 6
+      - 149.024
+  - - - 128
+      - 2944
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 5
+      - 2762.93
+  - - - 5888
+      - 5888
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 2
+      - 4388.07
+  - - - 5888
+      - 2944
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 1
+      - 4258.33
+  - - - 256
+      - 1856
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 5
+      - 4067.08
+  - - - 448
+      - 704
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 5
+      - 2343.84
+  - - - 1024
+      - 1024
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 3
+      - 2882.96
+  - - - 4
+      - 4
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 6
+      - 0.167285
+  - - - 256
+      - 128
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 0
+      - 252.345
+  - - - 3584
+      - 4288
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 2
+      - 4329.74
+  - - - 2368
+      - 256
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 3
+      - 2043.4
+  - - - 2944
+      - 3584
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 4
+      - 4209.22
+  - - - 4
+      - 1408
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 6
+      - 52.9228
+  - - - 1024
+      - 64
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 5
+      - 759.656
+  - - - 4288
+      - 1408
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 3
+      - 3952.8
+  - - - 64
+      - 5888
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 0
+      - 3095.14
+  - - - 1024
+      - 5888
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 3
+      - 3892.37
+  - - - 256
+      - 1408
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 0
+      - 1918.56
+  - - - 2944
+      - 3584
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 4
+      - 4011.18
+  - - - 3584
+      - 1408
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 3
+      - 3842.39
+  - - - 704
+      - 4288
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 0
+      - 3819.09
+  - - - 1408
+      - 5056
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 3
+      - 4012.01
+  - - - 64
+      - 4
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 6
+      - 2.18921
+  - - - 5888
+      - 1024
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 4
+      - 3673.03
+  - - - 3584
+      - 64
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 5
+      - 2706.1
+  - - - 1024
+      - 5056
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 3
+      - 4009.41
+  - - - 1856
+      - 1024
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 3
+      - 3090.74
+  - - - 1856
+      - 3584
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 4
+      - 4087.91
+  - - - 1856
+      - 256
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 5
+      - 3866.84
+  - - - 2944
+      - 64
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 5
+      - 1860.78
+  - - - 5888
+      - 4288
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 4
+      - 4328.08
+  - - - 1856
+      - 5056
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 4
+      - 4099.19
+  - - - 5888
+      - 5888
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 1
+      - 4197.38
+  - - - 2368
+      - 6784
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 1
+      - 4198.1
+  - - - 1024
+      - 1024
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 3
+      - 2847.6
+  - - - 2368
+      - 5888
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 3
+      - 4142.4
+  - - - 448
+      - 6784
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 0
+      - 3996.33
+  - - - 1408
+      - 4288
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 3
+      - 3914.84
+  - - - 2944
+      - 6784
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 1
+      - 4250.91
+  - - - 5056
+      - 4
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 6
+      - 132.309
+  - - - 4288
+      - 64
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 0
+      - 2035.98
+  - - - 4
+      - 704
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 6
+      - 26.4869
+  - - - 4288
+      - 1024
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 4
+      - 3550.13
+  - - - 6784
+      - 3584
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 4
+      - 4319.25
+  - - - 2368
+      - 2368
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 3
+      - 3776.85
+  - - - 6784
+      - 256
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 0
+      - 3707.19
+  - - - 128
+      - 1408
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 0
+      - 1235.65
+  - - - 6784
+      - 1024
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 4
+      - 3547.96
+  - - - 1024
+      - 2368
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 3
+      - 3869.81
+  - - - 6784
+      - 64
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 5
+      - 3151.13
+  - - - 704
+      - 64
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 0
+      - 525.454
+  - - - 704
+      - 704
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 0
+      - 2456.3
+  - - - 704
+      - 4
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 6
+      - 26.3506
+  - - - 6784
+      - 4
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 6
+      - 216.495
+  - - - 2944
+      - 4
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 6
+      - 100.881
+  - - - 2368
+      - 1408
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 3
+      - 4014.39
+  - - - 6784
+      - 128
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 3
+      - 3611.13
+  - - - 128
+      - 64
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 0
+      - 99.7293
+  - - - 3584
+      - 128
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 5
+      - 3718.19
+  - - - 2944
+      - 4288
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 4
+      - 4293.61
+  - - - 6784
+      - 3584
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 4
+      - 4198.46
+  - - - 704
+      - 1408
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 5
+      - 3209.46
+  - - - 4288
+      - 256
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 0
+      - 3250.19
+  - - - 3584
+      - 3584
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 1
+      - 4044.21
+  - - - 1856
+      - 4288
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 3
+      - 4003.9
+  - - - 1856
+      - 64
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 5
+      - 1374.65
+  - - - 6784
+      - 2368
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 1
+      - 4211.22
+  - - - 3584
+      - 256
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 0
+      - 3837.98
+  - - - 6784
+      - 1408
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 1
+      - 4180.09
+  - - - 1408
+      - 1856
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 5
+      - 3818.01
+  - - - 704
+      - 1856
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 3
+      - 3440.88
+  - - - 1856
+      - 3584
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 1
+      - 4038.56
+  - - - 5056
+      - 64
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 5
+      - 1747.73
+  - - - 1408
+      - 256
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 5
+      - 2646.85
+  - - - 4
+      - 448
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 6
+      - 18.4378
+  - - - 5056
+      - 2944
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 3
+      - 4010.93
+  - - - 2944
+      - 5056
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 3
+      - 4017.88
+  - - - 5056
+      - 5056
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 1
+      - 4207.49
+  - - - 128
+      - 256
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 5
+      - 343.822
+  - - - 448
+      - 2368
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 0
+      - 3429.79
+  - - - 256
+      - 256
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 5
+      - 504.772
+  - - - 448
+      - 2944
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 3
+      - 3069.33
+  - - - 64
+      - 64
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 5
+      - 46.7448
+  - - - 2944
+      - 5056
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 3
+      - 4102.31
+  - - - 128
+      - 704
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 5
+      - 686.57
+  - - - 6784
+      - 5056
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 4
+      - 4381.53
+  - - - 448
+      - 64
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 5
+      - 298.301
+  - - - 5056
+      - 128
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 0
+      - 2826.64
+  - - - 1408
+      - 2944
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 3
+      - 3838.04
+  - - - 6784
+      - 2944
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 1
+      - 4248.99
+  - - - 704
+      - 128
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 5
+      - 1092.63
+  - - - 2368
+      - 704
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 5
+      - 3577.71
+  - - - 5056
+      - 1024
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 4
+      - 3625.92
+  - - - 1024
+      - 1856
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 0
+      - 4106.48
+  - - - 128
+      - 448
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 5
+      - 696.217
+  - - - 1408
+      - 448
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 5
+      - 2815.38
+  - - - 2368
+      - 2944
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 3
+      - 3965.97
+  - - - 5056
+      - 256
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 0
+      - 3665.63
+  - - - 1024
+      - 448
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 0
+      - 2288.28
+  - - - 448
+      - 704
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 5
+      - 2616.79
+  - - - 5056
+      - 3584
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 4
+      - 4248.43
+  - - - 256
+      - 448
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 0
+      - 1330.23
+  - - - 1856
+      - 704
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 3
+      - 3444.16
+  - - - 704
+      - 2368
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 5
+      - 3339.21
+  - - - 2944
+      - 4
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 6
+      - 104.423
+  - - - 256
+      - 1024
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 0
+      - 2173.33
+  - - - 4288
+      - 4288
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 4
+      - 4272.88
+  - - - 1856
+      - 5888
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 3
+      - 4047.97
+  - - - 4
+      - 704
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 6
+      - 27.9776
+  - - - 256
+      - 6784
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 0
+      - 3814.9
+  - - - 1856
+      - 5056
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 1
+      - 4052.15
+  - - - 6784
+      - 5888
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 4
+      - 4400.94
+  - - - 4
+      - 5888
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 6
+      - 189.146
+  - - - 4288
+      - 5888
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 1
+      - 4338.08
+  - - - 4288
+      - 4288
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 1
+      - 4320.35
+  - - - 1856
+      - 1856
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 3
+      - 3415.85
+  - - - 5056
+      - 3584
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 1
+      - 4211.56
+  - - - 2944
+      - 448
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 3
+      - 3470.26
+  - - - 1024
+      - 4288
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 3
+      - 4113.36
+  - - - 2368
+      - 5056
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 3
+      - 4122.79
+  - - - 1408
+      - 1408
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 5
+      - 3624.38
+  - - - 64
+      - 256
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 0
+      - 191.101
+  - - - 128
+      - 704
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 5
+      - 940.712
+  - - - 5888
+      - 448
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 0
+      - 3860.84
+  - - - 64
+      - 6784
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 0
+      - 3144.95
+  - - - 2944
+      - 448
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 5
+      - 3850.58
+  - - - 6784
+      - 448
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 0
+      - 3858.56
+  - - - 1856
+      - 704
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 5
+      - 3711.98
+  - - - 5056
+      - 1856
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 4
+      - 4106.89
+  - - - 6784
+      - 704
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 5
+      - 4074.94
+  - - - 128
+      - 2368
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 5
+      - 2621.52
+  - - - 4288
+      - 128
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 0
+      - 2483.94
+  - - - 704
+      - 5056
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 2
+      - 3789.96
+  - - - 1024
+      - 4
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 6
+      - 36.9678
+  - - - 128
+      - 704
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 5
+      - 1049.2
+  - - - 4
+      - 6784
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 6
+      - 212.208
+  - - - 448
+      - 5888
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 3
+      - 3613.02
+  - - - 256
+      - 6784
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 0
+      - 3717.66
+  - - - 64
+      - 1408
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 5
+      - 679.986
+  - - - 1408
+      - 1024
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 3
+      - 3486.08
+  - - - 4288
+      - 4288
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 4
+      - 4312.4
+  - - - 704
+      - 1024
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 3
+      - 2795.61
+  - - - 5888
+      - 256
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 0
+      - 3559.29
+  - - - 256
+      - 5056
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 0
+      - 3782.95
+  - - - 5056
+      - 704
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 2
+      - 3794.09
+  - - - 64
+      - 448
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 5
+      - 299.1
+  - - - 6784
+      - 1408
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 1
+      - 3981.44
+  - - - 256
+      - 4288
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 0
+      - 3447.47
+  - - - 3584
+      - 2368
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 1
+      - 4091.67
+  - - - 1856
+      - 1856
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 5
+      - 3862.57
+  - - - 448
+      - 1408
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 5
+      - 2787.45
+  - - - 1024
+      - 704
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 0
+      - 3037.72
+  - - - 128
+      - 128
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 5
+      - 172.036
+  - - - 2368
+      - 2944
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 3
+      - 3805.83
+  - - - 1408
+      - 4
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 6
+      - 39.1339
+  - - - 4
+      - 1856
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 6
+      - 69.724
+  - - - 2944
+      - 64
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 5
+      - 2133.52
+  - - - 2368
+      - 4
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 6
+      - 66.0936
+  - - - 1856
+      - 2368
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 3
+      - 3855.84
+  - - - 6784
+      - 704
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 3
+      - 3804.97
+  - - - 448
+      - 1856
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 3
+      - 2752.33
+  - - - 3584
+      - 2944
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 1
+      - 4202.29
+  - - - 1024
+      - 3584
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 2
+      - 3543.21
+  - - - 448
+      - 3584
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 0
+      - 3528.38
+  - - - 448
+      - 3584
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 0
+      - 3435.87
+  - - - 2944
+      - 2368
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 3
+      - 3965.76
+  - - - 128
+      - 1024
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 5
+      - 1575.26
+  - - - 64
+      - 1024
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 0
+      - 496.33
+  - - - 64
+      - 4288
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 5
+      - 2371.5
+  - - - 2368
+      - 704
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 3
+      - 3035.65
+  - - - 4
+      - 2368
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 6
+      - 66.8813
+  - - - 128
+      - 5888
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 0
+      - 3289.92
+  - - - 5056
+      - 2944
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 2
+      - 4250.44
+  - - - 3584
+      - 5056
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 1
+      - 4256.68
+  - - - 448
+      - 5888
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 5
+      - 3876.51
+  - - - 4288
+      - 3584
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 2
+      - 4251.54
+  - - - 1856
+      - 4
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 6
+      - 67.2311
+  - - - 64
+      - 2368
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 5
+      - 1820.1
+  - - - 2944
+      - 1856
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 3
+      - 3828.99
+  - - - 4288
+      - 4
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 6
+      - 118.07
+  - - - 4
+      - 128
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 6
+      - 4.4929
+  - - - 1856
+      - 128
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 5
+      - 2665.48
+  - - - 6784
+      - 4288
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 4
+      - 4324.92
+  - - - 3584
+      - 4
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 6
+      - 126.945
+  - - - 5056
+      - 5056
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 1
+      - 4245.26
+  - - - 1024
+      - 4
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 6
+      - 26.6986
+  - - - 1024
+      - 6784
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 3
+      - 3678.82
+  - - - 64
+      - 3584
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 0
+      - 1484.44
+  - - - 5888
+      - 2368
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 3
+      - 4141.21
+  - - - 1408
+      - 1024
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 3
+      - 3301.25
+  - - - 6784
+      - 128
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 3
+      - 3543.23
+  - - - 1856
+      - 256
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 5
+      - 2388.63
+  - - - 448
+      - 256
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 5
+      - 1387.47
+  - - - 1408
+      - 4
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 6
+      - 53.9165
+  - - - 4288
+      - 256
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 0
+      - 2935.16
+  - - - 1856
+      - 4288
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 3
+      - 3851.88
+  - - - 4
+      - 1856
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 6
+      - 67.8511
+  - - - 6784
+      - 64
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 5
+      - 2243.33
+  - - - 64
+      - 256
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 0
+      - 126.926
+  - - - 4288
+      - 704
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 3
+      - 3364.54
+  - - - 1024
+      - 1024
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 3
+      - 2373.69
+  - - - 6784
+      - 5056
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 4
+      - 4413.13
+  - - - 64
+      - 128
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 0
+      - 85.7244
+  - - - 5056
+      - 5888
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 1
+      - 4286.35
+  - - - 4
+      - 4288
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 6
+      - 142.313
+  - - - 1408
+      - 2368
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 5
+      - 4100.03
+  - - - 4
+      - 4288
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 6
+      - 147.689
+  - - - 64
+      - 1856
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 5
+      - 1372.62
+  - - - 256
+      - 2368
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 5
+      - 2700.41
+  - - - 64
+      - 5056
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 5
+      - 1749.11
+  - - - 448
+      - 4
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 6
+      - 14.6511
+  - - - 128
+      - 4
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 6
+      - 5.31222
+  - - - 4
+      - 5056
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 6
+      - 132.49
+  - - - 64
+      - 128
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 0
+      - 99.6225
+  - - - 4
+      - 1856
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 6
+      - 67.8806
+  - - - 256
+      - 5056
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 0
+      - 3677.35
+  - - - 4288
+      - 5056
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 4
+      - 4067.5
+  - - - 6784
+      - 2944
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 1
+      - 4114.77
+  - - - 704
+      - 1024
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 3
+      - 2363.6
+  - - - 4
+      - 4
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 6
+      - 0.132643
+  - - - 4
+      - 2368
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 6
+      - 80.2433
+  - - - 704
+      - 1408
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 5
+      - 3129.04
+  - - - 3584
+      - 2368
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 1
+      - 4027.48
+  - - - 1024
+      - 5056
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 3
+      - 3935.93
+  - - - 5888
+      - 5056
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 1
+      - 4326.23
+  - - - 5888
+      - 2368
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 3
+      - 4103.96
+  - - - 5056
+      - 5888
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 4
+      - 4318.6
+  - - - 3584
+      - 2368
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 1
+      - 4104.1
+  - - - 4288
+      - 1024
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 4
+      - 3324.52
+  - - - 4288
+      - 5056
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 4
+      - 4222.28
+  - - - 256
+      - 448
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 5
+      - 1387.06
+  - - - 64
+      - 6784
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 0
+      - 3724.13
+  - - - 6784
+      - 4
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 6
+      - 210.45
+  - - - 1856
+      - 6784
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 1
+      - 4097.23
+  - - - 2944
+      - 128
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 5
+      - 2764.34
+  - - - 5056
+      - 1856
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 3
+      - 3881.01
+  - - - 256
+      - 64
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 5
+      - 122.06
+  - - - 448
+      - 5888
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 5
+      - 3782.58
+  - - - 1856
+      - 256
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 0
+      - 4042.23
+  - - - 4288
+      - 5888
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 1
+      - 4317.1
+  - - - 4
+      - 64
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 6
+      - 2.70127
+  - - - 128
+      - 4288
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 5
+      - 1921.77
+  - - - 2944
+      - 1408
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 3
+      - 3836.14
+  - - - 5888
+      - 6784
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 1
+      - 4388.59
+  - - - 704
+      - 5888
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 0
+      - 3963.54
+  - - - 64
+      - 5888
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 0
+      - 3239.97
+  - - - 5056
+      - 64
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 0
+      - 2790.18
+  - - - 1024
+      - 5888
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 3
+      - 3700.3
+  - - - 2944
+      - 1024
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 2
+      - 3401.63
+  - - - 256
+      - 1024
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 0
+      - 1944.01
+  - - - 64
+      - 1856
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 0
+      - 1225.2
+  - - - 5056
+      - 4288
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 3
+      - 4055.91
+  - - - 5056
+      - 6784
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 1
+      - 4409.39
+  - - - 5888
+      - 1408
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 3
+      - 4118.01
+  - - - 1024
+      - 4288
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 3
+      - 4113.12
+  - - - 704
+      - 448
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 5
+      - 2725.95
+  - - - 5056
+      - 1024
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 4
+      - 3581.47
+  - - - 6784
+      - 1856
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 4
+      - 4265.51
+  - - - 4
+      - 64
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 6
+      - 2.20612
+  - - - 128
+      - 1408
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 0
+      - 2152.47
+  - - - 1856
+      - 5888
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 3
+      - 3949.97
+  - - - 1408
+      - 4288
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 3
+      - 3776.65
+  - - - 64
+      - 3584
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 0
+      - 2703.7
+  - - - 2944
+      - 2368
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 3
+      - 3976.11
+  - - - 2944
+      - 5056
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 2
+      - 4200.55
+  - - - 5056
+      - 1408
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 3
+      - 4043.67
+  - - - 6784
+      - 5888
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 4
+      - 4261.96
+  - - - 3584
+      - 5888
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 3
+      - 4092.65
+  - - - 1856
+      - 704
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 5
+      - 3815.54
+  - - - 2368
+      - 448
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 0
+      - 3430.22
+  - - - 1408
+      - 256
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 5
+      - 3108.26
+  - - - 128
+      - 2944
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 0
+      - 1985.29
+  - - - 128
+      - 5056
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 5
+      - 2858.07
+  - - - 3584
+      - 4
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 6
+      - 112.177
+  - - - 704
+      - 256
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 5
+      - 1238.66
+  - - - 4
+      - 2944
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 6
+      - 106.164
+  - - - 6784
+      - 1024
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 2
+      - 3925.16
+  - - - 1024
+      - 2944
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 0
+      - 3738.38
+  - - - 4288
+      - 704
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 5
+      - 3710.59
+  - - - 448
+      - 4288
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 5
+      - 3800.78
+  - - - 5888
+      - 448
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 0
+      - 3789.71
+  - - - 3584
+      - 704
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 0
+      - 3561.84
+  - - - 1856
+      - 2944
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 5
+      - 3909.2
+  - - - 5888
+      - 4
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 6
+      - 182.654
+  - - - 64
+      - 4
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 6
+      - 2.62659
+  - - - 5888
+      - 6784
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 1
+      - 4399.29
+  - - - 256
+      - 128
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 0
+      - 382.627
+  - - - 1408
+      - 128
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 5
+      - 2158.21
+  - - - 2944
+      - 2944
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 4
+      - 4193.73
+  - - - 5056
+      - 6784
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 1
+      - 4273.81
+  - - - 256
+      - 704
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 5
+      - 1238.83
+  - - - 3584
+      - 1408
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 3
+      - 3906.13
+  - - - 4288
+      - 5888
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 1
+      - 4349.57
+  - - - 256
+      - 5888
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 0
+      - 3569.22
+  - - - 5056
+      - 1856
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 4
+      - 4095.42
+  - - - 1024
+      - 128
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 5
+      - 948.368
+  - - - 2368
+      - 1408
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 5
+      - 4093.9
+  - - - 1408
+      - 448
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 5
+      - 2518.46
+  - - - 256
+      - 4288
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 3
+      - 2591.66
+  - - - 448
+      - 4
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 6
+      - 18.2679
+  - - - 448
+      - 1856
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 0
+      - 3509.68
+  - - - 448
+      - 5056
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 3
+      - 3644.56
+  - - - 1024
+      - 1856
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 3
+      - 3310.94
+  - - - 4
+      - 1408
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 6
+      - 51.6418
+  - - - 64
+      - 64
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 5
+      - 49.4489
+  - - - 128
+      - 1856
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 5
+      - 2664.59
+  - - - 4288
+      - 6784
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 1
+      - 4351.47
+  - - - 128
+      - 6784
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 3
+      - 2817.05
+  - - - 64
+      - 5056
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 5
+      - 2395.32
+  - - - 1856
+      - 1408
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 0
+      - 3688.14
+  - - - 2944
+      - 4
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 6
+      - 94.74
+  - - - 4
+      - 6784
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 6
+      - 166.161
+  - - - 128
+      - 64
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 5
+      - 86.5101
+  - - - 1856
+      - 448
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 0
+      - 3628.55
+  - - - 2944
+      - 704
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 0
+      - 3535.45
+  - - - 6784
+      - 1408
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 1
+      - 4141.53
+  - - - 2368
+      - 704
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 5
+      - 3661.36
+  - - - 4288
+      - 1024
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 4
+      - 3607.26
+  - - - 2944
+      - 5888
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 4
+      - 4288.02
+  - - - 3584
+      - 4288
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 1
+      - 4204.24
+  - - - 5888
+      - 2368
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 5
+      - 4152.44
+  - - - 1024
+      - 2944
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 0
+      - 3627.43
+  - - - 5888
+      - 4
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 6
+      - 188.591
+  - - - 4
+      - 4288
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 6
+      - 132.797
+  - - - 1024
+      - 3584
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 2
+      - 3968.31
+  - - - 704
+      - 2944
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 0
+      - 3632.22
+  - - - 2944
+      - 4288
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 4
+      - 4282.99
+  - - - 4
+      - 4
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 6
+      - 0.183805
+  - - - 128
+      - 1408
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 0
+      - 2043.93
+  - - - 4288
+      - 1408
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 3
+      - 3908.87
+  - - - 704
+      - 1024
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 5
+      - 2971.61
+  - - - 4288
+      - 128
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 0
+      - 2793.03
+  - - - 128
+      - 3584
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 0
+      - 3726.19
+  - - - 4
+      - 1408
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 6
+      - 54.6578
+  - - - 4288
+      - 704
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 5
+      - 3816.87
+  - - - 704
+      - 448
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 5
+      - 2344.93
+  - - - 5888
+      - 448
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 0
+      - 3674.29
+  - - - 1024
+      - 128
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 5
+      - 1569.46
+  - - - 256
+      - 3584
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 0
+      - 3484.11
+  - - - 448
+      - 64
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 5
+      - 347.676
+  - - - 6784
+      - 1856
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 4
+      - 4220.72
+  - - - 4
+      - 1024
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 6
+      - 37.5087
+  - - - 5888
+      - 2944
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 1
+      - 4297.39
+  - - - 2944
+      - 1856
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 1
+      - 3871.56
+  - - - 4
+      - 3584
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 6
+      - 114.403
+  - - - 2368
+      - 1024
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 4
+      - 3313.85
+  - - - 448
+      - 128
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 5
+      - 601.949
+  - - - 1408
+      - 704
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 0
+      - 3130.33
+  - - - 4
+      - 5056
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 6
+      - 173.395
+  - - - 2944
+      - 128
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 5
+      - 1984.85
+  - - - 1856
+      - 5056
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 4
+      - 4116.81
+  - - - 2368
+      - 5888
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 3
+      - 4135.04
+  - - - 5888
+      - 1024
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 4
+      - 3696.76
+  - - - 4288
+      - 1856
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 3
+      - 3997.78
+  - - - 1408
+      - 5056
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 2
+      - 4053.86
+  - - - 256
+      - 256
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 5
+      - 686.243
+  - - - 2368
+      - 1856
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 3
+      - 4057.75
+  - - - 2368
+      - 4288
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 3
+      - 4109.55
+  - - - 3584
+      - 4
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 6
+      - 122.487
+  - - - 1408
+      - 5888
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 3
+      - 3991.21
+  - - - 3584
+      - 128
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 5
+      - 3906.41
+  - - - 4288
+      - 2944
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 1
+      - 4286.38
+  - - - 1856
+      - 2368
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 3
+      - 4145.31
+  - - - 1024
+      - 1408
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 3
+      - 3961.42
+  - - - 5056
+      - 256
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 3
+      - 3018.28
+  - - - 64
+      - 448
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 5
+      - 347.743
+  - - - 1024
+      - 5888
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 3
+      - 3945.17
+  - - - 704
+      - 448
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 5
+      - 2614.85
+  - - - 1856
+      - 64
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 5
+      - 1230.48
+  - - - 5056
+      - 1024
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 1
+      - 3550.41
+  - - - 256
+      - 1408
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 0
+      - 2967.53
+  - - - 5888
+      - 1408
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 3
+      - 4170.01
+  - - - 2368
+      - 128
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 0
+      - 2247.88
+  - - - 5888
+      - 4288
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 4
+      - 4346.55
+  - - - 448
+      - 1408
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 3
+      - 2123.86
+  - - - 448
+      - 128
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 5
+      - 696.352
+  - - - 256
+      - 5888
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 3
+      - 2749.88
+  - - - 128
+      - 448
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 0
+      - 669.201
+  - - - 1408
+      - 4
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 6
+      - 52.2966
+  - - - 256
+      - 256
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 5
+      - 795.382
+  - - - 4
+      - 448
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 6
+      - 14.8561
+  - - - 1024
+      - 3584
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 2
+      - 4172.03
+  - - - 1856
+      - 4288
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 3
+      - 3968.91
+  - - - 1024
+      - 4
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 6
+      - 36.9126
+  - - - 256
+      - 704
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 0
+      - 2050.29
+  - - - 5056
+      - 704
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 3
+      - 3498.86
+  - - - 4
+      - 448
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 6
+      - 18.5261
+  - - - 256
+      - 448
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 5
+      - 861.912
+  - - - 64
+      - 1408
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 5
+      - 1045.36
+  - - - 4
+      - 704
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 6
+      - 29.7186
+  - - - 4288
+      - 6784
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 1
+      - 4332.96
+  - - - 5888
+      - 256
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 3
+      - 2708.49
+  - - - 1856
+      - 4
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 6
+      - 66.6622
+  - - - 448
+      - 2944
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 0
+      - 3742.3
+  - - - 3584
+      - 64
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 5
+      - 1491.88
+  - - - 3584
+      - 6784
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 1
+      - 4317.81
+  - - - 256
+      - 4
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 6
+      - 11.2672
+  - - - 2944
+      - 6784
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 1
+      - 4111.36
+  - - - 6784
+      - 704
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 3
+      - 3985.35
+  - - - 1408
+      - 64
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 5
+      - 1046.04
+  - - - 2368
+      - 4
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 7
+      - 83.4965
+  - - - 5056
+      - 1024
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 4
+      - 3399.45
+  - - - 2368
+      - 3584
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 1
+      - 3869.75
+  - - - 1408
+      - 2368
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 3
+      - 3919.78
+  - - - 1024
+      - 704
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 3
+      - 2251.05
+  - - - 128
+      - 128
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 5
+      - 199.564
+  - - - 704
+      - 4288
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 0
+      - 3788.4
+  - - - 704
+      - 1856
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 0
+      - 3742.99
+  - - - 128
+      - 2368
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 5
+      - 2251.59
+  - - - 1408
+      - 1856
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 0
+      - 3686.3
+  - - - 2368
+      - 64
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 0
+      - 1818.98
+  - - - 64
+      - 128
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 5
+      - 59.2016
+  - - - 1408
+      - 6784
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 4
+      - 4172.14
+  - - - 3584
+      - 1024
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 2
+      - 4165.04
+  - - - 704
+      - 256
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 5
+      - 2049.32
+  - - - 448
+      - 4
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 6
+      - 19.5435
+  - - - 1408
+      - 2368
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 3
+      - 4015.31
+  - - - 5888
+      - 1856
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 3
+      - 3939.11
+  - - - 2368
+      - 1024
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 4
+      - 2985.41
+  - - - 1024
+      - 704
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 5
+      - 2772.32
+  - - - 448
+      - 4288
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 3
+      - 3442.58
+  - - - 128
+      - 1408
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 5
+      - 1794.77
+  - - - 5056
+      - 3584
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 1
+      - 4084.55
+  - - - 1408
+      - 4
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 6
+      - 51.0511
+  - - - 1408
+      - 1408
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 0
+      - 3398.36
+  - - - 5056
+      - 5888
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 1
+      - 4179.61
+  - - - 2944
+      - 1024
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 2
+      - 3301.45
+  - - - 1856
+      - 3584
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 1
+      - 3823.13
+  - - - 2944
+      - 448
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 5
+      - 3743.66
+  - - - 448
+      - 5056
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 0
+      - 3987.33
+  - - - 2368
+      - 5056
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 3
+      - 3985.79
+  - - - 3584
+      - 256
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 3
+      - 3499.15
+  - - - 6784
+      - 1024
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 2
+      - 3963.02
+  - - - 256
+      - 3584
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 0
+      - 3843.44
+  - - - 704
+      - 5888
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 3
+      - 3834.02
+  - - - 2944
+      - 6784
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 4
+      - 4259.17
+  - - - 2368
+      - 5056
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 3
+      - 4112.46
+  - - - 5888
+      - 4
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 6
+      - 146.59
+  - - - 64
+      - 2944
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 5
+      - 1858.36
+  - - - 5888
+      - 3584
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 1
+      - 4114.91
+  - - - 1408
+      - 1024
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 3
+      - 2943.69
+  - - - 5888
+      - 5888
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 2
+      - 4413.74
+  - - - 2368
+      - 4
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 6
+      - 83.8565
+  - - - 5056
+      - 128
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 3
+      - 2193.79
+  - - - 5056
+      - 5056
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 1
+      - 4255.61
+  - - - 2944
+      - 4288
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 4
+      - 4085.74
+  - - - 3584
+      - 6784
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 1
+      - 4350.26
+  - - - 1408
+      - 4288
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 3
+      - 3955.83
+  - - - 1856
+      - 1408
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 5
+      - 3746.6
+  - - - 1024
+      - 256
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 5
+      - 2264.66
+  - - - 3584
+      - 704
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 3
+      - 3247.55
+  - - - 448
+      - 4288
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 0
+      - 4212.78
+  - - - 2368
+      - 6784
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 3
+      - 4072.95
+  - - - 1856
+      - 5888
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 2
+      - 4157.73
+  - - - 5888
+      - 128
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 3
+      - 2456.1
+  - - - 704
+      - 64
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 5
+      - 345.423
+  - - - 128
+      - 1024
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 0
+      - 954.555
+  - - - 4
+      - 5888
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 6
+      - 174.397
+  - - - 128
+      - 5888
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 5
+      - 3187.19
+  - - - 1024
+      - 2944
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 3
+      - 3534.91
+  - - - 64
+      - 256
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 5
+      - 171.026
+  - - - 1024
+      - 128
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 5
+      - 1507.66
+  - - - 1856
+      - 1024
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 3
+      - 3695.39
+  - - - 704
+      - 256
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 5
+      - 2157.43
+  - - - 3584
+      - 2944
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 1
+      - 4216.23
+  - - - 3584
+      - 6784
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 1
+      - 4359.85
+  - - - 1856
+      - 128
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 0
+      - 2817.72
+  - - - 5056
+      - 2368
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 3
+      - 4114.79
+  - - - 448
+      - 1856
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 0
+      - 3627.79
+  - - - 5888
+      - 64
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 5
+      - 3079.63
+  - - - 1856
+      - 4
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 6
+      - 69.1257
+  - - - 704
+      - 2944
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 5
+      - 3779.01
+  - - - 128
+      - 1856
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 5
+      - 1554.43
+  - - - 1856
+      - 6784
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 1
+      - 4268.82
+  - - - 64
+      - 4288
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 5
+      - 1490.3
+  - - - 3584
+      - 1856
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 1
+      - 4017.69
+  - - - 3584
+      - 1408
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 3
+      - 3682.75
+  - - - 6784
+      - 448
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 3
+      - 3386.34
+  - - - 1024
+      - 1408
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 3
+      - 3195.56
+  - - - 1024
+      - 704
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 0
+      - 3140.55
+  - - - 5888
+      - 4288
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 4
+      - 4285.06
+  - - - 5888
+      - 5056
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 1
+      - 4273.65
+  - - - 704
+      - 1856
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 5
+      - 3711.26
+  - - - 64
+      - 4
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 6
+      - 2.86579
+  - - - 5056
+      - 2944
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 2
+      - 4122.76
+  - - - 5056
+      - 448
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 3
+      - 3642.0
+  - - - 1024
+      - 4288
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 3
+      - 4043.21
+  - - - 3584
+      - 704
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 0
+      - 3785.63
+  - - - 704
+      - 4
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 6
+      - 29.3126
+  - - - 64
+      - 3584
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 0
+      - 2541.32
+  - - - 1856
+      - 6784
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 1
+      - 4239.29
+  - - - 2944
+      - 5888
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 4
+      - 4125.3
+  - - - 2944
+      - 64
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 5
+      - 2247.13
+  - - - 704
+      - 128
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 5
+      - 1050.62
+  - - - 1856
+      - 2944
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 3
+      - 3832.33
+  - - - 3584
+      - 128
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 5
+      - 3255.81
+  - - - 5056
+      - 128
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 0
+      - 2543.53
+  - - - 5056
+      - 2368
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 3
+      - 3977.51
+  - - - 1024
+      - 2368
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 3
+      - 3470.98
+  - - - 1856
+      - 4288
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 3
+      - 4017.6
+  - - - 2944
+      - 1408
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 5
+      - 3976.29
+  - - - 3584
+      - 5888
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 1
+      - 4280.99
+  - - - 5056
+      - 2368
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 3
+      - 4106.89
+  - - - 64
+      - 2368
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 0
+      - 1531.69
+  - - - 256
+      - 128
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 0
+      - 398.133
+  - - - 1408
+      - 6784
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 4
+      - 4188.38
+  - - - 6784
+      - 1856
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 4
+      - 4279.32
+  - - - 4288
+      - 1856
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 3
+      - 3845.33
+  - - - 2368
+      - 256
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 0
+      - 2622.83
+  - - - 1856
+      - 2368
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 5
+      - 4199.02
+  - - - 1856
+      - 64
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 5
+      - 886.036
+  - - - 4
+      - 64
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 6
+      - 2.94754
+  - - - 2944
+      - 4288
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 4
+      - 4241.8
+  - - - 1856
+      - 6784
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 1
+      - 4280.4
+  - - - 64
+      - 1408
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 5
+      - 1090.28
+  - - - 128
+      - 1024
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 0
+      - 1509.32
+  - - - 128
+      - 5888
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 3
+      - 2493.35
+  - - - 3584
+      - 64
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 5
+      - 2551.58
+  - - - 64
+      - 1024
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 0
+      - 682.324
+  - - - 1024
+      - 6784
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 3
+      - 3896.62
+  - - - 448
+      - 3584
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 5
+      - 3216.81
+  - - - 3584
+      - 5056
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 3
+      - 4103.68
+  - - - 1024
+      - 448
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 0
+      - 3908.97
+  - - - 256
+      - 1856
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 0
+      - 3414.84
+  - - - 6784
+      - 704
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 3
+      - 4058.86
+  - - - 1024
+      - 448
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 0
+      - 3268.86
+  - - - 5056
+      - 1408
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 3
+      - 4002.72
+  - - - 256
+      - 64
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 5
+      - 190.71
+  - - - 448
+      - 5056
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 3
+      - 3357.35
+  - - - 2368
+      - 448
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 5
+      - 3338.97
+  - - - 128
+      - 4288
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 0
+      - 2480.52
+  - - - 5888
+      - 128
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 0
+      - 2918.04
+  - - - 448
+      - 1024
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 5
+      - 2301.92
+  - - - 1408
+      - 3584
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 5
+      - 3747.36
+  - - - 5056
+      - 448
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 0
+      - 3978.56
+  - - - 3584
+      - 256
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 3
+      - 2843.69
+  - - - 704
+      - 4288
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 5
+      - 3650.35
+  - - - 6784
+      - 6784
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 1
+      - 4427.56
+  - - - 1408
+      - 2944
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 5
+      - 3950.8
+  - - - 1856
+      - 128
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 5
+      - 2305.25
+  - - - 1408
+      - 5888
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 3
+      - 4180.56
+  - - - 4
+      - 3584
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 6
+      - 123.765
+  - - - 448
+      - 2368
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 0
+      - 3094.47
+  - - - 5888
+      - 64
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 5
+      - 1975.32
+  - - - 2944
+      - 704
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 3
+      - 3103.64
+  - - - 4
+      - 256
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 6
+      - 11.594
+  - - - 448
+      - 5056
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 0
+      - 3887.05
+  - - - 1024
+      - 5056
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 3
+      - 3991.07
+  - - - 64
+      - 6784
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 0
+      - 2242.84
+  - - - 3584
+      - 6784
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 1
+      - 4184.84
+  - - - 6784
+      - 5888
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 4
+      - 4389.36
+  - - - 3584
+      - 2368
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 3
+      - 3876.97
+  - - - 5056
+      - 4288
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 1
+      - 4226.88
+  - - - 2944
+      - 5056
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 2
+      - 4243.0
+  - - - 448
+      - 448
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 5
+      - 2269.53
+  - - - 3584
+      - 3584
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 1
+      - 3876.57
+  - - - 2368
+      - 1408
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 3
+      - 3915.02
+  - - - 128
+      - 4
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 6
+      - 5.69094
+  - - - 5888
+      - 128
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 0
+      - 3286.4
+  - - - 3584
+      - 1856
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 1
+      - 4082.85
+  - - - 2368
+      - 4
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 6
+      - 79.0114
+  - - - 2368
+      - 2368
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 3
+      - 3926.34
+  - - - 1856
+      - 2368
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 3
+      - 4061.34
+  - - - 1024
+      - 6784
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 2
+      - 3967.47
+- null

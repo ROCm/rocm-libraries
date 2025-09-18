@@ -1,0 +1,101 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+
+- caption: Installation
+  entries:
+  - file: install/rocPRIM-prerequisites.rst
+    title: Prerequisites
+  - file: install/rocPRIM-install-overview.rst
+    title: Installation overview
+  - file: install/rocPRIM-build-install-linux.rst
+    title: Installing on Linux
+  - file: install/rocPRIM-build-install-windows.rst
+    title: Building and installing from source
+
+- caption: Conceptual
+  entries:
+    - file: conceptual/rocPRIM-stripe-block.rst
+    - file: conceptual/rocPRIM-operations.rst
+    - file: conceptual/rocPRIM-scope.rst
+    - file: conceptual/rocPRIM-performance-tuning.rst
+    - file: conceptual/rocPRIM-type-traits.rst
+
+- caption: How to
+  entries:
+    - file: how-to/rocPRIM-spir-v.rst
+      title: Use the SPIR-V target
+
+- caption: Reference
+  entries:
+    - file: reference/rocPRIM-glossary.rst
+    - file: reference/data-type-support.rst
+    - file: reference/iterators.rst
+    - file: reference/types.rst
+    - file: conceptual/type_traits.rst
+    - file: device_ops/index.rst
+      subtrees:
+      - entries: 
+        - file: device_ops/config.rst
+        - file: device_ops/transform.rst
+        - file: device_ops/unique.rst
+        - file: device_ops/sort.rst
+        - file: device_ops/partial_sort.rst
+        - file: device_ops/nth_element.rst
+        - file: device_ops/merge.rst
+        - file: device_ops/partition.rst
+        - file: device_ops/run_length_encoding.rst
+        - file: device_ops/scan.rst
+        - file: device_ops/search_n.rst
+        - file: device_ops/select.rst
+        - file: device_ops/reduce.rst
+        - file: device_ops/adjacent_difference.rst
+        - file: device_ops/adjacent_find.rst
+        - file: device_ops/binary_search.rst
+        - file: device_ops/histogram.rst
+        - file: device_ops/device_copy.rst
+        - file: device_ops/memcpy.rst
+        - file: device_ops/find_first_of.rst
+        - file: device_ops/find_end.rst
+        - file: device_ops/search.rst
+    - file: block_ops/index.rst
+      subtrees:
+      - entries: 
+        - file: block_ops/ops_classes/index.rst
+          subtrees: 
+          - entries:
+            - file: block_ops/ops_classes/load.rst
+            - file: block_ops/ops_classes/store.rst
+            - file: block_ops/ops_classes/adjacent_difference.rst
+            - file: block_ops/ops_classes/discontinuity.rst
+            - file: block_ops/ops_classes/scan.rst
+            - file: block_ops/ops_classes/reduce.rst
+            - file: block_ops/ops_classes/run_length_decode.rst
+            - file: block_ops/ops_classes/shuffle.rst
+            - file: block_ops/ops_classes/exchange.rst
+            - file: block_ops/ops_classes/sort.rst
+            - file: block_ops/ops_classes/histogram.rst
+        - file: block_ops/data_mov_funcs.rst
+    - file: warp_ops/index.rst
+      subtrees: 
+      - entries:
+        - file: warp_ops/load.rst
+        - file: warp_ops/store.rst
+        - file: warp_ops/reduce.rst
+        - file: warp_ops/scan.rst
+        - file: warp_ops/sort.rst
+        - file: warp_ops/shuffle.rst
+        - file: warp_ops/exchange.rst
+    - file: thread_ops/index.rst
+      subtrees:
+      - entries:
+        - file: thread_ops/radix_key_codec.rst
+        - file: thread_ops/thread_operators.rst
+        - file: thread_ops/thread_load.rst
+        - file: thread_ops/thread_reduce.rst
+        - file: thread_ops/thread_scan.rst
+        - file: thread_ops/thread_search.rst
+        - file: thread_ops/thread_store.rst
+    - file: reference/developer.rst    
+    - file: license.rst

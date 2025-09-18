@@ -1,0 +1,44 @@
+defaults:
+  numbered: False
+root: src/index
+subtrees:
+- entries:
+  - file: src/what-is-tensile
+
+- caption: Install
+  entries:
+  - file: src/install/installation
+    title: Installation
+
+- caption: Conceptual
+  entries:
+  - file: src/conceptual/solution-selection-catalogs
+  - file: src/conceptual/benchmarking
+  - file: src/conceptual/kernel-parameters
+
+- caption: Reference
+  entries:
+  - file: src/cli-reference/cli-reference
+    title: CLI reference
+  - file: src/reference/environment-variables
+    title: Environment variables
+  - file: src/reference/precision-support
+    title: Precision support
+  - file: src/reference/nomenclature
+
+- caption: Contribution
+  entries:
+  - file: src/how-to/programmers-guide
+  - file: src/how-to/contribution-guidelines
+
+- caption: Tutorial
+  entries:
+  - file: src/tutorial/benchmark-config-example
+
+- caption: Support
+  entries:
+  - file: src/support/troubleshooting
+
+- caption: About
+  entries:
+  - file: license.rst

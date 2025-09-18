@@ -1,0 +1,24 @@
+codecov:
+  require_ci_to_pass: false
+
+ignore:
+  - "benchmark/"
+  - "build/"
+  - "cmake/"
+  - "docs/"
+  - "hipRAND/"
+  - "python/"
+  - "scripts/"
+  - "test/"
+  - "tools/"
+
+coverage:
+    precision: 2
+    round: nearest
+    range: "50...75"
+
+comment:
+    behavior: once       # if a new commit is made, update the old comment if it exists, otherwise make a new one.
+    require_changes: false  # Always post a comment, even if coverage stayed the same.
+    require_base: no        # Always post, even without a base to compare.
+    require_head: no        # Always post, even without a head to compare.

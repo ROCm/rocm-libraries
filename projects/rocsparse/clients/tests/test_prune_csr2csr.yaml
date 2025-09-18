@@ -1,0 +1,112 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: prune_csr2csr_bad_arg
+  category: pre_checkin
+  function: prune_csr2csr_bad_arg
+  precision: *single_double_precisions
+
+- name: pune_csr2csr
+  category: quick
+  function: prune_csr2csr
+  precision: *single_double_precisions
+  M: [0, 1, 10, 325, 1107]
+  N: [0, 1, 33, 435, 1089]
+  threshold: [0.001, 0.1, 0.5]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: prune_csr2csr
+  category: pre_checkin
+  function: prune_csr2csr
+  precision: *single_double_precisions
+  M: [10245, 50687, 92835]
+  N: [11200, 51023, 78583]
+  threshold: [0.1, 0.0, 0.9, 1.3]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: prune_csr2csr_file
+  category: pre_checkin
+  function: prune_csr2csr
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  threshold: [0.111, 0.5, 0.75, 1.1]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6,
+             scircuit]
+
+- name: prune_csr2csr
+  category: nightly
+  function: prune_csr2csr
+  precision: *single_double_precisions
+  M: [20245, 50677, 82859]
+  N: [12909, 40232, 88180]
+  threshold: [0.1, 0.2, 0.33, 0.5]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: prune_csr2csr_file
+  category: nightly
+  function: prune_csr2csr
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  threshold: [0.3, 0.45, 0.77, 0.1]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2,
+             Chevron3,
+             Chevron4]
+
+- name: prune_csr2csr_file
+  category: nightly
+  function: prune_csr2csr
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  threshold: [0.7, 0.8, 0.99, 1.0]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312,
+             bmwcra_1,
+             mac_econ_fwd500,
+             sme3Dc,
+             webbase-1M,
+             Chebyshev4]

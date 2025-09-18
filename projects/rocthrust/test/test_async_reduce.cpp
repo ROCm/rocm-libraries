@@ -1,0 +1,1015 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+#define THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER
+
+#include <thrust/detail/config.h>
+
+// need to suppress deprecation warnings inside several thrust headers
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
+#if THRUST_CPP_DIALECT >= 2017
+
+#  include <thrust/async/copy.h>
+#  include <thrust/async/reduce.h>
+#  include <thrust/device_vector.h>
+#  include <thrust/host_vector.h>
+
+#  include "test_param_fixtures.hpp"
+#  include "test_real_assertions.hpp"
+#  include "test_utils.hpp"
+
+TESTS_DEFINE(AsyncReduceTests, NumericalTestsParams);
+
+template <typename T>
+struct custom_plus
+{
+  THRUST_HOST_DEVICE T operator()(T lhs, T rhs) const
+  {
+    return lhs + rhs;
+  }
+};
+
+#  define DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...) \
+    template <typename T>                                                                \
+    struct NAME                                                                          \
+    {                                                                                    \
+      MEMBERS                                                                            \
+                                                                                         \
+      NAME()                                                                             \
+      {                                                                                  \
+        CTOR                                                                             \
+      }                                                                                  \
+                                                                                         \
+      ~NAME()                                                                            \
+      {                                                                                  \
+        DTOR                                                                             \
+      }                                                                                  \
+                                                                                         \
+      template <typename Event>                                                          \
+      void validate_event(Event& e)                                                      \
+      {                                                                                  \
+        THRUST_UNUSED_VAR(e);                                                            \
+        VALIDATE                                                                         \
+      }                                                                                  \
+                                                                                         \
+      template <typename ForwardIt, typename Sentinel>                                   \
+      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last)                    \
+        THRUST_DECLTYPE_RETURNS(::thrust::async::reduce(__VA_ARGS__))                    \
+    };                                                                                   \
+    /**/
+
+#  define DEFINE_ASYNC_REDUCE_INVOKER(NAME, ...)                                                     \
+    DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(                                                            \
+      NAME, THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), __VA_ARGS__) \
+    /**/
+
+#  define DEFINE_SYNC_REDUCE_INVOKER(NAME, ...)                                                                     \
+    template <typename T>                                                                                           \
+    struct NAME                                                                                                     \
+    {                                                                                                               \
+      template <typename ForwardIt, typename Sentinel>                                                              \
+      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last) THRUST_RETURNS(::thrust::reduce(__VA_ARGS__)) \
+    };                                                                                                              \
+    /**/
+
+DEFINE_ASYNC_REDUCE_INVOKER(reduce_async_invoker, THRUST_FWD(first), THRUST_FWD(last));
+DEFINE_ASYNC_REDUCE_INVOKER(reduce_async_invoker_device, thrust::device, THRUST_FWD(first), THRUST_FWD(last));
+DEFINE_ASYNC_REDUCE_INVOKER(reduce_async_invoker_device_allocator,
+                            thrust::device(thrust::device_allocator<void>{}),
+                            THRUST_FWD(first),
+                            THRUST_FWD(last));
+DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_on
+  // Members.
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  // Constructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  // Destructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  // `validate_event` member.
+  ,
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
+  // Arguments to `thrust::async::reduce`.
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last));
+DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_allocator_on
+  // Members.
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  // Constructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  // Destructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  // `validate_event` member.
+  ,
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
+  // Arguments to `thrust::async::reduce`.
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last));
+
+DEFINE_SYNC_REDUCE_INVOKER(reduce_sync_invoker, THRUST_FWD(first), THRUST_FWD(last));
+
+DEFINE_ASYNC_REDUCE_INVOKER(reduce_async_invoker_init, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>());
+DEFINE_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_init, thrust::device, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>());
+DEFINE_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_allocator_init,
+  thrust::device(thrust::device_allocator<void>{}),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>());
+DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_on_init
+  // Members.
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  // Constructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  // Destructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  // `validate_event` member.
+  ,
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
+  // Arguments to `thrust::async::reduce`.
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>());
+DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_allocator_on_init
+  // Members.
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  // Constructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  // Destructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  // `validate_event` member.
+  ,
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
+  // Arguments to `thrust::async::reduce`.
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>());
+
+DEFINE_SYNC_REDUCE_INVOKER(reduce_sync_invoker_init, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>());
+
+DEFINE_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_init_plus, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>(), thrust::plus<T>());
+DEFINE_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_init_plus,
+  thrust::device,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>(),
+  thrust::plus<T>());
+DEFINE_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_allocator_init_plus,
+  thrust::device(thrust::device_allocator<void>{}),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>(),
+  thrust::plus<T>());
+DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_on_init_plus
+  // Members.
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  // Constructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  // Destructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  // `validate_event` member.
+  ,
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
+  // Arguments to `thrust::async::reduce`.
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>(),
+  thrust::plus<T>());
+DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_allocator_on_init_plus
+  // Members.
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  // Constructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  // Destructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  // `validate_event` member.
+  ,
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
+  // Arguments to `thrust::async::reduce`.
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>(),
+  thrust::plus<T>());
+
+DEFINE_SYNC_REDUCE_INVOKER(
+  reduce_sync_invoker_init_plus, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>(), thrust::plus<T>());
+
+DEFINE_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_init_custom_plus, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>(), custom_plus<T>());
+DEFINE_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_init_custom_plus,
+  thrust::device,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>(),
+  custom_plus<T>());
+DEFINE_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_allocator_init_custom_plus,
+  thrust::device(thrust::device_allocator<void>{}),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>(),
+  custom_plus<T>());
+DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_on_init_custom_plus
+  // Members.
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  // Constructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  // Destructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  // `validate_event` member.
+  ,
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
+  // Arguments to `thrust::async::reduce`.
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>(),
+  custom_plus<T>());
+DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
+  reduce_async_invoker_device_allocator_on_init_custom_plus
+  // Members.
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  // Constructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+  // Destructor.
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
+  // `validate_event` member.
+  ,
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
+  // Arguments to `thrust::async::reduce`.
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  random_integer<T>(),
+  custom_plus<T>());
+
+DEFINE_SYNC_REDUCE_INVOKER(
+  reduce_sync_invoker_init_custom_plus, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>(), custom_plus<T>());
+
+///////////////////////////////////////////////////////////////////////////////
+
+template <typename T, template <typename> class AsyncReduceInvoker, template <typename> class SyncReduceInvoker>
+THRUST_HOST void test_async_reduce()
+{
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h0(random_integers<T>(size));
+    thrust::device_vector<T> d0a(h0);
+    thrust::device_vector<T> d0b(h0);
+    thrust::device_vector<T> d0c(h0);
+    thrust::device_vector<T> d0d(h0);
+
+    AsyncReduceInvoker<T> invoke_async;
+    SyncReduceInvoker<T> invoke_sync;
+
+    ASSERT_EQ(h0, d0a);
+    ASSERT_EQ(h0, d0b);
+    ASSERT_EQ(h0, d0c);
+    ASSERT_EQ(h0, d0d);
+
+    auto f0a = invoke_async(d0a.begin(), d0a.end());
+    auto f0b = invoke_async(d0b.begin(), d0b.end());
+    auto f0c = invoke_async(d0c.begin(), d0c.end());
+    auto f0d = invoke_async(d0d.begin(), d0d.end());
+
+    invoke_async.validate_event(f0a);
+    invoke_async.validate_event(f0b);
+    invoke_async.validate_event(f0c);
+    invoke_async.validate_event(f0d);
+
+    // This potentially runs concurrently with the copies.
+    auto const r0 = invoke_sync(h0.begin(), h0.end());
+
+    decltype(f0a.extract()) r1a;
+    decltype(f0b.extract()) r1b;
+    decltype(f0c.extract()) r1c;
+    decltype(f0d.extract()) r1d;
+
+    test_future_value_retrieval(f0a, r1a);
+    test_future_value_retrieval(f0b, r1b);
+    test_future_value_retrieval(f0c, r1c);
+    test_future_value_retrieval(f0d, r1d);
+
+    ASSERT_EQ(r0, r1a);
+    ASSERT_EQ(r0, r1b);
+    ASSERT_EQ(r0, r1c);
+    ASSERT_EQ(r0, r1d);
+  }
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_allocator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_allocator, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_on)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_on, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_allocator_on)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_allocator_on, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_allocator_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_allocator_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_on_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_on_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_allocator_on_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_allocator_on_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_allocator_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_allocator_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_on_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_on_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_allocator_on_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_allocator_on_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_allocator_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_allocator_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_on_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_on_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_allocator_on_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce<T, reduce_async_invoker_device_allocator_on_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+template <typename T, template <typename> class AsyncReduceInvoker, template <typename> class SyncReduceInvoker>
+THRUST_HOST void test_async_reduce_counting_iterator()
+{
+  constexpr std::size_t n = 15 * sizeof(T);
+
+  ASSERT_LE(T(n), truncate_to_max_representable<T>(n));
+
+  thrust::counting_iterator<T> first(0);
+  thrust::counting_iterator<T> last(n);
+
+  AsyncReduceInvoker<T> invoke_async;
+  SyncReduceInvoker<T> invoke_sync;
+
+  auto f0a = invoke_async(first, last);
+  auto f0b = invoke_async(first, last);
+  auto f0c = invoke_async(first, last);
+  auto f0d = invoke_async(first, last);
+
+  invoke_async.validate_event(f0a);
+  invoke_async.validate_event(f0b);
+  invoke_async.validate_event(f0c);
+  invoke_async.validate_event(f0d);
+
+  // This potentially runs concurrently with the copies.
+  auto const r0 = invoke_sync(first, last);
+
+  decltype(f0a.extract()) r1a;
+  decltype(f0b.extract()) r1b;
+  decltype(f0c.extract()) r1c;
+  decltype(f0d.extract()) r1d;
+
+  test_future_value_retrieval(f0a, r1a);
+  test_future_value_retrieval(f0b, r1b);
+  test_future_value_retrieval(f0c, r1c);
+  test_future_value_retrieval(f0d, r1d);
+
+  ASSERT_EQ(r0, r1a);
+  ASSERT_EQ(r0, r1b);
+  ASSERT_EQ(r0, r1c);
+  ASSERT_EQ(r0, r1d);
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_counting_iterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_counting_iterator<T, reduce_async_invoker, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_counting_iterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_counting_iterator<T, reduce_async_invoker_device, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_counting_iterator_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_counting_iterator<T, reduce_async_invoker_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_counting_iterator_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_counting_iterator<T, reduce_async_invoker_device_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_counting_iterator_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_counting_iterator<T, reduce_async_invoker_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_counting_iterator_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_counting_iterator<T, reduce_async_invoker_device_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_counting_iterator_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_counting_iterator<T, reduce_async_invoker_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_policy_counting_iterator_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_counting_iterator<T,
+                                      reduce_async_invoker_device_init_custom_plus,
+                                      reduce_sync_invoker_init_custom_plus>();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_using)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h0(random_integers<T>(size));
+    thrust::device_vector<T> d0a(h0);
+    thrust::device_vector<T> d0b(h0);
+
+    ASSERT_EQ(h0, d0a);
+    ASSERT_EQ(h0, d0b);
+
+    thrust::device_future<T> f0a;
+    thrust::device_future<T> f0b;
+
+    // When you import the customization points into the global namespace,
+    // they should be selected instead of the synchronous algorithms.
+    {
+      using namespace thrust::async;
+      f0a = reduce(d0a.begin(), d0a.end());
+    }
+    {
+      using thrust::async::reduce;
+      f0b = reduce(d0b.begin(), d0b.end());
+    }
+
+    // ADL should find the synchronous algorithms.
+    // This potentially runs concurrently with the copies.
+    T const r0 = reduce(h0.begin(), h0.end());
+
+    T r1a;
+    T r1b;
+
+    test_future_value_retrieval(f0a, r1a);
+    test_future_value_retrieval(f0b, r1b);
+
+    ASSERT_EQ(r0, r1a);
+    ASSERT_EQ(r0, r1b);
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_after)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h0(random_integers<T>(size));
+    thrust::device_vector<T> d0(h0);
+
+    ASSERT_EQ(h0, d0);
+
+    auto f0 = thrust::async::reduce(d0.begin(), d0.end());
+
+    ASSERT_EQ(true, f0.valid_stream());
+
+    auto const f0_stream = f0.stream().native_handle();
+
+    auto f1 = thrust::async::reduce(thrust::device.after(f0), d0.begin(), d0.end());
+
+    // Verify that double consumption of a future produces an exception.
+    ASSERT_THROW(auto x = thrust::async::reduce(thrust::device.after(f0), d0.begin(), d0.end());
+                 THRUST_UNUSED_VAR(x), thrust::event_error);
+
+    ASSERT_EQ_QUIET(f0_stream, f1.stream().native_handle());
+
+    auto after_policy2 = thrust::device.after(f1);
+
+    auto f2 = thrust::async::reduce(after_policy2, d0.begin(), d0.end());
+
+    // Verify that double consumption of a policy produces an exception.
+    ASSERT_THROW(auto x = thrust::async::reduce(after_policy2, d0.begin(), d0.end());
+                 THRUST_UNUSED_VAR(x), thrust::event_error);
+
+    ASSERT_EQ_QUIET(f0_stream, f2.stream().native_handle());
+
+    // This potentially runs concurrently with the copies.
+    T const r0 = thrust::reduce(h0.begin(), h0.end());
+
+    T r1;
+
+    test_future_value_retrieval(f2, r1);
+
+    ASSERT_EQ(r0, r1);
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_on_then_after)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h0(random_integers<T>(size));
+    thrust::device_vector<T> d0(h0);
+
+    ASSERT_EQ(h0, d0);
+
+    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream;
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(
+      StreamCreateWithFlags)(&stream, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+
+    auto f0 = thrust::async::reduce(thrust::device.on(stream), d0.begin(), d0.end());
+
+    ASSERT_EQ_QUIET(stream, f0.stream().native_handle());
+
+    auto f1 = thrust::async::reduce(thrust::device.after(f0), d0.begin(), d0.end());
+
+    // Verify that double consumption of a future produces an exception.
+    ASSERT_THROW(auto x = thrust::async::reduce(thrust::device.after(f0), d0.begin(), d0.end());
+                 THRUST_UNUSED_VAR(x), thrust::event_error);
+
+    ASSERT_EQ_QUIET(stream, f1.stream().native_handle());
+
+    auto after_policy2 = thrust::device.after(f1);
+
+    auto f2 = thrust::async::reduce(after_policy2, d0.begin(), d0.end());
+
+    // Verify that double consumption of a policy produces an exception.
+    ASSERT_THROW(auto x = thrust::async::reduce(after_policy2, d0.begin(), d0.end());
+                 THRUST_UNUSED_VAR(x), thrust::event_error);
+
+    ASSERT_EQ_QUIET(stream, f2.stream().native_handle());
+
+    // This potentially runs concurrently with the copies.
+    T const r0 = thrust::reduce(h0.begin(), h0.end());
+
+    T r1;
+
+    test_future_value_retrieval(f2, r1);
+
+    ASSERT_EQ(r0, r1);
+
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream));
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_allocator_on_then_after)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h0(random_integers<T>(size));
+    thrust::device_vector<T> d0(h0);
+
+    ASSERT_EQ(h0, d0);
+
+    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream0;
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(
+      StreamCreateWithFlags)(&stream0, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+
+    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream1;
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(
+      StreamCreateWithFlags)(&stream1, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
+
+    auto f0 = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).on(stream0), d0.begin(), d0.end());
+
+    ASSERT_EQ_QUIET(stream0, f0.stream().native_handle());
+
+    auto f1 = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).after(f0), d0.begin(), d0.end());
+
+    ASSERT_THROW(
+      auto x = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).after(f0), d0.begin(), d0.end());
+      THRUST_UNUSED_VAR(x), thrust::event_error);
+
+    ASSERT_EQ_QUIET(stream0, f1.stream().native_handle());
+
+    auto f2 = thrust::async::reduce(
+      thrust::device(thrust::device_allocator<void>{}).on(stream1).after(f1), d0.begin(), d0.end());
+
+    ASSERT_THROW(auto x = thrust::async::reduce(
+                   thrust::device(thrust::device_allocator<void>{}).on(stream1).after(f1), d0.begin(), d0.end());
+                 THRUST_UNUSED_VAR(x), thrust::event_error);
+
+    // KNOWN_FAILURE;
+    // FIXME: The below fails because you can't combine allocator attachment,
+    // `.on`, and `.after`.
+    // The `#if 0` can be removed once the KNOWN_FAILURE is resolved.
+#  if 0
+    ASSERT_EQ_QUIET(stream1, f2.stream().native_handle());
+
+    // This potentially runs concurrently with the copies.
+    T const r0 = thrust::reduce(h0.begin(), h0.end());
+
+    T r1;
+
+    test_future_value_retrieval(f2, r1);
+
+    ASSERT_EQ(r0, r1);
+
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream0));
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream1));
+#  endif
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+TYPED_TEST(AsyncReduceTests, test_async_reduce_caching)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    constexpr std::int64_t m = 32;
+
+    thrust::host_vector<T> h0(random_integers<T>(size));
+    thrust::device_vector<T> d0(h0);
+
+    ASSERT_EQ(h0, d0);
+
+    T const* f0_raw_data;
+
+    {
+      // Perform one reduction to ensure there's an entry in the caching
+      // allocator.
+      auto f0 = thrust::async::reduce(d0.begin(), d0.end());
+
+      TEST_EVENT_WAIT(f0);
+
+      f0_raw_data = f0.raw_data();
+    }
+
+    for (std::int64_t i = 0; i < m; ++i)
+    {
+      auto f1 = thrust::async::reduce(d0.begin(), d0.end());
+
+      ASSERT_EQ(true, f1.valid_stream());
+      ASSERT_EQ(true, f1.valid_content());
+
+      ASSERT_EQ_QUIET(f0_raw_data, f1.raw_data());
+
+      // This potentially runs concurrently with the copies.
+      T const r0 = thrust::reduce(h0.begin(), h0.end());
+
+      T r1;
+      test_future_value_retrieval(f1, r1);
+
+      ASSERT_EQ(r0, r1);
+    }
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+TYPED_TEST(AsyncReduceTests, test_async_copy_then_reduce)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h0a(random_integers<T>(size));
+    thrust::host_vector<T> h0b(random_integers<T>(size));
+    thrust::host_vector<T> h0c(random_integers<T>(size));
+    thrust::host_vector<T> h0d(random_integers<T>(size));
+
+    thrust::device_vector<T> d0a(size);
+    thrust::device_vector<T> d0b(size);
+    thrust::device_vector<T> d0c(size);
+    thrust::device_vector<T> d0d(size);
+
+    auto f0a = thrust::async::copy(h0a.begin(), h0a.end(), d0a.begin());
+    auto f0b = thrust::async::copy(h0b.begin(), h0b.end(), d0b.begin());
+    auto f0c = thrust::async::copy(h0c.begin(), h0c.end(), d0c.begin());
+    auto f0d = thrust::async::copy(h0d.begin(), h0d.end(), d0d.begin());
+
+    ASSERT_EQ(true, f0a.valid_stream());
+    ASSERT_EQ(true, f0b.valid_stream());
+    ASSERT_EQ(true, f0c.valid_stream());
+    ASSERT_EQ(true, f0d.valid_stream());
+
+    auto const f0a_stream = f0a.stream().native_handle();
+    auto const f0b_stream = f0b.stream().native_handle();
+    auto const f0c_stream = f0c.stream().native_handle();
+    auto const f0d_stream = f0d.stream().native_handle();
+
+    auto f1a = thrust::async::reduce(thrust::device.after(f0a), d0a.begin(), d0a.end());
+    auto f1b = thrust::async::reduce(thrust::device.after(f0b), d0b.begin(), d0b.end());
+    auto f1c = thrust::async::reduce(thrust::device.after(f0c), d0c.begin(), d0c.end());
+    auto f1d = thrust::async::reduce(thrust::device.after(f0d), d0d.begin(), d0d.end());
+
+    ASSERT_EQ(false, f0a.valid_stream());
+    ASSERT_EQ(false, f0b.valid_stream());
+    ASSERT_EQ(false, f0c.valid_stream());
+    ASSERT_EQ(false, f0d.valid_stream());
+
+    ASSERT_EQ(true, f1a.valid_stream());
+    ASSERT_EQ(true, f1a.valid_content());
+    ASSERT_EQ(true, f1b.valid_stream());
+    ASSERT_EQ(true, f1b.valid_content());
+    ASSERT_EQ(true, f1c.valid_stream());
+    ASSERT_EQ(true, f1c.valid_content());
+    ASSERT_EQ(true, f1d.valid_stream());
+    ASSERT_EQ(true, f1d.valid_content());
+
+    // Verify that streams were stolen.
+    ASSERT_EQ_QUIET(f0a_stream, f1a.stream().native_handle());
+    ASSERT_EQ_QUIET(f0b_stream, f1b.stream().native_handle());
+    ASSERT_EQ_QUIET(f0c_stream, f1c.stream().native_handle());
+    ASSERT_EQ_QUIET(f0d_stream, f1d.stream().native_handle());
+
+    // This potentially runs concurrently with the copies.
+    T const r0 = thrust::reduce(h0a.begin(), h0a.end());
+
+    T r1a;
+    T r1b;
+    T r1c;
+    T r1d;
+
+    test_future_value_retrieval(f1a, r1a);
+    test_future_value_retrieval(f1b, r1b);
+    test_future_value_retrieval(f1c, r1c);
+    test_future_value_retrieval(f1d, r1d);
+
+    ASSERT_EQ(r0, r1a);
+    ASSERT_EQ(r0, r1b);
+    ASSERT_EQ(r0, r1c);
+    ASSERT_EQ(r0, r1d);
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// TODO: when_all from reductions.
+
+// See also issue: https://github.com/NVIDIA/cccl/issues/1886
+struct tuple_sum
+{
+  __device__ thrust::tuple<int, int>
+  operator()(const thrust::tuple<int, int>& t1, const thrust::tuple<int, int>& t2) const
+  {
+    return thrust::make_tuple(thrust::get<0>(t1) + thrust::get<0>(t2), thrust::get<1>(t1) + thrust::get<1>(t2));
+  }
+};
+
+TEST(AsyncReduceTests, test_async_reduce_bug1886)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  // Initialize input data
+  thrust::device_vector<int> d_data1{1, 2, 3, 4, 5};
+  thrust::device_vector<int> d_data2{10, 20, 30, 40, 50};
+
+  using TupleType = thrust::tuple<int, int>;
+  using IteratorType =
+    thrust::zip_iterator<thrust::tuple<thrust::device_vector<int>::iterator, thrust::device_vector<int>::iterator>>;
+
+  TupleType result;
+  try
+  {
+    // Create zip_begin and zip_end iterators
+    IteratorType zip_begin = thrust::make_zip_iterator(thrust::make_tuple(d_data1.begin(), d_data2.begin()));
+    IteratorType zip_end   = thrust::make_zip_iterator(thrust::make_tuple(d_data2.end(), d_data2.end()));
+
+    // Initialize the starting tuple
+    TupleType init = thrust::make_tuple(0, 0);
+
+    // Perform async reduce using zip_begin and zip_end
+    auto future = thrust::async::reduce(thrust::device, zip_begin, zip_end, init, tuple_sum());
+
+    // Get the result
+    result = future.get();
+  }
+  catch (const ::std::bad_alloc& e)
+  {
+    (void) hipGetLastError();
+    GTEST_SKIP() << "std::bad_alloc: " << e.what();
+  }
+
+  // Print the result
+  std::cout << "Sum: (" << thrust::get<0>(result) << ", " << thrust::get<1>(result) << ")" << std::endl;
+}
+
+#endif
+
+// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC

@@ -1,0 +1,23 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SCAN_BY_KEY_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+scan_by_key_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, ::rocprim::block_load_method::block_load_transpose, ::rocprim::block_store_method::block_store_transpose, {{ measurement['cfg']['method'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class key_type, class value_type, class enable = void> struct default_scan_by_key_config :
+default_scan_by_key_config_base<key_type, value_type>::type { };
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class key_type, class value_type> struct default_scan_by_key_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, value_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}
+
+  
+
+

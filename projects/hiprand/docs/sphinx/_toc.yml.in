@@ -1,0 +1,28 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/installation
+    title: Installation guide
+
+- caption: How to
+  entries:
+  - file: how-to/use-hiprand-interfaces
+    title: Use hipRAND interfaces
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand/python/hiprand/examples
+    title: Examples
+
+- caption: API reference
+  entries:
+  - file: api-reference/data-type-support
+    title: Data type support
+  - file: api-reference/cpp-api
+  - file: api-reference/python-api
+- caption: About
+  entries:
+  - file: license

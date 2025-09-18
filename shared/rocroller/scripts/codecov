@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+
+################################################################################
+#
+# MIT License
+#
+# Copyright 2024-2025 AMD ROCm(TM) Software
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+################################################################################
+
+shopt -s globstar
+
+# Expects rocRoller tests to have been built with `-DCODE_COVERAGE=ON -DBUILD_SHARED_LIBS=OFF`
+
+help() {
+    echo "Usage: $0 [option...]" >&2
+    echo
+    echo "NOTE: This script assumes that rocRoller has been built with the following CMake arguments:"
+    echo "      -DCODE_COVERAGE=ON -DBUILD_SHARED_LIBS=OFF"
+    echo
+    echo "options:"
+    echo "--skip_codecov  Skip running the tests and collecting code coverage."
+    echo "--skip_diff     Skip performing the diff and producing reports."
+    echo "--skip_zip      Skip creating the zip archive with the results."
+    echo "-b              Absolute path to build directory"
+    echo "-g              GPU Identifier (for output file names)"
+    echo "-u              Comparison archive URL"
+    echo "-R              Regular expression to filter tests."
+    echo "-h              Print this help message"
+    echo
+}
+
+skip_diff=false
+skip_zip=false
+skip_codecov=false
+ctest_re_flag=
+ctest_re=
+
+while getopts R:g:b:u:h:-: flag; do
+    case "${flag}" in
+    -)
+      case "${OPTARG}" in
+        skip_codecov)
+          skip_codecov=true
+          ;;
+        skip_diff)
+          skip_diff=true
+          ;;
+        skip_zip)
+          skip_zip=true
+          ;;
+        *)
+          echo "Unknown option --${OPTARG}"
+          help
+          exit 1
+          ;;
+      esac
+      ;;
+    R)
+      ctest_re=${OPTARG}
+      ctest_re_flag="-R"
+      ;;
+    g) gpu=${OPTARG} ;;
+    b) build_path=${OPTARG} ;; # Absolute path required
+    u) masterURL=${OPTARG} ;;
+    h)
+        help
+        exit
+        ;;
+    \?)
+        help
+        exit
+        ;;
+    esac
+done
+
+# Require build_path
+if [ -z "$build_path" ]; then
+    echo 'Missing -b' >&2
+    echo
+    help
+    exit 1
+fi
+
+# build_path must be an absolute path to work with ctest
+if [ "$build_path" == "${build_path#/}" ]; then
+    echo 'Absolute path required for -b'
+    echo '(HINT: Try "-b `pwd`" if invoking from your build directory)'
+    echo
+    help
+    exit 1
+fi
+
+script_path=$(dirname "$(realpath $0)")
+code_cov_path=${build_path}
+profdata_file=${code_cov_path}/rocroller-tests.profdata
+ignore_patterns="(.*googletest-src.*)|(.*/catch2-src/.*)|(.*/catch2-build/.*)|(.*/yaml-cpp-src/.*)|(.*hip/include.*)|(.*/include/llvm/.*)|(.*/spdlog/.*)|(.*/msgpack-src/.*)|(.*/build/.*)|(.*/extern/.*)|(.*/test/.*[Tt]ests?.cpp)"
+
+if $skip_codecov; then
+  echo "Skipping code coverage..."
+else
+    set -x
+    mkdir -p ${code_cov_path}
+
+    #Remove the prof file from running the generator.
+    rm -rf ${build_path}/*.profraw
+    rm -rf ${code_cov_path}/*.profraw
+
+    # Add the node install to our PATH.
+    source ${script_path}/../docker/setup-node
+
+    # The `%m` creates a different prof file for each object file. So one for
+    # rocroller.so and one for rocroller-tests.
+    # Also had to switch to using ctest so seg faults can be handled gracefully.
+
+    echo Using $(nproc) threads for code coverage tests.
+    OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
+        -j $(nproc) \
+        --test-dir ${build_path} \
+        --output-on-failure \
+        ${ctest_re_flag} "${ctest_re}"
+
+    # this combines them back together.
+    /opt/rocm/lib/llvm/bin/llvm-profdata merge \
+        --sparse \
+        ${code_cov_path}/*.profraw \
+        -o ${profdata_file}
+
+    # For some reason, with the -object flag, we can't just specify the source
+    # directory, so we have to filter out the files we don't want.
+    /opt/rocm/lib/llvm/bin/llvm-cov report \
+        --instr-profile=${profdata_file} \
+        --object ${build_path}/test/rocroller-tests \
+        --object ${build_path}/test/rocroller-tests-catch \
+        --object ${build_path}/test/arch-gen-tests \
+        --ignore-filename-regex=${ignore_patterns} >${code_cov_path}/code_cov_${gpu}.report
+    cat ${code_cov_path}/code_cov_${gpu}.report
+
+    /opt/rocm/lib/llvm/bin/llvm-cov show \
+        --format=html \
+        --Xdemangler=/opt/rocm/llvm/bin/llvm-cxxfilt \
+        --instr-profile=${profdata_file} \
+        --object ${build_path}/test/rocroller-tests \
+        --object ${build_path}/test/rocroller-tests-catch \
+        --object ${build_path}/test/arch-gen-tests \
+        --ignore-filename-regex=${ignore_patterns} \
+        --output-dir=${code_cov_path}/code_cov_${gpu}_html
+
+    /opt/rocm/lib/llvm/bin/llvm-cov show \
+        --format=text \
+        --use-color=false \
+        --Xdemangler=/opt/rocm/llvm/bin/llvm-cxxfilt \
+        --instr-profile=${profdata_file} \
+        --object ${build_path}/test/rocroller-tests \
+        --object ${build_path}/test/rocroller-tests-catch \
+        --object ${build_path}/test/arch-gen-tests \
+        --ignore-filename-regex=${ignore_patterns} \
+        --output-dir=${code_cov_path}/code_cov_${gpu}_text
+
+    mkdir ${code_cov_path}/code_cov_${gpu}_text/lib
+    mv ${code_cov_path}/code_cov_${gpu}_text/coverage/**/lib/* \
+        ${code_cov_path}/code_cov_${gpu}_text/lib/
+    rm -rf ${code_cov_path}/code_cov_${gpu}_text/coverage
+
+    if $skip_zip; then
+        echo "Skipping zip."
+    else
+        # zip the text report for archiving.
+        pushd ${code_cov_path}
+        zip -r ${code_cov_path}/code_cov_${gpu}.zip ./code_cov_${gpu}_text
+        popd
+    fi
+fi
+
+if $skip_diff; then
+  echo "Skipping diff..."
+else
+    # Require archive url
+    if [ -z "$masterURL" ]; then
+        echo 'Missing -u' >&2
+        echo '(HINT: For master try "-u http://math-ci.amd.com/job/enterprise/job/code-coverage/job/rocRoller/job/master/lastSuccessfulBuild/artifact/*zip*/archive.zip")'
+        echo
+        help
+        exit 1
+    fi
+    set -x
+    #========Create Code Coverage Summary:========
+
+    set +e # Don't error out if the url fails to download.
+    cd ${build_path}
+    wget  -O ./archive.zip ${masterURL}
+    rm -rf ./archive
+    unzip archive.zip
+    set -e
+
+    if [ -f archive/**/code_cov_${gpu}.report ] && [ -f archive/**/code_cov_${gpu}.zip ]; then
+
+        mv archive/**/code_cov_${gpu}.report ./code_cov_${gpu}_master.report
+
+        results=$(tail -n 1 ./code_cov_${gpu}.report | tr -s ' ' | cut -d' ' -f 2-)
+        #Get the report artifact from the master branch named ./code_cov_${gpu}_master.report
+        master_results=$(tail -n 1 ./code_cov_${gpu}_master.report | tr -s ' ' | cut -d' ' -f 2-)
+
+        regions_total=$(echo $results | cut -d' ' -f 1)
+        functions_total=$(echo $results | cut -d' ' -f 4)
+        lines_total=$(echo $results | cut -d' ' -f 7)
+        branches_total=$(echo $results | cut -d' ' -f 10)
+
+        regions_missed=$(echo $results | cut -d' ' -f 2)
+        functions_missed=$(echo $results | cut -d' ' -f 5)
+        lines_missed=$(echo $results | cut -d' ' -f 8)
+        branches_missed=$(echo $results | cut -d' ' -f 11)
+
+        regions_percent=$(echo $results | cut -d' ' -f 3)
+        functions_percent=$(echo $results | cut -d' ' -f 6)
+        lines_percent=$(echo $results | cut -d' ' -f 9)
+        branches_percent=$(echo $results | cut -d' ' -f 12)
+
+        master_regions_missed=$(echo $master_results | cut -d' ' -f 2)
+        master_functions_missed=$(echo $master_results | cut -d' ' -f 5)
+        master_lines_missed=$(echo $master_results | cut -d' ' -f 8)
+        master_branches_missed=$(echo $master_results | cut -d' ' -f 11)
+
+        master_regions_percent=$(echo $master_results | cut -d' ' -f 3)
+        master_functions_percent=$(echo $master_results | cut -d' ' -f 6)
+        master_lines_percent=$(echo $master_results | cut -d' ' -f 9)
+        master_branches_percent=$(echo $master_results | cut -d' ' -f 12)
+
+        regions_missed_diff=$(echo ${regions_missed} - ${master_regions_missed} | bc)
+        functions_missed_diff=$(echo ${functions_missed} - ${master_functions_missed} | bc)
+        lines_missed_diff=$(echo ${lines_missed} - ${master_lines_missed} | bc)
+        branches_missed_diff=$(echo ${branches_missed} - ${master_branches_missed} | bc)
+
+        regions_percent_diff=$(echo ${regions_percent::-1} - ${master_regions_percent::-1} | bc)
+        functions_percent_diff=$(echo ${functions_percent::-1} - ${master_functions_percent::-1} | bc)
+        lines_percent_diff=$(echo ${lines_percent::-1} - ${master_lines_percent::-1} | bc)
+        branches_percent_diff=$(echo ${branches_percent::-1} - ${master_branches_percent::-1} | bc)
+
+        results=\
+"|Type|Total|Missed|Master Missed|Missed Change|Coverage|Master Coverage|Coverage Change|
+|:---|---:|---:|---:|---:|---:|---:|---:|
+|Lines|$lines_total|$lines_missed|$master_lines_missed|$lines_missed_diff|$lines_percent|$master_lines_percent|$lines_percent_diff%|
+|Functions|$functions_total|$functions_missed|$master_functions_missed|$functions_missed_diff|$functions_percent|$master_functions_percent|$functions_percent_diff%|
+|Regions|$regions_total|$regions_missed|$master_regions_missed|$regions_missed_diff|$regions_percent|$master_regions_percent|$regions_percent_diff%|
+|Branches|$branches_total|$branches_missed|$master_branches_missed|$branches_missed_diff|$branches_percent|$master_branches_percent|$branches_percent_diff%|"
+
+        echo "$results" > code_cov_${gpu}.formatted
+
+        #========Create Code Coverage Diff:========
+
+        mv archive/**/code_cov_${gpu}.zip ./code_cov_${gpu}_master_text.zip
+        rm -rf ./code_cov_${gpu}_master_text
+        unzip ./code_cov_${gpu}_master_text.zip -d ./code_cov_${gpu}_master_text
+
+        tmpdir=$(mktemp -d)
+        #Cleanup copies of the txt report for diff. Keep the originals intact.
+        if [ -d ./code_cov_${gpu}_text ]; then
+            cp -r ./code_cov_${gpu}_text ${tmpdir}/code_cov_${gpu}_text
+            find ${tmpdir}/code_cov_${gpu}_text -name "*.txt" -type f | xargs sed -i -f ../scripts/comparable_cov_report.sed
+        fi
+        if [ -d ./code_cov_${gpu}_master_text/code_cov_${gpu}_text ]; then
+            cp -r ./code_cov_${gpu}_master_text ${tmpdir}/code_cov_${gpu}_master_text
+            find ${tmpdir}/code_cov_${gpu}_master_text/code_cov_${gpu}_text -name "*.txt" -type f | xargs sed -i -f ../scripts/comparable_cov_report.sed
+        fi
+
+        #Don't exit when there is a diff. And make the file non-empty if there isn't.
+        (diff -dur --color=never ${tmpdir}/code_cov_${gpu}_master_text/code_cov_${gpu}_text ${tmpdir}/code_cov_${gpu}_text && echo "No diff") > ./code_cov_${gpu}.diff || true
+        wc -l ./code_cov_${gpu}.diff
+
+        if [ -s ./code_cov_${gpu}.diff ]; then
+            # Add the node install to our PATH.
+            source ../docker/setup-node
+            diff2html -s side -i file -F ./code_cov_diff_${gpu}.html -- ./code_cov_${gpu}.diff
+            wc -l ./code_cov_diff_${gpu}.html
+
+            cat ./code_cov_${gpu}.diff | grep -E "^\\+.*-ZERO-\\|" | wc -l > new_uncovered_lines.txt
+        else
+            mkdir -p ../python_cov_html
+            touch ../python_cov_html/index.html
+            mkdir -p ./code_cov_${gpu}_html
+            touch ./code_cov_${gpu}_html/index.html
+            touch ./code_cov_diff_${gpu}.html
+            echo "## Error encountered generating coverage report" > ./code_cov_${gpu}.formatted
+            echo "There was an empty ./code_cov_${gpu}.diff." >> ./code_cov_${gpu}.formatted
+            echo "0" > new_uncovered_lines.txt
+            echo "There was an empty ./code_cov_${gpu}.diff."
+        fi
+    else
+        mkdir -p ../python_cov_html
+        touch ../python_cov_html/index.html
+        mkdir -p ./code_cov_${gpu}_html
+        touch ./code_cov_${gpu}_html/index.html
+        touch ./code_cov_diff_${gpu}.html
+        echo "## Error encountered generating coverage report" > ./code_cov_${gpu}.formatted
+        echo "Skipped code cov for ${gpu}, no archived code_cov_${gpu}.report found." >> ./code_cov_${gpu}.formatted
+        echo "0" > new_uncovered_lines.txt
+        echo "Skipped code cov for ${gpu}, no archived code_cov_${gpu}.report found."
+    fi
+fi

@@ -1,0 +1,33 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+include: rocblas_perf_common.yaml
+
+Tests:
+  - name: axpy_bench
+    category: bench
+    function: axpy
+    precision: *single_double_precisions
+    alpha: 1
+    N: *generic_l1_perf_sizes
+    incx: 1 # using special unit-inc kernel for fp32, generic for fp64
+    incy: 1
+
+  - name: axpy_batched_bench
+    category: bench
+    function: axpy_batched
+    precision: *single_precision
+    alpha: 1
+    N: 4096
+    incx: 1
+    incy: 1
+    batch_count: *l1_batch_count_range
+
+  - name: axpy_fma8_bench
+    category: bench
+    function: axpy
+    precision: *half_precision
+    alpha: [ 2 ]
+    N: *generic_l1_perf_sizes
+    incx: 1 # using special unit-inc kernel for fp16
+    incy: 1
+...

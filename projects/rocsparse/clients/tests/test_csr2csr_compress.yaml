@@ -1,0 +1,177 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &tol_range_quick
+    - { alpha:   1.0,   alphai:  0.0}
+    - { alpha:   0.002, alphai:  0.0}
+    - { alpha:   0.5,   alphai:  0.0}
+    - { alpha:   1.0,   alphai:  0.0}
+    - { alpha:   3.0,   alphai:  0.0}
+
+  - &tol_range_checkin
+    - { alpha:   0.0, alphai:  0.0}
+    - { alpha:   2.7, alphai:  0.0}
+    - { alpha:   7.1, alphai:  0.0}
+    - { alpha:   8.3, alphai:  0.0}
+
+  - &tol_range_nightly
+    - { alpha:   0.0,    alphai:  0.0}
+    - { alpha:   0.0125, alphai:  0.0}
+    - { alpha:   0.7,    alphai:  0.0}
+    - { alpha:   4.5,    alphai:  0.0}
+    - { alpha:   8.9,    alphai:  0.0}
+
+Tests:
+- name: csr2csr_compress_bad_arg
+  category: pre_checkin
+  function: csr2csr_compress_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csr2csr_compress
+  category: quick
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex_real
+  M: [10]
+  N: [33]
+  alpha_alphai: *tol_range_quick
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_zero]
+
+- name: csr2csr_compress
+  category: quick
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex_real
+  M: [0, 1, 8, 10, 872]
+  N: [0, 1, 8, 33, 623]
+  alpha_alphai: *tol_range_quick
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2csr_compress
+  category: pre_checkin
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex_real
+  M: [0, 500, 1000]
+  N: [0, 242, 1000]
+  alpha_alphai: *tol_range_checkin
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2csr_compress
+  category: nightly
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex_real
+  M: [27428, 941291, 1105637]
+  N: [18582, 571938, 995827]
+  alpha_alphai: *tol_range_nightly
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2csr_compress_file
+  category: quick
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  alpha_alphai: *tol_range_quick
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6,
+             scircuit]
+
+- name: csr2csr_compress_file
+  category: pre_checkin
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  alpha_alphai: *tol_range_checkin
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10,
+             mc2depi,
+             ASIC_320k,
+             nos1,
+             nos3,
+             nos5,
+             nos7]
+
+- name: csr2csr_compress_file
+  category: nightly
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  alpha_alphai: *tol_range_nightly
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bibd_22_8,
+             bmwcra_1,
+             amazon0312,
+             Chebyshev4,
+             sme3Dc,
+             webbase-1M,
+             shipsec1]
+
+- name: csr2csr_compress_file
+  category: quick
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *tol_range_quick
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             Chevron2]
+
+- name: csr2csr_compress_file
+  category: pre_checkin
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *tol_range_checkin
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron3]
+
+- name: csr2csr_compress_file
+  category: nightly
+  function: csr2csr_compress
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *tol_range_nightly
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]

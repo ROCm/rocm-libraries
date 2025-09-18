@@ -1,0 +1,20 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_FIND_FIRST_OF_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+find_first_of_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class value_type, class enable = void>
+struct default_find_first_of_config : default_find_first_of_config_base<value_type>::type
+{};
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class value_type> struct default_find_first_of_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), value_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

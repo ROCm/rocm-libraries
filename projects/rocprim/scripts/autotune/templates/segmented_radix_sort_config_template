@@ -1,0 +1,32 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SEGMENTED_RADIX_SORT_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+segmented_radix_sort_config<
+    {{ measurement['cfg']['rb'] }},
+    kernel_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}>, 
+    typename std::conditional<
+        {{ measurement['cfg']['wsc']['pa'] }},
+        WarpSortConfig<
+            {{ measurement['cfg']['wsc']['lwss'] }}, {{ measurement['cfg']['wsc']['ipts'] }},
+            {{ measurement['cfg']['wsc']['bss'] }}, {{ measurement['cfg']['wsc']['pt'] }},
+            {{ measurement['cfg']['wsc']['lwsm'] }}, {{ measurement['cfg']['wsc']['iptm'] }},
+            {{ measurement['cfg']['wsc']['bsm'] }}>,
+        DisabledWarpSortConfig
+    >::type,
+    {{ measurement['cfg']['eupws'] }} > { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class key_type, typename value_type, class enable = void>
+struct default_segmented_radix_sort_config : default_segmented_radix_sort_config_base<6>::type
+{};
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class key_type, typename value_type> struct default_segmented_radix_sort_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, value_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

@@ -1,0 +1,246 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
+
+#pragma once
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
+
+namespace ck_tile {
+
+// this epilogue just store out a M*N matrix, row major
+
+template <typename AccDataType_,
+          typename ODataType_,
+          bool kPadM_,
+          bool kPadN_,
+          bool UseRawStore_                      = true,
+          memory_operation_enum MemoryOperation_ = memory_operation_enum::set>
+struct Default2DEpilogueProblem
+{
+    using AccDataType                                      = remove_cvref_t<AccDataType_>;
+    using ODataType                                        = remove_cvref_t<ODataType_>;
+    static constexpr bool kPadM                            = kPadM_;
+    static constexpr bool kPadN                            = kPadN_;
+    static constexpr bool UseRawStore                      = UseRawStore_;
+    static constexpr memory_operation_enum MemoryOperation = MemoryOperation_;
+    static constexpr index_t NumDTensor                    = 0;
+};
+
+template <typename ADataType_,
+          typename BDataType_,
+          typename DsDataType_,
+          typename AccDataType_,
+          typename ODataType_,
+          typename DsLayout_,
+          typename CLayout_,
+          typename CDElementwise_,
+          index_t kM_,
+          index_t kN_,
+          bool kPadM_,
+          bool kPadN_,
+          index_t kMPerXdl_,
+          index_t kNPerXdl_,
+          index_t kKPerXdl_,
+          bool isCTransposed_,
+          bool UseRawStore_                      = true,
+          memory_operation_enum MemoryOperation_ = memory_operation_enum::set>
+struct DefaultGemm2DEpilogueProblem : public Default2DEpilogueProblem<AccDataType_,
+                                                                      ODataType_,
+                                                                      kPadM_,
+                                                                      kPadN_,
+                                                                      UseRawStore_,
+                                                                      MemoryOperation_>
+{
+    using ADataType                        = remove_cvref_t<ADataType_>;
+    using BDataType                        = remove_cvref_t<BDataType_>;
+    using CLayout                          = remove_cvref_t<CLayout_>;
+    using DsDataType                       = remove_cvref_t<DsDataType_>;
+    using CDElementwise                    = remove_cvref_t<CDElementwise_>;
+    using DsLayout                         = remove_cvref_t<DsLayout_>;
+    static constexpr index_t kMPerBlock    = kM_;
+    static constexpr index_t kNPerBlock    = kN_;
+    static constexpr index_t kMPerXdl      = kMPerXdl_;
+    static constexpr index_t kNPerXdl      = kNPerXdl_;
+    static constexpr index_t kKPerXdl      = kKPerXdl_;
+    static constexpr index_t isCTransposed = isCTransposed_;
+
+    static constexpr index_t NumDTensor = DsDataType::size();
+
+    static_assert(NumDTensor == DsLayout::size(),
+                  "The size of DsDataType and DsLayout should be the same");
+};
+
+template <typename Problem_, typename Policy_ = void>
+struct Default2DEpilogue
+{
+    using Problem                     = remove_cvref_t<Problem_>;
+    using AccDataType                 = remove_cvref_t<typename Problem::AccDataType>;
+    using ODataType                   = remove_cvref_t<typename Problem::ODataType>;
+    static constexpr bool kPadM       = Problem::kPadM;
+    static constexpr bool kPadN       = Problem::kPadN;
+    static constexpr bool UseRawStore = Problem::UseRawStore;
+    static constexpr memory_operation_enum MemoryOperation = Problem::MemoryOperation;
+
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }
+
+    // TODO: this function assume store out vector size is the same as OAccTile last dimension size
+    //       how do we fix this ?
+    template <typename ODramWindowTmp, typename OAccTile, typename DsDramWindows>
+    CK_TILE_DEVICE auto operator()(ODramWindowTmp& o_dram_window_tmp,
+                                   const OAccTile& o_acc_tile,
+                                   const DsDramWindows& ds_dram_windows,
+                                   void* = nullptr) const
+    {
+        const auto storeOrUpdateTile = [&](const auto& o_tile) {
+            // TODO: this is ugly
+            if constexpr(UseRawStore && (kPadM || kPadN))
+            {
+                if constexpr(MemoryOperation == memory_operation_enum::set)
+                {
+                    store_tile_raw(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                }
+                else
+                {
+                    update_tile_raw(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                }
+                buffer_store_fence();
+            }
+            else
+            {
+                if constexpr(MemoryOperation == memory_operation_enum::set)
+                {
+                    store_tile(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                }
+                else
+                {
+                    update_tile(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                }
+            }
+        };
+
+        if constexpr(!std::is_same_v<DsDramWindows, std::nullptr_t> && Problem::NumDTensor >= 1)
+        {
+            using elementwise_result_t = decltype(load_tile(
+                make_tile_window(ds_dram_windows[number<0>{}].get_bottom_tensor_view(),
+                                 make_tuple(Problem::kMPerBlock, Problem::kNPerBlock),
+                                 ds_dram_windows[number<0>{}].get_window_origin(),
+                                 o_acc_tile.get_tile_distribution())));
+
+            elementwise_result_t elementwise_result;
+
+            const auto d_tensor_tuple = generate_tuple(
+                [&](auto idx) {
+                    const auto d_tile_window =
+                        make_tile_window(ds_dram_windows[idx], o_acc_tile.get_tile_distribution());
+                    return load_tile(d_tile_window);
+                },
+                number<Problem::NumDTensor>{});
+
+            const auto c_d_tuple = concat_tuple_of_reference(
+                tie(elementwise_result, o_acc_tile),
+                generate_tie([&](auto idx) -> const auto& { return d_tensor_tuple[idx]; },
+                             number<Problem::NumDTensor>{}));
+
+            tile_elementwise_inout_unpack(typename Problem::CDElementwise{}, c_d_tuple);
+
+            storeOrUpdateTile(elementwise_result);
+        }
+        else
+        {
+            storeOrUpdateTile(o_acc_tile);
+        }
+    }
+};
+
+template <typename Problem_, typename Policy_ = void>
+struct DefaultGemm2DEpilogue : public Default2DEpilogue<Problem_, Policy_>
+{
+    using Problem     = remove_cvref_t<Problem_>;
+    using ADataType   = remove_cvref_t<typename Problem::ADataType>;
+    using BDataType   = remove_cvref_t<typename Problem::BDataType>;
+    using AccDataType = remove_cvref_t<typename Problem::AccDataType>;
+    using ODataType   = remove_cvref_t<typename Problem::ODataType>;
+    // Used for weight-only quantization kernel, B would be dequantized to the same data type as A
+    using BTypeToUse =
+        std::conditional_t<std::is_same_v<BDataType, pk_int4_t>, ADataType, BDataType>;
+    using DsDataType                       = remove_cvref_t<typename Problem::DsDataType>;
+    using DsLayout                         = remove_cvref_t<typename Problem::DsLayout>;
+    using CDElementwise                    = remove_cvref_t<typename Problem::CDElementwise>;
+    using CLayout                          = remove_cvref_t<typename Problem::CLayout>;
+    static constexpr index_t kMPerXdl      = Problem::kMPerXdl;
+    static constexpr index_t kNPerXdl      = Problem::kNPerXdl;
+    static constexpr index_t kKPerXdl      = Problem::kKPerXdl;
+    static constexpr index_t isCTransposed = Problem::isCTransposed;
+
+    using WG = WarpGemmDispatcher<ADataType,
+                                  BTypeToUse,
+                                  AccDataType,
+                                  kMPerXdl,
+                                  kNPerXdl,
+                                  kKPerXdl,
+                                  isCTransposed>;
+
+    using CWarpDstr = typename WG::CWarpDstr;
+
+    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeC()
+    {
+        // N is contiguous dimension
+        if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
+        {
+            if constexpr(isCTransposed)
+            {
+                // In this case each thread has multiple consecutive elements in
+                // N dimension, however consecutive threads' elements have stride.
+                constexpr index_t NDimY = CWarpDstr::NDimY;
+                constexpr auto c_warp_y_lengths =
+                    CWarpDstr{}.get_ys_to_d_descriptor().get_lengths();
+                static_assert(WG::WarpGemmAttribute::Impl::kCM1PerLane ==
+                              c_warp_y_lengths.get(number<NDimY - 1>{}));
+                return c_warp_y_lengths.get(number<NDimY - 1>{});
+            }
+            else
+            {
+                // In this case each thread has just a single item in Ndim
+                return (WG::WarpGemmAttribute::Impl::kCNLane *
+                        WG::WarpGemmAttribute::Impl::kBNBlock) /
+                       WG::kN;
+            }
+        }
+        // M is contiguous dimension
+        else if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::ColumnMajor>)
+        {
+            if constexpr(isCTransposed)
+            {
+                // In this case each thread has just a single item in Mdim
+                return (WG::WarpGemmAttribute::Impl::kCNLane *
+                        WG::WarpGemmAttribute::Impl::kAMBlock) /
+                       WG::kN;
+            }
+            else
+            {
+                // In this case each thread has multiple consecutive elements in
+                // M dimension, however consecutive threads' elements have stride.
+                constexpr index_t NDimY = CWarpDstr::NDimY;
+                constexpr auto c_warp_y_lengths =
+                    CWarpDstr{}.get_ys_to_d_descriptor().get_lengths();
+                static_assert(WG::WarpGemmAttribute::Impl::kCM1PerLane ==
+                              c_warp_y_lengths.get(number<NDimY - 1>{}));
+                return c_warp_y_lengths.get(number<NDimY - 1>{});
+            }
+        }
+        else
+        {
+            static_assert(false, "Unsupported CLayout!");
+        }
+    }
+
+    template <index_t I>
+    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeD([[maybe_unused]] number<I> index)
+    {
+        return GetVectorSizeC();
+    }
+};
+
+} // namespace ck_tile

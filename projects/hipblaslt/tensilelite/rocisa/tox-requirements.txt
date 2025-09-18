@@ -1,0 +1,2 @@
+cmake
+pytest>=5.4.1

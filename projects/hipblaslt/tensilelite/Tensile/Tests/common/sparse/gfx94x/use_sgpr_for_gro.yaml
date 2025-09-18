@@ -1,0 +1,126 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  SleepPercent: 50
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  MaxFileName: 256
+  # PrintTensorD: 0x2
+  #DataInitTypeA: 1
+  #DataInitTypeB: 8
+  # DataInitTypeD: 3
+  # DataInitTypeE: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # DataInitTypeBias: 0
+  # DataInitTypeScaleD: 0
+  # NumMergedFiles: 4
+  PrintSolutionRejectionReason: True
+  # PrintWinnersOnly: True
+  NumElementsToValidate: -1
+  NumWarmups: 0
+  EnqueuesPerSync: 0
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+  # KernelTime: False
+  MinKForGSU: 1
+  # PrintCodeCommands: True
+  # CpuThreads: 1
+  # GenerateSourcesAndExit: True
+  # ValidationPrintValids: True
+  # ValidationMaxToPrint: 64
+  # ForceGenerateKernel: True
+  # ShowProgressBar: 0
+  #PruneSparseMode: 1
+  #PrintTensorD: 1
+  #PrintTensorRef: 1
+BenchmarkProblems:
+
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 16, 1,  1,  2, 2,  2, 2 ]
+          - [32, 32, 16, 1,  1,  2, 4,  4, 2 ]
+          - [32, 32, 16, 1,  1,  8, 2,  1, 4 ]
+          - [32, 32, 16, 1,  1,  7, 2,  1, 4 ]
+          - [32, 32, 16, 1,  1,  6, 2,  1, 4 ]
+          - [32, 32, 16, 1,  1,  5, 2,  1, 4 ]
+          - [32, 32, 16, 1,  1,  4, 2,  1, 4 ]
+          - [32, 32, 16, 1,  1,  3, 2,  1, 4 ]
+          - [32, 32, 16, 1,  1,  2, 2,  1, 4 ]
+          - [32, 32, 16, 1,  1,  1, 1,  1, 1 ]
+        - GlobalReadVectorWidthA: [4,8,16]
+        # - GlobalReadVectorWidthA: [-1]
+        # - GlobalReadVectorWidthB: [-1]
+        - DepthU: [16, 32, 64, 128]
+        # - VectorWidthA: [1,2]
+        # - VectorWidthB: [1]
+        - TransposeLDS: [-1]
+        # - LdsPadA: [-1]
+        # - LdsPadB: [-1]
+        # - LdsPadMetadata: [-1]
+        # - LdsBlockSizePerPadA: [-1]
+        # - LdsBlockSizePerPadB: [-1]
+        # - LdsBlockSizePerPadMetadata: [-1]
+        # - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        # - ClusterLocalRead: [1]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [0,1,2]
+        # - StoreRemapVectorWidth: [-1]
+        # - GlobalSplitU: [2]
+        # - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [1,0]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        # - LocalReadVectorWidth: [4,8]
+        # - SourceSwap: [0,1]
+        - UseSgprForGRO: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 16] # classic format
+          - Exact: [16, 16, 1, 32] # classic format
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 96] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 136] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 264] # classic format
+          - Exact: [256, 256, 1, 16] # classic format
+          - Exact: [256, 256, 1, 24] # classic format
+          - Exact: [256, 256, 1, 32] # classic format
+          - Exact: [256, 256, 1, 64] # classic format
+          - Exact: [256, 256, 1, 96] # classic format
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 136] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+        - ActivationArgs:
+          - [Enum: none]

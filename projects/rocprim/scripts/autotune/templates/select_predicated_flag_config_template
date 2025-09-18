@@ -1,0 +1,20 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SELECT_PREDICATED_FLAG_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+select_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class data_type, class flag_type, class enable = void>
+struct default_select_predicated_flag_config : default_partition_config_base<data_type, false>::type
+{};
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class data_type, class flag_type> struct default_select_predicated_flag_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), data_type, flag_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

@@ -1,0 +1,775 @@
+# MIT License
+#
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+include:
+  - project: 'amd/ci-templates'
+    ref: main
+    file:
+      - /defaults.yaml
+      - /deps-cmake.yaml
+      - /deps-docs.yaml
+      - /deps-format.yaml
+      - /deps-rocm.yaml
+      - /deps-vcpkg.yaml
+      - /deps-windows.yaml
+      - /deps-compiler-acceleration.yaml
+      - /gpus-rocm.yaml
+      - /rules.yaml
+
+stages:
+  - lint
+  - autotune
+  - build
+  - test
+  - benchmark
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS =~ /CI Skip/
+      when: never
+    - if: $CI_MERGE_REQUEST_TITLE !~ /Draft:/
+      variables:
+        ROCPRIM_TEST_RUNS: 1
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/
+      variables:
+        ROCPRIM_TEST_RUNS: 1
+
+variables:
+  PACKAGE_DIR: $BUILD_DIR/package
+  AUTOTUNE_CONFIG_DIR: ${CI_PROJECT_DIR}/autotune_config
+
+clang-format:
+  extends:
+    - .lint:clang-format
+
+copyright-date:
+  extends:
+    - .deps:rocm
+  stage: lint
+  needs: []
+  tags:
+    - build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - cd $CI_PROJECT_DIR
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - scripts/copyright-date/check-copyright.sh -v -d $CI_MERGE_REQUEST_DIFF_BASE_SHA
+
+.cmake-minimum-vcpkg:
+  extends:
+    - .deps:rocm
+    - .deps:cmake-minimum
+    - .deps:vcpkg
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:vcpkg", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+    - $VCPKG_DIR/vcpkg install
+        gtest
+        benchmark
+
+.cmake-minimum-apt:
+  extends:
+    - .deps:rocm
+    - .deps:cmake-minimum
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+    - $SUDO_CMD apt-get install -y -qq
+        libgtest-dev
+        libbenchmark-dev
+
+.build:vcpkg-apt:
+  stage: build
+  tags:
+    - build
+  extends:
+    - .gpus:rocm-gpus
+    - .rules:build
+# Missing -Werror and other diagnostic flags due to rocm-terminal sporting an old googletest APT package (Ubuntu 18.04).
+# Here we're only testing the consumption logic, and we want to avoid new errors breaking logic testing
+  script:
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_BUILD_TYPE=Release
+      "$(if [ -n "$VCPKG_DIR" ]; then echo "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_DIR/scripts/buildsystems/vcpkg.cmake"; fi)"
+      -D BUILD_TEST=ON
+      -D BUILD_EXAMPLE=ON
+      -D BUILD_BENCHMARK=ON
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD=17
+      -S $CI_PROJECT_DIR
+      -B $BUILD_DIR
+    - cmake
+      --build $BUILD_DIR
+      --target test_basic
+
+build:cmake-minimum-vcpkg:
+  stage: build
+  needs: []
+  extends:
+    - .cmake-minimum-vcpkg
+    - .build:vcpkg-apt
+
+build:cmake-minimum-apt:
+  stage: build
+  needs: []
+  extends:
+    - .cmake-minimum-apt
+    - .build:vcpkg-apt
+
+.cmake-latest:
+  extends:
+    - .deps:rocm
+    - .deps:cmake-latest
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.cmake-minimum:
+  extends:
+    - .deps:rocm
+    - .deps:cmake-minimum
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.build:common:
+  stage: build
+  tags:
+    - build
+  extends:
+    - .gpus:rocm-gpus
+    - .rules:build
+  variables:
+    EXTRA_CMAKE_CXX_FLAGS: ""
+    BUILD_TOOL_ARGS: ""
+  script:
+    - mkdir -p $BUILD_DIR
+    - cd $BUILD_DIR
+    - | # Add hardened libc++ assertions for tests only
+        if [[ $BUILD_TARGET == "TEST" ]]; then
+            echo "Configuring with hardened libc++!"
+            EXTRA_CMAKE_CXX_FLAGS+=" -D_GLIBCXX_ASSERTIONS=ON -D ROCPRIM_ENABLE_ASSERTS=ON"
+        fi
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror $EXTRA_CMAKE_CXX_FLAGS"
+      -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
+      -D BUILD_$BUILD_TARGET=ON
+      -D WITH_ROCRAND=ON
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D BUILD_EXAMPLE=ON
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
+      -S $CI_PROJECT_DIR
+      -B $BUILD_DIR
+    - cmake --build $BUILD_DIR -- ${BUILD_TOOL_ARGS}
+  artifacts:
+    paths:
+      - $BUILD_DIR/.ninja_log
+      - $BUILD_DIR/benchmark/*
+      - $BUILD_DIR/CMakeCache.txt
+      - $BUILD_DIR/CTestTestfile.cmake
+      - $BUILD_DIR/deps/googlebenchmark/
+      - $BUILD_DIR/gtest/
+      - $BUILD_DIR/test/CTestTestfile.cmake
+      - $BUILD_DIR/test/rocprim/CTestTestfile.cmake
+      - $BUILD_DIR/deps/rocrand/
+      - $BUILD_DIR/test/rocprim/test_*
+      - $BUILD_DIR/test/rocprim/libtest_*
+      - $BUILD_DIR/test/test_*
+    expire_in: 1 day
+
+build:spirv:
+  stage: build
+  needs: []
+  extends:
+    - .cmake-minimum
+    - .build:common
+  variables:
+    # For unknown reasons spir-v builds ignore 'clang diagnostic' pragmas that
+    # we use to ignore internal deprecations.
+    EXTRA_CMAKE_CXX_FLAGS: "-Wno-deprecated-declarations -mf16c -DROCPRIM_EXPERIMENTAL_SPIRV"
+    # Since not all targets are expected to build, do not stop building other
+    # targets when any target fails.
+    BUILD_TOOL_ARGS: "-k 0"
+    GPU_TARGETS: "amdgcnspirv"
+  image: "registry.streamhpc.internal/unstable-rocm:main"
+  allow_failure: true
+  parallel:
+    # Debug builds disabled due to excessive build times for debug test builds
+    matrix:
+      - BUILD_TYPE: Release
+        BUILD_TARGET: [BENCHMARK, TEST]
+        BUILD_VERSION: 17
+  artifacts:
+    when: always
+
+build:cmake-latest:
+  stage: build
+  needs: []
+  extends:
+    - .cmake-latest
+    - .build:common
+  parallel:
+    # Debug builds disabled due to excessive build times for debug test builds
+    matrix:
+      - BUILD_TYPE: Release
+        BUILD_TARGET: [BENCHMARK, TEST]
+        BUILD_VERSION: 17
+
+build:cmake-minimum:
+  needs: []
+  extends:
+    - .cmake-minimum
+    - .build:common
+  parallel:
+    matrix:
+      - BUILD_TYPE: [Debug, Release]
+        BUILD_TARGET: [BENCHMARK, TEST]
+        BUILD_VERSION: 17
+
+build:package:
+  stage: build
+  needs: []
+  tags:
+    - build
+  extends:
+    - .cmake-minimum
+    - .gpus:rocm-gpus
+    - .rules:build
+  script:
+    - mkdir -p $PACKAGE_DIR
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_STANDARD=17
+      -B $PACKAGE_DIR
+      -S $CI_PROJECT_DIR
+    - cd $PACKAGE_DIR
+    - cpack -G "DEB;ZIP"
+  artifacts:
+    paths:
+      - $PACKAGE_DIR/rocprim*.deb
+      - $PACKAGE_DIR/rocprim*.zip
+    expire_in: 1 day
+
+build:windows:
+  stage: build
+  needs: []
+  extends:
+    - .rules:build
+    - .gpus:rocm-windows
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
+  parallel:
+    matrix:
+      - BUILD_TYPE: Release
+  script:
+    - mkdir -p $CI_PROJECT_DIR/build
+    - cmake -G Ninja
+      -S $CI_PROJECT_DIR
+      -B $CI_PROJECT_DIR/build
+      -D BUILD_TEST=ON
+      -D BUILD_BENCHMARK=ON
+      -D AMDGPU_TARGETS=$GPU_TARGET
+      -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe"
+      -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}"
+      -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
+      -D CMAKE_CXX_STANDARD=17
+    - cmake --build "$CI_PROJECT_DIR/build"
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/test/test_*
+      - $CI_PROJECT_DIR/build/test/rocprim/test_*
+      - $CI_PROJECT_DIR/build/test/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/test/rocprim/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/gtest/
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
+      - $CI_PROJECT_DIR/build/.ninja_log
+      - $CI_PROJECT_DIR/build/CTestTestfile.cmake
+    expire_in: 1 day
+
+autotune:build:
+  stage: autotune
+  needs: []
+  tags:
+    - build
+  extends:
+    - .cmake-minimum
+    - .gpus:rocm-gpus
+    - .rules:benchmark
+  before_script:
+    - !reference [".cmake-minimum", before_script]
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -qq -y zstd
+  variables:
+    BENCHMARK_TARGETS: benchmark_config_tuning
+  script:
+    - mkdir -p $BUILD_DIR
+    - cd $BUILD_DIR
+    - 'printf "Building benchmark targets: %s\n" "$BENCHMARK_TARGETS"'
+    - cmake
+      -B $BUILD_DIR
+      -S $CI_PROJECT_DIR
+      -G Ninja
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_CXX_FLAGS="-Wno-#pragma-messages"
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -D BUILD_BENCHMARK=ON
+      -D BENCHMARK_CONFIG_TUNING=ON
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD=17
+    - cmake --build . --target $BENCHMARK_TARGETS
+    - 'rm -rf $BUILD_DIR/benchmark/benchmark*.parallel'
+    # The autotune benchmarks get very large, above GitLabs upload limit. Fortunately they compress well.
+    # We'll put them all in a single archive to compress them to a few hundred MB.
+    - find benchmark -type f -executable -print0 | tar -I zstd -cvf benchmarks.tar.zstd --null -T -
+
+  artifacts:
+    paths:
+      - $BUILD_DIR/benchmarks.tar.zstd
+      - $BUILD_DIR/.ninja_log
+      - $BUILD_DIR/deps/googlebenchmark/
+    expire_in: 1 week
+
+.test:common:
+  stage: test
+  tags:
+    - rocm
+    - $GPU
+  extends:
+    - .cmake-minimum
+  needs:
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
+            BUILD_VERSION: 17
+  script:
+    - cd $BUILD_DIR
+    - cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - cat ./resources.json
+    # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
+    # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
+    # As a temporary workaround, disable the SDMA for test stability.
+    - HSA_ENABLE_SDMA=0 ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
+
+test:any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:common
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/ && $CI_MERGE_REQUEST_LABELS !~ /Arch::/
+
+test:label-arch:
+  extends:
+    - .gpus:rocm
+    - .test:common
+    - .rules:arch-labels
+
+test:all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:rocm
+    - .test:common
+    - .rules:test
+
+.test:common-spirv:
+  stage: test
+  tags:
+    - rocm
+    - $GPU
+  extends:
+    - .cmake-minimum
+  allow_failure: true
+  timeout: 3h
+  needs:
+    - job: build:spirv
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
+            BUILD_VERSION: 17
+  image: "registry.streamhpc.internal/unstable-rocm:main"
+  script:
+    - cd $BUILD_DIR
+    - cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - cat ./resources.json
+    # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
+    # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
+    # As a temporary workaround, disable the SDMA for test stability.
+    - HSA_ENABLE_SDMA=0 ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
+      --exclude-regex rocprim.device_partition
+
+test:any-gpu-spirv:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:common-spirv
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/ && $CI_MERGE_REQUEST_LABELS !~ /Arch::/
+
+test:label-arch-spirv:
+  extends:
+    - .gpus:rocm
+    - .test:common-spirv
+    - .rules:arch-labels
+
+test:all-gpus-spirv:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:rocm
+    - .test:common-spirv
+    - .rules:test
+
+.test-windows-base:
+  stage: test
+  extends:
+    - .deps:rocm-windows
+    - .gpus:rocm-gpus-windows
+    - .deps:visual-studio-devshell
+    - .rules:test
+  script:
+    - cd $CI_PROJECT_DIR/build
+    - ctest --output-on-failure
+
+# Disabled due to extensive link times.
+# This is tracked in issue 679
+# test-windows-debug:
+#   extends:
+#     - .test-windows-base
+#   needs:
+#     - job: build:windows
+#       parallel:
+#         matrix:
+#           - BUILD_TYPE: Debug
+#             BUILD_TARGET: TEST
+
+test-windows-release:
+  extends:
+    - .test-windows-base
+  needs:
+    - job: build:windows
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+
+.test-package:
+  script:
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_BUILD_TYPE=Release
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_CXX_STANDARD=17
+      -S "$CI_PROJECT_DIR/test/extra"
+      -B "$CI_PROJECT_DIR/package_test"
+    - cmake --build "$CI_PROJECT_DIR/package_test"
+    - "$CI_PROJECT_DIR/package_test/test_rocprim_package"
+    - cd "$CI_PROJECT_DIR/package_test"
+    - ctest --output-on-failure --repeat-until-fail 2
+
+test:install:
+  stage: test
+  needs: []
+  tags:
+    - rocm
+  extends:
+    - .cmake-minimum
+    - .rules:test
+    - .gpus:rocm-gpus
+  script:
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_STANDARD=17
+      -B build
+      -S $CI_PROJECT_DIR
+    # Preserve $PATH when sudoing
+    - $SUDO_CMD env PATH="$PATH" cmake --build build --target install
+    - !reference [.test-package, script]
+
+test:deb:
+  stage: test
+  needs:
+    - build:package
+  tags:
+    - rocm
+  extends:
+    - .cmake-minimum
+    - .rules:test
+    - .gpus:rocm-gpus
+  script:
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
+    - !reference [.test-package, script]
+
+test:docs:
+  stage: test
+  variables:
+    SPHINX_DIR: $DOCS_DIR/sphinx
+  extends:
+    - .rules:test
+    - .build:docs
+  artifacts:
+    paths:
+      - $DOCS_DIR/_build/html/
+    expire_in: 2 weeks
+
+.benchmark-base:
+  stage: benchmark
+  extends:
+    - .rules:benchmark
+  variables:
+    BENCHMARK_RESULT_DIR: ${CI_PROJECT_DIR}/benchmark_results
+    BENCHMARK_RESULT_CACHE_DIR: ${BENCHMARK_RESULT_DIR}_cache
+
+benchmark:
+  needs:
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: BENCHMARK
+            BUILD_VERSION: 17
+  extends:
+    - .cmake-minimum
+    - .gpus:rocm
+    - .benchmark-base
+  variables:
+    BENCHMARK_FILENAME_REGEX: ^benchmark
+    BENCHMARK_ALGORITHM_REGEX: ""
+    BENCHMARK_SEED: random
+  script:
+    - 'printf "CI Variables used in benchmarks:\nBENCHMARK_RESULT_DIR: %s\nBENCHMARK_FILENAME_REGEX: %s\nBENCHMARK_ALGORITHM_REGEX: %s \n" "$BENCHMARK_RESULT_DIR" "$BENCHMARK_FILENAME_REGEX" "$BENCHMARK_ALGORITHM_REGEX"'
+    - cd "${CI_PROJECT_DIR}"
+    - mkdir -p "${BENCHMARK_RESULT_DIR}"
+    - python3
+      .gitlab/run_benchmarks.py
+      --benchmark_dir "${BUILD_DIR}/benchmark"
+      --benchmark_gpu_architecture "${GPU_TARGET}"
+      --benchmark_output_dir "${BENCHMARK_RESULT_DIR}"
+      --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
+      --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}"
+      --seed "${BENCHMARK_SEED}"
+    - python3
+      .gitlab/report_noise.py
+      --benchmark_json_dir "${BENCHMARK_RESULT_DIR}"
+      --noise_threshold_percentage 1.0
+      --accept_high_noise
+  artifacts:
+    paths:
+      - ${BENCHMARK_RESULT_DIR}
+    expire_in: 1 week
+
+benchmark:cache-or-report:
+  needs:
+    - benchmark
+  extends:
+    - .benchmark-base
+  tags:
+    - single-cache
+  cache:
+    key: benchmark-cache
+    paths:
+      - ${BENCHMARK_RESULT_CACHE_DIR}
+  script:
+    # If on MR branch, generate report, else cache results
+    - >
+      if [ ! -z "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}" ]; then
+        if [ ! -d "${BENCHMARK_RESULT_CACHE_DIR}" ]; then
+          echo 'ERROR: Cache directory does not exist'
+          exit 1
+        elif [ ! -d "${BENCHMARK_RESULT_DIR}" ]; then
+          echo 'ERROR: Benchmark results directory does not exist'
+          exit 1
+        else
+          echo 'INFO: Files in cache (reference benchmarks):'
+          ls -al ${BENCHMARK_RESULT_CACHE_DIR}
+          echo 'INFO: Generating report...'
+          python3 .gitlab/generate_report.py --old ${BENCHMARK_RESULT_CACHE_DIR} --new ${BENCHMARK_RESULT_DIR}
+        fi
+      elif [ "${CI_COMMIT_BRANCH}" == "${CI_DEFAULT_BRANCH}" ]; then
+        echo 'INFO: Caching benchmark results...'
+        mkdir -p ${BENCHMARK_RESULT_CACHE_DIR}
+        cp -R ${BENCHMARK_RESULT_DIR}/*.json ${BENCHMARK_RESULT_CACHE_DIR}
+      else
+        echo 'ERROR: Neither on a merge-request branch or the default branch'
+        exit 1
+      fi
+
+
+.autotune-base:
+  stage: autotune
+  extends:
+    - .rules:manual
+  variables:
+    AUTOTUNE_RESULT_DIR: ${CI_PROJECT_DIR}/autotune_results
+
+autotune:execute-tuning:
+  needs:
+    - autotune:build
+  extends:
+    - .autotune-base
+    - .cmake-minimum
+    - .gpus:rocm
+  variables:
+    AUTOTUNE_FILENAME_REGEX: ^benchmark
+    AUTOTUNE_ALGORITHM_REGEX: ""
+    AUTOTUNE_SIZE: ""
+    AUTOTUNE_TRIALS: ""
+  timeout: 8h
+  artifacts:
+    paths:
+      - ${AUTOTUNE_RESULT_DIR}/*.json
+  before_script:
+    - !reference [".cmake-minimum", before_script]
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -qq -y zstd
+  script:
+    - cd "${CI_PROJECT_DIR}"
+    - tar -I zstd -xvf "${BUILD_DIR}/benchmarks.tar.zstd" -C "${BUILD_DIR}/"
+    - |
+      if [ ! -d "${BUILD_DIR}/benchmark" ]; then
+          echo "There are no benchmark executables. Run the build job with a BUILD_TARGET."
+          exit 1
+      fi
+    - mkdir -p "${AUTOTUNE_RESULT_DIR}"
+    - python3
+      .gitlab/run_benchmarks.py
+      --benchmark_dir="${BUILD_DIR}/benchmark"
+      --benchmark_gpu_architecture="${GPU_TARGET}"
+      --benchmark_output_dir="${AUTOTUNE_RESULT_DIR}"
+      --benchmark_filename_regex="${AUTOTUNE_FILENAME_REGEX}"
+      --benchmark_filter_regex="${AUTOTUNE_ALGORITHM_REGEX}"
+      --size="${AUTOTUNE_SIZE}"
+      --trials="${AUTOTUNE_TRIALS}"
+      --seed=82589933
+    - python3
+      .gitlab/report_noise.py
+      --benchmark_json_dir "${AUTOTUNE_RESULT_DIR}"
+      --noise_threshold_percentage 1.0
+      --accept_high_noise
+
+autotune:generate-config:
+  image: python:3.10.5-buster
+  needs:
+    - job: "autotune:execute-tuning"
+      optional: true
+  extends:
+    - .rules:manual
+    - .autotune-base
+  variables:
+    AUTOTUNE_CONFIG_REPO_PATH: /rocprim/include/rocprim/device/detail/config
+    AUTOTUNE_RESULT_CACHE_DIR: ${AUTOTUNE_RESULT_DIR}_cache
+  tags:
+    - single-cache
+  cache:
+    key: autotune-cache
+    paths:
+      - autotune_results_cache/
+  script:
+    # Set cache dir variables depending on if this is a MR or not
+    - >
+      if [ ! -z "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" ]; then
+        AUTOTUNE_RESULT_CACHE_BRANCH_DIR="${AUTOTUNE_RESULT_CACHE_DIR}/${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}"
+        AUTOTUNE_RESULT_CACHE_TARGET_BRANCH_DIR="${AUTOTUNE_RESULT_CACHE_DIR}/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      else
+        AUTOTUNE_RESULT_CACHE_BRANCH_DIR="${AUTOTUNE_RESULT_CACHE_DIR}/${CI_COMMIT_BRANCH}"
+      fi
+    # If the global cache dir does not exist, create it
+    - mkdir -p $AUTOTUNE_RESULT_CACHE_DIR
+    # If there are fresh results in the artifacts, cache them in the branch cache
+    # If there are no fresh results, check branch cache
+    # If there are no branch cache results, check TARGET branch cache
+    # If there are TARGET branch cache results, cache them in the branch cache
+    - >
+      if [ -d "$AUTOTUNE_RESULT_DIR" ]; then
+        mkdir -p $AUTOTUNE_RESULT_CACHE_BRANCH_DIR
+        cp -R -u ${AUTOTUNE_RESULT_DIR}/*.json ${AUTOTUNE_RESULT_CACHE_BRANCH_DIR}
+      elif [ -d "$AUTOTUNE_RESULT_CACHE_BRANCH_DIR" ]; then
+        mkdir -p $AUTOTUNE_RESULT_DIR
+        cp -R -u ${AUTOTUNE_RESULT_CACHE_BRANCH_DIR}/*.json ${AUTOTUNE_RESULT_DIR}
+      elif [ -d "$AUTOTUNE_RESULT_CACHE_TARGET_BRANCH_DIR" ]; then
+        mkdir -p $AUTOTUNE_RESULT_DIR
+        cp -R -u ${AUTOTUNE_RESULT_CACHE_TARGET_BRANCH_DIR}/*.json ${AUTOTUNE_RESULT_DIR}
+        mkdir -p $AUTOTUNE_RESULT_CACHE_BRANCH_DIR
+        cp -R -u ${AUTOTUNE_RESULT_DIR}/*.json ${AUTOTUNE_RESULT_CACHE_BRANCH_DIR}
+      else
+        echo 'ERROR: No autotune results found in previous artifacts, the branch cache or the target branch cache...'
+        exit 1
+      fi
+    # List the final .json files to use for config generation
+    - ls -al ${AUTOTUNE_RESULT_DIR}
+    - cd "${CI_PROJECT_DIR}"
+    - python3 -m pip install jinja2
+    - mkdir -p ${AUTOTUNE_CONFIG_DIR}${AUTOTUNE_CONFIG_REPO_PATH}
+    - python3
+      scripts/autotune/create_optimization.py
+      --benchmark_files ${AUTOTUNE_RESULT_DIR}/*.json
+      --out_basedir "${AUTOTUNE_CONFIG_DIR}${AUTOTUNE_CONFIG_REPO_PATH}"
+  artifacts:
+    paths:
+      - ${AUTOTUNE_CONFIG_DIR}
+
+scheduled-check-changes:
+  stage: autotune
+  extends: .rules:scheduled-check-changes

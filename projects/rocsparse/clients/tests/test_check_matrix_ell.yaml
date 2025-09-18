@@ -1,0 +1,82 @@
+# ########################################################################
+# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: check_matrix_ell_bad_arg
+  category: pre_checkin
+  function: check_matrix_ell_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: check_matrix_ell
+  category: quick
+  function: check_matrix_ell
+  precision: *single_double_precisions_complex_real
+  M: [1, 8, 20, 57, 132, 202, 365, 476]
+  N: [2, 11, 23, 77, 137, 198, 287, 356, 511]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+
+- name: check_matrix_ell_file
+  category: pre_checkin
+  function: check_matrix_ell
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7,
+             mac_econ_fwd500,
+             mplate]
+
+- name: check_matrix_ell_file
+  category: nightly
+  function: check_matrix_ell
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  storage: [rocsparse_storage_mode_sorted]
+  filename: [scircuit,
+             amazon0312,
+             sme3Dc,
+             bmwcra_1,
+             shipsec1,
+             Chevron2,
+             Chevron3,
+             Chevron4,
+             qc2534,
+             bibd_22_8,
+             rma10]

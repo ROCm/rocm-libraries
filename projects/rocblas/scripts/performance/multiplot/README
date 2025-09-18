@@ -1,0 +1,27 @@
+- It is intended that benchmark_plot.sh be used to drive benchmark.py and plot.py
+- It is recommended you experiment with commands like
+
+  ./benchmark_plot.sh -t my_tag --level1 true --level2 false --level3 false --benchmark true --plot false
+
+  ./benchmark_plot.sh -t my_tag --level1 true --level2 false --level3 false --benchmark false --plot true
+
+  ./benchmark_plot.sh -t my_tag --level1 true --level2 false --level3 false --benchmark false --plot true --theo_max true
+
+  look in directory blas1/my_tag for output .csv files and plots
+
+- On a machine where you only want to run benchmarks, call benchmark_plot.sh with arguments
+  --benchmark true --plot false
+- There are .yaml files for each function that specify input argument sizes
+- rocblas-bench is called, and output will be in .csv files
+- If you are in your fork (not ROCmSoftwarePlatform) the .csv files can be checked in to github
+  on a remote machine, and checked out for plotting on a local machine
+- There is plotting of gflops vs size or gflops/theoretical_max_gflops vs size
+- plots are in .png files
+- For gfx90a here are checked in .csv result files and .png plot files
+- to get the gfx90a .cvs and .png files the following thre calls were made to benchmark_plot.sh
+
+  ./benchmark_plot.sh -t gfx90a  --level1 true  --level2 true --level3 true  --benchmark true --plot false
+
+  ./benchmark_plot.sh -t gfx90a  --level1 true  --level2 true --level3 true  --benchmark false --plot true
+
+  ./benchmark_plot.sh -t gfx90a  --level1 true  --level2 true --level3 true  --benchmark false --plot true --theo_max true

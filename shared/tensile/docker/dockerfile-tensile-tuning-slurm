@@ -1,0 +1,131 @@
+################################################################################
+#
+# Copyright (C) 2021-2022 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+
+# This Dockerfile provides a starting point for a Tensile tuning image
+# to run tuning tasks. It provides a deployment package that ensures
+# consistency for ROCm image, Tensile code and ATITOOL
+
+# Parameters related to building hip
+ARG base_image
+
+FROM ${base_image}
+LABEL maintainer="tensile-maintainer@amd.com"
+
+USER root
+ARG user_uid
+
+# Install dependent packages
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    cmake \
+    ca-certificates \
+    doxygen \
+    git \
+    graphviz \
+    nano \
+    pkg-config \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python3-pytest \
+    python3-setuptools \
+    python3-yaml \
+    libnuma1 \
+    libboost-all-dev \
+    zlib1g-dev \
+    libomp-dev \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# The version of MessagePack supplied in Ubuntu 16.04 is old and won't work,
+# so we'll manually download and install the DEB files
+RUN curl -O http://ftp.us.debian.org/debian/pool/main/m/msgpack-c/libmsgpack-dev_3.0.1-3_amd64.deb \
+         -O http://ftp.us.debian.org/debian/pool/main/m/msgpack-c/libmsgpackc2_3.0.1-3_amd64.deb
+RUN dpkg -i libmsgpack-dev_3.0.1-3_amd64.deb libmsgpackc2_3.0.1-3_amd64.deb
+
+RUN pip3 install setuptools --upgrade && \
+    pip3 install wheel && \
+    pip3 install tox pyyaml msgpack joblib
+
+# Parameters related to building Tensile
+ARG tensile_fork=ROCmSoftwarePlatform
+ARG tensile_branch=develop
+ARG tensile_commit=HEAD
+
+# Check out desired Tensile code
+RUN bash -xc \
+" \
+    echo \"Tensile Fork: ${tensile_fork}\"; \
+    echo \"Tensile Branch: ${tensile_branch}\"; \
+    echo \"Tensile Commit: ${tensile_commit}\"; \
+    mkdir /Tensile_tmp && pushd /Tensile_tmp; \
+    git clone -b ${tensile_branch} https://github.com/${tensile_fork}/Tensile.git .; \
+    git checkout ${tensile_commit}; \
+    git submodule update --init; \
+    .githooks/install; \
+    popd; \
+    mv /Tensile_tmp/Tensile /Tensile; \
+    rm -rf /Tensile_tmp; \
+"
+# Build the tensile client and deploy to /Tensile/bin
+RUN bash -xc \
+" \
+    echo \"Beginning build of tensile_client executable...\"; \
+    /Tensile/bin/Tensile /Tensile/Configs/build_client.yaml ./build_tmp; \
+    \
+    echo \"Deploying tensile_client executable to Tensile/bin/ ...\" ; \
+    mv ./build_tmp/0_Build/client/tensile_client /Tensile/bin/; \
+    \
+    echo \"Cleaning temp build directory ...\"; \
+    rm -rf ./build_tmp; \
+    \
+    echo \"Checking tensile_client deployment...\"; \
+    [ -f /Tensile/bin/tensile_client ] \
+      && echo \"tensile_client built successfully\" \
+      || echo \"ERROR: tensile_client FAILED to build\"; \
+"
+
+# Create the container's run script and deploy to /Tensile/bin
+RUN bash -xc \
+" \
+    echo \"Deploying run.sh script to Tensile/bin/ ...\" ; \
+    runScript=/Tensile/bin/run.sh ; \
+    touch \$runScript; \
+    echo \"# !/bin/bash\" >> \$runScript; \
+    echo \"# Container run script\" >> \$runScript ; \
+    echo \"# Expects single yaml in mounted /TaskDir\" >> \$runScript ; \
+    echo \"# Generates tuning result to /ResultDir\" >> \$runScript ; \
+    echo \"cd /Tensile\" >> \$runScript ; \
+    echo \"/Tensile/bin/Tensile /TaskDir/*.yaml /ResultDir --prebuilt-client=/Tensile/bin/tensile_client 2>&1 > /LogDir/runlog.log \" >> \$runScript ; \
+    echo \"exit \$?\" >> \$runScript ; \
+    chmod +x \$runScript ; \
+    cat \$runScript; \
+    \
+    [ -f /Tensile/bin/run.sh ] \
+      && echo \"run.sh script installed successfully\" \
+      || echo \"ERROR: run.sh FAILED to build\"; \
+"
+
+# Finally, designate the container to run the tuning script and save the log
+ENTRYPOINT exec /Tensile/bin/run.sh

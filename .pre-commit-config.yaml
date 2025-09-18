@@ -1,0 +1,57 @@
+# Pre-commit (https://pre-commit.com) configuration for assorted lint checks.
+#
+# See https://pre-commit.com/hooks.html for more hooks.
+
+# Top level exclusions from all hooks. Some of these could be moved into more
+# specific exclusions like check-yaml and clang-format, but for large generated
+# files even simple hooks like trailing-whitespace can be expensive.
+#
+# Note the yaml multiline literal and (?x) regex flag used here, see
+# https://pre-commit.com/#regular-expressions.
+exclude: |
+  (?x)
+    # These subprojects are not yet migrated to the superrepo and have alterate
+    # sources of truth, so do not run checks on their code.
+    projects/composablekernel/.*|
+    projects/hipsolver/.*|
+    projects/rocsolver/.*|
+    # Large yaml files
+    projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/.*|
+    # Large (20k+ LOC) source files
+    projects/hipblaslt/tensilelite/Tensile/CustomKernels/.*|
+    # Generated test yaml files
+    projects/hipblaslt/tensilelite/Tensile/Tests/.*|
+    # Large source files
+    projects/miopen/src/kernels/.*|
+    # Generated files (see rocrand/tools/ _generator.cpp files)
+    projects/rocrand/library/.*precomputed\.(cpp|h)|
+    projects/rocrand/library/.*constants\.(cpp|h)
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.2.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+
+  - repo: https://github.com/psf/black
+    rev: 22.10.0
+    hooks:
+      - id: black
+        language_version: python3
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.4
+    hooks:
+      - id: clang-format
+        name: clang-format (C/C++/ObjC)
+        entry: clang-format -i -style=file
+        files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+
+  - repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.10
+    hooks:
+      - id: cmake-format
+      - id: cmake-lint

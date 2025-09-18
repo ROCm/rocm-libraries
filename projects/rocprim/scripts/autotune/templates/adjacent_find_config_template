@@ -1,0 +1,20 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_ADJACENT_FIND_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+adjacent_find_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class input_type, class enable = void>
+struct default_adjacent_find_config : default_adjacent_find_config_base<input_type>::type
+{};
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class input_type> struct default_adjacent_find_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), input_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

@@ -1,0 +1,213 @@
+# ########################################################################
+# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &alpha_beta_range_quick
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
+  - &alpha_beta_range_checkin
+    - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   2.0, beta:  0.67, alphai: -1.0, betai:  1.5 }
+    - { alpha:   3.0, beta:  1.0,  alphai:  1.0, betai: -0.5 }
+
+  - &alpha_beta_range_0_1
+    - { alpha:   0.0, beta:  1.0,  alphai:  0.0, betai:  0.0 }
+
+  - &alpha_beta_range_nightly
+    - { alpha:   0.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   2.0, beta:  0.67, alphai:  0.0, betai:  1.5 }
+    - { alpha:   3.0, beta:  1.0,  alphai:  1.5, betai:  0.0 }
+    - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
+    - { alpha:  -1.0, beta: -0.5,  alphai:  0.0, betai:  0.0 }
+
+  - &alpha_beta_range_arch
+    - { alpha:   2.0, beta: -1.2, alphai:  0.0, betai: 0.0 }
+
+Tests:
+- name: ellmv_bad_arg
+  category: pre_checkin
+  function: ellmv_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: ellmv_extra
+  category: nightly
+  hardware: [gfx908, gfx90a]
+  function: ellmv_extra
+
+- name: ellmv
+  category: quick
+  function: ellmv
+  precision: *single_double_precisions_complex_real
+  M: [10, 500]
+  N: [33, 842]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: ellmv
+  category: pre_checkin
+  function: ellmv
+  precision: *single_double_precisions_complex_real
+  M: [0, 711]
+  N: [0, 444]
+  alpha_beta: *alpha_beta_range_0_1
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: ellmv
+  category: pre_checkin
+  function: ellmv
+  precision: *single_double_precisions
+  M: [7111, 10000]
+  N: [4441, 10000]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: ellmv
+  category: nightly
+  function: ellmv
+  precision: *double_only_precisions_complex
+  M: [39385, 193482, 639102]
+  N: [29348, 340123, 710341]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: ellmv_file
+  category: quick
+  function: ellmv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6]
+
+- name: ellmv_file
+  category: quick
+  function: ellmv
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit]
+
+- name: ellmv_file
+  category: pre_checkin
+  function: ellmv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos3,
+             nos5,
+             nos7]
+
+- name: ellmv_file
+  category: nightly
+  function: ellmv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bibd_22_8,
+             bmwcra_1,
+             amazon0312,
+             sme3Dc,
+             shipsec1]
+
+- name: ellmv_file
+  category: quick
+  function: ellmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2,
+             qc2534]
+
+- name: ellmv_file
+  category: pre_checkin
+  function: ellmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             rma10,
+             Chevron3]
+
+- name: ellmv_file
+  category: nightly
+  function: ellmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]
+
+- name: ellmv_graph_test
+  category: pre_checkin
+  function: ellmv
+  precision: *single_double_precisions_complex_real
+  M: [10, 500]
+  N: [33, 842]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true

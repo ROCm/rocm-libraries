@@ -1,0 +1,1143 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+#include <thrust/functional.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/retag.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/pair.h>
+#include <thrust/transform.h>
+#include <thrust/tuple.h>
+#include <thrust/universal_vector.h>
+
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
+
+// There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
+// Adding this attribute suffices that this miscompilation does not appear anymore
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
+#else
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+#endif
+
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::universal_host_pinned_vector<int>>>;
+
+TESTS_INOUT_DEFINE(TransformInOutTests, AllInOutTestsParams);
+
+TESTS_DEFINE(TransformTests, FullTestsParams);
+TESTS_DEFINE(TransformVectorTests, VectorTestsParams);
+
+template <class T>
+struct unary_transform
+{
+  __device__ __host__ inline constexpr T operator()(const T& a) const
+  {
+    return a + 5;
+  }
+};
+
+template <class T>
+struct binary_transform
+{
+  __device__ __host__ inline constexpr T operator()(const T& a, const T& b) const
+  {
+    return a * 2 + b * 5;
+  }
+};
+
+TYPED_TEST(TransformInOutTests, UnaryTransform)
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h_input(size);
+    for (size_t i = 0; i < size; i++)
+    {
+      h_input[i] = i;
+    }
+
+    // Calculate expected results on host
+    thrust::host_vector<U> expected(size);
+    thrust::transform(h_input.begin(), h_input.end(), expected.begin(), unary_transform<U>());
+
+    thrust::device_vector<T> d_input(h_input);
+    thrust::device_vector<U> d_output(size);
+    thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), unary_transform<U>());
+
+    thrust::host_vector<U> h_output = d_output;
+    for (size_t i = 0; i < size; i++)
+    {
+      ASSERT_EQ(h_output[i], expected[i]) << "where index = " << i;
+    }
+  }
+}
+
+TYPED_TEST(TransformInOutTests, BinaryTransform)
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h_input1(size);
+    thrust::host_vector<T> h_input2(size);
+    for (size_t i = 0; i < size; i++)
+    {
+      h_input1[i] = i * 3;
+      h_input2[i] = i;
+    }
+
+    // Calculate expected results on host
+    thrust::host_vector<U> expected(size);
+    thrust::transform(h_input1.begin(), h_input1.end(), h_input2.begin(), expected.begin(), binary_transform<U>());
+
+    thrust::device_vector<T> d_input1(h_input1);
+    thrust::device_vector<T> d_input2(h_input2);
+    thrust::device_vector<U> d_output(size);
+    thrust::transform(d_input1.begin(), d_input1.end(), d_input2.begin(), d_output.begin(), binary_transform<U>());
+
+    thrust::host_vector<U> h_output = d_output;
+    for (size_t i = 0; i < size; i++)
+    {
+      ASSERT_EQ(h_output[i], expected[i]) << "where index = " << i;
+    }
+  }
+}
+
+TYPED_TEST(TransformVectorTests, TestTransformUnarySimple)
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  typename Vector::iterator iter;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  Vector input{1, -2, 3};
+  Vector output(3);
+  Vector result{-1, 2, -3};
+
+  iter = thrust::transform(input.begin(), input.end(), output.begin(), thrust::negate<T>());
+
+  ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
+  ASSERT_EQ(output, result);
+}
+
+template <typename InputIterator, typename OutputIterator, typename UnaryFunction>
+OutputIterator transform(my_system& system, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
+{
+  system.validate_dispatch();
+  return result;
+}
+
+TEST(TransformTests, TestTransformUnaryDispatchExplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::transform(sys, vec.begin(), vec.begin(), vec.begin(), 0);
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template <typename InputIterator, typename OutputIterator, typename UnaryFunction>
+OutputIterator transform(my_tag, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
+{
+  *result = 13;
+  return result;
+}
+
+TEST(TransformTests, TestTransformUnaryDispatchImplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  thrust::transform(
+    thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
+
+  ASSERT_EQ(13, vec.front());
+}
+
+TYPED_TEST(TransformVectorTests, TestTransformIfUnaryNoStencilSimple) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  typename Vector::iterator iter;
+
+  Vector input{0, -2, 0};
+  Vector output{-1, -2, -3};
+  Vector result{-1, 2, -3};
+
+  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::internal::identity{});
+
+  ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
+  ASSERT_EQ(output, result);
+}
+
+template <typename InputIterator, typename ForwardIterator, typename UnaryFunction, typename Predicate>
+ForwardIterator
+transform_if(my_system& system, InputIterator, InputIterator, ForwardIterator result, UnaryFunction, Predicate)
+{
+  system.validate_dispatch();
+  return result;
+}
+
+TEST(TransformTests, TestTransformIfUnaryNoStencilDispatchExplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::transform_if(sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), 0);
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template <typename InputIterator, typename ForwardIterator, typename UnaryFunction, typename Predicate>
+ForwardIterator transform_if(my_tag, InputIterator, InputIterator, ForwardIterator result, UnaryFunction, Predicate)
+{
+  *result = 13;
+  return result;
+}
+
+TEST(TransformTests, TestTransformIfUnaryNoStencilDispatchImplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  thrust::transform_if(
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    0);
+
+  ASSERT_EQ(13, vec.front());
+}
+
+TYPED_TEST(TransformVectorTests, TestTransformIfUnarySimple) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  typename Vector::iterator iter;
+
+  Vector input{1, -2, 3};
+  Vector stencil{1, 0, 1};
+  Vector output{1, 2, 3};
+  Vector result{-1, 2, -3};
+
+  iter = thrust::transform_if(
+    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::internal::identity{});
+
+  ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
+  ASSERT_EQ(output, result);
+}
+
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename ForwardIterator,
+          typename UnaryFunction,
+          typename Predicate>
+ForwardIterator
+transform_if(my_system& system, InputIterator1, InputIterator1, ForwardIterator result, UnaryFunction, Predicate)
+{
+  system.validate_dispatch();
+  return result;
+}
+
+TEST(TransformTests, TestTransformIfUnaryDispatchExplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::transform_if(sys, vec.begin(), vec.begin(), vec.begin(), 0, 0);
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename ForwardIterator,
+          typename UnaryFunction,
+          typename Predicate>
+ForwardIterator transform_if(my_tag, InputIterator1, InputIterator1, ForwardIterator result, UnaryFunction, Predicate)
+{
+  *result = 13;
+  return result;
+}
+
+TEST(TransformTests, TestTransformIfUnaryDispatchImplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  thrust::transform_if(
+    thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0, 0);
+
+  ASSERT_EQ(13, vec.front());
+}
+
+TYPED_TEST(TransformVectorTests, TestTransformBinarySimple) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  typename Vector::iterator iter;
+
+  // There is a strange gcc bug here where it believes we would write out of bounds.
+  // It seems to go away if we add one more element that we leave untouched. Luckily 0 - 0 = 0 so all is fine.
+  // Note that we still write the element, so it does not hide a functional thrust bug
+  Vector input1{1, -2, 3};
+  Vector input2{-4, 5, 6};
+  Vector output(3);
+  Vector result{5, -7, -3};
+
+  iter = thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::minus<T>());
+
+  ASSERT_EQ(std::size_t(iter - output.begin()), input1.size());
+  ASSERT_EQ(output, result);
+}
+
+template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename UnaryFunction>
+OutputIterator
+transform(my_system& system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
+{
+  system.validate_dispatch();
+  return result;
+}
+
+TEST(TransformTests, TestTransformBinaryDispatchExplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::transform(sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), 0);
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename UnaryFunction>
+OutputIterator transform(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
+{
+  *result = 13;
+  return result;
+}
+
+TEST(TransformTests, TestTransformBinaryDispatchImplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  thrust::transform(
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    0);
+
+  ASSERT_EQ(13, vec.front());
+}
+
+TYPED_TEST(TransformVectorTests, TestTransformIfBinarySimple) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  typename Vector::iterator iter;
+
+  Vector input1{1, -2, 3};
+  Vector input2{-4, 5, 6};
+  Vector stencil{0, 1, 0};
+  Vector output{1, 2, 3};
+  Vector result{5, 2, -3};
+
+  ::internal::identity identity;
+
+  iter = thrust::transform_if(
+    input1.begin(),
+    input1.end(),
+    input2.begin(),
+    stencil.begin(),
+    output.begin(),
+    thrust::minus<T>(),
+    thrust::not_fn(identity));
+
+  ASSERT_EQ(std::size_t(iter - output.begin()), input1.size());
+  ASSERT_EQ(output, result);
+}
+
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename ForwardIterator,
+          typename BinaryFunction,
+          typename Predicate>
+ForwardIterator transform_if(
+  my_system& system,
+  InputIterator1,
+  InputIterator1,
+  InputIterator2,
+  InputIterator3,
+  ForwardIterator result,
+  BinaryFunction,
+  Predicate)
+{
+  system.validate_dispatch();
+  return result;
+}
+
+TEST(TransformTests, TestTransformIfBinaryDispatchExplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::transform_if(sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), vec.begin(), 0, 0);
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename ForwardIterator,
+          typename BinaryFunction,
+          typename Predicate>
+ForwardIterator transform_if(
+  my_tag,
+  InputIterator1,
+  InputIterator1,
+  InputIterator2,
+  InputIterator3,
+  ForwardIterator result,
+  BinaryFunction,
+  Predicate)
+{
+  *result = 13;
+  return result;
+}
+
+TEST(TransformTests, TestTransformIfBinaryDispatchImplicit)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> vec(1);
+
+  thrust::transform_if(
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    0,
+    0);
+
+  ASSERT_EQ(13, vec.front());
+}
+
+TYPED_TEST(TransformInOutTests, TestTransformUnary) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::device_vector<T> d_input = h_input;
+
+      thrust::host_vector<U> h_output(size);
+      thrust::device_vector<U> d_output(size);
+
+      thrust::transform(h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>());
+      thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>());
+
+      ASSERT_EQ(h_output, d_output);
+    }
+  }
+}
+
+TYPED_TEST(TransformInOutTests, TestTransformUnaryToDiscardIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::device_vector<T> d_input = h_input;
+
+      thrust::discard_iterator<> h_result =
+        thrust::transform(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), thrust::negate<T>());
+
+      thrust::discard_iterator<> d_result =
+        thrust::transform(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), thrust::negate<T>());
+
+      thrust::discard_iterator<> reference(size);
+
+      ASSERT_EQ_QUIET(reference, h_result);
+      ASSERT_EQ_QUIET(reference, d_result);
+    }
+  }
+}
+
+struct repeat2
+{
+  template <typename T>
+  THRUST_HOST_DEVICE thrust::pair<T, T> operator()(T x)
+  {
+    return thrust::make_pair(x, x);
+  }
+};
+
+TYPED_TEST(TransformInOutTests, TestTransformUnaryToDiscardIteratorZipped) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::device_vector<T> d_input = h_input;
+
+      thrust::host_vector<U> h_output(size);
+      thrust::device_vector<U> d_output(size);
+
+      using Iterator1 = typename thrust::host_vector<U>::iterator;
+      using Iterator2 = typename thrust::device_vector<U>::iterator;
+
+      using Tuple1 = thrust::tuple<Iterator1, thrust::discard_iterator<>>;
+      using Tuple2 = thrust::tuple<Iterator2, thrust::discard_iterator<>>;
+
+      using ZipIterator1 = thrust::zip_iterator<Tuple1>;
+      using ZipIterator2 = thrust::zip_iterator<Tuple2>;
+
+      ZipIterator1 z1(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator()));
+      ZipIterator2 z2(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator()));
+
+      ZipIterator1 h_result = thrust::transform(h_input.begin(), h_input.end(), z1, repeat2());
+
+      ZipIterator2 d_result = thrust::transform(d_input.begin(), d_input.end(), z2, repeat2());
+
+      thrust::discard_iterator<> reference(size);
+
+      ASSERT_EQ(h_output, d_output);
+
+      ASSERT_EQ_QUIET(reference, thrust::get<1>(h_result.get_iterator_tuple()));
+      ASSERT_EQ_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
+    }
+  }
+}
+
+struct is_positive
+{
+  template <typename T>
+  THRUST_HOST_DEVICE bool operator()(T& x)
+  {
+    return x > 0;
+  } // end operator()()
+}; // end is_positive
+
+TYPED_TEST(TransformInOutTests, TestTransformIfUnaryNoStencil) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<U> h_output = get_random_data<U>(
+        size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed + seed_value_addition);
+
+      thrust::device_vector<T> d_input  = h_input;
+      thrust::device_vector<U> d_output = h_output;
+
+      thrust::transform_if(h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>(), is_positive());
+
+      thrust::transform_if(d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>(), is_positive());
+
+      ASSERT_EQ(h_output, d_output);
+    }
+  }
+}
+
+TYPED_TEST(TransformInOutTests, TestTransformIfUnary) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_stencil = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
+      thrust::host_vector<U> h_output = get_random_data<U>(
+        size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed + 2 * seed_value_addition);
+
+      thrust::device_vector<T> d_input   = h_input;
+      thrust::device_vector<T> d_stencil = h_stencil;
+      thrust::device_vector<U> d_output  = h_output;
+
+      thrust::transform_if(
+        h_input.begin(), h_input.end(), h_stencil.begin(), h_output.begin(), thrust::negate<T>(), is_positive());
+
+      thrust::transform_if(
+        d_input.begin(), d_input.end(), d_stencil.begin(), d_output.begin(), thrust::negate<T>(), is_positive());
+
+      ASSERT_EQ(h_output, d_output);
+    }
+  }
+}
+
+TYPED_TEST(TransformInOutTests, TestTransformIfUnaryToDiscardIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_stencil = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
+
+      thrust::device_vector<T> d_input   = h_input;
+      thrust::device_vector<T> d_stencil = h_stencil;
+
+      thrust::discard_iterator<> h_result = thrust::transform_if(
+        h_input.begin(),
+        h_input.end(),
+        h_stencil.begin(),
+        thrust::make_discard_iterator(),
+        thrust::negate<T>(),
+        is_positive());
+
+      thrust::discard_iterator<> d_result = thrust::transform_if(
+        d_input.begin(),
+        d_input.end(),
+        d_stencil.begin(),
+        thrust::make_discard_iterator(),
+        thrust::negate<T>(),
+        is_positive());
+
+      thrust::discard_iterator<> reference(size);
+
+      ASSERT_EQ_QUIET(reference, h_result);
+      ASSERT_EQ_QUIET(reference, d_result);
+    }
+  }
+}
+
+TYPED_TEST(TransformInOutTests, TestTransformBinary) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_input2 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
+      thrust::device_vector<T> d_input1 = h_input1;
+      thrust::device_vector<T> d_input2 = h_input2;
+
+      thrust::host_vector<T> h_output(size);
+      thrust::device_vector<T> d_output(size);
+
+      thrust::transform(h_input1.begin(), h_input1.end(), h_input2.begin(), h_output.begin(), thrust::minus<T>());
+      thrust::transform(d_input1.begin(), d_input1.end(), d_input2.begin(), d_output.begin(), thrust::minus<T>());
+
+      ASSERT_EQ(h_output, d_output);
+
+      thrust::transform(h_input1.begin(), h_input1.end(), h_input2.begin(), h_output.begin(), thrust::multiplies<T>());
+      thrust::transform(d_input1.begin(), d_input1.end(), d_input2.begin(), d_output.begin(), thrust::multiplies<T>());
+
+      ASSERT_EQ(h_output, d_output);
+    }
+  }
+}
+
+TYPED_TEST(TransformInOutTests, TestTransformBinaryToDiscardIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_input2 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
+      thrust::device_vector<T> d_input1 = h_input1;
+      thrust::device_vector<T> d_input2 = h_input2;
+
+      thrust::discard_iterator<> h_result = thrust::transform(
+        h_input1.begin(), h_input1.end(), h_input2.begin(), thrust::make_discard_iterator(), thrust::minus<T>());
+      thrust::discard_iterator<> d_result = thrust::transform(
+        d_input1.begin(), d_input1.end(), d_input2.begin(), thrust::make_discard_iterator(), thrust::minus<T>());
+
+      thrust::discard_iterator<> reference(size);
+
+      ASSERT_EQ_QUIET(reference, h_result);
+      ASSERT_EQ_QUIET(reference, d_result);
+    }
+  }
+}
+
+TYPED_TEST(TransformInOutTests, TestTransformIfBinary) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_input1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_input2 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
+      thrust::host_vector<T> h_stencil = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + 2 * seed_value_addition);
+      thrust::host_vector<T> h_output = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + 3 * seed_value_addition);
+
+      thrust::device_vector<T> d_input1  = h_input1;
+      thrust::device_vector<T> d_input2  = h_input2;
+      thrust::device_vector<T> d_stencil = h_stencil;
+      thrust::device_vector<T> d_output  = h_output;
+
+      thrust::transform_if(
+        h_input1.begin(),
+        h_input1.end(),
+        h_input2.begin(),
+        h_stencil.begin(),
+        h_output.begin(),
+        thrust::minus<T>(),
+        is_positive());
+
+      thrust::transform_if(
+        d_input1.begin(),
+        d_input1.end(),
+        d_input2.begin(),
+        d_stencil.begin(),
+        d_output.begin(),
+        thrust::minus<T>(),
+        is_positive());
+
+      ASSERT_EQ(h_output, d_output);
+
+      h_stencil = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + 4 * seed_value_addition);
+      d_stencil = h_stencil;
+
+      thrust::transform_if(
+        h_input1.begin(),
+        h_input1.end(),
+        h_input2.begin(),
+        h_stencil.begin(),
+        h_output.begin(),
+        thrust::multiplies<T>(),
+        is_positive());
+
+      thrust::transform_if(
+        d_input1.begin(),
+        d_input1.end(),
+        d_input2.begin(),
+        d_stencil.begin(),
+        d_output.begin(),
+        thrust::multiplies<T>(),
+        is_positive());
+
+      ASSERT_EQ(h_output, d_output);
+    }
+  }
+}
+
+TYPED_TEST(TransformInOutTests, TestTransformIfBinaryToDiscardIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> h_input1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_input2 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
+      thrust::host_vector<T> h_stencil = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + 2 * seed_value_addition);
+
+      thrust::device_vector<T> d_input1  = h_input1;
+      thrust::device_vector<T> d_input2  = h_input2;
+      thrust::device_vector<T> d_stencil = h_stencil;
+
+      thrust::discard_iterator<> h_result = thrust::transform_if(
+        h_input1.begin(),
+        h_input1.end(),
+        h_input2.begin(),
+        h_stencil.begin(),
+        thrust::make_discard_iterator(),
+        thrust::minus<T>(),
+        is_positive());
+
+      thrust::discard_iterator<> d_result = thrust::transform_if(
+        d_input1.begin(),
+        d_input1.end(),
+        d_input2.begin(),
+        d_stencil.begin(),
+        thrust::make_discard_iterator(),
+        thrust::minus<T>(),
+        is_positive());
+
+      thrust::discard_iterator<> reference(size);
+
+      ASSERT_EQ_QUIET(reference, h_result);
+      ASSERT_EQ_QUIET(reference, d_result);
+    }
+  }
+}
+
+#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
+TYPED_TEST(TransformInOutTests, TestTransformUnaryCountingIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  // G++ 4.4.x has a known failure with auto-vectorization (due to -O3 or
+  // -ftree-vectorize) of this test.
+  // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43251
+
+  // ICPC has a known failure with auto-vectorization (due to -O2 or
+  // higher) of this test.
+  // See nvbug 200326708.
+  GTEST_NONFATAL_FAILURE_("Known failure");
+}
+#else
+TYPED_TEST(TransformInOutTests, TestTransformUnaryCountingIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  size_t const n = 15 * sizeof(T);
+
+  ASSERT_LE(T(n), truncate_to_max_representable<T>(n));
+
+  thrust::counting_iterator<T, thrust::host_system_tag> h_first   = thrust::make_counting_iterator<T>(0);
+  thrust::counting_iterator<T, thrust::device_system_tag> d_first = thrust::make_counting_iterator<T>(0);
+
+  thrust::host_vector<U> h_result(n);
+  thrust::device_vector<U> d_result(n);
+
+  thrust::transform(h_first, h_first + n, h_result.begin(), ::internal::identity{});
+  thrust::transform(d_first, d_first + n, d_result.begin(), ::internal::identity{});
+
+  ASSERT_EQ(h_result, d_result);
+}
+#endif
+
+#if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400
+TYPED_TEST(TransformInOutTests, TestTransformBinaryCountingIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  // GCC 4.4.x has a known failure with auto-vectorization (due to -O3 or -ftree-vectorize) of this test
+  // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43251
+
+  GTEST_NONFATAL_FAILURE_("Known failure");
+}
+#else
+TYPED_TEST(TransformInOutTests, TestTransformBinaryCountingIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  size_t const size = 15 * sizeof(T);
+
+  ASSERT_LE(T(size), truncate_to_max_representable<T>(size));
+
+  thrust::counting_iterator<T, thrust::host_system_tag> h_first   = thrust::make_counting_iterator<T>(0);
+  thrust::counting_iterator<T, thrust::device_system_tag> d_first = thrust::make_counting_iterator<T>(0);
+
+  thrust::host_vector<U> h_result(size);
+  thrust::device_vector<U> d_result(size);
+
+  thrust::transform(h_first, h_first + size, h_first, h_result.begin(), thrust::plus<T>());
+  thrust::transform(d_first, d_first + size, d_first, d_result.begin(), thrust::plus<T>());
+
+  ASSERT_EQ(h_result, d_result);
+}
+#endif
+
+template <typename T>
+struct plus_mod3
+{
+  T* table;
+
+  plus_mod3(T* table)
+      : table(table)
+  {}
+
+  THRUST_HOST_DEVICE T operator()(T a, T b)
+  {
+    return table[(int) (a + b)];
+  }
+};
+
+TYPED_TEST(TransformTests, TestTransformWithIndirection) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  // add numbers modulo 3 with external lookup table
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  Vector input1{0, 1, 2, 1, 2, 0, 1};
+  Vector input2{2, 2, 2, 0, 2, 1, 0};
+  Vector output(7, 0);
+
+  Vector table{0, 1, 2, 0, 1, 2};
+
+  thrust::transform(
+    input1.begin(), input1.end(), input2.begin(), output.begin(), plus_mod3<T>(thrust::raw_pointer_cast(&table[0])));
+
+  Vector ref{2, 0, 1, 1, 1, 1, 1};
+  ASSERT_EQ(output, ref);
+}
+
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void UnaryTransformKernel(int const N, int* input, int* output)
+{
+  if (threadIdx.x == 0)
+  {
+    thrust::device_ptr<int> in_begin(input);
+    thrust::device_ptr<int> in_end(input + N);
+    thrust::device_ptr<int> out_begin(output);
+    thrust::transform(thrust::hip::par, in_begin, in_end, out_begin, unary_transform<int>());
+  }
+}
+TEST(TransformInOutTests, TestUnaryTransformDevice)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<int> h_input(size);
+    for (size_t i = 0; i < size; i++)
+    {
+      h_input[i] = i;
+    }
+
+    // Calculate expected results on host
+    thrust::host_vector<int> expected(size);
+    thrust::transform(h_input.begin(), h_input.end(), expected.begin(), unary_transform<int>());
+
+    thrust::device_vector<int> d_input(h_input);
+    thrust::device_vector<int> d_output(size);
+
+    hipLaunchKernelGGL(
+      UnaryTransformKernel,
+      dim3(1, 1, 1),
+      dim3(128, 1, 1),
+      0,
+      0,
+      size,
+      thrust::raw_pointer_cast(&d_input[0]),
+      thrust::raw_pointer_cast(&d_output[0]));
+
+    ASSERT_EQ(expected, d_output);
+  }
+}
+
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void
+BinaryTransformKernel(int const N, int* input1, int* input2, int* output)
+{
+  if (threadIdx.x == 0)
+  {
+    thrust::device_ptr<int> in1_begin(input1);
+    thrust::device_ptr<int> in1_end(input1 + N);
+    thrust::device_ptr<int> in2_begin(input2);
+
+    thrust::device_ptr<int> out_begin(output);
+    thrust::transform(thrust::hip::par, in1_begin, in1_end, in2_begin, out_begin, binary_transform<int>());
+  }
+}
+
+TEST(TransformInOutTests, TestBinaryTransformDevice)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<int> h_input1(size);
+    thrust::host_vector<int> h_input2(size);
+    for (size_t i = 0; i < size; i++)
+    {
+      h_input1[i] = i * 3;
+      h_input2[i] = i;
+    }
+
+    // Calculate expected results on host
+    thrust::host_vector<int> expected(size);
+    thrust::transform(h_input1.begin(), h_input1.end(), h_input2.begin(), expected.begin(), binary_transform<int>());
+
+    thrust::device_vector<int> d_input1(h_input1);
+    thrust::device_vector<int> d_input2(h_input2);
+    thrust::device_vector<int> d_output(size);
+    hipLaunchKernelGGL(
+      BinaryTransformKernel,
+      dim3(1, 1, 1),
+      dim3(128, 1, 1),
+      0,
+      0,
+      size,
+      thrust::raw_pointer_cast(&d_input1[0]),
+      thrust::raw_pointer_cast(&d_input2[0]),
+      thrust::raw_pointer_cast(&d_output[0]));
+
+    ASSERT_EQ(expected, d_output);
+  }
+}

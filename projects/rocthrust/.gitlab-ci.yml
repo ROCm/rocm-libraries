@@ -1,0 +1,563 @@
+# ########################################################################
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# ########################################################################
+
+include:
+  - project: 'amd/ci-templates'
+    ref: main
+    file:
+      - /defaults.yaml
+      - /deps-cmake.yaml
+      - /deps-docs.yaml
+      - /deps-format.yaml
+      - /deps-rocm.yaml
+      - /deps-windows.yaml
+      - /deps-nvcc.yaml
+      - /deps-compiler-acceleration.yaml
+      - /gpus-rocm.yaml
+      - /gpus-nvcc.yaml
+      - /rules.yaml
+
+stages:
+  - lint
+  - build     # Tests if builds succeed (CMake)
+  - test      # Tests if unit tests are passing (CTest)
+  - benchmark # Runs the non-internal benchmarks (Google Benchmark)
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS !~ /CI Skip/
+
+variables:
+  # Helper variables
+  PACKAGE_DIR: $BUILD_DIR/package
+  ROCPRIM_GIT_BRANCH: develop_stream
+  ROCPRIM_DIR: ${CI_PROJECT_DIR}/rocPRIM
+
+clang-format:
+  extends:
+    - .lint:clang-format
+
+copyright-date:
+  extends:
+    - .deps:rocm
+  stage: lint
+  needs: []
+  tags:
+    - build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - cd $CI_PROJECT_DIR
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - scripts/copyright-date/check-copyright.sh -v -d $CI_MERGE_REQUEST_DIFF_BASE_SHA
+
+.cmake-latest:
+  extends:
+    - .deps:rocm
+    - .deps:cmake-latest
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.cmake-minimum:
+  extends:
+    - .deps:rocm
+    - .deps:cmake-minimum
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.install-rocprim:
+  script:
+    - branch_name="$ROCPRIM_GIT_BRANCH"
+    - if [[ $CI_COMMIT_BRANCH == "develop" ]] || [[ $CI_COMMIT_BRANCH == "master" ]]; then branch_name=$CI_COMMIT_BRANCH;
+    - fi;
+    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL} $ROCPRIM_DIR
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -D ROCM_DEP_ROCMCORE=OFF
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -S $ROCPRIM_DIR
+      -B $ROCPRIM_DIR/build
+    - cd $ROCPRIM_DIR/build
+    - cpack
+      -G "DEB"
+    - $SUDO_CMD dpkg -i rocprim*.deb
+
+.build:common:
+  stage: build
+  tags:
+    - build
+  extends:
+    - .gpus:rocm-gpus
+    - .rules:build
+  variables:
+    EXTRA_CMAKE_CXX_FLAGS: ""
+  script:
+    - !reference [.install-rocprim, script]
+    - | # Setup env vars for testing
+        rng_seed_count=0; prng_seeds="0";
+        if [[ $CI_COMMIT_BRANCH == "develop_stream" ]]; then
+            rng_seed_count=3
+            prng_seeds="0, 1000"
+        fi
+    - | # Add hardened libc++ assertions for tests only
+        if [[ $BUILD_TARGET == "TEST" ]]; then
+            echo "Configuring with hardened libc++!"
+            EXTRA_CMAKE_CXX_FLAGS+=" -D_GLIBCXX_ASSERTIONS=ON"
+        fi
+    # Build rocThrust
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_FLAGS="$EXTRA_CMAKE_CXX_FLAGS"
+      -D CMAKE_BUILD_TYPE=$BUILD_TYPE
+      -D BUILD_$BUILD_TARGET=ON
+      -D GPU_TARGETS=$GPU_TARGETS
+      -D RNG_SEED_COUNT=$rng_seed_count
+      -D PRNG_SEEDS=$prng_seeds
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
+      -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
+      -S $CI_PROJECT_DIR
+      -B $CI_PROJECT_DIR/build
+    - cmake --build $CI_PROJECT_DIR/build
+  artifacts:
+    paths:
+    - $CI_PROJECT_DIR/build/benchmark/*
+    - $CI_PROJECT_DIR/build/test/*
+    - $CI_PROJECT_DIR/build/testing/*
+    - $CI_PROJECT_DIR/build/deps/*
+    - $CI_PROJECT_DIR/build/CMakeCache.txt
+    - $CI_PROJECT_DIR/build/CTestTestfile.cmake
+    - $CI_PROJECT_DIR/build/.ninja_log
+    exclude:
+    - $CI_PROJECT_DIR/build/**/*.o
+    expire_in: 1 day
+
+build:cmake-latest:
+  stage: build
+  extends:
+    - .cmake-latest
+    - .build:common
+  parallel:
+    matrix:
+      - BUILD_TYPE: Release
+        BUILD_TARGET: [BENCHMARK, TEST, EXAMPLE]
+        BUILD_VERSION: 17
+
+build:cmake-minimum:
+  stage: build
+  extends:
+    - .cmake-minimum
+    - .build:common
+  parallel:
+    matrix:
+      - BUILD_TYPE: Release
+        BUILD_TARGET: [BENCHMARK, TEST, EXAMPLE]
+        BUILD_VERSION: 17
+
+build:package:
+  stage: build
+  extends:
+    - .cmake-minimum
+    - .rules:build
+  tags:
+    - build
+  script:
+    - !reference [.install-rocprim, script]
+    - cmake
+      -S $CI_PROJECT_DIR
+      -B $PACKAGE_DIR
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_COMPILER=hipcc
+    - cd $PACKAGE_DIR
+    - cpack
+      -G "DEB;ZIP"
+  artifacts:
+    paths:
+      - $PACKAGE_DIR/rocthrust*.deb
+      - $PACKAGE_DIR/rocthrust*.zip
+    expire_in: 1 day
+
+build:windows:
+  stage: build
+  needs: []
+  extends:
+    - .rules:build
+    - .gpus:rocm-windows
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
+  script:
+    # Download, configure, and install rocPRIM
+    - $BRANCH_NAME=$ROCPRIM_GIT_BRANCH
+    - if ( $CI_COMMIT_BRANCH -eq "develop" -or $CI_COMMIT_BRANCH -eq "master" ) { $branch_name=$CI_COMMIT_BRANCH }
+    - git clone -b $BRANCH_NAME https://gitlab-ci-token:$CI_JOB_TOKEN@$ROCPRIM_GIT_URL $ROCPRIM_DIR
+    - \& cmake
+      -S "$ROCPRIM_DIR"
+      -B "$ROCPRIM_DIR/build"
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=Release
+      -D GPU_TARGETS=$GPU_TARGET
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -D BUILD_BENCHMARK=OFF
+      -D BUILD_SHARED_LIBS=$BUILD_SHARED_LIBS
+      -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
+      -D CMAKE_INSTALL_PREFIX:PATH="$ROCPRIM_DIR/build/install" *>&1
+    - \& cmake --build "$ROCPRIM_DIR/build" --target install *>&1
+    # Configure and build rocThrust
+    - \& cmake
+      -S "$CI_PROJECT_DIR"
+      -B "$CI_PROJECT_DIR/build"
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=Release
+      -D GPU_TARGETS=$GPU_TARGET
+      -D BUILD_TEST=ON
+      -D BUILD_EXAMPLE=OFF
+      -D BUILD_BENCHMARK=OFF
+      -D CMAKE_TOOLCHAIN_FILE=$CI_PROJECT_DIR/toolchain-windows.cmake
+      -D CMAKE_CXX_FLAGS=-Wno-deprecated-declarations
+      -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
+      -D CMAKE_INSTALL_PREFIX:PATH="$CI_PROJECT_DIR/build/install"
+      -D CMAKE_CXX_STANDARD=17
+      -D CMAKE_PREFIX_PATH:PATH="$ROCPRIM_DIR/build/install;${env:HIP_PATH}" *>&1
+    - \& cmake --build "$CI_PROJECT_DIR/build" *>&1
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/
+      - $ROCPRIM_DIR/build/install
+    expire_in: 1 day
+
+test:package:
+  stage: test
+  needs:
+    - build:package
+  extends:
+    - .cmake-minimum
+    - .rules:test
+  tags:
+    - rocm
+  script:
+    - !reference [.install-rocprim, script]
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocthrust*.deb
+    # Test install
+    - cmake
+      -S $CI_PROJECT_DIR/extra
+      -B $CI_PROJECT_DIR/package_test
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D GPU_TARGETS=$GPU_TARGETS
+      -D ROCPRIM_ROOT=/opt/rocm/rocprim
+    - cmake --build $CI_PROJECT_DIR/package_test
+    - cd $CI_PROJECT_DIR/package_test
+    - ctest --output-on-failure
+    # Remove rocPRIM and rocThrust
+    - $SUDO_CMD dpkg -r rocthrust-dev
+    - $SUDO_CMD dpkg -r rocprim-dev
+
+test:doc:
+  stage: test
+  variables:
+    SPHINX_DIR: $DOCS_DIR/sphinx
+  extends:
+    - .build:docs
+    - .rules:test
+  artifacts:
+    paths:
+      - $DOCS_DIR/_build/html/
+    expire_in: 2 weeks
+
+.test:rocm:
+  stage: test
+  tags:
+    - rocm
+    - $GPU
+  extends:
+    - .cmake-minimum
+  needs:
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
+            BUILD_VERSION: 17
+  script:
+    - cd $CI_PROJECT_DIR/build
+    - cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - cat ./resources.json
+    # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
+    # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
+    # As a temporary workaround, disable the SDMA for test stability.
+    - HSA_ENABLE_SDMA=0 ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
+
+test:rocm-any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:rocm
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/ && $CI_MERGE_REQUEST_LABELS !~ /Arch::/
+
+test:rocm-label-arch:
+  extends:
+    - .gpus:rocm
+    - .test:rocm
+    - .rules:arch-labels
+
+test:rocm-all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:rocm
+    - .test:rocm
+    - .rules:test
+
+test-bitwise-repro-generate:
+  stage: test
+  extends:
+    - .cmake-minimum
+    - .rules:manual
+    - .gpus:rocm
+  needs:
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
+            BUILD_VERSION: 17
+  cache:
+    key: database
+    paths:
+      - $CI_PROJECT_DIR/bitwise.db
+    policy: push
+  script:
+    - cd $CI_PROJECT_DIR/build/test/
+    - ROCTHRUST_BWR_PATH=$CI_PROJECT_DIR/bitwise.db ROCTHRUST_BWR_GENERATE=1 ./reproducibility.hip
+
+test-bitwise-repro:
+  stage: test
+  extends:
+    - .cmake-minimum
+    - .rules:test
+    - .gpus:rocm
+  needs:
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
+            BUILD_VERSION: 17
+  cache:
+    key: database
+    paths:
+      - $CI_PROJECT_DIR/bitwise.db
+    policy: pull
+  script:
+    - cd $CI_PROJECT_DIR/build/test/
+    - ROCTHRUST_BWR_PATH=$CI_PROJECT_DIR/bitwise.db ./reproducibility.hip
+
+.rocm-windows:test:
+  extends:
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
+    - .gpus:rocm-windows
+    - .rules:test
+  stage: test
+  script:
+    - \& ctest --test-dir "$CI_PROJECT_DIR/build" --output-on-failure --no-tests=error *>&1
+
+test:rocm-windows:
+  extends:
+    - .rocm-windows:test
+  needs:
+    - build:windows
+
+.rocm-windows:test-install:
+  extends:
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
+    - .gpus:rocm-windows
+    - .rules:test
+  stage: test
+  script:
+    - \& cmake --build "$CI_PROJECT_DIR/build" --target install *>&1
+    - \& cmake
+      -G Ninja
+      -S "$CI_PROJECT_DIR/extra"
+      -B "$CI_PROJECT_DIR/build/package_test"
+      -D CMAKE_BUILD_TYPE=Release
+      -D GPU_TARGETS=$GPU_TARGET
+      -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
+      -D CMAKE_PREFIX_PATH:PATH="$ROCPRIM_DIR/build/install;${env:HIP_PATH}" *>&1
+    - \& cmake --build "$CI_PROJECT_DIR/build/package_test" *>&1
+    - \& ctest --test-dir "$CI_PROJECT_DIR/build/package_test" --output-on-failure --no-tests=error *>&1
+
+test:rocm-windows-install:
+  extends:
+    - .rocm-windows:test-install
+  needs:
+    - build:windows
+
+.nvcc:
+  extends:
+    - .deps:nvcc
+    - .gpus:nvcc-gpus
+    - .deps:cmake-latest
+    - .deps:compiler-acceleration
+    - .rules:manual
+  before_script:
+    - !reference [".deps:nvcc", before_script]
+    - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+build:cuda-and-omp:
+  stage: build
+  extends:
+    - .nvcc
+    - .rules:build
+  tags:
+    - build
+  variables:
+    CCCL_GIT_BRANCH: v2.8.5
+    CCCL_DIR: ${CI_PROJECT_DIR}/cccl
+  needs: []
+  script:
+    - git clone -b $CCCL_GIT_BRANCH https://github.com/NVIDIA/cccl.git $CCCL_DIR
+    # Replace CCCL Thrust headers with rocThrust headers
+    - rm -r $CCCL_DIR/thrust/thrust
+    - cp -r $CI_PROJECT_DIR/thrust $CCCL_DIR/thrust
+    - sed -i '/include(cmake\/ThrustAddSubdir.cmake)/i \  include(../cmake/CCCLAddSubdirHelper.cmake)' $CCCL_DIR/thrust/CMakeLists.txt
+    # Build tests and examples from CCCL Thrust
+    - cmake
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CUDA_ARCHITECTURES="$GPU_TARGETS"
+      -D CCCL_SOURCE_DIR="$CCCL_DIR"
+      -D THRUST_ENABLE_TESTING=ON
+      -D THRUST_ENABLE_EXAMPLES=ON
+      -D THRUST_ENABLE_BENCHMARKS=OFF
+      -D THRUST_ENABLE_MULTICONFIG=ON
+      -D THRUST_MULTICONFIG_ENABLE_SYSTEM_OMP=ON
+      -D THRUST_MULTICONFIG_ENABLE_SYSTEM_CUDA=ON
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D THRUST_MULTICONFIG_ENABLE_DIALECT_CPP14=FALSE
+      -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
+      -B $CI_PROJECT_DIR/build
+      -S $CCCL_DIR/thrust
+    - cmake --build $CI_PROJECT_DIR/build
+    - cd $CI_PROJECT_DIR/build
+    - ctest --output-on-failure --tests-regex "thrust.example.cmake.add_subdir|thrust.test.cmake.check_source_files"
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/bin/
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
+      - $CI_PROJECT_DIR/build/examples/cuda/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/examples/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/testing/unittest/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/testing/async/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/testing/omp/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/testing/cuda/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/testing/regression/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/testing/cpp/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/testing/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/CTestTestfile.cmake
+      - $CCCL_DIR/thrust/cmake/ThrustRunTest.cmake
+      - $CCCL_DIR/thrust/cmake/ThrustRunExample.cmake
+      - $CI_PROJECT_DIR/build/.ninja_log
+    expire_in: 1 day
+
+.test:cuda-and-omp:
+  stage: test
+  tags:
+    - nvcc
+    - $GPU
+  needs:
+    - build:cuda-and-omp
+  extends:
+    - .nvcc
+  before_script:
+    # This is only needed because of the legacy before_script in .gpus:nvcc would otherwise overwrite before_script
+    - !reference [.nvcc, before_script]
+  script:
+    - cd $CI_PROJECT_DIR/build
+    # These tests are executed on the build stage because they require sources
+    - ctest --output-on-failure --exclude-regex "thrust.example.cmake.add_subdir|thrust.test.cmake.check_source_files"
+
+test:cuda-and-omp-any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:cuda-and-omp
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/
+
+test:cuda-and-omp-all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:nvcc
+    - .test:cuda-and-omp
+    - .rules:test
+
+.benchmark-base:
+  stage: benchmark
+  extends:
+    - .rules:benchmark
+  variables:
+    BENCHMARK_RESULT_DIR: ${CI_PROJECT_DIR}/benchmark_results
+    BENCHMARK_RESULT_CACHE_DIR: ${BENCHMARK_RESULT_DIR}_cache
+
+benchmark:
+  needs:
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: BENCHMARK
+            BUILD_VERSION: 17
+  extends:
+    - .cmake-minimum
+    - .gpus:rocm
+    - .benchmark-base
+  variables:
+    BENCHMARK_FILENAME_REGEX: ^benchmark
+    BENCHMARK_ALGORITHM_REGEX: ""
+  timeout: 3h
+  script:
+    - 'printf "CI Variables used in benchmarks:\nBENCHMARK_RESULT_DIR: %s\nBENCHMARK_FILENAME_REGEX: %s\nBENCHMARK_ALGORITHM_REGEX: %s \n" "$BENCHMARK_RESULT_DIR" "$BENCHMARK_FILENAME_REGEX" "$BENCHMARK_ALGORITHM_REGEX"'
+    - cd "${CI_PROJECT_DIR}"
+    - mkdir -p "${BENCHMARK_RESULT_DIR}"
+    - python3
+      .gitlab/run_benchmarks.py
+      --benchmark_dir "${CI_PROJECT_DIR}/build/benchmark"
+      --benchmark_gpu_architecture "${GPU_TARGET}"
+      --benchmark_output_dir "${BENCHMARK_RESULT_DIR}"
+      --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
+      --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}"
+  artifacts:
+    paths:
+      - ${BENCHMARK_RESULT_DIR}
+    expire_in: 1 day

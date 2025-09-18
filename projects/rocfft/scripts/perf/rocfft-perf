@@ -1,0 +1,1273 @@
+#!/usr/bin/env python3
+
+# Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+"""Performance utilities for rocFFT.
+
+Overview
+========
+
+General workflow:
+
+- run: runs a suite of FFTs to collect timing information
+- post: post processes timing information to compute various statistics
+- plot: generate pdf or html plots of the results
+- autoperf: clones, builds, runs, posts, and plots two rocFFT commits
+
+Multiple runs can be compared at the post processing and plotting
+stages.  Multiple runs may:
+
+- be from different benchmark programs (eg, rocFFT, cuFFT, vkFFT, etc)
+- be from dyna-rocfft-bench.
+
+Usually:
+
+- a single bench (rocFFT) would be used to track performance over
+  time;
+- multiple benchess (rocFFT, cuFFT) would be used to compare different
+  FFT libraries;
+- a dyna-bench with multiple libraries (rocFFT) would be used to
+  compare two different rocFFT commits.
+
+Runs/subprocesses are logged to `rocfft-perf.log`.
+
+
+Run
+===
+
+The 'run' command drives FFT benchmarkers (if they accept the same
+command line arguments as `rocfft-bench`).  The benchmark program to
+use is specified by the `--bench/-w` switch.
+
+Test problems are generated using a `ProblemGenerator` and a filter.
+The default generator is a simple radix based generator.
+
+See
+
+  $ rocfft-perf run -h
+
+for more details.  To see which problems will be run without running
+them, use `--list/-l`.
+
+Using the `--suite/-S` option, problems are loaded from a "suites"
+file.  The default suites file is `suites.py`.  Alternatively, you can
+load the suite named "qa1" from a file called "mysuites.py" like this:
+
+  $ rocfft-perf run -S mysuites:qa1 ...
+
+That is, FILENAME:SUITENAME.
+
+By default, output files are stored in the `out0` directory.  This can
+be changed with the `--output/-o` agrument.
+
+
+Dynamic testing
+===============
+
+Dynamic testing is enabled by specifying more than one `--lib/-i`
+option.  These are passed down to the benchmarker, and hence it is assumed
+that the specific benchmarker is a "dyna" bench.
+
+Multiple output directories are used to store the results.
+
+
+Post processing
+===============
+
+During the post processing stage, various statistics are computed and
+saved:
+
+  $ rocfft-perf post DOCDIR OUTPUT [OUTPUT ...]
+
+The first directory is the 'document directory'.  When comparing
+multiple runs, comparative statistics are saved here in `.sdat` files.
+
+For each `.dat` file in the output directories, summary statistics are
+saved in `.mdat` files.
+
+
+Plotting
+========
+
+Based on the results from post processing, generate either an html or
+pdf report:
+
+  $ rocfft-perf html DOCDIR OUTPUT [OUTPUT ...]
+  $ rocfft-perf pdf DOCDIR OUTPUT [OUTPUT ...]
+
+"""
+
+import argparse
+import logging
+import statistics
+import sys
+import os
+import tempfile
+import re
+import collections
+
+from pathlib import Path
+
+import multiprocessing
+
+top = Path(__file__).resolve().parent
+sys.path.append(str(top))
+
+import perflib
+
+console = logging.StreamHandler()
+
+import types
+
+#
+# Helpers
+#
+
+
+def update(attr, dst, src):
+    """Set attribute `attr` on dst if it is not None on `src`."""
+    value = getattr(src, attr, None)
+    if value is not None:
+        setattr(dst, attr, value)
+
+
+#
+# Commands
+#
+
+
+def command_test(arguments):
+    """Test for regressions."""
+
+    # FIXME: rename and replace above comment
+
+    verbose = arguments.verbose
+    significance = arguments.significance
+    multitest = arguments.multitest
+
+    print("statistical test:", arguments.method)
+    print("significance:", significance)
+    print("multi-hypothesis framework:", multitest)
+
+    outdirs = [Path(x) for x in arguments.runs]
+    all_runs = perflib.utils.read_runs(outdirs, verbose)
+
+    if len(all_runs) != 2:
+        print(
+            "Error: one must provide exactly two runs for statistical comparison"
+        )
+        sys.exit(1)
+
+    runs = perflib.utils.by_dat(all_runs)
+    refdir, testdir = outdirs
+
+    label = ["reference", "test"]
+    if arguments.label != None:
+        for idx in range(len(arguments.label)):
+            label[idx] = arguments.label[idx]
+
+    print("reference data:", outdirs[0], label[0])
+    print("comparison data:", outdirs[1], label[1])
+
+    print()
+
+    ncompare = perflib.utils.find_ncompare(arguments.runs)
+
+    slower, faster, new_sig = perflib.utils.find_slower_faster(
+        outdirs, arguments.method, multitest, significance, ncompare, verbose)
+
+    if verbose:
+        print("faster:")
+        for case in faster:
+            print(case)
+        print("slower:")
+        for case in slower:
+            print(case)
+
+    nh1 = len(faster) + len(slower)
+    nh0 = ncompare - nh1
+
+    print("ncompare:", ncompare)
+    print("nh0:", nh0)
+    print("nh1:", nh1)
+    print("faster (" + label[1] + " wins): " + str(len(faster)))
+    print("slower (" + label[0] + " wins): " + str(len(slower)))
+
+    import numpy as np
+    geomean = 1.0
+    if nh1 > 0:
+        sig_speedups = []
+        for case in slower:
+            sig_speedups.append(case[1] / case[2])
+        for case in faster:
+            sig_speedups.append(case[1] / case[2])
+        import scipy
+        geomean = scipy.stats.mstats.gmean(sig_speedups)
+    print("geomean (significant cases):", geomean)
+
+    globalgeomean = perflib.utils.find_geomean(outdirs, verbose)
+    print("geomean:", globalgeomean)
+
+    return len(slower) > 0
+
+
+def generate_mdat(dat, measure, confidence):
+    import numpy
+    vals = [['token', 'median_sample', 'median_low', 'median_high']]
+    for token, sample in dat.get_samples():
+        if measure == "median":
+            median = statistics.median(sample.times)
+        elif measure == "mean":
+            median = numpy.mean(sample.times)
+        low, high = perflib.analysis.confidence_interval(sample.times,
+                                                         measure=measure,
+                                                         confidence=confidence)
+        vals.append([sample.label, median, low, high])
+    path = dat.path.with_suffix('.mdat')
+    perflib.utils.write_tsv(path, vals, meta=dat.meta, overwrite=True)
+
+
+def generate_pts_dat(dat):
+    """
+    For PTS system, extract data from raw dat and mdat.
+    """
+    import pandas
+    mdat = dat.path.with_suffix('.mdat')
+    mdat_df = pandas.read_csv(mdat, delimiter='\t', comment='#')
+
+    # The parsing rule subjects to changes in the future
+    ss = dat.tag
+    input_params = []
+    # placeness
+    input_params.append(ss[ss.rfind('_') + 1:])
+    ss = ss[:ss.rfind('_')]
+    # transform type
+    input_params.append(ss[ss.rfind('_', 0, ss.rfind('_') - 1) + 1:])
+    ss = ss[:ss.rfind('_', 0, ss.rfind('_') - 1)]
+    # precision
+    input_params.append(ss[ss.rfind('_') + 1:])
+    # suite
+    input_params.append(ss[:ss.rfind('_')])
+
+    input_params.reverse()
+
+    dimensions = set()
+
+    rows = []
+    for row_idx, sample in enumerate(dat.get_samples()):
+        new_row = []
+
+        token = sample[0]
+
+        # sanity check
+        if not token or token.count('_') < 3:
+            print(f"Skipping malformed token on row {row_idx}: '{token}'")
+            continue
+
+        try:
+            transform_type, placeness, length, batch, precision, bricks, gpus, ranks = perflib.utils.parse_token(
+                token)
+        except Exception as e:
+            print(
+                f"Error parsing token on row {row_idx}: '{token}'\nException: {e}"
+            )
+            continue
+
+        new_row.extend(input_params)
+        new_row.insert(1, token)
+        dimensions.add(len(length))
+        new_row.append(len(length))
+        new_row.extend(length)
+        if len(batch) == 1:
+            new_row.append(batch[0])
+        else:
+            print("multi-batch data format; exiting abnormally")
+            sys.exit(1)
+
+        # Multi-process and multi-gpu performance
+        ngpus_per_node = max(1, len(gpus))
+        nranks = max(1, len(ranks))
+
+        nnodes = max(1,
+                     (nranks + 1) / ngpus_per_node)  # assumes 1 gpu per rank
+
+        new_row.append(nranks)
+        new_row.append(ngpus_per_node)
+        new_row.append(nnodes)
+
+        # Input layout
+        input_split_type = perflib.utils.get_decomposition_type(
+            bricks['ifield'], label="ifield")
+        input_grid = perflib.utils.get_proc_grid(bricks['ifield'])
+        new_row.append(input_split_type)
+        new_row.extend(input_grid)
+
+        # Output layout
+        output_split_type = perflib.utils.get_decomposition_type(
+            bricks['ofield'], label="ofield")
+        output_grid = perflib.utils.get_proc_grid(bricks['ofield'])
+        new_row.append(output_split_type)
+        new_row.extend(output_grid)
+
+        # Statistics
+        new_row.extend(
+            mdat_df.loc[row_idx,
+                        ['median_sample', 'median_low', 'median_high']].
+            to_numpy().tolist())
+        times = sample[1].times
+        new_row.append(len(times))
+        new_row.extend(times)
+        rows.append(new_row)
+
+    if len(set(dimensions)) > 1:
+        print("mixed dimensions in the set; exiting abnormally")
+        sys.exit(1)
+
+    if len(set(dimensions)) == 0:
+        print("PTS data set empty")
+        return
+
+    dimension = list(dimensions)[0]
+
+    header = [
+        'suite', 'token', 'precision', 'transform type', 'placeness',
+        'dimension', 'xlength'
+    ]
+    if dimension == 2:
+        header.append('ylength')
+    elif dimension == 3:
+        header.extend(['ylength', 'zlength'])
+
+    header.append('nbatch')
+
+    # Multi-process headers
+    header.extend([
+        'nprocs', 'ngpus_per_node', 'nnodes', 'input_split_type', 'ingrid_x',
+        'ingrid_y', 'ingrid_z', 'output_split_type', 'outgrid_x', 'outgrid_y',
+        'outgrid_z'
+    ])
+
+    header.extend(
+        ['median_sample', 'median_low', 'median_high', 'nsample', 'samples'])
+
+    content = [header]
+    content.extend(rows)
+
+    perflib.utils.write_pts_dat(dat.path.with_suffix('.ptsdat'),
+                                content,
+                                meta=dat.meta)
+
+
+def command_post(arguments):
+    """Post process results in directories listed in `outdirs`.
+
+    Median confidence intervals for each run are written in 'mdat'
+    files.
+
+    Speedups and pvals are written in 'sdat' files.
+
+    """
+
+    outdirs = arguments.runs
+    docdir = arguments.output
+    verbose = arguments.verbose
+
+    import itertools
+
+    if verbose:
+        print("docdir:", docdir)
+        print("outdirs:", outdirs)
+
+    outdirs = [Path(x) for x in outdirs]
+
+    all_runs = perflib.utils.read_runs(outdirs, verbose)
+
+    # median confidence intervals
+    for run in all_runs:
+        with multiprocessing.Pool(None) as p:
+            p.starmap(
+                generate_mdat,
+                itertools.product(run.dats.values(), [arguments.measure],
+                                  [arguments.confidence]))
+            p.map(generate_pts_dat, run.dats.values())
+
+    # speedup and pvals
+    if len(outdirs) > 1:
+        docdir = Path(docdir)
+        docdir.mkdir(parents=True, exist_ok=True)
+
+        import scipy.stats, numpy
+
+        runs = perflib.utils.by_dat(all_runs)
+
+        group_outdirs = []
+        if arguments.ngroup == None:
+            group_outdirs.append(outdirs)
+        else:
+            totalgroups = (len(outdirs) + arguments.ngroup -
+                           1) // arguments.ngroup
+            for gidx in range(totalgroups):
+                group_outdirs.append(
+                    outdirs[gidx * arguments.ngroup:(gidx + 1) *
+                            arguments.ngroup])
+        #print(group_runs)
+        #sys.exit(1)
+
+        for gidx, group in enumerate(group_outdirs):
+
+            refdir, *otherdirs = group
+
+            for dat_name, dat_runs in runs.items():
+                refdat = dat_runs[refdir]
+                for otherdat in [
+                        dat_runs[otherdir] for otherdir in otherdirs
+                        if otherdir in dat_runs
+                ]:
+                    speedups = [[
+                        'token', 'speedup', 'speedup_low', 'speedup_high',
+                        'speedup_pval'
+                    ]]
+                    for token, sample in refdat.get_samples():
+                        if token not in otherdat.samples:
+                            continue
+                        sample = refdat.samples[token]
+                        Avals = refdat.samples[token].times
+                        Bvals = otherdat.samples[token].times
+                        if arguments.measure == "median":
+                            speedup = statistics.median(
+                                Avals) / statistics.median(Bvals)
+                        elif arguments.measure == "mean":
+                            speedup = numpy.mean(Avals) / numpy.mean(Bvals)
+                        low, high = perflib.analysis.ratio_confidence_interval(
+                            Avals, Bvals)
+                        pval = -1
+                        if arguments.method == 'moods':
+                            _, pval, _, _ = scipy.stats.median_test(
+                                Avals, Bvals)
+                        elif arguments.method == 'ttest':
+                            _, pval = scipy.stats.ttest_ind(Avals, Bvals)
+                        elif arguments.method == 'mwu':
+                            _, pval = scipy.stats.mannwhitneyu(Avals, Bvals)
+                        else:
+                            print("unsupported statistical method")
+                            sys.exit(1)
+
+                        speedups.append(
+                            [sample.token, speedup, low, high, pval])
+
+                    path = docdir / ('group_' + str(gidx) + '-' + dat_name +
+                                     '.sdat')
+                    perflib.utils.write_tsv(path,
+                                            speedups,
+                                            meta=refdat.meta,
+                                            overwrite=True)
+
+
+def command_generate(arguments):
+    """Generate PDF/HTML/DOCX from run results."""
+
+    import perflib.pdf
+    import perflib.html
+
+    Figure = {
+        'pdf': perflib.pdf.PDFFigure,
+        'html': perflib.html.HTMLFigure,
+        'docx': perflib.pdf.PDFFigure,
+    }[arguments.command]
+
+    docdir = Path(arguments.output)
+    docdir.mkdir(parents=True, exist_ok=True)
+
+    outdirs = [Path(outdir) for outdir in arguments.runs]
+    label = arguments.label
+    if label is None:
+        label = [outdir.stem for outdir in outdirs]
+    reference = perflib.utils.read_run(outdirs[0])
+
+    import pandas
+    import perflib.utils
+    ncompare = perflib.utils.find_ncompare(arguments.runs)
+    print("ncompare:", ncompare)
+
+    slower, faster, new_sig = perflib.utils.find_slower_faster(
+        outdirs, arguments.method, arguments.multitest, arguments.significance,
+        ncompare, arguments.verbose)
+
+    figures = []
+    for datname in perflib.utils.list_runs(outdirs[0]):
+        tag = datname.stem
+        title = reference.dats[datname.stem].meta.get('title', tag)
+        caption = reference.dats[datname.stem].meta.get('caption',
+                                                        title).replace(
+                                                            '_', ' ')
+        figtype = reference.dats[datname.stem].meta.get('figtype', 'linegraph')
+        primary, secondary = perflib.utils.get_post_processed(
+            tag, docdir, outdirs, arguments.ngroup)
+        figure = Figure(tag, title, caption, docdir, label, primary, secondary,
+                        figtype, reference.dats[datname.stem].meta)
+        figures.append(figure)
+
+    for figure in figures:
+        figure.make(new_sig)
+
+    if arguments.command == 'pdf':
+        if False:
+            for figure in figures:
+                figure.runasy()
+        else:
+            pool = multiprocessing.Pool(None)
+            for figure in figures:
+                pool.map_async(Figure.runasy, [figure])
+            pool.close()
+            pool.join()
+
+    if arguments.command == 'pdf':
+        perflib.pdf.make_tex(figures, docdir, outdirs, label, new_sig,
+                             ncompare)
+    if arguments.command == 'html':
+        title = f"Performance report: {perflib.utils.cjoin(outdirs)}"
+        perflib.html.make_html(figures, title, docdir, outdirs,
+                               arguments.significance)
+    if arguments.command == 'docx':
+        import perflib.docx
+        perflib.docx.make_docx(figures, docdir, outdirs,
+                               arguments.significance)
+
+
+def command_run(arguments):
+    """Run dyna-bench or bench."""
+
+    # build generator
+    generator = None
+    if arguments.suite is not None:
+        generator = perflib.generators.SuiteProblemGenerator(arguments.suite)
+    else:
+        generator = perflib.generators.RadixProblemGenerator()
+        for attr in [
+                'radix', 'xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax',
+                'verbose', 'timeout', 'hipskip'
+        ]:
+            update(attr, generator, arguments)
+
+    for attr in ['nbatch', 'mp_size', 'mp_exec', 'ingrid', 'outgrid', 'ngpus']:
+        update(attr, generator, arguments)
+
+    # build filter
+    filtered = perflib.generators.FilteredProblemGenerator()
+    if arguments.direction is not None:
+        filtered.direction = [arguments.direction]
+    if arguments.inplace:
+        filtered.inplace = [True]
+    if arguments.outplace:
+        filtered.inplace = [False]
+    if arguments.real:
+        filtered.real = [True]
+    if arguments.complex:
+        filtered.real = [False]
+    if arguments.precision:
+        filtered.precision = arguments.precision
+    if arguments.dimension:
+        filtered.dimension = arguments.dimension
+    if arguments.mp_size:
+        filtered.mp_size = arguments.mp_size
+    if arguments.mp_exec:
+        filtered.mp_exec = arguments.mp_exec
+    if arguments.ingrid:
+        filtered.ingrid = arguments.ingrid
+    if arguments.outgrid:
+        filtered.outgrid = arguments.outgrid
+    if arguments.ngpus:
+        filtered.ngpus = arguments.ngpus
+
+    if arguments.list:
+        for test in filtered(generator).generate_problems():
+            print(test)
+        return
+
+    # build timer
+    if arguments.bench is None:
+        print("No benchmarker set... use -w /path/to/benchmarker.")
+        return
+    dyna = 'dyna' in arguments.bench
+    if dyna:
+        if not arguments.lib:
+            print(
+                "Need to set dynamically loaded library when using dyna-bench."
+            )
+            return
+    if not arguments.out:
+        nout = len(arguments.lib) if dyna else 1
+        arguments.out = ['out' + str(i) for i in range(nout)]
+
+    timer = perflib.timer.GroupedTimer()
+    for attr in [
+            'device', 'bench', 'accutest', 'lib', 'out', 'device', 'ntrial',
+            'verbose', 'timeout', 'sequence', 'mp_size', 'mp_exec', 'ingrid',
+            'outgrid', 'ngpus'
+    ]:
+        update(attr, timer, arguments)
+
+    specs = perflib.specs.get_machine_specs(timer.device, arguments.specs_type)
+    for out in timer.out:
+        specs_file = Path(out) / 'specs.txt'
+        specs_file.parent.mkdir(parents=True, exist_ok=True)
+        specs_file.write_text(str(specs))
+
+    failed_tokens = timer.run_cases(filtered(generator))
+
+    print()
+
+    if failed_tokens:
+        logging.info("failed tokens: " + "\n".join(failed_tokens))
+        print("failed tokens:\n" + "\n".join(failed_tokens))
+
+
+def command_autoperf(arguments):
+    """Compare performance of two builds automagically."""
+
+    workdir = arguments.workdir
+    reference_commit = arguments.reference_commit
+    reference_repository = arguments.reference_repository
+    reference_label = arguments.reference_label
+    commit = arguments.commit
+    repository = arguments.repository
+    label = arguments.label
+    suite = arguments.suite
+    format = arguments.format
+    static = arguments.static
+    timeout = arguments.timeout
+
+    # Use the short version of the hashes (default length: 7)
+    if commit != None:
+        commit = commit[0:6]
+    if reference_commit != None:
+        reference_commit = reference_commit[0:6]
+
+    from perflib.build import build_rocfft
+
+    if reference_repository is None:
+        reference_repository = repository
+
+    if reference_label is None:
+        reference_label = reference_commit
+
+    if label is None:
+        label = commit
+
+    top = Path(workdir).resolve()
+    build1 = top / f'build-{reference_commit}'
+    build2 = top / f'build-{commit}'
+    output = top / f'doc-{commit}'
+
+    # build rocFFTs
+    top.mkdir(parents=True, exist_ok=True)
+    os.chdir(str(top))
+
+    lib1 = build1 / 'lib' / 'librocfft.so'
+    lib1.parent.mkdir(parents=True, exist_ok=True)
+    if not lib1.exists():
+        build_rocfft(reference_commit, dest=build1, repo=reference_repository)
+
+    lib2 = build2 / 'lib' / 'librocfft.so'
+    lib2.parent.mkdir(parents=True, exist_ok=True)
+    if not lib2.exists():
+        build_rocfft(commit, dest=build2, repo=repository)
+
+    # run cases
+    if static:
+        # use more trials for static bench
+        timer1 = perflib.timer.GroupedTimer()
+        timer1.bench = build1 / 'rocfft-bench'
+        timer1.lib = None
+        timer1.out = [build1]
+        timer1.ntrial = 20
+        timer1.timeout = timeout
+
+        timer2 = perflib.timer.GroupedTimer()
+        timer2.bench = build2 / 'rocfft-bench'
+        timer2.lib = None
+        timer2.out = [build2]
+        timer2.ntrial = 20
+        timer2.timeout = timeout
+        timers = [timer1, timer2]
+    else:
+        timer = perflib.timer.GroupedTimer()
+        timer.bench = build1 / 'dyna-rocfft-bench'
+        timer.lib = [lib1, lib2]
+        timer.out = [build1, build2]
+        timer.timeout = timeout
+        timers = [timer]
+
+    specs = perflib.specs.get_machine_specs(timers[0].device,
+                                            arguments.specs_type)
+    for t in timers:
+        for out in t.out:
+            specs_file = Path(out) / 'specs.txt'
+            specs_file.write_text(str(specs))
+
+    generator = perflib.generators.SuiteProblemGenerator(suite)
+    for t in timers:
+        t.run_cases(generator)
+
+    # post-process results
+    arguments.runs = [build1, build2]
+    arguments.output = output
+    arguments.label = [reference_label, label]
+    command_post(arguments)
+
+    # generate report
+    for report_type in format:
+        command_generate(arguments)
+
+
+def command_bweff(arguments):
+    """Collect bandwidth efficiency information."""
+
+    # build generator from suite
+    generator = perflib.generators.SuiteProblemGenerator(arguments.suite)
+
+    Path(arguments.out).mkdir(parents=True, exist_ok=True)
+
+    all_problems = collections.defaultdict(list)
+    for problem in generator.generate_problems():
+        all_problems[problem.tag].append(problem)
+
+    # create temporary file
+    fp = tempfile.NamedTemporaryFile()
+
+    # set environment variables
+    os.environ['ROCFFT_LAYER'] = '4'
+    os.environ['ROCFFT_LOG_PROFILE_PATH'] = fp.name
+
+    data = []
+    for i, (tag, problems) in enumerate(all_problems.items()):
+        print(
+            f'\n{tag} (group {i} of {len(all_problems)}): {len(problems)} problems'
+        )
+
+        bench = Path(arguments.bench)
+        if not bench.is_file():
+            raise RuntimeError(
+                f"Unable to find benchmarker: {arguments.bench}")
+
+        effdat_paths = [Path(arguments.out) / (tag + '.effdat')]
+        generator = perflib.generators.VerbatimGenerator(problems)
+
+        for prob in generator.generate_problems():
+
+            # determine appropriate batch size
+            if prob.precision == "half":
+                elem_size_bytes = 4
+            elif prob.precision == "single":
+                elem_size_bytes = 8
+            elif prob.precision == "double":
+                elem_size_bytes = 16
+
+            for length in prob.length:
+                elem_size_bytes *= length
+
+            nbatch = (arguments.target_size << 30) // elem_size_bytes
+
+            # run bench
+            token = perflib.bench.run(arguments.bench,
+                                      prob.length,
+                                      direction=prob.direction,
+                                      real=prob.real,
+                                      inplace=prob.inplace,
+                                      precision=prob.precision,
+                                      nbatch=nbatch,
+                                      ntrial=arguments.ntrial,
+                                      mp_size=prob.mp_size,
+                                      mp_exec=prob.mp_exec,
+                                      ingrid=prob.ingrid,
+                                      outgrid=prob.outgrid,
+                                      ngpus=prob.ngpus)[0]
+
+            fp.seek(0)
+
+            # parse profile log
+            profile_log = []
+            for line in fp:
+
+                line = line.decode('UTF-8').strip('\n')
+
+                perf_info = {}
+                items = re.split(r',(?![^\[]*[\]])', line)
+
+                for i in range(1, len(items), 2):
+                    perf_info.update({items[i]: items[i + 1]})
+
+                profile_log.append(perf_info)
+
+            fp.truncate(0)
+
+            # collect data in tab-separated .effdat files
+            for path in effdat_paths:
+                out = Path(path)
+                logging.info("output: " + str(out))
+                meta = {'title': prob.tag}
+                meta.update(prob.meta)
+                for row in profile_log:
+                    records = [
+                        token,  # testcase token
+                        row['scheme'],  # scheme
+                        row['duration_ms'],  # kernel duration in milliseconds
+                        row['bw_efficiency_pct'],  # estimated efficiency
+                        row['kernel_index']  # index number of this kernel in the execution plan
+                    ]
+                    data.append(records)
+                    perflib.utils.write_tsv(out, [records], meta=meta)
+
+    # close temporary file
+    fp.close()
+
+    # unset environment variables
+    if 'ROCFFT_LAYER' in os.environ:
+        del os.environ['ROCFFT_LAYER']
+        del os.environ['ROCFFT_LOG_PROFILE_PATH']
+
+    # determine median duration and efficiency by token and index
+    medians = collections.defaultdict(list)
+
+    for entry in data:
+        token = entry[0]
+        scheme = entry[1]
+        duration = float(entry[2])
+        efficiency = float(entry[3])
+        index = int(entry[4])
+
+        medians[(token, index, scheme)].append((duration, efficiency))
+
+    # collect median data in tab-separated .effdat files
+    out = Path(arguments.out) / ("median_values.effdat")
+    logging.info("output: " + str(out))
+    meta = {'title': "median values"}
+    for key in medians:
+        if arguments.mesaure == "median":
+            records = [
+                key[0],  # token
+                key[1],  # index
+                key[2],  # scheme
+                statistics.median(medians[key][0]),  # duration_ms
+                statistics.median(medians[key][1])  # bw_efficiency_pct
+            ]
+        elif arguments.mesaure == "mean":
+            records = [
+                key[0],  # token
+                key[1],  # index
+                key[2],  # scheme
+                numpy.mean(medians[key][0]),  # duration_ms
+                numpy.mean(medians[key][1])  # bw_efficiency_pct
+            ]
+        perflib.utils.write_tsv(out, [records], meta=meta)
+
+
+#
+# Main
+#
+
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        prog='rocfft-perf',
+        epilog="For a detailed usage overview, run: %(prog)s overview")
+    parser.add_argument('-v', '--verbose', action='store_true', default=False)
+    parser.add_argument('--logfile',
+                        type=str,
+                        help="log file name",
+                        default="rocfft-perf.log")
+
+    subparsers = parser.add_subparsers(dest='command')
+
+    subparsers.add_parser('overview', help='print a general usage overview')
+    specs_parser = subparsers.add_parser('specs', help='print machine specs')
+
+    run_parser = subparsers.add_parser('run', help='run!')
+    post_parser = subparsers.add_parser('post', help='post processing')
+    pdf_parser = subparsers.add_parser('pdf', help='generate pdf plots')
+    html_parser = subparsers.add_parser('html', help='generate html plots')
+    docx_parser = subparsers.add_parser('docx', help='generate docx plots')
+    test_parser = subparsers.add_parser('test', help='test for regressions')
+    autoperf_parser = subparsers.add_parser(
+        'autoperf',
+        help='clone, build, run, post, and plot two rocFFT commits')
+
+    specs_parser.add_argument(dest='specs_type',
+                              type=str,
+                              default='default',
+                              nargs='?',
+                              choices=['default', 'host', 'device'],
+                              help="type of specs")
+
+    for p in [post_parser, pdf_parser, html_parser, docx_parser]:
+        p.add_argument('output', type=str)
+    for p in [post_parser, pdf_parser, html_parser, docx_parser, test_parser]:
+        p.add_argument('runs', type=str, nargs='+')
+
+    for p in [post_parser, autoperf_parser]:
+        p.add_argument('--confidence',
+                       type=str,
+                       choices=["bootstrap", "stdev"],
+                       help="method for generating confidence interval",
+                       default="bootstrap")
+    for p in [post_parser, pdf_parser, html_parser]:
+        p.add_argument('--ngroup',
+                       type=int,
+                       help="size of comparison subgroup")
+
+    for p in [
+            post_parser, pdf_parser, test_parser, autoperf_parser, html_parser
+    ]:
+        p.add_argument('--method',
+                       type=str,
+                       choices=["moods", "ttest", "mwu"],
+                       help="statistical method",
+                       default="moods")
+    for p in [
+            post_parser, pdf_parser, html_parser, docx_parser, test_parser,
+            autoperf_parser
+    ]:
+        p.add_argument('--measure',
+                       type=str,
+                       choices=["mean", "median"],
+                       help="measure of central tendancy: median or mean",
+                       default="median")
+    for p in [
+            pdf_parser, html_parser, docx_parser, test_parser, autoperf_parser
+    ]:
+        p.add_argument('--significance',
+                       type=float,
+                       help='moods significance threshold',
+                       default=0.05)
+        p.add_argument('--multitest',
+                       type=str,
+                       choices=["none", "bonferroni", "bh"],
+                       help='Multi-hypothesis correction method',
+                       default="bonferroni")
+    for p in [pdf_parser, html_parser, docx_parser, test_parser]:
+        p.add_argument('-l',
+                       '--label',
+                       type=str,
+                       help='label (appendable)',
+                       action='append')
+
+    run_parser.add_argument('-g', '--device', type=int, help='device number')
+    run_parser.add_argument(
+        '--hipskip',
+        action=argparse.BooleanOptionalAction,
+        help='Do not count hip runtime error codes as failures')
+    run_parser.add_argument('-l',
+                            '--list',
+                            help='list runs (but do not run them)',
+                            action='store_true',
+                            default=False)
+    run_parser.add_argument('-o',
+                            '--out',
+                            type=str,
+                            help='output (appendable)',
+                            action='append')
+    run_parser.add_argument('-S',
+                            '--suite',
+                            type=str,
+                            help='test suite name (appendable)',
+                            action='append')
+    run_parser.add_argument('-w',
+                            '--bench',
+                            type=str,
+                            help='test executable path')
+    run_parser.add_argument('-i',
+                            '--lib',
+                            type=str,
+                            help='test library path (appendable)',
+                            action='append')
+    run_parser.add_argument('-r', '--radix', type=int, help='radix')
+    run_parser.add_argument('-x',
+                            '--xmin',
+                            type=int,
+                            help='minimum problem size in x direction')
+    run_parser.add_argument('-X',
+                            '--xmax',
+                            type=int,
+                            help='maximum problem size in x direction')
+    run_parser.add_argument('-y',
+                            '--ymin',
+                            type=int,
+                            help='minimum problem size in y direction')
+    run_parser.add_argument('-Y',
+                            '--ymax',
+                            type=int,
+                            help='maximum problem size in y direction')
+    run_parser.add_argument('-z',
+                            '--zmin',
+                            type=int,
+                            help='minimum problem size in z direction')
+    run_parser.add_argument('-Z',
+                            '--zmax',
+                            type=int,
+                            help='maximum problem size in z direction')
+    run_parser.add_argument('-D',
+                            '--direction',
+                            type=int,
+                            help='direction of transform')
+    run_parser.add_argument('-I',
+                            '--inplace',
+                            help='make transform in-place',
+                            action='store_true',
+                            default=False)
+    run_parser.add_argument('-O',
+                            '--outplace',
+                            help='make transform out-of-place',
+                            action='store_true',
+                            default=False)
+    run_parser.add_argument('-R',
+                            '--real',
+                            help='make transform real/complex',
+                            action='store_true',
+                            default=False)
+    run_parser.add_argument('-C',
+                            '--complex',
+                            help='make transform complex/complex',
+                            action='store_true',
+                            default=False)
+    run_parser.add_argument('-d',
+                            '--dimension',
+                            type=int,
+                            help='dimension of transform',
+                            action='append')
+    run_parser.add_argument('-b',
+                            '--nbatch',
+                            type=int,
+                            help='number of batches')
+    run_parser.add_argument('-N',
+                            '--ntrial',
+                            type=int,
+                            help='number of trials',
+                            default=20)
+    run_parser.add_argument('-mp_size',
+                            '--mp_size',
+                            type=int,
+                            help='number of MPI processors',
+                            default=1)
+
+    run_parser.add_argument('-mp_exec',
+                            '--mp_exec',
+                            type=str,
+                            help="path to mpi executable",
+                            default="/usr/bin/mpirun")
+
+    run_parser.add_argument('-ngpus',
+                            '--ngpus',
+                            type=int,
+                            help='number of GPUs',
+                            default=1)
+    run_parser.add_argument(
+        '-T',
+        '--timeout',
+        type=int,
+        help='test timeout in seconds (0 disables timeout)',
+        default=600)
+    run_parser.add_argument('--sequence',
+                            type=int,
+                            help='dyna-bench test sequence',
+                            default=0)
+
+    run_parser.add_argument('--ingrid',
+                            type=int,
+                            required=False,
+                            nargs='+',
+                            help='input processors grid')
+
+    run_parser.add_argument('--outgrid',
+                            type=int,
+                            required=False,
+                            nargs='+',
+                            help='output processors grid')
+
+    run_parser.add_argument('-f',
+                            '--precision',
+                            type=str,
+                            help='precision',
+                            action='append')
+    run_parser.add_argument('-t',
+                            '--accutest',
+                            type=str,
+                            help='accuracy test executable path')
+    run_parser.add_argument('--specs_type',
+                            type=str,
+                            default='default',
+                            nargs='?',
+                            choices=['default', 'host', 'device'],
+                            help="type of specs")
+
+    autoperf_parser.add_argument('--workdir',
+                                 type=str,
+                                 help='Working directory',
+                                 default='.')
+    autoperf_parser.add_argument('--reference_commit',
+                                 type=str,
+                                 help='Reference commit',
+                                 required=True)
+    autoperf_parser.add_argument(
+        '--reference_repository',
+        type=str,
+        help='Reference repository (if different from repository)')
+    autoperf_parser.add_argument(
+        '--reference_label',
+        type=str,
+        help='Reference label (if different from reference commit)')
+    autoperf_parser.add_argument('--commit',
+                                 type=str,
+                                 help='Commit to test',
+                                 required=True)
+    autoperf_parser.add_argument('--repository',
+                                 type=str,
+                                 help='Repository to test',
+                                 required=True)
+    autoperf_parser.add_argument(
+        '--label', type=str, help='Test label (if different from test commit)')
+    autoperf_parser.add_argument('--suite',
+                                 type=str,
+                                 help='Test suite name (appendable)',
+                                 action='append',
+                                 required=True)
+    autoperf_parser.add_argument('--format',
+                                 type=str,
+                                 help='Output format (appendable)',
+                                 action='append',
+                                 default=['html'])
+    autoperf_parser.add_argument('--static',
+                                 help='Use static bench instead of dyna',
+                                 action='store_true',
+                                 default=False)
+    autoperf_parser.add_argument(
+        '-T',
+        '--timeout',
+        type=int,
+        help='test timeout in seconds (0 disables timeout)',
+        default=600)
+    autoperf_parser.add_argument('--specs_type',
+                                 type=str,
+                                 default='default',
+                                 nargs='?',
+                                 choices=['default', 'host', 'device'],
+                                 help="type of specs")
+
+    bweff_parser = subparsers.add_parser(
+        'bweff', help='bandwidth efficiency collection')
+    # suite of tests to run
+    bweff_parser.add_argument('-S',
+                              '--suite',
+                              type=str,
+                              help='test suite name (appendable)',
+                              action='append',
+                              required=True)
+    # path to bench executable
+    bweff_parser.add_argument('-w',
+                              '--bench',
+                              type=str,
+                              help='test executable path',
+                              required=True)
+    # output directory for results
+    bweff_parser.add_argument('-o',
+                              '--out',
+                              type=str,
+                              help='output',
+                              default='out')
+    # number of trials to run per test case
+    bweff_parser.add_argument('-N',
+                              '--ntrial',
+                              type=int,
+                              help='number of trials',
+                              default=10)
+
+    bweff_parser.add_argument('-mp_size',
+                              '--mp_size',
+                              type=int,
+                              help='number of MPI processors',
+                              default=1)
+
+    bweff_parser.add_argument('-mp_exec',
+                              '--mp_exec',
+                              type=str,
+                              help="path to mpi executable",
+                              default="/usr/bin/mpirun")
+
+    bweff_parser.add_argument('-ngpus',
+                              '--ngpus',
+                              type=int,
+                              help='number of GPUs',
+                              default=1)
+
+    # target transform size
+    bweff_parser.add_argument('--target_size',
+                              type=int,
+                              help='target transform size in GiB',
+                              default=5)
+
+    arguments = parser.parse_args()
+
+    logging.basicConfig(filename=arguments.logfile,
+                        format='%(asctime)s %(levelname)s: %(message)s',
+                        level=logging.DEBUG)
+
+    console.setLevel(logging.WARNING)
+    console.setFormatter(logging.Formatter('%(levelname)-8s: %(message)s'))
+    logging.getLogger('').addHandler(console)
+
+    if arguments.verbose:
+        console.setLevel(logging.INFO)
+
+    if arguments.command == 'specs':
+        # Todo: find unified way to specify device id
+        print(perflib.specs.get_machine_specs(0, arguments.specs_type))
+
+    if arguments.command == 'overview':
+        print(globals()['__doc__'])
+
+    if arguments.command == 'run':
+        command_run(arguments)
+
+    if arguments.command == 'post':
+        command_post(arguments)
+
+    if arguments.command == 'test':
+        sys.exit(command_test(arguments))
+
+    if arguments.command == 'pdf':
+        command_generate(arguments)
+
+    if arguments.command == 'html':
+        command_generate(arguments)
+
+    if arguments.command == 'docx':
+        command_generate(arguments)
+
+    if arguments.command == 'autoperf':
+        command_autoperf(arguments)
+
+    if arguments.command == 'bweff':
+        command_bweff(arguments)
+
+    sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()

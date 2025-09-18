@@ -1,0 +1,10 @@
+# Default code owners
+* @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd @yoichiyoshida @babakpst
+# pattern overrides should also be reviewed by core rocBLAS: @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+# Documentation files
+docs/ @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+*.md @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+*.rst @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+.readthedocs.yaml @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+# Header directory for Doxygen documentation
+library/include/* @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd

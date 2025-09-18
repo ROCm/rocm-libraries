@@ -1,0 +1,154 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: csr2gebsr_bad_arg
+  category: pre_checkin
+  function: csr2gebsr_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csr2gebsr
+  category: quick
+  function: csr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: [325]
+  N: [435]
+  row_block_dimA: [8]
+  col_block_dimA: [4]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_zero]
+
+- name: csr2gebsr
+  category: quick
+  function: csr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: [0, 1, 10, 325, 1107]
+  N: [0, 1, 33, 435, 1089]
+  row_block_dimA: [1, 2, 8, 37]
+  col_block_dimA: [1, 2, 4, 8]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2gebsr
+  category: pre_checkin
+  function: csr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: [10245, 50687, 92835]
+  N: [11200, 51023, 78583]
+  row_block_dimA: [1, 5, 22, 71]
+  col_block_dimA: [3, 4, 11, 66]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2gebsr_file
+  category: pre_checkin
+  function: csr2gebsr
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [3, 8]
+  col_block_dimA: [16, 19, 7]
+# CI issue col_block_dimA: 45
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6,
+             scircuit,
+             mc2depi]
+
+- name: csr2gebsr
+  category: nightly
+  function: csr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: [20245, 50677, 82859]
+  N: [12909, 40232, 88180]
+  row_block_dimA: [1, 5, 16, 32]
+  col_block_dimA: [1, 5, 16, 32]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2gebsr
+  category: nightly
+  function: csr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: [10245]
+  N: [12909]
+  row_block_dimA: [2, 4, 8, 16, 32, 64]
+  col_block_dimA: [2, 4, 8, 16, 32, 64]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2gebsr_file
+  category: nightly
+  function: csr2gebsr
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [7]
+  col_block_dimA: [7, 14]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron2,
+             Chevron3,
+             Chevron4]
+
+- name: csr2gebsr_file
+  category: nightly
+  function: csr2gebsr
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [6]
+  col_block_dimA: [5, 9]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312,
+             bmwcra_1,
+             mac_econ_fwd500,
+             sme3Dc,
+             webbase-1M,
+             Chebyshev4,
+             rma10]

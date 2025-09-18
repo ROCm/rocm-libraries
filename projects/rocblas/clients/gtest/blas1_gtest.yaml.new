@@ -1,0 +1,1155 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_x_range
+    - { N: 1073741900, incx: 4 } # N * incx will overflow uint32_t and int32_t
+
+  - &N_range
+    - [ -1, 0, 5, 10, 500, 1000, 1024, 1025, 7111, 10000, 33792 ]
+
+  - &incx_range_small
+    - [1, 2]
+
+  - &incx_range
+    - [-1, 0, 1, 2]
+
+  - &incx_incy_range
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -1 }
+    - { incx: -1, incy:  1 }
+    - { incx: -3, incy: -3 }
+    - { incx:  0, incy:  1 }
+    - { incx:  0, incy:  0 }
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &incx_incy_range_x_y_output
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -1 }
+    - { incx: -3, incy:  1 }
+    - { incx: -3, incy: -3 }
+    # - { incx:  0, incy:  0 } # Indeterminate for swap
+    # - { incx:  0, incy:  1 } # Indeterminate when x is output (swap)
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &incx_incy_range_y_output
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -3 }
+    - { incx: -1, incy:  1 }
+    - { incx: -3, incy: -3 }
+    - { incx:  0, incy:  1 }
+    # - { incx:  0, incy:  0 } # Indeterminate for axpy
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &incx_incy_range_small
+    - { incx: 1, incy: 1 }
+    - { incx: -3, incy: -3 }
+
+  - &alpha_beta_range
+    - { alpha:  1.0, beta:  0.0 }
+    - { alpha:  2.0, beta: -1.0 }
+    - { alpha:  0.0, beta:  0.0 }
+
+  - &alphai_betai_range
+    - { alphai: 0.0 }
+    - { alphai: 1.0}
+    - { alphai: 2.0 }
+
+  - &complex_alpha_range_small
+    - { alpha: 4.0, alphai:  0.0 }
+    - { alpha: 0.0, alphai:  4.0 }
+    - { alpha: 3.0, alphai: -2.0 }
+
+Tests:
+
+# All functions with no parameters to scan over
+
+  - name: blas1
+    category: quick
+    api: [ C, FORTRAN ]
+    function:
+      - rotg: *rotg_precisions
+      - rotg_batched: *rotg_precisions
+      - rotg_strided_batched: *rotg_precisions
+    alpha_beta:                                                # using alpha and beta in place of a and b
+      - { alpha:  0.0, beta:  0.0 , alphai:  0.0, betai:  0.0} # using alpha and beta in place of a and b
+      - { alpha:  1.0, beta:  2.0 , alphai:  0.0, betai:  0.0}
+      - { alpha:  1.1, beta:  0.0 , alphai:  0.1, betai:  0.0}
+      - { alpha:  0.0, beta:  1.2 , alphai:  0.0, betai:  0.2}
+      - { alpha: -1.3, beta:  1.4 , alphai:  0.3, betai: -0.4}
+      - { alpha:  1.6, beta: -1.5 , alphai: -0.6, betai:  0.5}
+
+  - name: blas1
+    category: quick
+    api: [ C, FORTRAN ]
+    function:
+      - rotg:  *rotg_precisions
+      - rotmg: *single_double_precisions
+
+  - name: blas1_batched
+    category: quick
+    batch_count: [-1, 0, 5]
+    api: [ C, FORTRAN ]
+    function:
+      - rotg_batched: *rotg_precisions
+      - rotmg_batched: *single_double_precisions
+
+  - name: blas1_strided_batched
+    category: quick
+    batch_count: [-1, 0, 5]
+    stride_scale: [ 1.5 ]
+    api: [ C, FORTRAN ]
+    function:
+      - rotg_strided_batched: *rotg_precisions
+      - rotmg_strided_batched: *single_double_precisions
+
+# All functions with alpha and incx and incy
+
+# fortran
+  - name: blas1_with_alpha
+    category: quick
+    N: [ -1, 0, 64 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    api: FORTRAN
+    function:
+      - axpy: *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 64 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [-1, 0, 5]
+    api: FORTRAN
+    function:
+      - axpy_batched: *half_single_precisions_complex_real
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 64 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [-1, 0, 5]
+    stride_scale: [1, 2]
+    api: FORTRAN
+    function:
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+# quick
+  - name: blas1_with_alpha_HMM
+    category: HMM
+    N: [ -1, 0, 5, 33792 ]
+    incx_incy: *incx_incy_range_y_output
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    function:
+      - axpy:  *half_single_precisions_complex_real
+    HMM: true
+
+  - name: blas1_with_alpha
+    category: quick
+    N: [ -1, 0, 5, 33792 ]
+    incx_incy: *incx_incy_range_y_output
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    function:
+      - axpy:  *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: axpy_ex_compute_check
+    category: quick
+    N: [1]
+    incx: 1
+    incy: 1
+    alpha: -1.001
+    function:
+      - axpy_ex: *hpa_half_precision
+
+  - name: blas1_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 5, 33792 ]
+    incx_incy: *incx_incy_range_y_output
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [-1, 0, 5]
+    function:
+      - axpy_batched:  *half_single_precisions_complex_real
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 5, 33792 ]
+    incx_incy: *incx_incy_range_y_output
+    batch_count: [-1, 0, 5]
+    stride_scale: [ 1 ]
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    function:
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+# pre_checkin
+  - name: blas1_axpy_large_batch
+    category: pre_checkin
+    N: [ 7, 1000 ]
+    incx_incy: *incx_incy_range_small
+    alpha: [ 0, 1 ]
+    batch_count: [ 8193 ]
+    stride_scale: [ 1 ]
+    function:
+      - axpy_batched: *single_precision
+      - axpy_strided_batched: *single_precision
+
+  - name: blas1_with_alpha
+    category: pre_checkin
+    N: [ 50007, 1049600 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    function:
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_batched_with_alpha
+    category: pre_checkin
+    N: [ 50000, 1049600 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [2]
+    function:
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: pre_checkin
+    N: [ 50000, 1049600 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [2]
+    stride_scale: [ 2 ]
+    function:
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: axpy_multi_gpu
+    category: multi_gpu
+    N: [ 50007, 1049600 ]
+    incx_incy: *incx_incy_range_small
+    threads_streams: *common_threads_streams
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    devices: [0, 2, 4]
+    function:
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+# nightly
+  - name: blas1_with_alpha
+    category: nightly
+    N: [ 4000000 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    function:
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: axpy_multi_threads_streams
+    category: nightly
+    N: [ 50007, 1049600 ]
+    incx_incy: *incx_incy_range_small
+    threads_streams: *common_threads_streams
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    function:
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_batched_with_alpha
+    category: nightly
+    N: [ 400000 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [ 2, 4, 10, 12 ]
+    function:
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: nightly
+    N: [ 400000 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [ 2, 4, 10, 12 ]
+    stride_scale: [ 1 ]
+    function:
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+# All functions with alpha and incx but no incy
+
+# fortran
+  - name: scal_blas1_with_alpha
+    category: quick
+    N: [ -1, 0, 64 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    api: FORTRAN
+    function:
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+#
+
+  - name: blas1_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 64 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [-1, 0, 5]
+    api: FORTRAN
+    function:
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 64 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [-1, 0, 5]
+    stride_scale: [1, 2]
+    api: FORTRAN
+    function:
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+# quick
+  - name: blas1_with_alpha
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    function:
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_batched
+    category: quick
+    N: [ -1, 0, 5, 33792 ]
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [-1, 0, 5]
+    function:
+      - scal_batched: *single_double_precisions_complex_real
+      - scal_batched: *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [ -1, 0, 5, 33792 ]
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: [-1, 0, 5]
+    stride_scale: [ 1.5 ]
+    function:
+      - scal_strided_batched: *single_double_precisions_complex_real
+      - scal_strided_batched: *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+# pre_checkin
+  - name: blas1
+    category: pre_checkin
+    N: [ 50000, 1049600 ]
+    incx: *incx_range_small
+    alpha_beta: *complex_alpha_range_small
+    pointer_mode_device: false
+    function:
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_batched
+    category: pre_checkin
+    N: [ 1048576 ]
+    incx: *incx_range_small
+    alpha_beta: *complex_alpha_range_small
+    batch_count: [2]
+    pointer_mode_device: true
+    function:
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: pre_checkin
+    N: [ 1048576 ]
+    incx: *incx_range_small
+    alpha_beta: *complex_alpha_range_small
+    batch_count: [2]
+    stride_scale: [ 1.5 ]
+    pointer_mode_device: false
+    function:
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+# nightly
+  - name: blas1_batched
+    category: nightly
+    N: [ 4000000 ]
+    incx: *incx_range_small
+    alpha_beta: *complex_alpha_range_small
+    batch_count: [ 2 ]
+    pointer_mode_device: true
+    function:
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_batched
+    category: nightly
+    N: [ 10 ]
+    incx: *incx_range_small
+    alpha_beta: *complex_alpha_range_small
+    batch_count: [ 4000 ]
+    function:
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: nightly
+    N: [ 4000000 ]
+    incx: *incx_range_small
+    alpha_beta: *complex_alpha_range_small
+    batch_count: [ 2 ]
+    stride_scale: [ 1.2 ]
+    pointer_mode_device: false
+    function:
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: nightly
+    N: [ 10 ]
+    incx: *incx_range_small
+    alpha_beta: *complex_alpha_range_small
+    batch_count: [ 4000 ]
+    stride_scale: [ 2 ]
+    function:
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_size_t
+    category: stress
+    matrix_size: *size_t_x_range
+    pointer_mode_device: false
+    alpha: [ 2 ]
+    function:
+      - scal_ex: *hpa_half_precision
+
+# All functions with incx, no incy, no alpha
+# nrm2,asum,iamax,iamin all variants
+
+#fortran
+  - name: blas1
+    category: quick
+    N: [-1, 0, 1024]
+    incx: *incx_range_small
+    api: FORTRAN
+    function:
+      - asum: *single_double_precisions_complex_real
+      - nrm2: *single_double_precisions_complex_real
+      - nrm2_ex: *nrm2_ex_precisions
+      - iamax: *single_double_precisions_complex_real
+      - iamin: *single_double_precisions_complex_real
+
+  - name: blas1_batched
+    category: quick
+    N: [-1, 0, 1024]
+    incx: *incx_range_small
+    batch_count: [ -1, 0, 5 ]
+    api: FORTRAN
+    function:
+      - asum_batched:  *single_double_precisions_complex_real
+      - nrm2_batched:  *single_double_precisions_complex_real
+      - nrm2_batched_ex:  *nrm2_ex_precisions
+      - iamax_batched: *single_double_precisions_complex_real
+      - iamin_batched: *single_double_precisions_complex_real
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [-1, 0, 1024]
+    incx: *incx_range_small
+    batch_count: [ -1, 0, 5 ]
+    stride_scale: [ 1, 2 ]
+    api: FORTRAN
+    function:
+      - asum_strided_batched:  *single_double_precisions_complex_real
+      - nrm2_strided_batched:  *single_double_precisions_complex_real
+      - nrm2_strided_batched_ex:  *nrm2_ex_precisions
+      - iamax_strided_batched: *single_double_precisions_complex_real
+      - iamin_strided_batched: *single_double_precisions_complex_real
+
+# quick
+  - name: blas1
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    function:
+      - nrm2:  *single_double_precisions_complex_real
+      - nrm2_ex:  *nrm2_ex_precisions
+      - asum:  *single_double_precisions_complex_real
+      - iamax: *single_double_precisions_complex_real
+      - iamin: *single_double_precisions_complex_real
+
+  - name: blas1_batched
+    category: quick
+    N: [ -1, 0, 5, 33792 ]
+    incx: *incx_range
+    batch_count: [-1, 0, 257]
+    function:
+      - asum_batched: *single_double_precisions_complex_real
+      - nrm2_batched: *single_double_precisions_complex_real
+      - nrm2_batched_ex: *nrm2_ex_precisions
+      - iamax_batched: *single_double_precisions_complex_real
+      - iamin_batched: *single_double_precisions_complex_real
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [ -1, 0, 5, 33792 ]
+    incx: *incx_range
+    batch_count: [-1, 0, 257]
+    stride_scale: [ 1.5 ]
+    function:
+      - asum_strided_batched: *single_double_precisions_complex_real
+      - nrm2_strided_batched: *single_double_precisions_complex_real
+      - nrm2_strided_batched_ex: *nrm2_ex_precisions
+      - iamax_strided_batched: *single_double_precisions_complex_real
+      - iamin_strided_batched: *single_double_precisions_complex_real
+
+# pre_checkin
+  - name: blas1
+    category: pre_checkin
+    N: [ 50000, 1049600 ]
+    incx: *incx_range_small
+    function:
+      # for large N nrm2 and asum drop single precision tolerance comparisions.
+      # nrm2_ex uses nrm2 code, no need to test interface again, so only using
+      # the superset code of nrm2_ex.
+      - nrm2_ex:  *nrm2_ex_precisions_double
+      - asum:  *double_precision_complex_real
+      - iamax: *single_double_precisions_complex_real
+      - iamin: *single_double_precisions_complex_real
+
+  - name: blas1_batched
+    category: pre_checkin
+    N: [ 1048576 ]
+    incx: *incx_range_small
+    batch_count: [2]
+    function:
+      - asum_batched: *double_precision_complex_real
+      - nrm2_batched_ex: *nrm2_ex_precisions_double
+      - iamax_batched: *double_precision_complex_real
+      - iamin_batched: *double_precision_complex_real
+
+  - name: blas1_strided_batched
+    category: pre_checkin
+    N: [ 1048576 ]
+    incx: *incx_range_small
+    batch_count: [2]
+    stride_scale: [ 1.5 ]
+    function:
+      - asum_strided_batched: *double_precision_complex_real
+      - nrm2_strided_batched_ex: *nrm2_ex_precisions_double
+      - iamax_strided_batched: *double_precision_complex_real
+      - iamin_strided_batched: *double_precision_complex_real
+
+# nightly
+  - name: blas1
+    category: nightly
+    N: [ 300001 ]
+    incx: *incx_range_small
+    function:
+      - nrm2_ex:  *nrm2_ex_precisions_double
+      - asum:  *double_precision_complex_real
+      - iamax:  *double_precision_complex_real
+      - iamin:  *double_precision_complex_real
+
+  - name: blas1_batched
+    category: nightly
+    N: [ 300001 ]
+    incx: *incx_range_small
+    batch_count: [ 65 ]
+    function:
+      - asum_batched: *double_precision_complex_real
+      - nrm2_batched_ex: *nrm2_ex_precisions_double
+      - iamax_batched: *double_precision_complex_real
+      - iamin_batched: *double_precision_complex_real
+
+  - name: blas1_strided_batched
+    category: nightly
+    N: [ 300001 ]
+    incx: *incx_range_small
+    batch_count: [ 65 ]
+    stride_scale: [ 1 ]
+    function:
+      - asum_strided_batched: *double_precision_complex_real
+      - nrm2_strided_batched_ex: *nrm2_ex_precisions_double
+      - iamax_strided_batched: *double_precision_complex_real
+      - iamin_strided_batched: *double_precision_complex_real
+
+# All functions with incx, incy, no alpha
+
+# fortran
+  - name: blas1
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    api: FORTRAN
+    function:
+      - copy: *single_double_precisions_complex_real
+      - dot:   *half_bfloat_single_double_complex_real_precisions
+      - dotc:  *single_double_precisions_complex
+      - dot_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_ex: *half_bfloat_single_double_complex_real_precisions
+      - swap: *single_double_precisions_complex_real
+      - rot:   *rot_precisions
+      - rot_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+
+
+  - name: blas1_batched
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 5]
+    api: FORTRAN
+    function:
+      - copy_batched: *single_double_precisions_complex_real
+      - dot_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched:  *single_double_precisions_complex
+      - dot_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - swap_batched: *single_double_precisions_complex_real
+      - rot_batched:   *rot_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 5]
+    stride_scale: [1, 2]
+    api: FORTRAN
+    function:
+      - copy_strided_batched: *single_double_precisions_complex_real
+      - dot_strided_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched:  *single_double_precisions_complex
+      - dotc_strided_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - swap_strided_batched: *single_double_precisions_complex_real
+      - rot_strided_batched:   *rot_precisions
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+
+# quick
+  - name: blas1_HMM
+    category: HMM
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range
+    function:
+      - dot:   *half_bfloat_single_double_complex_real_precisions
+    HMM: true
+
+  - name: blas1
+    category: quick
+    N: [ -1, 0, 1025, 13000]
+    incx_incy: *incx_incy_range
+    function:
+      - copy: *single_double_precisions_complex_real
+      - dot:   *half_bfloat_single_double_complex_real_precisions
+      - dotc:  *single_double_precisions_complex
+      - dot_ex:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_ex:   *half_bfloat_single_double_complex_real_precisions
+
+  - name: blas1_batched
+    category: quick
+    N: [ -1, 0, 1025, 13000]
+    incx_incy: *incx_incy_range
+    batch_count: [-1, 0, 257]
+    function:
+      - copy_batched: *single_double_precisions_complex_real
+      - dot_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched:  *single_double_precisions_complex
+      - dot_batched_ex:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched_ex:   *half_bfloat_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [ -1, 0, 1025, 13000]
+    incx_incy: *incx_incy_range
+    batch_count: [-1, 0, 257]
+    stride_scale: [ 1 ]
+    function:
+      - copy_strided_batched:  *single_double_precisions_complex_real
+      - dot_strided_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched:  *single_double_precisions_complex
+      - dot_strided_batched_ex:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched_ex:   *half_bfloat_single_double_complex_real_precisions
+
+# quick dot one block transitions (halfs excluded)
+  - name: blas1
+    category: quick
+    N: [ 10001, 13001, 16001, 33000 ]
+    incx_incy: *incx_incy_range_small
+    function:
+      - dot:   *single_double_precisions_complex
+      - dotc:  *single_double_precisions_complex
+      - dot_ex:   *single_double_precisions_complex
+      - dotc_ex:   *single_double_precisions_complex
+
+# quick
+# dot alt algorithm, algo=1 forces x*x with incx=incy to test special case kernel
+  - name: blas1
+    category: quick
+    N: [ -1, 0, 1025, 16001]
+    incx_incy: *incx_incy_range_small
+    algo: 1
+    function:
+      - dot:   *bfloat_single_double_complex_real_precisions
+      - dotc:  *bfloat_single_double_complex_real_precisions
+      - dot_ex:   *bfloat_single_double_complex_real_precisions
+      - dotc_ex:   *bfloat_single_double_complex_real_precisions
+
+  - name: blas1_batched
+    category: quick
+    N: [ -1, 0, 1025, 16000]
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 257]
+    algo: 1
+    function:
+      - dot_batched:   *bfloat_single_double_complex_real_precisions
+      - dotc_batched:  *bfloat_single_double_complex_real_precisions
+      - dot_batched_ex:   *bfloat_single_double_complex_real_precisions
+      - dotc_batched_ex:   *bfloat_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [ -1, 0, 1025, 15999]
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 257]
+    stride_scale: [ 1 ]
+    algo: 1
+    function:
+      - dot_strided_batched:   *bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched:  *bfloat_single_double_complex_real_precisions
+      - dot_strided_batched_ex:   *bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched_ex:   *bfloat_single_double_complex_real_precisions
+
+  - name: blas1
+    category: quick
+    N: [-1, 0, 511] # N is kept less than 512 to avoid rounding errors in half precision
+    incx_incy: *incx_incy_range_small
+    algo: 1
+    function:
+      - dot:   *half_precision
+      - dotc:  *half_precision
+      - dot_ex:   *half_precision
+      - dotc_ex:   *half_precision
+
+  - name: blas1_batched
+    category: quick
+    N: [-1, 0, 511] # N is kept less than 512 to avoid rounding errors in half precision
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 257]
+    algo: 1
+    function:
+      - dot_batched:   *half_precision
+      - dotc_batched:  *half_precision
+      - dot_batched_ex:   *half_precision
+      - dotc_batched_ex:   *half_precision
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [-1, 0, 511] # N is kept less than 512 to avoid rounding errors in half precision
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 125]
+    stride_scale: [ 1 ]
+    algo: 1
+    function:
+      - dot_strided_batched:   *half_precision
+      - dotc_strided_batched:  *half_precision
+      - dot_strided_batched_ex:   *half_precision
+      - dotc_strided_batched_ex:   *half_precision
+
+# pre_checkin
+  - name: blas1
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    incx_incy: *incx_incy_range_small
+    function:
+      # dot_ex uses dot code, so only testing superset code of dot_ex for pre-checkin and nightly.
+      # we should be sure to keep testing the dot API in quick tests as done above.
+      # similarly with rot
+      - swap: *single_double_precisions_complex_real
+      - copy: *single_double_precisions_complex_real
+      - dot_ex:   *double_precision_complex_real
+      - dotc_ex:  *double_precision_complex_real
+      - rot_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+
+  - name: blas1_batched
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    function:
+      - swap_batched: *single_double_precisions_complex_real
+      - copy_batched: *single_double_precisions_complex_real
+      - dot_batched_ex:   *double_precision_complex_real
+      - dotc_batched_ex:  *double_precision_complex_real
+      - rot_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+
+  - name: blas1_strided_batched
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - swap_strided_batched: *single_double_precisions_complex_real
+      - copy_strided_batched:  *single_double_precisions_complex_real
+      - dot_strided_batched_ex:   *double_precision_complex_real
+      - dotc_strided_batched_ex:  *double_precision_complex_real
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+  - name: dot_multi_gpu
+    category: multi_gpu
+    N: [ 5000, 800000 ]
+    incx_incy: *incx_incy_range_small
+    function:
+      - dot:   *double_precision_complex_real
+    threads_streams: *common_threads_streams
+    devices: [0, 2, 4]
+
+# nightly
+  - name: blas1
+    category: nightly
+    N: [ 4000000 ]
+    incx_incy: *incx_incy_range_small
+    function:
+      - swap: *single_double_precisions_complex_real
+      - copy: *single_double_precisions_complex_real
+      - dot_ex:  *double_precision_complex_real
+      - dotc_ex: *double_precision_complex_real
+      - rot_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+
+  - name: dot_multi_threads_stream
+    category: nightly
+    N: [ 5000, 800000 ]
+    incx_incy: *incx_incy_range_small
+    function:
+      - dot:   *double_precision_complex_real
+    threads_streams: *common_threads_streams
+
+  - name: blas1_batched
+    category: nightly
+    N: [ 4000000 ]
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    function:
+      - swap_batched: *single_double_precisions_complex_real
+      - copy_batched:  *single_double_precisions_complex_real
+      - dot_batched_ex:   *double_precision_complex_real
+      - dotc_batched_ex:  *double_precision_complex_real
+      - rot_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+
+  - name: blas1_strided_batched
+    category: nightly
+    N: [ 4000000 ]
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - swap_strided_batched: *single_double_precisions_complex_real
+      - copy_strided_batched:  *single_double_precisions_complex_real
+      - dot_strided_batched_ex:   *double_precision_complex_real
+      - dotc_strided_batched_ex:  *double_precision_complex_real
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+# Swap, rot, and rotm get their own for quick tests as they write to x and y
+
+# quick
+  - name: blas1
+    category: quick
+    N: [ -1, 0, 32, 1025]
+    incx_incy: *incx_incy_range_x_y_output
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - swap: *single_double_precisions_complex_real
+      - swap_batched: *single_double_precisions_complex_real
+      - swap_strided_batched: *single_double_precisions_complex_real
+      - rot:   *rot_precisions
+      - rot_batched:   *rot_precisions
+      - rot_strided_batched:   *rot_precisions
+      - rot_ex: *rot_ex_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+      - rotm_batched:  *single_double_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+# all functions NaN_check
+  - name: blas1_nan_check
+    category: pre_checkin
+    N: [ 5 ]
+    batch_count: [ 3 ]
+    incx: [ 1, 2 ]
+    incy: [ 2, 1 ]
+    alpha: .NaN
+    stride_scale: [ 1 ]
+    function:
+      - nrm2:  *single_double_precisions_complex_real
+      - nrm2_batched:  *single_double_precisions_complex_real
+      - nrm2_strided_batched:  *single_double_precisions_complex_real
+      - nrm2_ex: *nrm2_ex_precisions
+      - nrm2_batched_ex: *nrm2_ex_precisions
+      - nrm2_strided_batched_ex: *nrm2_ex_precisions
+      - asum:  *single_double_precisions_complex_real
+      - asum_batched:  *single_double_precisions_complex_real
+      - asum_strided_batched:  *single_double_precisions_complex_real
+      - iamax: *single_double_precisions_complex_real
+      - iamax_batched: *single_double_precisions_complex_real
+      - iamax_strided_batched: *single_double_precisions_complex_real
+      - iamin: *single_double_precisions_complex_real
+      - iamin_batched: *single_double_precisions_complex_real
+      - iamin_strided_batched: *single_double_precisions_complex_real
+      - axpy:  *half_single_precisions_complex_real
+      - axpy_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - copy:  *single_double_precisions_complex_real
+      - copy_batched:  *single_double_precisions_complex_real
+      - copy_strided_batched:  *single_double_precisions_complex_real
+      - dot:   *half_bfloat_single_double_complex_real_precisions
+      - dot_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dot_strided_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc:  *single_double_precisions_complex
+      - dotc_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dot_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_ex: *half_bfloat_single_double_complex_real_precisions
+      - dot_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dot_strided_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+      - swap:  *single_double_precisions_complex_real
+      - swap_batched:  *single_double_precisions_complex_real
+      - swap_strided_batched:  *single_double_precisions_complex_real
+
+      #TODO: - Tests bypass the unit_check_general in ROTG,ROTMG,ROTM when NaN is input for alpha as this is not expected
+
+      - rot:   *rot_precisions
+      - rot_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+      - rotmg: *single_double_precisions
+      - rot_batched:   *rot_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+      - rotmg_batched: *single_double_precisions
+      - rot_strided_batched:   *rot_precisions
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_strided_batched:  *single_double_precisions
+      - rotmg_strided_batched: *single_double_precisions
+
+
+# all functions bad arg
+# for bad_arg no arguments should be used by test code
+  - name: blas1_bad_arg
+    category: pre_checkin
+    api: [ C, FORTRAN ]
+    function:
+      - nrm2_bad_arg:  *single_double_precisions_complex_real
+      - nrm2_batched_bad_arg:  *single_double_precisions_complex_real
+      - nrm2_strided_batched_bad_arg:  *single_double_precisions_complex_real
+      - nrm2_ex_bad_arg: *nrm2_ex_precisions
+      - nrm2_batched_ex_bad_arg: *nrm2_ex_precisions
+      - nrm2_strided_batched_ex_bad_arg: *nrm2_ex_precisions
+      - asum_bad_arg:  *single_double_precisions_complex_real
+      - asum_batched_bad_arg:  *single_double_precisions_complex_real
+      - asum_strided_batched_bad_arg:  *single_double_precisions_complex_real
+      - iamax_bad_arg: *single_double_precisions_complex_real
+      - iamax_batched_bad_arg: *single_double_precisions_complex_real
+      - iamax_strided_batched_bad_arg: *single_double_precisions_complex_real
+      - iamin_bad_arg: *single_double_precisions_complex_real
+      - iamin_batched_bad_arg: *single_double_precisions_complex_real
+      - iamin_strided_batched_bad_arg: *single_double_precisions_complex_real
+      - axpy_bad_arg:  *half_single_precisions_complex_real
+      - axpy_batched_bad_arg: *half_single_precisions_complex_real
+      - axpy_strided_batched_bad_arg: *half_single_precisions_complex_real
+      - axpy_ex_bad_arg: *bfloat_half_single_double_complex_real_precisions
+      - axpy_batched_ex_bad_arg: *bfloat_half_single_double_complex_real_precisions
+      - axpy_strided_batched_ex_bad_arg: *bfloat_half_single_double_complex_real_precisions
+      - copy_bad_arg:  *single_double_precisions_complex_real
+      - copy_batched_bad_arg:  *single_double_precisions_complex_real
+      - copy_strided_batched_bad_arg:  *single_double_precisions_complex_real
+      - dot_bad_arg:   *half_bfloat_single_double_complex_real_precisions
+      - dot_batched_bad_arg:   *half_bfloat_single_double_complex_real_precisions
+      - dot_strided_batched_bad_arg:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_bad_arg:  *single_double_precisions_complex
+      - dotc_batched_bad_arg:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched_bad_arg:   *half_bfloat_single_double_complex_real_precisions
+      - dot_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_ex: *half_bfloat_single_double_complex_real_precisions
+      - dot_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dot_strided_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - scal_bad_arg:  *single_double_precisions_complex_real
+      - scal_bad_arg:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex_bad_arg: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex_bad_arg: *scal_ex_single_double_complex_real_alpha_complex_out
+      - scal_batched_bad_arg:  *single_double_precisions_complex_real
+      - scal_batched_bad_arg:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex_bad_arg: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex_bad_arg: *scal_ex_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_bad_arg:  *single_double_precisions_complex_real
+      - scal_strided_batched_bad_arg:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex_bad_arg: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex_bad_arg: *scal_ex_single_double_complex_real_alpha_complex_out
+      - swap_bad_arg:  *single_double_precisions_complex_real
+      - swap_batched_bad_arg:  *single_double_precisions_complex_real
+      - swap_strided_batched_bad_arg:  *single_double_precisions_complex_real
+      - rot_bad_arg:   *rot_precisions
+      - rot_ex_bad_arg: *rot_ex_precisions
+      - rotg_bad_arg:  *rotg_precisions
+      - rotm_bad_arg:  *single_double_precisions
+      - rotmg_bad_arg: *single_double_precisions
+      - rot_batched_bad_arg:   *rot_precisions
+      - rot_batched_ex_bad_arg: *rot_ex_precisions
+      - rotg_batched_bad_arg:  *rotg_precisions
+      - rotm_batched_bad_arg:  *single_double_precisions
+      - rotmg_batched_bad_arg: *single_double_precisions
+      - rot_strided_batched_bad_arg:   *rot_precisions
+      - rot_strided_batched_ex_bad_arg: *rot_ex_precisions
+      - rotg_strided_batched_bad_arg:  *rotg_precisions
+      - rotm_strided_batched_bad_arg:  *single_double_precisions
+      - rotmg_strided_batched_bad_arg: *single_double_precisions
+
+
+  - name: blas1_graph_test
+    category: pre_checkin
+    N: [ 20000 ]
+    batch_count: [ 3 ]
+    incx: [ 1 ]
+    incy: [ 1 ]
+    alpha: [ 1 ]
+    stride_scale: [ 1 ]
+    graph_test: true
+    function:
+      - nrm2:  *single_double_precisions_complex_real
+      - nrm2_batched:  *single_double_precisions_complex_real
+      - nrm2_strided_batched:  *single_double_precisions_complex_real
+      - nrm2_ex:  *nrm2_ex_precisions
+      - nrm2_batched_ex:  *nrm2_ex_precisions
+      - nrm2_strided_batched_ex:  *nrm2_ex_precisions
+      - asum:  *single_double_precisions_complex_real
+      - asum_batched:  *single_double_precisions_complex_real
+      - asum_strided_batched:  *single_double_precisions_complex_real
+      - iamax: *single_double_precisions_complex_real
+      - iamax_batched: *single_double_precisions_complex_real
+      - iamax_strided_batched: *single_double_precisions_complex_real
+      - iamin: *single_double_precisions_complex_real
+      - iamin_batched: *single_double_precisions_complex_real
+      - iamin_strided_batched: *single_double_precisions_complex_real
+      - axpy:  *half_single_precisions_complex_real
+      - axpy_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - copy:  *single_double_precisions_complex_real
+      - copy_batched:  *single_double_precisions_complex_real
+      - copy_strided_batched:  *single_double_precisions_complex_real
+      - dot:   *half_bfloat_single_double_complex_real_precisions
+      - dot_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dot_strided_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc:  *single_double_precisions_complex
+      - dotc_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dot_ex: *half_bfloat_single_double_complex_real_precisions
+      - dot_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dot_strided_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *single_double_precisions_complex_real
+      - scal_batched_ex: *single_double_precisions_complex_real
+      - scal_strided_batched_ex: *single_double_precisions_complex_real
+      - swap:  *single_double_precisions_complex_real
+      - swap_batched:  *single_double_precisions_complex_real
+      - swap_strided_batched:  *single_double_precisions_complex_real
+      - rot:   *rot_precisions
+      - rot_ex: *rot_ex_precisions
+      - rotg:  *rotg_precisions
+      - rotm:  *single_double_precisions
+      - rotmg: *single_double_precisions
+      - rot_batched:   *rot_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rotg_batched:  *rotg_precisions
+      - rotm_batched:  *single_double_precisions
+      - rotmg_batched: *single_double_precisions
+      - rot_strided_batched:   *rot_precisions
+      - rotg_strided_batched:  *rotg_precisions
+      - rotm_strided_batched:  *single_double_precisions
+      - rotmg_strided_batched: *single_double_precisions
+...

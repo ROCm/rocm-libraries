@@ -1,0 +1,41 @@
+coverage:
+  status:
+    project:
+      default:
+        enabled: false
+      composable_kernel:
+        flags: [composable_kernel]
+        target: 80%
+      hipBLAS:
+        flags: [hipBLAS]
+        target: 80%
+      hipCUB:
+        flags: [hipCUB]
+        target: 80%
+      hipRAND:
+        flags: [hipRAND]
+        target: 80%
+      hipSPARSE:
+        flags: [hipSPARSE]
+        target: 80%
+      hipSPARSELt:
+        flags: [hipSPARSELt]
+        target: 80%
+      rocBLAS:
+        flags: [rocBLAS]
+        target: 80%
+      rocRAND:
+        flags: [rocRAND]
+        target: 80%
+      rocRoller:
+        flags: [rocRoller]
+        target: 80%
+      rocSPARSE:
+        flags: [rocSPARSE]
+        target: 80%
+      rocThrust:
+        flags: [rocThrust]
+        target: 80%
+      Tensile:
+        flags: [Tensile]
+        target: 80%

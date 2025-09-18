@@ -1,0 +1,46 @@
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - develop
+    - mainline
+  paths:
+    exclude:
+    - .githooks
+    - .github
+    - .jenkins
+    - docs
+    - '.*.y*ml'
+    - '*.md'
+    - '*.rst'
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - develop
+    - mainline
+  paths:
+    exclude:
+    - .githooks
+    - .github
+    - .jenkins
+    - docs
+    - '.*.y*ml'
+    - '*.md'
+    - '*.rst'
+  drafts: false
+
+jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocBLAS.yml@pipelines_repo

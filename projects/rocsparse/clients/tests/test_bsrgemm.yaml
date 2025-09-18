@@ -1,0 +1,554 @@
+# ########################################################################
+# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &alpha_range_quick
+    - { alpha:   1.0, alphai:  1.0 }
+    - { alpha:  -0.5, alphai: -0.5 }
+
+  - &alpha_range_checkin
+    - { alpha:   2.0, alphai:  0.5 }
+    - { alpha:   0.0, alphai:  1.5 }
+
+  - &alpha_range_nightly
+    - { alpha:   2.0, alphai:  0.0 }
+    - { alpha:   3.0, alphai:  1.5 }
+
+  - &beta_range_quick
+    - { beta:   0.4, betai:  0.0 }
+    - { beta:  -0.5, betai: -0.5 }
+
+  - &beta_range_checkin
+    - { beta:   0.0, betai:  1.5 }
+    - { beta:   3.0, betai:  1.0 }
+
+  - &beta_range_nightly
+    - { beta:   0.0, betai:  1.5 }
+    - { beta:  -0.5, betai:  1.0 }
+
+Tests:
+- name: bsrgemm_bad_arg
+  category: pre_checkin
+  function: bsrgemm_bad_arg
+  precision: *single_double_precisions_complex_real
+
+# C = alpha * A * B + beta * D
+- name: bsrgemm_mult
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: [435, 2370, 3100]
+  N: [330, 2456, 31802]
+  K: [200, 2700, 3849]
+  block_dim: [2, 7]
+  alpha_alphai: *alpha_range_quick
+  beta_betai: *beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_mult_file
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: [1000, 8670, 12000]
+  K: 1
+  block_dim: [3, 11]
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: bsrgemm_mult_file
+  category: nightly
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [2200]
+  K: 1
+  block_dim: [3, 24]
+  alpha_alphai: *alpha_range_nightly
+  beta_betai: *beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit,
+             bmwcra_1,
+             rma10,
+             shipsec1,
+             Chevron3,
+             Chevron4,
+             qc2534,
+             mplate,
+             mac_econ_fwd500]
+
+- name: bsrgemm_mult_file
+  category: nightly
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [2200]
+  K: 1
+  block_dim: [3, 24]
+  alpha_alphai: *alpha_range_nightly
+  beta_betai: *beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312,
+             sme3Dc]
+  skip_hardware: gfx1151
+
+# C = alpha * A * B
+- name: bsrgemm_mult
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [13]
+  K: [-1, 50]
+  block_dim: [5, 8]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_zero]
+
+- name: bsrgemm_mult
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: [50, 647]
+  N: [13, 523]
+  K: [50, 254]
+  block_dim: [7, 16]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_mult
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: [-1, 0, 1799, 32519]
+  N: [-1, 0, 3712, 16021]
+  K: [-1, 0, 1942, 9848]
+  block_dim: [2, 32]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_mult
+  category: nightly
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: [214923, 842323]
+  N: [12942, 1492312]
+  K: [42312, 743434]
+  block_dim: [6, 9]
+  alpha_alphai: *alpha_range_nightly
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_mult_file
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [13, 523]
+  K: 1
+  block_dim: [8, 20]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6,
+             scircuit]
+
+- name: bsrgemm_mult_file
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [0, 3712, 16021]
+  K: 1
+  block_dim: [3, 12]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10,
+             mc2depi,
+             ASIC_320k,
+             nos1,
+             nos3,
+             nos5,
+             nos7]
+
+- name: bsrgemm_mult_file
+  category: nightly
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: [149231]
+  K: 1
+  block_dim: [5, 6]
+  alpha_alphai: *alpha_range_nightly
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit,
+             amazon0312,
+             Chebyshev4,
+             webbase-1M]
+
+- name: bsrgemm_mult_file
+  category: nightly
+  function: bsrgemm
+  precision: *double_only_precisions
+  M: 1
+  N: [156287]
+  K: 1
+  block_dim: [8, 9]
+  alpha_alphai: *alpha_range_nightly
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bmwcra_1,
+             sme3Dc,
+             shipsec1]
+
+- name: bsrgemm_mult_file
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [21, 719]
+  K: 1
+  block_dim: [3, 18]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             Chevron2]
+
+- name: bsrgemm_mult_file
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [0, 5925, 20142]
+  K: 1
+  block_dim: [15, 19]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron3]
+
+- name: bsrgemm_mult_file
+  category: nightly
+  function: bsrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [17462, 901923]
+  K: 1
+  block_dim: [8, 9]
+  alpha_alphai: *alpha_range_nightly
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]
+
+# C = beta * D
+- name: bsrgemm_scale
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: [582]
+  N: [243]
+  K: 1
+  block_dim: [5, 11]
+  alpha: [-99.0]
+  beta_betai: *beta_range_quick
+  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_zero]
+
+- name: bsrgemm_scale
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: [-1, 0, 8, 24, 582]
+  N: [-1, 0, 12, 48, 243]
+  K: 1
+  block_dim: [23, 27]
+  alpha: [-99.0]
+  beta_betai: *beta_range_quick
+  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_scale
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: [-1, 0, 932, 1523, 23404]
+  N: [-1, 0, 784, 4842, 19703]
+  K: 1
+  block_dim: [26, 27]
+  alpha: [-99.0]
+  beta_betai: *beta_range_checkin
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_scale
+  category: nightly
+  function: bsrgemm
+  precision: *single_double_precisions_complex_real
+  M: [194823, 943929, 2094392]
+  N: [21042, 174923]
+  K: 1
+  block_dim: [11]
+  alpha: [-99.0]
+  beta_betai: *beta_range_nightly
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_scale_file
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: 1
+  block_dim: [16, 17]
+  alpha: [-99.0]
+  beta_betai: *beta_range_quick
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6,
+             scircuit]
+
+- name: bsrgemm_scale_file
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: 1
+  block_dim: [3, 4]
+  alpha: [-99.0]
+  beta_betai: *beta_range_checkin
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10,
+             mc2depi,
+             nos1,
+             nos3,
+             nos5,
+             nos7]
+
+- name: bsrgemm_scale_file
+  category: nightly
+  function: bsrgemm
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: 1
+  block_dim: [4, 6]
+  alpha: [-99.0]
+  beta_betai: *beta_range_nightly
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bibd_22_8,
+             bmwcra_1,
+             amazon0312,
+             Chebyshev4,
+             sme3Dc,
+             webbase-1M,
+             shipsec1]
+
+- name: bsrgemm_scale_file
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  K: 1
+  block_dim: [7, 8]
+  alpha: [-99.0]
+  beta_betai: *beta_range_quick
+  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             Chevron2]
+
+- name: bsrgemm_scale_file
+  category: pre_checkin
+  function: bsrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  K: 1
+  block_dim: [11, 12]
+  alpha: [-99.0]
+  beta_betai: *beta_range_checkin
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron3]
+
+- name: bsrgemm_scale_file
+  category: nightly
+  function: bsrgemm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  K: 1
+  block_dim: [2, 7]
+  alpha: [-99.0]
+  beta_betai: *beta_range_nightly
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]

@@ -1,0 +1,27 @@
+  ########################################
+  # Explore small number of half solns
+  ########################################
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - FractionalLoad: [1]
+        - PrefetchGlobalRead: [ False, True ]
+        - PrefetchLocalRead: [ False, True]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16,  8, 1 ]
+          - [ 16, 16, 1 ]
+        - GlobalSplitU: [1]
+        - WorkGroupMapping: [8]
+        - DepthU: [ 16 ]
+        - VectorWidth: [4]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:

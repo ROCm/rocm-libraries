@@ -1,0 +1,52 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: False
+  maxdepth: 7
+root: index
+subtrees:
+- entries:
+  - file: what-is-hipsparselt
+    title: What is hipSPARSELt?
+
+- caption: Install
+  entries:
+  - file: install/quick-start-install
+    title: Quick start installation guide
+  - file: install/install-hipsparselt
+    title: Detailed installation guide
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/storage-format
+    title: Storage formats
+  - file: conceptual/mi300-features
+    title: Features for the Instinct MI300 series
+
+- caption: How to
+  entries:
+  - file: how-to/device-stream-management
+    title: Manage devices and streams
+  - file: how-to/porting
+    title: Port from NVIDIA CUDA
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparselt/clients/samples
+    title: Client samples
+
+- caption: API Reference
+  entries:
+    - file: reference/supported-functions.rst
+      title: Supported functions
+    - file: reference/data-type-support.rst
+      title: Data type support
+    - file: reference/env-variables.rst
+      title: Environment variables
+    - file: doxygen/html/index
+      title: API library
+
+- caption: About
+  entries:
+    - file: license.md
+      title: License

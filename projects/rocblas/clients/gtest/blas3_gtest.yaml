@@ -1,0 +1,20 @@
+
+include: get_solutions_gtest.yaml
+include: gemm_gtest.yaml
+include: gemm_batched_gtest.yaml
+include: gemm_strided_batched_gtest.yaml
+include: gemmt_gtest.yaml
+include: dgmm_gtest.yaml
+include: geam_gtest.yaml
+include: geam_ex_gtest.yaml
+include: symm_gtest.yaml
+include: syrk_gtest.yaml
+include: syr2k_gtest.yaml
+include: syrkx_gtest.yaml
+include: hemm_gtest.yaml
+include: herk_gtest.yaml
+include: her2k_gtest.yaml
+include: herkx_gtest.yaml
+include: trmm_gtest.yaml
+include: trsm_gtest.yaml
+include: trtri_gtest.yaml

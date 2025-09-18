@@ -1,0 +1,64 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+
+- entries:
+  - file: what-is-rocblas.rst
+    title: What is rocBLAS?
+
+- caption: Install
+  entries:
+  - file: install/Linux_Install_Guide
+    title: Install rocBLAS on Linux
+  - file: install/Windows_Install_Guide
+    title: Install rocBLAS on Windows
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/rocblas-design-notes
+    title: rocBLAS design notes
+  - file: conceptual/blas-operations-intro
+    title: BLAS operations introduction
+
+- caption: How to
+  entries:
+  - file: how-to/Programmers_Guide
+    title: Program with rocBLAS
+  - file: how-to/logging-in-rocblas.rst
+    title: Use logging with rocBLAS
+  - file: how-to/Contributors_Guide.rst
+    title: Contribute to rocBLAS
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas/clients/samples
+    title: rocBLAS sample code
+
+- caption: API Reference
+  entries:
+  - file: reference/data-type-support.rst
+  - file: reference/env-variables.rst
+  - file: reference/API_Reference-Guide.rst
+    title: API Reference
+    subtrees:
+    - entries:
+      - file: reference/datatypes.rst
+      - file: reference/enumerations.rst
+      - file: reference/helper-functions.rst
+      - file: reference/level-1.rst
+      - file: reference/level-2.rst
+      - file: reference/level-3.rst
+      - file: reference/extension.rst
+      - file: reference/beta-features.rst
+      - file: reference/memory-alloc.rst
+      - file: reference/deprecations.rst
+
+- caption: About
+  entries:
+  - file: license.rst
+    title: rocBLAS license
+  - file: reference/references.rst
+    title: References
+  - file: reference/acknowledge.rst
+    title: Acknowledgements

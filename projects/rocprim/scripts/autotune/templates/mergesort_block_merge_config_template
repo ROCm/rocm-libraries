@@ -1,0 +1,19 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_MERGE_SORT_BLOCK_MERGE_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+merge_sort_block_merge_config<256, 1, (1 << 17) + 70000, {{ measurement['cfg']['mergepath_partition_bs'] }}, {{ measurement['cfg']['mergepath_bs'] }}, {{ measurement['cfg']['mergepath_ipt'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class key_type, class value_type = rocprim::empty_type, class enable = void> struct default_merge_sort_block_merge_config :
+merge_sort_block_merge_config_base<key_type, value_type>::type {};
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class key_type, class value_type> struct default_merge_sort_block_merge_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, value_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

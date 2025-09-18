@@ -1,0 +1,287 @@
+# headers
+GlobalParameters:
+  MinimumRequiredVersion: 4.9.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  KernelTime: True
+  SleepPercent: 500
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  PrintSolutionRejectionReason: True
+  PrintWinnersOnly: True
+#  PinClocks: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      StridedBatched: False
+
+# bodys midSize
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - WavefrontSize: [32] # , 64]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [  4,  4 ]
+          - [  4,  8 ]
+          - [  8,  8 ]
+        - WorkGroup:
+          - [  8,  8,  1 ]
+          - [ 16,  8,  1 ]
+          - [ 16, 16,  1 ]
+        - DepthU: [ 8, 16, 32 ]
+        - VectorWidth: [8]
+        - LocalDotLayout: [2]
+        - InnerUnroll: [2]
+        - GlobalSplitU: [1]
+        - StaggerUMapping: [3]
+        - StaggerUStride: [128]
+        - StaggerU: [0, 32]
+        - WorkGroupMapping: [1,4,8]
+        - ExpandPointerSwap: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 5056, 1, 256]
+          - Exact: [64, 6784, 1, 3328]
+          - Exact: [64, 5056, 1, 3328]
+          - Exact: [64, 6784, 1, 1280]
+          - Exact: [64, 6784, 1, 256]
+          - Exact: [64, 5056, 1, 1280]
+          - Exact: [64, 5888, 1, 3328]
+          - Exact: [64, 5888, 1, 1280]
+          - Exact: [64, 5888, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
+
+# bodys smaSize
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - WavefrontSize: [32] # , 64]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [  2,  2 ]
+          - [  4,  4 ]
+        - WorkGroup:
+          - [  8,  8,  1 ]
+          - [ 16,  8,  1 ]
+          - [ 16, 16,  1 ]
+        - DepthU: [ 8, 16, 32 ]
+        - VectorWidth: [2]
+        - LocalDotLayout: [2]
+        - InnerUnroll: [2]
+        - GlobalSplitU: [1]
+        - StaggerUMapping: [3]
+        - StaggerUStride: [128]
+        - StaggerU: [0, 32]
+        - WorkGroupMapping: [1,4,8]
+        - ExpandPointerSwap: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 1408, 1, 3328]
+          - Exact: [64, 1856, 1, 256]
+          - Exact: [64, 2368, 1, 3328]
+          - Exact: [64, 3584, 1, 1280]
+          - Exact: [64, 2944, 1, 256]
+          - Exact: [64, 1408, 1, 1280]
+          - Exact: [64, 2368, 1, 1280]
+          - Exact: [64, 3584, 1, 3328]
+          - Exact: [64, 1856, 1, 3328]
+          - Exact: [64, 1856, 1, 1280]
+          - Exact: [64, 4288, 1, 256]
+          - Exact: [64, 2944, 1, 3328]
+          - Exact: [64, 4288, 1, 1280]
+          - Exact: [64, 2944, 1, 1280]
+          - Exact: [64, 1408, 1, 256]
+          - Exact: [64, 2368, 1, 256]
+          - Exact: [64, 3584, 1, 256]
+          - Exact: [64, 4288, 1, 3328]
+
+# bodys bigN
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - WavefrontSize: [32] # , 64]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [  1,  4 ]
+          - [  2,  2 ]
+          - [  2,  4 ]
+        - WorkGroup:
+          - [  8,  8,  1 ]
+          - [ 16,  8,  1 ]
+          - [ 16, 16,  1 ]
+        - DepthU: [ 8, 16, 32 ]
+        - LocalDotLayout: [2]
+        - InnerUnroll: [2]
+        - VectorWidth: [2]
+        - GlobalSplitU: [1]
+        - StaggerUMapping: [3]
+        - StaggerUStride: [128]
+        - StaggerU: [0, 32]
+        - WorkGroupMapping: [1,4,8]
+        - ExpandPointerSwap: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 2944, 1, 3328]
+          - Exact: [1, 2368, 1, 1280]
+          - Exact: [1, 1408, 1, 1280]
+          - Exact: [1, 2368, 1, 3328]
+          - Exact: [1, 3584, 1, 1280]
+          - Exact: [1, 2944, 1, 1]
+          - Exact: [1, 1408, 1, 3328]
+          - Exact: [1, 2944, 1, 256]
+          - Exact: [1, 5056, 1, 256]
+          - Exact: [1, 1856, 1, 256]
+          - Exact: [1, 1856, 1, 1280]
+          - Exact: [1, 4288, 1, 1280]
+          - Exact: [1, 1408, 1, 1]
+          - Exact: [1, 1408, 1, 256]
+          - Exact: [1, 2368, 1, 256]
+          - Exact: [1, 4288, 1, 1]
+          - Exact: [1, 1856, 1, 3328]
+          - Exact: [1, 4288, 1, 3328]
+          - Exact: [1, 2368, 1, 1]
+          - Exact: [1, 3584, 1, 3328]
+          - Exact: [1, 5056, 1, 1]
+          - Exact: [1, 3584, 1, 256]
+          - Exact: [1, 5056, 1, 1280]
+          - Exact: [1, 3584, 1, 1]
+          - Exact: [1, 2944, 1, 1280]
+          - Exact: [1, 1856, 1, 1]
+          - Exact: [1, 4288, 1, 256]
+
+# bodys other
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - WavefrontSize: [32] # , 64]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [  2,  2 ]
+          - [  4,  4 ]
+        - WorkGroup:
+          - [  8,  8,  1 ]
+          - [ 16,  8,  1 ]
+          - [ 16, 16,  1 ]
+        - DepthU: [ 8, 16, 32 ]
+        - VectorWidth: [2]
+        - LocalDotLayout: [2]
+        - InnerUnroll: [2]
+        - GlobalSplitU: [1]
+        - StaggerUMapping: [3]
+        - StaggerUStride: [128]
+        - StaggerU: [0, 32]
+        - WorkGroupMapping: [1,4,8]
+        - ExpandPointerSwap: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 448, 1, 3328]
+          - Exact: [1, 64, 1, 1280]
+          - Exact: [64, 128, 1, 256]
+          - Exact: [128, 64, 1, 1280]
+          - Exact: [1, 128, 1, 1]
+          - Exact: [64, 1024, 1, 3328]
+          - Exact: [1, 64, 1, 3328]
+          - Exact: [64, 448, 1, 1280]
+          - Exact: [1, 256, 1, 1280]
+          - Exact: [64, 64, 1, 1280]
+          - Exact: [1, 1, 1, 3328]
+          - Exact: [1, 64, 1, 1]
+          - Exact: [1, 128, 1, 1280]
+          - Exact: [64, 1024, 1, 1280]
+          - Exact: [64, 256, 1, 1280]
+          - Exact: [1, 1024, 1, 256]
+          - Exact: [1, 704, 1, 3328]
+          - Exact: [1, 256, 1, 1]
+          - Exact: [128, 64, 1, 256]
+          - Exact: [64, 128, 1, 3328]
+          - Exact: [64, 256, 1, 3328]
+          - Exact: [1, 1, 1, 256]
+          - Exact: [1, 704, 1, 1]
+          - Exact: [1, 704, 1, 1280]
+          - Exact: [64, 448, 1, 256]
+          - Exact: [1, 448, 1, 1280]
+          - Exact: [64, 128, 1, 1280]
+          - Exact: [1, 1, 1, 1]
+          - Exact: [256, 64, 1, 256]
+          - Exact: [1, 448, 1, 3328]
+          - Exact: [1, 128, 1, 256]
+          - Exact: [1, 1024, 1, 3328]
+          - Exact: [64, 1024, 1, 256]
+          - Exact: [64, 256, 1, 256]
+          - Exact: [1, 1024, 1, 1280]
+          - Exact: [1, 1, 1, 1280]
+          - Exact: [64, 704, 1, 256]
+          - Exact: [64, 64, 1, 256]
+          - Exact: [128, 64, 1, 3328]
+          - Exact: [1, 448, 1, 256]
+          - Exact: [1, 1024, 1, 1]
+          - Exact: [64, 704, 1, 3328]
+          - Exact: [1, 256, 1, 256]
+          - Exact: [1, 704, 1, 256]
+          - Exact: [1, 128, 1, 3328]
+          - Exact: [64, 64, 1, 3328]
+          - Exact: [1, 448, 1, 1]
+          - Exact: [1, 64, 1, 256]
+          - Exact: [64, 704, 1, 1280]
+          - Exact: [1, 256, 1, 3328]
+
+# tail
+LibraryLogic:
+    ScheduleName: "navi21"
+    DeviceNames: ["Device 73a2"]
+    ArchitectureName: "gfx1030"
+
+LibraryClient:

@@ -1,0 +1,421 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &alpha_beta_range_quick
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
+  - &alpha_beta_range_checkin
+    - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   2.0, beta:  0.67, alphai: -1.0, betai:  1.5 }
+    - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
+
+  - &alpha_beta_range_1
+    - { alpha:   1.0, beta:  1.0,  alphai:  1.0, betai:  1.0 }
+
+  - &alpha_beta_range_nightly
+    - { alpha:   2.0, beta:  0.67, alphai:  0.0, betai:  1.5 }
+    - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
+
+Tests:
+- name: gebsrmv_bad_arg
+  category: pre_checkin
+  function: gebsrmv_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions_complex_real
+  M: [0, 2, 231]
+  N: [0, 2, 42]
+  row_block_dimA: [3]
+  col_block_dimA: [8]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [852, 71]
+  N: [42, 441]
+  row_block_dimA: [14]
+  col_block_dimA: [8]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [31]
+  N: [42]
+  row_block_dimA: [81]
+  col_block_dimA: [8]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmv_file
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [2, 17]
+  col_block_dimA: [5, 6]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2,
+             mplate]
+
+- name: gebsrmv_file
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [9, 18]
+  col_block_dimA: [4, 7]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos3,
+             nos5]
+
+- name: gebsrmv_file
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [9, 18]
+  col_block_dimA: [4, 7]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos7]
+
+#
+# More tests for code coverage
+#
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [32]
+  N: [512, 1024, 4096, 8192, 16384]
+  row_block_dimA: [1, 2]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [32]
+  N: [512, 1024, 4096, 8192, 16384]
+  row_block_dimA: [3, 4]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 16, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [512]
+  N: [16384]
+  row_block_dimA: [5]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [512]
+  N: [16384]
+  row_block_dimA: [6, 7, 8]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 16, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [64]
+  N: [8192]
+  row_block_dimA: [9, 12]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 16, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [64]
+  N: [8192]
+  tolm: 2.0
+  row_block_dimA: [10, 11]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 16, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [64]
+  N: [64]
+  row_block_dimA: [13, 14, 15, 16]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 16, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: gebsrmv
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [64]
+  N: [64]
+  row_block_dimA: [17]
+  col_block_dimA: [2,4,8,16, 32]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [10]
+  N: [33]
+  row_block_dimA: [17]
+  col_block_dimA: [8]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_zero]
+
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [10]
+  N: [33]
+  row_block_dimA: [17]
+  col_block_dimA: [8, 12]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [4096]
+  N: [8192]
+  row_block_dimA: [17]
+  col_block_dimA: [8, 12]
+  tolm: 3.0
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmv
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: [4096]
+  N: [8192]
+  row_block_dimA: [33, 64]
+  col_block_dimA: [8]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+
+- name: gebsrmv_file
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [9, 26, 190]
+  col_block_dimA: [7, 11]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos6]
+
+- name: gebsrmv_file
+  category: quick
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [10, 57, 236]
+  col_block_dimA: [17, 39]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534]
+
+
+- name: gebsrmv
+  category: nightly
+  function: gebsrmv
+  precision: *double_only_precisions_complex
+  M: [39385, 193482]
+  N: [29348, 340123]
+  row_block_dimA: [1, 4, 11, 20]
+  col_block_dimA: [2, 8]
+  alpha_beta: *alpha_beta_range_nightly
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+
+- name: gebsrmv_file
+  category: nightly
+  function: gebsrmv
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [4]
+  col_block_dimA: [2, 5, 8]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312,
+             shipsec1,
+             webbase-1M]
+
+- name: gebsrmv_file
+  category: nightly
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [2, 13]
+  col_block_dimA: [2, 8]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_column]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]
+
+- name: gebsrmv_graph_test
+  category: pre_checkin
+  function: gebsrmv
+  precision: *single_double_precisions_complex
+  M: [4096]
+  N: [8192]
+  row_block_dimA: [33, 64]
+  col_block_dimA: [8]
+  tolm: 3.0
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true

@@ -1,0 +1,20 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_PARTITION_TWO_WAY_PREDICATE_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+select_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class data_type, class enable = void>
+struct default_partition_two_way_predicate_config : default_partition_config_base<data_type, false>::type
+{};
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class data_type> struct default_partition_two_way_predicate_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), data_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

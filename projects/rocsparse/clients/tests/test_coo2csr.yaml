@@ -1,0 +1,129 @@
+# ########################################################################
+# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: coo2csr_bad_arg
+  category: pre_checkin
+  function: coo2csr_bad_arg
+  precision: *single_precision
+
+- name: coo2csr
+  category: quick
+  function: coo2csr
+  precision: *single_precision
+  M: [10, 872]
+  N: [33, 623]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: coo2csr
+  category: quick
+  function: coo2csr
+  precision: *single_precision
+  M: [10]
+  N: [33]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_zero]
+
+- name: coo2csr
+  category: pre_checkin
+  function: coo2csr
+  precision: *single_precision
+  M: [0, 500, 1000]
+  N: [0, 242, 1000]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: coo2csr
+  category: nightly
+  function: coo2csr
+  precision: *single_precision
+  M: [27428, 941291, 1105637]
+  N: [18582, 571938, 995827]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: coo2csr_file
+  category: quick
+  function: coo2csr
+  precision: *single_precision
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6,
+             scircuit,
+             Chevron2,
+             mplate,
+             qc2534]
+
+- name: coo2csr_file
+  category: pre_checkin
+  function: coo2csr
+  precision: *single_precision
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10,
+             mc2depi,
+             ASIC_320k,
+             nos1,
+             nos3,
+             nos5,
+             nos7]
+
+- name: coo2csr_file
+  category: nightly
+  function: coo2csr
+  precision: *single_precision
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bibd_22_8,
+             bmwcra_1,
+             amazon0312,
+             Chebyshev4,
+             sme3Dc,
+             webbase-1M,
+             shipsec1,
+             Chevron3,
+             Chevron4]
+
+- name: coo2csr_graph_test
+  category: pre_checkin
+  function: coo2csr
+  precision: *single_precision
+  M: [10, 872]
+  N: [33, 623]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true

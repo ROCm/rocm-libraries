@@ -1,0 +1,21 @@
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchGlobalRead: [0]
+        - KernelLanguage: ["Source"]
+        - ThreadTile:
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  8, 8, 1 ]
+            #- [  16, 8, 1 ]
+        - DepthU: [8]
+        - GlobalReadVectorWidth: [1]
+        - VectorWidth: [1]
+
+        - FractionalLoad: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:

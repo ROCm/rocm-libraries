@@ -1,0 +1,16 @@
+- queries: .
+- qlpack: codeql/cpp-queries
+- include:
+    id:
+        - /rr/
+        - cpp/allocation-too-small
+        - cpp/bad-addition-overflow-check
+        - cpp/cleartext-storage-file
+        - cpp/comparison-with-wider-type
+        - cpp/hresult-boolean-conversion
+        - cpp/incorrect-string-type-conversion
+        - cpp/openssl-heartbleed
+        - cpp/overflow-calculated
+        - cpp/pointer-overflow-check
+        - cpp/static-buffer-overflow
+        - cpp/too-few-arguments

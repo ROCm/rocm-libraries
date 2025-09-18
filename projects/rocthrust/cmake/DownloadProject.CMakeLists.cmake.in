@@ -1,0 +1,25 @@
+# Distributed under the OSI-approved MIT License.  See accompanying
+# file LICENSE or https://github.com/Crascit/DownloadProject for details.
+
+cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
+
+project(${DL_ARGS_PROJ}-download NONE)
+
+include(ExternalProject)
+if(${DL_ARGS_BUILD_PROJECT})
+    ExternalProject_Add(${DL_ARGS_PROJ}-download
+                        ${DL_ARGS_UNPARSED_ARGUMENTS}
+                        SOURCE_DIR          "${DL_ARGS_SOURCE_DIR}"
+                        TEST_COMMAND        ""
+    )
+else()
+    ExternalProject_Add(${DL_ARGS_PROJ}-download
+                        ${DL_ARGS_UNPARSED_ARGUMENTS}
+                        SOURCE_DIR          "${DL_ARGS_SOURCE_DIR}"
+                        TEST_COMMAND        ""
+                        UPDATE_COMMAND      ""
+                        CONFIGURE_COMMAND   ""
+                        BUILD_COMMAND       ""
+                        INSTALL_COMMAND     ""
+    )
+endif()

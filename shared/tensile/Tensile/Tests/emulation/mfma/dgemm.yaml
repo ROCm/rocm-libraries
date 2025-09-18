@@ -1,0 +1,164 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, emulation1] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  - # sgemm TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1,  1,  8,2,  1,4]  # 128x128
+          # - [16, 16, 4, 1,  1,  4,4,  2,2]  # 128x128
+          # - [16, 16, 4, 1,  1,  2,8,  4,1]  # 128x128
+        - SourceSwap: [1]
+        - PrefetchGlobalRead: [1]
+        - ThreadTile:
+          - [ 1, 32 ]
+        - WorkGroup:
+          - [  16, 16, 1 ]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - DepthU: [ 8 ]
+        - VectorWidth: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # - Range: [ [1024], [1024], [1], [1024] ]
+          - Range: [ [1031], [1031], [8], [1031] ]
+
+  # - # sgemm NN
+  #   - # ProblemType
+  #     OperationType: GEMM
+  #     DataType: d
+  #     TransposeA: False
+  #     TransposeB: False
+  #     UseBeta: True
+  #     Batched: True
+
+  #   - # BenchmarkProblemSizeGroup - Standard
+  #     InitialSolutionParameters:
+  #     BenchmarkCommonParameters:
+  #       - KernelLanguage: ["Assembly"]
+  #       - EdgeType: ["ShiftPtr"]
+  #       - PrefetchLocalRead: [True]
+  #     ForkParameters:
+  #       - MatrixInstruction:
+  #         - [16, 16, 4, 1,  1,  8,2,  1,4]  # 128x128
+  #         - [16, 16, 4, 1,  1,  4,4,  2,2]  # 128x128
+  #         - [16, 16, 4, 1,  1,  2,8,  4,1]  # 128x128
+  #       - SourceSwap: [1]
+  #       - PrefetchGlobalRead: [1]
+  #       - ThreadTile:
+  #         - [ 1, 32 ]
+  #       - WorkGroup:
+  #         - [  16, 16, 1 ]
+  #       - WorkGroupMapping: [8]
+  #       - GlobalSplitU: [1]
+  #       - DepthU: [ 8 ]
+  #       - VectorWidth: [1]
+  #     BenchmarkForkParameters:
+  #     JoinParameters:
+  #     BenchmarkJoinParameters:
+  #     BenchmarkFinalParameters:
+  #       - ProblemSizes:
+  #         - Range: [ [1024], [1024], [1], [1024] ]
+  #         - Range: [ [1031], [1031], [8], [1031] ]
+
+  # - # sgemm NT
+  #   - # ProblemType
+  #     OperationType: GEMM
+  #     DataType: d
+  #     TransposeA: False
+  #     TransposeB: True
+  #     UseBeta: True
+  #     Batched: True
+
+  #   - # BenchmarkProblemSizeGroup - Standard
+  #     InitialSolutionParameters:
+  #     BenchmarkCommonParameters:
+  #       - KernelLanguage: ["Assembly"]
+  #       - EdgeType: ["ShiftPtr"]
+  #       - PrefetchLocalRead: [True]
+  #     ForkParameters:
+  #       - MatrixInstruction:
+  #         - [16, 16, 4, 1,  1,  8,2,  1,4]  # 128x128
+  #         - [16, 16, 4, 1,  1,  4,4,  2,2]  # 128x128
+  #         - [16, 16, 4, 1,  1,  2,8,  4,1]  # 128x128
+  #       - SourceSwap: [1]
+  #       - PrefetchGlobalRead: [1]
+  #       - ThreadTile:
+  #         - [ 1, 32 ]
+  #       - WorkGroup:
+  #         - [  16, 16, 1 ]
+  #       - WorkGroupMapping: [8]
+  #       - GlobalSplitU: [1]
+  #       - DepthU: [ 8 ]
+  #       - VectorWidth: [1]
+  #     BenchmarkForkParameters:
+  #     JoinParameters:
+  #     BenchmarkJoinParameters:
+  #     BenchmarkFinalParameters:
+  #       - ProblemSizes:
+  #         - Range: [ [1024], [1024], [1], [1024] ]
+  #         - Range: [ [1031], [1031], [8], [1031] ]
+
+  # - # sgemm TT
+  #   - # ProblemType
+  #     OperationType: GEMM
+  #     DataType: d
+  #     TransposeA: True
+  #     TransposeB: True
+  #     UseBeta: True
+  #     Batched: True
+
+  #   - # BenchmarkProblemSizeGroup - Standard
+  #     InitialSolutionParameters:
+  #     BenchmarkCommonParameters:
+  #       - KernelLanguage: ["Assembly"]
+  #       - EdgeType: ["ShiftPtr"]
+  #       - PrefetchLocalRead: [True]
+  #     ForkParameters:
+  #       - MatrixInstruction:
+  #         - [16, 16, 4, 1,  1,  8,2,  1,4]  # 128x128
+  #         - [16, 16, 4, 1,  1,  4,4,  2,2]  # 128x128
+  #         - [16, 16, 4, 1,  1,  2,8,  4,1]  # 128x128
+  #       - SourceSwap: [1]
+  #       - PrefetchGlobalRead: [1]
+  #       - ThreadTile:
+  #         - [ 1, 32 ]
+  #       - WorkGroup:
+  #         - [  16, 16, 1 ]
+  #       - WorkGroupMapping: [8]
+  #       - GlobalSplitU: [1]
+  #       - DepthU: [ 8 ]
+  #       - VectorWidth: [1]
+  #     BenchmarkForkParameters:
+  #     JoinParameters:
+  #     BenchmarkJoinParameters:
+  #     BenchmarkFinalParameters:
+  #       - ProblemSizes:
+  #         - Range: [ [1024], [1024], [1], [1024] ]
+  #         - Range: [ [1031], [1031], [8], [1031] ]

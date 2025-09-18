@@ -1,0 +1,93 @@
+{
+    "version": 3,
+    "configurePresets": [
+      {
+        "name": "opt-rocm",
+        "displayName": "/opt/rocm Config",
+        "description": "Sets compiler and prefix path for /opt/rocm environment",
+        "cacheVariables": {
+          "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+          "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
+          "CMAKE_PREFIX_PATH": "/opt/rocm",
+          "CMAKE_BUILD_TYPE": "Release",
+          "HIPBLASLT_ENABLE_FETCH": "ON"
+        }
+      },
+      {
+        "name": "tensilelite",
+        "displayName": "TensileLite",
+        "description": "Configures just tensilelite host and client",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_BUILD_TESTING": "OFF",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF",
+          "HIPBLASLT_ENABLE_DEVICE": "OFF",
+          "HIPBLASLT_ENABLE_HOST": "OFF",
+          "HIPBLASLT_ENABLE_MSGPACK": "ON",
+          "HIPBLASLT_ENABLE_LLVM": "ON",
+          "TENSILELITE_ENABLE_CLIENT": "ON",
+          "TENSILELITE_BUILD_TESTING": "OFF",
+          "TENSILELITE_ENABLE_AUTOBUILD": "ON",
+          "HIPBLASLT_ENABLE_ROCROLLER": "OFF"
+        }
+      },
+      {
+        "name": "rocisa",
+        "displayName": "rocisa",
+        "description": "Configures just rocisa",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_BUILD_TESTING": "OFF",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF",
+          "HIPBLASLT_ENABLE_DEVICE": "OFF",
+          "HIPBLASLT_ENABLE_HOST": "OFF",
+          "HIPBLASLT_ENABLE_MSGPACK": "OFF",
+          "HIPBLASLT_ENABLE_LLVM": "OFF",
+          "TENSILELITE_ENABLE_CLIENT": "OFF",
+          "TENSILELITE_ENABLE_HOST": "OFF",
+          "TENSILELITE_BUILD_TESTING": "OFF",
+          "TENSILELITE_ENABLE_AUTOBUILD": "OFF",
+          "HIPBLASLT_ENABLE_ROCROLLER": "OFF"
+        }
+      },
+      {
+        "name": "hipblaslt",
+        "displayName": "hipBLASLt",
+        "description": "Build just the hipblaslt library and required deps",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_ENABLE_HOST": "ON",
+          "HIPBLASLT_ENABLE_DEVICE": "OFF",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF"
+        }
+      },
+      {
+        "name": "gemm-libs",
+        "displayName": "Build gemm libraries",
+        "description": "Configures just tensilelite host and client",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_ENABLE_HOST": "OFF",
+          "HIPBLASLT_ENABLE_DEVICE": "ON",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF",
+          "TENSILELITE_ENABLE_HOST": "OFF",
+          "TENSILELITE_ENABLE_CLIENT": "OFF"
+
+        }
+      },
+      {
+        "name": "hipblaslt-clients",
+        "displayName": "hipBLASLt Clients",
+        "description": "Configures targets required to build clients",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_ENABLE_HOST": "ON",
+          "HIPBLASLT_ENABLE_DEVICE": "ON",
+          "HIPBLASLT_ENABLE_CLIENT": "ON",
+          "TENSILELITE_ENABLE_HOST": "ON",
+          "TENSILELITE_ENABLE_CLIENT": "OFF",
+          "HIPBLASLT_ENABLE_SAMPLES": "OFF"
+        }
+      }
+  ]
+}

@@ -1,0 +1,10 @@
+/**
+@brief hipRAND host API C++ Wrapper.
+@author
+@file
+*/
+
+/**
+ * \defgroup hiprandhostcpp hipRAND host API C++ Wrapper
+ *
+ */

@@ -1,0 +1,552 @@
+# MIT License
+#
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+variables:
+  ROCRAND_DIR: ${CI_PROJECT_DIR}/rocRAND
+
+include:
+  - project: amd/ci-templates
+    ref: main
+    file:
+      - /defaults.yaml
+      - /deps-cmake.yaml
+      - /deps-docs.yaml
+      - /deps-format.yaml
+      - /deps-rocm.yaml
+      - /deps-nvcc.yaml
+      - /deps-windows.yaml
+      - /deps-compiler-acceleration.yaml
+      - /gpus-rocm.yaml
+      - /gpus-nvcc.yaml
+      - /rules.yaml
+
+stages:
+  - lint
+  - deps
+  - build
+  - test
+
+clang-format:
+  extends:
+    - .lint:clang-format
+
+copyright-date:
+  extends:
+    - .deps:rocm
+  stage: lint
+  needs: []
+  tags:
+    - build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - cd $CI_PROJECT_DIR
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - scripts/copyright-date/check-copyright.sh -v -d $CI_MERGE_REQUEST_DIFF_BASE_SHA
+
+
+.rocm:cmake-minimum:
+  variables:
+    COMPILER: hipcc
+  extends:
+    - .deps:rocm
+    - .deps:cmake-minimum
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.nvcc:cmake-minimum:
+  variables:
+    COMPILER: c++
+  extends:
+    - .deps:nvcc
+    - .deps:cmake-minimum
+    - .deps:compiler-acceleration
+  before_script:
+    - !reference [".deps:nvcc", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
+
+.rocm:rocrand:
+  stage: deps
+  extends:
+    - .gpus:rocm-gpus
+    - .rules:build
+  needs: []
+  variables:
+    ROCRAND_GIT_BRANCH: "develop_stream"
+  script:
+    - branch_name="${ROCRAND_GIT_BRANCH}"
+    - if [ ${CI_COMMIT_BRANCH} == develop ] || [ ${CI_COMMIT_BRANCH} == master ]; then branch_name=${CI_COMMIT_BRANCH};
+    - fi;
+    - git clone -b ${branch_name} https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCRAND_GIT_URL}
+    - cmake
+      -S ${ROCRAND_DIR}
+      -B ${ROCRAND_DIR}/build
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D BUILD_TEST=OFF
+      -D BUILD_BENCHMARK=OFF
+      -D BUILD_FORTRAN_WRAPPER=OFF
+      -D DEPENDENCIES_FORCE_DOWNLOAD=OFF
+      -D BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D GPU_TARGETS=${GPU_TARGETS}
+      -D ROCM_DEP_ROCMCORE=OFF
+    - cmake --build ${ROCRAND_DIR}/build --target package
+  artifacts:
+    paths:
+      - ${ROCRAND_DIR}/build/rocrand*.deb
+
+deps:rocrand:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .rocm:cmake-minimum
+    - .rocm:rocrand
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+
+deps:rocrand-static:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .rocm:cmake-minimum
+    - .rocm:rocrand
+  variables:
+    BUILD_SHARED_LIBS: "OFF"
+
+.rocm:build:
+  stage: build
+  extends:
+    - .gpus:rocm-gpus
+    - .rules:build
+  script:
+    - cmake
+      -S ${CI_PROJECT_DIR}
+      -B ${CI_PROJECT_DIR}/build
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D BUILD_TEST=ON
+      -D BUILD_BENCHMARK=ON
+      -D BUILD_FORTRAN_WRAPPER=ON
+      -D DEPENDENCIES_FORCE_DOWNLOAD=ON
+      -D BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
+      -D DISABLE_WERROR=OFF
+      -D GPU_TARGETS=${GPU_TARGETS}
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
+    - cmake --build ${CI_PROJECT_DIR}/build
+    - cmake --build ${CI_PROJECT_DIR}/build --target package
+
+.nvcc:build:
+  stage: build
+  extends:
+    - .gpus:nvcc-gpus
+    - .rules:build
+  needs: []
+  script:
+    - cmake
+      -S ${CI_PROJECT_DIR}
+      -B ${CI_PROJECT_DIR}/build
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D BUILD_TEST=ON
+      -D BUILD_BENCHMARK=ON
+      -D BUILD_FORTRAN_WRAPPER=ON
+      -D DEPENDENCIES_FORCE_DOWNLOAD=ON
+      -D NVGPU_TARGETS=${GPU_TARGETS}
+      -D BUILD_WITH_LIB=CUDA
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
+      -D CMAKE_CXX_STANDARD=14
+    - cmake --build ${CI_PROJECT_DIR}/build
+    - cmake --build ${CI_PROJECT_DIR}/build --target package
+
+.save-artifacts:
+  artifacts:
+    paths:
+      - ${CI_PROJECT_DIR}/build/library/
+      - ${CI_PROJECT_DIR}/build/test/test_*
+      - ${CI_PROJECT_DIR}/build/**/CTestTestfile.cmake
+      - ${CI_PROJECT_DIR}/build/CMakeCache.txt
+      - ${CI_PROJECT_DIR}/build/*.deb
+      - ${CI_PROJECT_DIR}/build/*.zip
+      - ${ROCRAND_DIR}/build/rocrand*.deb
+
+.rocm:rocrand-install:
+  before_script:
+    - ${SUDO_CMD} dpkg -i ${ROCRAND_DIR}/build/rocrand*.deb
+
+build:rocm-cmake-minimum:
+  tags:
+    - build
+  needs:
+    - deps:rocrand
+  extends:
+    - .rocm:cmake-minimum
+    - .rocm:build
+    - .save-artifacts
+    - .rocm:rocrand-install
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+  parallel:
+    matrix:
+      - BUILD_VERSION: [14, 17]
+  before_script:
+    - !reference [".rocm:cmake-minimum", before_script]
+    - !reference [".rocm:rocrand-install", before_script]
+
+build:rocm-static-cmake-minimum:
+  tags:
+    - build
+  needs:
+    - deps:rocrand-static
+  extends:
+    - .rocm:cmake-minimum
+    - .rocm:build
+    - .save-artifacts
+    - .rocm:rocrand-install
+  variables:
+    BUILD_SHARED_LIBS: "OFF"
+    BUILD_VERSION: 14
+  before_script:
+    - !reference [".rocm:cmake-minimum", before_script]
+    - !reference [".rocm:rocrand-install", before_script]
+
+build:nvcc-cmake-minimum:
+  tags:
+    - build
+  needs: []
+  extends:
+    - .nvcc:cmake-minimum
+    - .nvcc:build
+    - .save-artifacts
+
+.rocm-windows:build:
+  extends:
+    - .deps:visual-studio-devshell
+    - .deps:rocm-windows
+    - .gpus:rocm-gpus-windows
+    - .rules:build
+  needs: []
+  stage: build
+  variables:
+    ROCRAND_GIT_BRANCH: "develop_stream"
+    BUILD_TYPE: Release
+  script:
+    # Configure and install rocRAND
+    - $branch_name=$ROCRAND_GIT_BRANCH
+    - if ($CI_COMMIT_BRANCH -eq "develop" -or $CI_COMMIT_BRANCH -eq "master") { $branch_name=$CI_COMMIT_BRANCH }
+    - git clone -b $branch_name https://gitlab-ci-token:$CI_JOB_TOKEN@$ROCRAND_GIT_URL
+    - \& cmake
+      -S "$ROCRAND_DIR"
+      -B "$ROCRAND_DIR/build"
+      -G Ninja
+      -D BUILD_BENCHMARK=OFF
+      -D BUILD_FORTRAN_WRAPPER=OFF
+      -D BUILD_SHARED_LIBS=$BUILD_SHARED_LIBS
+      -D BUILD_TEST=OFF
+      -D CMAKE_BUILD_TYPE=$BUILD_TYPE
+      -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
+      -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}/lib/cmake"
+      -D CMAKE_INSTALL_PREFIX:PATH="$ROCRAND_DIR/build/install"
+      -D GPU_TARGETS=$GPU_TARGETS *>&1
+    - \& cmake --build "$ROCRAND_DIR/build" --target install *>&1
+    # Configure hipRAND
+    - \& cmake
+      -S "$CI_PROJECT_DIR"
+      -B "$CI_PROJECT_DIR/build"
+      -G Ninja
+      -D BUILD_BENCHMARK=ON
+      -D BUILD_FORTRAN_WRAPPER=OFF
+      -D BUILD_SHARED_LIBS=$BUILD_SHARED_LIBS
+      -D BUILD_TEST=ON
+      -D CMAKE_BUILD_TYPE=$BUILD_TYPE
+      -D CMAKE_NO_SYSTEM_FROM_IMPORTED=TRUE
+      -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
+      -D CMAKE_PREFIX_PATH:PATH="$ROCRAND_DIR/build/install/lib/cmake/rocrand;${env:HIP_PATH}/lib/cmake"
+      -D CMAKE_INSTALL_PREFIX:PATH="$CI_PROJECT_DIR/build/install"
+      -D DISABLE_WERROR=OFF
+      -D GPU_TARGETS=$GPU_TARGETS *>&1
+    # Build hipRAND
+    - \& cmake --build "$CI_PROJECT_DIR/build" *>&1
+    # Copy rocRAND.dll to the test directory
+    - if ($BUILD_SHARED_LIBS -eq "ON") { & cmake -E copy "$ROCRAND_DIR/build/install/bin/rocRAND.dll" "$CI_PROJECT_DIR/build/test" *>&1 }
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/
+      - $ROCRAND_DIR/build/install
+
+build:rocm-windows:
+  extends:
+    - .rocm-windows:build
+  variables:
+    BUILD_SHARED_LIBS: "ON"
+
+build:rocm-windows-static:
+  extends:
+    - .rocm-windows:build
+  variables:
+    BUILD_SHARED_LIBS: "OFF"
+
+.test:ctest:
+  extends:
+    - .rules:test
+  stage: test
+  script:
+    - cd ${CI_PROJECT_DIR}/build
+    # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
+    # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
+    # As a temporary workaround, disable the SDMA for test stability.
+    - HSA_ENABLE_SDMA=0 ctest --output-on-failure
+
+test:rocm:
+  needs:
+    - build:rocm-cmake-minimum
+  extends:
+    - .rocm:cmake-minimum
+    - .test:ctest
+    - .gpus:rocm
+    - .rocm:rocrand-install
+  before_script:
+    - !reference [".rocm:cmake-minimum", before_script]
+    - !reference [".rocm:rocrand-install", before_script]
+
+test:nvcc:
+  needs:
+    - build:nvcc-cmake-minimum
+  extends:
+    - .nvcc:cmake-minimum
+    - .test:ctest
+    - .gpus:nvcc
+  before_script:
+    # This is only needed because of the legacy before_script in .gpus:nvcc
+    - !reference [".nvcc:cmake-minimum", before_script]
+
+.test:python:
+  stage: test
+  extends:
+    - .rules:test
+  before_script:
+    - ${SUDO_CMD} apt-get update -qq
+    - ${SUDO_CMD} apt-get install -y -qq python3 python3-pip python3-venv
+    - export HIPRAND_PATH=${CI_PROJECT_DIR}/build/library/
+  script:
+    - cd ${CI_PROJECT_DIR}/python/hiprand
+    - python3 -m venv hiprand-venv
+    - source hiprand-venv/bin/activate
+    - python3 -m pip install setuptools numpy
+    - python3 -m pip install .
+    - python3 tests/hiprand_test.py
+    - python3 -m pip uninstall --yes hiprand
+    - deactivate
+
+test:rocm-python:
+  tags:
+    - rocm
+  extends:
+    - .test:python
+    - .deps:rocm
+    - .rocm:rocrand-install
+  needs:
+    - build:rocm-cmake-minimum
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".rocm:rocrand-install", before_script]
+    - !reference [".test:python", before_script]
+
+test:nvcc-python:
+  tags:
+    - nvcc
+  extends:
+    - .deps:nvcc
+    - .test:python
+  needs:
+    - build:nvcc-cmake-minimum
+  before_script:
+    - !reference [".deps:nvcc", before_script]
+    - !reference [".test:python", before_script]
+
+.test:package:
+  stage: test
+  extends:
+    - .rules:test
+  script:
+    - cd ${CI_PROJECT_DIR}/build
+    - ${SUDO_CMD} dpkg -i hiprand*.deb
+    - cmake
+      -S ${CI_PROJECT_DIR}/test/package/
+      -B ${CI_PROJECT_DIR}/build_package_test
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      ${WITH_LIB_CUDA}
+    - cmake --build ${CI_PROJECT_DIR}/build_package_test
+    - cd ${CI_PROJECT_DIR}/build_package_test
+    - ctest --output-on-failure
+    - ${SUDO_CMD} dpkg -r hiprand-tests hiprand-dev hiprand
+
+test:rocm-package:
+  tags:
+    - rocm
+  extends:
+    - .rocm:cmake-minimum
+    - .test:package
+    - .rocm:rocrand-install
+  needs:
+    - build:rocm-cmake-minimum
+  before_script:
+    - !reference [".rocm:cmake-minimum", before_script]
+    - !reference [".rocm:rocrand-install", before_script]
+  variables:
+    WITH_LIB_CUDA: ""
+
+test:nvcc-package:
+  tags:
+    - nvcc
+  extends:
+    - .nvcc:cmake-minimum
+    - .test:package
+  needs:
+    - build:nvcc-cmake-minimum
+  variables:
+    WITH_LIB_CUDA: "-D BUILD_WITH_LIB=CUDA"
+
+.test:install:
+  stage: test
+  extends:
+    - .rules:test
+  script:
+    - cmake
+      -S ${CI_PROJECT_DIR}
+      -B ${CI_PROJECT_DIR}/build_only_install
+      -G Ninja
+      -D BUILD_TEST=OFF
+      -D BUILD_FORTRAN_WRAPPER=OFF
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
+      ${WITH_LIB_CUDA}
+    # Preserve $PATH when sudoing
+    - ${SUDO_CMD} env PATH="$PATH" cmake --build ${CI_PROJECT_DIR}/build_only_install --target install
+    - cmake
+      -S ${CI_PROJECT_DIR}/test/package/
+      -B ${CI_PROJECT_DIR}/install_test
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=${COMPILER}
+      ${WITH_LIB_CUDA}
+    - cmake --build ${CI_PROJECT_DIR}/install_test
+    - cd ${CI_PROJECT_DIR}/install_test
+    - ctest --output-on-failure
+
+test:rocm-install:
+  tags:
+    - rocm
+  extends:
+    - .rocm:cmake-minimum
+    - .test:install
+    - .rocm:rocrand-install
+  needs:
+    - deps:rocrand
+  before_script:
+    - !reference [".rocm:cmake-minimum", before_script]
+    - !reference [".rocm:rocrand-install", before_script]
+  variables:
+    WITH_LIB_CUDA: ""
+
+test:nvcc-install:
+  tags:
+    - nvcc
+  extends:
+    - .nvcc:cmake-minimum
+    - .test:install
+  needs: []
+  variables:
+    WITH_LIB_CUDA: "-D BUILD_WITH_LIB=CUDA"
+
+test:doc:
+  stage: test
+  variables:
+    SPHINX_DIR: $DOCS_DIR/sphinx
+  extends:
+    - .rules:test
+    - .build:docs
+  artifacts:
+    paths:
+      - $DOCS_DIR/_build/html/
+    expire_in: 2 weeks
+
+.rocm-windows:test:
+  extends:
+    - .gpus:rocm-windows
+    - .rules:test
+  stage: test
+  variables:
+    BUILD_TYPE: Release
+  script:
+    - \& ctest --test-dir "$CI_PROJECT_DIR/build" --output-on-failure --no-tests=error *>&1
+
+test:rocm-windows:
+  extends:
+    - .rocm-windows:test
+  needs:
+    - build:rocm-windows
+
+.rocm-windows:test-install:
+  extends:
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
+    - .gpus:rocm-windows
+    - .rules:test
+  stage: test
+  variables:
+    BUILD_TYPE: Release
+  script:
+    - \& cmake --build "$CI_PROJECT_DIR/build" --target install *>&1
+    - \& cmake
+      -S "$CI_PROJECT_DIR/test/package"
+      -B "$CI_PROJECT_DIR/build/install_test"
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=$BUILD_TYPE
+      -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
+      -D CMAKE_NO_SYSTEM_FROM_IMPORTED=TRUE
+      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_PREFIX_PATH="$CI_PROJECT_DIR/build/install;$ROCRAND_DIR/build/install;${env:HIP_PATH}/lib/cmake" *>&1
+    - \& cmake --build "$CI_PROJECT_DIR/build/install_test" *>&1
+    - \& cmake -E copy "$ROCRAND_DIR/build/install/bin/rocRAND.dll" "$CI_PROJECT_DIR/build/install_test" *>&1
+    - \& cmake -E copy "$CI_PROJECT_DIR/build/install/bin/hipRAND.dll" "$CI_PROJECT_DIR/build/install_test" *>&1
+    - \& ctest --test-dir "$CI_PROJECT_DIR/build/install_test" --output-on-failure --no-tests=error *>&1
+
+test:rocm-windows-install:
+  extends:
+    - .rocm-windows:test-install
+  needs:
+    - build:rocm-windows

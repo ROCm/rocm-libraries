@@ -1,0 +1,41 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  CodeObjectVersion: V4
+
+BenchmarkProblems:
+
+  - # sgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - GlobalSplitU: [1]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 4, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+        - DepthU: [-3]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 128, 128, 1, 128 ]

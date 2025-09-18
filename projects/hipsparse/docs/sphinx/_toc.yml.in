@@ -1,0 +1,60 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+
+- entries:
+  - file: what-is-hipsparse.rst
+    title: What is hipSPARSE?
+
+- caption: Install
+  entries:
+  - file: install/install
+    title: Linux installation guide
+  - file: install/install-windows
+    title: Windows installation guide
+
+- caption: How to
+  entries:
+  - file: howto/using-hipsparse
+    title: Use hipSPARSE
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse/clients/samples
+    title: Client samples
+
+- caption: Examples
+  entries:
+  - file: reference/reference
+    title: API reference
+    subtrees:
+    - entries:
+      - file: reference/api.rst
+        title: Exported functions
+      - file: reference/types.rst
+        title: hipSPARSE data types
+      - file: reference/precision.rst
+        title: hipSPARSE precision support
+      - file: reference/auxiliary.rst
+        title: Sparse auxiliary functions
+      - file: reference/level1.rst
+        title: Sparse level 1 functions
+      - file: reference/level2.rst
+        title: Sparse level 2 functions
+      - file: reference/level3.rst
+        title: Sparse level 3 functions
+      - file: reference/extra.rst
+        title: Sparse extra functions
+      - file: reference/precond.rst
+        title: Preconditioner functions
+      - file: reference/conversion.rst
+        title: Sparse conversion functions
+      - file: reference/reorder.rst
+        title: Sparse reordering functions
+      - file: reference/generic.rst
+        title: Sparse generic functions
+
+- caption: About
+  entries:
+  - file: license.rst

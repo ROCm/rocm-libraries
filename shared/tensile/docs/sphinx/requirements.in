@@ -1,0 +1,3 @@
+rocm-docs-core==1.20.0
+autodoc
+joblib  # Required dependency for API doc-string generation

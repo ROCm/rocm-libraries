@@ -1,0 +1,9 @@
+[submodule "fin"]
+	path = projects/miopen/fin
+	url = https://github.com/ROCm/MIFin.git
+	branch = develop
+
+[submodule "HostLibraryTests/googletest"]
+	path = shared/tensile/HostLibraryTests/googletest
+	url = https://github.com/google/googletest.git
+	branch = master

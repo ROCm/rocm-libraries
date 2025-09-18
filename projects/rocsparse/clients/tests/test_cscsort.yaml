@@ -1,0 +1,126 @@
+# ########################################################################
+# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: cscsort_bad_arg
+  category: pre_checkin
+  function: cscsort_bad_arg
+  precision: *single_precision
+
+- name: cscsort
+  category: quick
+  function: cscsort
+  precision: *single_precision
+  M: [10]
+  N: [33]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_zero]
+  algo: [0, 1]
+
+- name: cscsort
+  category: quick
+  function: cscsort
+  precision: *single_precision
+  M: [10, 500]
+  N: [33, 242]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  algo: [0, 1]
+
+- name: cscsort
+  category: pre_checkin
+  function: cscsort
+  precision: *single_precision
+  M: [0, 3872, 10000]
+  N: [0, 1623, 10000]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  algo: [0, 1]
+
+- name: cscsort
+  category: nightly
+  function: cscsort
+  precision: *single_precision
+  M: [29593, 159382, 738249]
+  N: [9173, 82940, 538192]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  algo: [0, 1]
+
+- name: cscsort_file
+  category: quick
+  function: cscsort
+  precision: *single_precision
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  algo: [0, 1]
+  filename: [mac_econ_fwd500,
+             nos2,
+             nos4,
+             nos6,
+             scircuit,
+             Chevron2,
+             mplate,
+             qc2534]
+
+- name: cscsort_file
+  category: pre_checkin
+  function: cscsort
+  precision: *single_precision
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  algo: [0, 1]
+  filename: [rma10,
+             mc2depi,
+             ASIC_320k,
+             nos1,
+             nos3,
+             nos5,
+             nos7]
+
+- name: cscsort_file
+  category: nightly
+  function: cscsort
+  precision: *single_precision
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  algo: [0, 1]
+  filename: [bibd_22_8,
+             bmwcra_1,
+             amazon0312,
+             Chebyshev4,
+             sme3Dc,
+             webbase-1M,
+             shipsec1,
+             Chevron3,
+             Chevron4]

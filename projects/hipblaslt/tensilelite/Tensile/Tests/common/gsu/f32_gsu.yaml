@@ -1,0 +1,60 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: False
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+
+BenchmarkProblems:
+  - # sgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - 1LDSBuffer: [1]
+        - DepthU: [ 8 ]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - GlobalSplitU: [0, 1, 2]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4,4, 2,2]
+        - MIArchVgpr: [0]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        # - StaggerU: [0, 32]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [4]
+        - TransposeLDS: [0]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [1, 2, 4, 8]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 4096]
