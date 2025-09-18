@@ -254,8 +254,6 @@ static std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
  */
 void PerformanceConfigHipImplicitGemmGroupWrwWmma::InitHeuristicKernelIDs(const std::string& type)
 {
-    // TODO check if specific arch has different tokens
-
     for(int i = 0; i < valid_kernels.size(); i++)
     {
         if(valid_kernels[i].find(type) != std::string::npos)
@@ -266,12 +264,17 @@ void PerformanceConfigHipImplicitGemmGroupWrwWmma::InitHeuristicKernelIDs(const 
     }
 }
 
+bool PerformanceConfigHipImplicitGemmGroupWrwWmma::ModelApplyToken(
+    int idx, std::string value, const std::string& arch, const ProblemDescription& problem)
+{
+    // TODO once the AI model is trained/available
+    return false;
+}
+
 static std::vector<float> GetFeatures(const ProblemDescription& problem, const std::string& arch)
 {
     // TODO - Extract convolution problem characteristics and format them as numerical features for
     // the AI model
-    (void)problem;
-    (void)arch;
     std::size_t n = 0;
     std::vector<float> features(n * n, 0.0f);
     return features;
@@ -281,9 +284,7 @@ template <typename DataType>
 bool PerformanceConfigHipImplicitGemmGroupWrwWmma::RunParameterPredictionModel(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    // TODO - Execute the complete AI pipeline to predict the best kernel for this problem
-    (void)ctx;
-    (void)problem;
+    // TODO once the AI model is trained/available
     return false;
 }
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -292,10 +293,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwWmma::RunParameterPredictionModel(
 bool PerformanceConfigHipImplicitGemmGroupWrwWmma::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    // TODO - Decide if the AI model is trained/available for this specific combination of
-    // architecture, data types, and problem constraints
-    (void)ctx;
-    (void)problem;
+    // TODO once the AI model is trained/available
     return false;
 }
 
@@ -307,7 +305,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwWmma::HeuristicInit(
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(IsModelApplicable(ctx, problem))
     {
-        // TODO - when models are defined and trained
+        // TODO once the AI model is trained/available
     }
 #endif
     switch(problem.GetInDataType())
