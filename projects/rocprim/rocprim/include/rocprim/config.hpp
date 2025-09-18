@@ -140,9 +140,9 @@
 #endif
 
 #ifdef ROCPRIM_TARGET_SPIRV
-    #define ROCPRIM_CONSTEXPR
+    #define ROCPRIM_AMDGCN_CONSTEXPR
 #else
-    #define ROCPRIM_CONSTEXPR constexpr
+    #define ROCPRIM_AMDGCN_CONSTEXPR constexpr
 #endif
 
 #if __has_builtin(__builtin_amdgcn_processor_is)
@@ -272,15 +272,11 @@
     #define ROCPRIM_DETAIL_HAS_DPP 1
 #endif
 
-#if(!defined(ROCPRIM_DISABLE_DPP) || ROCPRIM_DISABLE_DPP == 0) \
+#if (!defined(ROCPRIM_DISABLE_DPP) || ROCPRIM_DISABLE_DPP == 0) \
     && (defined(ROCPRIM_DETAIL_HAS_DPP) && ROCPRIM_DETAIL_HAS_DPP == 1)
     #define ROCPRIM_DETAIL_USE_DPP 1
 #else
     #define ROCPRIM_DETAIL_USE_DPP 0
-#endif
-
-#if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS)
-    #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
 #endif
 
 #ifndef ROCPRIM_NAVI
@@ -301,7 +297,7 @@
 /// Quad size (group of 4 threads)
 #define ROCPRIM_QUAD_SIZE 4u
 
-#if(defined(_MSC_VER) && !defined(__clang__)) || (defined(__GNUC__) && !defined(__clang__))
+#if (defined(_MSC_VER) && !defined(__clang__)) || (defined(__GNUC__) && !defined(__clang__))
     #define ROCPRIM_UNROLL
     #define ROCPRIM_NO_UNROLL
 #else
