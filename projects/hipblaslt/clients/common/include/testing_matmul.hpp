@@ -3996,7 +3996,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     e_transA, e_transB, e_grouped_gemm, e_batch_count, e_M, e_N, e_K, e_alpha, e_lda, e_stride_a, \
         e_beta, e_ldb, e_stride_b, e_ldc, e_stride_c, e_ldd, e_stride_d, e_a_type, e_b_type,      \
         e_c_type, e_d_type, e_compute_type, e_scaleA, e_scaleB, e_scaleC, e_scaleD, e_amaxD,      \
-        e_activation_type, e_bias_vector, e_bias_type, e_aux_type
+        e_swizzle_a, e_swizzle_b, e_activation_type, e_bias_vector, e_bias_type, e_aux_type
 
             const char* tuningEnv     = getenv("HIPBLASLT_TUNING_FILE");
             int32_t     solutionIndex = ((tuningEnv && heuristicResult.size() == 1)
