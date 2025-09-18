@@ -62,10 +62,10 @@ BenchmarkProblems:
           - [16, 16, 16, 1,  1,   4, 16,  2,2 ] # MT = 128x512
           - [16, 16, 16, 1,  1,   8, 16,  2,2 ] # MT = 256x512
           - [16, 16, 16, 1,  1,   4, 5,   2,2 ] # MT = 128x160
-        # - WorkGroup:
-        #   - [16, 16, 1] # LSU=1, minDU=32
-        #   - [16, 16, 2] # LSU=2, minDU=64
-        #   - [16, 16, 4] # LSU=4, minDU=128
+        - WorkGroup:
+          - [16, 16, 1] # LSU=1, minDU=32
+          - [16, 16, 2] # LSU=2, minDU=64
+          - [16, 16, 4] # LSU=4, minDU=128
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]
         - PrefetchGlobalRead: [1,2]
@@ -144,9 +144,9 @@ BenchmarkProblems:
           - [16, 16, 16, 1,  1,   4,  2, 2,2 ] # MT = 128x64
           - [16, 16, 16, 1,  1,   8,  2, 2,2 ] # MT = 256x64
           - [16, 16, 16, 1,  1,   4,  4, 2,2 ] # MT = 128x128
-        # - WorkGroup:
-        #   - [16, 16, 1] # LSU=1, minDU=32
-        #   - [16, 16, 2] # LSU=2, minDU=64
+        - WorkGroup:
+          - [16, 16, 1] # LSU=1, minDU=32
+          - [16, 16, 2] # LSU=2, minDU=64
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]
         - PrefetchGlobalRead: [2]
@@ -215,9 +215,9 @@ BenchmarkProblems:
           - [16, 16, 16, 1,  1,   4,  2, 2,2 ] # MT = 128x64
           - [16, 16, 16, 1,  1,   8,  2, 2,2 ] # MT = 256x64
           - [16, 16, 16, 1,  1,   4,  4, 2,2 ] # MT = 128x128
-        # - WorkGroup:
-        #   - [16, 16, 1] # LSU=1, minDU=32
-        #   - [16, 16, 2] # LSU=2, minDU=64
+        - WorkGroup:
+          - [16, 16, 1] # LSU=1, minDU=32
+          - [16, 16, 2] # LSU=2, minDU=64
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]
         - PrefetchGlobalRead: [2]
@@ -286,9 +286,9 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,   4,  16, 2,2 ] # MT = 128x512
           - [16, 16, 32, 1,  1,   8,  16, 2,2 ] # MT = 256x512
           - [16, 16, 32, 1,  1,   4,  5,  2,2 ] # MT = 128x160
-        # - WorkGroup:
-        #   - [16, 16, 1] # LSU=1, minDU=64
-        #   - [16, 16, 2] # LSU=2, minDU=128
+        - WorkGroup:
+          - [16, 16, 1] # LSU=1, minDU=64
+          - [16, 16, 2] # LSU=2, minDU=128
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [16]
         - PrefetchGlobalRead: [2]
@@ -358,10 +358,10 @@ BenchmarkProblems:
           - [16, 16, 8, 1,  1,   8,  4, 2,2 ] # MT = 256x128
           - [16, 16, 8, 1,  1,   4,  8, 2,2 ] # MT = 128x256
           - [16, 16, 8, 1,  1,   8,  8, 2,2 ] # MT = 256x256
-        # - WorkGroup:
-        #   - [16, 16, 1] # LSU=1, minDU=16
-        #   - [16, 16, 2] # LSU=2, minDU=32
-        #   - [16, 16, 4] # LSU=4, minDU=64
+        - WorkGroup:
+          - [16, 16, 1] # LSU=1, minDU=16
+          - [16, 16, 2] # LSU=2, minDU=32
+          - [16, 16, 4] # LSU=4, minDU=64
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [4]
         - PrefetchGlobalRead: [2]
@@ -430,10 +430,10 @@ BenchmarkProblems:
           - [16, 16, 4, 1,  1,   4,  16, 2,2 ] # MT = 128x512
           - [16, 16, 4, 1,  1,   8,  16, 2,2 ] # MT = 256x512
           - [16, 16, 4, 1,  1,   4,  5,  2,2 ] # MT = 128x160
-        # - WorkGroup:
-        #   - [16, 16, 1] # LSU=1, minDU=16
-        #   - [16, 16, 2] # LSU=2, minDU=32
-        #   - [16, 16, 4] # LSU=4, minDU=64
+        - WorkGroup:
+          - [16, 16, 1] # LSU=1, minDU=16
+          - [16, 16, 2] # LSU=2, minDU=32
+          - [16, 16, 4] # LSU=4, minDU=64
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [4]
         - PrefetchGlobalRead: [2]

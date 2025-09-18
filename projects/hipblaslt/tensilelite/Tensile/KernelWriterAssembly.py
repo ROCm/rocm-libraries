@@ -2588,8 +2588,7 @@ class KernelWriterAssembly(KernelWriter):
               lsuStride  = du // lsu
               numWaves   = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
               # codes
-              module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"], tmpVgprRes))
-              module.add(vectorStaticDivide(wave_id, wave_id, numWaves, tmpVgprRes, comment="LSU offset: Get LSU wave_id"))
+              module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"] * numWaves, tmpVgprRes, comment="LSU offset: Get LSU wave_id"))
               module.add(VLShiftLeftB32(dst=vgpr(wave_id), shiftHex=hex(log2(lsuStride*swzMorN)), src=vgpr(wave_id), comment="LSU offset: LSU_wave_id*MI_MorN(%u)*lsuStrideK(%u)"%(swzMorN, lsuStride)))
               module.add(VAddU32(dst=vgpr(v), src0=vgpr(wave_id), src1=vgpr(v), comment="tileOffset += LSU offset"))
               self.vgprPool.checkIn(wave_id)
@@ -3713,12 +3712,16 @@ class KernelWriterAssembly(KernelWriter):
 
       WvG_M = kernel["MIWaveGroup"][0]
       if tP["isA"]:
-        module.add(VAndB32(dst=vgpr(qReg), src0=hex(WvG_M-1), src1=vgpr(qReg), comment="%s: wave_id (along_M) mod MIWG[0]"%(swizzledOrTrName)))
+        module.add(VAndB32(dst=vgpr(qReg), src0=hex(WvG_M-1), src1=vgpr(qReg), comment="%s: wave_id (along_M) %%= MIWG[0]"%(swizzledOrTrName)))
         module.add(VMulU32U24(dst=vgpr(qReg), src0=numKr, src1=vgpr(qReg), comment="%s: wave_id (along_M) *= numKr"%(swizzledOrTrName)))
       elif tP["isB"]:
         # NB:
         #   Calc of w_id is: /= MIWG[0], not %= MIWG[1]
         module.add(VLShiftRightB32(dst=vgpr(qReg), shiftHex=log2(WvG_M), src=vgpr(qReg), comment="%s: wave_id (along_N) /= MIWG[0]"%(swizzledOrTrName)))
+        if kernel["LocalSplitU"] > 1:
+          # LSU for swizzleB: make sure wave_id is in the range of MIWG[1], so need extra %=MIWG[1]
+          WvG_N = kernel["MIWaveGroup"][1]
+          module.add(VAndB32(dst=vgpr(qReg), src0=hex(WvG_N-1), src1=vgpr(qReg), comment="%s: LSU Case: wave_id (along_N) %%= MIWG[1]"%(swizzledOrTrName)))
         module.add(VMulU32U24(dst=vgpr(qReg), src0=numKr, src1=vgpr(qReg), comment="%s: wave_id (along_N) *= numKr"%(swizzledOrTrName)))
 
       if tP["isSwizzled"]:
@@ -12266,7 +12269,7 @@ class KernelWriterAssembly(KernelWriter):
         raise RuntimeError("chooseGlobalRead: offset too large for global_load %u"%(offset))
 
       modifier = GLOBALModifiers(offset=offset)
-      
+
       if bpl==8:
         return GlobalLoadTR8B64(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
       elif bpl==16:
