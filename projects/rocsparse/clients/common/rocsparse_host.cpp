@@ -8283,14 +8283,6 @@ void host_csr_to_ell(J                     M,
     }
 }
 
-
-
-
-
-
-
-
-
 template <typename I, typename J, typename T>
 void host_csr_to_sell(J                     M,
                       J                     slice_size,

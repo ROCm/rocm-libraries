@@ -47,9 +47,22 @@ Tests:
 - name: spmv_sell
   category: quick
   function: spmv_sell
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [300]
+  slice_size: [1, 2]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_zero]
+
+- name: spmv_sell
+  category: quick
+  function: spmv_sell
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [1, 44, 170]
+  M: [44, 170]
   N: [89, 243]
   slice_size: [1, 2, 3]
   alpha_beta: *alpha_beta_range_quick
