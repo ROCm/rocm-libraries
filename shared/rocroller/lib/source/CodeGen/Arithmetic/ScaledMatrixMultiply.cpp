@@ -36,8 +36,6 @@ namespace rocRoller
 {
     namespace InstructionGenerators
     {
-        RegisterComponent(ScaledMatrixMultiplyGenerator);
-
         const std::string ScaledMatrixMultiply::Basename = "ScaledMatrixMultiply";
 
         Generator<Instruction>

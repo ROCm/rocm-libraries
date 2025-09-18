@@ -34,8 +34,8 @@
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
-#include <Tensile/analytical/StreamK.hpp>
-#include <Tensile/analytical/Utils.hpp>
+#include <origami/streamk.hpp>
+#include <origami/utils.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -49,7 +49,7 @@
 
 namespace TensileLite
 {
-    using ReductionType = analytical::streamk::ReductionType;
+    using ReductionType = origami::streamk::reduction_type;
 
     enum class KERNELARGTYPE
     {
@@ -1239,7 +1239,7 @@ namespace TensileLite
                             = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
                         size_t elementSize = GetElementSize(problemType.aType);
                         double H_L2        = 0.0; // TODO
-                        auto   bestWGM     = analytical::select_best_wgm(sizes[0],
+                        auto   bestWGM     = origami::select_best_wgm(sizes[0],
                                                                    sizes[1],
                                                                    sizes[3],
                                                                    sizes[2],
@@ -1253,7 +1253,6 @@ namespace TensileLite
                                                                    wgmList,
                                                                    elementSize,
                                                                    H_L2,
-                                                                   false,
                                                                    false);
                         defaultWGM         = bestWGM.second;
                         if(T_Debug)
@@ -3018,47 +3017,47 @@ namespace TensileLite
         return 0;
     }
 
-    TensileLite::analytical::DataType datatypeToAnalyticalDatatype(rocisa::DataType type)
+    origami::data_type_t datatypeToAnalyticalDatatype(rocisa::DataType type)
     {
         switch(type)
         {
             case rocisa::DataType::Float:
-                return TensileLite::analytical::DataType::Float;
+                return origami::data_type_t::Float;
             case rocisa::DataType::Double:
-                return TensileLite::analytical::DataType::Double;
+                return origami::data_type_t::Double;
             case rocisa::DataType::Half:
-                return TensileLite::analytical::DataType::Half;
+                return origami::data_type_t::Half;
             case rocisa::DataType::Int8x4:
-                return TensileLite::analytical::DataType::Int8x4;
+                return origami::data_type_t::Int8x4;
             case rocisa::DataType::Int32:
-                return TensileLite::analytical::DataType::Int32;
+                return origami::data_type_t::Int32;
             case rocisa::DataType::BFloat16:
-                return TensileLite::analytical::DataType::BFloat16;
+                return origami::data_type_t::BFloat16;
             case rocisa::DataType::Int8:
-                return TensileLite::analytical::DataType::Int8;
+                return origami::data_type_t::Int8;
             case rocisa::DataType::Int64:
-                return TensileLite::analytical::DataType::Int64;
+                return origami::data_type_t::Int64;
             case rocisa::DataType::XFloat32:
-                return TensileLite::analytical::DataType::XFloat32;
+                return origami::data_type_t::XFloat32;
             case rocisa::DataType::Float8_fnuz:
-                return TensileLite::analytical::DataType::Float8_fnuz;
+                return origami::data_type_t::Float8_fnuz;
             case rocisa::DataType::BFloat8_fnuz:
-                return TensileLite::analytical::DataType::BFloat8_fnuz;
+                return origami::data_type_t::BFloat8_fnuz;
             case rocisa::DataType::Float8BFloat8_fnuz:
-                return TensileLite::analytical::DataType::Float8BFloat8_fnuz;
+                return origami::data_type_t::Float8BFloat8_fnuz;
             case rocisa::DataType::BFloat8Float8_fnuz:
-                return TensileLite::analytical::DataType::BFloat8Float8_fnuz;
+                return origami::data_type_t::BFloat8Float8_fnuz;
             case rocisa::DataType::Float8:
-                return TensileLite::analytical::DataType::Float8;
+                return origami::data_type_t::Float8;
             case rocisa::DataType::BFloat8:
-                return TensileLite::analytical::DataType::BFloat8;
+                return origami::data_type_t::BFloat8;
             case rocisa::DataType::Float8BFloat8:
-                return TensileLite::analytical::DataType::Float8BFloat8;
+                return origami::data_type_t::Float8BFloat8;
             case rocisa::DataType::BFloat8Float8:
-                return TensileLite::analytical::DataType::BFloat8Float8;
+                return origami::data_type_t::BFloat8Float8;
 
             default:
-                return TensileLite::analytical::DataType::None;
+                return origami::data_type_t::None;
         }
     }
 
@@ -3096,10 +3095,10 @@ namespace TensileLite
             {
                 batch *= problem.batchSize(i);
             }
-            analytical::DataType miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            origami::data_type_t miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            reductionStrat = analytical::streamk::select_streamk_reduction(
+            reductionStrat = origami::streamk::select_reduction(
                 x,
                 y,
                 z,
@@ -3160,10 +3159,10 @@ namespace TensileLite
             {
                 batch *= problem.batchSize(i);
             }
-            analytical::DataType miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            origami::data_type_t miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            skGrid = analytical::streamk::select_streamk_grid(x,
+            skGrid = origami::streamk::select_grid(x,
                                                               y,
                                                               z,
                                                               batch,

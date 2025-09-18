@@ -27,6 +27,7 @@
 #pragma once
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {
@@ -78,6 +79,6 @@ namespace rocRoller
                                         Register::ValuePtr r2hs,
                                         Expression::Conditional const&);
 
-        static const std::string Name;
+        inline static const std::string Name = "ConditionalGenerator";
     };
 }

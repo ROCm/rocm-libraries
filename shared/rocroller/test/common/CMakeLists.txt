@@ -10,6 +10,11 @@ target_link_libraries(common-test-utilities
         roc::mxDataGenerator
         hip::host
         OpenMP::OpenMP_CXX
+        # Some of the internal rocroller headers use boost templates. Since we
+        # do not wish to advertise a public boost dep from the rocroller library
+        # itself, we add the boost dep only to the tests that depend on these
+        # private headers.
+        Boost::headers
         ${CBLAS_LIBRARIES}
 )
 

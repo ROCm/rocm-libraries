@@ -37,6 +37,10 @@
 
 namespace rocRoller
 {
+    using DisallowedCycles = std::map<int, EnumBitset<CoexecCategory>>;
+    void        combineCoexec(DisallowedCycles& dst, DisallowedCycles const& src, int offset);
+    std::string toString(DisallowedCycles const& cycles);
+
     namespace Scheduling
     {
 
@@ -70,6 +74,8 @@ namespace rocRoller
             /// Will this cause an out-of-registers error?
             EnumBitset<Register::Type> outOfRegisters;
 
+            DisallowedCycles disallowedCoexec;
+
             std::vector<std::string> errors;
 
             static InstructionStatus StallCycles(unsigned int const value);
@@ -81,6 +87,8 @@ namespace rocRoller
              * Merge values of members from `other` into `this`.
              */
             void combine(InstructionStatus const& other);
+
+            std::string coexecString() const;
 
             InstructionStatus();
 

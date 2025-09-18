@@ -317,7 +317,8 @@ struct [[deprecated(
         return HIPCUB_MIN(t, u);
     }
 };
-/*
+
+#if !defined(__HIP_NO_HALF_OPERATORS__)
 template<>
 struct [[deprecated(
     "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdMin<__half>
@@ -332,7 +333,8 @@ struct [[deprecated(
         return HIPCUB_MIN(t, u);
     }
 };
-*/
+#endif // !defined(__HIP_NO_HALF_OPERATORS__)
+
 template<>
 struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Min "
                     "instead.")]] SimdMin<__hip_bfloat16>
@@ -383,7 +385,7 @@ struct [[deprecated(
     }
 };
 
-/*
+#if !defined(__HIP_NO_HALF_OPERATORS__)
 template<>
 struct [[deprecated(
     "SIMD intrinsics are currently not supported on HIP, use Max instead.")]] SimdMax<__half>
@@ -397,7 +399,7 @@ struct [[deprecated(
         return HIPCUB_MAX(t, u);
     }
 };
-*/
+#endif // !defined(__HIP_NO_HALF_OPERATORS__)
 
 template<>
 struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Max "
@@ -447,7 +449,7 @@ struct [[deprecated(
         return t + u;
     }
 };
-/*
+#if !defined(__HIP_NO_HALF_OPERATORS__)
 template<>
 struct [[deprecated(
     "SIMD intrinsics are currently not supported on HIP, use Sum instead.")]] SimdSum<__half>
@@ -461,7 +463,7 @@ struct [[deprecated(
         return t + u;
     }
 };
-*/
+#endif // !defined(__HIP_NO_HALF_OPERATORS__)
 
 template<>
 struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Sum "
@@ -514,7 +516,7 @@ struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP
     }
 };
 
-/*
+#if !defined(__HIP_NO_HALF_OPERATORS__)
 template<>
 struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, so "
                     "this operator will multiply 2 input values directly")]] SimdMul<__half>
@@ -528,7 +530,7 @@ struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP
         return t * u;
     }
 };
-*/
+#endif // !defined(__HIP_NO_HALF_OPERATORS__)
 
 template<>
 struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, so "

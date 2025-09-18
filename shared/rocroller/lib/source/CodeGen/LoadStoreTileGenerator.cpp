@@ -118,153 +118,6 @@ namespace rocRoller
             return std::make_shared<BufferDescriptor>(bufferSrd, m_context);
         }
 
-        static std::pair<uint, uint>
-            getElementBlockValues(KernelGraph const& graph, int target, const bool isTransposed)
-        {
-            uint elementBlockNumber = 0;
-            uint elementBlockIndex  = 0;
-
-            std::unordered_set<int> tileTags;
-            using OpsAndTilesType
-                = std::tuple<std::pair<int, Operation>, std::pair<int, MacroTile>, DataType>;
-            std::vector<OpsAndTilesType> targetOpsAndTiles;
-
-            for(auto conn : graph.mapper.getCoordinateConnections(target))
-            {
-                auto     opTag = conn.control;
-                auto     op    = std::get<Operation>(graph.control.getElement(opTag));
-                DataType dataType;
-                if(std::visit(rocRoller::overloaded{[&](LoadTiled& load) {
-                                                        dataType = load.varType.dataType;
-                                                        return true;
-                                                    },
-                                                    [&](LoadLDSTile& load) {
-                                                        dataType = load.varType.dataType;
-                                                        return true;
-                                                    },
-                                                    [&](StoreTiled& store) {
-                                                        dataType = store.varType.dataType;
-                                                        return true;
-                                                    },
-                                                    [&](StoreLDSTile& store) {
-                                                        dataType = store.varType.dataType;
-                                                        return true;
-                                                    },
-                                                    [&](auto& other) { return false; }},
-                              op))
-                {
-                    auto [macTileTag, macTile] = graph.getDimension<MacroTile>(opTag);
-
-                    auto maybeParentTile = only(
-                        graph.coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<Duplicate>));
-                    if(maybeParentTile)
-                    {
-                        macTileTag = *maybeParentTile;
-                        macTile    = *graph.coordinates.get<MacroTile>(macTileTag);
-                    }
-
-                    if(!tileTags.count(macTileTag))
-                    {
-                        targetOpsAndTiles.push_back({{opTag, op}, {macTileTag, macTile}, dataType});
-                    }
-                }
-            }
-
-            auto [tagAndOp, tagAndTile, dataType] = [](auto opsAndTiles) -> OpsAndTilesType {
-                for(OpsAndTilesType& elem : opsAndTiles)
-                {
-                    auto memType = std::get<1>(elem).second.memoryType;
-                    if(memType == MemoryType::WAVE || memType == MemoryType::WAVE_SWIZZLE)
-                    {
-                        return elem;
-                    }
-                }
-                return opsAndTiles[0];
-            }(targetOpsAndTiles);
-            auto [opTag, op]           = tagAndOp;
-            auto [macTileTag, macTile] = tagAndTile;
-
-            if(macTile.memoryType == MemoryType::VGPR
-               || (macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   && macTile.memoryType == MemoryType::WAVE_SPLIT))
-            {
-                auto [elementNumberXTag, elementNumberX]
-                    = graph.getDimension<ElementNumber>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(elementNumberX.size)[EvaluationTime::Translate],
-                    "Could not determine ElementNumberX size at translate-time.\n",
-                    ShowValue(elementNumberX));
-
-                auto [elementNumberYTag, elementNumberY]
-                    = graph.getDimension<ElementNumber>(opTag, 1);
-                AssertFatal(
-                    Expression::evaluationTimes(elementNumberY.size)[EvaluationTime::Translate],
-                    "Could not determine ElementNumber size at translate-time.\n",
-                    ShowValue(elementNumberY));
-
-                elementBlockNumber = getUnsignedInt(evaluate(elementNumberX.size));
-                elementBlockIndex  = getUnsignedInt(evaluate(elementNumberY.size));
-            }
-            else if(macTile.memoryType == MemoryType::WAVE
-                    || macTile.memoryType == MemoryType::WAVE_SWIZZLE)
-            {
-                auto [vgprBlockNumberTag, vgprBlockNumber]
-                    = graph.getDimension<VGPRBlockNumber>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(vgprBlockNumber.size)[EvaluationTime::Translate],
-                    "Could not determine VGPRBlockNumber size at translate-time.\n",
-                    ShowValue(vgprBlockNumber));
-
-                auto [vgprBlockIndexTag, vgprBlockIndex]
-                    = graph.getDimension<VGPRBlockIndex>(opTag, 0);
-                AssertFatal(
-                    Expression::evaluationTimes(vgprBlockIndex.size)[EvaluationTime::Translate],
-                    "Could not determine VGPRBlockIndex size at translate-time.\n",
-                    ShowValue(vgprBlockIndex));
-
-                elementBlockNumber = getUnsignedInt(evaluate(vgprBlockNumber.size));
-                elementBlockIndex  = getUnsignedInt(evaluate(vgprBlockIndex.size));
-                if(isScaleType(dataType))
-                {
-                    // Scales are another special case here. For Scales we need
-                    // to get VGPR coordinate instead of VGPRBlockNumber/Index
-                    // (see addLoadSwizzleTileCT).
-                    auto [vgprTag, vgpr] = graph.getDimension<VGPR>(opTag, 0);
-                    AssertFatal(Expression::evaluationTimes(vgpr.size)[EvaluationTime::Translate],
-                                "Could not determine VGPR size at translate-time.\n",
-                                ShowValue(vgpr));
-                    // Multiplying by elementBlockNumber here forces the use
-                    // of the widest load/store possible
-                    elementBlockIndex = elementBlockNumber * getUnsignedInt(evaluate(vgpr.size));
-                }
-
-                if((!isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(dataType,
-                                                                     {.m = macTile.subTileSizes[0],
-                                                                      .n = macTile.subTileSizes[1],
-                                                                      .k = macTile.subTileSizes[2]})
-                    || isScaleType(dataType))
-                   && !isTransposed)
-                {
-                    // For Scales and other kinds of tiles, VGPRBlockIndex holds
-                    // number of VGPR per block and not elements per VGPRBlock.
-                    elementBlockIndex *= packingFactorForDataType(dataType);
-                }
-            }
-            else
-            {
-                Throw<FatalError>(
-                    "Could not find ElementNumber or VGPRBlockNumber/Index coordinates.\n",
-                    ShowValue(op),
-                    ShowValue(macTile));
-            }
-
-            AssertFatal(elementBlockNumber > 0 && elementBlockIndex > 0,
-                        "elemementBlockNumber & elementBlockIndex must be greater than zero. ",
-                        ShowValue(elementBlockNumber),
-                        ShowValue(elementBlockIndex));
-            return {elementBlockNumber, elementBlockIndex};
-        }
-
         /**
          * @brief Build unrolled offset expression.
          *
@@ -283,69 +136,56 @@ namespace rocRoller
          *
          * part of the offset above.
          */
-        ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int                offsetTag,
+        ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int                opTag,
+                                                            bool               isDirect2LDS,
                                                             Transformer const& coords)
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::getOffsetExpr(offsetTag: {})", offsetTag);
+            rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::getOffsetExpr("
+                                               "operationTag: {}, isDirect2LDS: {})",
+                                               opTag,
+                                               isDirect2LDS);
 
-            // Find storage node connected to Offset edge.
-            auto maybeTargetTag = findStorageNeighbour(offsetTag, *m_graph);
-            if(!maybeTargetTag)
-            {
-                return nullptr;
-            }
+            auto [target, direction] = getOperationTarget(opTag, *m_graph, isDirect2LDS);
+            auto [required, path]    = findRequiredCoordinates(target, direction, *m_graph);
 
-            auto [targetTag, direction] = *maybeTargetTag;
-
-            // Find all required coordinates for the storage node,
-            // and filter out Unroll coordinates.
-            auto [required, path] = findRequiredCoordinates(targetTag, direction, *m_graph);
-            auto unrolls          = filterCoordinates<Unroll>(required, *m_graph);
-
+            auto unrolls = filterCoordinates<Unroll>(required, *m_graph);
             if(unrolls.size() == 0)
                 return nullptr;
 
             ExpressionPtr result = Expression::literal(0u);
 
-            for(auto const& unroll : unrolls)
-            {
-                // Find the neighbour of the Unroll that:
-                // 1. is in the load/store coordinate transform path
-                // 2. has a Stride edge connected to it
-                std::optional<int> maybeStrideTag;
-                std::vector<int>   neighbourNodes;
-                if(direction == Graph::Direction::Downstream)
-                    neighbourNodes = m_graph->coordinates.parentNodes(unroll).to<std::vector>();
-                else
-                    neighbourNodes = m_graph->coordinates.childNodes(unroll).to<std::vector>();
-                for(auto neighbourNode : neighbourNodes)
+            auto getUnrollStrideCoordinate = [this](int opTag, int subdimension) {
+                for(auto const& c : m_graph->mapper.getConnections(opTag))
                 {
-                    if(path.contains(neighbourNode))
+                    if(std::holds_alternative<Connections::UnrollStride>(c.connection))
                     {
-                        auto neighbourEdges = m_graph->coordinates.getNeighbours(
-                            neighbourNode, Graph::opposite(direction));
-                        for(auto neighbourEdge : neighbourEdges)
-                        {
-                            auto maybeStride = m_graph->coordinates.get<Stride>(neighbourEdge);
-                            if(maybeStride
-                               && m_context->registerTagManager()->hasExpression(neighbourEdge))
-                            {
-                                maybeStrideTag = neighbourEdge;
-                            }
-                        }
+                        auto curConnection = std::get<Connections::UnrollStride>(c.connection);
+                        auto unrollDim     = curConnection.unrollDimension;
+                        if(unrollDim != subdimension)
+                            continue;
+                        return c.coordinate;
                     }
                 }
+                return -1;
+            };
 
-                if(!maybeStrideTag)
+            for(auto const& unroll : unrolls)
+            {
+                auto const subDimension = m_graph->mapper.getConnectionSubdimension(opTag, unroll);
+
+                if(subDimension == -1)
+                    continue;
+
+                auto strideTag = getUnrollStrideCoordinate(opTag, subDimension);
+                if(strideTag == -1)
                     continue;
 
                 auto [strideExpr, strideAttrs]
-                    = m_context->registerTagManager()->getExpression(*maybeStrideTag);
+                    = m_context->registerTagManager()->getExpression(strideTag);
 
                 Log::debug(
                     "  unroll coord {} value: {}", unroll, toString(coords.getCoordinate(unroll)));
-
+                Log::debug("  stride coord {} expr: {}", strideTag, toString(strideExpr));
                 result = result + coords.getCoordinate(unroll) * strideExpr;
             }
 
@@ -398,11 +238,27 @@ namespace rocRoller
                     info.rowOffsetReg = m_context->registerTagManager()->getRegister(offsetTag);
                 }
 
-                rowOffsetExpr = getOffsetExpr(offsetTag, coords);
+                rowOffsetExpr = getOffsetExpr(tag, direct2LDS, coords);
             }
-            else if(m_baseOffsets.count(offsetTag) > 0)
+            else
             {
-                auto baseTag = m_baseOffsets[offsetTag];
+                auto baseTag = -1;
+                for(auto const& c : m_graph->mapper.getConnections(tag))
+                {
+                    if(!std::holds_alternative<Connections::BaseOffset>(c.connection))
+                        continue;
+                    auto curConnection = std::get<Connections::BaseOffset>(c.connection);
+                    auto subdim        = curConnection.subdimension;
+
+                    if(subdim != 0)
+                        continue;
+                    baseTag = c.coordinate;
+                }
+                if(baseTag == -1)
+                {
+                    Throw<FatalError>("Base offset not found");
+                }
+
                 if(direct2LDS)
                 {
                     auto tmp = m_context->registerTagManager()->getRegister(baseTag);
@@ -425,11 +281,7 @@ namespace rocRoller
                     co_yield m_context->copier()->copy(info.rowOffsetReg, baseReg);
                 }
 
-                rowOffsetExpr = getOffsetExpr(offsetTag, coords);
-            }
-            else
-            {
-                Throw<FatalError>("Base offset not found");
+                rowOffsetExpr = getOffsetExpr(tag, direct2LDS, coords);
             }
 
             if(direct2LDS)
@@ -583,8 +435,6 @@ namespace rocRoller
                 coords.setCoordinate(increment, L(0u));
             }
 
-            // Compute an offset address if we don't have an
-            // associated base address to inherit from
             if(base < 0 && offset > 0)
             {
                 auto offsetType = Register::Type::Vector;
@@ -593,152 +443,6 @@ namespace rocRoller
                 auto offsetReg = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
                 offsetReg->setName(concatenate("Offset", tag));
                 scope->addRegister(offset);
-
-                auto indexExpr
-                    = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
-
-                auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
-                auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
-
-                auto const& arch = m_context->targetArchitecture();
-                const auto  needsPadding
-                    = numBits == 6 && isTransposed
-                      && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
-
-                ExpressionPtr paddingBytes{L(0u)};
-                if(needsPadding && maybeLDS)
-                {
-                    uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
-                    auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
-                    paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
-                }
-
-                co_yield Instruction::Comment(
-                    fmt::format("  Offset({}): indexExpr: {}", offset, toString(indexExpr)));
-                co_yield Instruction::Comment(
-                    fmt::format("  Offset({}): paddingBytes: {}", offset, toString(paddingBytes)));
-
-                auto expr = toBytes(indexExpr) + paddingBytes;
-
-                if(ci.isDirect2LDS)
-                    expr = makeScalar(expr);
-
-                co_yield generate(offsetReg, convert(offsetReg->variableType(), expr));
-                offsetReg->setReadOnly();
-            }
-            else
-            {
-                m_baseOffsets.insert_or_assign(offset, base);
-            }
-
-            // Compute a stride
-            if(stride > 0)
-            {
-                auto indexExpr = ci.forward ? coords.forwardStride(increment, L(1), {target})[0]
-                                            : coords.reverseStride(increment, L(1), {target})[0];
-
-                // We have to manually invoke m_fastArith here since it can't traverse into the
-                // RegisterTagManager.
-                // TODO: Revisit storing expressions in the RegisterTagManager.
-                bool unitStride = false;
-                if(Expression::evaluationTimes(indexExpr)[EvaluationTime::Translate])
-                {
-                    if(getUnsignedInt(evaluate(indexExpr)) == 1u)
-                        unitStride = true;
-                }
-
-                uint          elementBlockSize = 0;
-                ExpressionPtr elementBlockStride;
-                ExpressionPtr trLoadPairStride;
-                ExpressionPtr elementBlockStridePaddingBytes{L(0u)};
-                ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
-                ExpressionPtr indexExprPaddingBytes{L(0u)};
-
-                auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
-                auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
-
-                if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
-                {
-                    auto [elementBlockNumber, elementBlockIndex]
-                        = getElementBlockValues(*m_graph, target, isTransposed);
-
-                    elementBlockSize = elementBlockIndex;
-
-                    auto const& arch = m_context->targetArchitecture();
-                    if(isTransposed)
-                    {
-                        // See addLoadWaveTileCTF8F6F4 in LowerTile.cpp
-                        const auto wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
-                        uint const numVBlocks
-                            = wfs == 64 ? (numBits == 8 ? 2 : 1) : (numBits == 8 ? 4 : 2);
-                        elementBlockSize = (elementBlockNumber / numVBlocks) * elementBlockSize;
-                    }
-                    AssertFatal(
-                        elementBlockSize > 0, "Invalid elementBlockSize: ", elementBlockSize);
-
-                    const auto needsPadding
-                        = numBits == 6 && isTransposed
-                          && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
-
-                    // Padding is added after every 16 elements, thus for F6 datatypes that will
-                    // be transpose loaded from LDS elementBlockSize is set to 16 instead of 32.
-                    if(needsPadding)
-                    {
-                        elementBlockSize = 16;
-                    }
-
-                    elementBlockStride
-                        = ci.forward
-                              ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
-                              : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
-
-                    uint elementsPerTrLoad = elementBlockIndex;
-                    trLoadPairStride
-                        = ci.forward
-                              ? coords.forwardStride(increment, L(elementsPerTrLoad), {target})[0]
-                              : coords.reverseStride(increment, L(elementsPerTrLoad), {target})[0];
-
-                    if(needsPadding && maybeLDS)
-                    {
-                        uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
-                        auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
-                        elementBlockStridePaddingBytes
-                            = elementBlockStride / L(elementsPerTrLoad) * L(extraLdsBytes);
-                        trLoadPairStridePaddingBytes
-                            = trLoadPairStride / L(elementsPerTrLoad) * L(extraLdsBytes);
-                        indexExprPaddingBytes = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
-                    }
-                }
-
-                co_yield Instruction::Comment(
-                    fmt::format("  Stride({}): indexExpr: {}", stride, toString(indexExpr)));
-                co_yield Instruction::Comment(fmt::format("  Stride({}): indexExprPaddingBytes: {}",
-                                                          stride,
-                                                          toString(indexExprPaddingBytes)));
-                co_yield Instruction::Comment(
-                    fmt::format("  Stride({}): unitStride: {} vgprBlockSize: {}",
-                                stride,
-                                unitStride,
-                                elementBlockSize));
-                co_yield Instruction::Comment(fmt::format(
-                    "  Stride({}): elementBlockStride: {} elementBlockStridePaddingBytes: {}",
-                    stride,
-                    toString(elementBlockStride),
-                    toString(elementBlockStridePaddingBytes)));
-                co_yield Instruction::Comment(fmt::format("  Stride({}): trLoadPairStride:  {} "
-                                                          "trLoadPairStridePaddingBytes: {}",
-                                                          stride,
-                                                          toString(trLoadPairStride),
-                                                          toString(trLoadPairStridePaddingBytes)));
-
-                tagger->addExpression(stride,
-                                      m_fastArith(toBytes(indexExpr) + indexExprPaddingBytes),
-                                      {ci.strideType,
-                                       unitStride,
-                                       elementBlockSize,
-                                       toBytes(elementBlockStride) + elementBlockStridePaddingBytes,
-                                       toBytes(trLoadPairStride) + trLoadPairStridePaddingBytes});
-                scope->addRegister(stride);
             }
 
             // Create a buffer descriptor

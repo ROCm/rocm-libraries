@@ -36,6 +36,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <rocRoller/Utilities/LazySingleton.hpp>
+
 namespace rocRoller
 {
     namespace Component
@@ -159,31 +161,6 @@ namespace rocRoller
         template <Component Comp>
         bool RegisterComponentImpl();
 
-#define RegisterComponentBaseCustom(base, name) const std::string base::Basename = #name
-
-#define RegisterComponentBase(base) RegisterComponentBaseCustom(base, #base)
-
-#define VAR_CAT2(a, b) a##b
-#define VAR_CAT(a, b) VAR_CAT2(a, b)
-#define RegisterComponentCustom(component, name)                        \
-    const std::string component::Name = name;                           \
-    namespace                                                           \
-    {                                                                   \
-        auto VAR_CAT(_component_, __LINE__)                             \
-            = rocRoller::Component::RegisterComponentImpl<component>(); \
-    }
-
-#define RegisterComponent(component) RegisterComponentCustom(component, #component)
-
-#define RegisterComponentTemplateSpec(component, types...)                     \
-    template <>                                                                \
-    const std::string component<types>::Name = #component "<" #types ">";      \
-    namespace                                                                  \
-    {                                                                          \
-        auto VAR_CAT(_component_, __LINE__)                                    \
-            = rocRoller::Component::RegisterComponentImpl<component<types>>(); \
-    }
-
         class ComponentFactoryBase
         {
         public:
@@ -198,7 +175,7 @@ namespace rocRoller
         };
 
         template <ComponentBase Base>
-        class ComponentFactory : public ComponentFactoryBase
+        class ComponentFactory : public ComponentFactoryBase, LazySingleton<ComponentFactory<Base>>
         {
         public:
             using Argument = typename Base::Argument;
@@ -209,6 +186,8 @@ namespace rocRoller
                 Matcher<Base> matcher;
                 Builder<Base> builder;
             };
+
+            ComponentFactory();
 
             static ComponentFactory& Instance();
 
@@ -226,6 +205,8 @@ namespace rocRoller
             bool registerComponent(std::string const& name,
                                    Matcher<Base>      matcher,
                                    Builder<Base>      builder);
+
+            void registerImplementations();
 
             template <typename T>
             void emptyCache(T&& arg);

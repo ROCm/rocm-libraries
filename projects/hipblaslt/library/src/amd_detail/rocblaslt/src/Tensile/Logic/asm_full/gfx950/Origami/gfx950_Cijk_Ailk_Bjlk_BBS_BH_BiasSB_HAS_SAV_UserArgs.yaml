@@ -41937,7 +41937,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Custom_Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+    BaseName: Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT2qV3rStRgcsMcTwgKFQsl5kyuQLRiSKEOfx5KWVaCz6w=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -41945,7 +41945,7 @@
     ClusterLocalRead: 1
     CodeObjectVersion: '4'
     ConvertAfterDS: false
-    CustomKernelName: Custom_Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+    CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 64
     DirectToLds: true
@@ -41979,8 +41979,8 @@
       SupportUserGSU: false, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Custom_Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
-    LDSTrInst: 0
+    KernelNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA4096_LBSPPB4096_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW8_SK3_SKXCCM0_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
+    LDSTrInst: false
     LSCA: 256
     LSCB: 256
     LSPA: 8
@@ -42048,6 +42048,7 @@
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
+    MfmaInitCVgprs: true
     NoLdsWriteCode: true
     NoReject: false
     NoTailLoop: false
@@ -42057,7 +42058,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -42084,7 +42085,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 186
-    SolutionNameMin: Custom_Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+    SolutionNameMin: Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA4096_LBSPPB4096_LBSPPM0_LPA0_LPB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW8_SK3_SKXCCM0_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM16_WGMXCC2_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 0
     StaggerUMapping: 0
@@ -42102,6 +42103,7 @@
     SubGroupA: 8
     SubGroupB: 32
     SuppressNoLoadLoop: false
+    SwapGlobalReadOrder: false
     ThreadTile: [1, 1]
     ThreadTile0: 32
     ThreadTile1: 8
@@ -42115,10 +42117,13 @@
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
+    UseCustomMainLoopSchedule: true
+    UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UsePLRPack: true
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 8
@@ -42129,8 +42134,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
+    WorkGroupMapping: 16
+    WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -42139,13 +42144,13 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: false
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
     _staggerStrideShift: 0
-    enableLDSTrA: 0
-    enableLDSTrB: 0
+    enableLDSTrA: false
+    enableLDSTrB: false
     reorderGRInstForDTVA: false
     reorderGRInstForDTVB: false
     tailLoopOptA: false

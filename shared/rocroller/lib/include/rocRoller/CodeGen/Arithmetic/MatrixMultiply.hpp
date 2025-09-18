@@ -69,7 +69,7 @@ namespace rocRoller
             MatrixMultiplyGenerator(ContextPtr context)
                 : m_context(context){};
 
-            static const std::string Name;
+            inline static const std::string Name = "MatrixMultiplyGenerator";
 
             static bool Match(Argument const& arg)
             {
