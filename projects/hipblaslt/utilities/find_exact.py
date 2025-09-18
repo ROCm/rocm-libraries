@@ -210,7 +210,7 @@ def findExact(config):
     if config["ProblemType"]["UseBias"]:
         gemm_type += "_Bias"
 
-    execBenchPath = globalParameters["BuildDir"] + "/clients/staging/hipblaslt-bench"
+    execBenchPath = globalParameters["BuildDir"] + "/clients/hipblaslt-bench"
 
     for size in config["ProblemSizes"]:
         filename = "result_%s%s_%s_%dx%dx%dx%d.txt"%(config["ProblemType"]["TransposeA"],
@@ -426,7 +426,7 @@ def UpdateGrid(config):
         solutionIndex = int(re.search(r'\d+', perfData[0]).group())
 
         # replace hipblaslt-bench with execBenchPath
-        execBenchPath = globalParameters["BuildDir"] + "/clients/staging/hipblaslt-bench"
+        execBenchPath = globalParameters["BuildDir"] + "/clients/hipblaslt-bench"
         benchCommand[0] = execBenchPath
         benchCommand.append("--print_kernel_info")
 

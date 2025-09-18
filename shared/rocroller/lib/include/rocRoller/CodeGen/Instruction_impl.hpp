@@ -347,14 +347,14 @@ namespace rocRoller
     inline constexpr bool Instruction::isCommentOnly() const
     {
         // clang-format off
-        return m_nopCount == 0
-            && m_allocations[0] == nullptr
-            && m_directive.empty()
+        return m_opcode.empty()
             && m_label.empty()
-            && m_waitCount == WaitCount()
-            && m_opcode.empty()
-            && m_dependency == Scheduling::Dependency::None
-        && m_lockOp == Scheduling::LockOperation::None;
+            && m_directive.empty()
+            && m_nopCount       == 0
+            && m_allocations[0] == nullptr
+            && m_waitCount      == WaitCount()
+            && m_dependency     == Scheduling::Dependency::None
+            && m_lockOp         == Scheduling::LockOperation::None;
         // clang-format on
     }
 
@@ -609,12 +609,14 @@ namespace rocRoller
 
     inline Instruction& Instruction::lock(Scheduling::Dependency dependency, std::string comment)
     {
+        if(dependency == Scheduling::Dependency::Count)
+            return *this;
+
         AssertFatal(m_lockOp == Scheduling::LockOperation::None,
                     "An instruction can only lock or unlock once.");
 
-        AssertFatal(dependency != Scheduling::Dependency::None
-                        && dependency != Scheduling::Dependency::Count,
-                    "Can not create lock instruction with Unlock or Count dependency");
+        // AssertFatal(dependency != Scheduling::Dependency::Count,
+        //             "Can not create lock instruction with Unlock or Count dependency");
 
         m_lockOp     = Scheduling::LockOperation::Lock;
         m_dependency = dependency;
@@ -629,6 +631,9 @@ namespace rocRoller
 
     inline Instruction& Instruction::unlock(Scheduling::Dependency dependency, std::string comment)
     {
+        if(dependency == Scheduling::Dependency::Count)
+            return *this;
+
         AssertFatal(m_lockOp == Scheduling::LockOperation::None,
                     "An instruction can only lock or unlock once.");
 

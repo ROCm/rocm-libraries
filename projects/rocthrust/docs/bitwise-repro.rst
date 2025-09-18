@@ -22,7 +22,7 @@ An alternative version of the above operations that *is* bitwise reproducible wi
 =====
 Tests
 =====
-To run the bitwise reproduciblity tests, you'll need to build the reproducibility.hip target. 
+To run the bitwise reproduciblity tests, you'll need to build the reproducibility.hip target.
 This target provides bitwise reproduciblity test coverage in two forms:
 
 1. The first form runs tests by issuing multiple calls to the bitwise-reproducible versions of the algorithms mentioned in the section above using the deterministic parallel execution policy.

@@ -34,4 +34,3 @@ else
     echo su --login $_USER
     su --login $_USER
 fi
-

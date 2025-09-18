@@ -34,12 +34,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Scalar, DataType::Int32);
-    RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Vector, DataType::Int32);
-    RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Scalar, DataType::Int64);
-    RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Vector, DataType::Int64);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Modulo>>
         GetGenerator<Expression::Modulo>(Register::ValuePtr dst,

@@ -73,6 +73,6 @@ namespace rocRoller
         Generator<Instruction>
             generate(Register::ValuePtr dst, Register::ValuePtr arg, Expression::Negate const&);
 
-        static const std::string Name;
+        inline static const std::string Name = "NegateGenerator";
     };
 }

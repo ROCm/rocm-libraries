@@ -83,13 +83,13 @@ Follow these guidelines to optimize how Stream-K uses resources:
    The following example limits the GEMM kernels to 64 workgroups:
 
    .. code-block:: bash
-   
+
       export TENSILE_STREAMK_FIXED_GRID=64
 
 *  **Limiting compute units**: Use ``TENSILE_STREAMK_MAX_CUS`` to restrict the number of compute units the Stream-K kernels can use.
-  
+
    This example limits the GEMM kernels to 32 compute units:
-      
+
    .. code-block:: bash
 
       export TENSILE_STREAMK_MAX_CUS=32

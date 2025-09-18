@@ -33,6 +33,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
 #include "GPUContextFixture.hpp"
@@ -121,12 +122,14 @@ namespace PermLanesTest
         params->setManualWavefrontCount({4, 1});
         auto lowerTile             = std::make_shared<LowerTile>(params, context);
         kgraph                     = kgraph.transform(lowerTile);
-        auto addComputeIndex       = std::make_shared<AddComputeIndex>();
-        kgraph                     = kgraph.transform(addComputeIndex);
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
+        auto addComputeIndex       = std::make_shared<AddComputeIndex>();
+        kgraph                     = kgraph.transform(addComputeIndex);
         kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
-        kgraph                     = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+        if(context->kernelOptions()->removeSetCoordinate)
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context));
 
         context->schedule(k->preamble());
         context->schedule(k->prolog());
@@ -179,7 +182,7 @@ namespace PermLanesTest
                         + lane * waveK
                         + vgprBlock * miK
                         + vgprIndex;
-            
+
             auto resultIdx = wave * waveK * nLanes * waveK
                              + vgprIndex * factor * nLanes * waveK
                              + simdIndex * nLanes * waveK

@@ -35,4 +35,3 @@ target_link_libraries(TensileTestLib PUBLIC TensileHost ${Boost_LIBRARIES})
 if(TENSILE_USE_OPENMP)
     target_link_libraries(TensileTestLib PRIVATE custom_openmp_cxx)
 endif()
-

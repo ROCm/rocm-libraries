@@ -263,7 +263,7 @@ namespace TensileLite
 
         template <typename IO>
         const typename TaskPredicateSMT<IO>::SubclassMap SubclassMappingTraits<Predicates::Predicate<Task>,IO>::subclasses
-            = TaskPredicateSMT<IO>::GetSubclasses();     
+            = TaskPredicateSMT<IO>::GetSubclasses();
 
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::WorkspaceCheck, IO>

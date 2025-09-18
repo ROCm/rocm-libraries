@@ -31,7 +31,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p hipsparseXgtsv2_nopivot_bufferSizeExt returns the size of the temporary storage
-*  buffer in bytes that is required by \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()". 
+*  buffer in bytes that is required by \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]

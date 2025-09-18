@@ -52,7 +52,7 @@ rocblas_status rocsolver_sygvd_hegvd_impl(rocblas_handle handle,
 
     // argument checking
     rocblas_status st
-        = rocsolver_sygv_hegv_argCheck(handle, itype, evect, uplo, n, lda, ldb, A, B, D, E, info);
+        = rocsolver_sygvd_hegvd_argCheck(handle, itype, evect, uplo, n, lda, ldb, A, B, D, E, info);
     if(st != rocblas_status_continue)
         return st;
 

@@ -61,13 +61,18 @@ function(add_rocthrust_test TEST)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
             ${sqlite_local_SOURCE_DIR}
     )
-    target_link_libraries(${TEST_TARGET}
-        PRIVATE
-            rocthrust
-            roc::rocprim_hip
-        PUBLIC
-            ${ROCTHRUST_SQLITE_LIB}
-    )
+
+    if(USE_SYSTEM_LIB)
+        target_link_libraries(${TEST_TARGET} PRIVATE roc::rocthrust)
+    else()
+        target_link_libraries(${TEST_TARGET}
+            PRIVATE
+                rocthrust
+                roc::rocprim_hip
+        )
+    endif()
+    target_link_libraries(${TEST_TARGET} PUBLIC ${ROCTHRUST_SQLITE_LIB})
+
     if (TARGET GTest::GTest)
         target_link_libraries(${TEST_TARGET}
                 PRIVATE
@@ -92,14 +97,14 @@ function(add_rocthrust_test TEST)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/"
     )
     if(AMDGPU_TEST_TARGETS)
-    foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
-        add_test("${AMDGPU_TARGET}-${TEST_TARGET}" ${TEST_TARGET})
-        set_tests_properties("${AMDGPU_TARGET}-${TEST_TARGET}"
-            PROPERTIES
-                RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1"
-                LABELS "hip;${AMDGPU_TARGET}"
-        )
-    endforeach()
+        foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
+            add_test("${AMDGPU_TARGET}-${TEST_TARGET}" ${TEST_TARGET})
+            set_tests_properties("${AMDGPU_TARGET}-${TEST_TARGET}"
+                PROPERTIES
+                    RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1"
+                    LABELS "hip;${AMDGPU_TARGET}"
+            )
+        endforeach()
     else()
         add_relative_test(${TEST_TARGET} ${TEST_TARGET})
         set_tests_properties(${TEST_TARGET}
@@ -122,7 +127,7 @@ function(add_rocthrust_test TEST)
         add_custom_command( TARGET ${TEST_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/test )
       endforeach( file_i )
     endif()
-    
+
     # Check for per-test script. Script will be included in the current scope
     # to allow custom property modifications.
     set(TEST_CMAKE_SCRIPT "${TEST}.cmake")

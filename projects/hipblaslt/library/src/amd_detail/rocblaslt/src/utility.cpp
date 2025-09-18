@@ -295,6 +295,10 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "EPILOGUE_BIAS";
     case ROCBLASLT_EPILOGUE_RELU_BIAS:
         return "EPILOGUE_RELU_BIAS";
+    case ROCBLASLT_EPILOGUE_RELU_AUX:
+        return "ROCBLASLT_EPILOGUE_RELU_AUX";
+    case ROCBLASLT_EPILOGUE_RELU_AUX_BIAS:
+        return "ROCBLASLT_EPILOGUE_RELU_AUX_BIAS";
     case ROCBLASLT_EPILOGUE_GELU:
         return "EPILOGUE_GELU";
     case ROCBLASLT_EPILOGUE_DGELU:
@@ -319,6 +323,10 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "EPILOGUE_CLAMP_EXT";
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
         return "EPILOGUE_CLAMP_BIAS_EXT";
+    case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
+        return "ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT";
+    case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
+        return "ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT";
     default:
         return "Invalid epilogue";
     }

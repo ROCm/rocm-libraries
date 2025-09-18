@@ -303,7 +303,6 @@ double get_time_us_sync(hipStream_t stream)
         {
             THROW_IF_HIP_ERROR(hipEventCreate(&start));
             THROW_IF_HIP_ERROR(hipEventCreate(&stop));
-            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
             THROW_IF_HIP_ERROR(hipEventRecord(start, stream));
 
             return 0.0;
@@ -311,7 +310,7 @@ double get_time_us_sync(hipStream_t stream)
         else
         {
             THROW_IF_HIP_ERROR(hipEventRecord(stop, stream));
-            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            THROW_IF_HIP_ERROR(hipEventSynchronize(stop));
 
             float milliseconds = 0;
             THROW_IF_HIP_ERROR(hipEventElapsedTime(&milliseconds, start, stop));

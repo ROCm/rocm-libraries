@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup extra_module
 *  \details
 *  \p rocsparse_bsrgemm_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_bsrgemm_nnzb() and \ref rocsparse_sbsrgemm "rocsparse_Xbsrgemm()". 
+*  that is required by \ref rocsparse_bsrgemm_nnzb() and \ref rocsparse_sbsrgemm "rocsparse_Xbsrgemm()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note
@@ -239,7 +239,7 @@ rocsparse_status rocsparse_zbsrgemm_buffer_size(rocsparse_handle                
 *  offsets, that point to the start of every block row of the sparse BSR matrix, of the
 *  resulting multiplied matrix C. It is assumed that \p bsr_row_ptr_C has been allocated
 *  with size \p mb+1.
-*  The required buffer size can be obtained by 
+*  The required buffer size can be obtained by
 *  \ref rocsparse_sbsrgemm_buffer_size "rocsparse_Xbsrgemm_buffer_size()".
 *
 *  \note

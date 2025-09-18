@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup precond_module
  *  \details
  *  \p rocsparse_bsrilu0_zero_pivot returns \ref rocsparse_status_zero_pivot, if either a
- *  structural or numerical zero has been found during \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()" 
+ *  structural or numerical zero has been found during \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()"
  *  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same
  *  index base as the BSR matrix.
  *
@@ -155,12 +155,12 @@ rocsparse_status rocsparse_dcbsrilu0_numeric_boost(rocsparse_handle             
 /*! \ingroup precond_module
  *  \details
  *  \p rocsparse_bsrilu0_buffer_size returns the size of the temporary storage buffer
- *  that is required by \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()" and 
- *  \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()". The temporary storage buffer must be allocated 
- *  by the user. The size of the temporary storage buffer is identical to the size returned by 
- *  \ref rocsparse_sbsrsv_buffer_size "rocsparse_Xbsrsv_buffer_size()" and 
- *  \ref rocsparse_sbsric0_buffer_size "rocsparse_Xbsric0_buffer_size()" if the matrix sparsity 
- *  pattern is identical. The user allocated buffer can thus be shared between subsequent calls 
+ *  that is required by \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()" and
+ *  \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()". The temporary storage buffer must be allocated
+ *  by the user. The size of the temporary storage buffer is identical to the size returned by
+ *  \ref rocsparse_sbsrsv_buffer_size "rocsparse_Xbsrsv_buffer_size()" and
+ *  \ref rocsparse_sbsric0_buffer_size "rocsparse_Xbsric0_buffer_size()" if the matrix sparsity
+ *  pattern is identical. The user allocated buffer can thus be shared between subsequent calls
  *  to those functions.
  *
  *  \note
@@ -262,9 +262,9 @@ rocsparse_status rocsparse_zbsrilu0_buffer_size(rocsparse_handle                
 
 /*! \ingroup precond_module
  *  \details
- *  \p rocsparse_bsrilu0_analysis performs the analysis step for 
- *  \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()". It is expected that this function will 
- *  be executed only once for a given matrix. The analysis meta data can be cleared by 
+ *  \p rocsparse_bsrilu0_analysis performs the analysis step for
+ *  \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()". It is expected that this function will
+ *  be executed only once for a given matrix. The analysis meta data can be cleared by
  *  \ref rocsparse_bsrilu0_clear().
  *
  *  \p rocsparse_bsrilu0_analysis can share its meta data with
@@ -390,7 +390,7 @@ rocsparse_status rocsparse_zbsrilu0_analysis(rocsparse_handle                han
 /*! \ingroup precond_module
  *  \details
  *  \p rocsparse_bsrilu0_clear deallocates all memory that was allocated by
- *  \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()". This is especially useful, 
+ *  \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()". This is especially useful,
  *  if memory is an issue and the analysis data is not required for further computation.
  *
  *  \note
@@ -427,18 +427,18 @@ rocsparse_status rocsparse_bsrilu0_clear(rocsparse_handle handle, rocsparse_mat_
  *    A \approx LU
  *  \f]
  *
- *  Computing the above incomplete LU factorization requires three steps to complete. First, 
- *  the user determines the size of the required temporary storage buffer by calling 
- *  \ref rocsparse_sbsrilu0_buffer_size "rocsparse_Xbsrilu0_buffer_size()". Once this buffer size 
- *  has been determined, the user allocates the buffer and passes it to 
- *  \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()". This will perform analysis on 
- *  the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsrilu0, \p rocsparse_dbsrilu0, 
- *  \p rocsparse_cbsrilu0, or \p rocsparse_zbsrilu0 to perform the actual factorization. The calculation of 
- *  the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity 
- *  pattern while the factorization can be repeatedly applied to multiple matrices having the same sparsity 
- *  pattern. Once all calls to \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()" are complete, the temporary 
+ *  Computing the above incomplete LU factorization requires three steps to complete. First,
+ *  the user determines the size of the required temporary storage buffer by calling
+ *  \ref rocsparse_sbsrilu0_buffer_size "rocsparse_Xbsrilu0_buffer_size()". Once this buffer size
+ *  has been determined, the user allocates the buffer and passes it to
+ *  \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()". This will perform analysis on
+ *  the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsrilu0, \p rocsparse_dbsrilu0,
+ *  \p rocsparse_cbsrilu0, or \p rocsparse_zbsrilu0 to perform the actual factorization. The calculation of
+ *  the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity
+ *  pattern while the factorization can be repeatedly applied to multiple matrices having the same sparsity
+ *  pattern. Once all calls to \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()" are complete, the temporary
  *  buffer can be deallocated.
- *  
+ *
  *  \p rocsparse_bsrilu0 reports the first zero pivot (either numerical or structural zero).
  *  The zero pivot status can be obtained by calling \ref rocsparse_bsrilu0_zero_pivot().
  *

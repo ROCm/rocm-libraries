@@ -35,15 +35,15 @@ extern "C" {
 *  \details
 *  Given a sparse CSR matrix and a non-negative tolerance, this function computes how many entries would be left
 *  in each row of the matrix if elements less than the tolerance were removed. It also computes the total number
-*  of remaining elements in the matrix. 
+*  of remaining elements in the matrix.
 *
-*  Specifically given an input sparse matrix A in CSR format, the resulting compressed sparse CSR matrix C is 
+*  Specifically given an input sparse matrix A in CSR format, the resulting compressed sparse CSR matrix C is
 *  computed using:
-*  \f[ 
+*  \f[
 *   C(i,j) = A(i, j) \text{  if |A(i, j)| > tol}
 *  \f]
 *
-*  The user first allocates \p nnzPerRow with size \p m elements. Then calling \p hipsparseXnnz_compress, 
+*  The user first allocates \p nnzPerRow with size \p m elements. Then calling \p hipsparseXnnz_compress,
 *  the function fills in the \p nnzPerRow array and sets the total number of nonzeros found in \p nnzC.
 *
 *  See hipsparseScsr2csr_compress() for full code example.
@@ -96,7 +96,7 @@ extern "C" {
 *    int n     = 5;
 *    int nnz_A = 8;
 *
-*    int hcsrRowPtr_A[4] = {0, 3, 5, 8};             
+*    int hcsrRowPtr_A[4] = {0, 3, 5, 8};
 *    float hcsrVal_A[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
 *
 *    int* dcsrRowPtr_A = nullptr;
