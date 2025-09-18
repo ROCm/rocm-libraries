@@ -960,7 +960,6 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                res.ok = false;
                 if(!res.ok)
                 {
                     writeGEMMFailureDetails(res,
