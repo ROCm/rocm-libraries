@@ -24,10 +24,11 @@
  *
  *******************************************************************************/
 
+#pragma once
 
 #include <memory>
-#include <vector>
 #include <span>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -40,7 +41,7 @@ static std::shared_ptr<T> makeSharedDeviceUninitialized(size_t count)
 {
     T* raw = nullptr;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&raw), count * sizeof(T)));
-    return std::shared_ptr<T>(raw, [](T* p){ hipFree(p); });
+    return std::shared_ptr<T>(raw, [](T* p) { hipFree(p); });
 }
 
 template <typename T>
@@ -48,9 +49,10 @@ class RotatingBuffer
 {
 public:
     RotatingBuffer(const std::vector<T>& hostData, size_t rotatingBufferSizeBytes)
-        : m_numElems(hostData.size()),
-          m_rotatingBufferElems(rotatingBufferSizeBytes > 0 ? rotatingBufferSizeBytes / sizeof(T) : 0),
-          m_currentOffset(0)
+        : m_numElems(hostData.size())
+        , m_rotatingBufferElems(rotatingBufferSizeBytes > 0 ? rotatingBufferSizeBytes / sizeof(T)
+                                                            : 0)
+        , m_currentOffset(0)
     {
         if(hostData.empty())
         {
@@ -61,10 +63,8 @@ public:
         if(rotatingBufferSizeBytes == 0)
         {
             m_buffer = makeSharedDeviceUninitialized<T>(m_numElems);
-            HIP_CHECK(hipMemcpy(m_buffer.get(),
-                                hostData.data(),
-                                m_numElems * sizeof(T),
-                                hipMemcpyHostToDevice));
+            HIP_CHECK(hipMemcpy(
+                m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
             return;
         }
 
@@ -77,10 +77,8 @@ public:
         {
             m_buffer = makeSharedDeviceUninitialized<T>(m_numElems);
 
-            HIP_CHECK(hipMemcpy(m_buffer.get(),
-                                hostData.data(),
-                                m_numElems * sizeof(T),
-                                hipMemcpyHostToDevice));
+            HIP_CHECK(hipMemcpy(
+                m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
         }
         else
         {
@@ -90,10 +88,8 @@ public:
             for(size_t r = 0; r < numCopies; ++r)
             {
                 T* dst = m_buffer.get() + r * m_numElems;
-                HIP_CHECK(hipMemcpy(dst,
-                                    hostData.data(),
-                                    m_numElems * sizeof(T),
-                                    hipMemcpyHostToDevice));
+                HIP_CHECK(
+                    hipMemcpy(dst, hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
             }
         }
     }
@@ -114,7 +110,8 @@ public:
         {
             m_currentOffset = 0; // always return base
         }
-        if(m_currentOffset + m_numElems > (m_numElems < m_rotatingBufferElems ? m_rotatingBufferElems : m_numElems))
+        if(m_currentOffset + m_numElems
+           > (m_numElems < m_rotatingBufferElems ? m_rotatingBufferElems : m_numElems))
         {
             Throw<FatalError>("RotatingBuffer::next: computed offset out of bounds");
         }
@@ -123,8 +120,9 @@ public:
     }
 
 private:
-    size_t m_numElems;                // number of elements in one matrix
-    size_t m_rotatingBufferElems;     // rotating buffer size, in elements (0 means rotation is disabled)
-    size_t m_currentOffset;
+    size_t m_numElems; // number of elements in one matrix
+    size_t
+        m_rotatingBufferElems; // rotating buffer size, in elements (0 means rotation is disabled)
+    size_t             m_currentOffset;
     std::shared_ptr<T> m_buffer;
 };
