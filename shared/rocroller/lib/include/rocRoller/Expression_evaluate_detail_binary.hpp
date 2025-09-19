@@ -78,7 +78,7 @@ namespace rocRoller::Expression::EvaluateDetail
     /**
      * Declares a BinaryEvaluatorVisitor that can be defined in C++ by a single
      * binary expression, such as Multiply which can be defined by (lhs * rhs).
-     * 
+     *
      * E.g. BINARY_EVALUATOR_VISITOR(Multiply, *) would declare for Multiply a
      * visitor that will apply the '*' operator to pairs of types where that is
      * valid, and throw an exception for pairs where that is not valid.

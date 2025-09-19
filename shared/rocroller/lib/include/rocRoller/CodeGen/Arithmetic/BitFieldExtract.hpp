@@ -72,6 +72,7 @@ namespace rocRoller
                                         Register::ValuePtr                 arg,
                                         Expression::BitFieldExtract const& expr);
 
-        static const std::string Name;
+        inline static const std::string Name
+            = concatenate("BitFieldExtractGenerator<", toString(DATATYPE), ">");
     };
 }

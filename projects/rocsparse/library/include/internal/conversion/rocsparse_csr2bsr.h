@@ -33,9 +33,9 @@ extern "C" {
 #endif
 /*! \ingroup conv_module
 *  \details
-*  This function takes a sparse CSR matrix as input and computes the block row offset array, \p bsr_row_ptr, 
-*  and the total number of nonzero blocks, \p bsr_nnz, that will result from converting the CSR format input 
-*  matrix to a BSR format output matrix. This function is the first step in the conversion and is used in 
+*  This function takes a sparse CSR matrix as input and computes the block row offset array, \p bsr_row_ptr,
+*  and the total number of nonzero blocks, \p bsr_nnz, that will result from converting the CSR format input
+*  matrix to a BSR format output matrix. This function is the first step in the conversion and is used in
 *  conjunction with \ref rocsparse_scsr2bsr "rocsparse_Xcsr2bsr()".
 *
 *  \note
@@ -103,20 +103,20 @@ rocsparse_status rocsparse_csr2bsr_nnz(rocsparse_handle          handle,
 *  \details
 *  \p rocsparse_csr2bsr converts a CSR matrix into a BSR matrix. It is assumed,
 *  that \p bsr_val, \p bsr_col_ind and \p bsr_row_ptr are allocated. Allocation size
-*  for \p bsr_row_ptr is computed as \p mb+1 where \p mb is the number of block rows 
+*  for \p bsr_row_ptr is computed as \p mb+1 where \p mb is the number of block rows
 *  and \p nb is the number of block columns in the BSR matrix:
 *  \f[
 *    mb = (m + block\_dim - 1) / block\_dim \\
 *    nb = (n + block\_dim - 1) / block\_dim
 *  \f]
-*  Allocation size for \p bsr_val and \p bsr_col_ind is computed using \ref rocsparse_csr2bsr_nnz() 
+*  Allocation size for \p bsr_val and \p bsr_col_ind is computed using \ref rocsparse_csr2bsr_nnz()
 *  which also fills in \p bsr_row_ptr.
 *
-*  Converting from a sparse CSR matrix to a sparse BSR matrix requires two steps. First, the user 
-*  allocates the \p bsr_row_ptr array to have length \p mb+1 and passes this to the function 
+*  Converting from a sparse CSR matrix to a sparse BSR matrix requires two steps. First, the user
+*  allocates the \p bsr_row_ptr array to have length \p mb+1 and passes this to the function
 *  \ref rocsparse_csr2bsr_nnz. This will fill the \p bsr_row_ptr array and also compute the total
 *  number of nonzero blocks in the BSR matrix. Now that the total number of nonzero blocks is known,
-*  the user can allocate the \p bsr_col_ind and \p bsr_val arrays. Finally, the user calls 
+*  the user can allocate the \p bsr_col_ind and \p bsr_val arrays. Finally, the user calls
 *  \p rocsparse_csr2bsr to complete the conversion. See example below.
 *
 *  \p rocsparse_csr2bsr requires extra temporary storage that is allocated internally if \p block_dim>16

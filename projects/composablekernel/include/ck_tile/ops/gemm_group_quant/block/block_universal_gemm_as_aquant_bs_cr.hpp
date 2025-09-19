@@ -5,19 +5,19 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/ops/common/load_interleaved_pk_type.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1_default_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/elementwise.hpp"
 
 namespace ck_tile {
 
-template <typename Problem, index_t UnaryOpSize_ = 8>
+template <typename Problem>
 struct BlockGemmAQuantBase
 {
     using AQDataType      = remove_cvref_t<typename Problem::AQDataType>;
     using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
 
-    static constexpr index_t UnaryOpSize = UnaryOpSize_;
     template <typename T>
     CK_TILE_DEVICE static float cvt_scale_to_fp32(T scale)
     {
@@ -42,23 +42,6 @@ struct BlockGemmAQuantBase
         }
         return scale_reg_f;
     }
-
-    template <typename WarpWindow, typename WarpTile>
-    CK_TILE_DEVICE static void load_interleaved_pk_type(WarpTile& warp_tile,
-                                                        const WarpWindow& warp_window)
-    {
-        const element_wise::PassThroughPack8 elementwise_op{};
-
-        static_assert(WarpTile::get_thread_buffer_size() % UnaryOpSize == 0);
-        constexpr index_t thread_buffer_size = WarpTile::get_thread_buffer_size() / UnaryOpSize;
-        const auto in_dstr_tensors           = load_tile(warp_window);
-
-        using ComputeVectorType = ComputeDataType __attribute__((ext_vector_type(UnaryOpSize)));
-        static_for<0, thread_buffer_size, 1>{}([&](auto i) {
-            elementwise_op(warp_tile.get_thread_buffer().template get_as<ComputeVectorType>()(i),
-                           in_dstr_tensors.get_thread_buffer().template get_as<pk_int4x4_t>()[i]);
-        });
-    }
 };
 
 // A is block window on shared memory
@@ -66,7 +49,9 @@ struct BlockGemmAQuantBase
 // Consecutive kQuantGroupSize elements of A are quantized with a separate scale.
 // B is block window on shared memory
 // C is block distributed tensor
-template <typename Problem_, typename Policy_ = BlockGemmASmemBSmemCRegV1DefaultPolicy>
+template <typename Problem_,
+          typename Policy_     = BlockGemmASmemBSmemCRegV1DefaultPolicy,
+          index_t UnaryOpSize_ = 8>
 struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
 {
     private:
@@ -172,6 +157,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
 
     using Base = BlockGemmAQuantBase<Problem_>;
 
+    using Loader   = remove_cvref_t<InterleavedPKTypeLoader<ComputeDataType, UnaryOpSize_>>;
     using WarpGemm = remove_cvref_t<typename Traits::WarpGemm>;
 
     static constexpr index_t KIterPerWarp = Traits::KIterPerWarp;
@@ -181,9 +167,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
     static constexpr index_t MWarp = Traits::MWarp;
     static constexpr index_t NWarp = Traits::NWarp;
 
-    static constexpr auto Scheduler       = Traits::Scheduler;
-    static constexpr uint8_t kA_cvt_scale = std::is_same_v<ADataType, pk_int4_t> ? 16 : 1;
-    static constexpr uint8_t kB_cvt_scale = std::is_same_v<BDataType, pk_int4_t> ? 16 : 1;
+    static constexpr auto Scheduler = Traits::Scheduler;
 
     using AWarpDstr = typename WarpGemm::AWarpDstr;
     using BWarpDstr = typename WarpGemm::BWarpDstr;
@@ -294,7 +278,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
             {
                 static_assert(std::is_same_v<ComputeDataType, fp8_t> ||
                               std::is_same_v<ComputeDataType, bf8_t>);
-                Base::load_interleaved_pk_type(a_warp_tile_, a_block_window);
+                Loader::load_interleaved_pk_type(a_warp_tile_, a_block_window);
             }
             else
             {
@@ -304,7 +288,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
             {
                 static_assert(std::is_same_v<ComputeDataType, fp8_t> ||
                               std::is_same_v<ComputeDataType, bf8_t>);
-                Base::load_interleaved_pk_type(b_warp_tile_, b_block_window);
+                Loader::load_interleaved_pk_type(b_warp_tile_, b_block_window);
             }
             else
             {
@@ -360,10 +344,11 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
 
                         if constexpr(Traits::PreshuffleQuant)
                         {
+                            static_assert(false,
+                                          "It is not supported yet to enable both Preshuffle and "
+                                          "TransposeC.");
                             if constexpr(Traits::TransposeC) // transposed C
                             {
-                                static_assert(false,
-                                              "It is not supported yet to enable both Preshuffle.");
                                 // TODO:
                                 // A new tile distribution is needed for the Preshuffle and
                                 // Transpose combination. For instance, with mnk at 16x16x32, lanes
@@ -451,13 +436,13 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
 
                                         c_block_tensor.get_thread_buffer()[tbuf_offset + c_row] +=
                                             (c_warp_tensor.get_thread_buffer()[c_row] *
-                                             scale_reg_f * kA_cvt_scale * kB_cvt_scale);
+                                             scale_reg_f);
                                     });
                             }
                         }
                         else
                         {
-                            if(Traits::TransposeC) // transposed C
+                            if constexpr(Traits::TransposeC) // transposed C
                             {
                                 constexpr index_t reg_offset = mIter * Traits::AQPerBlock + kQScale;
                                 constexpr auto tbuf_offset   = number<
@@ -471,7 +456,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
                                     [&](auto c_row) {
                                         c_block_tensor.get_thread_buffer()[tbuf_offset + c_row] +=
                                             (c_warp_tensor.get_thread_buffer()[c_row] *
-                                             scale_reg_f * kA_cvt_scale * kB_cvt_scale);
+                                             scale_reg_f);
                                     });
                             }
                             else
@@ -556,7 +541,7 @@ struct AQuantBlockUniversalGemmAsBsCr : public BlockGemmAQuantBase<Problem_>
                                                                        reg_offset_for_row_data] +=
                                         (c_warp_tensor
                                              .get_thread_buffer()[reg_offset_for_row_data] *
-                                         scale_reg_f * kA_cvt_scale * kB_cvt_scale);
+                                         scale_reg_f);
                                 });
                             }
                         }
