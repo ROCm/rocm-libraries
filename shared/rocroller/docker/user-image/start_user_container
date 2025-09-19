@@ -27,12 +27,13 @@
 
 
 from __future__ import print_function
+
+import argparse
 import grp
 import os
 import subprocess
-import argparse
-from pathlib import Path
 import sys
+from pathlib import Path
 
 dockerfiles = {
     "clang": "docker/dockerfile-ubuntu-clang",
