@@ -76,6 +76,9 @@ option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enable
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
 
+# Check and test cuda compiler, defines 'CMAKE_CUDA_COMPILER'
+check_language(CUDA)
+
 # Set the ROCM install directory.
 if(WIN32)
   set(ROCM_ROOT "$ENV{HIP_PATH}" CACHE PATH "Root directory of the ROCm installation")
@@ -146,9 +149,13 @@ elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" S
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
-elseif(CMAKE_CXX_COMPILER MATCHES ".*nvcc$")
-  message(STATUS "Host compiler set to use NVCC (CMAKE_CXX_COMPILER) which is not well supported. Use a plain host compiler such as GCC or compile through HIPCC.")
-  add_compile_options(--forward-unknown-to-host-compiler)
+elseif(CMAKE_CUDA_COMPILER)
+  # We haven't detected HIP, so surely we must be on a CUDA-compatible compiler.
+  # Contrary to HIP, 'enable_language(CUDA)' is supported from CMake 3.8 and higher.
+  enable_language(CUDA)
+
+  # Hack: let CMake think that our 'hpp' and 'hip' files are actually CUDA files.
+  set(CMAKE_CUDA_SOURCE_FILE_EXTENSIONS hpp;hip;cu;cuh)
 endif()
 
 # Compressed offload binaries are currently not working with the SPIR-V target
