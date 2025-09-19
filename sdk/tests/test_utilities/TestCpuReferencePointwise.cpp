@@ -5,7 +5,8 @@
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-
+#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::data_objects;
@@ -89,7 +90,7 @@ protected:
     }
 };
 
-using TestTypes = ::testing::Types<float, double>;
+using TestTypes = ::testing::Types<float, double, half, hip_bfloat16>;
 TYPED_TEST_SUITE(CpuReferencePointwiseTemplate, TestTypes);
 
 TYPED_TEST(CpuReferencePointwiseTemplate, AddOperation)
