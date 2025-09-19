@@ -511,9 +511,8 @@ amdhsa.kernels:
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
-            // _b96 requires 64-bit alignment for dst, _b96 has huge penalty if not 64-bit aligned for LDS addr
-            const auto alignment = instrDwords == 3 ? 4 : instrDwords;
-            const auto regCount  = 256 - 4; // leave a few
+            const auto alignment = instrDwords;
+            const auto regCount  = 256 - 8; // leave a few
 
             auto dst = Register::Value::Placeholder(
                 m_context,
@@ -531,7 +530,7 @@ amdhsa.kernels:
                 DataType::Raw32,
                 m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) / 4);
             auto ldsWithOffset = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
+                m_context, Register::Type::Vector, DataType::UInt32, 1);
             auto workitemIndex = m_context->kernel()->workitemIndex()[0];
             co_yield Expression::generate(
                 ldsWithOffset,
@@ -559,8 +558,17 @@ amdhsa.kernels:
                 return {start, start + m};
             };
 
-            const int ITERS            = 8;
-            const int ALREADY_FINISHED = 2 + instrDwords;
+            const int ITERS            = 12;
+            const int ALREADY_FINISHED = ITERS - 3;
+
+            // auto addrs = Register::Value::Placeholder(
+            //     m_context, Register::Type::Vector, DataType::UInt32, 4);
+            // for(int i = 0; i < 4; ++i)
+            // {
+            //     auto subset = addrs->subset({i});
+            //     co_yield Expression::generate(
+            //         subset, ldsWithOffset->expression() + Expression::literal(i * 16), m_context);
+            // }
 
             co_yield m_context->mem()->barrier({});
 

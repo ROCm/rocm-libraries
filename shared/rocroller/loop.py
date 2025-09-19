@@ -150,12 +150,14 @@ def main():
                         "--att",
                         "-d",
                         rocprof_dir + "/",
-                        "--att-perfcounter-ctrl=8",
-                        "--att-perfcounters=SQ_LDS_BANK_CONFLICT,SQ_LDS_IDX_ACTIVE,SQ_LDS_MEM_VIOLATIONS,SQ_INST_LEVEL_LDS",
+                        "--att-perfcounter-ctrl=1",
+                        "--att-perfcounters=SQ_LDS_BANK_CONFLICT,SQ_LDS_IDX_ACTIVE,SQ_INST_LEVEL_LDS,SQ_ACCUM_PREV_HIRES",
                         "--att-target-cu=1",
                         "--att-shader-engine-mask=0x1",
                         "--",
                     ] + args.exe_cmd.split()
+                    
+                    print(" ".join(rocprof_cmd))
 
                     try:
                         # Run rocprof command
