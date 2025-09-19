@@ -34,7 +34,6 @@
 #include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
-#include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 
 namespace rocRoller
