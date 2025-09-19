@@ -32,7 +32,6 @@ import os
 import subprocess
 import argparse
 from pathlib import Path
-import sys
 
 dockerfiles = {
     "clang": "docker/dockerfile-ubuntu-clang",
