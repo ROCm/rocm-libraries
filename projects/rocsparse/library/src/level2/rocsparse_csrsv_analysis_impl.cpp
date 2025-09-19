@@ -50,7 +50,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Stream
+    // stream
     hipStream_t stream = handle->stream;
 
     // If analyzing transposed, allocate some info memory to hold the transposed matrix
@@ -498,7 +498,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
         handle, keys, vals, m, startbit, endbit, rocprim_size, rocprim_buffer));
 
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-    
+
     if(vals.current() != row_map)
     {
         RETURN_IF_HIP_ERROR(hipMemcpyAsync(
