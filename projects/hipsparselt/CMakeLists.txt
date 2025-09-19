@@ -161,6 +161,7 @@ if(HIPSPARSELT_ENABLE_HIP)
         )
     endif()
 
+    set(ORIGAMI_ENABLE_INSTALL OFF)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
     endblock()
 endif()
