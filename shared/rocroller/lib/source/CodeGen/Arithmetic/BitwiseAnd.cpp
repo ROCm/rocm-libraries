@@ -32,8 +32,6 @@
 
 namespace rocRoller
 {
-    RegisterComponent(BitwiseAndGenerator);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::BitwiseAnd>>
         GetGenerator<Expression::BitwiseAnd>(Register::ValuePtr dst,
