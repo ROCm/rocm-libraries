@@ -53,14 +53,15 @@ def main():
     parser = argparse.ArgumentParser(description="Execute Gemm Tuning")
     parser.add_argument("--input_file", type=str, help="Path to the list of gemm ops")
     parser.add_argument("--output_path", type=str, default='./tuning_result', help="Path to output file")
-    parser.add_argument("--swizzleA", action='store_true', help="Whether to enable swizzle tuning")
+    parser.add_argument("--swizzleA", action='store_true', help="Whether to enable swizzleA tuning")
+    parser.add_argument("--swizzleB", action='store_true', help="Whether to enable swizzleB tuning")
     parser.add_argument("--requested_solution", type=int, default=128, help="Searching space for gemm tuning")
     parser.add_argument("--cold_iters", type=int, default=-1, help="warm-up iteration to measure kernel performance")
     parser.add_argument("--iters", type=int, default=-1, help="iteration to measure kernel performance")
     parser.add_argument("--gpu_id", type=int, default=0, help="select gpu devices")
     parser.add_argument("--stablize_gpu", action='store_true', help="whether to stablelize GPU frequency")
     args = parser.parse_args()
-    
+
     # set_up gpu status
     os.environ["HIPBLASLT_LOG_MASK"] = "32"
     os.environ["HIP_VISIBLE_DEVICES"] = str(args.gpu_id)
