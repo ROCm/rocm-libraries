@@ -361,9 +361,20 @@ namespace rocRoller::Client::GEMMClient
                 auto spanB = rotatingB.next();
                 auto spanC = rotatingC.next();
 
-                commandArgs.setArgument(aTag, ArgumentType::Value, spanA.data());
-                commandArgs.setArgument(bTag, ArgumentType::Value, spanB.data());
-                commandArgs.setArgument(cTag, ArgumentType::Value, spanC.data());
+                commandArgs.setArgument(aTag,
+                                        ArgumentType::Value,
+                                        static_cast<int>(spanA.size()),
+                                        reinterpret_cast<unsigned char*>(spanA.data()));
+
+                commandArgs.setArgument(bTag,
+                                        ArgumentType::Value,
+                                        static_cast<int>(spanB.size()),
+                                        reinterpret_cast<unsigned char*>(spanB.data()));
+
+                commandArgs.setArgument(cTag,
+                                        ArgumentType::Value,
+                                        static_cast<int>(spanC.size()),
+                                        reinterpret_cast<unsigned char*>(spanC.data()));
 
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs);
@@ -376,10 +387,19 @@ namespace rocRoller::Client::GEMMClient
                 auto spanB = rotatingB.next();
                 auto spanC = rotatingC.next();
 
-                commandArgs.setArgument(aTag, ArgumentType::Value, spanA.data());
-                commandArgs.setArgument(bTag, ArgumentType::Value, spanB.data());
-                commandArgs.setArgument(cTag, ArgumentType::Value, spanC.data());
+                commandArgs.setArgument(aTag,
+                                        ArgumentType::Value,
+                                        static_cast<int>(spanA.size()),
+                                        reinterpret_cast<unsigned char*>(spanA.data()));
+                commandArgs.setArgument(bTag,
+                                        ArgumentType::Value,
+                                        static_cast<int>(spanB.size()),
+                                        reinterpret_cast<unsigned char*>(spanB.data()));
 
+                commandArgs.setArgument(cTag,
+                                        ArgumentType::Value,
+                                        static_cast<int>(spanC.size()),
+                                        reinterpret_cast<unsigned char*>(spanC.data()));
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
