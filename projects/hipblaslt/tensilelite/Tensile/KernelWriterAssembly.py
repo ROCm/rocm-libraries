@@ -7000,7 +7000,7 @@ class KernelWriterAssembly(KernelWriter):
             ccVgprs = [None]*3 # three terms that can be negated: [real1, imag0, imag1]
             ccInsts = [None]*3
             accImOffset = accVgprImagNumOffset(kernel)
-            accStartSrcImg = accStartSrc+accImOffset
+            accStartSrcImg = accStart+accImOffset
             accEndSrcImg = accStartSrcImg + accs_per_wave - 1
 
             # vgpr A,B setting. In complex case, numRegistersIn does not match. Use numRegistersOut instead
@@ -7231,8 +7231,8 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SCmpEQU64(src0=sgpr("Alpha",2), src1=sgpr(tmpSgpr,2), comment="Alpha == 1.0 ?"))
 
             elif kernel["ProblemType"]["ComputeDataType"].isSingleComplex():
-              module.add(SMovB32(dst=sgpr(tmpSgpr+0), src=hex(1.0), comment="Real part of 1.0"))
-              module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=hex(0.0), comment="Imaginary part of 1.0"))
+              module.add(SMovB32(dst=sgpr(tmpSgpr+0), src=1.0, comment="Real part of 1.0"))
+              module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=0.0, comment="Imaginary part of 1.0"))
               module.add(SCmpEQU64(src0=sgpr("Alpha",2), src1=sgpr(tmpSgpr,2), comment="Alpha == 1.0 ?"))
 
             elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():

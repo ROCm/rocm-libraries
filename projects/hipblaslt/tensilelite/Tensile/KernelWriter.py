@@ -4697,8 +4697,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # for zgemm + (SCIU or MIAV) case, allocate 4 vgpr for alpha calculation (cannot use tmp vgpr in unroll loop or write batch)
     if kernel["ProblemType"]["DataType"].isComplex() \
-        and (kernel["StoreCInUnroll"] or kernel["MIArchVgpr"]) \
-        and (kernel["_GlobalAccumulation"] != 'MultipleBuffer'):
+      and (kernel["_GlobalAccumulation"] != 'MultipleBuffer'):
+      # and (kernel["StoreCInUnroll"] or kernel["MIArchVgpr"]) \
       # need proper alignment
       vgprIdx = ((vgprIdx+2 - 1)//2)*2
       self.states.startVgprAlphaTmp = vgprIdx
