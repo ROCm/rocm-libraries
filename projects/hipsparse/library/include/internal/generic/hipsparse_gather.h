@@ -71,7 +71,7 @@ extern "C" {
 *  \par Example
 *  \snippet example_hipsparse_gather.cpp doc example
 */
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGather(hipsparseHandle_t          handle,
                                   hipsparseConstDnVecDescr_t vecY,
