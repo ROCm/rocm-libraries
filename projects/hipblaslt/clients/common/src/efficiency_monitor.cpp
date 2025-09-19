@@ -136,6 +136,8 @@ public:
 
     void setDeviceId(int deviceId)
     {
+        if(!enabled())
+            return;
         m_smiDeviceIndex = GetAMDSMIIndex(deviceId);
         m_XCDCount       = 1;
 
