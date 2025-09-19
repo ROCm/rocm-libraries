@@ -27,7 +27,7 @@ def main():
         "--strides",
         type=int,
         nargs="+",
-        default=[2**i for i in range(0, 4)],
+        default=[2**i for i in range(0, 3)],
         help="List of byte stride values to test",
     )
 

@@ -104,7 +104,7 @@ def main():
         help="Directory to search for CSV files",
     )
     parser.add_argument(
-        "--hide-path",
+        "--hide-instrs",
         "-H",
         action="store_true",
         help="Show the full path instead of instruction columns",
@@ -125,9 +125,7 @@ def main():
 
     print(f"Found {len(csv_files)} CSV files to process\n")
 
-    # Adjust formatting based on whether path is shown
-    if args.hide_path:
-        # With -H: Show path instead of instructions
+    if args.hide_instrs:
         separator_width = 120
         print("-" * separator_width)
         print(
@@ -135,7 +133,6 @@ def main():
         )
         print("-" * separator_width)
     else:
-        # Without -H: Show instructions
         separator_width = 235
         print("-" * separator_width)
         print(
@@ -144,23 +141,18 @@ def main():
         print("-" * separator_width)
 
     for csv_file in csv_files:
-        # Get absolute path
         absolute_path = os.path.abspath(csv_file)
-        # Extract directory name (e.g., ds_read_b32_stride_1)
         dir_name = os.path.basename(os.path.dirname(csv_file))
         median_latency = calculate_average_latency(csv_file)
 
-        # Extract data from lines 3, 4, 5, and 6
         lines_data = extract_specific_lines(csv_file)
 
-        # Format line data for display (instruction only, no latency)
         line_3_str = lines_data[0][0][:40] if lines_data[0][0] != "N/A" else "N/A"
         line_4_str = lines_data[1][0][:40] if lines_data[1][0] != "N/A" else "N/A"
         line_5_str = lines_data[2][0][:40] if lines_data[2][0] != "N/A" else "N/A"
         line_6_str = lines_data[3][0][:40] if lines_data[3][0] != "N/A" else "N/A"
 
-        if args.hide_path:
-            # With -H: Show path instead of instructions
+        if args.hide_instrs:
             if median_latency is not None:
                 print(
                     f"{dir_name:<35} | {median_latency:>14.1f} | {absolute_path:<65}"
@@ -170,7 +162,6 @@ def main():
                     f"{dir_name:<35} | {'N/A':>14} | {absolute_path:<65}"
                 )
         else:
-            # Without -H: Show instructions
             if median_latency is not None:
                 print(
                     f"{dir_name:<35} | {median_latency:>14.1f} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {'...':>3}"

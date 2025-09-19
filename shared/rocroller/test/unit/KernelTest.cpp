@@ -488,7 +488,7 @@ amdhsa.kernels:
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
         const auto workgroupSize = 256u;
-        auto       workitemCount = Expression::literal(256 * workgroupSize);
+        auto       workitemCount = Expression::literal(256u * workgroupSize); // 256 CU on MI350X
         k->setWorkgroupSize({workgroupSize, 1, 1});
         k->setWorkitemCount({workitemCount, one, one});
         k->setDynamicSharedMemBytes(zero);
@@ -558,7 +558,7 @@ amdhsa.kernels:
                 return {start, start + m};
             };
 
-            const int ITERS            = 12;
+            const int ITERS            = 16;
             const int ALREADY_FINISHED = ITERS - 3;
 
             // auto addrs = Register::Value::Placeholder(
