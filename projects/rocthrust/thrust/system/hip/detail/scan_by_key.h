@@ -75,7 +75,7 @@ THRUST_HOST_DEVICE auto invoke_inclusive_scan_by_key(
   const BinaryFunction scan_op,
   const KeyCompareFunction key_compare_op,
   const hipStream_t stream,
-  [[maybe_unused]] bool debug_sync) -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
+  bool debug_sync) -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
 {
   return rocprim::inclusive_scan_by_key(
     temporary_storage,
@@ -87,12 +87,7 @@ THRUST_HOST_DEVICE auto invoke_inclusive_scan_by_key(
     scan_op,
     key_compare_op,
     stream,
-#  ifdef TCX_DEBUG
-    true
-#  else
-    debug_sync
-#  endif
-  );
+    debug_sync);
 }
 
 template <typename Derived,
@@ -112,7 +107,7 @@ THRUST_HOST_DEVICE auto invoke_inclusive_scan_by_key(
   const BinaryFunction scan_op,
   const KeyCompareFunction key_compare_op,
   const hipStream_t stream,
-  [[maybe_unused]] bool debug_sync) -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
+  bool debug_sync) -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
 {
   return rocprim::deterministic_inclusive_scan_by_key(
     temporary_storage,
@@ -124,12 +119,7 @@ THRUST_HOST_DEVICE auto invoke_inclusive_scan_by_key(
     scan_op,
     key_compare_op,
     stream,
-#  ifdef TCX_DEBUG
-    true
-#  else
-    debug_sync
-#  endif
-  );
+    debug_sync);
 }
 
 THRUST_EXEC_CHECK_DISABLE
