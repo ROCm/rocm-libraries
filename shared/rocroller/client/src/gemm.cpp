@@ -1544,11 +1544,11 @@ int main(int argc, const char* argv[])
     if(solution.workgroupSizeY == -1)
         solution.workgroupSizeY = 2;
 
-    const DataType typeA   = fromString<DataType>(solution.types.typeA);
-    const DataType typeB   = fromString<DataType>(solution.types.typeB);
-    const DataType typeC   = fromString<DataType>(solution.types.typeC);
-    const DataType typeD   = fromString<DataType>(solution.types.typeD);
-    const DataType typeAcc = fromString<DataType>(solution.types.typeAcc);
+    const DataType typeA   = fromString<DataType>(types.typeA);
+    const DataType typeB   = fromString<DataType>(types.typeB);
+    const DataType typeC   = fromString<DataType>(types.typeC);
+    const DataType typeD   = fromString<DataType>(types.typeD);
+    const DataType typeAcc = fromString<DataType>(types.typeAcc);
 
     AssertFatal((typeAcc == DataType::Float) || (typeAcc == DataType::Half)
                 || (typeAcc == DataType::BFloat16));
