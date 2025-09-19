@@ -346,7 +346,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
     rocm_install(
         DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
-        COMPONENT devel
+        COMPONENT runtime
     )
 endif()
 
@@ -376,9 +376,15 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench-extop-matrixtransform
             hipblaslt-bench-extop-softmax
             hipblaslt-bench-extop-amax
-            hipblaslt-sequence
         COMPONENT benchmarks
     )
+    if(HIPBLASLT_ENABLE_LLVM)
+        rocm_install(
+            TARGETS
+                hipblaslt-sequence
+            COMPONENT benchmarks
+        )
+    endif()
     rocm_install(
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/data/hipblaslt_common.yaml"

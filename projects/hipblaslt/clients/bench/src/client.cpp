@@ -444,6 +444,10 @@ try
          value<bool>(&arg.swizzle_a)->default_value(false),
          "Enable tensor swizzling for A")
 
+        ("swizzleB",
+         value<bool>(&arg.swizzle_b)->default_value(false),
+         "Enable tensor swizzling for B")
+
         ("batch_count",
          value<int32_t>(&arg.batch_count)->default_value(1),
          "Number of matrices. Only applicable to batched and strided_batched routines")
@@ -899,6 +903,17 @@ try
                && arg.a_type != string_to_hip_datatype("bf16_r"))))
     {
         hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
+        return 1;
+    }
+
+    if(arg.swizzle_b
+       && (arg.transA != 'T' || arg.transB != 'N'
+           || (arg.b_type != string_to_hip_datatype("f16_r")
+               && arg.b_type != string_to_hip_datatype("f8_fnuz_r")
+               && arg.b_type != string_to_hip_datatype("f8_r")
+               && arg.b_type != string_to_hip_datatype("bf16_r"))))
+    {
+        hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
         return 1;
     }
 
