@@ -2426,19 +2426,19 @@ void host_ellmv(rocsparse_operation  trans,
 
 template <typename T, typename I, typename J, typename A, typename X, typename Y>
 void host_sellmv(rocsparse_operation  trans,
-                J                    M,
-                J                    N,
-                I                    nnz,
-                J                    slice_size,
-                I                    sell_colval_size,
-                T                    alpha,
-                const I*             sell_slice_offsets,
-                const J*             sell_col_ind,
-                const A*             sell_val,
-                const X*             x,
-                T                    beta,
-                Y*                   y,
-                rocsparse_index_base base)
+                 J                    M,
+                 J                    N,
+                 I                    nnz,
+                 J                    slice_size,
+                 I                    sell_colval_size,
+                 T                    alpha,
+                 const I*             sell_slice_offsets,
+                 const J*             sell_col_ind,
+                 const A*             sell_val,
+                 const X*             x,
+                 T                    beta,
+                 Y*                   y,
+                 rocsparse_index_base base)
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -2451,16 +2451,17 @@ void host_sellmv(rocsparse_operation  trans,
         for(J slice = 0; slice < nslices; slice++)
         {
             I slice_start = sell_slice_offsets[slice] - base;
-            I slice_end = sell_slice_offsets[slice + 1] - base;
+            I slice_end   = sell_slice_offsets[slice + 1] - base;
 
             std::vector<T> sums(slice_size, 0);
             for(I j = slice_start; j < slice_end; j++)
             {
                 J local_row = j % slice_size;
-                J col = sell_col_ind[j] - base;
+                J col       = sell_col_ind[j] - base;
                 if(col >= 0)
                 {
-                    sums[local_row] = std::fma(static_cast<T>(sell_val[j]),  static_cast<T>(x[col]), sums[local_row]);
+                    sums[local_row] = std::fma(
+                        static_cast<T>(sell_val[j]),  static_cast<T>(x[col]), sums[local_row]);
                 }
             }
 
@@ -2472,8 +2473,9 @@ void host_sellmv(rocsparse_operation  trans,
                 {
                     if(beta != static_cast<T>(0))
                     {
-                        y[row] = std::fma(
-                            static_cast<T>(beta), static_cast<T>(y[row]), static_cast<T>(alpha * sums[local_row]));
+                        y[row] = std::fma(static_cast<T>(beta), 
+                                          static_cast<T>(y[row]), 
+                                          static_cast<T>(alpha * sums[local_row]));
                     }
                     else
                     {
@@ -2495,7 +2497,7 @@ void host_sellmv(rocsparse_operation  trans,
         for(J slice = 0; slice < nslices; slice++)
         {
             I slice_start = sell_slice_offsets[slice] - base;
-            I slice_end = sell_slice_offsets[slice + 1] - base;
+            I slice_end   = sell_slice_offsets[slice + 1] - base;
 
             for(I j = slice_start; j < slice_end; j++)
             {
@@ -8316,9 +8318,10 @@ void host_csr_to_sell(J                     M,
             if(row < M)
             {
                 I start = csr_row_ptr[row] - csr_base;
-                I end = csr_row_ptr[row + 1] - csr_base;
+                I end   = csr_row_ptr[row + 1] - csr_base;
 
-                max_row_length_in_slice = std::max(max_row_length_in_slice, static_cast<J>(end - start));
+                max_row_length_in_slice 
+                    = std::max(max_row_length_in_slice, static_cast<J>(end - start));
             }
         }
 
@@ -8333,7 +8336,7 @@ void host_csr_to_sell(J                     M,
     for(I i = 0; i < sell_colval_size; i++)
     {
         sell_col_ind[i] = -1;
-        sell_val[i] = 0;
+        sell_val[i]     = 0;
     }
 
     // Fill columns and rows
@@ -8348,7 +8351,7 @@ void host_csr_to_sell(J                     M,
             if(row < M)
             {
                 I start = csr_row_ptr[row] - csr_base;
-                I end = csr_row_ptr[row + 1] - csr_base;
+                I end   = csr_row_ptr[row + 1] - csr_base;
 
                 for(I j = start; j < end; j++)
                 {
@@ -8356,7 +8359,7 @@ void host_csr_to_sell(J                     M,
                     T val = csr_val[j];
 
                     sell_col_ind[slice_start + slice_size * (j - start) + s] = col + sell_base;
-                    sell_val[slice_start + slice_size * (j - start) + s] = val;
+                    sell_val[slice_start + slice_size * (j - start) + s]     = val;
                 }
             }
         }
@@ -9662,27 +9665,27 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                     rocsparse_index_base base_C,             \
                                                     rocsparse_index_base base_D);
 
-#define INSTANTIATE_IJT_2(ITYPE, JTYPE, TTYPE)                                                        \
-    template void host_csr_to_ell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,                   \
-                                                       const std::vector<ITYPE>& csr_row_ptr,         \
-                                                       const std::vector<JTYPE>& csr_col_ind,         \
-                                                       const std::vector<TTYPE>& csr_val,             \
-                                                       std::vector<JTYPE>&       ell_col_ind,         \
-                                                       std::vector<TTYPE>&       ell_val,             \
-                                                       JTYPE&                    ell_width,           \
-                                                       rocsparse_index_base      csr_base,            \
+#define INSTANTIATE_IJT_2(ITYPE, JTYPE, TTYPE)                                                   \
+    template void host_csr_to_ell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,              \
+                                                       const std::vector<ITYPE>& csr_row_ptr,    \
+                                                       const std::vector<JTYPE>& csr_col_ind,    \
+                                                       const std::vector<TTYPE>& csr_val,        \
+                                                       std::vector<JTYPE>&       ell_col_ind,    \
+                                                       std::vector<TTYPE>&       ell_val,        \
+                                                       JTYPE&                    ell_width,      \
+                                                       rocsparse_index_base      csr_base,       \
                                                        rocsparse_index_base      ell_base);           \
-    template void host_csr_to_sell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,                  \
-                                                        JTYPE                     slice_size,         \
-                                                        const std::vector<ITYPE>& csr_row_ptr,        \
-                                                        const std::vector<JTYPE>& csr_col_ind,        \
-                                                        const std::vector<TTYPE>& csr_val,            \
-                                                        std::vector<ITYPE>&       sell_slice_offsets, \
-                                                        std::vector<JTYPE>&       sell_col_ind,       \
-                                                        std::vector<TTYPE>&       sell_val,           \
-                                                        ITYPE&                    sell_colval_size,   \
-                                                        rocsparse_index_base      csr_base,           \
-                                                        rocsparse_index_base      ell_base);
+    template void host_csr_to_sell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,             \
+                                                        JTYPE                     slice_size,    \
+                                                        const std::vector<ITYPE>& csr_row_ptr,   \
+                                                        const std::vector<JTYPE>& csr_col_ind,   \
+                                                        const std::vector<TTYPE>& csr_val,       \
+                                                        std::vector<ITYPE>&  sell_slice_offsets, \
+                                                        std::vector<JTYPE>&  sell_col_ind,       \
+                                                        std::vector<TTYPE>&  sell_val,           \
+                                                        ITYPE&               sell_colval_size,   \
+                                                        rocsparse_index_base csr_base,           \
+                                                        rocsparse_index_base ell_base);
 
 #define INSTANTIATE_IXYT(ITYPE, XTYPE, YTYPE, TTYPE)                                  \
     template void host_doti<ITYPE, XTYPE, YTYPE, TTYPE>(ITYPE                nnz,     \
@@ -9721,49 +9724,49 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                            ITYPE*               csx_row_col_ptr,     \
                                                            JTYPE*               csx_col_row_ind);
 
-#define INSTANTIATE_IJAXYT(ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE) \
-    template void host_bsrmv(rocsparse_direction  dir,               \
-                             rocsparse_operation  trans,             \
-                             JTYPE                mb,                \
-                             JTYPE                nb,                \
-                             ITYPE                nnzb,              \
-                             TTYPE                alpha,             \
-                             const ITYPE*         bsr_row_ptr,       \
-                             const ITYPE*         bsr_end_ptr,       \
-                             const JTYPE*         bsr_col_ind,       \
-                             const ATYPE*         bsr_val,           \
-                             JTYPE                bsr_dim,           \
-                             const XTYPE*         x,                 \
-                             TTYPE                beta,              \
-                             YTYPE*               y,                 \
-                             rocsparse_index_base base);             \
-    template void host_bsrmv(rocsparse_direction  dir,               \
-                             rocsparse_operation  trans,             \
-                             JTYPE                mb,                \
-                             JTYPE                nb,                \
-                             ITYPE                nnzb,              \
-                             TTYPE                alpha,             \
-                             const ITYPE*         bsr_row_ptr,       \
-                             const JTYPE*         bsr_col_ind,       \
-                             const ATYPE*         bsr_val,           \
-                             JTYPE                bsr_dim,           \
-                             const XTYPE*         x,                 \
-                             TTYPE                beta,              \
-                             YTYPE*               y,                 \
-                             rocsparse_index_base base);             \
-    template void host_cscmv(rocsparse_operation   trans,            \
-                             JTYPE                 M,                \
-                             JTYPE                 N,                \
-                             ITYPE                 nnz,              \
-                             TTYPE                 alpha,            \
-                             const ITYPE*          csc_col_ptr,      \
-                             const JTYPE*          csc_row_ind,      \
-                             const ATYPE*          csc_val,          \
-                             const XTYPE*          x,                \
-                             TTYPE                 beta,             \
-                             YTYPE*                y,                \
-                             rocsparse_index_base  base,             \
-                             rocsparse_matrix_type matrix_type,      \
+#define INSTANTIATE_IJAXYT(ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE)   \
+    template void host_bsrmv(rocsparse_direction  dir,                 \
+                             rocsparse_operation  trans,               \
+                             JTYPE                mb,                  \
+                             JTYPE                nb,                  \
+                             ITYPE                nnzb,                \
+                             TTYPE                alpha,               \
+                             const ITYPE*         bsr_row_ptr,         \
+                             const ITYPE*         bsr_end_ptr,         \
+                             const JTYPE*         bsr_col_ind,         \
+                             const ATYPE*         bsr_val,             \
+                             JTYPE                bsr_dim,             \
+                             const XTYPE*         x,                   \
+                             TTYPE                beta,                \
+                             YTYPE*               y,                   \
+                             rocsparse_index_base base);               \
+    template void host_bsrmv(rocsparse_direction  dir,                 \
+                             rocsparse_operation  trans,               \
+                             JTYPE                mb,                  \
+                             JTYPE                nb,                  \
+                             ITYPE                nnzb,                \
+                             TTYPE                alpha,               \
+                             const ITYPE*         bsr_row_ptr,         \
+                             const JTYPE*         bsr_col_ind,         \
+                             const ATYPE*         bsr_val,             \
+                             JTYPE                bsr_dim,             \
+                             const XTYPE*         x,                   \
+                             TTYPE                beta,                \
+                             YTYPE*               y,                   \
+                             rocsparse_index_base base);               \
+    template void host_cscmv(rocsparse_operation   trans,              \
+                             JTYPE                 M,                  \
+                             JTYPE                 N,                  \
+                             ITYPE                 nnz,                \
+                             TTYPE                 alpha,              \
+                             const ITYPE*          csc_col_ptr,        \
+                             const JTYPE*          csc_row_ind,        \
+                             const ATYPE*          csc_val,            \
+                             const XTYPE*          x,                  \
+                             TTYPE                 beta,               \
+                             YTYPE*                y,                  \
+                             rocsparse_index_base  base,               \
+                             rocsparse_matrix_type matrix_type,        \
                              rocsparse_spmv_alg    algo);              \
     template void host_csrmv(rocsparse_operation   trans,              \
                              JTYPE                 M,                  \
@@ -9779,7 +9782,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                              rocsparse_index_base  base,               \
                              rocsparse_matrix_type matrix_type,        \
                              rocsparse_spmv_alg    algo,               \
-                             bool                  force_conj);        \
+                             bool                  force_conj);                         \
     template void host_sellmv(rocsparse_operation  trans,              \
                               JTYPE                M,                  \
                               JTYPE                N,                  \

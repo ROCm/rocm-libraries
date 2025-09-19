@@ -244,7 +244,8 @@ public:
     //
     // SLICED ELL
     //
-    void init_sell(host_sell_matrix<T, I, J>& that, J& m, J& n, J slice_size, rocsparse_index_base base);
+    void init_sell(
+        host_sell_matrix<T, I, J>& that, J& m, J& n, J slice_size, rocsparse_index_base base);
 
     //
     // HYBRID

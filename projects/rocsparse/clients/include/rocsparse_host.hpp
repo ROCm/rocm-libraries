@@ -1192,7 +1192,7 @@ void host_csr_to_sell(J                     M,
                       std::vector<I>&       sell_slice_offsets,
                       std::vector<J>&       sell_col_ind,
                       std::vector<T>&       sell_val,
-                      I&                     sell_colval_size,
+                      I&                    sell_colval_size,
                       rocsparse_index_base  csr_base,
                       rocsparse_index_base  sell_base);
 

@@ -22,10 +22,10 @@
  *
  * ************************************************************************ */
 #include "rocsparse_init.hpp"
+#include "../include/rocsparse_host.hpp"
 #include "rocsparse_import.hpp"
 #include "rocsparse_importer_impls.hpp"
 #include "rocsparse_matrix.hpp"
-#include "../include/rocsparse_host.hpp"
 
 #include "rocsparse_clients_routine_trace.hpp"
 
