@@ -84,6 +84,10 @@ def run_black(path: pathlib.Path):
     format_and_patch(f"black --quiet --check --diff {path}", path)
 
 
+def run_isort(path: pathlib.Path):
+    format_and_patch(f"isort --profile black --quiet --check --diff {path}", path)
+
+
 def get_cpp_files(dir: pathlib.Path):
     cpp_suffixes = {".h", ".hpp", ".cpp", ".h.in", ".hpp.in", ".cpp.in"}
     return [
@@ -131,6 +135,7 @@ def fix_python(dir: pathlib.Path):
         paths = tqdm(paths, unit=" files")
 
     for path in paths:
+        run_isort(path)
         run_black(path)
     write("Done.")
 
