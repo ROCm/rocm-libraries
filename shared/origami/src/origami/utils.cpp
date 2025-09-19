@@ -171,6 +171,7 @@ namespace origami
                                                        mi_datatype,
                                                        mx_block_size,
                                                        WGM,
+                                                       0,
                                                        split,
                                                        debug);
 
@@ -254,6 +255,7 @@ namespace origami
                                                                  WGM,
                                                                  non_temporal_a,
                                                                  non_temporal_b,
+                                                                 occupancy,
                                                                  0, // split will be picked automatically
                                                                  debug);
 
@@ -516,6 +518,7 @@ namespace origami
                                                 mi_datatype,
                                                 mx_block_size,
                                                 WGM,
+                                                0,
                                                 split,
                                                 debug);
 

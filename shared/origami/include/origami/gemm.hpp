@@ -194,6 +194,7 @@ namespace origami
                                      int             WGM,
                                 size_t non_temporal_a,
                                 size_t non_temporal_b,
+                                size_t occupancy,
                                      size_t          split = 0,
                                      bool            debug = false);
 

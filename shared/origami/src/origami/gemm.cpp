@@ -526,7 +526,7 @@ namespace origami
         int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
 
         // mem2 tile dimensions
-        int mall_m = grid_m * grid_n / WGM;         // M dimension of mem2 tile
+        int mall_m = numActiveCUs / WGM;         // M dimension of mem2 tile
         int mall_n = std::min(WGM, grid_n); // N dimension of mem2 tile
 
         // If a single mem2 tile is larger than the grid, extend its M dimension
@@ -966,6 +966,7 @@ namespace origami
                                     int             WGM,
                                     size_t non_temporal_a,
                                     size_t non_temporal_b,
+                                    size_t occupancy,
                                     size_t          split,
                                     bool            debug)
     {
@@ -1057,6 +1058,8 @@ namespace origami
                                                 numActiveCUs,
                                                 splittingFactor,
                                                 debug);
+
+
         // Compute latency for all waves and return it as the latency for the MT/problem
         double total_latency = L_wave * numWaves;
 
@@ -1099,6 +1102,9 @@ namespace origami
         bool largen_block_panel = (N>8192 && K < 8192 && M < 8192 && batch ==1);
         bool mixed_medium_gemms = (M<8192 && N < 8192 && K < 8192 && batch ==1);
 
+        int grid_m = static_cast<int>(safe_ceil_div(M, MT_M));
+        int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
+
         if(heuristics && mixed_medium_gemms)
         {
             if(transA && !transB && MT_K < 128 && K > 256)
@@ -1111,12 +1117,59 @@ namespace origami
                 total_latency = total_latency * 1.5;
             }
 
+
+
+            if(occupancy > 1 &&  grid_m*grid_n > hardware.N_CU)
+            {
+                total_latency = total_latency * 2;
+            }
+
+            //Kernels where kernel occupancy is greater than 1 (causes interference at WG level)
+            if(!transA && transB&& MT_M == 128 && MT_N ==64 && MT_K ==128 && grid_m*grid_n > hardware.N_CU)
+            {
+                total_latency = total_latency * 2;
+            }
+            if(!transA && transB&& MT_M == 64 && MT_N ==64 && MT_K ==256 && grid_m*grid_n > hardware.N_CU)
+            {
+                total_latency = total_latency * 2;
+            }
+
+            if(!transA && !transB&& MT_M == 128 && MT_N ==64 && MT_K ==128 && grid_m*grid_n > hardware.N_CU)
+            {
+                total_latency = total_latency * 2;
+            }
+            if(!transA && !transB&& MT_M == 64 && MT_N ==64 && MT_K ==256 && grid_m*grid_n > hardware.N_CU)
+            {
+                total_latency = total_latency * 2;
+            }
+
+            if(!transA && !transB&& MT_M == 64 && MT_N ==128 && MT_K ==64 && grid_m*grid_n > hardware.N_CU)
+            {
+                total_latency = total_latency * 2;
+            }
+
+
+            if(!transA && !transB&& MT_M == 64 && MT_N ==128 && MT_K ==32 && grid_m*grid_n > hardware.N_CU)
+            {
+                total_latency = total_latency * 2;
+            }
+
+
+
             //Capture transpose overhead as a fractional increase.
             if(!transA && !transB)
             {
                 //Transpose overhead scales in M and K
                 size_t num_mi_m = MT_M/MI_M;
                 total_latency = total_latency * (1.01 * num_mi_m);
+
+                if(MT_K > 64)
+                {
+                size_t num_mi_k = MT_K/MI_K;
+                total_latency = total_latency * (1.001 * num_mi_k);
+                }
+
+
             }
 
 
@@ -1136,6 +1189,12 @@ namespace origami
 
         if(heuristics && largek_panel_panel)
         {
+
+            if(occupancy > 1 &&  grid_m*grid_n > hardware.N_CU)
+            {
+                total_latency = total_latency * 2;
+            }
+
             if(non_temporal_a >= 1 || non_temporal_b >= 1)
             {
                 total_latency = total_latency * 0.9;
@@ -1159,7 +1218,7 @@ namespace origami
             //If more than 80% of the last tile is wasted
             else if((M % MT_M < 0.2 * MT_M) && (M % MT_M != 0))
             {
-                total_latency = total_latency * 2;
+                total_latency = total_latency *4;
             }
             
 
@@ -1168,10 +1227,10 @@ namespace origami
                 double edge_waste_m_percent = ((MT_M) - (M % MT_M))/M;
                 total_latency = total_latency * (1 + edge_waste_m_percent);
 
-                // if(MT_K == 32 && MT_N != 512)
-                // {
-                //     total_latency = total_latency * 1.5;
-                // }
+                if(MT_K == 32 && MT_N != 512)
+                {
+                    total_latency = total_latency * 1.5;
+                }
 
             }
 
@@ -1379,7 +1438,7 @@ namespace origami
             hardware.log_debug("Total_latency (with heuristics)", total_latency);
             hardware.log_debug("non_temporal_a", non_temporal_a);
             hardware.log_debug("non_temporal_b", non_temporal_b);
-
+            hardware.log_debug("kernel_occupancy", occupancy);
             hardware.print_debug_info();
         }
 
