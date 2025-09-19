@@ -454,17 +454,28 @@ public:
 
     void RunWmmaSolver()
     {
-        // For now, only 2D WRW has WMMA implementation
-        if constexpr(NDIM == 2u && CONV_DIR == Direction::BackwardWeights)
+        // For now, only WRW has WMMA implementation
+        if constexpr(CONV_DIR == Direction::BackwardWeights)
         {
-            DispatchSolver<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops, // Placeholder
-                           miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops, // Placeholder
-                           miopen::solver::conv::ConvHipImplicitGemmGroupWrwWmma>();
+            if constexpr(NDIM == 2u)
+            {
+                DispatchSolver<
+                    miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops, // Placeholder
+                    miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops, // Placeholder
+                    miopen::solver::conv::ConvHipImplicitGemmGroupWrwWmma>();
+            }
+            else
+            {
+                DispatchSolver<
+                    miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops, // Placeholder
+                    miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops, // Placeholder
+                    miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwWmma>();
+            }
         }
         else
         {
             test_skipped = true;
-            GTEST_SKIP() << "WMMA solver only supports 2D BackwardWeights";
+            GTEST_SKIP() << "WMMA solver only supports BackwardWeights";
         }
     }
 
@@ -473,7 +484,8 @@ protected:
     {
         if constexpr(CONV_DIR == Direction::BackwardWeights)
         {
-            if(!IsTestSupportedByDevice(Gpu::gfx94X) && std::is_same<T, bfloat16>::value)
+            if(!IsTestSupportedByDevice(Gpu::gfx94X) && !IsTestSupportedByDevice(Gpu::gfx110X) &&
+               !IsTestSupportedByDevice(Gpu::gfx120X) && std::is_same<T, bfloat16>::value)
             {
                 test_skipped = true;
                 GTEST_SKIP() << "bf16 tests skipped on this hardware.";

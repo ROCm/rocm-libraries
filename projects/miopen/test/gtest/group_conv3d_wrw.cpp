@@ -34,3 +34,7 @@ DEFINE_GROUP_CONV3D_TEST(half, FP16, BackwardWeights);
 // /// \todo int8_t tests don't work. Need debugging
 // // DEFINE_GROUP_CONV3D_TEST(int8_t, BackwardWeights);
 DEFINE_GROUP_CONV3D_TEST(bfloat16, BFP16, BackwardWeights);
+
+DEFINE_GROUP_CONV3D_WMMA_TEST(float, FP32, BackwardWeights);
+DEFINE_GROUP_CONV3D_WMMA_TEST(half, FP16, BackwardWeights);
+DEFINE_GROUP_CONV3D_WMMA_TEST(bfloat16, BFP16, BackwardWeights);
