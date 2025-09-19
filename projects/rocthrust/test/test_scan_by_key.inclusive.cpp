@@ -15,7 +15,8 @@
  *  limitations under the License.
  */
 
-#define TCX_DEBUG
+// #define TCX_DEBUG
+// #define TCX_DUMP_DATA
 
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
@@ -23,6 +24,9 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/random.h>
 #include <thrust/scan.h>
+
+#include <filesystem>
+#include <fstream>
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
@@ -385,7 +389,12 @@ TEST(ScanByKeyInclusiveTests, TestScanByKeyLargeInput)
       thrust::device_vector<unsigned int> d_keys = h_keys;
 
   thrust::inclusive_scan_by_key(h_keys.begin(), h_keys.end(), h_vals.begin(), h_keys.begin());
-  thrust::device_vector<T> d_h_keys = h_keys;
+  thrust::device_vector<int> d_h_keys = h_keys;
+
+#ifdef TCX_DUMP_DATA
+  thrust::host_vector<int> output = d_h_keys;
+  dump_binary(output.data(), size * sizeof(int), std::filesystem::current_path().append("./__cache__/output_dump.dat"));
+#endif
 
   int i = 0;
   while (true)
@@ -394,11 +403,11 @@ TEST(ScanByKeyInclusiveTests, TestScanByKeyLargeInput)
     thrust::inclusive_scan_by_key(d_keys.begin(), d_keys.end(), d_vals.begin(), d_keys.begin());
     if (d_keys == d_h_keys)
     {
-      ++i;
+      std::cout << "\rrun " << ++i;
     }
     else
     {
-      std::cout << "wrong value after " << i << " runs";
+      std::cout << "\rwrong value after " << i << " runs";
       exit(-1);
     }
     // the code will hang here

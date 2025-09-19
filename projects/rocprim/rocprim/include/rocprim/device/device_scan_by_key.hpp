@@ -34,6 +34,7 @@
 #include "detail/device_scan_by_key.hpp"
 #include "detail/lookback_scan_state.hpp"
 #include "device_scan_by_key_config.hpp"
+#include "device_transform.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -118,6 +119,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                                    const bool            debug_synchronous)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<InputIterator>::value_type;
 
     using config = wrapped_scan_by_key_config<Config, key_type, AccType>;
 
@@ -151,6 +153,8 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 
     void*         scan_state_storage;
     wrapped_type* previous_last_value;
+    value_type*   temp_output;
+    size_t        temp_output_size_byte = 0;
 
     detail::temp_storage::layout layout{};
     const hipError_t             layout_result
@@ -160,14 +164,37 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         return layout_result;
     }
 
+    // Detect if the buffer of `keys` is reused as `output`
+    if constexpr(std::is_same<KeysInputIterator, OutputIterator>::value)
+    {
+        if(static_cast<typename std::remove_const<decltype(size)>::type>(
+               std::distance(keys, output))
+           < size)
+        {
+            // In this case, there is overlap on `keys` and `output`. So we allocate a temp buffer
+            temp_output_size_byte = sizeof(value_type) * size;
+        }
+    }
+    else if constexpr(std::is_pointer<KeysInputIterator>::value
+                      && std::is_pointer<OutputIterator>::value)
+    {
+        if(static_cast<typename std::remove_const<decltype(size)>::type>(
+               std::distance(keys, reinterpret_cast<KeysInputIterator>(output)))
+           < size)
+        {
+            // In this case, there is overlap on `keys` and `output`. So we allocate a temp buffer
+            temp_output_size_byte = sizeof(value_type) * size;
+        }
+    }
+
     const hipError_t partition_result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
         detail::temp_storage::make_linear_partition(
             // This is valid even with offset_scan_state_with_sleep_type
             detail::temp_storage::make_partition(&scan_state_storage, layout),
-            detail::temp_storage::ptr_aligned_array(&previous_last_value,
-                                                    use_limited_size ? 1 : 0)));
+            detail::temp_storage::ptr_aligned_array(&previous_last_value, use_limited_size ? 1 : 0),
+            detail::temp_storage::ptr_aligned_array(&temp_output, temp_output_size_byte)));
     if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
         return partition_result;
@@ -228,72 +255,98 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         std::cout << "----------------------------------\n";
     }
 
-    for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
+    auto launch_scan_by_key = [&](auto phantom_output)
     {
-        // limited_size is of type unsigned int, so current_size also fits in an unsigned int
-        // size_t is necessary as type of std::min because 'size - offset' can exceed the
-        // upper limit of unsigned int and converting it can lead to wrong results
-        const unsigned int current_size
-            = static_cast<unsigned int>(std::min<size_t>(size - offset, limited_size));
-        const unsigned int scan_blocks    = ceiling_div(current_size, items_per_block);
-        const unsigned int init_grid_size = ceiling_div(scan_blocks, block_size);
-
-        // Start point for time measurements
-        std::chrono::steady_clock::time_point start;
-        if(debug_synchronous)
+        for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
         {
-            std::cout << "index:            " << i << '\n';
-            std::cout << "current_size:     " << current_size << '\n';
-            std::cout << "number of blocks: " << scan_blocks << '\n';
+            // limited_size is of type unsigned int, so current_size also fits in an unsigned int
+            // size_t is necessary as type of std::min because 'size - offset' can exceed the
+            // upper limit of unsigned int and converting it can lead to wrong results
+            const unsigned int current_size
+                = static_cast<unsigned int>(std::min<size_t>(size - offset, limited_size));
+            const unsigned int scan_blocks    = ceiling_div(current_size, items_per_block);
+            const unsigned int init_grid_size = ceiling_div(scan_blocks, block_size);
 
-            start = std::chrono::steady_clock::now();
-        }
-
-        with_scan_state(
-            [&](const auto scan_state)
+            // Start point for time measurements
+            std::chrono::steady_clock::time_point start;
+            if(debug_synchronous)
             {
-                hipLaunchKernelGGL(init_lookback_scan_state_kernel,
-                                   dim3(init_grid_size),
-                                   dim3(block_size),
-                                   0,
-                                   stream,
-                                   scan_state,
-                                   scan_blocks,
-                                   number_of_blocks - 1,
-                                   i > 0 ? previous_last_value : nullptr);
-            });
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
-                                                    scan_blocks,
-                                                    start);
+                std::cout << "index:            " << i << '\n';
+                std::cout << "current_size:     " << current_size << '\n';
+                std::cout << "number of blocks: " << scan_blocks << '\n';
 
-        if(debug_synchronous)
-        {
-            start = std::chrono::steady_clock::now();
-        }
-        ROCPRIM_RETURN_ON_ERROR(with_scan_state(
-            [&](auto& scan_state)
+                start = std::chrono::steady_clock::now();
+            }
+
+            with_scan_state(
+                [&](const auto scan_state)
+                {
+                    hipLaunchKernelGGL(init_lookback_scan_state_kernel,
+                                       dim3(init_grid_size),
+                                       dim3(block_size),
+                                       0,
+                                       stream,
+                                       scan_state,
+                                       scan_blocks,
+                                       number_of_blocks - 1,
+                                       i > 0 ? previous_last_value : nullptr);
+                });
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
+                                                        scan_blocks,
+                                                        start);
+
+            if(debug_synchronous)
             {
-                return launch_device_scan_by_key<config, Determinism, Exclusive>(
-                    target_arch,
-                    keys + offset,
-                    input + offset,
-                    output + offset,
-                    initial_value,
-                    compare,
-                    scan_op,
-                    scan_state,
-                    size,
-                    i * number_of_blocks,
-                    total_number_of_blocks,
-                    i > 0 ? as_const_ptr(previous_last_value) : nullptr,
-                    dim3(scan_blocks),
-                    dim3(block_size),
-                    0,
-                    stream);
-            }));
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
-                                                    current_size,
-                                                    start);
+                start = std::chrono::steady_clock::now();
+            }
+            ROCPRIM_RETURN_ON_ERROR(with_scan_state(
+                [&](auto& scan_state)
+                {
+                    return launch_device_scan_by_key<config, Determinism, Exclusive>(
+                        target_arch,
+                        keys + offset,
+                        input + offset,
+                        phantom_output + offset,
+                        initial_value,
+                        compare,
+                        scan_op,
+                        scan_state,
+                        size,
+                        i * number_of_blocks,
+                        total_number_of_blocks,
+                        i > 0 ? as_const_ptr(previous_last_value) : nullptr,
+                        dim3(scan_blocks),
+                        dim3(block_size),
+                        0,
+                        stream);
+                }));
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
+                                                        current_size,
+                                                        start);
+        }
+    };
+
+    if(temp_output_size_byte > 0)
+    {
+        launch_scan_by_key(temp_output);
+        // Store data -- "in-place" scan_by_key will use more global memory and here is an extra step of
+        // storing data back into the output. So it is slower than not reusing the input.
+        ROCPRIM_RETURN_ON_ERROR(
+            ::rocprim::transform(temp_output,
+                                 output,
+                                 size,
+                                 // The temp_output holds value_type data, the ideal situation
+                                 // is that the compiler will throw an error if it's not possible
+                                 // to assign output[i] with a value_type item, which means that
+                                 // value_type is not convertible to key_type, in this case, the
+                                 // "in-place" scan_by_key shouldn't be allowed.
+                                 ::rocprim::identity<value_type>(),
+                                 stream,
+                                 debug_synchronous));
+    }
+    else
+    {
+        launch_scan_by_key(output);
     }
     return hipSuccess;
 }
@@ -321,6 +374,11 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
+///
+/// \note In-place scan_by_key
+/// In-place scan_by_key is supported by using the same buffer for `values_input` and `values_output`.
+/// Reusing `keys_input` as `values_output` is supported only when the sizeof(key_type) is larger than
+/// the sizeof(value_type).
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. It can be
@@ -513,6 +571,11 @@ inline hipError_t deterministic_inclusive_scan_by_key(void* const               
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
+///
+/// \note In-place scan_by_key
+/// In-place scan_by_key is supported by using the same buffer for `values_input` and `values_output`.
+/// Reusing `keys_input` as `values_output` is supported only when the sizeof(key_type) is larger than
+/// the sizeof(value_type).
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. It can be
