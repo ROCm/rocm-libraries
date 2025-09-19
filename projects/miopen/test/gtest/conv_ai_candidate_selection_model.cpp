@@ -327,7 +327,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 #else
 // Add a dummy test when AI kernel tuning is disabled
-TEST(CandidateSelectionDisabled, FeatureDisabled)
+TEST(CPU_CandidateSelectionDisabled_NONE, FeatureDisabled)
 {
     GTEST_SKIP() << "AI candidate selection features are disabled in this build";
 }

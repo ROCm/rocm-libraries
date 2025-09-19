@@ -446,7 +446,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 #else
 // Dummy test when AI kernel tuning is disabled
-TEST(Conv3DKernelTuningDisabled, FeatureDisabled)
+TEST(CPU_Conv3DKernelTuningDisabled_NONE, FeatureDisabled)
 {
     GTEST_SKIP() << "AI kernel tuning features are disabled in this build";
 }
