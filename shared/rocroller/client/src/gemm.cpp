@@ -360,14 +360,11 @@ namespace rocRoller::Client::GEMMClient
                 auto spanA = rotatingA.next();
                 auto spanB = rotatingB.next();
                 auto spanC = rotatingC.next();
-                commandArgs.setArgument(
-                    aTag, ArgumentType::Value, static_cast<int>(spanA.size()), spanA.data());
 
-                commandArgs.setArgument(
-                    bTag, ArgumentType::Value, static_cast<int>(spanB.size()), spanB.data());
+                commandArgs.setArgument(aTag, ArgumentType::Value, spanA.data());
+                commandArgs.setArgument(bTag, ArgumentType::Value, spanB.data());
+                commandArgs.setArgument(cTag, ArgumentType::Value, spanC.data());
 
-                commandArgs.setArgument(
-                    cTag, ArgumentType::Value, static_cast<int>(spanC.size()), spanC.data());
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs);
             }
@@ -375,14 +372,14 @@ namespace rocRoller::Client::GEMMClient
             HIP_TIMER(t_kernel, "GEMM", benchmarkParams.numInner);
             for(int inner = 0; inner < benchmarkParams.numInner; ++inner)
             {
-                commandArgs.setArgument(
-                    aTag, ArgumentType::Value, static_cast<int>(spanA.size()), spanA.data());
+                auto spanA = rotatingA.next();
+                auto spanB = rotatingB.next();
+                auto spanC = rotatingC.next();
 
-                commandArgs.setArgument(
-                    bTag, ArgumentType::Value, static_cast<int>(spanB.size()), spanB.data());
+                commandArgs.setArgument(aTag, ArgumentType::Value, spanA.data());
+                commandArgs.setArgument(bTag, ArgumentType::Value, spanB.data());
+                commandArgs.setArgument(cTag, ArgumentType::Value, spanC.data());
 
-                commandArgs.setArgument(
-                    cTag, ArgumentType::Value, static_cast<int>(spanC.size()), spanC.data());
                 auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
