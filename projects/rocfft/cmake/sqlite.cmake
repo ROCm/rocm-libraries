@@ -25,21 +25,21 @@ include( ExternalProject )
 option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" OFF )
 
 if( SQLITE_USE_SYSTEM_PACKAGE )
-  # Require a safe baseline (fixes truncation/memory-corruption issues).
-  find_package(SQLite3 3.50.2 REQUIRED)
-  list(APPEND static_depends PACKAGE SQLite3)
-  set(ROCFFT_SQLITE_LIB SQLite::SQLite3)
+  # Require a safe baseline (fixes truncation/memory-corruption issues).
+  find_package(SQLite3 3.50.2 REQUIRED)
+  list(APPEND static_depends PACKAGE SQLite3)
+  set(ROCFFT_SQLITE_LIB SQLite::SQLite3)
 else()
   include( FetchContent )
 
-  # embed SQLite amalgamation (version 3.50.2 -> serial 3500200).
-  # allow override via environment variable for mirrors/airgapped builds.
-  if(DEFINED ENV{SQLITE_3_50_2_SRC_URL})
-    set(SQLITE_3_50_2_SRC_URL_INIT $ENV{SQLITE_3_50_2_SRC_URL})
-  else()
-    set(SQLITE_3_50_2_SRC_URL_INIT https://www.sqlite.org/2025/sqlite-amalgamation-3500200.zip)
-  endif()
-  set(SQLITE_3_50_2_SRC_URL ${SQLITE_3_50_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
+  # embed SQLite amalgamation (version 3.50.2 -> serial 3500200).
+  # allow override via environment variable for mirrors/airgapped builds.
+  if(DEFINED ENV{SQLITE_3_50_2_SRC_URL})
+    set(SQLITE_3_50_2_SRC_URL_INIT $ENV{SQLITE_3_50_2_SRC_URL})
+  else()
+    set(SQLITE_3_50_2_SRC_URL_INIT https://www.sqlite.org/2025/sqlite-amalgamation-3500200.zip)
+  endif()
+  set(SQLITE_3_50_2_SRC_URL ${SQLITE_3_50_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
   set(SQLITE_SRC_3_50_2_SHA3_256 75c118e727ee6a9a3d2c0e7c577500b0c16a848d109027f087b915b671f61f8a CACHE STRING "SHA3-256 hash of SQLite source code")
 
   # use extract timestamp for fetched files instead of timestamps in the archive
