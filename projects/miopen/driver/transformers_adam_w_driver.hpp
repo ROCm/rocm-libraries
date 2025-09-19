@@ -78,6 +78,8 @@ public:
 
     int RunForwardGPU() override;
     int RunForwardCPU();
+    int RunForwardCPUUpdated();
+    int RunForwardCPUUpdatedMT();
 
     int RunBackwardGPU() override;
 
@@ -437,6 +439,107 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
 
         params[i] = param_val;
     }
+
+    return miopenStatusSuccess;
+}
+
+template <typename Tgpu, typename Tref, typename Tgrad>
+int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdated()
+{
+    if(is_amp && found_inf)
+        return miopenStatusSuccess;
+
+    const auto params      = param_host.data();
+    const auto grads       = grad_host.data();
+    const auto exp_avgs    = exp_avg_host.data();
+    const auto exp_avg_sqs = exp_avg_sq_host.data();
+    const auto step        = iter;
+
+    const size_t numel = miopen::deref(paramDesc).GetElementSize();
+
+    const float bias_correction1    = 1.0 - pow(beta1, step);
+    const float bias_correction2    = 1.0 - pow(beta2, step);
+    const float corrected_step_size = correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
+    const float k                   = 1.0 - (lr * weight_decay);
+    const float inv_grad_scale      = 1.0 / static_cast<float>(grad_scale);
+    const float one_minus_beta1     = 1.0 - beta1;
+    const float one_minus_beta2     = 1.0 - beta2;
+
+    for(size_t i = 0; i < numel; ++i)
+    {
+        Tref exp_avg_val    = exp_avgs[i];
+        Tref exp_avg_sq_val = exp_avg_sqs[i];
+
+        Tref param_val = params[i];
+        Tref grad_val  = grads[i];
+        if(is_amp)
+            grad_val *= inv_grad_scale;
+
+        exp_avg_val    = exp_avg_val * beta1 + grad_val * one_minus_beta1;
+        exp_avg_sq_val = exp_avg_sq_val * beta2 + grad_val * grad_val * one_minus_beta2;
+
+        const float denorm    = sqrt(exp_avg_sq_val) + eps;
+        const float step_size = correct_bias ? corrected_step_size : lr;
+
+        param_val -= exp_avg_val / denorm * step_size;
+
+        if(weight_decay > 0.0)
+        {
+            param_val *= k;
+        }
+
+        params[i] = param_val;
+    }
+
+    return miopenStatusSuccess;
+}
+
+template <typename Tgpu, typename Tref, typename Tgrad>
+int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdatedMT()
+{
+    if(is_amp && found_inf)
+        return miopenStatusSuccess;
+
+    const auto params      = param_host.data();
+    const auto grads       = grad_host.data();
+    const auto exp_avgs    = exp_avg_host.data();
+    const auto exp_avg_sqs = exp_avg_sq_host.data();
+    const auto step        = iter;
+
+    const size_t numel = miopen::deref(paramDesc).GetElementSize();
+
+    const float bias_correction1    = 1.0 - pow(beta1, step);
+    const float bias_correction2    = 1.0 - pow(beta2, step);
+    const float corrected_step_size = correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
+    const float k                   = 1.0 - (lr * weight_decay);
+    const float inv_grad_scale      = 1.0 / static_cast<float>(grad_scale);
+    const float one_minus_beta1     = 1.0 - beta1;
+    const float one_minus_beta2     = 1.0 - beta2;
+
+    par_ford(numel)([&](size_t i) {
+        Tref exp_avg_val    = exp_avgs[i];
+        Tref exp_avg_sq_val = exp_avg_sqs[i];
+
+        Tref param_val = params[i];
+        Tref grad_val  = grads[i];
+        if(is_amp)
+            grad_val *= inv_grad_scale;
+
+        exp_avg_val    = exp_avg_val * beta1 + grad_val * one_minus_beta1;
+        exp_avg_sq_val = exp_avg_sq_val * beta2 + grad_val * grad_val * one_minus_beta2;
+
+        const float denorm    = sqrt(exp_avg_sq_val) + eps;
+        const float step_size = correct_bias ? corrected_step_size : lr;
+
+        param_val -= exp_avg_val / denorm * step_size;
+
+        if(weight_decay > 0.0)
+        {
+            param_val *= k;
+        }
+
+        params[i] = param_val;
+    });
 
     return miopenStatusSuccess;
 }
