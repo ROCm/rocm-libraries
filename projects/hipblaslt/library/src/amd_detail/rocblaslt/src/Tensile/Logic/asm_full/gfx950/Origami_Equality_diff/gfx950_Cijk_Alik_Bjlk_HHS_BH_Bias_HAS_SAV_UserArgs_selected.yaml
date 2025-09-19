@@ -232,9 +232,8 @@
     _staggerStrideShift: 2
     allowLRVWforTLUandMI: false
 - [2, 3, 0, 1]
-- - - [1, 1, 1, 1]
-    - [0, 0]
+- []
 - null
 - null
 - DeviceEfficiency
-- Equality
+- Prediction

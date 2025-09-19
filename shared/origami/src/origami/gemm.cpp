@@ -303,12 +303,12 @@ namespace origami
         // TT: A is contiguous in K and B is contiguous in N
         if(transA && transB)
         {
-            if(MT_K * safe_ceil_div(element_size_A, 8) < 128)
+            if(MT_K * safe_ceil_div(element_size_A, 8) % 128 != 0)
             {
                 L_MT = L_MT * 2;
             }
 
-            if(MT_N * safe_ceil_div(element_size_B, 8) < 128)
+            if(MT_N * safe_ceil_div(element_size_B, 8) % 128 != 0)
             {
                 L_MT = L_MT * 2;
             }
@@ -317,12 +317,12 @@ namespace origami
         // NN: A is contiguous in M and B is contiguous in K
         if(!transA && !transB)
         {
-            if(MT_M * safe_ceil_div(element_size_A, 8) < 128)
+            if(MT_M * safe_ceil_div(element_size_A, 8) % 128 != 0)
             {
                 L_MT = L_MT * 2;
             }
 
-            if(MT_K * safe_ceil_div(element_size_B, 8) < 128)
+            if(MT_K * safe_ceil_div(element_size_B, 8) % 128 != 0)
             {
                 L_MT = L_MT * 2;
             }
@@ -407,13 +407,17 @@ namespace origami
             // Compute grid dimensions
             int grid_m = static_cast<int>(safe_ceil_div(M, MT_M));
             int grid_n = static_cast<int>(safe_ceil_div(N, MT_N));
-
+            int grid = grid_m * grid_n;
+            if(grid > hardware.N_CU)
+            {
+                grid = hardware.N_CU;
+            }
             // Distribute CUs per XCD
             // Modify cu_per_xcd to only take into account the CUs that might share same K-tiles
             // This is to factor in the effect of splitting on L2
-            int cu_per_xcd = safe_ceil_div(grid_m * grid_n, hardware.NUM_XCD);
-            cu_per_xcd /= splittingFactor;
-
+            int cu_per_xcd = safe_ceil_div(grid, hardware.NUM_XCD);
+            //cu_per_xcd /= splittingFactor;
+            cu_per_xcd = std::max(cu_per_xcd,1);
             // N dimension of mem1 tile is divided by whichever is smaller between WGM and grid
             int l2_n = std::min(WGM, grid_n);
             int l2_m = cu_per_xcd / l2_n;
@@ -451,6 +455,28 @@ namespace origami
                 l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
             }
 
+            while(l2_m * l2_n > grid)
+            {
+                if(l2_m > 1)
+                {
+                    l2_m--;
+                }
+                else
+                {
+                    l2_n--;
+                }
+                
+                if(l2_m == 1 && l2_n == 1)
+                {
+                    break;
+                }
+
+            }
+
+
+            l2_A_uncached_reads = static_cast<long long>(l2_m) * MT_M * MT_K;
+            l2_B_uncached_reads = static_cast<long long>(l2_n) * MT_N * MT_K;
+
             // Total reads considering repeated usage
             long long l2_A_reads = static_cast<long long>(l2_m) * l2_n * MT_M * MT_K;
             long long l2_B_reads = static_cast<long long>(l2_n) * l2_m * MT_N * MT_K;
@@ -477,6 +503,8 @@ namespace origami
                 hardware.log_debug("L2Tile_M", l2_m);
                 hardware.log_debug("L2Tile_N", l2_n);
             }
+
+            l2_hit = std::max(l2_hit,0.2);
 
             return l2_hit;
         }
@@ -560,6 +588,11 @@ namespace origami
         double H_mem1
             = estimate_l2_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, element_size_A, WGM, splittingFactor);
 
+        if(H_mem1 == 0)
+        {
+            H_mem1 = 0.5;
+        }
+
         // 2) Estimate mall hit-rate
         double H_mem2
             = estimate_mall_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, WGM, numActiveCUs, splittingFactor);
@@ -602,8 +635,10 @@ namespace origami
         double Ld_mem2 = (1.0 - H_mem1) * total_Ld;
         double Ld_MEM  = (1.0 - H_mem2) * Ld_mem2;
 
-        // 9) enforce whole‐problem minimum loads
-        if(numActiveCUs < hardware.N_CU)
+        // 9) enforce whole‐problem minimum loads when we can fit M/N in the CUs.
+        size_t grid_m = safe_ceil_div(M,MT_M);
+        size_t grid_n = safe_ceil_div(N,MT_N);
+        if((grid_m * grid_n < hardware.N_CU) && batch == 1)
         {
             double min_load
                 = static_cast<double>(M * MT_K * splittingFactor * safe_ceil_div(element_size_A, 8)
@@ -647,12 +682,12 @@ namespace origami
         // TT : A is contiguous in K and B is contiguous in N
         if(transA && transB)
         {
-            if(MT_K * safe_ceil_div(element_size_A, 8) < 128)
+            if(MT_K * safe_ceil_div(element_size_A, 8) % 128 != 0)
             {
                 L_mem = L_mem * 2;
             }
 
-            if(MT_N * safe_ceil_div(element_size_B, 8) < 128)
+            if(MT_N * safe_ceil_div(element_size_B, 8) % 128 != 0)
             {
                 L_mem = L_mem * 2;
             }
@@ -661,12 +696,12 @@ namespace origami
         // NN : A is contiguous in M and B is contiguous in K
         if(!transA && !transB)
         {
-            if(MT_M * safe_ceil_div(element_size_A, 8) < 128)
+            if(MT_M * safe_ceil_div(element_size_A, 8) % 128 != 0)
             {
                 L_mem = L_mem * 2;
             }
 
-            if(MT_K * safe_ceil_div(element_size_B, 8) < 128)
+            if(MT_K * safe_ceil_div(element_size_B, 8) % 128 != 0)
             {
                 L_mem = L_mem * 2;
             }
@@ -771,18 +806,34 @@ namespace origami
         double L_epilogue = (static_cast<double>(numActiveCUs)
                                 * MT_M * MT_N * safe_ceil_div(element_size_out, 8))
                                 / limited_mem1;
-
+        L_epilogue += L_compute;
         // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N tiles to coherent memory
-        if(splittingFactor > 1)
-        {
-            size_t n_partials              = splittingFactor - 1;
-            double partial_readwrite_bytes = (2 * numActiveCUs
-                                                * MT_M * MT_N * safe_ceil_div(element_size_out, 8)
-                                                * n_partials);
-            double L_reduce = partial_readwrite_bytes / (hardware.mem3_perf_ratio);
-            L_epilogue += L_reduce * 1;
-        }
+            if(splittingFactor > 1)
+            {
+                size_t n_partials = splittingFactor - 1;
 
+                // Only the reduction CU reads from all splits.
+                double partial_read_bytes
+                    = n_partials * MT_M * MT_N * safe_ceil_div(element_size_out, 8);
+
+                // All CUs write (once for each partial, and once by the reduction CU for the output.)
+                double partial_write_bytes
+                    = numActiveCUs * MT_M * MT_N * safe_ceil_div(element_size_out, 8);
+
+                double partial_readwrite_bytes = partial_read_bytes + partial_write_bytes;
+
+                //64 Threads active in a SIMD. Exposed to at least latency of reducing splittingfactor tiles.
+                double partial_adds = ((MT_M * MT_N) * splittingFactor) / (64);
+                //Things have to be written to memory
+                double mem_bw_occ         = compute_mem_bw_from_occupancy(hardware, numActiveCUs);
+                double mem_bw_occ_limited = hardware.mem3_perf_ratio * mem_bw_occ;
+                // double partial_readwrite_bytes = (2 * numActiveCUs
+                //                                   * MT_M * MT_N * safe_ceil_div(element_size_out, 8)
+                //                                   * n_partials);
+
+                double L_reduce = partial_readwrite_bytes / (mem_bw_occ_limited);
+                L_epilogue += L_reduce * 1;
+            }
         // 4'') tf32 emu has some more overhead
         double L_cvt    = 0;
         bool   tf32_emu = ((mi_datatype == data_type_t::XFloat32)
@@ -810,6 +861,13 @@ namespace origami
         // num_iter      = std::max(num_iter, 1L);
         long splittedK = static_cast<long>(safe_ceil_div(K, splittingFactor));
         long num_iter = static_cast<long>(safe_ceil_div(splittedK, MT_K)) - 1;
+
+
+        //Zero Padding in the K dimension on last iteration
+        if(K%MT_K !=0)
+        {
+            L_epilogue = L_epilogue * 2;
+        }
 
         // 7) Total tile latency
         double L_tile_total = (L_tile_single * num_iter)
@@ -1036,26 +1094,170 @@ namespace origami
                 total_latency = total_latency * 0.5;
             }
         }
+        //Large K panel-panel category
+        bool largek_panel_panel = (K>8192 && M < 8192 && N < 8192 && batch ==1);
+        bool largen_block_panel = (N>8192 && K < 8192 && M < 8192 && batch ==1);
+        bool mixed_medium_gemms = (M<8192 && N < 8192 && K < 8192 && batch ==1);
 
-        //Big N and MT_M == M 
-        if((non_temporal_a!=0 && non_temporal_b !=0))
+        if(heuristics && mixed_medium_gemms)
         {
-            total_latency *= 20;
-        }
-        else if(M<1024 &&  N > 16384 && non_temporal_b !=0)
-        {
-            total_latency = total_latency * 0.2;
-        }
-        else if(non_temporal_b ==3)
-        {
-            total_latency = total_latency * 2;
-        }
+            if(transA && !transB && MT_K < 128 && K > 256)
+            {
+                total_latency = total_latency * 1.5;
+            }
+
+            if(!transA && transB && MT_K < 128 && K > 128)
+            {
+                total_latency = total_latency * 1.5;
+            }
+
+            //Capture transpose overhead as a fractional increase.
+            if(!transA && !transB)
+            {
+                //Transpose overhead scales in M and K
+                size_t num_mi_m = MT_M/MI_M;
+                total_latency = total_latency * (1.01 * num_mi_m);
+            }
 
 
-        if(heuristics && !tf32_emu)
+            if(!transA && transB)
+            {
+                //Transpose overhead scales in M and K
+                // size_t num_mi_m = MT_M/MI_M;
+                // total_latency = total_latency * (1.005 * num_mi_m);
+
+                //Transpose overhead scales in M and K
+                size_t num_mi_n = MT_N/MI_N;
+                total_latency = total_latency * (1.005 * num_mi_n);
+
+            }
+
+        }
+
+        if(heuristics && largek_panel_panel)
         {
+            if(non_temporal_a >= 1 || non_temporal_b >= 1)
+            {
+                total_latency = total_latency * 0.9;
+            }
+
+            if(MT_M == 160 && !transA && transB && M< 1024 && N <= 512 && element_size_A == 16)
+            {
+                total_latency = total_latency * 0.7;
+            }
+
+            if(transA && !transB && (MT_M > 300 || MT_N > 300))
+            {
+                total_latency = total_latency * 2;
+            }
+
+            //If less than 20% of the tile is wasted
+            if(M % MT_M > 0.8 * MT_M)
+            {
+                total_latency = total_latency * 0.8;
+            }
+            //If more than 80% of the last tile is wasted
+            else if((M % MT_M < 0.2 * MT_M) && (M % MT_M != 0))
+            {
+                total_latency = total_latency * 2;
+            }
             
 
+            if(!transA && transB)
+            {
+                double edge_waste_m_percent = ((MT_M) - (M % MT_M))/M;
+                total_latency = total_latency * (1 + edge_waste_m_percent);
+
+                // if(MT_K == 32 && MT_N != 512)
+                // {
+                //     total_latency = total_latency * 1.5;
+                // }
+
+            }
+
+
+
+        }
+
+        if(heuristics && largen_block_panel)
+        {
+            size_t num_mi_m = safe_ceil_div(M,MI_M);
+            size_t next_biggest_MT_M = num_mi_m * MI_M;
+            if(non_temporal_b >= 1)
+            {
+                total_latency = total_latency * 0.9;
+            }
+
+            //If the MT_M is the next biggest MT larger than the M dimension
+            if(MT_M == next_biggest_MT_M  )
+            {
+                total_latency = total_latency * 0.6;
+            }
+            //If the MT is bigger than M generally
+            else if(M < MT_M)
+            {
+                total_latency = total_latency * 0.8;
+            }
+            //If there is no edge waste in the M dimension
+            else if(M % MT_M == 0)
+            {
+                total_latency = total_latency * 0.8;
+            }
+            //If less than 20% of the tile is wasted
+            else if(M % MT_M > 0.8 * MT_M)
+            {
+                total_latency = total_latency * 0.8;
+            }
+            //If more than 80% of the last tile is wasted
+            else if((M % MT_M < 0.2 * MT_M) && (M % MT_M != 0))
+            {
+                total_latency = total_latency * 2;
+            }
+
+            //Capture transpose overhead as a fractional increase.
+            if(!transA && !transB)
+            {
+
+                if(MT_M == 128 && MT_N == 320 && MT_K==32)
+                {
+                    total_latency = total_latency * 2;
+                }
+            }
+
+            // if(MT_M == 192 && MT_N == 320 && MT_K ==64)
+            // {
+            //     total_latency = total_latency * 4;
+            // }
+
+            // if(MT_M == 256 && MT_N == 160 && MT_K ==64)
+            // {
+            //     total_latency = total_latency * 4;
+            // }
+
+
+            // if(MT_M == 192 && MT_N == 320 && MT_K ==32)
+            // {
+            //     total_latency = total_latency * 0.5;
+            // }
+            // The kernel for this is more optimized (Custom kernel NN)
+            if((!transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32 && element_size_A == 16)
+            {
+                total_latency = total_latency * 0.9;
+            }
+
+            if(MT_N % 160 == 0 && MT_K == 64 && !transA && !transB)
+            {
+                total_latency = total_latency * 4;
+            }
+
+            if(!transA && !transB && K<512 && MT_K >= 64)
+            {
+                total_latency = total_latency * 4;
+            }
+        }
+
+        if(heuristics && !tf32_emu && !largek_panel_panel && !largen_block_panel && !mixed_medium_gemms)
+        {
             // Penalize tiles that lead to edge waste
             const size_t numMT_M = safe_ceil_div(M, MT_M);
             const size_t numMT_N = safe_ceil_div(N, MT_N);
@@ -1161,11 +1363,11 @@ namespace origami
                 }
 
                 // Bias towards dimensions divisible by 64 for 8-bit datatypes
-                if((MT_M > 64) && (MT_M % 64 != 0))
+                if((MT_M > 64) && (MT_M % 128 != 0))
                 {
                     total_latency = total_latency * 1.2;
                 }
-                if((MT_N > 64) && (MT_N % 64 != 0))
+                if((MT_N > 64) && (MT_N % 128 != 0))
                 {
                     total_latency = total_latency * 1.2;
                 }
@@ -1175,8 +1377,8 @@ namespace origami
         if(hardware_t::is_debug_enabled())
         {
             hardware.log_debug("Total_latency (with heuristics)", total_latency);
-            hardware.log_debug("nontemporal A", non_temporal_a);
-            hardware.log_debug("nontemporal B", non_temporal_b);
+            hardware.log_debug("non_temporal_a", non_temporal_a);
+            hardware.log_debug("non_temporal_b", non_temporal_b);
 
             hardware.print_debug_info();
         }
@@ -1232,7 +1434,8 @@ namespace origami
                                                             mi_datatype,
                                                             mx_block_size,
                                                             WGM,
-                                                            0,0,
+                                                            0,
+                                                            0,
                                                             debug);
         double total_time_seconds = latency_cycles / cycles_per_second;
         // Compute performance in FLOPS

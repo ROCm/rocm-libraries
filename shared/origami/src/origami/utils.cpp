@@ -171,8 +171,6 @@ namespace origami
                                                        mi_datatype,
                                                        mx_block_size,
                                                        WGM,
-                                                       0,
-                                                       0,
                                                        split,
                                                        debug);
 
@@ -225,7 +223,7 @@ namespace origami
                 size_t WGM              = std::get<7>(mt);
                 size_t non_temporal_a   = std::get<8>(mt);
                 size_t non_temporal_b   = std::get<9>(mt);
-                
+
                 if(debug)
                 {
                     std::cout << "Evaluating MT_M=" << MT_M << ", MT_N=" << MT_N
@@ -518,9 +516,6 @@ namespace origami
                                                 mi_datatype,
                                                 mx_block_size,
                                                 WGM,
-                                                0,
-                                                0,
-
                                                 split,
                                                 debug);
 
