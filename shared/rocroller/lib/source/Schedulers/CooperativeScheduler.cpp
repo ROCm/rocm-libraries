@@ -31,21 +31,20 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponent(CooperativeScheduler);
         static_assert(Component::Component<CooperativeScheduler>);
 
-        inline CooperativeScheduler::CooperativeScheduler(ContextPtr ctx, CostFunction cmp)
+        CooperativeScheduler::CooperativeScheduler(ContextPtr ctx, CostFunction cmp)
             : Scheduler{ctx}
         {
             m_cost = Component::Get<Scheduling::Cost>(cmp, m_ctx);
         }
 
-        inline bool CooperativeScheduler::Match(Argument arg)
+        bool CooperativeScheduler::Match(Argument arg)
         {
             return std::get<0>(arg) == SchedulerProcedure::Cooperative;
         }
 
-        inline std::shared_ptr<Scheduler> CooperativeScheduler::Build(Argument arg)
+        std::shared_ptr<Scheduler> CooperativeScheduler::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -53,7 +52,7 @@ namespace rocRoller
             return std::make_shared<CooperativeScheduler>(std::get<2>(arg), std::get<1>(arg));
         }
 
-        inline std::string CooperativeScheduler::name() const
+        std::string CooperativeScheduler::name() const
         {
             return Name;
         }
@@ -63,7 +62,7 @@ namespace rocRoller
             return true;
         }
 
-        inline Generator<Instruction>
+        Generator<Instruction>
             CooperativeScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
             std::vector<Generator<Instruction>::iterator> iterators;
