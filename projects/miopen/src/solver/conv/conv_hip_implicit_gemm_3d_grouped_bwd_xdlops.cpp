@@ -426,10 +426,14 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
     split_k   = 0; // split_k is not used in this solver, but it is required by the interface
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    // 1. AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
     {
+        MIOPEN_LOG_I2(
+            "Step 1: Attempting AI heuristics for data type: " << problem.GetInDataType());
+
         bool ai_success         = false;
         std::string solver_name = "ConvHipImplicitGemm3DGroupBwdXdlops";
 
@@ -459,17 +463,37 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
 
         if(ai_success)
         {
-            MIOPEN_LOG_I("AI heuristics successfully selected kernel: " << kernel_id);
+            MIOPEN_LOG_I("Step 1: AI heuristics selected kernel: " << kernel_id);
             return;
         }
         else
         {
-            MIOPEN_LOG_I("AI heuristics failed, falling back to default initialization");
+            MIOPEN_LOG_I2("Step 1: AI heuristics failed, proceeding to default initialization");
+            // Continue to default initialization
         }
     }
+    else
+    {
+        MIOPEN_LOG_I2("Step 1: AI heuristics skipped (disabled or dummy context)");
+    }
+#else
+    MIOPEN_LOG_I2("Step 1: AI heuristics not available (MIOPEN_ENABLE_AI_KERNEL_TUNING disabled)");
 #endif
-    // Fallback to original initialization
+
+    // 2. Default: index remains 0, first valid_kernel will be used
+    MIOPEN_LOG_I2("Step 2: Using default initialization (index=0)");
     InitValidKernels(problem);
+    if(!valid_kernels.empty())
+    {
+        index     = 0;
+        kernel_id = valid_kernels[index];
+        MIOPEN_LOG_I("Step 2: Default initialization selected kernel: " << kernel_id
+                                                                        << " at index: 0");
+    }
+    else
+    {
+        MIOPEN_LOG_W("Step 2: Default initialization failed - no valid kernels found");
+    }
 #endif
 }
 

@@ -26,7 +26,7 @@
 
 #include <vector>
 #include <cstdint>
-
+#include <optional>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/env.hpp>
 #include <miopen/generic_search.hpp>
@@ -427,6 +427,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     auto idx_override = env::value(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
     if(idx_override != 0)
     {
+        MIOPEN_LOG_I2("Step 1: Attempting index override with value: " << idx_override);
         switch(problem.GetInDataType())
         {
         case miopenHalf: Init<ck::half_t>(problem); break;
@@ -438,78 +439,30 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         {
             index     = idx_override;
             kernel_id = valid_kernels[index];
-            MIOPEN_LOG_I("Index override selected kernel: " << kernel_id << " at index: " << index);
+            MIOPEN_LOG_I("Step 1: Index override selected kernel: " << kernel_id
+                                                                    << " at index: " << index);
             return;
         }
         else
         {
-            MIOPEN_LOG_W(
-                "Index override failed, index "
-                << idx_override
-                << " out of range, falling back to AI heuristics or default initialization");
-            // Continue to AI heuristics
-        }
-    }
-
-    // 2. AI heuristics (if enabled)
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    // Only use AI heuristics for float32 (not for fp16 or bf16, since tests did not show
-    // significant improvement for those compared to fallback)
-    if(problem.GetInDataType() == miopenFloat)
-    {
-        if(&ctx != &GetDummyCtx() &&
-           !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
-        {
-            bool ai_success         = false;
-            std::string solver_name = "ConvHipImplicitGemm3DGroupFwdXdlops";
-
-            auto run_ai_heuristics = [&](auto CKDataType) {
-                using T                 = decltype(CKDataType);
-                auto fill_valid_kernels = [=](const miopen::conv::ProblemDescription& problem)
-                    -> std::vector<std::string> {
-                    return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<T>,
-                                                               CKArgs<T>>(problem);
-                };
-                return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
-                                                                            problem,
-                                                                            valid_kernels,
-                                                                            index,
-                                                                            split_k,
-                                                                            kernel_id,
-                                                                            fill_valid_kernels,
-                                                                            solver_name);
-            };
-            switch(problem.GetInDataType())
-            {
-            case miopenHalf: ai_success = run_ai_heuristics(ck::half_t{}); break;
-            case miopenFloat: ai_success = run_ai_heuristics(float{}); break;
-            case miopenBFloat16: ai_success = run_ai_heuristics(ck::bhalf_t{}); break;
-            default: break;
-            }
-            if(ai_success)
-            {
-                MIOPEN_LOG_I("AI heuristics successfully selected kernel: " << kernel_id);
-                return;
-            }
-            else
-            {
-                MIOPEN_LOG_I("AI heuristics failed, falling back to fallback heuristics or default "
-                             "initialization");
-                // Continue to fallback heuristics
-            }
+            MIOPEN_LOG_W("Step 1: Index override failed, index "
+                         << idx_override << " out of range, proceeding to next step");
+            // Continue to hard-coded heuristics
         }
     }
     else
     {
-
-        MIOPEN_LOG_I2("AI heuristics only supported for FP32 data type, falling back to fallback "
-                      "heuristics or default initialization");
+        MIOPEN_LOG_I2("Step 1: Index override not set, proceeding to next step");
     }
-#endif
 
-    // 3. Fallback heuristics for BF16/FP16 only
-    if(problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf)
+    // 2. Hard-coded heuristics for BF16/FP16 on gfx942 only
+    if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
+       ctx.GetStream().GetDeviceName() == "gfx942")
     {
+        MIOPEN_LOG_I2("Step 2: Attempting hard-coded heuristics for "
+                      << (problem.GetInDataType() == miopenBFloat16 ? "BF16" : "FP16")
+                      << " on gfx942");
+
         switch(problem.GetInDataType())
         {
         case miopenHalf: Init<ck::half_t>(problem); break;
@@ -518,26 +471,28 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         }
 
         auto find_kernel = [&valid_kernels = std::as_const(valid_kernels)](
-                               const std::size_t& index,
-                               const std::string& kernel_id) -> std::size_t {
-            if(index < valid_kernels.size() && valid_kernels[index] == kernel_id)
-                return index;
+                               const std::size_t& expected_index,
+                               const std::string& kernel_id) -> std::optional<std::size_t> {
+            if(expected_index < valid_kernels.size() && valid_kernels[expected_index] == kernel_id)
+                return expected_index;
             auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
             if(it != valid_kernels.end())
                 return static_cast<std::size_t>(it - valid_kernels.begin());
-            MIOPEN_LOG_E("Not found :" << index << "-" << kernel_id);
-            return 0;
+            MIOPEN_LOG_I2("Hard-coded heuristics did not find kernel: " << kernel_id);
+            return std::nullopt;
         };
 
         if(problem.GetInChannels() > 8 && problem.GetGroupCount() == 1 &&
            problem.GetAlphaBetaCase() == DEFAULT)
         {
             int K = problem.GetOutChannels();
+            std::optional<std::size_t> found_index;
+
             if(problem.GetInDataType() == miopenBFloat16)
             {
                 if(K < 64)
                 {
-                    index = find_kernel(
+                    found_index = find_kernel(
                         38,
                         "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
                         "<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, "
@@ -545,7 +500,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
                 }
                 else
                 {
-                    index = find_kernel(
+                    found_index = find_kernel(
                         30,
                         "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
                         "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
@@ -556,7 +511,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
             {
                 if(K < 64)
                 {
-                    index = find_kernel(
+                    found_index = find_kernel(
                         57,
                         "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
                         "<64, 16, 16, 128, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, "
@@ -564,32 +519,102 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
                 }
                 else
                 {
-                    index = find_kernel(
+                    found_index = find_kernel(
                         31,
                         "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
                         "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
                         "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
                 }
             }
+
+            if(found_index.has_value())
+            {
+                index     = found_index.value();
+                kernel_id = valid_kernels[index];
+                MIOPEN_LOG_I("Step 2: Hard-coded heuristics selected kernel: "
+                             << kernel_id << " at index: " << index);
+                return;
+            }
         }
 
-        if(index < valid_kernels.size())
+        MIOPEN_LOG_I2(
+            "Step 2: Hard-coded heuristics did not select a kernel, proceeding to next step");
+        // Continue to AI heuristics
+    }
+    else
+    {
+        MIOPEN_LOG_I2("Step 2: Hard-coded heuristics skipped (data type: "
+                      << problem.GetInDataType() << ", device: " << ctx.GetStream().GetDeviceName()
+                      << ")");
+    }
+
+    // 3. AI heuristics (if enabled)
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    if(&ctx != &GetDummyCtx() &&
+       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
+    {
+        MIOPEN_LOG_I2(
+            "Step 3: Attempting AI heuristics for data type: " << problem.GetInDataType());
+
+        bool ai_success         = false;
+        std::string solver_name = "ConvHipImplicitGemm3DGroupFwdXdlops";
+
+        auto run_ai_heuristics = [&](auto CKDataType) {
+            using T = decltype(CKDataType);
+            auto fill_valid_kernels =
+                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<T>, CKArgs<T>>(
+                    problem);
+            };
+            return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
+                                                                        problem,
+                                                                        valid_kernels,
+                                                                        index,
+                                                                        split_k,
+                                                                        kernel_id,
+                                                                        fill_valid_kernels,
+                                                                        solver_name);
+        };
+        switch(problem.GetInDataType())
         {
-            kernel_id = valid_kernels[index];
-            MIOPEN_LOG_I("Fallback heuristics selected kernel: " << kernel_id
-                                                                 << " at index: " << index);
+        case miopenHalf: ai_success = run_ai_heuristics(ck::half_t{}); break;
+        case miopenFloat: ai_success = run_ai_heuristics(float{}); break;
+        case miopenBFloat16: ai_success = run_ai_heuristics(ck::bhalf_t{}); break;
+        default: break;
+        }
+        if(ai_success)
+        {
+            MIOPEN_LOG_I("Step 3: AI heuristics selected kernel: " << kernel_id);
             return;
         }
         else
         {
-            MIOPEN_LOG_W("Fallback heuristics failed, index "
-                         << index << " out of range, falling back to default initialization");
+            MIOPEN_LOG_I2("Step 3: AI heuristics failed, proceeding to default initialization");
             // Continue to default initialization
         }
     }
+    else
+    {
+        MIOPEN_LOG_I2("Step 3: AI heuristics skipped (disabled or dummy context)");
+    }
+#else
+    MIOPEN_LOG_I2("Step 3: AI heuristics not available (MIOPEN_ENABLE_AI_KERNEL_TUNING disabled)");
+#endif
 
     // 4. Default: index remains 0, first valid_kernel will be used
+    MIOPEN_LOG_I2("Step 4: Using default initialization (index=0)");
     InitValidKernels(problem);
+    if(!valid_kernels.empty())
+    {
+        index     = 0;
+        kernel_id = valid_kernels[index];
+        MIOPEN_LOG_I("Step 4: Default initialization selected kernel: " << kernel_id
+                                                                        << " at index: 0");
+    }
+    else
+    {
+        MIOPEN_LOG_W("Step 4: Default initialization failed - no valid kernels found");
+    }
 #endif
 }
 
