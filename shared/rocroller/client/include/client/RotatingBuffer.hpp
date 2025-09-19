@@ -34,7 +34,10 @@
 
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
+
+using namespace rocRoller;
 
 template <typename T>
 static std::shared_ptr<T> makeSharedDeviceUninitialized(size_t count)
