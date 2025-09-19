@@ -91,5 +91,5 @@ target_sources(rocroller-tests-catch
 )
 
 target_include_directories(rocroller-tests-catch PRIVATE
-    ${CMAKE_SOURCE_DIR}/shared/rocroller/client/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../client/include
 )
