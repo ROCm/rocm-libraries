@@ -15,7 +15,7 @@ Documentation for rocFFT is available at
   - (32,32,128)
   - (32,32,64)
   - (64,32,128)
-* Improved performance of 3D MPI pencil decompositions, by using sub-communicators for global transpose operations.
+* Improved performance of 3D MPI pencil decompositions by using sub-communicators for global transpose operations.
 
 ## rocFFT 1.0.34 for ROCm 7.0.0
 
