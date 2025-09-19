@@ -84,11 +84,9 @@ namespace rocRoller
                 rv << "_WG";
                 rocRoller::streamJoin(rv, std::vector{workgroupSizeX, workgroupSizeY}, "x");
 
-                if(workgroupMapping.first != -1)
+                if(workgroupMappingDim != -1)
                 {
-                    rv << "_WGM";
-                    rocRoller::streamJoin(
-                        rv, std::vector{workgroupMapping.first, workgroupMapping.second}, "");
+                    rv << "_WGM" << workgroupMappingDim;
                 }
 
                 rv << "_WGMXCC";
@@ -169,6 +167,7 @@ namespace rocRoller
                 {
                     s << " BlockSize:" << x.scaleBlockSize;
                 }
+                s << std::endl;
                 return s;
             }
 
@@ -204,11 +203,11 @@ namespace rocRoller
                 s << "Unroll:    X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
                 s << "Scheduler: " << x.scheduler << std::endl;
                 s << "WG size:   " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
-                if(x.workgroupMapping.first != -1)
+                if(x.workgroupMappingDim != -1)
                 {
-                    s << "WG Mapping: " << x.workgroupMapping.first << ","
-                      << x.workgroupMapping.second << std::endl;
+                    s << "WG Mapping Dim: " << x.workgroupMappingDim << std::endl;
                 }
+
                 s << "WG XCC Remap: " << x.workgroupRemapXCC;
                 if(x.workgroupRemapXCC)
                 {

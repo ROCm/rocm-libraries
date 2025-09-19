@@ -19,7 +19,7 @@ BenchmarkProblems:
   ########################################
   # NT - standard
   ########################################
-  - 
+  -
     - # ProblemType
       OperationType: GEMM
       DataType: d

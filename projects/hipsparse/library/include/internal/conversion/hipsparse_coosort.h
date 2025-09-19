@@ -33,7 +33,7 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXcoosort_bufferSizeExt returns the size of the temporary storage buffer
-*  in bytes required by \ref hipsparseXcoosortByRow() and \ref hipsparseXcoosortByColumn(). 
+*  in bytes required by \ref hipsparseXcoosortByRow() and \ref hipsparseXcoosortByColumn().
 *  The temporary storage buffer must be allocated by the user.
 *
 *  @param[in]
@@ -55,7 +55,7 @@ extern "C" {
 *                      hipsparseXcoosortByRow() and hipsparseXcoosortByColumn().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
 *              \p cooCols or \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -75,7 +75,7 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *  \p hipsparseXcoosortByRow sorts a matrix in COO format by row. The sorted
 *  permutation vector \p P can be used to obtain sorted \p cooVal array. In this
 *  case, \p P must be initialized as the identity permutation, see
-*  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO 
+*  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO
 *  values, see hipsparse \ref hipsparseSgthr "hipsparseXgthr()".
 *
 *  \p hipsparseXcoosortByRow requires extra temporary storage buffer that has to be
@@ -111,7 +111,7 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *                  \ref hipsparseXcoosort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
 *              \p cooCols or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
@@ -127,7 +127,7 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *    //     6 0 0 7 8
 *    int hcooRowInd[8] = {0, 2, 0, 1, 1, 0, 2, 2};
 *    int hcooColInd[8] = {0, 0, 1, 1, 2, 3, 3, 4};
-*    float hcooVal[8]   = {1.0f, 6.0f, 2.0f, 4.0f, 5.0f, 3.0f, 7.0f, 8.0f}; 
+*    float hcooVal[8]   = {1.0f, 6.0f, 2.0f, 4.0f, 5.0f, 3.0f, 7.0f, 8.0f};
 *
 *    int m         = 3;
 *    int n         = 5;
@@ -166,7 +166,7 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *    hipFree(dcooVal);
 *    hipFree(dcooValSorted);
 *    hipFree(dperm);
-*   
+*
 *    hipFree(dbuffer);
 *
 *    hipsparseDestroy(handle);
@@ -189,7 +189,7 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *  \p hipsparseXcoosortByColumn sorts a matrix in COO format by column. The sorted
 *  permutation vector \p P can be used to obtain sorted \p cooVal array. In this
 *  case, \p P must be initialized as the identity permutation, see
-*  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO 
+*  \ref hipsparseCreateIdentityPermutation(). To apply the permutation vector to the COO
 *  values, see hipsparse \ref hipsparseSgthr "hipsparseXgthr()".
 *
 *  \p hipsparseXcoosortByColumn requires extra temporary storage buffer that has to be
@@ -225,7 +225,7 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *                  \ref hipsparseXcoosort_bufferSizeExt().
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
 *              \p cooCols or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
@@ -241,7 +241,7 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *    //     6 0 0 7 8
 *    int hcooRowInd[8] = {0, 0, 0, 1, 1, 2, 2, 2};
 *    int hcooColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcooVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}; 
+*    float hcooVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
 *
 *    int m         = 3;
 *    int n         = 5;
@@ -280,7 +280,7 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *    hipFree(dcooVal);
 *    hipFree(dcooValSorted);
 *    hipFree(dperm);
-*   
+*
 *    hipFree(dbuffer);
 *
 *    hipsparseDestroy(handle);

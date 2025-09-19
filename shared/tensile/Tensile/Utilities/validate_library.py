@@ -58,7 +58,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     data = gather_data(csvpath)
-    
+
     # List files in library path
     datFiles = [f.stem for f in pathlib.Path(libraryPath).glob("*.dat")]
     coFiles = [f.stem for f in pathlib.Path(libraryPath).glob("*.co")]

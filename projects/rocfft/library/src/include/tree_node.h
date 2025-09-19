@@ -42,6 +42,7 @@
 #include "kargs.h"
 #include "load_store_ops.h"
 #include "logging.h"
+#include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
 
@@ -827,6 +828,11 @@ struct rocfft_location_t
         return device < other.device;
     }
 
+    bool operator==(const rocfft_location_t& other) const
+    {
+        return comm_rank == other.comm_rank && device == other.device;
+    }
+
     int comm_rank = 0;
     int device    = 0;
 };
@@ -1369,6 +1375,7 @@ private:
 // The former is preferable, as it is usually more optimized.
 struct CommAllToAll : public MultiPlanItem
 {
+
     CommAllToAll(rocfft_precision           _precision,
                  rocfft_array_type          _arrayType,
                  const std::vector<size_t>& _sendOffsets,
@@ -1376,7 +1383,9 @@ struct CommAllToAll : public MultiPlanItem
                  const std::vector<size_t>& _recvOffsets,
                  const std::vector<size_t>& _recvCounts,
                  BufferPtr                  _sendBuf,
-                 BufferPtr                  _recvBuf)
+                 BufferPtr                  _recvBuf,
+                 bool                       uniformCounts,
+                 MPI_Comm_wrapper_t         subcomm = {})
         : precision(_precision)
         , arrayType(_arrayType)
         , sendOffsets(_sendOffsets)
@@ -1385,6 +1394,8 @@ struct CommAllToAll : public MultiPlanItem
         , recvCounts(_recvCounts)
         , sendBuf(_sendBuf)
         , recvBuf(_recvBuf)
+        , uniform_counts(uniformCounts)
+        , subcomm(std::move(subcomm))
     {
         // Currently MPI interface uses 32-bit signed ints, so assert
         // that our counts/offsets don't overflow that type
@@ -1433,6 +1444,16 @@ struct CommAllToAll : public MultiPlanItem
         return true;
     }
 
+    void set_uniform_count_inside_subcomm(size_t val)
+    {
+        uniform_count_inside_subcomm = val;
+    }
+
+    void set_uniform_count(bool val)
+    {
+        uniform_counts = val;
+    }
+
 private:
     const rocfft_precision  precision;
     const rocfft_array_type arrayType;
@@ -1444,9 +1465,18 @@ private:
     const std::vector<size_t> recvOffsets;
     const std::vector<size_t> recvCounts;
 
+    // counts for MPIAlltoall inside a subcommunicator
+    size_t uniform_count_inside_subcomm;
+
     // send/receive buffers
     const BufferPtr sendBuf;
     const BufferPtr recvBuf;
+
+    // check uniform counts for using AlltoAll instead of AlltoAllv
+    bool uniform_counts = false;
+
+    // subcomm for optimizations whenever possible
+    MPI_Comm_wrapper_t subcomm;
 };
 
 // Tree-structured FFT plan.  This is specific to a single device on

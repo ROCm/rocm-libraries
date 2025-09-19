@@ -256,7 +256,7 @@ program example_fortran_bsrilu0
                 if(j .eq. h_bsr_col_ind(k) + 1)  then
                     do t = 1, block_dim
                         if(dir .eq. 0) then
-                            write(*,fmt='(A,F6.2)',advance='no') ' ', h_bsr_val(block_dim * block_dim * (k - 1) + & 
+                            write(*,fmt='(A,F6.2)',advance='no') ' ', h_bsr_val(block_dim * block_dim * (k - 1) + &
                                                                                 block_dim * (s - 1) + t)
                         else
                             write(*,fmt='(A,F6.2)',advance='no') ' ', h_bsr_val(block_dim * block_dim * (k - 1) + &

@@ -100,22 +100,32 @@ template<typename Config,
          typename CountsOutputIterator,
          typename RunsCountOutputIterator,
          typename LookbackScanState>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    non_trivial_kernel(const InputIterator           input,
-                       const OffsetsOutputIterator   offsets_output,
-                       const CountsOutputIterator    counts_output,
-                       const RunsCountOutputIterator runs_count_output,
-                       const LookbackScanState       scan_state,
-                       const std::size_t             grid_size,
-                       const std::size_t             size)
+inline hipError_t launch_non_trivial(detail::target_arch           arch,
+                                     const InputIterator           input,
+                                     const OffsetsOutputIterator   offsets_output,
+                                     const CountsOutputIterator    counts_output,
+                                     const RunsCountOutputIterator runs_count_output,
+                                     const LookbackScanState       scan_state,
+                                     const std::size_t             grid_size,
+                                     const std::size_t             size,
+                                     dim3                          grid,
+                                     dim3                          block,
+                                     size_t                        shmem,
+                                     hipStream_t                   stream)
 {
-    run_length_encode::non_trivial_kernel_impl<Config, OffsetCountPairType>(input,
-                                                                            offsets_output,
-                                                                            counts_output,
-                                                                            runs_count_output,
-                                                                            scan_state,
-                                                                            grid_size,
-                                                                            size);
+    auto kernel = [=](auto arch_config)
+    {
+        run_length_encode::non_trivial_kernel_impl<decltype(arch_config), OffsetCountPairType>(
+            input,
+            offsets_output,
+            counts_output,
+            runs_count_output,
+            scan_state,
+            grid_size,
+            size);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<typename Config,
@@ -149,7 +159,7 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
     detail::target_arch target_arch;
     ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
 
-    const non_trivial_runs_config_params params     = dispatch_target_arch<config>(target_arch);
+    const non_trivial_runs_config_params params = dispatch_target_arch<config, false>(target_arch);
     const unsigned int                   block_size = params.kernel_config.block_size;
     const unsigned int items_per_block = block_size * params.kernel_config.items_per_thread;
     const std::size_t  grid_size       = detail::ceiling_div(size, items_per_block);
@@ -177,11 +187,12 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
 
     scan_state_type            scan_state{};
     scan_state_with_sleep_type scan_state_with_sleep{};
-    ROCPRIM_RETURN_ON_ERROR(scan_state_type::create(scan_state, scan_state_storage, grid_size, stream));
+    ROCPRIM_RETURN_ON_ERROR(
+        scan_state_type::create(scan_state, scan_state_storage, grid_size, stream));
     ROCPRIM_RETURN_ON_ERROR(scan_state_with_sleep_type::create(scan_state_with_sleep,
-                                                       scan_state_storage,
-                                                       grid_size,
-                                                       stream));
+                                                               scan_state_storage,
+                                                               grid_size,
+                                                               stream));
 
     auto with_scan_state
         = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
@@ -235,24 +246,23 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                                                 grid_size,
                                                 start);
 
-    with_scan_state(
+    ROCPRIM_RETURN_ON_ERROR(with_scan_state(
         [&](const auto scan_state)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    run_length_encode::non_trivial_kernel<config, offset_count_pair_type>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
+            return run_length_encode::launch_non_trivial<config, offset_count_pair_type>(
+                target_arch,
                 input + 0,
                 offsets_output,
                 counts_output,
                 runs_count_output,
                 scan_state,
                 grid_size,
-                size);
-        });
+                size,
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                stream);
+        }));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("run_length_encode::non_trivial_kernel",
                                                 size,
                                                 start);

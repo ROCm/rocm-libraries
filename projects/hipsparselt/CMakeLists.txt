@@ -33,7 +33,8 @@ option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 # Find CUDA if the user wants a CUDA version.
 option(BUILD_CUDA "Look for CUDA and use that as a backend if found" OFF)
-option(BUILD_USE_LOCAL_TENSILE "Build hipSparseLt with local tensilelite" ON)
+option(BUILD_USE_LOCAL_TENSILE "Build hipSparseLt with local tensilelite" OFF)
+option(BUILD_USE_LOCAL_TENSILE_HIPBLASLT_NEXT_CMAKE "Build hipSparseLt with local tensilelite (hipblaslt next cmake)" ON)
 include(CMakeDependentOption)
 cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Enable roctx marker in hipSPARSELt" ON "BUILD_SHARED_LIBS" OFF)
 
@@ -42,6 +43,10 @@ if(BUILD_CUDA)
     set(BUILD_CLIENTS_TESTS OFF)
     set(HIPSPARSELT_ENABLE_MARKER OFF)
 endif()
+
+set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
+    CACHE PATH "Path to hipblaslt directory."
+)
 
 # This will add compile option: -std=c++17
 set(CMAKE_CXX_STANDARD 17 )
@@ -156,6 +161,51 @@ else()
     option( BUILD_WITH_TENSILE "Build full functionality which requires tensile?" ON )
 
     if( BUILD_WITH_TENSILE )
+      if( BUILD_USE_LOCAL_TENSILE_HIPBLASLT_NEXT_CMAKE )
+          set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
+          if(NOT EXISTS "${HIPBLASLT_PATH}")
+              message(
+                  FATAL_ERROR
+                      "hipBLASLt required but not found at ${HIPBLASLT_PATH}."
+              )
+          endif()
+
+          block(SCOPE_FOR VARIABLES)
+          set(HIPBLASLT_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL "" FORCE)
+          set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
+          set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
+          # Builds tensilelite's device libraries (.co/.dat)
+          set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
+          # Builds tensilelite::tensilelite-host target
+          set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+          if( Tensile_NO_LAZY_LIBRARY_LOADING )
+            set( HIPBLASLT_ENABLE_LAZY_LOAD OFF)
+          else()
+            set( HIPBLASLT_ENABLE_LAZY_LOAD ON)
+          endif()
+          set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
+          set(HIPBLASLT_LIBLOGIC_PATH
+              "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+              CACHE STRING "" FORCE
+          )
+          set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
+              CACHE FILEPATH "License file for package" FORCE
+          )
+          if(WIN32)
+              set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
+                  CACHE PATH "path to tensile library" FORCE
+              )
+          else()
+              set(HIPBLASLT_TENSILE_LIBRARY_DIR
+                  "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
+                  CACHE PATH "path to tensile library" FORCE
+              )
+          endif()
+          set(ORIGAMI_ENABLE_INSTALL OFF)
+          add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
+          endblock()
+      endif()
+    else()
       # we will have expanded "all" for tensile to ensure consistency as we have local rules
       set( Tensile_ARCHITECTURE "${AMDGPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
 
@@ -361,6 +411,7 @@ else()
 endif( )
 
 set( CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" "\${CPACK_PACKAGING_INSTALL_PREFIX}/lib" )
+set( CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /opt/rocm/llvm/bin/llvm-strip" ) # need to generalize this
 
 # Give hipsparselt compiled for CUDA backend a different name
 if( NOT BUILD_CUDA )

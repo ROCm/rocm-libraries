@@ -50,11 +50,8 @@ void TestSequenceDevice(ExecutionPolicy exec)
     ASSERT_EQUAL(cudaSuccess, err);
   }
 
-  ASSERT_EQUAL(v[0], 0);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 2);
-  ASSERT_EQUAL(v[3], 3);
-  ASSERT_EQUAL(v[4], 4);
+  thrust::device_vector<int> ref{0, 1, 2, 3, 4};
+  ASSERT_EQUAL(v, ref);
 
   sequence_kernel<<<1, 1>>>(exec, v.begin(), v.end(), 10);
   {
@@ -62,11 +59,8 @@ void TestSequenceDevice(ExecutionPolicy exec)
     ASSERT_EQUAL(cudaSuccess, err);
   }
 
-  ASSERT_EQUAL(v[0], 10);
-  ASSERT_EQUAL(v[1], 11);
-  ASSERT_EQUAL(v[2], 12);
-  ASSERT_EQUAL(v[3], 13);
-  ASSERT_EQUAL(v[4], 14);
+  ref = {10, 11, 12, 13, 14};
+  ASSERT_EQUAL(v, ref);
 
   sequence_kernel<<<1, 1>>>(exec, v.begin(), v.end(), 10, 2);
   {
@@ -74,11 +68,8 @@ void TestSequenceDevice(ExecutionPolicy exec)
     ASSERT_EQUAL(cudaSuccess, err);
   }
 
-  ASSERT_EQUAL(v[0], 10);
-  ASSERT_EQUAL(v[1], 12);
-  ASSERT_EQUAL(v[2], 14);
-  ASSERT_EQUAL(v[3], 16);
-  ASSERT_EQUAL(v[4], 18);
+  ref = {10, 12, 14, 16, 18};
+  ASSERT_EQUAL(v, ref);
 }
 
 void TestSequenceDeviceSeq()
@@ -106,29 +97,20 @@ void TestSequenceCudaStreams()
   thrust::sequence(thrust::cuda::par.on(s), v.begin(), v.end());
   cudaStreamSynchronize(s);
 
-  ASSERT_EQUAL(v[0], 0);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 2);
-  ASSERT_EQUAL(v[3], 3);
-  ASSERT_EQUAL(v[4], 4);
+  Vector ref{0, 1, 2, 3, 4};
+  ASSERT_EQUAL(v, ref);
 
   thrust::sequence(thrust::cuda::par.on(s), v.begin(), v.end(), 10);
   cudaStreamSynchronize(s);
 
-  ASSERT_EQUAL(v[0], 10);
-  ASSERT_EQUAL(v[1], 11);
-  ASSERT_EQUAL(v[2], 12);
-  ASSERT_EQUAL(v[3], 13);
-  ASSERT_EQUAL(v[4], 14);
+  ref = {10, 11, 12, 13, 14};
+  ASSERT_EQUAL(v, ref);
 
   thrust::sequence(thrust::cuda::par.on(s), v.begin(), v.end(), 10, 2);
   cudaStreamSynchronize(s);
 
-  ASSERT_EQUAL(v[0], 10);
-  ASSERT_EQUAL(v[1], 12);
-  ASSERT_EQUAL(v[2], 14);
-  ASSERT_EQUAL(v[3], 16);
-  ASSERT_EQUAL(v[4], 18);
+  ref = {10, 12, 14, 16, 18};
+  ASSERT_EQUAL(v, ref);
 
   cudaStreamDestroy(s);
 }

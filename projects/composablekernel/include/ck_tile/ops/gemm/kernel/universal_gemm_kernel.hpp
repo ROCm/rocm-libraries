@@ -157,23 +157,23 @@ struct UniversalGemmKernel
     using EpiloguePipeline = remove_cvref_t<EpiloguePipeline_>;
 
     static constexpr bool ADataTypeIsTuple =
-        is_detected<is_tuple, typename GemmPipeline::ADataType>::value;
+        is_detected<is_tuple, typename GemmPipeline::AsDataType>::value;
     static constexpr bool BDataTypeIsTuple =
-        is_detected<is_tuple, typename GemmPipeline::BDataType>::value;
+        is_detected<is_tuple, typename GemmPipeline::BsDataType>::value;
     static constexpr bool DDataTypeIsTuple =
         is_detected<is_tuple, typename EpiloguePipeline::DsDataType>::value;
     static constexpr bool ALayoutIsTuple =
-        is_detected<is_tuple, typename GemmPipeline::ALayout>::value;
+        is_detected<is_tuple, typename GemmPipeline::AsLayout>::value;
     static constexpr bool BLayoutIsTuple =
-        is_detected<is_tuple, typename GemmPipeline::BLayout>::value;
+        is_detected<is_tuple, typename GemmPipeline::BsLayout>::value;
     static constexpr bool DLayoutIsTuple =
         is_detected<is_tuple, typename EpiloguePipeline::DsLayout>::value;
 
     using AsLayout = std::conditional_t<ALayoutIsTuple,
-                                        remove_cvref_t<typename GemmPipeline::ALayout>,
+                                        remove_cvref_t<typename GemmPipeline::AsLayout>,
                                         remove_cvref_t<tuple<typename GemmPipeline::ALayout>>>;
     using BsLayout = std::conditional_t<BLayoutIsTuple,
-                                        remove_cvref_t<typename GemmPipeline::BLayout>,
+                                        remove_cvref_t<typename GemmPipeline::BsLayout>,
                                         remove_cvref_t<tuple<typename GemmPipeline::BLayout>>>;
 
     using DsLayout = std::conditional_t<DLayoutIsTuple,
@@ -181,11 +181,11 @@ struct UniversalGemmKernel
                                         remove_cvref_t<tuple<typename EpiloguePipeline::DsLayout>>>;
 
     using AsDataType = std::conditional_t<ADataTypeIsTuple,
-                                          remove_cvref_t<typename GemmPipeline::ADataType>,
+                                          remove_cvref_t<typename GemmPipeline::AsDataType>,
                                           remove_cvref_t<tuple<typename GemmPipeline::ADataType>>>;
 
     using BsDataType = std::conditional_t<BDataTypeIsTuple,
-                                          remove_cvref_t<typename GemmPipeline::BDataType>,
+                                          remove_cvref_t<typename GemmPipeline::BsDataType>,
                                           remove_cvref_t<tuple<typename GemmPipeline::BDataType>>>;
 
     using DsDataType =
@@ -193,10 +193,13 @@ struct UniversalGemmKernel
                            remove_cvref_t<typename EpiloguePipeline::DsDataType>,
                            remove_cvref_t<tuple<typename EpiloguePipeline::DsDataType>>>;
 
-    using ELayout   = remove_cvref_t<typename GemmPipeline::CLayout>;
+    using CLayout   = remove_cvref_t<typename GemmPipeline::CLayout>;
     using EDataType = remove_cvref_t<typename EpiloguePipeline::ODataType>;
 
-    static constexpr index_t KernelBlockSize = GemmPipeline::BlockSize;
+    using AElementWise = remove_cvref_t<typename GemmPipeline::AElementWise>;
+    using BElementWise = remove_cvref_t<typename GemmPipeline::BElementWise>;
+
+    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
 
     // Get the persistent kernel if the pipeline has it available
     struct has_persistent_kernel
@@ -275,15 +278,26 @@ struct UniversalGemmKernel
     CK_TILE_HOST static auto MaxOccupancyGridSize(const stream_config& s) -> dim3
     {
         using Kernel      = UniversalGemmKernel<TilePartitioner, GemmPipeline, EpiloguePipeline>;
-        const auto kernel = kentry<KernelBlockSize, 1, Kernel, KernelArgs>;
+        const auto kernel = kentry<1, Kernel, KernelArgs>;
         int occupancy;
         hip_check_error(
-            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, KernelBlockSize, 0));
+            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, BlockSize().x, 0));
+
         const int grid_size = get_available_compute_units(s) * occupancy;
         return dim3(grid_size, 1, 1);
     }
 
-    CK_TILE_HOST static constexpr auto BlockSize() { return dim3(KernelBlockSize); }
+    CK_TILE_HOST static auto BlockSize()
+    {
+        if(ck_tile::is_wave32())
+        {
+            return dim3(kBlockSize / 2);
+        }
+        else
+        {
+            return dim3(kBlockSize);
+        }
+    }
 
     CK_TILE_HOST static constexpr KernelArgs
     MakeKernelArgs(const UniversalGemmHostArgs<NumATensor, NumBTensor, NumDTensor>& hostArgs)
@@ -371,7 +385,9 @@ struct UniversalGemmKernel
             }
         }
 
-        bool AsTesnorIsValid = {true};
+        const auto vectorSizeA = is_wave32() ? GemmPipeline::template GetVectorSizeA<true>()
+                                             : GemmPipeline::template GetVectorSizeA<false>();
+        bool AsTesnorIsValid   = {true};
         static_for<0, NumATensor, 1>{}([&](auto index) {
             using AiLayout = remove_cvref_t<std::tuple_element_t<index.value, AsLayout>>;
             if constexpr(std::is_same_v<AiLayout, tensor_layout::gemm::RowMajor>)
@@ -387,7 +403,7 @@ struct UniversalGemmKernel
                     }
                     AsTesnorIsValid = false;
                 }
-                if(kargs.K % GemmPipeline::GetVectorSizeA() != 0)
+                if(kargs.K % vectorSizeA != 0)
                 {
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
@@ -407,7 +423,7 @@ struct UniversalGemmKernel
                     }
                     AsTesnorIsValid = false;
                 }
-                if(kargs.M % GemmPipeline::GetVectorSizeA() != 0)
+                if(kargs.M % vectorSizeA != 0)
                 {
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
@@ -418,7 +434,9 @@ struct UniversalGemmKernel
             }
         });
 
-        bool BsTesnorIsValid = {true};
+        bool BsTesnorIsValid   = {true};
+        const auto vectorSizeB = is_wave32() ? GemmPipeline::template GetVectorSizeB<true>()
+                                             : GemmPipeline::template GetVectorSizeB<false>();
         static_for<0, NumBTensor, 1>{}([&](auto index) {
             using BiLayout = remove_cvref_t<std::tuple_element_t<index.value, BsLayout>>;
             if constexpr(std::is_same_v<BiLayout, tensor_layout::gemm::RowMajor>)
@@ -432,7 +450,7 @@ struct UniversalGemmKernel
                     }
                     BsTesnorIsValid = false;
                 }
-                if(kargs.N % GemmPipeline::GetVectorSizeB() != 0)
+                if(kargs.N % vectorSizeB != 0)
                 {
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
@@ -454,7 +472,7 @@ struct UniversalGemmKernel
                     }
                     BsTesnorIsValid = false;
                 }
-                if(kargs.K % GemmPipeline::GetVectorSizeB() != 0)
+                if(kargs.K % vectorSizeB != 0)
                 {
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
@@ -468,7 +486,7 @@ struct UniversalGemmKernel
         bool DTesnorIsValid = {true};
         static_for<0, NumDTensor, 1>{}([&](auto index) {
             using DiLayout = remove_cvref_t<std::tuple_element_t<index.value, DsLayout>>;
-            if(std::is_same_v<DiLayout, ELayout> == false)
+            if(std::is_same_v<DiLayout, CLayout> == false)
             {
                 DTesnorIsValid = false;
             }
@@ -514,7 +532,7 @@ struct UniversalGemmKernel
             }
         });
 
-        if constexpr(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>)
+        if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
         {
             if(kargs.N % TilePartitioner::NPerBlock != 0 && GemmPipeline::kPadN == false)
             {
@@ -564,7 +582,7 @@ struct UniversalGemmKernel
                         const std::array<const void*, NumDTensor>& ds_ptr,
                         EDataType* e_ptr,
                         const KernelArgs& kargs,
-                        const SplitKBatchOffset& splitk_batch_offset)
+                        const index_t k_size)
     {
         static_assert(!TilePartitioner::BlockGemmShape::PermuteA, "Not implemented!");
 
@@ -576,7 +594,7 @@ struct UniversalGemmKernel
                 {
                     return make_naive_tensor_view<address_space_enum::global>(
                         static_cast<const AiDataType*>(as_ptr[i]),
-                        make_tuple(kargs.M, splitk_batch_offset.splitted_k),
+                        make_tuple(kargs.M, k_size),
                         make_tuple(kargs.stride_As[i], 1),
                         number<GemmPipeline::GetVectorSizeA()>{},
                         number<1>{});
@@ -585,7 +603,7 @@ struct UniversalGemmKernel
                 {
                     return make_naive_tensor_view<address_space_enum::global>(
                         static_cast<const AiDataType*>(as_ptr[i]),
-                        make_tuple(splitk_batch_offset.splitted_k, kargs.M),
+                        make_tuple(k_size, kargs.M),
                         make_tuple(kargs.stride_As[i], 1),
                         number<GemmPipeline::GetVectorSizeA()>{},
                         number<1>{});
@@ -602,7 +620,7 @@ struct UniversalGemmKernel
                     if constexpr(TilePartitioner::BlockGemmShape::PermuteB)
                     {
                         constexpr index_t K1 = GemmPipeline::GetSmemPackB();
-                        const index_t K0     = splitk_batch_offset.splitted_k / K1;
+                        const index_t K0     = k_size / K1;
                         constexpr index_t VectorSizeB =
                             std::min(K1, GemmPipeline::GetVectorSizeB());
                         const auto b_k0_n_k1_desc =
@@ -623,7 +641,7 @@ struct UniversalGemmKernel
                     {
                         return make_naive_tensor_view<address_space_enum::global>(
                             bs_ptr[i],
-                            make_tuple(splitk_batch_offset.splitted_k, kargs.N),
+                            make_tuple(k_size, kargs.N),
                             make_tuple(kargs.stride_Bs[i], 1),
                             number<GemmPipeline::GetVectorSizeB()>{},
                             number<1>{});
@@ -634,7 +652,7 @@ struct UniversalGemmKernel
                     if constexpr(TilePartitioner::BlockGemmShape::PermuteB)
                     {
                         constexpr index_t K1 = GemmPipeline::GetSmemPackB();
-                        const index_t K0     = splitk_batch_offset.splitted_k / K1;
+                        const index_t K0     = k_size / K1;
                         constexpr index_t VectorSizeB =
                             std::min(K1, GemmPipeline::GetVectorSizeB());
                         const auto b_k0_n_k1_desc =
@@ -657,7 +675,7 @@ struct UniversalGemmKernel
                         {
                             index_t kFlatK =
                                 GemmPipeline::BlockGemmShape::flatKPerWarp *
-                                (splitk_batch_offset.splitted_k /
+                                (k_size /
                                  TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{}));
                             index_t kFlatN = kargs.N * kargs.K / kFlatK;
 
@@ -672,7 +690,7 @@ struct UniversalGemmKernel
                         {
                             return make_naive_tensor_view<address_space_enum::global>(
                                 bs_ptr[i],
-                                make_tuple(kargs.N, splitk_batch_offset.splitted_k),
+                                make_tuple(kargs.N, k_size),
                                 make_tuple(kargs.stride_Bs[i], 1),
                                 number<GemmPipeline::GetVectorSizeB()>{},
                                 number<1>{});
@@ -709,7 +727,7 @@ struct UniversalGemmKernel
 
         // TODO: enable vector write for C in ColMajor
         const auto& e_tensor_view = [&]() {
-            if constexpr(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>)
+            if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
                 return make_naive_tensor_view<address_space_enum::global, DstInMemOp>(
                     e_ptr,
@@ -803,7 +821,7 @@ struct UniversalGemmKernel
         // TODO vector write in for C in ColMajor
         const auto& e_pad_view = [&]() {
             const auto& e_tensor_view = views.at(I3);
-            if constexpr(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>)
+            if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
                 return pad_tensor_view(e_tensor_view,
                                        make_tuple(number<TilePartitioner::MPerBlock>{},
@@ -947,7 +965,7 @@ struct UniversalGemmKernel
         // Create Gemm tensor views, pad views and tile windows
         const auto& gemm_tensor_views_tuple =
             MakeGemmTensorViews<EpiloguePipeline::MemoryOperation>(
-                as_ptr, bs_ptr, ds_ptr, e_ptr, kargs, splitk_batch_offset);
+                as_ptr, bs_ptr, ds_ptr, e_ptr, kargs, splitk_batch_offset.splitted_k);
 
         const auto& gemm_pad_views = MakeGemmPadViews(gemm_tensor_views_tuple);
         auto gemm_tile_windows     = MakeGemmTileWindows(gemm_pad_views, block_idx_m, block_idx_n);
@@ -960,8 +978,8 @@ struct UniversalGemmKernel
         const auto& bs_block_window = gemm_tile_windows.at(I1);
         const auto& ds_block_window = gemm_tile_windows.at(I2);
 
-        const auto& c_block_tile =
-            GemmPipeline{}(as_block_window[I0], bs_block_window[I0], num_loop, smem_ptr_0);
+        const auto& c_block_tile = GemmPipeline{}.template operator()(
+            as_block_window, AElementWise{}, bs_block_window, BElementWise{}, num_loop, smem_ptr_0);
 
         if(UseDefaultScheduler || (get_warp_id() == 0))
         {
@@ -1003,7 +1021,7 @@ struct UniversalGemmKernel
         // Create Gemm tensor views, pad views and tile windows
         const auto& gemm_tensor_views_tuple =
             MakeGemmTensorViews<EpiloguePipeline::MemoryOperation>(
-                as_ptr, bs_ptr, ds_ptr, e_ptr, kargs, splitk_batch_offset);
+                as_ptr, bs_ptr, ds_ptr, e_ptr, kargs, splitk_batch_offset.splitted_k);
 
         const auto& gemm_pad_views = MakeGemmPadViews(gemm_tensor_views_tuple);
         auto gemm_tile_windows     = MakeGemmTileWindows(gemm_pad_views, block_idx_m, block_idx_n);
@@ -1016,8 +1034,13 @@ struct UniversalGemmKernel
         const auto& bs_block_window = gemm_tile_windows.at(I1);
         const auto& ds_block_window = gemm_tile_windows.at(I2);
 
-        const auto& c_block_tile = GemmPipeline{}(
-            as_block_window[I0], bs_block_window[I0], num_loop, smem_ptr_0, smem_ptr_1);
+        const auto& c_block_tile = GemmPipeline{}.template operator()(as_block_window,
+                                                                      AElementWise{},
+                                                                      bs_block_window,
+                                                                      BElementWise{},
+                                                                      num_loop,
+                                                                      smem_ptr_0,
+                                                                      smem_ptr_1);
 
         // Run Epilogue Pipeline
         auto& c_block_window = gemm_tile_windows.at(I3);

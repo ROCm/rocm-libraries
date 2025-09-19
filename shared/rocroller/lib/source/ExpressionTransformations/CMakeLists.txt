@@ -7,6 +7,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/ConvertPropagation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataFlowTagPropagation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastArithmetic.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FastDivision.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastMultiplication.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseAssociative.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseTernary.cpp"

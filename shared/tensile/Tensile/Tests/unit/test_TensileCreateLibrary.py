@@ -577,7 +577,7 @@ def test_prepAsm(setupSolutionsAndKernels):
     def testLinux():
         tcl.prepAsm(kernelWriterAssembly, True, Path("no-commit-prep-asm"), (9, 0, 10), 1)
 
-        expected = """#!/bin/sh 
+        expected = """#!/bin/sh
 # usage: asm-new.sh kernelName(no extension) [--wave32]
 f=$1
 shift

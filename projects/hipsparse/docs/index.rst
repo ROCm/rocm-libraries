@@ -28,7 +28,8 @@ The hipSPARSE public repository is located at `<https://github.com/ROCm/rocm-lib
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/install>`
+    * :doc:`Linux installation guide <./install/install>`
+    * :doc:`Windows installation guide <./install/install-windows>`
 
   .. grid-item-card:: How to
 
@@ -56,5 +57,3 @@ The hipSPARSE public repository is located at `<https://github.com/ROCm/rocm-lib
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
-
-

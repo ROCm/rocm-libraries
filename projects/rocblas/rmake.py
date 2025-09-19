@@ -53,7 +53,7 @@ def parse_args():
                         help='Build with address sanitizer enabled. (optional, default: False')
 
     experimental_opts.add_argument('-b', '--branch', dest='tensile_tag', type=str, required=False, default="",
-                        help='Specify the Tensile repository branch or tag to use. (eg. develop, mybranch or <commit hash> )')
+                        help='deprecated: Specify the legacy Tensile GitHub repository branch or tag to use. (eg. develop, or <commit hash>). note: tensile_tag.txt containing commit hash has been deprecated.')
 
     general_opts.add_argument(      '--build_dir', type=str, required=False, default="build",
                         help='Specify path to configure & build process output directory.(optional, default: ./build)')
@@ -92,8 +92,8 @@ def parse_args():
                         help='Build and install external dependencies. (Handled by install.sh and on Windows rdeps.py')
 
     experimental_opts.add_argument('-f', '--fork', dest='tensile_fork', type=str, required=False, default="",
-                        help='Specify the username to fork the Tensile GitHub repository (e.g., ROCm or MyUserName)')
-
+                        help='deprecated: Specify the username to the fork of the legacy Tensile GitHub repository (e.g., ROCm or MyUserName)')
+    
     general_opts.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Build in Debug mode (optional, default: False)')
 
@@ -161,13 +161,13 @@ def parse_args():
                         help='Source path. (optional, default: Current directory)')
 
     experimental_opts.add_argument('-t', '--test_local_path', dest='tensile_test_local_path', type=str, required=False, default="",
-                        help='Use a local path for Tensile instead of remote GIT repo (optional)')
+                        help='Use a local path for Tensile instead of relative shared/tensile folder (optional).  This is required to build a different commit of Tensile than rocBLAS. note: tensile_tag.txt containing commit hash has been deprecated.')
 
     experimental_opts.add_argument(      '--hipblaslt_path', dest='hipblaslt_path', type=str, required=False, default="",
                         help='Use a local path for HipBLASLt (optional)')
 
     general_opts.add_argument(      '--upgrade_tensile_venv_pip', required=False, default=False, action='store_true',
-                        help='Upgrade python pip version during Tensile installation (optional, default: False)')
+                        help='Upgrade python pip and packaging versions during Tensile installation (optional, default: False)')
 
     experimental_opts.add_argument('-u', '--use-custom-version', dest='tensile_version', type=str, required=False, default="",
                         help='Ignore Tensile version and just use the Tensile tag (optional)')
