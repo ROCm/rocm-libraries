@@ -592,7 +592,9 @@ class SizeMapping:
                  'CUOccupancy',
                  'PrefetchGlobalRead',
                  'MathClocksUnrolledLoop',
-                 'synchronizerSizePerWG'
+                 'synchronizerSizePerWG',
+                 'nonTemporalA',
+                 'nonTemporalB',
                  ]
 
     @classmethod
@@ -644,7 +646,9 @@ class SizeMapping:
                    CUOccupancy              = d['CUOccupancy'],
                    PrefetchGlobalRead       = pgr,
                    MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop'],
-                   synchronizerSizePerWG    = synchronizerSizePerWG
+                   synchronizerSizePerWG    = synchronizerSizePerWG,
+                   nonTemporalA             = d['NonTemporalA'],
+                   nonTemporalB             = d['NonTemporalB'],
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):

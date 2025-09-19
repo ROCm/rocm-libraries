@@ -158,6 +158,9 @@ namespace TensileLite
         int MathClocksUnrolledLoop = 0;
 
         size_t synchronizerSizePerWG = 0;
+
+        int nonTemporalA = 0;
+        int nonTemporalB = 0;
     };
 
     struct StreamKSettings
