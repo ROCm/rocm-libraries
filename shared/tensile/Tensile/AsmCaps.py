@@ -972,6 +972,7 @@ def getCapabilitiesCache(rocmVersion: NamedTuple) -> dict:
              (11, 0, 1): {'VOP3v_dot4_i32_i8': True},
              (11, 0, 2): {'VOP3v_dot4_i32_i8': True},
              (11, 0, 3): {'VOP3v_dot4_i32_i8': True},
+             (11, 5, 0): {'VOP3v_dot4_i32_i8': True},
              (11, 5, 1): {'VOP3v_dot4_i32_i8': True},
              (12, 0, 0): {'VOP3v_dot4_i32_i8': True},
              (12, 0, 1): {'VOP3v_dot4_i32_i8': True}}

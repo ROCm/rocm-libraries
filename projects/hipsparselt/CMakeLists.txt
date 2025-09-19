@@ -201,7 +201,7 @@ else()
                   CACHE PATH "path to tensile library" FORCE
               )
           endif()
-
+          set(ORIGAMI_ENABLE_INSTALL OFF)
           add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
           endblock()
       endif()

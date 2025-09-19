@@ -66,7 +66,7 @@ static std::string rocsparse_parse_yaml(const std::string& yaml, const char* inc
 
     auto        exepath       = rocsparse_exepath();
     const char* matrices_path = rocsparse_clients_matrices_dir_get(false);
-    auto        cmd           = exepath + "rocsparse_gentest.py ";
+    auto        cmd           = "python " + exepath + "rocsparse_gentest.py ";
     if(include_path != nullptr)
     {
         cmd += " -I ";
