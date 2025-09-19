@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup conv_module
 *  \brief
 *  \p hipsparseXdense2csr converts the matrix A in dense format into a sparse matrix in CSR format.

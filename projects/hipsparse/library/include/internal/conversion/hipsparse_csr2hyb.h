@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup conv_module
 *  \brief Convert a sparse CSR matrix into a sparse HYB matrix
 *

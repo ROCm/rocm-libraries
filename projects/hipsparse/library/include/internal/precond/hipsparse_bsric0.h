@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
  *  \details
  *  \p hipsparseXbsric02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
@@ -67,7 +67,7 @@ hipsparseStatus_t
     hipsparseXbsric02_zeroPivot(hipsparseHandle_t handle, bsric02Info_t info, int* position);
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
  *  \details
  *  \p hipsparseXbsric02_bufferSize returns the size of the temporary storage buffer
@@ -168,7 +168,7 @@ hipsparseStatus_t hipsparseZbsric02_bufferSize(hipsparseHandle_t         handle,
 /**@}*/
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
  *  \details
  *  \p hipsparseXbsric02_analysis performs the analysis step for \ref hipsparseSbsric02
@@ -276,7 +276,7 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
 /**@}*/
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
  *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting using BSR
  *  storage format

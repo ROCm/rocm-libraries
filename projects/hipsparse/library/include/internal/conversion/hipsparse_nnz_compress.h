@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
 *  This function is used as the first step in converting a CSR matrix to a compressed CSR matrix.
 *

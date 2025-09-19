@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup extra_module
 *  \details
 *  \p hipsparseXcsrgeamNnz computes the total CSR non-zero elements and the CSR row

@@ -76,7 +76,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGather(hipsparseHandle_t          handle,
                                   hipsparseConstDnVecDescr_t vecY,
                                   hipsparseSpVecDescr_t      vecX);
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGather(hipsparseHandle_t     handle,
                                   hipsparseDnVecDescr_t vecY,

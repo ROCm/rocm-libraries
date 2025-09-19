@@ -84,7 +84,7 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t          handle,
                                             hipDataType                computeType,
                                             hipsparseSDDMMAlg_t        alg,
                                             size_t*                    pBufferSizeInBytes);
-#elif (CUDART_VERSION >= 11022)
+#elif(CUDART_VERSION >= 11022)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t           handle,
                                             hipsparseOperation_t        opA,
@@ -156,7 +156,7 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t          handle,
                                             hipDataType                computeType,
                                             hipsparseSDDMMAlg_t        alg,
                                             void*                      tempBuffer);
-#elif (CUDART_VERSION >= 11022)
+#elif(CUDART_VERSION >= 11022)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
                                             hipsparseOperation_t        opA,
@@ -295,7 +295,7 @@ hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t          handle,
                                  hipDataType                computeType,
                                  hipsparseSDDMMAlg_t        alg,
                                  void*                      tempBuffer);
-#elif (CUDART_VERSION >= 11022)
+#elif(CUDART_VERSION >= 11022)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t           handle,
                                  hipsparseOperation_t        opA,

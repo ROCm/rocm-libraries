@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level1_module
 *  \brief Apply Givens rotation to a dense and a sparse vector.
 *

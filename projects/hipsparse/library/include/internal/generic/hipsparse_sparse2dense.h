@@ -59,7 +59,7 @@ hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           
                                                     hipsparseDnMatDescr_t       matB,
                                                     hipsparseSparseToDenseAlg_t alg,
                                                     size_t*                     pBufferSizeInBytes);
-#elif (CUDART_VERSION >= 11020)
+#elif(CUDART_VERSION >= 11020)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           handle,
                                                     hipsparseSpMatDescr_t       matA,
@@ -124,7 +124,7 @@ hipsparseStatus_t hipsparseSparseToDense(hipsparseHandle_t           handle,
                                          hipsparseDnMatDescr_t       matB,
                                          hipsparseSparseToDenseAlg_t alg,
                                          void*                       externalBuffer);
-#elif (CUDART_VERSION >= 11020)
+#elif(CUDART_VERSION >= 11020)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSparseToDense(hipsparseHandle_t           handle,
                                          hipsparseSpMatDescr_t       matA,

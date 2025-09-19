@@ -97,7 +97,7 @@ hipsparseStatus_t hipsparseAxpby(hipsparseHandle_t          handle,
                                  hipsparseConstSpVecDescr_t vecX,
                                  const void*                beta,
                                  hipsparseDnVecDescr_t      vecY);
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseAxpby(hipsparseHandle_t     handle,
                                  const void*           alpha,

@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup extra_module
 *  \details
 *  \p hipsparseXcsrgemmNnz computes the total CSR non-zero elements and the CSR row
@@ -133,7 +133,7 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
                                        int*                      nnzTotalDevHostPtr);
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup extra_module
 *  \brief Sparse matrix sparse matrix multiplication using CSR storage format
 *
@@ -342,7 +342,7 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
 /**@}*/
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup extra_module
 *  \details
 *  \p hipsparseXcsrgemm2_bufferSizeExt returns the size of the temporary storage buffer
@@ -516,7 +516,7 @@ hipsparseStatus_t hipsparseZcsrgemm2_bufferSizeExt(hipsparseHandle_t         han
 /**@}*/
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup extra_module
 *  \details
 *  \p hipsparseXcsrgemm2Nnz computes the total CSR non-zero elements and the CSR row
@@ -638,7 +638,7 @@ hipsparseStatus_t hipsparseXcsrgemm2Nnz(hipsparseHandle_t         handle,
                                         void*                     pBuffer);
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup extra_module
 *  \brief Sparse matrix sparse matrix multiplication using CSR storage format
 *

@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup conv_module
 *  \brief Convert a sparse CSR matrix into a sparse CSC matrix
 *
@@ -173,7 +173,7 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
 /**@}*/
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 /*! \ingroup conv_module
 *  \brief This function computes the size of the user allocated temporary storage buffer used
 *  when converting a sparse CSR matrix into a sparse CSC matrix.
@@ -252,7 +252,7 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
                                                  size_t*               pBufferSizeInBytes);
 #endif
 
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 /*! \ingroup conv_module
 *  \brief Convert a sparse CSR matrix into a sparse CSC matrix
 *

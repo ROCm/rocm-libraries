@@ -153,7 +153,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
                                            hipDataType                 computeType,
                                            hipsparseSpMMAlg_t          alg,
                                            void*                       externalBuffer);
-#elif (CUDART_VERSION >= 11021)
+#elif(CUDART_VERSION >= 11021)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,

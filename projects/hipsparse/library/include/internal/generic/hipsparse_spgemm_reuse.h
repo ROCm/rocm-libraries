@@ -102,7 +102,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t         
                                                       hipsparseSpGEMMDescr_t     spgemmDescr,
                                                       size_t*                    bufferSize1,
                                                       void*                      externalBuffer1);
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      handle,
                                                       hipsparseOperation_t   opA,
@@ -201,7 +201,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t          handle,
                                            size_t*                    bufferSize4,
                                            void*                      externalBuffer4);
 
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
                                            hipsparseOperation_t   opA,
@@ -298,7 +298,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t          handle,
                                             hipsparseSpGEMMDescr_t     spgemmDescr,
                                             size_t*                    bufferSize5,
                                             void*                      externalBuffer5);
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
                                             hipsparseOperation_t   opA,
@@ -367,7 +367,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_compute(hipsparseHandle_t          handle
                                                hipDataType                computeType,
                                                hipsparseSpGEMMAlg_t       alg,
                                                hipsparseSpGEMMDescr_t     spgemmDescr);
-#elif (CUDART_VERSION >= 11031)
+#elif(CUDART_VERSION >= 11031)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_compute(hipsparseHandle_t      handle,
                                                hipsparseOperation_t   opA,

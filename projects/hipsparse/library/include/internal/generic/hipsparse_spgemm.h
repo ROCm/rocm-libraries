@@ -33,7 +33,7 @@ extern "C" {
 *  \p hipsparseSpGEMM_createDescr creates a sparse matrix sparse matrix product descriptor. It should be
 *  destroyed at the end using \ref hipsparseSpGEMM_destroyDescr().
 */
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_createDescr(hipsparseSpGEMMDescr_t* descr);
 #endif
@@ -43,7 +43,7 @@ hipsparseStatus_t hipsparseSpGEMM_createDescr(hipsparseSpGEMMDescr_t* descr);
 *  \p hipsparseSpGEMM_destroyDescr destroys a sparse matrix sparse matrix product descriptor and releases all
 *  resources used by the descriptor.
 */
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 #endif
@@ -137,7 +137,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
                                                  hipsparseSpGEMMDescr_t     spgemmDescr,
                                                  size_t*                    bufferSize1,
                                                  void*                      externalBuffer1);
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
                                                  hipsparseOperation_t   opA,
@@ -240,7 +240,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
                                           hipsparseSpGEMMDescr_t     spgemmDescr,
                                           size_t*                    bufferSize2,
                                           void*                      externalBuffer2);
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
                                           hipsparseOperation_t   opA,
@@ -337,7 +337,7 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
                                        hipDataType                computeType,
                                        hipsparseSpGEMMAlg_t       alg,
                                        hipsparseSpGEMMDescr_t     spgemmDescr);
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t      handle,
                                        hipsparseOperation_t   opA,
