@@ -858,7 +858,7 @@ pushd .
   fi
 
   if [[ "${build_clients}" == false ]]; then
-    cmake_client_options="HIPBLASLT_ENABLE_CLIENTS=OFF"
+    cmake_client_options=" -DHIPBLASLT_ENABLE_CLIENT=OFF"
   else
     if [[ ( "${use_system_packages}" == false ) && ( "${install_dependencies}" == true ) ]]; then
         cmake_client_options=" -DBLAS_LIBRARIES=/usr/local/lib/libblas.a -DLAPACK_LIBRARIES='/usr/local/lib/liblapack.a;/usr/local/lib/libblas.a' -DBLA_STATIC=ON"

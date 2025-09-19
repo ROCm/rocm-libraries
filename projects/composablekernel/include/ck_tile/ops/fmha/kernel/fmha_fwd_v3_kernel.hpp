@@ -81,6 +81,7 @@ struct FmhaFwdV3Kernel
         // ck_tile::index_t window_size_left, window_size_right;
         ck_tile::index_t window_size_left, window_size_right;
         ck_tile::GenericAttentionMaskEnum mask_type;
+        ck_tile::index_t remap_opt;
     };
 
     struct FmhaFwdCommonLSEKargs
@@ -99,6 +100,11 @@ struct FmhaFwdV3Kernel
         ck_tile::index_t batch_stride_k;
         ck_tile::index_t batch_stride_v;
         ck_tile::index_t batch_stride_o;
+
+        // Optional cumulative sequence length pointers for batch mode
+        // If provided, they override seqlen_q / seqlen_k per-batch to skip tail padding.
+        const ck_tile::index_t* cu_seqlen_q_ptr  = nullptr; // [batch+1]
+        const ck_tile::index_t* cu_seqlen_kv_ptr = nullptr; // [batch+1]
     };
 
     struct FmhaFwdGroupModeKargs
@@ -109,6 +115,11 @@ struct FmhaFwdV3Kernel
         const int32_t* seqstart_q_ptr;
         const int32_t* seqstart_k_ptr;
         const int32_t* seqlen_k_ptr;
+
+        // Optional cumulative padded sequence starts (including PAD tokens)
+        // Used solely to compute memory offsets when sequences are physically padded.
+        const int32_t* seqstart_padded_q_ptr = nullptr; // [batch+1]
+        const int32_t* seqstart_padded_k_ptr = nullptr; // [batch+1]
     };
 
     using Kargs = std::conditional_t<kIsGroupMode, FmhaFwdGroupModeKargs, FmhaFwdBatchModeKargs>;
@@ -143,7 +154,8 @@ struct FmhaFwdV3Kernel
               ck_tile::index_t batch_stride_o,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
-              ck_tile::index_t mask_type)
+              ck_tile::index_t mask_type,
+              ck_tile::index_t remap_opt)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -176,6 +188,7 @@ struct FmhaFwdV3Kernel
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
+            kargs.remap_opt         = remap_opt;
         }
         if constexpr(kStoreLSE)
         {
@@ -184,6 +197,78 @@ struct FmhaFwdV3Kernel
             kargs.batch_stride_lse = batch_stride_lse;
         }
 
+        return kargs;
+    }
+
+    // Overload: Batch mode with optional cu_seqlen pointers
+    template <bool Cond = !kIsGroupMode>
+    CK_TILE_HOST static constexpr std::enable_if_t<Cond, Kargs>
+    MakeKargs(const void* q_ptr,
+              const void* k_ptr,
+              const void* v_ptr,
+              void* lse_ptr,
+              void* o_ptr,
+              ck_tile::index_t seqlen_q,
+              ck_tile::index_t seqlen_k,
+              ck_tile::index_t hdim_q,
+              ck_tile::index_t hdim_v,
+              ck_tile::index_t num_head_q,
+              ck_tile::index_t nhead_ratio_qk,
+              float scale_s,
+              ck_tile::index_t stride_q,
+              ck_tile::index_t stride_k,
+              ck_tile::index_t stride_v,
+              ck_tile::index_t stride_o,
+              ck_tile::index_t nhead_stride_q,
+              ck_tile::index_t nhead_stride_k,
+              ck_tile::index_t nhead_stride_v,
+              ck_tile::index_t nhead_stride_lse,
+              ck_tile::index_t nhead_stride_o,
+              ck_tile::index_t batch_stride_q,
+              ck_tile::index_t batch_stride_k,
+              ck_tile::index_t batch_stride_v,
+              ck_tile::index_t batch_stride_lse,
+              ck_tile::index_t batch_stride_o,
+              ck_tile::index_t window_size_left,
+              ck_tile::index_t window_size_right,
+              ck_tile::index_t mask_type,
+              ck_tile::index_t remap_opt,
+              const ck_tile::index_t* cu_seqlen_q_ptr,
+              const ck_tile::index_t* cu_seqlen_kv_ptr)
+    {
+        auto kargs = MakeKargs(q_ptr,
+                               k_ptr,
+                               v_ptr,
+                               lse_ptr,
+                               o_ptr,
+                               seqlen_q,
+                               seqlen_k,
+                               hdim_q,
+                               hdim_v,
+                               num_head_q,
+                               nhead_ratio_qk,
+                               scale_s,
+                               stride_q,
+                               stride_k,
+                               stride_v,
+                               stride_o,
+                               nhead_stride_q,
+                               nhead_stride_k,
+                               nhead_stride_v,
+                               nhead_stride_lse,
+                               nhead_stride_o,
+                               batch_stride_q,
+                               batch_stride_k,
+                               batch_stride_v,
+                               batch_stride_lse,
+                               batch_stride_o,
+                               window_size_left,
+                               window_size_right,
+                               mask_type,
+                               remap_opt);
+
+        kargs.cu_seqlen_q_ptr  = cu_seqlen_q_ptr;
+        kargs.cu_seqlen_kv_ptr = cu_seqlen_kv_ptr;
         return kargs;
     }
 
@@ -213,7 +298,8 @@ struct FmhaFwdV3Kernel
               ck_tile::index_t nhead_stride_o,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
-              ck_tile::index_t mask_type)
+              ck_tile::index_t mask_type,
+              ck_tile::index_t remap_opt)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -245,6 +331,7 @@ struct FmhaFwdV3Kernel
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
+            kargs.remap_opt         = remap_opt;
         }
         if constexpr(kStoreLSE)
         {
@@ -255,45 +342,151 @@ struct FmhaFwdV3Kernel
         return kargs;
     }
 
+    // Overload: Group mode with optional padded seqstarts for memory offsets
+    template <bool Cond = kIsGroupMode>
+    CK_TILE_HOST static constexpr std::enable_if_t<Cond, Kargs>
+    MakeKargs(const void* q_ptr,
+              const void* k_ptr,
+              const void* v_ptr,
+              void* lse_ptr,
+              void* o_ptr,
+              const void* seqstart_q_ptr,
+              const void* seqstart_k_ptr,
+              const void* seqlen_k_ptr,
+              ck_tile::index_t hdim_q,
+              ck_tile::index_t hdim_v,
+              ck_tile::index_t num_head_q,
+              ck_tile::index_t nhead_ratio_qk,
+              float scale_s,
+              ck_tile::index_t stride_q,
+              ck_tile::index_t stride_k,
+              ck_tile::index_t stride_v,
+              ck_tile::index_t stride_o,
+              ck_tile::index_t nhead_stride_q,
+              ck_tile::index_t nhead_stride_k,
+              ck_tile::index_t nhead_stride_v,
+              ck_tile::index_t nhead_stride_lse,
+              ck_tile::index_t nhead_stride_o,
+              ck_tile::index_t window_size_left,
+              ck_tile::index_t window_size_right,
+              ck_tile::index_t mask_type,
+              ck_tile::index_t remap_opt,
+              const void* seqstart_padded_q_ptr,
+              const void* seqstart_padded_k_ptr)
+    {
+        auto kargs = MakeKargs(q_ptr,
+                               k_ptr,
+                               v_ptr,
+                               lse_ptr,
+                               o_ptr,
+                               seqstart_q_ptr,
+                               seqstart_k_ptr,
+                               seqlen_k_ptr,
+                               hdim_q,
+                               hdim_v,
+                               num_head_q,
+                               nhead_ratio_qk,
+                               scale_s,
+                               stride_q,
+                               stride_k,
+                               stride_v,
+                               stride_o,
+                               nhead_stride_q,
+                               nhead_stride_k,
+                               nhead_stride_v,
+                               nhead_stride_lse,
+                               nhead_stride_o,
+                               window_size_left,
+                               window_size_right,
+                               mask_type,
+                               remap_opt);
+
+        kargs.seqstart_padded_q_ptr = reinterpret_cast<const int32_t*>(seqstart_padded_q_ptr);
+        kargs.seqstart_padded_k_ptr = reinterpret_cast<const int32_t*>(seqstart_padded_k_ptr);
+        return kargs;
+    }
+
     CK_TILE_HOST static constexpr auto GridSize(ck_tile::index_t batch_size_,
                                                 ck_tile::index_t nhead_,
                                                 ck_tile::index_t seqlen_q_,
                                                 ck_tile::index_t hdim_v_)
     {
         // TODO: this may need tuning
-        return dim3(ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
-                        ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1),
-                    nhead_,
-                    batch_size_);
-    }
-
-    CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
-    {
-        using namespace ck_tile;
-
-        // const index_t num_tile_m0 = seqlen_q / kM0;
-        const index_t num_tile_n1 = ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
-
-        const index_t i_block = blockIdx.x;
-        const index_t i_nhead = blockIdx.y;
-        const index_t i_batch = blockIdx.z;
-
-        const auto f = [](index_t dividend, index_t divisor) {
-            index_t quotient = dividend / divisor;
-            index_t modulus  = dividend - quotient * divisor;
-            return ck_tile::make_tuple(quotient, modulus);
-        };
-
-        const auto [i_tile_m, i_tile_n] = f(i_block, num_tile_n1);
-
         if constexpr(kHasMask)
         {
-            // assume that num_tile_n1 is always 1
-            return ck_tile::make_tuple(gridDim.x - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
+            return dim3(nhead_,
+                        ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
+                            ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1),
+                        batch_size_);
         }
         else
         {
-            return ck_tile::make_tuple(i_tile_m, i_tile_n, i_nhead, i_batch);
+            return dim3(nhead_,
+                        ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
+                            ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1),
+                        batch_size_);
+        }
+    }
+
+    CK_TILE_DEVICE static constexpr auto
+    RemapTileIndices(int32_t tg_idx, int32_t tg_idy, int32_t remap_option)
+    {
+        if(remap_option < 1)
+        {
+            return make_tuple(static_cast<int32_t>(gridDim.x - tg_idx - 1), tg_idy);
+        }
+
+        int32_t remapped_tg_idx = tg_idx;
+        int32_t remapped_tg_idy = tg_idy;
+
+        if(remap_option == 2)
+        { // special remapping
+            int32_t tmp0 = (remapped_tg_idy & 0x7) * gridDim.x + remapped_tg_idx;
+            int32_t tmp1 = tmp0 & 0x7;
+
+            remapped_tg_idx = tmp0 >> 3;
+            remapped_tg_idy = (remapped_tg_idy & 0xfffffff8) + tmp1;
+        }
+        else
+        { // normal remapping
+            int32_t cus_per_xdim_per_xcc = gridDim.x >> 3;
+            int32_t tgs_cu_id            = remapped_tg_idx >> 3;
+
+            if(tgs_cu_id < cus_per_xdim_per_xcc)
+            {
+                int32_t tgs_xcc_id = remapped_tg_idx & 0x7;
+                int32_t new_tg_idx = tgs_xcc_id * cus_per_xdim_per_xcc + tgs_cu_id;
+
+                remapped_tg_idx = new_tg_idx;
+            }
+        }
+
+        return make_tuple(remapped_tg_idx, remapped_tg_idy);
+    }
+
+    CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs&)
+    {
+        using namespace ck_tile;
+
+        // const index_t num_tile_n1 = ck_tile::integer_divide_ceil(kargs.hdim_v,
+        // FmhaPipeline::kN1);
+
+        // assume that num_tile_n1 is always 1
+        if constexpr(kHasMask)
+        {
+            const index_t i_nhead = blockIdx.x;
+            const index_t i_block = blockIdx.y;
+            const index_t i_batch = blockIdx.z;
+
+            return ck_tile::make_tuple(gridDim.y - 1 - i_block, 0, i_nhead, i_batch);
+        }
+        else
+        {
+            const index_t i_nhead = blockIdx.x;
+            const index_t i_block = blockIdx.y;
+            const index_t i_batch = blockIdx.z;
+
+            return ck_tile::make_tuple(i_block, 0, i_nhead, i_batch);
         }
     }
 
@@ -326,18 +519,26 @@ struct FmhaFwdV3Kernel
         if constexpr(kIsGroupMode)
         {
             // get starting offset for each batch
-            const long_index_t query_start = kargs.seqstart_q_ptr[i_batch];
-            const long_index_t key_start   = kargs.seqstart_k_ptr[i_batch];
+            const long_index_t query_start_unpadded = kargs.seqstart_q_ptr[i_batch];
+            const long_index_t key_start_unpadded   = kargs.seqstart_k_ptr[i_batch];
 
-            batch_offset_q = query_start * kargs.stride_q;
-            batch_offset_k = key_start * kargs.stride_k;
-            batch_offset_v = key_start * kargs.stride_v;
+            const long_index_t query_start_padded = kargs.seqstart_padded_q_ptr
+                                                        ? kargs.seqstart_padded_q_ptr[i_batch]
+                                                        : query_start_unpadded;
+            const long_index_t key_start_padded   = kargs.seqstart_padded_k_ptr
+                                                        ? kargs.seqstart_padded_k_ptr[i_batch]
+                                                        : key_start_unpadded;
+
+            batch_offset_q = query_start_padded * kargs.stride_q;
+            batch_offset_k = key_start_padded * kargs.stride_k;
+            batch_offset_v = key_start_padded * kargs.stride_v;
 
             if constexpr(kStoreLSE)
             {
-                batch_offset_lse = query_start;
+                // LSE layout is [nhead, total_seqlen], index by unpadded start
+                batch_offset_lse = query_start_unpadded;
             }
-            batch_offset_o = query_start * kargs.stride_o;
+            batch_offset_o = query_start_padded * kargs.stride_o;
 
             // get real # queries & # keys under group mode
             const auto adjusted_seqstart_q_ptr = kargs.seqstart_q_ptr + i_batch;
@@ -370,6 +571,18 @@ struct FmhaFwdV3Kernel
                 batch_offset_lse = static_cast<long_index_t>(i_batch) * kargs.batch_stride_lse;
             }
             batch_offset_o = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
+
+            // If cumulative seqlen pointers are provided, override per-batch effective lengths
+            if(kargs.cu_seqlen_q_ptr != nullptr)
+            {
+                kargs.seqlen_q =
+                    kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
+            }
+            if(kargs.cu_seqlen_kv_ptr != nullptr)
+            {
+                kargs.seqlen_k =
+                    kargs.cu_seqlen_kv_ptr[i_batch + 1] - kargs.cu_seqlen_kv_ptr[i_batch];
+            }
         }
 
         // for simplicity, batch stride we just modify the pointer
