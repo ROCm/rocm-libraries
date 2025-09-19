@@ -253,6 +253,160 @@ protected:
             param_fp16.data = handle.Read<half_float::half>(param_fp16_dev, param_fp16.data.size());
     }
 
+    void RunUpdatedTest()
+    {
+        const miopen::TensorDescriptor emptyDesc;
+        auto&& handle = get_handle();
+
+        cpu_adam_updated<Tp, Tg>
+        (
+            ref_param,
+            grad,
+            exp_avg,
+            exp_avg_sq,
+            max_exp_avg_sq,
+            lr,
+            beta1,
+            beta2,
+            weight_decay,
+            eps,
+            amsgrad,
+            maximize,
+            adamw,
+            is_amp,
+            grad_scale[0],
+            found_inf[0],
+            step_count
+        );
+
+        for(uint32_t i = 1; i <= step_count; i++)
+        {
+            auto status = miopen::Adam(handle,
+                                       param.desc,
+                                       param_dev.get(),
+                                       param.desc,
+                                       param_dev.get(),
+                                       param_fp16.desc,
+                                       param_fp16_dev.get(),
+                                       grad.desc,
+                                       grad_dev.get(),
+                                       exp_avg.desc,
+                                       exp_avg_dev.get(),
+                                       exp_avg.desc,
+                                       exp_avg_dev.get(),
+                                       exp_avg_sq.desc,
+                                       exp_avg_sq_dev.get(),
+                                       exp_avg_sq.desc,
+                                       exp_avg_sq_dev.get(),
+                                       max_exp_avg_sq.desc,
+                                       max_exp_avg_sq_dev.get(),
+                                       max_exp_avg_sq.desc,
+                                       max_exp_avg_sq_dev.get(),
+                                       grad_scale.desc,
+                                       grad_scale_dev.get(),
+                                       found_inf.desc,
+                                       found_inf_dev.get(),
+                                       use_step_tensor ? step.desc : emptyDesc,
+                                       step_dev.get(),
+                                       use_step_tensor ? step.desc : emptyDesc,
+                                       step_dev.get(),
+                                       i,
+                                       lr,
+                                       beta1,
+                                       beta2,
+                                       weight_decay,
+                                       eps,
+                                       amsgrad,
+                                       maximize,
+                                       adamw,
+                                       is_amp);
+
+            EXPECT_EQ(status, miopenStatusSuccess);
+        }
+
+        param.data = handle.Read<Tp>(param_dev, param.data.size());
+
+        if(is_amp)
+            param_fp16.data = handle.Read<half_float::half>(param_fp16_dev, param_fp16.data.size());
+    }
+
+    void RunUpdatedSingleThreadTest()
+    {
+        const miopen::TensorDescriptor emptyDesc;
+        auto&& handle = get_handle();
+
+        cpu_adam_updated_singlethread<Tp, Tg>
+        (
+            ref_param,
+            grad,
+            exp_avg,
+            exp_avg_sq,
+            max_exp_avg_sq,
+            lr,
+            beta1,
+            beta2,
+            weight_decay,
+            eps,
+            amsgrad,
+            maximize,
+            adamw,
+            is_amp,
+            grad_scale[0],
+            found_inf[0],
+            step_count
+        );
+
+        for(uint32_t i = 1; i <= step_count; i++)
+        {
+            auto status = miopen::Adam(handle,
+                                       param.desc,
+                                       param_dev.get(),
+                                       param.desc,
+                                       param_dev.get(),
+                                       param_fp16.desc,
+                                       param_fp16_dev.get(),
+                                       grad.desc,
+                                       grad_dev.get(),
+                                       exp_avg.desc,
+                                       exp_avg_dev.get(),
+                                       exp_avg.desc,
+                                       exp_avg_dev.get(),
+                                       exp_avg_sq.desc,
+                                       exp_avg_sq_dev.get(),
+                                       exp_avg_sq.desc,
+                                       exp_avg_sq_dev.get(),
+                                       max_exp_avg_sq.desc,
+                                       max_exp_avg_sq_dev.get(),
+                                       max_exp_avg_sq.desc,
+                                       max_exp_avg_sq_dev.get(),
+                                       grad_scale.desc,
+                                       grad_scale_dev.get(),
+                                       found_inf.desc,
+                                       found_inf_dev.get(),
+                                       use_step_tensor ? step.desc : emptyDesc,
+                                       step_dev.get(),
+                                       use_step_tensor ? step.desc : emptyDesc,
+                                       step_dev.get(),
+                                       i,
+                                       lr,
+                                       beta1,
+                                       beta2,
+                                       weight_decay,
+                                       eps,
+                                       amsgrad,
+                                       maximize,
+                                       adamw,
+                                       is_amp);
+
+            EXPECT_EQ(status, miopenStatusSuccess);
+        }
+
+        param.data = handle.Read<Tp>(param_dev, param.data.size());
+
+        if(is_amp)
+            param_fp16.data = handle.Read<half_float::half>(param_fp16_dev, param_fp16.data.size());
+    }
+
     void Verify()
     {
         double threshold = std::numeric_limits<Tp>::epsilon();

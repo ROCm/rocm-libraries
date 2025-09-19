@@ -27,6 +27,8 @@
 
 namespace adam {
 
+/////////////////////////////////////////////////////////
+
 struct GPU_Adam_FP32 : AdamTest<float, float>
 {
 };
@@ -39,8 +41,40 @@ struct GPU_AmpAdam_FP32 : AdamTest<float, half_float::half>
 {
 };
 
+/////////////////////////////////////////////////////////
+
+struct GPU_Adam_Updated_FP32 : AdamTest<float, float>
+{
+};
+
+struct GPU_Adam_Updated_FP16 : AdamTest<half_float::half, half_float::half>
+{
+};
+
+struct GPU_AmpAdam_Updated_FP32 : AdamTest<float, half_float::half>
+{
+};
+
+/////////////////////////////////////////////////////////
+
+struct GPU_Adam_Updated_Singlethread_FP32 : AdamTest<float, float>
+{
+};
+
+struct GPU_Adam_Updated_Singlethread_FP16 : AdamTest<half_float::half, half_float::half>
+{
+};
+
+struct GPU_AmpAdam_Updated_Singlethread_FP32 : AdamTest<float, half_float::half>
+{
+};
+
+/////////////////////////////////////////////////////////
+
 } // namespace adam
 using namespace adam;
+
+/////////////////////////////////////////////////////////
 
 TEST_P(GPU_Adam_FP32, AdamFloatTestFw)
 {
@@ -60,6 +94,56 @@ TEST_P(GPU_AmpAdam_FP32, AmpAdamTestFw)
     Verify();
 };
 
+/////////////////////////////////////////////////////////
+
+TEST_P(GPU_Adam_Updated_FP32, AdamUpdatedFloatTestFw)
+{
+    RunUpdatedTest();
+    Verify();
+};
+
+TEST_P(GPU_Adam_Updated_FP16, AdamUpdatedFloat16TestFw)
+{
+    RunUpdatedTest();
+    Verify();
+};
+
+TEST_P(GPU_AmpAdam_Updated_FP32, AmpAdamUpdatedTestFw)
+{
+    RunUpdatedTest();
+    Verify();
+};
+
+/////////////////////////////////////////////////////////
+
+TEST_P(GPU_Adam_Updated_Singlethread_FP32, AdamUpdatedSinglethreadFloatTestFw)
+{
+    RunUpdatedSingleThreadTest();
+    Verify();
+};
+
+TEST_P(GPU_Adam_Updated_Singlethread_FP16, AdamUpdatedSinglethreadFloat16TestFw)
+{
+    RunUpdatedSingleThreadTest();
+    Verify();
+};
+
+TEST_P(GPU_AmpAdam_Updated_Singlethread_FP32, AmpAdamUpdatedSinglethreadTestFw)
+{
+    RunUpdatedSingleThreadTest();
+    Verify();
+};
+
+/////////////////////////////////////////////////////////
+
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_FP32, testing::ValuesIn(AdamTestConfigs()));
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_FP16, testing::ValuesIn(AdamTestConfigs()));
 INSTANTIATE_TEST_SUITE_P(Full, GPU_AmpAdam_FP32, testing::ValuesIn(AdamTestConfigs()));
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_Updated_FP32, testing::ValuesIn(AdamTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_Updated_FP16, testing::ValuesIn(AdamTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_AmpAdam_Updated_FP32, testing::ValuesIn(AdamTestConfigs()));
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_Updated_Singlethread_FP32, testing::ValuesIn(AdamTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_Updated_Singlethread_FP16, testing::ValuesIn(AdamTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_AmpAdam_Updated_Singlethread_FP32, testing::ValuesIn(AdamTestConfigs()));
