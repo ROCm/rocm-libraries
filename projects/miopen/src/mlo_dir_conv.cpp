@@ -158,6 +158,7 @@ static auto GetImplicitGemmWrWSolvers()
         miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops,
         miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops,
         miopen::solver::conv::ConvHipImplicitGemmGroupWrwWmma,
+        miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwWmma,
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC>{};
 }
