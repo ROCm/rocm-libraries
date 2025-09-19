@@ -1,8 +1,8 @@
 # hipBLASLt Offline Tuning Script
 
-This tool aims to provide an easy-to-use script to perform GEMM tuning with hipblaslt-bench. 
+This tool aims to provide an easy-to-use script to perform GEMM tuning with hipblaslt-bench.
 
-GEMM library [hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html) provides benchmark tool for hipBLASLt's supported operations. Please check the [README](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/clients/bench/README.md) for details. 
+GEMM library [hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html) provides benchmark tool for hipBLASLt's supported operations. Please check the [README](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/clients/bench/README.md) for details.
 
 The process of hipBLASLt GEMM tuning includes the followings
 
@@ -38,7 +38,7 @@ The hipBLASLt log consists of the hipblaslt-bench command lines for each call of
     ```
 
 2. Run the model
-    
+
     With the above environment variables, the hipBLASLt log will be automatically saved to the path of the export HIPBLASLT_LOG_MASK=32.
 
 ## Pre-Tuning
@@ -54,7 +54,7 @@ Before start GEMM tuning, we need to do the following.
 2. Remove duplicates in hipBLASLt log
 
     Since each hipBLASLt GEMM might be called many times when runing the model, the hipBLASLt log contains many duplicate lines. The parse_input_log() in utils.py will remove the duplicate and count the occurance of each GEMM. The hipBLASLt log will be saved under the user-defined output path with name of "unique_<input_hipblaslt_log>".
-    
+
 3. Set-up stable GPU
 
     A stable GPU frequency is critical for GEMM tuning. The following commands will set-up the GPU frequency relatively stable at 1900 MHz.
@@ -67,23 +67,23 @@ Before start GEMM tuning, we need to do the following.
     unset HIP_FORCE_DEV_KERNARG
     rocm-smi -r -d <gpu_id>
     ```
-    
+
 
 ## GEMM Tuning
 
-The GEMM Tuning with hipblaslt-bench is to measure the performance of the candidate kernels within the searching space, and return the kernel with best latency. Runing gemm_tuning.py will start the GEMM tuning with hipblaslt-bench. The options of gemm_tuning.py are listed below. 
+The GEMM Tuning with hipblaslt-bench is to measure the performance of the candidate kernels within the searching space, and return the kernel with best latency. Runing gemm_tuning.py will start the GEMM tuning with hipblaslt-bench. The options of gemm_tuning.py are listed below.
 
 1. input_file
-    
+
     The input_file refers to the hipBLASLt log with the GEMMs to be tuned. The duplicate lines in the log will be removed when runing.
 
 2. output_path
-    
+
     The output_path refers to the directory that user defined to save the tuning result files.
 
-3. swizzleA
+3. swizzleA/B
 
-    Enabling swizzleA will re-arrange the memory layout of matrix A to avoid bank conflict and boost the latency performance. 
+    Enabling swizzleA/B will re-arrange the memory layout of matrix A/B to avoid bank conflict and boost the latency performance.
 
 4. requested_solution
 
@@ -99,7 +99,7 @@ The GEMM Tuning with hipblaslt-bench is to measure the performance of the candid
 
 7. stablize_gpu
 
-    Enable stablize_gpu will provide a lower performance but more consistent GPU setting. 
+    Enable stablize_gpu will provide a lower performance but more consistent GPU setting.
 
 
 ## Apply Tuning Result
