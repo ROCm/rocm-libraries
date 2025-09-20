@@ -48,6 +48,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
     case rocsparse_spmv_alg_coo_atomic:
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_csr_lrb:
+    case rocsparse_spmv_alg_csr_nnzsplit:
     {
         return false;
     }
@@ -64,6 +65,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
     case rocsparse_spmv_input_operation:
     case rocsparse_spmv_input_compute_datatype:
     case rocsparse_spmv_input_scalar_datatype:
+    case rocsparse_spmv_input_nnz_use_starting_block_ids:
     {
         return false;
     }
@@ -93,6 +95,7 @@ protected:
     rocsparse_operation     m_operation;
     rocsparse_datatype      m_scalar_datatype;
     rocsparse_datatype      m_compute_datatype;
+    bool                    m_use_starting_block_ids;
 
     float m_local_host_alpha_value[4];
     float m_local_host_beta_value[4];
@@ -151,6 +154,7 @@ public:
         , m_operation((rocsparse_operation)-1)
         , m_scalar_datatype((rocsparse_datatype)-1)
         , m_compute_datatype((rocsparse_datatype)-1)
+        , m_use_starting_block_ids(false)
     {
     }
 
@@ -206,6 +210,14 @@ public:
     void set_compute_datatype(rocsparse_datatype value)
     {
         this->m_compute_datatype = value;
+    }
+    void set_use_starting_block_ids(bool value)
+    {
+        this->m_use_starting_block_ids = value;
+    }
+    bool get_use_starting_block_ids() const
+    {
+        return this->m_use_starting_block_ids;
     }
 };
 
@@ -325,6 +337,15 @@ try
                            rocsparse_status_invalid_size);
         const rocsparse_operation op = *reinterpret_cast<const rocsparse_operation*>(in);
         descr->set_operation(op);
+        return rocsparse_status_success;
+    }
+
+    case rocsparse_spmv_input_nnz_use_starting_block_ids:
+    {
+        ROCSPARSE_CHECKARG(
+            4, size_in_bytes, size_in_bytes != sizeof(bool), rocsparse_status_invalid_size);
+        const bool use_starting_block_ids = *reinterpret_cast<const bool*>(in);
+        descr->set_use_starting_block_ids(use_starting_block_ids);
         return rocsparse_status_success;
     }
         // LCOV_EXCL_START

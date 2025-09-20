@@ -66,6 +66,7 @@ ROCSPARSE_DO_ROUTINE(csrgeam)					\
 ROCSPARSE_DO_ROUTINE(csrgemm)					\
 ROCSPARSE_DO_ROUTINE(csrgemm_reuse)				\
 ROCSPARSE_DO_ROUTINE(csrmv)					\
+ROCSPARSE_DO_ROUTINE(csrmv_analysis)					\
 ROCSPARSE_DO_ROUTINE(csrmv_managed)				\
 ROCSPARSE_DO_ROUTINE(cscmv)					\
 ROCSPARSE_DO_ROUTINE(csrmm)					\

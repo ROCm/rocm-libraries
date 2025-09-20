@@ -113,10 +113,6 @@ option(ROCFFT_BUILD_OFFLINE_TUNER "Build with offline tuner executable rocfft_of
 # Provide ability to disable hipRAND dependency
 option(USE_HIPRAND "Use hipRAND to provide device-side input generation" ON)
 
-if( USE_HIPRAND )
-  add_compile_definitions(USE_HIPRAND)
-endif( )
-
 # Split up function pool compilation across N files to parallelize its build
 set(ROCFFT_FUNCTION_POOL_N 8 CACHE STRING "Number of files to split function_pool into for compilation")
 
