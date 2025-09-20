@@ -44,7 +44,13 @@ static std::shared_ptr<T> makeSharedDeviceUninitialized(size_t count)
 {
     T* raw = nullptr;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&raw), count * sizeof(T)));
-    return std::shared_ptr<T>(raw, [](T* p) { hipFree(p); });
+    return std::shared_ptr<T>(raw, [](T* p) {
+        hipError_t err = hipFree(p);
+        if(err != hipSuccess)
+        {
+            Throw<FatalError>("hipFree failed in RotatingBuffer deleter");
+        }
+    });
 }
 
 template <typename T>
