@@ -221,6 +221,8 @@ public:
         : fft_params(p)
     {
     }
+    hipfft_params(hipfft_params&& p) = default;
+    hipfft_params& operator=(hipfft_params&& other) = default;
 
     ~hipfft_params()
     {
@@ -486,6 +488,13 @@ public:
         // store token to check if plan was already made
         current_token = token();
         return fft_status_from_hipfftparams(ret);
+    }
+
+    hipfftResult_t set_stream(hipStream_t stream)
+    {
+        if(plan == INVALID_PLAN_HANDLE)
+            throw std::runtime_error("Plan must be created before setting a desired stream");
+        return hipfftSetStream(plan, stream);
     }
 
     void validate_fields() const override
@@ -1224,7 +1233,7 @@ private:
             // the plan wasn't created first
             const size_t num_values_to_check
                 = plan == INVALID_PLAN_HANDLE ? 1 : worksize_estimate.size();
-            for(auto idx = 0; ret == HIPFFT_SUCCESS && idx < num_values_to_check; idx++)
+            for(size_t idx = 0; ret == HIPFFT_SUCCESS && idx < num_values_to_check; idx++)
             {
                 ret = worksize_estimate[idx] != absurd_init_worksize_estimate
                           ? HIPFFT_SUCCESS
@@ -1540,12 +1549,14 @@ private:
     hipfftResult_t create_make_plan_Nd()
     {
         auto ret = create_with_pre_make();
+
         if(ret != HIPFFT_SUCCESS)
             return ret;
         // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
-        size_t* worksize_ptr = is_preventing_auto_allocation_at_generation()
-                                   ? nullptr
-                                   : auto_allocated_worksizes.data();
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
         switch(dim())
         {
         case 1:
@@ -1572,10 +1583,11 @@ private:
         if(ret != HIPFFT_SUCCESS)
             return ret;
         // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
-        size_t* worksize_ptr = is_preventing_auto_allocation_at_generation()
-                                   ? nullptr
-                                   : auto_allocated_worksizes.data();
-        auto    layout_args  = make_valid_layout_args_for_plan_many<int>();
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
+        auto                layout_args  = make_valid_layout_args_for_plan_many<int>();
         return hipfftMakePlanMany(plan,
                                   dim(),
                                   int_length.data(),
@@ -1597,10 +1609,11 @@ private:
             return ret;
 
         // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
-        size_t* worksize_ptr = is_preventing_auto_allocation_at_generation()
-                                   ? nullptr
-                                   : auto_allocated_worksizes.data();
-        auto    layout_args  = make_valid_layout_args_for_plan_many<long long int>();
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr = is_preventing_auto_allocation_at_generation()
+                                               ? tmp_worksize.data()
+                                               : auto_allocated_worksizes.data();
+        auto                layout_args  = make_valid_layout_args_for_plan_many<long long int>();
         return hipfftMakePlanMany64(plan,
                                     dim(),
                                     ll_length.data(),
@@ -1645,11 +1658,12 @@ private:
             return ret;
 
         // do not register plan's worksizes as "auto-allocated" if auto-allocation was explicitly prevented
-        size_t* worksize_ptr  = is_preventing_auto_allocation_at_generation()
-                                    ? nullptr
-                                    : auto_allocated_worksizes.data();
-        auto    executionType = get_xt_api_execution_type();
-        auto    layout_args   = make_valid_layout_args_for_plan_many<long long int>();
+        std::vector<size_t> tmp_worksize(get_num_used_gpus());
+        size_t*             worksize_ptr  = is_preventing_auto_allocation_at_generation()
+                                                ? tmp_worksize.data()
+                                                : auto_allocated_worksizes.data();
+        auto                executionType = get_xt_api_execution_type();
+        auto                layout_args   = make_valid_layout_args_for_plan_many<long long int>();
         return hipfftXtMakePlanMany(plan,
                                     dim(),
                                     ll_length.data(),

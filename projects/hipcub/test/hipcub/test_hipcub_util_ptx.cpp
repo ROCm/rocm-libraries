@@ -697,7 +697,7 @@ __global__
 void warp_id_kernel(unsigned int* output)
 {
     const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;
-    output[index] = hipcub::WarpId();
+    output[index]            = ::rocprim::warp_id();
 }
 
 TEST(HipcubUtilPtxTests, WarpId)
@@ -778,7 +778,7 @@ template <unsigned int LogicalWarpSize>
 HIPCUB_DEVICE
 std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
 test_warp_mask_pow_two() {
-    const unsigned int logical_warp_id = hipcub::LaneId() / LogicalWarpSize;
+    const unsigned int logical_warp_id = ::rocprim::lane_id() / LogicalWarpSize;
     const uint64_t mask = hipcub::WarpMask<LogicalWarpSize>(logical_warp_id);
 
     const unsigned int warp_start = logical_warp_id * LogicalWarpSize;
@@ -812,7 +812,7 @@ template <unsigned int LogicalWarpSize>
 HIPCUB_DEVICE
 std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
 test_warp_mask_non_pow_two() {
-    const unsigned int logical_warp_id = hipcub::LaneId() / LogicalWarpSize;
+    const unsigned int logical_warp_id = ::rocprim::lane_id() / LogicalWarpSize;
     const uint64_t mask = hipcub::WarpMask<LogicalWarpSize>(logical_warp_id);
 
     for (unsigned int lane = 0; lane < LogicalWarpSize; ++lane) {

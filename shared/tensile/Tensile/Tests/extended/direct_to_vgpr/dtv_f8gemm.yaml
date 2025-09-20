@@ -342,5 +342,3 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 508, 508, 1, 2048]
-
-

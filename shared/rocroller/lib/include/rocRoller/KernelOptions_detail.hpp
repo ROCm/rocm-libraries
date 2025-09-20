@@ -118,8 +118,8 @@ namespace rocRoller
 
         /**
          * Skip generation of permlane instructions when loading scale data.
-         * This is experimental and will cause the validation to fail, but will
-         * show better performance.
+         * This is experimental and requires that the input be specifically
+         * modified, but will show better performance.
          */
         bool scaleSkipPermlane = false;
 
@@ -127,6 +127,11 @@ namespace rocRoller
          * Which method to use to crash the kernel if an assertion fails.
          */
         AssertOpKind assertOpKind = AssertOpKind::NoOp;
+
+        /**
+         * Enable/Disable the RemoveSetCoordinate transformation
+         */
+        bool removeSetCoordinate = false;
 
         std::string toString() const;
     };

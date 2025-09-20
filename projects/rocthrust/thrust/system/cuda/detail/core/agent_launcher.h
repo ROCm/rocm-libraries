@@ -28,9 +28,17 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <cub/detail/device_synchronize.cuh>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if _CCCL_HAS_CUDA_COMPILER
 #  include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 #  include <thrust/system/cuda/detail/core/util.h>
 
@@ -45,9 +53,9 @@
 #  if !defined(THRUST_DISABLE_KERNEL_VISIBILITY_WARNING_SUPPRESSION)
 _CCCL_DIAG_SUPPRESS_GCC("-Wattributes")
 _CCCL_DIAG_SUPPRESS_CLANG("-Wattributes")
-#    if !defined(_CCCL_CUDA_COMPILER_NVHPC)
+#    if !_CCCL_CUDA_COMPILER(NVHPC)
 _CCCL_DIAG_SUPPRESS_NVHPC(attribute_requires_external_linkage)
-#    endif // !_LIBCUDACXX_COMPILER_NVHPC_CUDA
+#    endif // !_CCCL_CUDA_COMPILER(NVHPC)
 #  endif // !THRUST_DISABLE_KERNEL_VISIBILITY_WARNING_SUPPRESSION
 
 THRUST_NAMESPACE_BEGIN
@@ -271,12 +279,13 @@ struct AgentLauncher : Agent
   {
     assert(has_shmem && vshmem == nullptr);
     print_info(_kernel_agent<Agent, Args...>);
-    launcher::triple_chevron(grid, plan.block_threads, shmem_size, stream).doit(_kernel_agent<Agent, Args...>, args...);
+    cuda_cub::detail::triple_chevron(grid, plan.block_threads, shmem_size, stream)
+      .doit(_kernel_agent<Agent, Args...>, args...);
   }
 
   // If there is a risk of not having enough shared memory
   // we compile generic kernel instead.
-  // This kernel is likely to be somewhat slower, but it can accomodate
+  // This kernel is likely to be somewhat slower, but it can accommodate
   // both shared and virtualized shared memories.
   // Alternative option is to compile two kernels, one using shared and one
   // using virtualized shared memory. While this can be slightly faster if we
@@ -287,7 +296,7 @@ struct AgentLauncher : Agent
   {
     assert((has_shmem && vshmem == nullptr) || (!has_shmem && vshmem != nullptr && shmem_size == 0));
     print_info(_kernel_agent_vshmem<Agent, Args...>);
-    launcher::triple_chevron(grid, plan.block_threads, shmem_size, stream)
+    cuda_cub::detail::triple_chevron(grid, plan.block_threads, shmem_size, stream)
       .doit(_kernel_agent_vshmem<Agent, Args...>, vshmem, args...);
   }
 

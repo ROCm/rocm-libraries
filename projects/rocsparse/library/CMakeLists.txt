@@ -76,7 +76,8 @@ target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall
 
 # Target include directories
 target_include_directories(rocsparse
-                           PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
+                           PRIVATE ${ROCPRIM_INCLUDE_DIRS}
+                                   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
                                    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/library/include>
                            PUBLIC  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/rocsparse>
                                    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>

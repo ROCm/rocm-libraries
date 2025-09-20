@@ -45,7 +45,7 @@ void rocsparse_matrix_factory_laplace2d<T, I, J>::init_csr(std::vector<I>&      
                                                            rocsparse_fill_mode    uplo,
                                                            rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(matrix_type)
     {
@@ -107,7 +107,7 @@ void rocsparse_matrix_factory_laplace2d<T, I, J>::init_coo(std::vector<I>&      
                                                            rocsparse_fill_mode    uplo,
                                                            rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(matrix_type)
     {
@@ -173,7 +173,7 @@ void rocsparse_matrix_factory_laplace2d<T, I, J>::init_gebsr(std::vector<I>&    
                                                              rocsparse_fill_mode    uplo,
                                                              rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_gebsr_laplace2d(bsr_row_ptr,
                                    bsr_col_ind,

@@ -8,6 +8,10 @@ Build MIOpen for embedded systems
 
 Follow these steps to build and configure MIOpen for an embedded system.
 
+.. note::
+
+   You can run ``install_deps.cmake`` from the ``rocm-libraries/projects/miopen`` directory.
+
 1. Install the dependencies. The default install location is ``/usr/local``:
 
    .. code:: cpp
@@ -21,7 +25,7 @@ Follow these steps to build and configure MIOpen for an embedded system.
       mkdir build; cd build;
 
 3. Add the embedded build configuration.
-   
+
    The minimum static build configuration, without an
    embedded precompiled kernels package or
    FindDb, is the following:

@@ -25,7 +25,6 @@
 //       - Revisit all usages of transform_per_block and max_factor_pp.
 //       - Test with factors_pp.size() > 1
 //       - Revisit lstride usage and input/output strides
-//       - Revisit factor 64 logic in calculate_offsets() with different input lengths
 
 // Variation of StockhamKernelRR that implements the partial pass
 // method. Similarities of StockhamPartialPassKernelRR with
@@ -49,15 +48,29 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         , params(params)
     {
         length_pp  = params.parent_length[params.off_dim];
-        factors_pp = params.factors_off_dim;
+        factors_pp = params.pp_factors_curr;
 
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
+        length_off_dim = params.parent_length[params.off_dim];
+
         R.size = Expression{std::max(nregisters, max_factor_pp)};
+
+        // nregister must not be larger than max_factor_pp.
+        // If that were to be true,  work in the off-dimension
+        // in perform_partial_pass_step_1_2() would require to
+        // to be applied to (nregisters-max_factor_pp) elements
+        // in the off-dimension, but this data is not available
+        // in the LDS, and the number of additional elements
+        // would need to be at least a multiple of max_factor_pp.
+        if(nregisters > max_factor_pp)
+            throw std::runtime_error(
+                "StockhamPartialPassKernelRR: nregisters cannot be larger than max_factor_pp");
     }
 
     StockhamPartialPassParams params;
 
+    unsigned int              length_off_dim;
     unsigned int              max_factor_pp;
     std::vector<unsigned int> factors_pp;
     unsigned int              length_pp;
@@ -84,8 +97,10 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                         block_id * transforms_per_block + thread_id / threads_per_transform};
         stmts += Assign{remaining, transform};
         stmts += Assign{remaining_pp,
-                        64 * Parens(transform / 64) + Parens(transform % 64) / transforms_per_block
-                            + Parens(transform * (64 / transforms_per_block)) % 64};
+                        length_off_dim * Parens(transform / length_off_dim)
+                            + Parens(transform % length_off_dim) / transforms_per_block
+                            + Parens(transform * (length_off_dim / transforms_per_block))
+                                  % length_off_dim};
 
         stmts += For{d,
                      1,
@@ -218,20 +233,21 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(R[w], lds_complex[offset_lds + (w * stride_lds)]);
+            work += Assign(R[hr * width + w],
+                           lds_complex[offset_lds + (hr * width + w) * stride_lds]);
 
         return work;
     }
 
     ArgumentList device_lds_reg_inout_pp_arguments()
     {
-        ArgumentList args{R, lds_complex, stride_lds, offset_lds};
+        ArgumentList args{R, lds_complex, stride_lds, offset_lds, thread};
         return args;
     }
 
     std::vector<Expression> device_lds_reg_inout_pp_device_call_arguments()
     {
-        return {R, lds_complex, stride_lds_pp, offset_lds_pp};
+        return {R, lds_complex, stride_lds_pp, offset_lds_pp, thread_id / max_factor_pp};
     }
 
     TemplateList device_lds_reg_inout_pp_templates()
@@ -251,17 +267,22 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         f.arguments = device_lds_reg_inout_pp_arguments();
         f.qualifier = "__device__";
 
+        auto effective_length = std::max(length, length_pp);
+
         StatementList& body = f.body;
 
         auto load_lds = std::mem_fn(&StockhamPartialPassKernelRR::load_lds_step_1_2_generator);
         // first pass of load (full)
-        unsigned int width  = max_factor_pp;
-        float        height = static_cast<float>(length) / width / threads_per_transform;
+        unsigned int width  = factors_pp[0];
+        float        height = static_cast<float>(effective_length) / width / threads_per_transform;
         body += SyncThreads();
         body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
                          width,
                          height,
-                         ThreadGuardMode::NO_GUARD);
+                         ThreadGuardMode::GUARD_BY_IF,
+                         false,
+                         std::nullopt,
+                         effective_length);
 
         return f;
     }
@@ -274,7 +295,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(lds_complex[offset_lds + (w * stride_lds)], R[w]);
+            work += Assign(lds_complex[offset_lds + (hr * width + w) * stride_lds],
+                           R[hr * width + w]);
 
         return work;
     }
@@ -289,17 +311,22 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         f.arguments = device_lds_reg_inout_pp_arguments();
         f.qualifier = "__device__";
 
+        auto effective_length = std::max(length_pp, length);
+
         StatementList& body = f.body;
 
         auto store_lds = std::mem_fn(&StockhamPartialPassKernelRR::store_pp_step_1_2_lds_generator);
         // last pass of store (full)
-        unsigned int width  = max_factor_pp;
-        float        height = static_cast<float>(length) / width / threads_per_transform;
+        unsigned int width  = factors_pp.back();
+        float        height = static_cast<float>(effective_length) / width / threads_per_transform;
         body += SyncThreads();
         body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5),
                          width,
                          height,
-                         ThreadGuardMode::NO_GUARD);
+                         ThreadGuardMode::GUARD_BY_IF,
+                         false,
+                         std::nullopt,
+                         effective_length);
         return f;
     }
 

@@ -99,6 +99,29 @@ namespace rocRoller
     }
 
     template <CCountedEnum Enum>
+    std::string shortString(EnumBitset<Enum> const& set)
+    {
+        std::string rv = "{";
+
+        bool first = true;
+        for(int i = 0; i < static_cast<int>(Enum::Count); i++)
+        {
+            auto enumValue = static_cast<Enum>(i);
+
+            if(set[enumValue])
+            {
+                if(!first)
+                    rv += ", ";
+
+                rv += toString(enumValue);
+                first = false;
+            }
+        }
+
+        return rv + "}";
+    }
+
+    template <CCountedEnum Enum>
     std::ostream& operator<<(std::ostream& stream, EnumBitset<Enum> const& bs)
     {
         return stream << toString(bs);

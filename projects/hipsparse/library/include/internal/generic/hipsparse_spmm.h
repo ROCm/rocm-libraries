@@ -30,15 +30,15 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpMM_bufferSize computes the required user allocated buffer size needed when computing the 
+*  \p hipsparseSpMM_bufferSize computes the required user allocated buffer size needed when computing the
 *  sparse matrix multiplication with a dense matrix:
 *  \f[
 *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, COO, BSR or Blocked ELL storage format, 
+*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, COO, BSR or Blocked ELL storage format,
 *  \f$B\f$ is a dense matrix of size \f$k \times n\f$ and \f$C\f$ is a dense matrix of size \f$m \times n\f$.
 *
-*  \p hipsparseSpMM_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpMM 
+*  \p hipsparseSpMM_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpMM
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
@@ -100,15 +100,15 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpMM_preprocess performs the required preprocessing used when computing the 
+*  \p hipsparseSpMM_preprocess performs the required preprocessing used when computing the
 *  sparse matrix multiplication with a dense matrix:
 *  \f[
 *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, COO, BSR or Blocked ELL storage format, 
+*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, COO, BSR or Blocked ELL storage format,
 *  \f$B\f$ is a dense matrix of size \f$k \times n\f$ and \f$C\f$ is a dense matrix of size \f$m \times n\f$.
 *
-*  \p hipsparseSpMM_preprocess supports multiple combinations of data types and compute types. See \ref hipsparseSpMM for a complete 
+*  \p hipsparseSpMM_preprocess supports multiple combinations of data types and compute types. See \ref hipsparseSpMM for a complete
 *  listing of all the data type and compute type combinations available.
 *
 *  @param[in]
@@ -201,15 +201,15 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \f]
 *  Both \f$B\f$ and \f$C\f$ can be in row or column order.
 *
-*  \p hipsparseSpMM requires three stages to complete. First, the user calls \ref hipsparseSpMM_bufferSize to determine 
+*  \p hipsparseSpMM requires three stages to complete. First, the user calls \ref hipsparseSpMM_bufferSize to determine
 *  the size of the required temporary storage buffer. Next, the user allocates this buffer and calls
-*  \ref hipsparseSpMM_preprocess which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user calls 
+*  \ref hipsparseSpMM_preprocess which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user calls
 *  \p hipsparseSpMM to perform the actual computation. The buffer size and preprecess routines only need to be called once for a given
 *  sparse matrix \f$op(A)\f$ while the computation routine can be repeatedly used with different \f$B\f$ and \f$C\f$ matrices.
 *  Once all calls to \p hipsparseSpMM are complete, the temporary buffer can be deallocated.
 *
-*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is 
-*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ as 
+*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
+*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ as
 *  this provides the best memory access.
 *
 *  \p hipsparseSpMM supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity
@@ -218,7 +218,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  <table>
 *  <caption id="spmm_csr_algorithms">CSR Algorithms</caption>
-*  <tr><th>CSR Algorithms              
+*  <tr><th>CSR Algorithms
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG2</td>
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG3</td>
@@ -226,7 +226,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  <table>
 *  <caption id="spmm_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>COO Algorithms              
+*  <tr><th>COO Algorithms
 *  <tr><td>HIPSPARSE_SPMM_COO_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMM_COO_ALG2</td>
 *  <tr><td>HIPSPARSE_SPMM_COO_ALG3</td>
@@ -235,13 +235,13 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  <table>
 *  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
-*  <tr><th>ELL Algorithms                      
+*  <tr><th>ELL Algorithms
 *  <tr><td>HIPSPARSE_SPMM_BLOCKED_ELL_ALG1</td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
-*  <tr><th>BSR Algorithms             
+*  <tr><th>BSR Algorithms
 *  <tr><td>CUSPARSE_SPMM_BSR_ALG1</td>
 *  </table>
 *
@@ -269,13 +269,14 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmm_mixed">Mixed Precisions</caption>
-*  <tr><th>A / B     <th>C         <th>compute_type
-*  <tr><td>HIP_R_8I  <td>HIP_R_32I <td>HIP_R_32I
-*  <tr><td>HIP_R_8I  <td>HIP_R_32F <td>HIP_R_32F
-*  <tr><td>HIP_R_16F <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><th>A / B      <th>C         <th>compute_type
+*  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
+*  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
 *  </table>
 *
-*  \p hipsparseSpMM supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions 
+*  \p hipsparseSpMM supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions
 *  for storing the row pointer and column indices arrays of the sparse matrices.
 *
 *  \p hipsparseSpMM also supports batched computation for CSR and COO matrices. There are three supported batch modes:
@@ -364,8 +365,8 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *    float beta  = 0.25f;
 *
 *    std::vector<int> hcsrRowPtr = {0, 3, 5, 8};
-*    std::vector<int> hcsrColInd = {0, 1, 3, 1, 2, 0, 2, 3}; 
-*    std::vector<float> hcsrVal     = {1, 2, 3, 4, 5, 6, 7, 8}; 
+*    std::vector<int> hcsrColInd = {0, 1, 3, 1, 2, 0, 2, 3};
+*    std::vector<float> hcsrVal     = {1, 2, 3, 4, 5, 6, 7, 8};
 *
 *    std::vector<float> hB(nnz_B, 1.0f);
 *    std::vector<float> hC(nnz_C, 1.0f);
@@ -434,7 +435,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *                            matC,
 *                            HIP_R_32F,
 *                            HIPSPARSE_MM_ALG_DEFAULT,
-*                            &buffer);
+*                            buffer);
 *
 *    // Perform operation
 *    hipsparseSpMM(handle,
@@ -447,7 +448,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *                 matC,
 *                 HIP_R_32F,
 *                 HIPSPARSE_MM_ALG_DEFAULT,
-*                 &buffer);
+*                 buffer);
 *
 *    // Copy device to host
 *    hipMemcpy(hC.data(), dC, sizeof(float) * nnz_C, hipMemcpyDeviceToHost);

@@ -690,13 +690,7 @@ if( BUILD_WITH_TENSILE )
   endif()
 
   if(BUILD_WITH_HIPBLASLT)
-    target_include_directories( rocblas
-      SYSTEM BEFORE PRIVATE
-        $<BUILD_INTERFACE:${HIPBLASLT_INCLUDE_DIR}>
-    )
-    if( BUILD_SHARED_LIBS )
-      target_link_libraries( rocblas PRIVATE roc::hipblaslt )
-    endif()
+    target_link_libraries( rocblas PRIVATE roc::hipblaslt )
   endif()
 
   if( NOT BUILD_SHARED_LIBS )

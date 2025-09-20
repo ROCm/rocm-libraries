@@ -228,7 +228,7 @@ shown in the table below:
 
    "``./install.sh -h``", "Help information."
    "``./install.sh -d``", "Build the library dependencies and library in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of ``install.sh``, it is not necessary to rebuild the dependencies."
-   "``./install.sh --upgrade_tensile_venv_pip``", "On RPM-based Linux distributions it may be required to upgrade ``pip`` for the build to succeed."
+   "``./install.sh --upgrade_tensile_venv_pip``", "On RPM-based Linux distributions it may be required to upgrade ``pip`` or ``packaging`` for the build to succeed."
    "``./install.sh``", "Build the library in your local directory. It is assumed the dependencies have been built."
    "``./install.sh -i``", "Build the library, then build and install the rocBLAS package in ``/opt/rocm/rocblas``. You will be prompted for ``sudo`` access. This installs it for all users. To keep rocBLAS in your local directory, do not use the ``-i`` flag."
 
@@ -259,6 +259,7 @@ listed in this table.
    "``./install.sh -c``", "Build the library and client in your local directory. It is assumed the dependencies have been built."
    "``./install.sh -idc``", "Build the library  dependencies, client dependencies, library, and client, then build and install the rocBLAS package. You will be prompted for ``sudo`` access. To install rocBLAS for all users, use the ``-i`` flag. To restrict it to your local directory, do not use the ``-i`` flag."
    "``./install.sh -ic``", "Build and install the rocBLAS package and build the client. You will be prompted for ``sudo`` access. This installs it for all users. To restrict rocBLAS to your local directory, do not use the ``-i`` flag."
+   "``./install.sh -t /path/to/Tensile``", "``tensile_tag.txt`` has been deprecated so use this option to build a folder that has a different Tensile commit than the rocBLAS commit."
 
 Building the clients without the library
 ------------------------------------------

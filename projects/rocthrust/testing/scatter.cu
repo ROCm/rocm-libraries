@@ -27,33 +27,21 @@
 #include <unittest/unittest.h>
 
 template <class Vector>
-void TestScatterSimple(void)
+void TestScatterSimple()
 {
-  Vector map(5); // scatter indices
-  Vector src(5); // source vector
-  Vector dst(8); // destination vector
-
-  // clang-format off
-  map[0] = 6; map[1] = 3; map[2] = 1; map[3] = 7; map[4] = 2;
-  src[0] = 0; src[1] = 1; src[2] = 2; src[3] = 3; src[4] = 4;
-  dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0; dst[5] = 0; dst[6] = 0; dst[7] = 0;
-  // clang-format on
+  Vector map{6, 3, 1, 7, 2};
+  Vector src{0, 1, 2, 3, 4};
+  Vector dst(8, 0);
 
   thrust::scatter(src.begin(), src.end(), map.begin(), dst.begin());
 
-  ASSERT_EQUAL(dst[0], 0);
-  ASSERT_EQUAL(dst[1], 2);
-  ASSERT_EQUAL(dst[2], 4);
-  ASSERT_EQUAL(dst[3], 1);
-  ASSERT_EQUAL(dst[4], 0);
-  ASSERT_EQUAL(dst[5], 0);
-  ASSERT_EQUAL(dst[6], 0);
-  ASSERT_EQUAL(dst[7], 3);
+  Vector ref{0, 2, 4, 1, 0, 0, 0, 3};
+  ASSERT_EQUAL(dst, ref);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestScatterSimple);
 
 template <typename InputIterator1, typename InputIterator2, typename RandomAccessIterator>
-THRUST_HOST_DEVICE void scatter(my_system& system, InputIterator1, InputIterator1, InputIterator2, RandomAccessIterator)
+void scatter(my_system& system, InputIterator1, InputIterator1, InputIterator2, RandomAccessIterator)
 {
   system.validate_dispatch();
 }
@@ -70,7 +58,7 @@ void TestScatterDispatchExplicit()
 DECLARE_UNITTEST(TestScatterDispatchExplicit);
 
 template <typename InputIterator1, typename InputIterator2, typename RandomAccessIterator>
-THRUST_HOST_DEVICE void scatter(my_tag, InputIterator1, InputIterator1, InputIterator2, RandomAccessIterator output)
+void scatter(my_tag, InputIterator1, InputIterator1, InputIterator2, RandomAccessIterator output)
 {
   *output = 13;
 }
@@ -140,36 +128,22 @@ void TestScatterToDiscardIterator(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestScatterToDiscardIterator);
 
 template <class Vector>
-void TestScatterIfSimple(void)
+void TestScatterIfSimple()
 {
-  Vector flg(5); // predicate array
-  Vector map(5); // scatter indices
-  Vector src(5); // source vector
-  Vector dst(8); // destination vector
-
-  // clang-format off
-  flg[0] = 0; flg[1] = 1; flg[2] = 0; flg[3] = 1; flg[4] = 0;
-  map[0] = 6; map[1] = 3; map[2] = 1; map[3] = 7; map[4] = 2;
-  src[0] = 0; src[1] = 1; src[2] = 2; src[3] = 3; src[4] = 4;
-  dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0; dst[5] = 0; dst[6] = 0; dst[7] = 0;
-  // clang-format on
+  Vector flg{0, 1, 0, 1, 0};
+  Vector map{6, 3, 1, 7, 2};
+  Vector src{0, 1, 2, 3, 4};
+  Vector dst(8, 0);
 
   thrust::scatter_if(src.begin(), src.end(), map.begin(), flg.begin(), dst.begin());
 
-  ASSERT_EQUAL(dst[0], 0);
-  ASSERT_EQUAL(dst[1], 0);
-  ASSERT_EQUAL(dst[2], 0);
-  ASSERT_EQUAL(dst[3], 1);
-  ASSERT_EQUAL(dst[4], 0);
-  ASSERT_EQUAL(dst[5], 0);
-  ASSERT_EQUAL(dst[6], 0);
-  ASSERT_EQUAL(dst[7], 3);
+  Vector ref{0, 0, 0, 1, 0, 0, 0, 3};
+  ASSERT_EQUAL(dst, ref);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestScatterIfSimple);
 
 template <typename InputIterator1, typename InputIterator2, typename InputIterator3, typename RandomAccessIterator>
-THRUST_HOST_DEVICE void
-scatter_if(my_system& system, InputIterator1, InputIterator1, InputIterator2, InputIterator3, RandomAccessIterator)
+void scatter_if(my_system& system, InputIterator1, InputIterator1, InputIterator2, InputIterator3, RandomAccessIterator)
 {
   system.validate_dispatch();
 }
@@ -186,8 +160,7 @@ void TestScatterIfDispatchExplicit()
 DECLARE_UNITTEST(TestScatterIfDispatchExplicit);
 
 template <typename InputIterator1, typename InputIterator2, typename InputIterator3, typename RandomAccessIterator>
-THRUST_HOST_DEVICE void
-scatter_if(my_tag, InputIterator1, InputIterator1, InputIterator2, InputIterator3, RandomAccessIterator output)
+void scatter_if(my_tag, InputIterator1, InputIterator1, InputIterator2, InputIterator3, RandomAccessIterator output)
 {
   *output = 13;
 }
@@ -281,7 +254,7 @@ void TestScatterIfToDiscardIterator(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestScatterIfToDiscardIterator);
 
 template <typename Vector>
-void TestScatterCountingIterator(void)
+void TestScatterCountingIterator()
 {
   Vector source(10);
   thrust::sequence(source.begin(), source.end(), 0);
@@ -315,7 +288,7 @@ void TestScatterCountingIterator(void)
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestScatterCountingIterator);
 
 template <typename Vector>
-void TestScatterIfCountingIterator(void)
+void TestScatterIfCountingIterator()
 {
   Vector source(10);
   thrust::sequence(source.begin(), source.end(), 0);

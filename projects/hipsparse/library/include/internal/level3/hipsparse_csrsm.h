@@ -32,9 +32,9 @@ extern "C" {
 /*! \ingroup level3_module
 *  \details
 *  \p hipsparseXcsrsm2_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
-*  structural or numerical zero has been found during \ref hipsparseScsrsm2_analysis 
-*  "hipsparseXcsrsm2_analysis()" or \ref hipsparseScsrsm2_solve "hipsparseXcsrsm2_solve()" 
-*  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, 
+*  structural or numerical zero has been found during \ref hipsparseScsrsm2_analysis
+*  "hipsparseXcsrsm2_analysis()" or \ref hipsparseScsrsm2_solve "hipsparseXcsrsm2_solve()"
+*  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position,
 *  using same index base as the CSR matrix.
 *
 *  \p position can be in host or device memory. If no zero pivot has been found,
@@ -65,8 +65,8 @@ hipsparseStatus_t
 /*! \ingroup level3_module
 *  \details
 *  \p hipsparseXcsrsm2_bufferSizeExt returns the size of the temporary storage buffer
-*  in bytes that is required by \ref hipsparseScsrsm2_analysis "hipsparseXcsrsm2_analysis()" 
-*  and \ref hipsparseScsrsm2_solve "hipsparseXcsrsm2_solve()". The temporary storage buffer 
+*  in bytes that is required by \ref hipsparseScsrsm2_analysis "hipsparseXcsrsm2_analysis()"
+*  and \ref hipsparseScsrsm2_solve "hipsparseXcsrsm2_solve()". The temporary storage buffer
 *  must be allocated by the user.
 *
 *  @param[in]
@@ -110,8 +110,8 @@ hipsparseStatus_t
 *                     \ref hipsparseScsrsm2_solve "hipsparseXcsrsm2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nrhs, \p nnz, \p alpha, 
-*              \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nrhs, \p nnz, \p alpha,
+*              \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B,
 *              \p info or \p pBufferSizeInBytes is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -202,8 +202,8 @@ hipsparseStatus_t hipsparseZcsrsm2_bufferSizeExt(hipsparseHandle_t         handl
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level3_module
 *  \details
-*  \p hipsparseXcsrsm2_analysis performs the analysis step for \ref hipsparseScsrsm2_solve 
-*  "hipsparseXcsrsm2_solve()". It is expected that this function will be executed only once 
+*  \p hipsparseXcsrsm2_analysis performs the analysis step for \ref hipsparseScsrsm2_solve
+*  "hipsparseXcsrsm2_solve()". It is expected that this function will be executed only once
 *  for a given matrix and particular operation type.
 *
 *  \note
@@ -252,8 +252,8 @@ hipsparseStatus_t hipsparseZcsrsm2_bufferSizeExt(hipsparseHandle_t         handl
 *  pBuffer     temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nrhs, \p nnz, \p alpha, 
-*              \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nrhs, \p nnz, \p alpha,
+*              \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B,
 *              \p info or \p pBuffer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -399,8 +399,8 @@ hipsparseStatus_t hipsparseZcsrsm2_analysis(hipsparseHandle_t         handle,
 *  \f]
 *
 *  \p hipsparseXcsrsm2_solve requires a user allocated temporary buffer. Its size is returned by
-*  \ref hipsparseScsrsm2_bufferSizeExt "hipsparseXcsrsm2_bufferSizeExt()". The size of the required buffer is 
-*  larger when \p transA equals \ref HIPSPARSE_OPERATION_TRANSPOSE or \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE 
+*  \ref hipsparseScsrsm2_bufferSizeExt "hipsparseXcsrsm2_bufferSizeExt()". The size of the required buffer is
+*  larger when \p transA equals \ref HIPSPARSE_OPERATION_TRANSPOSE or \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE
 *  and when \p transB is \ref HIPSPARSE_OPERATION_NON_TRANSPOSE. The subsequent solve will also be faster when \f$A\f$
 *  is non-transposed and \f$B\f$ is transposed (or conjugate transposed). For example, instead of solving:
 *
@@ -444,26 +444,26 @@ hipsparseStatus_t hipsparseZcsrsm2_analysis(hipsparseHandle_t         handle,
 *    \end{bmatrix}^{T}
 *  \f]
 *
-*  Once the temporary storage buffer has been allocated, analysis meta data is required. It can be obtained by 
-*  \ref hipsparseScsrsm2_analysis "hipsparseXcsrsm2_analysis()". The triangular solve is completed by calling 
-*  \p hipsparseXcsrsm2_solve and once all solves are performed, the temporary storage buffer allocated by the 
+*  Once the temporary storage buffer has been allocated, analysis meta data is required. It can be obtained by
+*  \ref hipsparseScsrsm2_analysis "hipsparseXcsrsm2_analysis()". The triangular solve is completed by calling
+*  \p hipsparseXcsrsm2_solve and once all solves are performed, the temporary storage buffer allocated by the
 *  user can be freed.
 *
-*  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is 
+*  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is
 *  missing the diagonal entry (referred to as a structural zero) or the diagonal entry is zero (referred to as a numerical zero)
-*  then a division by zero would occur. \p hipsparseXcsrsm2_solve tracks the location of the first zero pivot (either numerical 
-*  or structural zero). The zero pivot status can be checked calling \ref hipsparseXcsrsm2_zeroPivot(). If 
-*  \ref hipsparseXcsrsm2_zeroPivot() returns \ref HIPSPARSE_STATUS_SUCCESS, then no zero pivot was found and therefore 
+*  then a division by zero would occur. \p hipsparseXcsrsm2_solve tracks the location of the first zero pivot (either numerical
+*  or structural zero). The zero pivot status can be checked calling \ref hipsparseXcsrsm2_zeroPivot(). If
+*  \ref hipsparseXcsrsm2_zeroPivot() returns \ref HIPSPARSE_STATUS_SUCCESS, then no zero pivot was found and therefore
 *  the matrix does not have a structural or numerical zero.
 *
-*  The user can specify that the sparse matrix should be interpreted as having ones on the diagonal by setting the diagonal type 
-*  on the descriptor \p descrA to \ref HIPSPARSE_DIAG_TYPE_UNIT using \ref hipsparseSetMatDiagType. If 
-*  \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for 
+*  The user can specify that the sparse matrix should be interpreted as having ones on the diagonal by setting the diagonal type
+*  on the descriptor \p descrA to \ref HIPSPARSE_DIAG_TYPE_UNIT using \ref hipsparseSetMatDiagType. If
+*  \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for
 *  some \f$j\f$.
 *
-*  The sparse CSR matrix passed to \p hipsparseXcsrsm2_solve does not actually have to be a triangular matrix. Instead the 
-*  triangular upper or lower part of the sparse matrix is solved based on \ref hipsparseFillMode_t set on the descriptor 
-*  \p descrA. If the fill mode is set to \ref HIPSPARSE_FILL_MODE_LOWER, then the lower triangular matrix is solved. If the 
+*  The sparse CSR matrix passed to \p hipsparseXcsrsm2_solve does not actually have to be a triangular matrix. Instead the
+*  triangular upper or lower part of the sparse matrix is solved based on \ref hipsparseFillMode_t set on the descriptor
+*  \p descrA. If the fill mode is set to \ref HIPSPARSE_FILL_MODE_LOWER, then the lower triangular matrix is solved. If the
 *  fill mode is set to \ref HIPSPARSE_FILL_MODE_UPPER then the upper triangular matrix is solved.
 *
 *  \note
@@ -517,8 +517,8 @@ hipsparseStatus_t hipsparseZcsrsm2_analysis(hipsparseHandle_t         handle,
 *  pBuffer     temporary storage buffer allocated by the user.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nrhs, \p nnz, \p alpha, 
-*              \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, 
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nrhs, \p nnz, \p alpha,
+*              \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B,
 *              \p info or \p pBuffer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

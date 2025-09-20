@@ -48,7 +48,7 @@ namespace rocRoller
         {
             Nop() {}
             template <typename... Args>
-            Nop(Args&&... i)
+            explicit Nop(Args&&... i)
             {
             }
 
@@ -63,6 +63,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(Scalar const&);
             std::unordered_set<OperationTag> operator()(Literal const&);
             std::unordered_set<OperationTag> operator()(BlockScale const&);
+            std::unordered_set<OperationTag> operator()(SubTileTranspose const&);
             std::unordered_set<OperationTag> operator()(T_Load_Linear const&);
             std::unordered_set<OperationTag> operator()(T_Load_Scalar const&);
             std::unordered_set<OperationTag> operator()(T_Load_Tiled const&);
@@ -87,6 +88,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(Scalar const&);
             std::unordered_set<OperationTag> operator()(Literal const&);
             std::unordered_set<OperationTag> operator()(BlockScale const&);
+            std::unordered_set<OperationTag> operator()(SubTileTranspose const&);
             std::unordered_set<OperationTag> operator()(T_Load_Linear const&);
             std::unordered_set<OperationTag> operator()(T_Load_Scalar const&);
             std::unordered_set<OperationTag> operator()(T_Load_Tiled const&);
@@ -119,6 +121,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(Scalar&);
             std::unordered_set<OperationTag> operator()(Literal&);
             std::unordered_set<OperationTag> operator()(BlockScale&);
+            std::unordered_set<OperationTag> operator()(SubTileTranspose&);
             std::unordered_set<OperationTag> operator()(T_Load_Linear&);
             std::unordered_set<OperationTag> operator()(T_Load_Scalar&);
             std::unordered_set<OperationTag> operator()(T_Load_Tiled&);
@@ -146,6 +149,7 @@ namespace rocRoller
             std::string operator()(Scalar const&);
             std::string operator()(Literal const&);
             std::string operator()(BlockScale const&);
+            std::string operator()(SubTileTranspose const&);
             std::string operator()(T_Load_Linear const&);
             std::string operator()(T_Load_Scalar const&);
             std::string operator()(T_Load_Tiled const&);
@@ -175,6 +179,7 @@ namespace rocRoller
             void operator()(Scalar&);
             void operator()(Literal&);
             void operator()(BlockScale&);
+            void operator()(SubTileTranspose&);
             void operator()(T_Load_Linear&);
             void operator()(T_Load_Scalar&);
             void operator()(T_Load_Tiled&);
@@ -196,6 +201,7 @@ namespace rocRoller
             void operator()(Scalar&);
             void operator()(Literal&);
             void operator()(BlockScale&);
+            void operator()(SubTileTranspose&);
             void operator()(T_Load_Linear&);
             void operator()(T_Load_Scalar&);
             void operator()(T_Load_Tiled&);
@@ -215,6 +221,7 @@ namespace rocRoller
             rocRoller::VariableType operator()(Scalar&);
             rocRoller::VariableType operator()(Literal&);
             rocRoller::VariableType operator()(BlockScale&);
+            rocRoller::VariableType operator()(SubTileTranspose&);
             rocRoller::VariableType operator()(T_Load_Linear&);
             rocRoller::VariableType operator()(T_Load_Scalar&);
             rocRoller::VariableType operator()(T_Load_Tiled&);

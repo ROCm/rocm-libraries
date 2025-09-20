@@ -11,7 +11,7 @@ rocRAND documentation
 rocRAND provides functions that generate pseudo-random and quasi-random numbers.
 The rocRAND library is implemented in the :doc:`HIP <hip:index>`
 programming language and optimized for the latest discrete AMD GPUs. It is designed to run on top
-of the AMD :doc:`ROCm platform <rocm:what-is-rocm>`, but it also works on NVIDIA CUDA-enabled GPUs.
+of the AMD :doc:`ROCm platform <rocm:what-is-rocm>`.
 
 rocRAND integrates with a wrapper library called hipRAND, which you can use to easily port
 NVIDIA CUDA applications that use the CUDA cuRAND library to the

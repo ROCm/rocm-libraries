@@ -33,29 +33,37 @@
 
 namespace rocRoller
 {
-    KernelOptions::KernelOptions()
-        : m_values(std::make_unique<KernelOptionValues>())
+    static void increaseRegisterLimit(KernelOptionValues& values)
     {
         if(Settings::Get(Settings::NoRegisterLimits))
         {
-            m_values->maxACCVGPRs *= 10;
-            m_values->maxSGPRs *= 10;
-            m_values->maxVGPRs *= 10;
+            values.maxACCVGPRs *= 10;
+            values.maxSGPRs *= 10;
+            values.maxVGPRs *= 10;
         }
+    }
+
+    KernelOptions::KernelOptions()
+        : m_values(std::make_unique<KernelOptionValues>())
+    {
+        increaseRegisterLimit(*m_values);
     }
 
     KernelOptions::KernelOptions(KernelOptionValues&& other)
         : m_values(std::make_unique<KernelOptionValues>(std::forward<KernelOptionValues>(other)))
     {
+        increaseRegisterLimit(*m_values);
     }
 
     KernelOptions::KernelOptions(KernelOptions const& other)
         : m_values(std::make_unique<KernelOptionValues>(*other.m_values))
     {
+        increaseRegisterLimit(*m_values);
     }
     KernelOptions::KernelOptions(KernelOptions&& other)
         : m_values(std::move(other.m_values))
     {
+        increaseRegisterLimit(*m_values);
     }
 
     KernelOptions& KernelOptions::operator=(KernelOptions const& other)
@@ -129,7 +137,7 @@ namespace rocRoller
 
     std::string toString(KernelOptionValues const& values)
     {
-        static_assert(sizeof(KernelOptionValues) == 68,
+        static_assert(sizeof(KernelOptionValues) == 72,
                       "Edit the toString() function when adding a kernel option!");
 
         std::string rv = "Kernel Options:\n";
@@ -164,6 +172,7 @@ namespace rocRoller
         ShowOption(enableFullDivision);
         ShowOption(scaleSkipPermlane);
         ShowString(assertOpKind);
+        ShowOption(removeSetCoordinate);
 
 #undef Show
 #undef ShowOption

@@ -29,9 +29,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponent(BitwiseNegateGenerator);
-
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::BitwiseNegate>>
         GetGenerator<Expression::BitwiseNegate>(Register::ValuePtr dst,

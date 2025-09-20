@@ -38,7 +38,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/hipsparse-version.h.in"
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/hipsparse.h"
                "${PROJECT_BINARY_DIR}/include/hipsparse/hipsparse.h" COPYONLY)
 
-set(HEADER_FILES 
+set(HEADER_FILES
   # Level1
   internal/level1/hipsparse_axpyi.h
   internal/level1/hipsparse_dotci.h
@@ -121,6 +121,7 @@ set(HEADER_FILES
   internal/generic/hipsparse_spsv.h
   internal/generic/hipsparse_spvv.h
   # Auxiliary
+  hipsparse-bfloat16.h
   hipsparse-types.h
   hipsparse-auxiliary.h
   hipsparse-generic-types.h

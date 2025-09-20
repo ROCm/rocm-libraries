@@ -771,6 +771,7 @@ namespace rocsparse
 
     static const std::map<spmm_template_tuple, spmm_template_t> s_spmm_template_dispatch{{
 
+        // Mixed precisions
         SPMM_TEMPLATE_CONFIG(rocsparse_datatype_i32_r,
                              rocsparse_indextype_i32,
                              rocsparse_indextype_i32,
@@ -795,27 +796,6 @@ namespace rocsparse
         SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
                              rocsparse_indextype_i32,
                              rocsparse_indextype_i32,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
                              rocsparse_datatype_i8_r,
                              rocsparse_datatype_i8_r,
                              rocsparse_datatype_f32_r),
@@ -853,6 +833,49 @@ namespace rocsparse
                              rocsparse_indextype_i64,
                              rocsparse_datatype_f16_r,
                              rocsparse_datatype_f16_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_bf16_r,
+                             rocsparse_datatype_bf16_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_bf16_r,
+                             rocsparse_datatype_bf16_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_bf16_r,
+                             rocsparse_datatype_bf16_r,
+                             rocsparse_datatype_f32_r),
+
+        // Uniform precisions
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r,
                              rocsparse_datatype_f32_r),
 
         SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_r,

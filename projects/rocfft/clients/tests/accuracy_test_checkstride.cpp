@@ -70,7 +70,11 @@ inline auto param_checkstride()
                 for(const auto& types :
                     generate_types(trans_type, {fft_placement_notinplace}, true))
                 {
+#ifdef WIN32
+                    for(bool callback : {false})
+#else
                     for(bool callback : {true, false})
+#endif
                     {
                         // callbacks don't work for planar
                         bool is_planar = std::get<2>(types) == fft_array_type_complex_planar

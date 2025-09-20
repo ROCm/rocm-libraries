@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -108,6 +108,10 @@ class SYTRF_FORTRAN : public SYTRF_BASE<API_FORTRAN>
 {
 };
 
+class SYTRF_COMPAT : public SYTRF_BASE<API_COMPAT>
+{
+};
+
 // non-batch tests
 
 TEST_P(SYTRF, __float)
@@ -150,6 +154,26 @@ TEST_P(SYTRF_FORTRAN, __double_complex)
     run_tests<false, false, rocblas_double_complex>();
 }
 
+TEST_P(SYTRF_COMPAT, __float)
+{
+    run_tests<false, false, float>();
+}
+
+TEST_P(SYTRF_COMPAT, __double)
+{
+    run_tests<false, false, double>();
+}
+
+TEST_P(SYTRF_COMPAT, __float_complex)
+{
+    run_tests<false, false, rocblas_float_complex>();
+}
+
+TEST_P(SYTRF_COMPAT, __double_complex)
+{
+    run_tests<false, false, rocblas_double_complex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
 //                          SYTRF,
 //                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(uplo_range)));
@@ -164,4 +188,12 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SYTRF_FORTRAN,
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          SYTRF_COMPAT,
+//                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(uplo_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SYTRF_COMPAT,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));

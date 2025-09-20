@@ -167,7 +167,7 @@ namespace Tensile
                 ("sleep-percent",            po::value<int>()->default_value(0), "Sleep percentage")
                 ("hardware-monitor",         po::value<bool>()->default_value(true), "Use hardware monitor.")
                 ("flush-count",              po::value<size_t>()->default_value(1), "Number of copies of arrays to allocate for cache flushing in timing code."
-                                                                                    " Functions are called iters times in a timing loop." 
+                                                                                    " Functions are called iters times in a timing loop."
                                                                                     " If the problem memory footprint is small enough, then arrays will be cached."
                                                                                     " flush_count can be used to prevent caching."
                                                                                     " For example, for sgemm with transA=transB=N:"

@@ -73,7 +73,6 @@ template<typename DerivedPolicy,
 
 
 } // end namespace detail
-} // end namespace omp 
+} // end namespace omp
 } // end namespace system
 THRUST_NAMESPACE_END
-

@@ -246,8 +246,8 @@ void testing_spmm_batched_coo(const Arguments& arg)
     host_vector<C> hC_1(batch_count_C * nnz_C);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1);
-    rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1);
+    rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1, arg.convert_to_int);
+    rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1, arg.convert_to_int);
 
     if(arg.convert_to_int)
     {
@@ -482,5 +482,7 @@ INSTANTIATE_MIXED(int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 
 void testing_spmm_batched_coo_extra(const Arguments& arg) {}

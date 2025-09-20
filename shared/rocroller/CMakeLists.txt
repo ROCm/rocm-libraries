@@ -2,7 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.24.4)
-project(rocroller VERSION 1.0.0 LANGUAGES CXX)
+set(ROCROLLER_VERSION 1.0.0)
+set(ROCROLLER_SOVERSION 1)
+project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -43,7 +45,7 @@ option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
 option(ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF "Use the pregenerates GPU architecture definition YAML file(s) in the repository." ON)
 set(ROCROLLER_MRISAS_DIR "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitectureGenerator/amd-mrisa" CACHE STRING "Path to directory containing MRISA XML files.")
-set(MXDATAGENERATOR_GIT_TAG "3ac153eec4c1a1e0da7546abc9c0c4f54e180f43" CACHE STRING "mxDataGenerator tag/commit hash to checkout")
+set(MXDATAGENERATOR_GIT_TAG "31407efa7938fd70ea9b28e08a4d53e398415f8b" CACHE STRING "mxDataGenerator tag/commit hash to checkout")
 set(MXDATAGENERATOR_GIT_URL "https://github.com/ROCm/mxDataGenerator.git" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
 
 if(ROCROLLER_ENABLE_TEST_DISCOVERY)
@@ -157,12 +159,17 @@ else()
     add_library(rocroller STATIC)
     set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
+set_target_properties(rocroller
+    PROPERTIES
+        VERSION ${ROCROLLER_VERSION}
+        SOVERSION ${ROCROLLER_SOVERSION}
+)
 add_library(roc::rocroller ALIAS rocroller)
 
 add_library(rocroller-interface INTERFACE)
 add_library(roc::rocroller-interface ALIAS rocroller-interface)
 
-target_compile_options(rocroller PUBLIC $<BUILD_INTERFACE:-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=rocm-libraries/shared/rocroller>)
+target_compile_options(rocroller PUBLIC $<BUILD_INTERFACE:-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=shared/rocroller>)
 
 if(ROCROLLER_ENABLE_LLD)
     find_package(LLD REQUIRED)
@@ -188,11 +195,7 @@ if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
     set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH};ASAN_OPTIONS=detect_leaks=0")
 endif()
 
-if(ROCROLLER_BUILD_SHARED_LIBS)
-    target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
-else()
-    target_link_libraries(rocroller-interface INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,roc::rocroller>)
-endif()
+target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
@@ -233,9 +236,9 @@ endif()
 
 target_link_libraries(rocroller
     PUBLIC
-       Boost::headers
        hip::host
     PRIVATE
+        $<BUILD_INTERFACE:Boost::headers>
         ${msgpack_libs}
         amd_comgr
 )
@@ -256,8 +259,8 @@ target_link_libraries(rocroller
         ${llvm_libs}
 )
 
-target_include_directories(rocroller 
-    PUBLIC 
+target_include_directories(rocroller
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
 )
 
