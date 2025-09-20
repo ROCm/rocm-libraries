@@ -1036,13 +1036,13 @@ namespace rocRoller::Client::GEMMClient::CLI
             std::istringstream iss(arg);
             std::string        token;
 
-            iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
+            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
             std::getline(iss, token, 'x');
             solution.waveM = std::stoi(token);
             std::getline(iss, token, 'x');
             solution.waveN = std::stoi(token);
 
-            iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
             std::getline(iss, token, 'x');
             solution.waveK = std::stoi(token);
 
@@ -1091,12 +1091,12 @@ namespace rocRoller::Client::GEMMClient::CLI
             std::istringstream iss(arg);
             std::string        token;
 
-            iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
+            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
             std::getline(iss, token, 'x');
             mnk.m = std::stoi(token);
             std::getline(iss, token, 'x');
             mnk.n = std::stoi(token);
-            iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
             std::getline(iss, token, 'x');
             mnk.k = std::stoi(token);
         }
@@ -1564,7 +1564,7 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::loadLDSA), "Use LDS when loading A.");
     app.add_flag(SN(&SP::loadLDSB), "Use LDS when loading B.");
     app.add_flag(SN(&SP::storeLDSD), "Use LDS when storing D.");
-    app.add_option("--lds", "Use LDS when for A/B/D.");
+    app.add_option("--lds", "Use LDS for A/B/D.");
 
     app.add_flag(SN(&SP::direct2LDSA), "Use direct-to-LDS when loading A.");
     app.add_flag(SN(&SP::direct2LDSB), "Use direct-to-LDS when loading B.");
