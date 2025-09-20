@@ -40,7 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 7385280c1391c23a9a023d0c7e25fdf615cf5af6 # 2025-09-15 commit
+          ref: 3e7eda729ab7a934c6d05d03396520a7be82f080 # 2025-09-19 commit
 
       - name: Runner Health Settings
         run: |
@@ -67,7 +67,7 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-math-libs --no-include-ml-frameworks
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Install python deps
         run: |
