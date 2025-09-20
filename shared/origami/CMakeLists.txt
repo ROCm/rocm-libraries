@@ -20,6 +20,7 @@ rocm_setup_version(VERSION ${PROJECT_VERSION})
 option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Enable Python binding tests." OFF)
+option(ORIGAMI_ENABLE_INSTALL "Configure origami installation" ON)
 
 find_package(hip REQUIRED)
 
@@ -100,34 +101,34 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     endif()
 endif()
 
-rocm_install(TARGETS origami origami-headers)
+if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
+    rocm_install(TARGETS origami origami-headers)
 
-rocm_export_targets(
-    TARGETS roc::origami roc::origami-headers
-    DEPENDS PACKAGE hip
-    NAMESPACE roc::
-)
+    rocm_export_targets(
+        TARGETS roc::origami roc::origami-headers
+        DEPENDS PACKAGE hip
+        NAMESPACE roc::
+    )
 
-rocm_install(
-    DIRECTORY include/
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    COMPONENT devel
-    FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
-)
+    rocm_install(
+        DIRECTORY include/
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT devel
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+    )
 
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake"
-    @ONLY
-)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake"
+        @ONLY
+    )
 
-rocm_install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/origami"
-    COMPONENT devel
-)
+    rocm_install(
+        FILES "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/origami"
+        COMPONENT devel
+    )
 
-if(ORIGAMI_STANDALONE)
     set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
     set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
 
