@@ -365,30 +365,7 @@ class LocalReadMFMA(LocalRead):
 
                             if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
                                 if tP["bpe"] == 2 and tP["bpeDS"] == 4:
-                                    # Case A:
-                                    #print("writer.states.lrvwTileA = ",writer.states.lrvwTileA)
-                                    #print("writer.states.lrvwTileB = ",writer.states.lrvwTileB)
-                                    #assert 0
-                                    if valuiIdx % 8 == 0:
-                                        v0 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx))
-                                        v1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, valuiIdx))
-                                        v2 = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, valuiIdx))
-                                        v3 = vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, valuiIdx))
-                                        v4 = vgpr("Valu%s_X%u_I%u+%u+4"%(tc, bufferIdx, iui, valuiIdx))
-                                        v5 = vgpr("Valu%s_X%u_I%u+%u+5"%(tc, bufferIdx, iui, valuiIdx))
-                                        v6 = vgpr("Valu%s_X%u_I%u+%u+6"%(tc, bufferIdx, iui, valuiIdx))
-                                        v7 = vgpr("Valu%s_X%u_I%u+%u+7"%(tc, bufferIdx, iui, valuiIdx))
-
-                                        dstidx = valuiIdx // 2
-                                        v0dst = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, dstidx))
-                                        v1dst = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, dstidx))
-                                        v2dst = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, dstidx))
-                                        v3dst = vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, dstidx))
-
-                                        packCode.add(VCvtPkF32toBF16(dst=v0dst, src0=v0, src1=v1, comment="convert fp32 to bf16"))
-                                        packCode.add(VCvtPkF32toBF16(dst=v1dst, src0=v2, src1=v3, comment="convert fp32 to bf16"))
-                                        packCode.add(VCvtPkF32toBF16(dst=v2dst, src0=v4, src1=v5, comment="convert fp32 to bf16"))
-                                        packCode.add(VCvtPkF32toBF16(dst=v3dst, src0=v6, src1=v7, comment="convert fp32 to bf16"))
+                                    assert 0 # Doesn't support ConvertAfterDS
                                 else:
                                     highBitsForHalf = False
                                     isHigh16Bits = False
