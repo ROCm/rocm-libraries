@@ -129,7 +129,7 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         ElementType Hypergraph<Node, Edge, Hyper>::getElementType(int index) const
         {
-            return getElementType(m_elements.at(index));
+            return getElementType(getElement(index));
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -160,6 +160,11 @@ namespace rocRoller
             m_elements.emplace(index, std::forward<T>(element));
 
             AssertFatal(isModificationAllowed(index), "addElement is disallowed on this graph");
+
+            if(!m_incidenceBySrc.contains(index))
+                m_incidenceBySrc.emplace(index, std::map<int, int>{});
+            if(!m_incidenceByDst.contains(index))
+                m_incidenceByDst.emplace(index, std::map<int, int>{});
 
             clearCache(GraphModification::AddElement);
             return index;
@@ -233,74 +238,57 @@ namespace rocRoller
 
             AssertFatal(isModificationAllowed(index), "addElement is disallowed on this graph");
 
-            for(int src : inputs)
+            if(!m_incidenceBySrc.contains(index))
+                m_incidenceBySrc.emplace(index, std::map<int, int>{});
+            if(!m_incidenceByDst.contains(index))
+                m_incidenceByDst.emplace(index, std::map<int, int>{});
+            addIncidents(index, elementType, inputs, outputs);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
+        void Hypergraph<Node, Edge, Hyper>::addIncidents(int              index,
+                                                         ElementType      elementType,
+                                                         T_Inputs const&  inputs,
+                                                         T_Outputs const& outputs)
+        {
+            AssertFatal(m_elements.contains(index) && m_incidenceBySrc.contains(index)
+                            && m_incidenceByDst.contains(index),
+                        "Graph index not registered, element not in graph",
+                        ShowValue(index),
+                        ShowValue(elementType));
+
+            auto addIncidentSrc = [this](int src, int dst, bool checkEdgeOrdering) {
+                auto& connections   = this->m_incidenceBySrc.at(src);
+                int   incidentOrder = 0;
+                if(!connections.empty())
+                    incidentOrder = connections.rbegin()->first + 1;
+
+                if(checkEdgeOrdering)
+                    AssertFatal(incidentOrder == 0, "Too many incidents for edge connection");
+                connections.emplace(incidentOrder, dst);
+            };
+
+            auto addIncidentDst = [this](int src, int dst, bool checkEdgeOrdering) {
+                auto& connections   = this->m_incidenceByDst.at(dst);
+                int   incidentOrder = 0;
+                if(!connections.empty())
+                    incidentOrder = connections.rbegin()->first + 1;
+
+                if(checkEdgeOrdering)
+                    AssertFatal(incidentOrder == 0, "Too many incidents for edge connection");
+                connections.emplace(incidentOrder, src);
+            };
+
+            for(int input : inputs)
             {
-                auto connectedIncidents
-                    = m_incidenceBySrc
-                      | std::views::filter([elementType, index, src](auto const& i) {
-                            return elementType == ElementType::Edge ? i.dst == index : i.src == src;
-                        });
-
-                int incidentOrder = 0;
-                if(!std::ranges::empty(connectedIncidents))
-                {
-                    if(std::ranges::any_of(connectedIncidents, [index, src](auto const& i) {
-                           return i.dst == index && i.src == src;
-                       }))
-                    {
-                        // Skip duplicate incident
-                        continue;
-                    }
-
-                    incidentOrder
-                        = std::ranges::max_element(connectedIncidents, {}, &Incident::edgeOrder)
-                              ->edgeOrder
-                          + 1;
-
-                    AssertFatal(Hyper || incidentOrder == 0,
-                                "Too many incidents for edge connection",
-                                ShowValue(elementType),
-                                ShowValue(index),
-                                ShowValue(src));
-                }
-
-                m_incidenceBySrc.insert({src, index, incidentOrder});
-                m_incidenceByDst.insert({src, index, incidentOrder});
+                addIncidentSrc(input, index, !Hyper && elementType != ElementType::Edge);
+                addIncidentDst(input, index, !Hyper && elementType == ElementType::Edge);
             }
-
-            for(int dst : outputs)
+            for(int output : outputs)
             {
-                auto connectedIncidents
-                    = m_incidenceBySrc
-                      | std::views::filter([elementType, index, dst](auto const& i) {
-                            return elementType == ElementType::Edge ? i.src == index : i.dst == dst;
-                        });
-
-                int incidentOrder = 0;
-                if(!std::ranges::empty(connectedIncidents))
-                {
-                    if(std::ranges::any_of(connectedIncidents, [index, dst](auto const& i) {
-                           return i.src == index && i.dst == dst;
-                       }))
-                    {
-                        // Skip duplicate incident
-                        continue;
-                    }
-
-                    incidentOrder
-                        = std::ranges::max_element(connectedIncidents, {}, &Incident::edgeOrder)
-                              ->edgeOrder
-                          + 1;
-
-                    AssertFatal(Hyper || incidentOrder == 0,
-                                "Too many incidents for edge connection",
-                                ShowValue(elementType),
-                                ShowValue(index),
-                                ShowValue(dst));
-                }
-
-                m_incidenceBySrc.insert({index, dst, incidentOrder});
-                m_incidenceByDst.insert({index, dst, incidentOrder});
+                addIncidentSrc(index, output, !Hyper && elementType == ElementType::Edge);
+                addIncidentDst(index, output, !Hyper && elementType != ElementType::Edge);
             }
         }
 
@@ -311,10 +299,13 @@ namespace rocRoller
 
             clearCache(GraphModification::DeleteElement);
 
-            std::erase_if(m_incidenceBySrc,
-                          [index](auto const& i) { return i.src == index || i.dst == index; });
-            std::erase_if(m_incidenceByDst,
-                          [index](auto const& i) { return i.src == index || i.dst == index; });
+            m_incidenceBySrc.erase(index);
+            for(auto& i : m_incidenceBySrc)
+                std::erase_if(i.second, [index](auto const& d) { return d.second == index; });
+
+            m_incidenceByDst.erase(index);
+            for(auto& i : m_incidenceByDst)
+                std::erase_if(i.second, [index](auto const& s) { return s.second == index; });
 
             m_elements.erase(index);
         }
@@ -407,7 +398,11 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         size_t Hypergraph<Node, Edge, Hyper>::getIncidenceSize() const
         {
-            return m_incidenceBySrc.size();
+            return std::accumulate(
+                m_incidenceBySrc.begin(),
+                m_incidenceBySrc.end(),
+                0,
+                [](size_t sum, auto const& value) { return sum + value.second.size(); });
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -419,7 +414,9 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         auto Hypergraph<Node, Edge, Hyper>::getElement(int index) const -> Element const&
         {
-            AssertFatal(index >= 0 && index < m_nextIndex, "Element not found ", ShowValue(index));
+            AssertFatal(index >= 0 && index < m_nextIndex && m_elements.contains(index),
+                        "Element not found ",
+                        ShowValue(index));
             return m_elements.at(index);
         }
 
@@ -466,20 +463,20 @@ namespace rocRoller
 
             Location rv;
             rv.index   = index;
-            rv.element = m_elements.at(index);
+            rv.element = getElement(index);
 
             {
-                std::ranges::copy(m_incidenceByDst | std::views::filter([index](auto const& i) {
-                                      return i.dst == index;
-                                  }) | std::views::transform([](auto const& i) { return i.src; }),
-                                  std::back_inserter(rv.incoming));
+                std::ranges::copy(
+                    m_incidenceByDst.at(index)
+                        | std::views::transform([](auto const& i) { return i.second; }),
+                    std::back_inserter(rv.incoming));
             }
 
             {
-                std::ranges::copy(m_incidenceBySrc | std::views::filter([index](auto const& i) {
-                                      return i.src == index;
-                                  }) | std::views::transform([](auto const& i) { return i.dst; }),
-                                  std::back_inserter(rv.outgoing));
+                std::ranges::copy(
+                    m_incidenceBySrc.at(index)
+                        | std::views::transform([](auto const& i) { return i.second; }),
+                    std::back_inserter(rv.outgoing));
             }
 
             m_locationCache[index] = rv;
@@ -493,9 +490,7 @@ namespace rocRoller
             for(auto const& pair : m_elements)
             {
                 int index = pair.first;
-                if(std::none_of(m_incidenceByDst.begin(),
-                                m_incidenceByDst.end(),
-                                [index](auto const& i) { return i.dst == index; }))
+                if(m_incidenceByDst.at(index).empty())
                     co_yield index;
             }
         }
@@ -506,9 +501,7 @@ namespace rocRoller
             for(auto const& pair : m_elements)
             {
                 int index = pair.first;
-                if(std::none_of(m_incidenceBySrc.begin(),
-                                m_incidenceBySrc.end(),
-                                [index](auto const& i) { return i.src == index; }))
+                if(m_incidenceBySrc.at(index).empty())
                     co_yield index;
             }
         }
@@ -661,28 +654,19 @@ namespace rocRoller
         Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisit(int       start,
                                                                         Direction dir) const
         {
-            if(dir == Direction::Downstream)
-                co_yield breadthFirstVisitDownstream(start);
-            else
-                co_yield breadthFirstVisitUpstream(start);
-        }
-
-        template <typename Node, typename Edge, bool Hyper>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisitDownstream(int start) const
-        {
             std::unordered_set<int> visitedNodes;
 
             visitedNodes.insert(start);
 
             co_yield start;
 
-            std::deque<Incident>                toExplore;
-            std::set<Incident, Incident::bySrc> noted = {};
+            std::deque<std::pair<int, int>> toExplore;
+            std::set<std::pair<int, int>>   noted = {};
 
             while(!toExplore.empty())
             {
                 auto i    = toExplore.front();
-                auto node = i.dst;
+                auto node = dir == Direction::Downstream ? i.second : i.first;
                 toExplore.pop_front();
                 if(visitedNodes.contains(node))
                     continue;
@@ -692,51 +676,21 @@ namespace rocRoller
 
                 noted.insert(i);
 
-                for(auto const& candidate : m_incidenceBySrc)
+                for(auto const& s :
+                    dir == Direction::Downstream ? m_incidenceBySrc : m_incidenceByDst)
                 {
-                    if(node == candidate.src && !noted.contains(candidate))
+                    for(auto const& d : s.second)
                     {
-                        toExplore.push_back(candidate);
-                        noted.insert(candidate);
+                        std::pair<int, int> candidate = {s.first, d.second};
+                        if(node == candidate.first && !noted.contains(candidate))
+                        {
+                            toExplore.push_back(candidate);
+                            noted.insert(candidate);
+                        }
                     }
                 }
             }
-        }
-
-        template <typename Node, typename Edge, bool Hyper>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisitUpstream(int start) const
-        {
-            std::unordered_set<int> visitedNodes;
-
-            visitedNodes.insert(start);
-
-            co_yield start;
-
-            std::deque<Incident>                toExplore;
-            std::set<Incident, Incident::bySrc> noted = {};
-
-            while(!toExplore.empty())
-            {
-                auto i    = toExplore.front();
-                auto node = i.src;
-                toExplore.pop_front();
-                if(visitedNodes.contains(node))
-                    continue;
-
-                visitedNodes.insert(node);
-                co_yield node;
-
-                noted.insert(i);
-
-                for(auto const& candidate : m_incidenceByDst)
-                {
-                    if(node == candidate.dst && !noted.contains(candidate))
-                    {
-                        toExplore.push_back(candidate);
-                        noted.insert(candidate);
-                    }
-                }
-            }
+            co_return;
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -883,41 +837,39 @@ namespace rocRoller
 
         template <typename Node, typename Edge, bool Hyper>
         template <Direction Dir>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const element) const
+        Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const index) const
         {
+            AssertFatal(m_elements.contains(index) && m_incidenceBySrc.contains(index)
+                            && m_incidenceByDst.contains(index),
+                        "Graph index not registered, element not in graph",
+                        ShowValue(index));
             if constexpr(Dir == Direction::Downstream)
             {
-                for(auto const neighbour :
-                    m_incidenceBySrc | std::views::filter([element](auto const& i) {
-                        return i.src == element;
-                    }) | std::views::transform([](auto const& i) { return i.dst; }))
+                for(auto const& neighbour : m_incidenceBySrc.at(index))
                 {
-                    co_yield neighbour;
+                    co_yield neighbour.second;
                 }
             }
             else
             {
-                for(auto const neighbour :
-                    m_incidenceByDst | std::views::filter([element](auto const& i) {
-                        return i.dst == element;
-                    }) | std::views::transform([](auto const& i) { return i.src; }))
+                for(auto const& neighbour : m_incidenceByDst.at(index))
                 {
-                    co_yield neighbour;
+                    co_yield neighbour.second;
                 }
             }
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const element,
+        Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const index,
                                                                     Direction Dir) const
         {
             if(Dir == Direction::Downstream)
             {
-                co_yield getNeighbours<Direction::Downstream>(element);
+                co_yield getNeighbours<Direction::Downstream>(index);
             }
             else
             {
-                co_yield getNeighbours<Direction::Upstream>(element);
+                co_yield getNeighbours<Direction::Upstream>(index);
             }
         }
 
@@ -962,10 +914,11 @@ namespace rocRoller
                 msg << "];" << std::endl;
             }
 
-            for(auto const& incident : m_incidenceBySrc)
+            for(auto const& s : m_incidenceBySrc)
             {
-                msg << '"' << prefix << incident.src << "\" -> \"" << prefix << incident.dst << '"'
-                    << std::endl;
+                for(auto const& d : s.second)
+                    msg << '"' << prefix << s.first << "\" -> \"" << prefix << d.second << '"'
+                        << std::endl;
             }
 
             // Enforce left-to-right ordering for elements connected to an edge.
@@ -1264,18 +1217,20 @@ namespace rocRoller
         {
             static_assert(!Hyper, "findEdge not supported for hypergraphs.");
 
-            for(auto const& candidate : m_incidenceBySrc)
-            {
-                auto theEdge = candidate.src;
-                if(candidate.dst == head
-                   && std::any_of(m_incidenceBySrc.begin(),
-                                  m_incidenceBySrc.end(),
-                                  [theEdge, tail](auto const& i) {
-                                      return i.src == tail && i.dst == theEdge;
-                                  }))
-                    return theEdge;
-            }
+            AssertFatal(m_elements.contains(tail) && m_elements.contains(head),
+                        "Graph index not registered, elements not in graph",
+                        ShowValue(tail),
+                        ShowValue(head));
 
+            auto const& dsts = m_incidenceByDst.at(head);
+            auto const& srcs = m_incidenceBySrc.at(tail);
+            for(auto const& d : dsts)
+            {
+                auto rv = std::find_if(
+                    srcs.begin(), srcs.end(), [d](auto const& s) { return s.second == d.second; });
+                if(rv != srcs.end())
+                    return rv->second;
+            }
             return std::nullopt;
         }
     }

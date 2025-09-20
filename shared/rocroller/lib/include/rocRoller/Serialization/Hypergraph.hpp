@@ -127,14 +127,18 @@ namespace rocRoller
                         graph.m_elements[entry.id] = entry.value;
                 }
 
-                std::vector<typename HG::Incident> incidence;
+                std::vector<Graph::HypergraphIncident> incidence;
 
                 if(iot::outputting(io))
                 {
-                    incidence.reserve(graph.m_incidenceBySrc.size());
-                    std::copy(graph.m_incidenceBySrc.begin(),
-                              graph.m_incidenceBySrc.end(),
-                              std::back_insert_iterator(incidence));
+                    for(auto const& s : graph.m_incidenceBySrc)
+                    {
+                        for(auto const& d : s.second)
+                        {
+                            incidence.push_back(
+                                {.src = s.first, .dst = d.second, .edgeOrder = d.first});
+                        }
+                    }
                 }
 
                 iot::mapRequired(io, "incidence", incidence);
@@ -142,7 +146,12 @@ namespace rocRoller
                 if(!iot::outputting(io))
                 {
                     for(auto& i : incidence)
-                        graph.m_incidenceBySrc.insert(std::move(i));
+                    {
+                        graph.addIncidents(i.src,
+                                           graph.getElementType(i.src),
+                                           std::initializer_list<int>{},
+                                           std::initializer_list<int>{i.dst});
+                    }
                 }
             }
 

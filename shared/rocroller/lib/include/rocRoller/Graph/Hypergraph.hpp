@@ -179,6 +179,12 @@ namespace rocRoller
                             T_Inputs const&  inputs,
                             T_Outputs const& outputs);
 
+            template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
+            void addIncidents(int              index,
+                              ElementType      elementType,
+                              T_Inputs const&  inputs,
+                              T_Outputs const& outputs);
+
             void deleteElement(int index);
 
             template <CForwardRangeOf<int>        T_Inputs,
@@ -290,8 +296,6 @@ namespace rocRoller
              */
             Generator<int> breadthFirstVisit(int       start,
                                              Direction dir = Direction::Downstream) const;
-            Generator<int> breadthFirstVisitDownstream(int start) const;
-            Generator<int> breadthFirstVisitUpstream(int start) const;
 
             /**
             * @brief Yields element indices (both nodes and edges) that form the paths
@@ -317,9 +321,9 @@ namespace rocRoller
             Generator<int> path(RangeStart const& starts, RangeEnd const& ends) const;
 
             template <Direction Dir>
-            Generator<int> getNeighbours(int const element) const;
+            Generator<int> getNeighbours(int const index) const;
 
-            Generator<int> getNeighbours(int const element, Direction Dir) const;
+            Generator<int> getNeighbours(int const index, Direction Dir) const;
 
             /**
              * @brief Return edges in topological order.
@@ -453,8 +457,8 @@ namespace rocRoller
             // TODO: May need to replace with multi_index for in-place rewriting.
             std::map<int, Element> m_elements;
 
-            std::set<HypergraphIncident, HypergraphIncident::bySrc> m_incidenceBySrc;
-            std::set<HypergraphIncident, HypergraphIncident::byDst> m_incidenceByDst;
+            std::map<int, std::map<int, int>> m_incidenceBySrc;
+            std::map<int, std::map<int, int>> m_incidenceByDst;
 
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
