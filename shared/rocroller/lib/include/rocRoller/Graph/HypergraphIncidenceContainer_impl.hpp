@@ -35,38 +35,31 @@ namespace rocRoller::Graph
                                                             T_Inputs const&  inputs,
                                                             T_Outputs const& outputs)
     {
-        auto addIncidenceSrc = [this](int src, int dst) {
-            auto& connections    = this->m_incidencesBySrc.at(src);
-            int   incidenceOrder = 0;
+        auto addIncidence = [](int target, auto& connections) {
+            int incidenceOrder = 0;
             if(!connections.empty())
             {
-                if(std::any_of(connections.begin(),
-                               connections.end(),
-                               [dst](auto const& connection) { return connection.second == dst; }))
+                if(std::any_of(
+                       connections.begin(), connections.end(), [target](auto const& connection) {
+                           return connection.second == target;
+                       }))
                 {
                     // Don't add duplicate incidence
                     return;
                 }
                 incidenceOrder = connections.rbegin()->first + 1;
             }
-            connections.emplace(incidenceOrder, dst);
+            connections.emplace(incidenceOrder, target);
         };
 
-        auto addIncidenceDst = [this](int src, int dst) {
-            auto& connections    = this->m_incidencesByDst.at(dst);
-            int   incidenceOrder = 0;
-            if(!connections.empty())
-            {
-                if(std::any_of(connections.begin(),
-                               connections.end(),
-                               [src](auto const& connection) { return connection.second == src; }))
-                {
-                    // Don't add duplicate incidence
-                    return;
-                }
-                incidenceOrder = connections.rbegin()->first + 1;
-            }
-            connections.emplace(incidenceOrder, src);
+        auto addIncidenceSrc = [this, &addIncidence](int src, int dst) {
+            auto& connections = this->m_incidencesBySrc.at(src);
+            addIncidence(dst, connections);
+        };
+
+        auto addIncidenceDst = [this, &addIncidence](int src, int dst) {
+            auto& connections = this->m_incidencesByDst.at(dst);
+            addIncidence(src, connections);
         };
 
         accountForIndex(index);

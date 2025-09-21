@@ -43,13 +43,17 @@ namespace rocRoller::Graph
 
     void HypergraphIncidenceContainer::deleteIndex(int index)
     {
-        m_incidencesBySrc.erase(index);
-        for(auto& i : m_incidencesBySrc)
-            std::erase_if(i.second, [index](auto const& d) { return d.second == index; });
+        auto connectionMatches
+            = [index](auto const& connection) { return connection.second == index; };
 
+        m_incidencesBySrc.erase(index);
         m_incidencesByDst.erase(index);
-        for(auto& i : m_incidencesByDst)
-            std::erase_if(i.second, [index](auto const& s) { return s.second == index; });
+
+        for(auto& connections : m_incidencesBySrc)
+            std::erase_if(connections.second, connectionMatches);
+
+        for(auto& connections : m_incidencesByDst)
+            std::erase_if(connections.second, connectionMatches);
     }
 
     Generator<int> HypergraphIncidenceContainer::getSrcs(int index) const

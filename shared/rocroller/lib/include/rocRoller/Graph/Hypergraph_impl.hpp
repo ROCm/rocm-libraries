@@ -448,9 +448,9 @@ namespace rocRoller
             if(getElementType(parent) == ElementType::Node)
             {
                 std::set<int> visited;
-                for(auto const edgeIndex : getNeighbours<Direction::Downstream>(parent))
+                for(int edgeIndex : getNeighbours<Direction::Downstream>(parent))
                 {
-                    for(auto const neighbour : getNeighbours<Direction::Downstream>(edgeIndex))
+                    for(int neighbour : getNeighbours<Direction::Downstream>(edgeIndex))
                     {
                         if(!visited.contains(neighbour))
                         {
@@ -472,9 +472,9 @@ namespace rocRoller
             if(getElementType(child) == ElementType::Node)
             {
                 std::set<int> visited;
-                for(auto const edgeIndex : getNeighbours<Direction::Upstream>(child))
+                for(int edgeIndex : getNeighbours<Direction::Upstream>(child))
                 {
-                    for(auto const neighbour : getNeighbours<Direction::Upstream>(edgeIndex))
+                    for(int neighbour : getNeighbours<Direction::Upstream>(edgeIndex))
                     {
                         if(!visited.contains(neighbour))
                         {
@@ -645,7 +645,7 @@ namespace rocRoller
 
             co_yield start;
 
-            for(auto const element : getNeighbours<Dir>(start))
+            for(int element : getNeighbours<Dir>(start))
             {
                 co_yield depthFirstVisit<Dir>(element, visitedNodes);
             }
@@ -663,12 +663,12 @@ namespace rocRoller
 
             co_yield start;
 
-            for(auto const tag : getNeighbours<Dir>(start))
+            for(int tag : getNeighbours<Dir>(start))
             {
                 visitedElements.insert(tag);
                 if(edgePredicate(tag))
                 {
-                    for(auto const child : getNeighbours<Dir>(tag))
+                    for(int child : getNeighbours<Dir>(tag))
                     {
                         co_yield depthFirstVisit<Dir>(child, edgePredicate, visitedElements);
                     }
@@ -711,7 +711,7 @@ namespace rocRoller
         {
             constexpr Direction reverseDir = opposite(Dir);
 
-            for(auto const end : ends)
+            for(int end : ends)
             {
                 if(visitedElements.contains(end))
                 {
@@ -728,7 +728,7 @@ namespace rocRoller
                 visitedElements[end] = false;
 
                 std::vector<int> results;
-                for(auto const nextElement : getNeighbours<reverseDir>(end))
+                for(int nextElement : getNeighbours<reverseDir>(end))
                 {
                     if(getElementType(nextElement) == ElementType::Edge
                        && !edgeSelector(nextElement))
@@ -765,7 +765,7 @@ namespace rocRoller
         bool Hypergraph<Node, Edge, Hyper>::edgeSatisfied(
             int const edge, std::map<int, bool> const& visitedElements) const
         {
-            for(auto const element : getNeighbours<Dir>(edge))
+            for(int element : getNeighbours<Dir>(edge))
             {
                 auto iter = visitedElements.find(element);
                 if(iter == visitedElements.end() || !iter->second)

@@ -87,7 +87,7 @@ namespace rocRoller
             Generator<int> getDsts(int index) const;
 
             /**
-             * @brief Get a count of all connected sources
+             * @brief Get a count of all connected sources to element at index
              * 
              * @param index Graph index of element to be queried
              * @return size_t Count of all connected sources
@@ -95,7 +95,7 @@ namespace rocRoller
             size_t getSrcCount(int index) const;
 
             /**
-             * @brief Get a count of all connected destinations
+             * @brief Get a count of all connected destinations to element at index
              * 
              * @param index Graph index of element to be queried
              * @return size_t Count of all connected destinations
@@ -105,7 +105,7 @@ namespace rocRoller
             /**
              * @brief Get all incidences in container, sorted by sources
              * 
-             * @return Generator<std::pair<int, int>> Yields a series of pair<srcIndex, dstIndex>
+             * @return Generator<HypergraphIncidence> Yields a series of HypergraphIncidence
              */
             Generator<HypergraphIncidence> getAllIncidences() const;
 
@@ -121,15 +121,15 @@ namespace rocRoller
 
             /**
              * @brief All incidences, sorted by sources, then by edge order.
-             * Accessing the map by a graph index will give a map showing all connected destinations, ordered by edge order.
-             * The structure can be read as map<srcIndex, std::map<edgeOrder, dstIndex>>.
+             * Accessing the map by a graph index will give a map showing all connected destinations, ordered by incidence order.
+             * The structure can be read as map<srcIndex, std::map<incidenceOrder, dstIndex>>.
              */
             std::map<int, std::map<int, int>> m_incidencesBySrc;
 
             /**
              * @brief All incidences, sorted by destinations, then by edge order.
-             * Accessing the map by a graph index will give a map showing all connected sources, ordered by edge order.
-             * The structure can be read as map<dstIndex, std::map<edgeOrder, srcIndex>>.
+             * Accessing the map by a graph index will give a map showing all connected sources, ordered by incidence order.
+             * The structure can be read as map<dstIndex, std::map<incidenceOrder, srcIndex>>.
              */
             std::map<int, std::map<int, int>> m_incidencesByDst;
         };
