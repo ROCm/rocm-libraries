@@ -49,12 +49,12 @@ namespace rocRoller
              * 
              * @tparam T_Inputs Range
              * @tparam T_Outputs Range
-             * @param index Graph index of element to be connected by incidences
+             * @param id Graph id of element to be connected by incidences
              * @param inputs Graph indices of input elements to be connected
              * @param outputs Graph indices of output elements to be connected
              */
             template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-            void addIncidences(int index, T_Inputs const& inputs, T_Outputs const& outputs);
+            void addIncidences(int id, T_Inputs const& inputs, T_Outputs const& outputs);
 
             /**
              * @brief Gets the number of incidences in the container
@@ -64,43 +64,43 @@ namespace rocRoller
             size_t size() const;
 
             /**
-             * @brief Purge incidences that refer to this index
+             * @brief Purge incidences that refer to this id
              * 
-             * @param index Graph index of element to be deleted
+             * @param id Graph id of element to be deleted
              */
-            void deleteIndex(int index);
+            void deleteId(int id);
 
             /**
              * @brief Get all connected sources
              * 
-             * @param index Graph index of element to be queried
+             * @param id Graph id of element to be queried
              * @return Generator<int> Yields a series of graph indices for incoming elements
              */
-            Generator<int> getSrcs(int index) const;
+            Generator<int> getSrcs(int id) const;
 
             /**
              * @brief Get all connected destinations
              * 
-             * @param index Graph index of element to be queried
+             * @param id Graph id of element to be queried
              * @return Generator<int> Yields a series of graph indices for outgoing elements
              */
-            Generator<int> getDsts(int index) const;
+            Generator<int> getDsts(int id) const;
 
             /**
-             * @brief Get a count of all connected sources to element at index
+             * @brief Get a count of all connected sources to element at id
              * 
-             * @param index Graph index of element to be queried
+             * @param id Graph id of element to be queried
              * @return size_t Count of all connected sources
              */
-            size_t getSrcCount(int index) const;
+            size_t getSrcCount(int id) const;
 
             /**
-             * @brief Get a count of all connected destinations to element at index
+             * @brief Get a count of all connected destinations to element at id
              * 
-             * @param index Graph index of element to be queried
+             * @param id Graph id of element to be queried
              * @return size_t Count of all connected destinations
              */
-            size_t getDstCount(int index) const;
+            size_t getDstCount(int id) const;
 
             /**
              * @brief Get all incidences in container, sorted by sources
@@ -115,21 +115,21 @@ namespace rocRoller
             /**
              * @brief A check to ensure internal maps are able to be queried using std::map::at
              * 
-             * @param index Graph index that might be accessed by internal maps
+             * @param id Graph id that might be accessed by internal maps
              */
-            void accountForIndex(int index);
+            void accountForId(int id);
 
             /**
              * @brief All incidences, sorted by sources, then by edge order.
-             * Accessing the map by a graph index will give a map showing all connected destinations, ordered by incidence order.
-             * The structure can be read as map<srcIndex, std::map<incidenceOrder, dstIndex>>.
+             * Accessing the map by a graph id will give a map showing all connected destinations, ordered by incidence order.
+             * The structure can be read as map<srcId, std::map<incidenceOrder, dstId>>.
              */
             std::map<int, std::map<int, int>> m_incidencesBySrc;
 
             /**
              * @brief All incidences, sorted by destinations, then by edge order.
-             * Accessing the map by a graph index will give a map showing all connected sources, ordered by incidence order.
-             * The structure can be read as map<dstIndex, std::map<incidenceOrder, srcIndex>>.
+             * Accessing the map by a graph id will give a map showing all connected sources, ordered by incidence order.
+             * The structure can be read as map<dstId, std::map<incidenceOrder, srcId>>.
              */
             std::map<int, std::map<int, int>> m_incidencesByDst;
         };

@@ -41,13 +41,12 @@ namespace rocRoller::Graph
             [](size_t sum, auto const& value) { return sum + value.second.size(); });
     }
 
-    void HypergraphIncidenceContainer::deleteIndex(int index)
+    void HypergraphIncidenceContainer::deleteId(int id)
     {
-        auto connectionMatches
-            = [index](auto const& connection) { return connection.second == index; };
+        auto connectionMatches = [id](auto const& connection) { return connection.second == id; };
 
-        m_incidencesBySrc.erase(index);
-        m_incidencesByDst.erase(index);
+        m_incidencesBySrc.erase(id);
+        m_incidencesByDst.erase(id);
 
         for(auto& connections : m_incidencesBySrc)
             std::erase_if(connections.second, connectionMatches);
@@ -56,39 +55,39 @@ namespace rocRoller::Graph
             std::erase_if(connections.second, connectionMatches);
     }
 
-    Generator<int> HypergraphIncidenceContainer::getSrcs(int index) const
+    Generator<int> HypergraphIncidenceContainer::getSrcs(int id) const
     {
-        if(!m_incidencesByDst.contains(index))
+        if(!m_incidencesByDst.contains(id))
             co_return;
 
-        for(auto const& connection : m_incidencesByDst.at(index))
+        for(auto const& connection : m_incidencesByDst.at(id))
         {
             co_yield connection.second;
         }
     }
 
-    Generator<int> HypergraphIncidenceContainer::getDsts(int index) const
+    Generator<int> HypergraphIncidenceContainer::getDsts(int id) const
     {
-        if(!m_incidencesBySrc.contains(index))
+        if(!m_incidencesBySrc.contains(id))
             co_return;
 
-        for(auto const& connection : m_incidencesBySrc.at(index))
+        for(auto const& connection : m_incidencesBySrc.at(id))
         {
             co_yield connection.second;
         }
     }
 
-    size_t HypergraphIncidenceContainer::getSrcCount(int index) const
+    size_t HypergraphIncidenceContainer::getSrcCount(int id) const
     {
-        if(m_incidencesByDst.contains(index))
-            return m_incidencesByDst.at(index).size();
+        if(m_incidencesByDst.contains(id))
+            return m_incidencesByDst.at(id).size();
         return 0;
     }
 
-    size_t HypergraphIncidenceContainer::getDstCount(int index) const
+    size_t HypergraphIncidenceContainer::getDstCount(int id) const
     {
-        if(m_incidencesBySrc.contains(index))
-            return m_incidencesBySrc.at(index).size();
+        if(m_incidencesBySrc.contains(id))
+            return m_incidencesBySrc.at(id).size();
         return 0;
     }
 
@@ -104,12 +103,12 @@ namespace rocRoller::Graph
         }
     }
 
-    void HypergraphIncidenceContainer::accountForIndex(int index)
+    void HypergraphIncidenceContainer::accountForId(int id)
     {
-        if(!m_incidencesBySrc.contains(index))
-            m_incidencesBySrc.emplace(index, std::map<int, int>{});
-        if(!m_incidencesByDst.contains(index))
-            m_incidencesByDst.emplace(index, std::map<int, int>{});
+        if(!m_incidencesBySrc.contains(id))
+            m_incidencesBySrc.emplace(id, std::map<int, int>{});
+        if(!m_incidencesByDst.contains(id))
+            m_incidencesByDst.emplace(id, std::map<int, int>{});
     }
 
     std::string HypergraphIncidenceContainer::toDOTSection(std::string const& prefix) const

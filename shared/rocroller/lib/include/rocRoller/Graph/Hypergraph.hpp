@@ -91,7 +91,7 @@ namespace rocRoller
 
             struct Location
             {
-                int              index;
+                int              id;
                 std::vector<int> incoming;
                 std::vector<int> outgoing;
 
@@ -100,18 +100,18 @@ namespace rocRoller
                 constexpr inline bool operator==(Location const& rhs) const;
             };
 
-            bool exists(int index) const;
+            bool exists(int id) const;
 
             /**
-             * @brief Returns whether `index` points to a node or an edge.
+             * @brief Returns whether `id` points to a node or an edge.
              */
-            ElementType getElementType(int index) const;
+            ElementType getElementType(int id) const;
 
             template <typename T = Node>
-            T getNode(int index) const;
+            T getNode(int id) const;
 
             template <typename T = Edge>
-            T getEdge(int index) const;
+            T getEdge(int id) const;
 
             /**
              * @brief Returns whether `e` is a node or an edge.
@@ -132,10 +132,10 @@ namespace rocRoller
             /**
              * @brief Set (overwrite) existing element.
              *
-             * Asserts that the index exists already.
+             * Asserts that the id exists already.
              */
             template <typename T>
-            void setElement(int index, T&& element);
+            void setElement(int id, T&& element);
 
             template <typename T>
             int addElement(T&&                        element,
@@ -146,12 +146,12 @@ namespace rocRoller
             int addElement(T&& element, T_Inputs const& inputs, T_Outputs const& outputs);
 
             template <typename T, CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-            void addElement(int              index,
+            void addElement(int              id,
                             T&&              element,
                             T_Inputs const&  inputs,
                             T_Outputs const& outputs);
 
-            void deleteElement(int index);
+            void deleteElement(int id);
 
             template <CForwardRangeOf<int>        T_Inputs,
                       CForwardRangeOf<int>        T_Outputs,
@@ -166,12 +166,12 @@ namespace rocRoller
 
             size_t getElementCount() const;
 
-            Element const& getElement(int index) const;
+            Element const& getElement(int id) const;
 
             /**
-             * @brief Returns a Location info object detailing connections to the element `index`.
+             * @brief Returns a Location info object detailing connections to the element `id`.
              */
-            Location getLocation(int index) const;
+            Location getLocation(int id) const;
 
             /**
              * @brief Yields element indices without any incoming connections.
@@ -286,9 +286,9 @@ namespace rocRoller
             Generator<int> path(RangeStart const& starts, RangeEnd const& ends) const;
 
             template <Direction Dir>
-            Generator<int> getNeighbours(int const index) const;
+            Generator<int> getNeighbours(int const id) const;
 
-            Generator<int> getNeighbours(int const index, Direction Dir) const;
+            Generator<int> getNeighbours(int const id, Direction Dir) const;
 
             /**
              * @brief Return edges in topological order.
@@ -423,7 +423,7 @@ namespace rocRoller
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
 
-            int nextAvailableIndex() const;
+            int nextAvailableId() const;
         };
 
         template <typename Node, typename Edge, bool Hyper>
