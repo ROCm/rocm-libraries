@@ -34,8 +34,10 @@
 #include <variant>
 #include <vector>
 
+#include <rocRoller/Graph/HypergraphIncidenceContainer.hpp>
 #include <rocRoller/Graph/Hypergraph_fwd.hpp>
 #include <rocRoller/Serialization/Base_fwd.hpp>
+#include <rocRoller/Utilities/Concepts.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
@@ -77,31 +79,6 @@ namespace rocRoller
 
         std::string toString(GraphModification m);
 
-        struct HypergraphIncident
-        {
-            int src;
-            int dst;
-            int edgeOrder;
-
-            struct bySrc
-            {
-                bool operator()(const HypergraphIncident& a, const HypergraphIncident& b) const
-                {
-                    return std::tie(a.src, a.edgeOrder, a.dst)
-                           < std::tie(b.src, b.edgeOrder, b.dst);
-                }
-            };
-
-            struct byDst
-            {
-                bool operator()(const HypergraphIncident& a, const HypergraphIncident& b) const
-                {
-                    return std::tie(a.dst, a.edgeOrder, a.src)
-                           < std::tie(b.dst, b.edgeOrder, b.src);
-                }
-            };
-        };
-
         template <typename Node, typename Edge, bool Hyper = true>
         class Hypergraph
         {
@@ -112,11 +89,6 @@ namespace rocRoller
 
             static std::string ElementName(Element const& el);
 
-            using Incident = HypergraphIncident;
-
-            /**
-             *
-             */
             struct Location
             {
                 int              index;
@@ -179,12 +151,6 @@ namespace rocRoller
                             T_Inputs const&  inputs,
                             T_Outputs const& outputs);
 
-            template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-            void addIncidents(int              index,
-                              ElementType      elementType,
-                              T_Inputs const&  inputs,
-                              T_Outputs const& outputs);
-
             void deleteElement(int index);
 
             template <CForwardRangeOf<int>        T_Inputs,
@@ -198,7 +164,6 @@ namespace rocRoller
             requires(std::constructible_from<Edge, T>) void deleteElement(T_Inputs const&  inputs,
                                                                           T_Outputs const& outputs);
 
-            size_t getIncidenceSize() const;
             size_t getElementCount() const;
 
             Element const& getElement(int index) const;
@@ -428,8 +393,6 @@ namespace rocRoller
                 std::set<int> const& candidates)
             const;
 
-            int nextIndex() const;
-
             /**
              * If an edge exists that goes from tail to head, return it,
              * otherwise nullopt.
@@ -450,18 +413,17 @@ namespace rocRoller
             // clang-format on
             template <typename T1, typename T2, typename T3>
             friend struct rocRoller::Serialization::MappingTraits;
-            int m_nextIndex = 1;
 
             mutable std::map<int, Location> m_locationCache;
 
-            // TODO: May need to replace with multi_index for in-place rewriting.
             std::map<int, Element> m_elements;
 
-            std::map<int, std::map<int, int>> m_incidenceBySrc;
-            std::map<int, std::map<int, int>> m_incidenceByDst;
+            HypergraphIncidenceContainer m_incidences;
 
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
+
+            int nextAvailableIndex() const;
         };
 
         template <typename Node, typename Edge, bool Hyper>

@@ -39,25 +39,24 @@ namespace rocRoller
     namespace Serialization
     {
         template <typename IO>
-        struct MappingTraits<Graph::HypergraphIncident, IO, EmptyContext>
+        struct MappingTraits<Graph::HypergraphIncidence, IO, EmptyContext>
         {
             using iot              = IOTraits<IO>;
             static const bool flow = true;
 
-            static void mapping(IO& io, typename Graph::HypergraphIncident& inc)
+            static void mapping(IO& io, typename Graph::HypergraphIncidence& inc)
             {
                 iot::mapRequired(io, "src", inc.src);
                 iot::mapRequired(io, "dst", inc.dst);
-                iot::mapRequired(io, "edgeOrder", inc.edgeOrder);
             }
 
-            static void mapping(IO& io, typename Graph::HypergraphIncident& inc, EmptyContext&)
+            static void mapping(IO& io, typename Graph::HypergraphIncidence& inc, EmptyContext&)
             {
                 mapping(io, inc);
             }
         };
 
-        ROCROLLER_SERIALIZE_VECTOR(false, Graph::HypergraphIncident);
+        ROCROLLER_SERIALIZE_VECTOR(false, Graph::HypergraphIncidence);
 
         template <CNamedVariant Var>
         struct ElementEntry
@@ -109,8 +108,6 @@ namespace rocRoller
 
             static void mapping(IO& io, HG& graph)
             {
-                iot::mapRequired(io, "nextIndex", graph.m_nextIndex);
-
                 std::vector<ElementEntry<Element>> elements;
                 if(iot::outputting(io))
                 {
@@ -127,18 +124,11 @@ namespace rocRoller
                         graph.m_elements[entry.id] = entry.value;
                 }
 
-                std::vector<Graph::HypergraphIncident> incidence;
+                std::vector<Graph::HypergraphIncidence> incidence;
 
                 if(iot::outputting(io))
                 {
-                    for(auto const& s : graph.m_incidenceBySrc)
-                    {
-                        for(auto const& d : s.second)
-                        {
-                            incidence.push_back(
-                                {.src = s.first, .dst = d.second, .edgeOrder = d.first});
-                        }
-                    }
+                    incidence = graph.m_incidences.getAllIncidences().template to<std::vector>();
                 }
 
                 iot::mapRequired(io, "incidence", incidence);
@@ -147,10 +137,8 @@ namespace rocRoller
                 {
                     for(auto& i : incidence)
                     {
-                        graph.addIncidents(i.src,
-                                           graph.getElementType(i.src),
-                                           std::initializer_list<int>{},
-                                           std::initializer_list<int>{i.dst});
+                        graph.m_incidences.addIncidences(
+                            i.src, std::initializer_list<int>{}, std::initializer_list<int>{i.dst});
                     }
                 }
             }

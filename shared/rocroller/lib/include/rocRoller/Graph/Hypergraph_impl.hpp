@@ -155,16 +155,10 @@ namespace rocRoller
         template <typename T>
         int Hypergraph<Node, Edge, Hyper>::addElement(T&& element)
         {
-            int index = m_nextIndex++;
-            AssertFatal(m_elements.find(index) == m_elements.end());
+            int index = nextAvailableIndex();
             m_elements.emplace(index, std::forward<T>(element));
 
             AssertFatal(isModificationAllowed(index), "addElement is disallowed on this graph");
-
-            if(!m_incidenceBySrc.contains(index))
-                m_incidenceBySrc.emplace(index, std::map<int, int>{});
-            if(!m_incidenceByDst.contains(index))
-                m_incidenceByDst.emplace(index, std::map<int, int>{});
 
             clearCache(GraphModification::AddElement);
             return index;
@@ -204,8 +198,7 @@ namespace rocRoller
                                                       T_Inputs const&  inputs,
                                                       T_Outputs const& outputs)
         {
-            int index = m_nextIndex;
-            m_nextIndex++;
+            int index = nextAvailableIndex();
             addElement(index, std::forward<T>(element), inputs, outputs);
 
             return index;
@@ -238,57 +231,32 @@ namespace rocRoller
 
             AssertFatal(isModificationAllowed(index), "addElement is disallowed on this graph");
 
-            if(!m_incidenceBySrc.contains(index))
-                m_incidenceBySrc.emplace(index, std::map<int, int>{});
-            if(!m_incidenceByDst.contains(index))
-                m_incidenceByDst.emplace(index, std::map<int, int>{});
-            addIncidents(index, elementType, inputs, outputs);
-        }
+            m_incidences.addIncidences(index, inputs, outputs);
 
-        template <typename Node, typename Edge, bool Hyper>
-        template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-        void Hypergraph<Node, Edge, Hyper>::addIncidents(int              index,
-                                                         ElementType      elementType,
-                                                         T_Inputs const&  inputs,
-                                                         T_Outputs const& outputs)
-        {
-            AssertFatal(m_elements.contains(index) && m_incidenceBySrc.contains(index)
-                            && m_incidenceByDst.contains(index),
-                        "Graph index not registered, element not in graph",
-                        ShowValue(index),
-                        ShowValue(elementType));
-
-            auto addIncidentSrc = [this](int src, int dst, bool checkEdgeOrdering) {
-                auto& connections   = this->m_incidenceBySrc.at(src);
-                int   incidentOrder = 0;
-                if(!connections.empty())
-                    incidentOrder = connections.rbegin()->first + 1;
-
-                if(checkEdgeOrdering)
-                    AssertFatal(incidentOrder == 0, "Too many incidents for edge connection");
-                connections.emplace(incidentOrder, dst);
-            };
-
-            auto addIncidentDst = [this](int src, int dst, bool checkEdgeOrdering) {
-                auto& connections   = this->m_incidenceByDst.at(dst);
-                int   incidentOrder = 0;
-                if(!connections.empty())
-                    incidentOrder = connections.rbegin()->first + 1;
-
-                if(checkEdgeOrdering)
-                    AssertFatal(incidentOrder == 0, "Too many incidents for edge connection");
-                connections.emplace(incidentOrder, src);
-            };
-
-            for(int input : inputs)
+            if constexpr(!Hyper)
             {
-                addIncidentSrc(input, index, !Hyper && elementType != ElementType::Edge);
-                addIncidentDst(input, index, !Hyper && elementType == ElementType::Edge);
-            }
-            for(int output : outputs)
-            {
-                addIncidentSrc(index, output, !Hyper && elementType == ElementType::Edge);
-                addIncidentDst(index, output, !Hyper && elementType != ElementType::Edge);
+                std::string errorMsg
+                    = "Graph is not a hypergraph but edge has more than one incidence";
+                if(elementType == ElementType::Edge)
+                {
+                    AssertFatal(m_incidences.getSrcCount(index) <= 1
+                                    && m_incidences.getDstCount(index) <= 1,
+                                errorMsg,
+                                ShowValue(index));
+                }
+                else
+                {
+                    for(int input : inputs)
+                    {
+                        AssertFatal(
+                            m_incidences.getDstCount(input) <= 1, errorMsg, ShowValue(input));
+                    }
+                    for(int output : outputs)
+                    {
+                        AssertFatal(
+                            m_incidences.getSrcCount(output) <= 1, errorMsg, ShowValue(output));
+                    }
+                }
             }
         }
 
@@ -299,14 +267,7 @@ namespace rocRoller
 
             clearCache(GraphModification::DeleteElement);
 
-            m_incidenceBySrc.erase(index);
-            for(auto& i : m_incidenceBySrc)
-                std::erase_if(i.second, [index](auto const& d) { return d.second == index; });
-
-            m_incidenceByDst.erase(index);
-            for(auto& i : m_incidenceByDst)
-                std::erase_if(i.second, [index](auto const& s) { return s.second == index; });
-
+            m_incidences.deleteIndex(index);
             m_elements.erase(index);
         }
 
@@ -396,16 +357,6 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        size_t Hypergraph<Node, Edge, Hyper>::getIncidenceSize() const
-        {
-            return std::accumulate(
-                m_incidenceBySrc.begin(),
-                m_incidenceBySrc.end(),
-                0,
-                [](size_t sum, auto const& value) { return sum + value.second.size(); });
-        }
-
-        template <typename Node, typename Edge, bool Hyper>
         size_t Hypergraph<Node, Edge, Hyper>::getElementCount() const
         {
             return m_elements.size();
@@ -414,9 +365,7 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         auto Hypergraph<Node, Edge, Hyper>::getElement(int index) const -> Element const&
         {
-            AssertFatal(index >= 0 && index < m_nextIndex && m_elements.contains(index),
-                        "Element not found ",
-                        ShowValue(index));
+            AssertFatal(m_elements.contains(index), "Element not found", ShowValue(index));
             return m_elements.at(index);
         }
 
@@ -461,23 +410,10 @@ namespace rocRoller
                     return iter->second;
             }
 
-            Location rv;
-            rv.index   = index;
-            rv.element = getElement(index);
-
-            {
-                std::ranges::copy(
-                    m_incidenceByDst.at(index)
-                        | std::views::transform([](auto const& i) { return i.second; }),
-                    std::back_inserter(rv.incoming));
-            }
-
-            {
-                std::ranges::copy(
-                    m_incidenceBySrc.at(index)
-                        | std::views::transform([](auto const& i) { return i.second; }),
-                    std::back_inserter(rv.outgoing));
-            }
+            Location rv{.index    = index,
+                        .incoming = m_incidences.getSrcs(index).to<std::vector>(),
+                        .outgoing = m_incidences.getDsts(index).to<std::vector>(),
+                        .element  = getElement(index)};
 
             m_locationCache[index] = rv;
 
@@ -490,7 +426,7 @@ namespace rocRoller
             for(auto const& pair : m_elements)
             {
                 int index = pair.first;
-                if(m_incidenceByDst.at(index).empty())
+                if(m_incidences.getSrcCount(index) == 0)
                     co_yield index;
             }
         }
@@ -501,7 +437,7 @@ namespace rocRoller
             for(auto const& pair : m_elements)
             {
                 int index = pair.first;
-                if(m_incidenceBySrc.at(index).empty())
+                if(m_incidences.getDstCount(index) == 0)
                     co_yield index;
             }
         }
@@ -660,13 +596,22 @@ namespace rocRoller
 
             co_yield start;
 
+            // This is a pair<srcIndex, dstIndex> for Downstream, or pair<dstIndex, srcIndex> for Upstream
             std::deque<std::pair<int, int>> toExplore;
-            std::set<std::pair<int, int>>   noted = {};
+            std::set<std::pair<int, int>>   noted;
+
+            for(int connected : dir == Direction::Downstream ? m_incidences.getDsts(start)
+                                                             : m_incidences.getSrcs(start))
+            {
+                std::pair<int, int> candidate = {start, connected};
+                toExplore.push_back(candidate);
+                noted.insert(candidate);
+            }
 
             while(!toExplore.empty())
             {
                 auto i    = toExplore.front();
-                auto node = dir == Direction::Downstream ? i.second : i.first;
+                auto node = i.second;
                 toExplore.pop_front();
                 if(visitedNodes.contains(node))
                     continue;
@@ -674,19 +619,14 @@ namespace rocRoller
                 visitedNodes.insert(node);
                 co_yield node;
 
-                noted.insert(i);
-
-                for(auto const& s :
-                    dir == Direction::Downstream ? m_incidenceBySrc : m_incidenceByDst)
+                for(int connected : dir == Direction::Downstream ? m_incidences.getDsts(node)
+                                                                 : m_incidences.getSrcs(node))
                 {
-                    for(auto const& d : s.second)
+                    std::pair<int, int> candidate = {node, connected};
+                    if(!noted.contains(candidate))
                     {
-                        std::pair<int, int> candidate = {s.first, d.second};
-                        if(node == candidate.first && !noted.contains(candidate))
-                        {
-                            toExplore.push_back(candidate);
-                            noted.insert(candidate);
-                        }
+                        toExplore.push_back(candidate);
+                        noted.insert(candidate);
                     }
                 }
             }
@@ -839,23 +779,16 @@ namespace rocRoller
         template <Direction Dir>
         Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const index) const
         {
-            AssertFatal(m_elements.contains(index) && m_incidenceBySrc.contains(index)
-                            && m_incidenceByDst.contains(index),
+            AssertFatal(m_elements.contains(index),
                         "Graph index not registered, element not in graph",
                         ShowValue(index));
             if constexpr(Dir == Direction::Downstream)
             {
-                for(auto const& neighbour : m_incidenceBySrc.at(index))
-                {
-                    co_yield neighbour.second;
-                }
+                co_yield m_incidences.getDsts(index);
             }
             else
             {
-                for(auto const& neighbour : m_incidenceByDst.at(index))
-                {
-                    co_yield neighbour.second;
-                }
+                co_yield m_incidences.getSrcs(index);
             }
         }
 
@@ -914,12 +847,7 @@ namespace rocRoller
                 msg << "];" << std::endl;
             }
 
-            for(auto const& s : m_incidenceBySrc)
-            {
-                for(auto const& d : s.second)
-                    msg << '"' << prefix << s.first << "\" -> \"" << prefix << d.second << '"'
-                        << std::endl;
-            }
+            msg << m_incidences.toDOTSection(prefix);
 
             // Enforce left-to-right ordering for elements connected to an edge.
             for(auto const& pair : m_elements)
@@ -1146,12 +1074,6 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        int Hypergraph<Node, Edge, Hyper>::nextIndex() const
-        {
-            return m_nextIndex;
-        }
-
-        template <typename Node, typename Edge, bool Hyper>
         template <typename T>
         requires(std::constructible_from<Edge, T>)
             std::set<int> Hypergraph<Node, Edge, Hyper>::followEdges(
@@ -1218,20 +1140,26 @@ namespace rocRoller
             static_assert(!Hyper, "findEdge not supported for hypergraphs.");
 
             AssertFatal(m_elements.contains(tail) && m_elements.contains(head),
-                        "Graph index not registered, elements not in graph",
+                        "Graph indices not registered, elements not in graph",
                         ShowValue(tail),
                         ShowValue(head));
 
-            auto const& dsts = m_incidenceByDst.at(head);
-            auto const& srcs = m_incidenceBySrc.at(tail);
-            for(auto const& d : dsts)
+            auto dsts = m_incidences.getDsts(tail).to<std::vector>();
+            for(int src : m_incidences.getSrcs(head))
             {
-                auto rv = std::find_if(
-                    srcs.begin(), srcs.end(), [d](auto const& s) { return s.second == d.second; });
-                if(rv != srcs.end())
-                    return rv->second;
+                auto rv = std::find(dsts.begin(), dsts.end(), src);
+                if(rv != dsts.end())
+                    return *rv;
             }
             return std::nullopt;
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        int Hypergraph<Node, Edge, Hyper>::nextAvailableIndex() const
+        {
+            if(m_elements.empty())
+                return 1;
+            return m_elements.rbegin()->first + 1;
         }
     }
 }
