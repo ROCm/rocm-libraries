@@ -1379,7 +1379,7 @@ class Solution(collections.abc.Mapping):
           and not (state["ProblemType"]["DataTypeA"].isSingle() and state["ProblemType"]["DataTypeB"].isSingle()):
           reject(state, printRejectionReason, "one of DataTypeA or DataTypeB need to be float8/float8_fnuz or both are fp32")
           return
-      if (state["ProblemType"]["DataType"].isBFloat16() == True) \
+      if state["ProblemType"]["DataType"].isBFloat16() \
           and (state["ProblemType"]["DataTypeA"].isSingle() and state["ProblemType"]["DataTypeB"].isSingle()):
           reject(state, printRejectionReason, "ConvertAfterDS doesn't support SS_BSS type")
           return
