@@ -56,6 +56,10 @@ jobs:
         run: |
           pip install -r TheRock/requirements.txt
 
+      - name: Patch rocm-libraries
+        run: |
+          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+
       - name: Install requirements
         run: |
           choco install --no-progress -y ccache

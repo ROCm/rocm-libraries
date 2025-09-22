@@ -74,6 +74,10 @@ jobs:
           pip install -r TheRock/requirements.txt
           pip freeze
 
+      - name: Patch rocm-libraries
+        run: |
+          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
