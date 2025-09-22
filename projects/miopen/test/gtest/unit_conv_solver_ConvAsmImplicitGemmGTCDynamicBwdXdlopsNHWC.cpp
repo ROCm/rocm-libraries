@@ -131,6 +131,12 @@ using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_BFP16 =
     GPU_UnitTestConvSolverBwd_BFP16;
 using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_FP32 =
     GPU_UnitTestConvSolverBwd_FP32;
+using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP16 =
+    GPU_UnitTestConvSolverBwd_FP16;
+using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_BFP16 =
+    GPU_UnitTestConvSolverBwd_BFP16;
+using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP32 =
+    GPU_UnitTestConvSolverBwd_FP32;
 using CPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCDevApplicabilityBwd_NONE =
     CPU_UnitTestConvSolverDevApplicabilityBwd_NONE;
 
@@ -147,6 +153,24 @@ TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_BFP16,
 };
 
 TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_FP32,
+       ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
+{
+    this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
+};
+
+TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP16,
+       ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
+{
+    this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
+};
+
+TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_BFP16,
+       ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
+{
+    this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
+};
+
+TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP32,
        ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
 {
     this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
