@@ -25029,7 +25029,6 @@ ROCBLAS_DEPRECATED_MSG("rocblas_set_device_memory_size will be removed in a futu
                        "supported modes will be rocblas_managed & user_owned [Do not use]")
 ROCBLAS_EXPORT rocblas_status rocblas_set_device_memory_size(rocblas_handle handle, size_t size);
 
-
 /*! \brief
     \details
     Allows user to set the device memory for the handle to use as a workspace (user-owned scheme).
@@ -25064,7 +25063,6 @@ ROCBLAS_EXPORT bool rocblas_is_managing_device_memory(rocblas_handle handle);
 ROCBLAS_DEPRECATED_MSG("rocblas_is_user_managing_device_memory will be removed in a future release "
                        "and supported modes will be rocblas_managed and user_owned [Do not use]")
 ROCBLAS_EXPORT bool rocblas_is_user_managing_device_memory(rocblas_handle handle);
-
 
 /*! \brief
     \details
