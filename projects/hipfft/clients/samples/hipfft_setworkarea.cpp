@@ -85,7 +85,7 @@ int main()
     std::cout << "hipfftEstimate 1d workSize: " << workSize << std::endl;
 
     hipfftHandle plan{};
-    hipfft_rt         = hipfftCreate(&plan);
+    hipfft_rt = hipfftCreate(&plan);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftCreate failed");
     hipfft_rt = hipfftSetAutoAllocation(plan, 0);

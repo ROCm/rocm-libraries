@@ -31,8 +31,6 @@ DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 
-
-
 int main()
 {
     std::cout << "hipfft 1D double-precision real-to-complex transform\n";

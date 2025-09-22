@@ -26,7 +26,6 @@
 #include <hipfft/hipfft.h>
 #include <hipfft/hipfftXt.h>
 
-
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
