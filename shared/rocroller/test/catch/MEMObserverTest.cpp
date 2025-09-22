@@ -68,10 +68,10 @@ namespace MEMObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
 
             SECTION("VMEM Instructions stall")
             {

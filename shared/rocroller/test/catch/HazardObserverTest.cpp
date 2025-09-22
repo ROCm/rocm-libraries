@@ -94,10 +94,10 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
 
             SECTION("v_readlane (2nd op) read as laneselect")
             {
@@ -315,10 +315,10 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
 
             SECTION("Has hazard with 2nd op (non-trans) accessing the same register")
             {
@@ -407,10 +407,10 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
 
             SECTION("Hazard with VALU write followed by a readlane or permlane")
             {
@@ -464,10 +464,12 @@ namespace HazardObserverTest
 
             SECTION("Tests for v_permlane*, only on GFX950")
             {
-                // if(!arch.isCDNA35GPU())
-                // {
-                //     SKIP("Only test GFX950");
-                // }
+                auto context = TestContext::ForTarget(arch);
+                if(!context->targetArchitecture().HasCapability(GPUCapability::HasPermLanes16)
+                   && !context->targetArchitecture().HasCapability(GPUCapability::HasPermLanes32))
+                {
+                    SKIP("permlanes not supported");
+                }
 
                 SECTION("Hazard with 2nd op accessing the same register")
                 {
@@ -515,10 +517,10 @@ namespace HazardObserverTest
 
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
 
             SECTION("Hazard on 94X with 2nd op is v_readlane")
             {
@@ -623,10 +625,10 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
 
             auto context = TestContext::ForTarget(arch);
             auto v       = createRegisters(context, Register::Type::Vector, DataType::UInt32, 2);
@@ -659,10 +661,10 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
 
             auto context = TestContext::ForTarget(arch);
 
@@ -685,10 +687,10 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
 
             SECTION("NOPs added for buffer_store_dwordx4 followed by VALU")
             {
