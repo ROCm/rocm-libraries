@@ -67,18 +67,18 @@ int main(int argc, char* argv[])
     const int bs   = 1; // Block size
     const int mb   = m / bs; // Number of block rows
     const int nb   = n / bs; // Number of block columns
-    const int nnzb = 8; // Number of non-zero blocks
+    const int nnzb = 10; // Number of non-zero blocks
 
     // BSR row pointers
-    int hbsrRowPtr[mb + 1] = {0, 2, 4, 6, 8};
+    int hbsrRowPtr[mb + 1] = {0, 2, 5, 8, 10};
 
     // BSR column indices
-    int hbsrColInd[nnzb] = {0, 1, 0, 1, 1, 2, 2, 3};
+    int hbsrColInd[nnzb] = {0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
 
     // BSR values (single precision float for 'S'bsric02)
     // Values are stored column-major within each block, but with bs=1, this is simple.
     // The values correspond to the upper triangular part of the matrix.
-    float hbsrVal[nnzb * bs * bs] = {4.0f, 1.0f, 1.0f, 5.0f, 2.0f, 3.0f, 1.0f, 2.0f};
+    float hbsrVal[nnzb * bs * bs] = {4.0f, 1.0f, 1.0f, 5.0f, 2.0f, 2.0f, 3.0f, 1.0f, 1.0f, 2.0f};
 
     // Matrix descriptor
     hipsparseMatDescr_t descr;

@@ -66,21 +66,21 @@ int main(int argc, char* argv[])
 
     int m   = 4; // Number of rows
     int n   = 4; // Number of columns (equal to m for Cholesky)
-    int nnz = 8; // Number of non-zero elements (counting only one side for symmetric)
+    int nnz = 10; // Number of non-zero elements (counting only one side for symmetric)
 
     // CSR row pointers
-    int hcsrRowPtr[5] = {0, 2, 4, 6, 8};
+    int hcsrRowPtr[5] = {0, 2, 5, 8, 10};
 
     // CSR column indices
     // These indices correspond to the non-zero values used below.
     // For a symmetric matrix A, we implicitly work with A_lower.
     // The output will be L.
-    int hcsrColInd[8] = {0, 1, 0, 1, 1, 2, 2, 3};
+    int hcsrColInd[10] = {0, 1, 0, 1, 2, 1, 2, 3, 2, 3};
 
     // CSR values (single precision float for 'S'csric02)
     // The factorization computes the lower triangular L factor.
     // The input values represent the entries of A that correspond to the non-zero pattern.
-    float hcsrVal[8] = {4.0f, 1.0f, 1.0f, 5.0f, 2.0f, 3.0f, 1.0f, 2.0f};
+    float hcsrVal[10] = {4.0f, 1.0f, 1.0f, 5.0f, 2.0f, 2.0f, 3.0f, 1.0f, 1.0f, 2.0f};
 
     // Matrix descriptor
     hipsparseMatDescr_t descr;
