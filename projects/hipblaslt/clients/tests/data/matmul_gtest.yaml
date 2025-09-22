@@ -1782,7 +1782,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   norm_check: 1
   unit_check: 0
-  gpu_arch: '9(42|50)'
+  gpu_arch: '950'
 
 - name: matmul_gemm_double
   category: pre_checkin

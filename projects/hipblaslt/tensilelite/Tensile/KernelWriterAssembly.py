@@ -9223,6 +9223,29 @@ class KernelWriterAssembly(KernelWriter):
                   if kernel["ExpertSchedulingMode"] > 0:
                     localWriteCVTCode.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
 
+            #comment = "Reg -> L %u_%u_%u_%u"%(para, sPara, perp, sPerp)
+            isHigh16Bits = False
+            isCvtHighBits = False
+            datatype = kernel["ProblemType"]["DataType%s"%tc] if kernel["ConvertAfterDS"] else kernel["ProblemType"]["DataType"]
+            if (datatype.isHalf() or datatype.isBFloat16()) and not tP["isM"]:
+              if s%2==1:
+                isHigh16Bits = True
+              if (blockWidth == 0.5) and (instHi % 2 == 1):
+                isHigh16Bits = True
+              if kernel["ProblemType"]["DataType%s"%tc].isAnyFloat8():
+                if g2lIdx%2 == 1:
+                  isCvtHighBits = True
+            #       |  hi16  |  hi16  |        |        |
+            #       |  hi8   |        |   hi8  |        |
+            #############################################
+            # VGPR: |---w4---|---w3---|---w2---|---w1---| -> b8_d16: get w1 / _b8_d16_hi: get w3
+            # LSHR: |--------|---w4---|--------|---w2---| -> b8_d16: get w2 / _b8_d16_hi: get w4
+            elif datatype.isInt8() or datatype.is8bitFloat() or tP["isM"]:
+              isHigh16Bits = (s % 4) > 1 # 2,3
+              # TODO
+              # if tP["glvw"]==1 and instructionCnt%2==1:
+              #   isHigh16Bits = True
+
             paramList = []
             numsOfRegister = []
             globalBlockWidth = tP["globalReadInstruction"].totalWidth
@@ -9231,7 +9254,13 @@ class KernelWriterAssembly(KernelWriter):
 #            print("destVgprPrefix = ", destVgprPrefix, ", blockWidth = ", blockWidth)
             for _ in range(0, numBlocks):
               # FIXME: In the future all registers should pass from global read instead of recalculate them
-              if globalBlockWidth == blockWidth and tP["glvw"] == 1:
+              if globalBlockWidth == 1 and blockWidth == 0.5 and tP["glvw"] == 1:
+                if isHigh16Bits:
+                  paramList.append(vgpr(destVgprPrefix + "+%u"%(g2lIdx + 1)))
+                else:
+                  paramList.append(vgpr(destVgprPrefix + "+%u"%(g2lIdx)))
+                numsOfRegister.append(blockWidth)
+              elif globalBlockWidth == blockWidth and tP["glvw"] == 1:
 #                print("destVgprPrefix = ", destVgprPrefix)
 #                print("tc = ", tc, ", i", i)
 #                print(self.vgprs.globalReadRegisters[tc][i])
@@ -9277,32 +9306,7 @@ class KernelWriterAssembly(KernelWriter):
 
             #print "offset", offset
 
-            #comment = "Reg -> L %u_%u_%u_%u"%(para, sPara, perp, sPerp)
-            isHigh16Bits = False
-            isCvtHighBits = False
-            datatype = kernel["ProblemType"]["DataType%s"%tc] if kernel["ConvertAfterDS"] else kernel["ProblemType"]["DataType"]
-            if (datatype.isHalf() or datatype.isBFloat16()) and not tP["isM"]:
-              if s%2==1:
-                isHigh16Bits = True
-              if (blockWidth == 0.5) and (instHi % 2 == 1):
-                isHigh16Bits = True
-              if kernel["ProblemType"]["DataType%s"%tc].isAnyFloat8():
-                if g2lIdx%2 == 1:
-                  isCvtHighBits = True
-
-
-            #       |  hi16  |  hi16  |        |        |
-            #       |  hi8   |        |   hi8  |        |
-            #############################################
-            # VGPR: |---w4---|---w3---|---w2---|---w1---| -> b8_d16: get w1 / _b8_d16_hi: get w3
-            # LSHR: |--------|---w4---|--------|---w2---| -> b8_d16: get w2 / _b8_d16_hi: get w4
-            elif datatype.isInt8() or datatype.is8bitFloat() or tP["isM"]:
-              isHigh16Bits = (s % 4) > 1 # 2,3
-              # TODO
-              # if tP["glvw"]==1 and instructionCnt%2==1:
-              #   isHigh16Bits = True
-
-              # Need cvt
+            # Need cvt
             if tP["bpeDS"] != tP["bpeGR"]:
               assert numBlocks == 1
               if (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isHalf()):
@@ -9541,7 +9545,10 @@ class KernelWriterAssembly(KernelWriter):
                   self.vgprPool.checkIn(vgprTmp)
               elif (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isBFloat16()):
                 newBlockWidth = (tP["bpeGR"] / tP["bpe"]) * blockWidth
-                if newBlockWidth == 1:
+                if tP["glvw"] == 1:
+                  # use the same VGPR
+                  localWriteCVTCode.add(VCvtPkF32toBF16(dst=paramList[0], src0=paramList[0], src1=paramList[0], comment="convert one fp32 to bf16 to the same VGPR"))
+                elif newBlockWidth == 1:
                   new_src = deepcopy(paramList[0])
                   if isHigh16Bits:
                     new_src.regName.addOffset(1)

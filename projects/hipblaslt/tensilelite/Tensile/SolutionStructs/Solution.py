@@ -2008,7 +2008,8 @@ class Solution(collections.abc.Mapping):
 
         if validDepthU and state["KernelLanguage"] == "Assembly":
           if isaInfoMap[state["ISA"]].archCaps["HasEccHalf"]:
-            if state["ProblemType"]["DataType"].numRegisters() == 0.5 and (not state["ProblemType"]["HighPrecisionAccumulate"]):
+            if state["ProblemType"]["DataType"].numRegisters() == 0.5 and (not state["ProblemType"]["HighPrecisionAccumulate"]) \
+               and (not state["ProblemType"]["DataTypeA"].isSingle()) and (not state["ProblemType"]["DataTypeB"].isSingle()):
                 if state["GlobalReadVectorWidthA"] == 1 or state["GlobalReadVectorWidthB"] == 1:
                   reject(state, printRejectionReason, "HalfEcc requires HPA if glvw = 1")
                   break
