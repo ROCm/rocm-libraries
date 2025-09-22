@@ -4,7 +4,7 @@
 > The published rocRAND documentation is available [here](https://rocm.docs.amd.com/projects/rocRAND/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 The rocRAND project provides functions that generate pseudorandom and quasirandom numbers.
-The rocRAND library is implemented in the [HIP](https://github.com/ROCm/HIP)
+The rocRAND library is implemented in the [HIP](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip)
 programming language and optimized for AMD's latest discrete GPUs. It is designed to run on top
 of AMD's [ROCm](https://rocm.docs.amd.com) runtime.
 
