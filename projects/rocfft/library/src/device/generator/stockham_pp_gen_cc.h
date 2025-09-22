@@ -817,10 +817,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     std::vector<Expression> device_call_arguments(unsigned int call_iter) override
     {
         std::vector<Expression> args = StockhamKernel::device_call_arguments(call_iter);
-        auto which = Ternary{Parens{And{apply_large_twiddle, large_twiddle_base < 8}},
-                             Parens{large_twd_lds},
-                             Parens{large_twiddles}};
-        args.push_back(which);
+        args.push_back(large_twiddles);
         args.push_back(largeTwdBatchIsTransformCount ? batch : transform);
         args.push_back(thread_in_device_twd);
         return args;
@@ -899,44 +896,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                              height,
                              ThreadGuardMode::NO_GUARD);
 
-            if(npass == factors.size() - 1)
-                body += large_twiddles_multiply(width, height, cumheight);
-
-            // internal lds store (half-with-linear and full-with-linear/nonlinear)
+            // internal lds store
             StatementList reg2lds_full;
-            StatementList reg2lds_half;
             if(npass < factors.size() - 1)
             {
-                // linear variant store (half) and load (half)
-                for(auto component : {Component::REAL, Component::IMAG})
-                {
-                    bool isFirstStore = (npass == 0) && (component == Component::REAL);
-                    auto half_width   = factors[npass];
-                    auto half_height
-                        = static_cast<float>(length) / half_width / threads_per_transform;
-                    // minimize sync as possible
-                    if(!isFirstStore)
-                        reg2lds_half += SyncThreads();
-                    reg2lds_half += add_work(
-                        std::bind(store_lds, this, _1, _2, _3, _4, _5, component, cumheight),
-                        half_width,
-                        half_height,
-                        ThreadGuardMode::GUARD_BY_IF,
-                        false,
-                        max_factor_pp);
-
-                    half_width  = factors[npass + 1];
-                    half_height = static_cast<float>(length) / half_width / threads_per_transform;
-                    reg2lds_half += SyncThreads();
-                    reg2lds_half
-                        += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, component),
-                                    half_width,
-                                    half_height,
-                                    ThreadGuardMode::GUARD_BY_IF,
-                                    false,
-                                    max_factor_pp);
-                }
-
                 // internal full lds store (both linear/nonlinear variants)
                 if(npass == 0)
                     reg2lds_full += If{!direct_load_to_reg, {SyncThreads()}};
@@ -950,8 +913,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                     false,
                     max_factor_pp);
 
-                body += If{Not{lds_is_real}, reg2lds_full};
-                body += Else{reg2lds_half};
+                body += reg2lds_full;
             }
         }
         return f;
