@@ -317,7 +317,9 @@ struct ProblemInterpreter
         const int conv_stride_h   = GetAdjustedConvolutionStrideH(problem);
         const int conv_dilation_h = GetAdjustedConvolutionDilationH(problem);
 
-        const int hi_tot_pad   = (ho - 1) * conv_stride_h - hi + conv_dilation_h * (y - 1) + 1;
+        // For ho == 1: total padding = conv_dilation_h * (y - 1) - hi + 1;
+        // (General formula: (ho - 1) * conv_stride_h - hi + conv_dilation_h * (y - 1) + 1)
+        const int hi_tot_pad   = conv_dilation_h * (y - 1) - hi + 1;
         const int hi_right_pad = hi_tot_pad - problem.GetPadH();
 
         return (hi_right_pad >= 0) ? conv_stride_h : problem.GetKernelStrideH();
@@ -341,7 +343,9 @@ struct ProblemInterpreter
         const int conv_stride_w   = GetAdjustedConvolutionStrideW(problem);
         const int conv_dilation_w = GetAdjustedConvolutionDilationW(problem);
 
-        const int wi_tot_pad   = (wo - 1) * conv_stride_w - wi + conv_dilation_w * (x - 1) + 1;
+        // For wo == 1: total padding = conv_dilation_w * (x - 1) - wi + 1;
+        // (General formula: (wo - 1) * conv_stride_w - wi + conv_dilation_w * (x - 1) + 1)
+        const int wi_tot_pad   = conv_dilation_w * (x - 1) - wi + 1;
         const int wi_right_pad = wi_tot_pad - problem.GetPadW();
 
         return (wi_right_pad >= 0) ? conv_stride_w : problem.GetKernelStrideW();
