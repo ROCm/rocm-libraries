@@ -114,10 +114,15 @@ else()
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
+    if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+        set(CMAKE_Fortran_COMPILER  "gfortran")
+    endif()
     enable_language(Fortran)
+
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
     endif()
+
     # There is an implicit find_package(BLAS) when finding lapack
     find_package(LAPACK REQUIRED)
 endif()
@@ -199,6 +204,7 @@ if(HIPBLASLT_ENABLE_MSGPACK)
     endif()
 endif()
 
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
 add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -261,6 +267,7 @@ if(HIPBLASLT_ENABLE_HOST)
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include"
     )
 
     set_target_properties(hipblaslt
@@ -339,7 +346,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
     rocm_install(
         DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
-        COMPONENT devel
+        COMPONENT runtime
     )
 endif()
 
@@ -369,9 +376,15 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench-extop-matrixtransform
             hipblaslt-bench-extop-softmax
             hipblaslt-bench-extop-amax
-            hipblaslt-sequence
         COMPONENT benchmarks
     )
+    if(HIPBLASLT_ENABLE_LLVM)
+        rocm_install(
+            TARGETS
+                hipblaslt-sequence
+            COMPONENT benchmarks
+        )
+    endif()
     rocm_install(
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/data/hipblaslt_common.yaml"

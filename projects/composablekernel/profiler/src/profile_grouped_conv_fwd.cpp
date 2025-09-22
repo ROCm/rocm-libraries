@@ -53,8 +53,8 @@ static void print_helper_msg()
         << "                 4: Input fp8, Weight fp8, Output fp8\n"
         << "                 5: Input bf8, Weight bf8, Output fp8\n"
         << "                 6: Input fp8, Weight bf8, Output fp8\n"
-        << "                 7: Input bf8, Weight fp8, Output fp8)\n"
-        << "                 8: Input fp32, Weight fp32, Output fp32, Compute tf32\n"
+        << "                 7: Input bf8, Weight fp8, Output fp8\n"
+        << "                 8: Input fp32, Weight fp32, Output fp32, Compute tf32)\n"
         << "arg3: tensor layout (0: Input[G, N, Hi, Wi, C], Weight[G, K, Y, X, C], Output[G, N, Ho, Wo, K]\n"
         << "                     1: Input[N, Hi, Wi, G, C], Weight[G, K, Y, X, C], Output[N, Ho, Wo, G, K]\n"
         << "                     2: Input[N, G, C, Hi, Wi], Weight[G, K, Y, X, C], Output[N, "
@@ -105,7 +105,9 @@ int profile_grouped_conv_fwd(int argc, char* argv[])
     using INT8 = int8_t;
     using F8   = ck::f8_t;
     using BF8  = ck::bf8_t;
+#if defined(__gfx942__)
     using TF32 = ck::tf32_t;
+#endif
 
     //
     using GNWC   = ck::tensor_layout::convolution::GNWC;
@@ -266,7 +268,9 @@ int profile_grouped_conv_fwd(int argc, char* argv[])
         }
         else if(data_type == ConvDataType::F32_F32_F32_TF32)
         {
+#if defined(__gfx942__)
             return profile(I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
+#endif
         }
     }
     // NHWGC_GKYXC_NHWGK
@@ -376,7 +380,9 @@ int profile_grouped_conv_fwd(int argc, char* argv[])
         }
         else if(data_type == ConvDataType::F32_F32_F32_TF32)
         {
+#if defined(__gfx942__)
             return profile(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
+#endif
         }
     }
     // NGCDHW_GKCZYX_NGKDHW
@@ -397,7 +403,9 @@ int profile_grouped_conv_fwd(int argc, char* argv[])
         }
         else if(data_type == ConvDataType::F32_F32_F32_TF32)
         {
+#if defined(__gfx942__)
             return profile(I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
+#endif
         }
     }
 

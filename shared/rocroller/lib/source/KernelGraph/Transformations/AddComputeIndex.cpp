@@ -312,6 +312,59 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    void addUnrollStrideConnection(KernelGraph&                     kgraph,
+                                   int                              candidate,
+                                   bool                             isDirect2LDS,
+                                   const std::vector<int>&          strideCoords,
+                                   std::vector<DeferredConnection>& connections)
+    {
+        auto [target, direction] = getOperationTarget(candidate, kgraph, isDirect2LDS);
+        auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
+        auto unrolls             = filterCoordinates<Unroll>(required, kgraph);
+
+        for(auto const& unroll : unrolls)
+        {
+            {
+                {
+                    auto const subDimension
+                        = kgraph.mapper.getConnectionSubdimension(candidate, unroll);
+                    // Find the neighbour of the Unroll that:
+                    // 1. is in the load/store coordinate transform path
+                    // 2. has a Stride edge connected to it
+                    std::vector<int> neighbourNodes;
+                    if(direction == Graph::Direction::Downstream)
+                        neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
+                    else
+                        neighbourNodes = kgraph.coordinates.childNodes(unroll).to<std::vector>();
+
+                    for(auto neighbourNode : neighbourNodes)
+                    {
+                        if(path.contains(neighbourNode))
+                        {
+                            auto neighbourEdges = kgraph.coordinates.getNeighbours(
+                                neighbourNode, Graph::opposite(direction));
+                            for(auto neighbourEdge : neighbourEdges)
+                            {
+                                auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
+                                if(maybeStride
+                                   && std::find(
+                                          strideCoords.begin(), strideCoords.end(), neighbourEdge)
+                                          != strideCoords.end())
+                                {
+                                    auto maybeStrideTag = neighbourEdge;
+                                    auto newConnection
+                                        = makeConnection<Stride, Connections::UnrollStride>(
+                                            maybeStrideTag, subDimension);
+                                    connections.push_back(newConnection);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * @brief Add ComputeIndex nodes required for `op`.
      */
@@ -335,9 +388,13 @@ namespace rocRoller::KernelGraph
         std::vector<int>                chain;
         std::vector<DeferredConnection> connections;
         std::map<int, int>              offsetOfCoord;
+        bool                            hasUnroll = false;
+        std::vector<int>                strideCoords;
 
         for(auto info : getRequiredCoordinatesInfo(op, location, graph, isDirect2LDS))
         {
+            if(info.isUnroll)
+                hasUnroll = true;
             // Add ComputeIndex operation
             int offset = -1, stride = -1, buffer = -1;
             if(direction == Graph::Direction::Downstream)
@@ -391,6 +448,14 @@ namespace rocRoller::KernelGraph
                 connections.push_back(DC<Stride>(stride, info.sdim));
             if(buffer != -1)
                 connections.push_back(DC<Buffer>(buffer));
+            if(base != -1)
+                connections.push_back(
+                    makeConnection<Offset, Connections::BaseOffset>(base, info.sdim));
+
+            // save all stride coordinates for the memory operation
+            // then select the unroll stride and add it to connection
+            if(stride != -1)
+                strideCoords.push_back(stride);
 
             if(info.needsUpdate)
             {
@@ -409,6 +474,8 @@ namespace rocRoller::KernelGraph
                 graph.mapper.connect(update, offset, NaryArgument::DEST);
             }
         }
+
+        addUnrollStrideConnection(graph, op, isDirect2LDS, strideCoords, connections);
 
         for(int i = 1; i < chain.size(); ++i)
             graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
