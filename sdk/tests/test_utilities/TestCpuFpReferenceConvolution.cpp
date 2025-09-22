@@ -300,3 +300,33 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceSanityValidation)
     EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 0), 6.0f);
     EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 1), 8.0f);
 }
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataBasic)
+{
+    // Basic backward data convolution test
+    Tensor<float> inputTensor({1, 1, 4, 4});
+    Tensor<float> weightTensor({1, 1, 1, 1});
+    Tensor<float> outputTensor({1, 1, 4, 4});
+
+    // Input: [1, 2; 3, 4]
+    outputTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    outputTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    outputTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    outputTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    // Weight: [2]
+    weightTensor.setHostValue(2.0f, 0, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Expected output: input * weight = [2, 4; 6, 8]
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 0), 2.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 1), 4.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 0), 6.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 1), 8.0f);
+}
