@@ -135,6 +135,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
                                     void*                buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
@@ -267,36 +268,37 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
         }
         case rocsparse_sddmm_alg_default:
         {
-            static constexpr int NB = 512;
-
-#define LAUNCH(NT_)                                                         \
-    int64_t num_blocks_x = (m - 1) / (NB / NT_) + 1;                        \
-    dim3    blocks(num_blocks_x);                                           \
-    dim3    threads(NB);                                                    \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
-        (rocsparse::sddmm_csx_kernel<NB, NT_, rocsparse_direction_row, T>), \
-        blocks,                                                             \
-        threads,                                                            \
-        0,                                                                  \
-        handle->stream,                                                     \
-        trans_A,                                                            \
-        trans_B,                                                            \
-        order_A,                                                            \
-        order_B,                                                            \
-        m,                                                                  \
-        n,                                                                  \
-        k,                                                                  \
-        nnz,                                                                \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                   \
-        A_val,                                                              \
-        A_ld,                                                               \
-        B_val,                                                              \
-        B_ld,                                                               \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                    \
-        C_val_data,                                                         \
-        C_row_data,                                                         \
-        C_col_data,                                                         \
-        C_base,                                                             \
+#define LAUNCH_WAVEFRONT_PER_ROWCOL(BLOCKSIZE, WFSIZE, NTHREADS_PER_DOTPRODUCT)    \
+    dim3 blocks((m - 1) / (BLOCKSIZE / WFSIZE) + 1);                               \
+    dim3 threads(BLOCKSIZE);                                                       \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
+        (rocsparse::sddmm_csx_kernel_wavefront_per_rowcol<BLOCKSIZE,               \
+                                                          WFSIZE,                  \
+                                                          NTHREADS_PER_DOTPRODUCT, \
+                                                          rocsparse_direction_row, \
+                                                          T>),                     \
+        blocks,                                                                    \
+        threads,                                                                   \
+        0,                                                                         \
+        handle->stream,                                                            \
+        trans_A,                                                                   \
+        trans_B,                                                                   \
+        order_A,                                                                   \
+        order_B,                                                                   \
+        m,                                                                         \
+        n,                                                                         \
+        k,                                                                         \
+        nnz,                                                                       \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                          \
+        A_val,                                                                     \
+        A_ld,                                                                      \
+        B_val,                                                                     \
+        B_ld,                                                                      \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                           \
+        C_val_data,                                                                \
+        C_row_data,                                                                \
+        C_col_data,                                                                \
+        C_base,                                                                    \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
             if(handle->pointer_mode == rocsparse_pointer_mode_host)
@@ -306,22 +308,24 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
                     return rocsparse_status_success;
                 }
             }
+
             if(k > 4)
             {
-                LAUNCH(8);
+                LAUNCH_WAVEFRONT_PER_ROWCOL(256, 32, 8);
             }
             else if(k > 2)
             {
-                LAUNCH(4);
+                LAUNCH_WAVEFRONT_PER_ROWCOL(256, 32, 4);
             }
             else if(k > 1)
             {
-                LAUNCH(2);
+                LAUNCH_WAVEFRONT_PER_ROWCOL(256, 32, 2);
             }
             else
             {
-                LAUNCH(1);
+                LAUNCH_WAVEFRONT_PER_ROWCOL(256, 32, 1);
             }
+
             return rocsparse_status_success;
         }
             // LCOV_EXCL_START
