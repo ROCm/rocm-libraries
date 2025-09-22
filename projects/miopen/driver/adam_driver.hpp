@@ -318,6 +318,9 @@ public:
     Tref GetTolerance();
     int VerifyBackward() override;
     int VerifyForward() override;
+
+    int GetReferenceCPUSolversCount() override;
+
     ~AdamDriver() override
     {
         miopenDestroyTensorDescriptor(paramDesc);
@@ -337,6 +340,15 @@ public:
     }
 
 private:
+    enum class ReferenceCPUSolver
+    {
+        Original = 0,
+        Updated,
+        UpdatedSingleThreaded,
+        ////////////////////////////
+        Count
+    };
+
     InputFlags inflags;
 
     int forw = 1;
@@ -783,8 +795,31 @@ Tref AdamDriver<Tgpu, Tref, Tgrad>::GetTolerance()
 template <typename Tgpu, typename Tref, typename Tgrad>
 int AdamDriver<Tgpu, Tref, Tgrad>::VerifyForward()
 {
+    const char* pSolverName {nullptr};
+
+    switch (static_cast<ReferenceCPUSolver>(reference_cpu_solver_id))
     {
-        RunForwardCPU();
+        case ReferenceCPUSolver::Original: 
+            RunForwardCPU();
+            pSolverName = "CPU reference";
+            break;
+
+        case ReferenceCPUSolver::Updated: 
+            RunForwardCPUUpdated();
+            pSolverName = "Updated CPU reference";
+            break;
+
+        case ReferenceCPUSolver::UpdatedSingleThreaded: 
+            RunForwardCPUUpdatedMT();
+            pSolverName = "Updated Multithreaded CPU reference";
+            break;
+        
+        default:
+            break;
+    }
+
+    if (pSolverName != nullptr)
+    {
         const Tref tolerance = GetTolerance();
         auto error           = miopen::rms_range(param_host, param);
     
@@ -794,35 +829,7 @@ int AdamDriver<Tgpu, Tref, Tgrad>::VerifyForward()
             return EC_VerifyFwd;
         }
     
-        std::cout << "Forward Adam Verifies OK on CPU reference" << std::endl;
-    }
-
-    {
-        RunForwardCPUUpdated();
-        const Tref tolerance = GetTolerance();
-        auto error           = miopen::rms_range(param_host, param);
-
-        if(!std::isfinite(error) || error > tolerance)
-        {
-            std::cout << "Forward Updated Adam FAILED: " << error << std::endl;
-            return EC_VerifyFwd;
-        }
-
-        std::cout << "Forward Adam Verifies OK on Updated CPU reference" << std::endl;
-    }
-
-    {
-        RunForwardCPUUpdatedMT();
-        const Tref tolerance = GetTolerance();
-        auto error           = miopen::rms_range(param_host, param);
-
-        if(!std::isfinite(error) || error > tolerance)
-        {
-            std::cout << "Forward Updated Multithreaded Adam FAILED: " << error << std::endl;
-            return EC_VerifyFwd;
-        }
-
-        std::cout << "Forward Adam Verifies OK on Updated Multithreaded CPU reference" << std::endl;
+        std::cout << "Forward Adam Verifies OK on " << pSolverName << std::endl;
     }
 
     return miopenStatusSuccess;
@@ -832,6 +839,12 @@ template <typename Tgpu, typename Tref, typename Tgrad>
 int AdamDriver<Tgpu, Tref, Tgrad>::VerifyBackward()
 {
     return miopenStatusSuccess;
+}
+
+template <typename Tgpu, typename Tref, typename Tgrad>
+int AdamDriver<Tgpu, Tref, Tgrad>::GetReferenceCPUSolversCount()
+{
+    return static_cast<int>(ReferenceCPUSolver::Count);
 }
 
 #endif // GUARD_MIOPEN_ADAM_DRIVER_HPP

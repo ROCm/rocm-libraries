@@ -86,6 +86,9 @@ public:
     Tref GetTolerance();
     int VerifyBackward() override;
     int VerifyForward() override;
+
+    int GetReferenceCPUSolversCount() override;
+
     ~TransformersAdamWDriver() override
     {
         miopenDestroyTensorDescriptor(paramDesc);
@@ -103,6 +106,15 @@ public:
     }
 
 private:
+    enum class ReferenceCPUSolver
+    {
+        Original = 0,
+        Updated,
+        UpdatedSingleThreaded,
+        ////////////////////////////
+        Count
+    };
+
     InputFlags inflags;
 
     int forw = 1;
@@ -575,17 +587,42 @@ Tref TransformersAdamWDriver<Tgpu, Tref, Tgrad>::GetTolerance()
 template <typename Tgpu, typename Tref, typename Tgrad>
 int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::VerifyForward()
 {
-    RunForwardCPU();
-    const Tref tolerance = GetTolerance();
-    auto error           = miopen::rms_range(param_host, param);
+    const char* pSolverName {nullptr};
 
-    if(!std::isfinite(error) || error > tolerance)
+    switch (static_cast<ReferenceCPUSolver>(reference_cpu_solver_id))
     {
-        std::cout << "Forward Adam FAILED: " << error << std::endl;
-        return EC_VerifyFwd;
+        case ReferenceCPUSolver::Original: 
+            RunForwardCPU();
+            pSolverName = "CPU reference";
+            break;
+
+        case ReferenceCPUSolver::Updated: 
+            RunForwardCPUUpdated();
+            pSolverName = "Updated CPU reference";
+            break;
+
+        case ReferenceCPUSolver::UpdatedSingleThreaded: 
+            RunForwardCPUUpdatedMT();
+            pSolverName = "Updated Multithreaded CPU reference";
+            break;
+        
+        default:
+            break;
     }
 
-    std::cout << "Forward Adam Verifies OK on CPU reference" << std::endl;
+    if (pSolverName != nullptr)
+    {
+        const Tref tolerance = GetTolerance();
+        auto error           = miopen::rms_range(param_host, param);
+    
+        if(!std::isfinite(error) || error > tolerance)
+        {
+            std::cout << "Forward Transformers Adam FAILED: " << error << std::endl;
+            return EC_VerifyFwd;
+        }
+    
+        std::cout << "Forward Transformers Adam Verifies OK on " << pSolverName << std::endl;
+    }
 
     return miopenStatusSuccess;
 }
@@ -594,6 +631,12 @@ template <typename Tgpu, typename Tref, typename Tgrad>
 int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::VerifyBackward()
 {
     return miopenStatusSuccess;
+}
+
+template <typename Tgpu, typename Tref, typename Tgrad>
+int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::GetReferenceCPUSolversCount()
+{
+    return static_cast<int>(ReferenceCPUSolver::Count);
 }
 
 #endif // GUARD_MIOPEN_TRANSFORMERS_ADAM_W_DRIVER_HPP
