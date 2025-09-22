@@ -101,8 +101,11 @@ add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
 
 # callback functions need to be built as relocatable device code
-target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
-target_link_options( rocfft-test PRIVATE -fgpu-rdc )
+# (causes failure at link stage on Windows)
+if (NOT WIN32)
+  target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
+  target_link_options( rocfft-test PRIVATE -fgpu-rdc )
+endif()
 
 find_package( Boost REQUIRED )
 set( Boost_DEBUG ON )
@@ -216,16 +219,14 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
   )
 endif()
 
+find_package( GTest QUIET )
 
-
-include( ../cmake/build-gtest.cmake )
-
-if( BUILD_GTEST OR NOT GTEST_FOUND )
+if( GTest_FOUND )
+    target_link_libraries( rocfft-test PRIVATE GTest::gtest )
+else()
+  include( ../cmake/build-gtest.cmake )
   add_dependencies( rocfft-test gtest )
   list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
-else()  
-  list( APPEND rocfft-test_include_dirs $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
   list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
 endif()
 
@@ -258,6 +259,7 @@ if ( USE_HIPRAND )
   PRIVATE
   hip::hiprand
   )
+  target_compile_definitions( rocfft-test PRIVATE USE_HIPRAND )
 endif()
 
 if( ROCFFT_MPI_ENABLE )

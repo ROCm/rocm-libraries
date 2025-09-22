@@ -554,7 +554,7 @@ struct merge_inplace_impl
     ROCPRIM_DETAIL_GENERATE_DISPATCH_KERNEL(update_work_tree);
 #undef ROCPRIM_DETAIL_GENERATE_DISPATCH_KERNEL
 
-    static __global__
+    static ROCPRIM_KERNEL
     void block_merge_kernel(iterator_t     data,
                             size_t         num_items,
                             BinaryFunction compare_function,

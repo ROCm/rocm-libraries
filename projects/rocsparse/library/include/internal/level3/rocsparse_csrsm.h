@@ -35,9 +35,9 @@ extern "C" {
 /*! \ingroup level3_module
 *  \details
 *  \p rocsparse_csrsm_zero_pivot returns \ref rocsparse_status_zero_pivot, if either a
-*  structural or numerical zero has been found during 
-*  \ref rocsparse_scsrsm_solve "rocsparse_Xcsrsm_solve()" computation. The first zero 
-*  pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same index base as 
+*  structural or numerical zero has been found during
+*  \ref rocsparse_scsrsm_solve "rocsparse_Xcsrsm_solve()" computation. The first zero
+*  pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same index base as
 *  the CSR matrix.
 *
 *  \p position can be in host or device memory. If no zero pivot has been found,
@@ -71,8 +71,8 @@ rocsparse_status rocsparse_csrsm_zero_pivot(rocsparse_handle   handle,
 /*! \ingroup level3_module
 *  \details
 *  \p rocsparse_csrsm_buffer_size returns the size of the temporary storage buffer that
-*  is required by \ref rocsparse_scsrsm_analysis "rocsparse_Xcsrsm_analysis()" and 
-*  \ref rocsparse_scsrsm_solve "rocsparse_Xcsrsm_solve()". The temporary storage buffer 
+*  is required by \ref rocsparse_scsrsm_analysis "rocsparse_Xcsrsm_analysis()" and
+*  \ref rocsparse_scsrsm_solve "rocsparse_Xcsrsm_solve()". The temporary storage buffer
 *  must be allocated by the user.
 *
 *  \note
@@ -209,9 +209,9 @@ rocsparse_status rocsparse_zcsrsm_buffer_size(rocsparse_handle                ha
 
 /*! \ingroup level3_module
 *  \details
-*  \p rocsparse_csrsm_analysis performs the analysis step for 
-*  \ref rocsparse_scsrsm_solve "rocsparse_Xcsrsm_solve()". It is expected that this 
-*  function will be executed only once for a given matrix and particular operation 
+*  \p rocsparse_csrsm_analysis performs the analysis step for
+*  \ref rocsparse_scsrsm_solve "rocsparse_Xcsrsm_solve()". It is expected that this
+*  function will be executed only once for a given matrix and particular operation
 *  type. The analysis meta data can be cleared by \ref rocsparse_csrsm_clear().
 *
 *  \p rocsparse_csrsm_analysis can share its meta data with
@@ -363,11 +363,11 @@ rocsparse_status rocsparse_zcsrsm_analysis(rocsparse_handle                handl
 /*! \ingroup level3_module
 *  \details
 *  \p rocsparse_csrsm_clear deallocates all memory that was allocated by
-*  \ref rocsparse_scsrsm_analysis "rocsparse_Xcsrsm_analysis()". This is especially 
-*  useful, if memory is an issue and the analysis data is not required for further 
-*  computation, e.g. when switching to another sparse matrix format. Calling 
-*  \p rocsparse_csrsm_clear is optional. All allocated resources will be cleared 
-*  when the opaque \ref rocsparse_mat_info struct is destroyed using 
+*  \ref rocsparse_scsrsm_analysis "rocsparse_Xcsrsm_analysis()". This is especially
+*  useful, if memory is an issue and the analysis data is not required for further
+*  computation, e.g. when switching to another sparse matrix format. Calling
+*  \p rocsparse_csrsm_clear is optional. All allocated resources will be cleared
+*  when the opaque \ref rocsparse_mat_info struct is destroyed using
 *  \ref rocsparse_destroy_mat_info().
 *
 *  \note
@@ -445,8 +445,8 @@ rocsparse_status rocsparse_csrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *  \f]
 *
 *  \p rocsparse_csrsm_solve requires a user allocated temporary buffer. Its size is returned by
-*  \ref rocsparse_scsrsm_buffer_size "rocsparse_Xcsrsm_buffer_size()". The size of the required buffer is 
-*  larger when \p trans_A equals \ref rocsparse_operation_transpose or \ref rocsparse_operation_conjugate_transpose 
+*  \ref rocsparse_scsrsm_buffer_size "rocsparse_Xcsrsm_buffer_size()". The size of the required buffer is
+*  larger when \p trans_A equals \ref rocsparse_operation_transpose or \ref rocsparse_operation_conjugate_transpose
 *  and when \p trans_B is \ref rocsparse_operation_none. The subsequent solve will also be faster when \f$A\f$
 *  is non-transposed and \f$B\f$ is transposed (or conjugate transposed). For example, instead of solving:
 *
@@ -493,21 +493,21 @@ rocsparse_status rocsparse_csrsm_clear(rocsparse_handle handle, rocsparse_mat_in
 *  Once the temporary storage buffer has been allocated, analysis meta data is required.
 *  It can be obtained by \ref rocsparse_scsrsm_analysis "rocsparse_Xcsrsm_analysis()".
 *
-*  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is 
+*  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is
 *  missing the diagonal entry (referred to as a structural zero) or the diagonal entry is zero (referred to as a numerical zero)
-*  then a division by zero would occur. \p rocsparse_csrsm_solve tracks the location of the first zero pivot (either numerical 
-*  or structural zero). The zero pivot status can be checked calling \ref rocsparse_csrsm_zero_pivot(). If 
-*  \ref rocsparse_csrsm_zero_pivot() returns \ref rocsparse_status_success, then no zero pivot was found and therefore 
+*  then a division by zero would occur. \p rocsparse_csrsm_solve tracks the location of the first zero pivot (either numerical
+*  or structural zero). The zero pivot status can be checked calling \ref rocsparse_csrsm_zero_pivot(). If
+*  \ref rocsparse_csrsm_zero_pivot() returns \ref rocsparse_status_success, then no zero pivot was found and therefore
 *  the matrix does not have a structural or numerical zero.
 *
-*  The user can specify that the sparse matrix should be interpreted as having ones on the diagonal by setting the diagonal type 
-*  on the descriptor \p descr to \ref rocsparse_diag_type_unit using \ref rocsparse_set_mat_diag_type. If 
-*  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for 
+*  The user can specify that the sparse matrix should be interpreted as having ones on the diagonal by setting the diagonal type
+*  on the descriptor \p descr to \ref rocsparse_diag_type_unit using \ref rocsparse_set_mat_diag_type. If
+*  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for
 *  some \f$j\f$.
 *
-*  The sparse CSR matrix passed to \p rocsparse_csrsm_solve does not actually have to be a triangular matrix. Instead the 
-*  triangular upper or lower part of the sparse matrix is solved based on \ref rocsparse_fill_mode set on the descriptor 
-*  \p descr. If the fill mode is set to \ref rocsparse_fill_mode_lower, then the lower triangular matrix is solved. If the 
+*  The sparse CSR matrix passed to \p rocsparse_csrsm_solve does not actually have to be a triangular matrix. Instead the
+*  triangular upper or lower part of the sparse matrix is solved based on \ref rocsparse_fill_mode set on the descriptor
+*  \p descr. If the fill mode is set to \ref rocsparse_fill_mode_lower, then the lower triangular matrix is solved. If the
 *  fill mode is set to \ref rocsparse_fill_mode_upper then the upper triangular matrix is solved.
 *
 *  \note

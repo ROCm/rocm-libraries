@@ -32,6 +32,8 @@ find_library(BLIS_LIB
         "${BLIS_PATH_4_0}/lib_ILP64"
         "${CMAKE_CURRENT_BINARY_DIR}/../deps/blis/lib"
         "${CMAKE_CURRENT_BINARY_DIR}/../deps/amd-blis/lib/ILP64"
+        "${PROJECT_BINARY_DIR}/deps/blis/lib"
+        "${PROJECT_BINARY_DIR}/deps/amd-blis/lib/ILP64"
         "/usr/local/lib"
 )
 
@@ -54,3 +56,4 @@ if(BLIS_FOUND)
 endif()
 
 message(STATUS "Found BLIS: ${BLIS_LIB}")
+message(STATUS "Found BLIS: ${BLIS_INCLUDE_DIR}")

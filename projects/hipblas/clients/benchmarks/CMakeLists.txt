@@ -45,7 +45,7 @@ set( hipblas_benchmark_common
 
 if(NOT WIN32)
   add_executable( hipblas-bench ${hipblas_bench_source} ${hipblas_benchmark_common} $<TARGET_OBJECTS:hipblas_fortran_client>)
-elseif()
+else()
   add_executable( hipblas-bench ${hipblas_bench_source} ${hipblas_benchmark_common} )
 endif()
 
