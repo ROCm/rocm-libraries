@@ -9,7 +9,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
 configure_file(${CK_ROOT}/include/ck/config.h.in ${CK_ROOT}/include/ck/config.h)
 
-find_package(ROCM)
+find_package(ROCmCMakeBuildTools)
 include(ROCMInstallTargets)
 include(ROCMTest)
 find_package(hiprtc REQUIRED)

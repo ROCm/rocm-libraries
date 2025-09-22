@@ -17,7 +17,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
 
   FetchContent_GetProperties(rocm-cmake)
   if(NOT rocm-cmake_POPULATED)
-    FetchContent_Populate(rocm-cmake)
+    FetchContent_MakeAvailable(rocm-cmake)
     add_subdirectory(${rocm-cmake_SOURCE_DIR} ${rocm-cmake_BINARY_DIR} EXCLUDE_FROM_ALL)
     list(APPEND CMAKE_MODULE_PATH ${rocm-cmake_SOURCE_DIR}/modules)
   endif()

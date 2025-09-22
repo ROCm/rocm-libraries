@@ -10,7 +10,7 @@ endif()
 
 find_package(ROCmCMakeBuildTools QUIET PATHS ${ROCM_PATH})
 if(NOT ROCmCMakeBuildTools_FOUND)
-  find_package(ROCM 0.7.3 CONFIG QUIET PATHS ${ROCM_PATH})
+  find_package(ROCmCMakeBuildTools 0.7.3 CONFIG QUIET PATHS ${ROCM_PATH})
   if(NOT ROCM_FOUND)
     set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
     set(rocm_cmake_url "https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip")

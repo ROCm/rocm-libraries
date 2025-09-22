@@ -144,7 +144,7 @@ if(BUILD_BENCHMARK)
 endif(BUILD_BENCHMARK)
 
 if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-  find_package(ROCM 0.11.0 CONFIG QUIET PATHS "${ROCM_ROOT}") # rocm-cmake
+  find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET PATHS "${ROCM_ROOT}") # rocm-cmake
 endif()
 if(NOT ROCM_FOUND)
   message(STATUS "ROCm CMake not found. Fetching...")
@@ -165,7 +165,7 @@ if(NOT ROCM_FOUND)
   FetchContent_GetProperties(rocm-cmake)
   if(NOT rocm-cmake_POPULATED)
     # rocm-cmake 0.12.0 and higher needs to built from source
-    FetchContent_Populate(rocm-cmake)
+    FetchContent_MakeAvailable(rocm-cmake)
     message("Populated: ${rocm-cmake_SOURCE_DIR}")
     execute_process(
       WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
@@ -177,9 +177,9 @@ if(NOT ROCM_FOUND)
     )
   endif()
   FetchContent_MakeAvailable(rocm-cmake)
-  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
+  find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 else()
-  find_package(ROCM 0.11.0 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
+  find_package(ROCmCMakeBuildTools 0.11.0 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
 endif()
 
 

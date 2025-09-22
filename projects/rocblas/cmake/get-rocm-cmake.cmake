@@ -5,7 +5,7 @@ include(FetchContent)
 
 find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}")
 if(NOT ROCmCMakeBuildTools_FOUND)
-  find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_PATH}") # deprecated fallback
+  find_package(ROCmCMakeBuildTools 0.7.3 CONFIG QUIET PATHS "${ROCM_PATH}") # deprecated fallback
   if(NOT ROCM_FOUND)
     message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
     set(rocm_cmake_tag "rocm-6.4.0" CACHE STRING "rocm-cmake tag to download")

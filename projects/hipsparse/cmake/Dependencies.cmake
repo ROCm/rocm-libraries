@@ -59,7 +59,7 @@ endif()
 # ROCm cmake package
 find_package(ROCmCMakeBuildTools 0.11.0 QUIET CONFIG PATHS ${CMAKE_PREFIX_PATH})
 if(NOT ROCmCMakeBuildTools_FOUND)
-  find_package(ROCM 0.7.3 QUIET CONFIG PATHS ${CMAKE_PREFIX_PATH}) # deprecated fallback
+  find_package(ROCmCMakeBuildTools 0.7.3 QUIET CONFIG PATHS ${CMAKE_PREFIX_PATH}) # deprecated fallback
   if(NOT ROCM_FOUND)
     message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
     set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
