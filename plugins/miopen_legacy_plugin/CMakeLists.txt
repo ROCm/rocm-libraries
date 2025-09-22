@@ -1,6 +1,12 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+find_package(hipdnn_sdk CONFIG REQUIRED)
+
+# todo: improve this
+get_filename_component(HIPDNN_SDK_CONFIG_DIR "${hipdnn_sdk_CONFIG}" DIRECTORY)
+include(${HIPDNN_SDK_CONFIG_DIR}/hipdnn_sdk_plugin_config.cmake)
+
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     message(STATUS "Building miopen legacy plugin standalone")
     cmake_minimum_required(VERSION 3.25.2)
@@ -52,10 +58,16 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     )
     
     find_package(hip REQUIRED)
-    find_package(hipdnn_sdk CONFIG REQUIRED)
+    
 else()
     message(STATUS "Building miopen legacy plugin as a dependency")
 endif()
+
+set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
+
+message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
+message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
+file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 find_package(miopen CONFIG REQUIRED)
 
@@ -92,17 +104,23 @@ target_compile_definitions(miopen_legacy_plugin PRIVATE
 target_link_libraries(miopen_legacy_plugin PRIVATE miopen_legacy_plugin_private)
 target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL") # Hide symbols from linked static libs
 target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-set_target_properties(miopen_legacy_plugin PROPERTIES 
+set_target_properties(miopen_legacy_plugin PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+    INSTALL_RPATH "/opt/rocm/lib"
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    BUILD_WITH_INSTALL_RPATH TRUE
+    ENABLE_EXPORTS ON  # Enable symbol exports for proper dependency resolution
 )
 
-clang_tidy_check(miopen_legacy_plugin)
+if(BUILD_PLUGIN_AS_DEPENDENCY)
+    clang_tidy_check(miopen_legacy_plugin)
+endif()
 
 set(MIOPEN_LEGACY_PLUGIN_PATH ./hipdnn_plugins/engines/miopen_legacy_plugin CACHE INTERNAL "miopen legacy plugin dir" FORCE)
 
-add_subdirectory(tests)
-add_subdirectory(integration_tests)
+    add_subdirectory(tests)
+    add_subdirectory(integration_tests)
 
 install(
     TARGETS miopen_legacy_plugin
