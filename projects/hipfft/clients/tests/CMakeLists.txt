@@ -133,15 +133,32 @@ foreach( target ${TEST_TARGETS} )
     CXX_STANDARD_REQUIRED ON
     )
 
-    if( BUILD_CLIENTS_TESTS_OPENMP )
-      set_target_properties( ${TEST_TARGETS} PROPERTIES
-         BUILD_RPATH "${BUILD_RPATH}"
-      )
-      set_target_properties( ${TEST_TARGETS} PROPERTIES
-        INSTALL_RPATH "${INSTALL_RPATH}"
-      )
-    endif()
+  if( BUILD_CLIENTS_TESTS_OPENMP )
+    set_target_properties( ${TEST_TARGETS} PROPERTIES
+       BUILD_RPATH "${BUILD_RPATH}"
+    )
+    set_target_properties( ${TEST_TARGETS} PROPERTIES
+      INSTALL_RPATH "${INSTALL_RPATH}"
+    )
+  endif()
 
+  if( NOT hiprand_FOUND )
+    find_package( hiprand REQUIRED )
+  endif()
+  if( USE_HIPRAND )
+    if( BUILD_WITH_LIB STREQUAL "CUDA" )
+      # nvcc doesn't know what do with hiprand.so.1.1, but we can try linking it to hiprand.so,
+      # assuming that it's in the same directory.
+      get_target_property( HIPRAND_FILE_PATH hip::hiprand LOCATION )
+      string( REGEX REPLACE ".so(.[0-9]*)*" ".so" HIPRAND_FILE_PATH_NOVER "${HIPRAND_FILE_PATH}" )
+      message( "Renamed hiprand so filename: ${HIPRAND_FILE_PATH_NOVER}" )
+      
+      target_link_libraries( ${target} PRIVATE ${HIPRAND_FILE_PATH_NOVER} )
+    else()
+      target_link_libraries( ${target} PRIVATE hip::hiprand )
+    endif()
+  endif()
+  
   if( BUILD_WITH_LIB STREQUAL "ROCM" )
     target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
     target_link_libraries( ${target}
@@ -153,12 +170,6 @@ foreach( target ${TEST_TARGETS} )
       target_compile_options( ${target} PRIVATE --offload-arch=${gpu_target} )
     endforeach()
 
-    if( NOT hiprand_FOUND )
-      find_package( hiprand REQUIRED )
-    endif()
-    if( USE_HIPRAND )
-      target_link_libraries( ${target} PRIVATE hip::hiprand )
-    endif()
   else()
     target_compile_definitions( ${target} PRIVATE __HIP_PLATFORM_NVIDIA__)
     target_include_directories( ${target} PRIVATE ${HIP_INCLUDE_DIRS})
@@ -176,7 +187,6 @@ foreach( target ${TEST_TARGETS} )
     endif()
     target_compile_definitions( ${target} PUBLIC _CUFFT_BACKEND )
   endif()
-
 
   target_include_directories( ${target}
     PRIVATE
