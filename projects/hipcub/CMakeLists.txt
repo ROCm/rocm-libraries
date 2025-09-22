@@ -154,8 +154,8 @@ elseif(CMAKE_CUDA_COMPILER)
   # Contrary to HIP, 'enable_language(CUDA)' is supported from CMake 3.8 and higher.
   enable_language(CUDA)
 
-  # Hack: let CMake think that our 'hpp' and 'hip' files are actually CUDA files.
-  set(CMAKE_CUDA_SOURCE_FILE_EXTENSIONS hpp;hip;cu;cuh)
+  # Hack: let CMake think that our 'hip' files are actually CUDA files.
+  set(CMAKE_CUDA_SOURCE_FILE_EXTENSIONS hip;cu)
 endif()
 
 # Compressed offload binaries are currently not working with the SPIR-V target
