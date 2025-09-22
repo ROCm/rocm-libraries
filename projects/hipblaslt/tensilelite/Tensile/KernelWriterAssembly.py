@@ -3771,7 +3771,8 @@ class KernelWriterAssembly(KernelWriter):
         numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         # generate instruction
         module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"] * numWaves, tmpVgprRes, comment="LSU offset: Get LSU wave_id"))
-        module.add(VMulLOU32(dst=vgpr(wave_id), src0=hex(lsuStride), src1=vgpr(wave_id), \
+        module.add(VMovB32(dst=vgpr(tmpVgpr), src=hex(lsuStride)))
+        module.add(VMulLOU32(dst=vgpr(wave_id), src0=vgpr(tmpVgpr), src1=vgpr(wave_id), \
           comment="LSU offset: lsuoffset = wave_id*lsuStride(%u)" % (lsuStride)))
         module.add(VAddU32(dst=vgpr(qReg), src0=vgpr(wave_id), src1=vgpr(qReg), \
           comment="LSU Offset: offset += lsuoffset" ))
