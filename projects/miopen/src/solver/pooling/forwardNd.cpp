@@ -153,7 +153,7 @@ ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
     {
         auto kernel = KernelInfo{};
 
-        kernel.kernel_file = "MIOpenPoolingND.cl";
+        kernel.kernel_file = "MIOpenPoolingND.cpp";
         kernel.kernel_name = "mloPoolingNDFwd";
 
         int pooling_method = (problem.GetPooling().mode == miopenPoolingMax)
@@ -195,7 +195,7 @@ ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
 
         build_params << GetDataTypeKBP(problem.GetXDesc().GetType());
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk = {lcl_work, 1, 1};
         kernel.g_wk = {lcl_work * grp_num, 1, 1};

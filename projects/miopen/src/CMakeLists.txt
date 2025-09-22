@@ -565,7 +565,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenPoolingBwd.cl
         kernels/MIOpenPoolingBwdND.cl
         kernels/MIOpenPoolingForwardNaive.cpp
-        kernels/MIOpenPoolingND.cl
+        kernels/MIOpenPoolingND.cpp
         kernels/MIOpenConv1x1S.cl
         kernels/MIOpenConv1x1J1.cl
         kernels/MIOpenConv1x1J1_stride.cl
