@@ -23,11 +23,8 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
 #include <hip/hip_runtime.h>
-#endif
-
-#include "miopen_limits.hpp"
+#include <climits>
 #include "pooling_functions.h"
 
 #ifndef USE_GLOBAL_INDEX
@@ -35,9 +32,9 @@
 #endif
 
 #if defined(MLO_POOLING_SAVE_INDEX) && (MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX)
-#define USE_MASK 1
+constexpr bool USE_MASK = true;
 #else
-#define USE_MASK 0
+constexpr bool USE_MASK = false;
 #endif
 
 #if (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE) || (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
@@ -61,9 +58,9 @@
 #define MLO_POOLING_OP(A, B) ((A) + (B))
 #endif
 
-#define BOT_TILE_W ((TOP_W_PER_WORK - 1) * STRIDE_W + KERNEL_SZ_W)
-#define BOT_TILE_H ((TOP_H_PER_WORK - 1) * STRIDE_H + KERNEL_SZ_H)
-#define BOT_TILE_D ((TOP_D_PER_WORK - 1) * STRIDE_D + KERNEL_SZ_D)
+constexpr auto BOT_TILE_W = (TOP_W_PER_WORK - 1) * STRIDE_W + KERNEL_SZ_W;
+constexpr auto BOT_TILE_H = (TOP_H_PER_WORK - 1) * STRIDE_H + KERNEL_SZ_H;
+constexpr auto BOT_TILE_D = (TOP_D_PER_WORK - 1) * STRIDE_D + KERNEL_SZ_D;
 
 extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
     void mloPoolingNDFwd(const FLOAT* bot,
@@ -126,12 +123,10 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                                 (run_x >= 0 && run_x < bot_w)) &&
                                b_id < batch;
 
-                    bot_data[h][j][i] = (vis) ? bot[bot_gbl_off] :
-#if MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
-                                              (FLOAT)(-MAX_VAL);
-#elif AVERAGE_OPS
-                                              (FLOAT)(0);
-#endif
+                    bot_data[h][j][i] = vis ? bot[bot_gbl_off]
+                                        : MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
+                                            ? /* MAX */ FLOAT{-MAX_VAL}
+                                            : /* AVG */ FLOAT{0};
                 }
             }
         }
@@ -139,82 +134,78 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
 #pragma unroll
         for(unsigned int m = 0; m < TOP_D_PER_WORK; m++)
         {
-#if AVERAGE_OPS
             int dstart = (top_d_id + m) * STRIDE_D - pad_d;
-            int dend   = min((dstart + KERNEL_SZ_D), (int)bot_d);
+            int dend   = min((dstart + KERNEL_SZ_D), static_cast<int>(bot_d));
             dstart     = max(dstart, 0);
-#endif
+
             for(unsigned int k = 0; k < TOP_H_PER_WORK; k++)
             {
-#if AVERAGE_OPS
                 int hstart = (top_h_id + k) * STRIDE_H - pad_h;
-                int hend   = min((hstart + KERNEL_SZ_H), (int)bot_h);
+                int hend   = min((hstart + KERNEL_SZ_H), static_cast<int>(bot_h));
                 hstart     = max(hstart, 0);
-#endif
+
                 for(unsigned int l = 0; l < TOP_W_PER_WORK; l++)
                 {
 
-#if AVERAGE_OPS
                     int wstart = (top_w_id + l) * STRIDE_W - pad_w;
-                    int wend   = min((wstart + KERNEL_SZ_W), (int)bot_w);
+                    int wend   = min((wstart + KERNEL_SZ_W), static_cast<int>(bot_w));
                     wstart     = max(wstart, 0);
-                    unsigned int pool_size =
-#if MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE
-                        KERNEL_SZ_W * KERNEL_SZ_H * KERNEL_SZ_D;
-                    (void)wend;
-                    (void)hend;
-                    (void)dend;
-#else
-                        (dend - dstart) * (hend - hstart) * (wend - wstart);
-#endif
+
+                    unsigned int pool_size = [&] {
+                        if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE)
+                            return (dend - dstart) * (hend - hstart) * (wend - wstart);
+                        else if constexpr(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
+                            return KERNEL_SZ_W * KERNEL_SZ_H * KERNEL_SZ_D;
+                        else // MAX
+                            return 0;
+                    }();
+
                     pool_size = (pool_size == 0) ? 1 : pool_size;
-#endif
 
-                    FLOAT_ACCUM top_val =
-#if MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
-                        (FLOAT_ACCUM)(-MAX_VAL_ACCUM);
-#elif AVERAGE_OPS
-                        (FLOAT_ACCUM)(0);
-#endif
+                    FLOAT_ACCUM top_val = MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX //
+                                              ? /* MAX */ FLOAT_ACCUM{-MAX_VAL_ACCUM}
+                                              : /* AVG */ FLOAT_ACCUM{0};
 
-#if USE_MASK
                     index_t mask_idx = 0;
-#endif
-
                     for(unsigned int h = 0; h < KERNEL_SZ_D; h++)
                     {
                         for(unsigned int j = 0; j < KERNEL_SZ_H; j++)
                         {
                             for(unsigned int i = 0; i < KERNEL_SZ_W; i++)
                             {
-
                                 FLOAT_ACCUM bot_val = CVT_FLOAT2ACCUM(
                                     bot_data[h + m * STRIDE_D][j + k * STRIDE_H][i + l * STRIDE_W]);
 
-#if USE_MASK
-                                if(bot_val > top_val)
+                                if constexpr(USE_MASK)
                                 {
-                                    top_val = bot_val;
+                                    if(bot_val > top_val)
+                                    {
+                                        top_val = bot_val;
 
-#if USE_GLOBAL_INDEX
-                                    mask_idx =
-                                        ((top_w_id + l) * STRIDE_W + i - pad_w) +
-                                        bot_w * ((top_h_id + k) * STRIDE_H + j - pad_h) +
-                                        bot_w * bot_h * ((top_d_id + m) * STRIDE_D + h - pad_d);
-#else
-                                    mask_idx = i + KERNEL_SZ_W * (j + KERNEL_SZ_H * h);
-#endif
+                                        if constexpr(USE_GLOBAL_INDEX)
+                                        {
+                                            mask_idx =
+                                                ((top_w_id + l) * STRIDE_W + i - pad_w) +
+                                                bot_w * ((top_h_id + k) * STRIDE_H + j - pad_h) +
+                                                bot_w * bot_h *
+                                                    ((top_d_id + m) * STRIDE_D + h - pad_d);
+                                        }
+                                        else
+                                        {
+                                            mask_idx = i + KERNEL_SZ_W * (j + KERNEL_SZ_H * h);
+                                        }
+                                    }
                                 }
-#else
-                                top_val = MLO_POOLING_OP(top_val, bot_val);
-#endif
+                                else
+                                {
+                                    top_val = MLO_POOLING_OP(top_val, bot_val);
+                                }
                             }
                         }
                     }
 
-#if AVERAGE_OPS
-                    top_val *= CVT_FP32_2ACCUM(1.f) / (FLOAT_ACCUM)pool_size;
-#endif
+                    if constexpr(AVERAGE_OPS)
+                        top_val *= CVT_FP32_2ACCUM(1.f) / static_cast<FLOAT_ACCUM>(pool_size);
 
                     if(top_d_id + m < top_d && top_h_id + k < top_h && top_w_id + l < top_w &&
                        b_id < batch)
@@ -224,9 +215,8 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
                                                (top_h_id + k) * top_str_h + top_w_id + l;
 
                         top[top_idx] = top_val;
-#if USE_MASK
-                        mask[top_idx] = mask_idx;
-#endif
+                        if constexpr(USE_MASK)
+                            mask[top_idx] = mask_idx;
                     }
                 }
             }
