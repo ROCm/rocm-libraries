@@ -411,8 +411,6 @@ namespace rocRoller
             template <typename T1, typename T2, typename T3>
             friend struct rocRoller::Serialization::MappingTraits;
 
-            mutable std::map<int, Location> m_locationCache;
-
             std::map<int, Element> m_elements;
 
             HypergraphIncidenceContainer m_incidences;

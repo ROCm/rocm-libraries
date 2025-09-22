@@ -148,7 +148,6 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         void Hypergraph<Node, Edge, Hyper>::clearCache(GraphModification)
         {
-            m_locationCache.clear();
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -404,20 +403,10 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         auto Hypergraph<Node, Edge, Hyper>::getLocation(int id) const -> Location
         {
-            {
-                auto iter = m_locationCache.find(id);
-                if(iter != m_locationCache.end())
-                    return iter->second;
-            }
-
-            Location rv{.id       = id,
-                        .incoming = m_incidences.getSrcs(id),
-                        .outgoing = m_incidences.getDsts(id),
-                        .element  = getElement(id)};
-
-            m_locationCache[id] = rv;
-
-            return rv;
+            return {.id       = id,
+                    .incoming = m_incidences.getSrcs(id),
+                    .outgoing = m_incidences.getDsts(id),
+                    .element  = getElement(id)};
         }
 
         template <typename Node, typename Edge, bool Hyper>
