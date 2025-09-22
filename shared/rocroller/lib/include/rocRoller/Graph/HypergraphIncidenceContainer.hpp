@@ -27,6 +27,7 @@
 #pragma once
 
 #include <map>
+#include <vector>
 
 #include <rocRoller/Utilities/Concepts.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
@@ -121,17 +122,13 @@ namespace rocRoller
 
             /**
              * @brief All incidences, sorted by sources, then by edge order.
-             * Accessing the map by a graph id will give a map showing all connected destinations, ordered by incidence order.
-             * The structure can be read as map<srcId, std::map<incidenceOrder, dstId>>.
              */
-            std::map<int, std::map<int, int>> m_incidencesBySrc;
+            std::map<int, std::vector<int>> m_incidencesBySrc;
 
             /**
              * @brief All incidences, sorted by destinations, then by edge order.
-             * Accessing the map by a graph id will give a map showing all connected sources, ordered by incidence order.
-             * The structure can be read as map<dstId, std::map<incidenceOrder, srcId>>.
              */
-            std::map<int, std::map<int, int>> m_incidencesByDst;
+            std::map<int, std::vector<int>> m_incidencesByDst;
         };
     }
 }

@@ -43,26 +43,24 @@ namespace rocRoller::Graph
 
     void HypergraphIncidenceContainer::deleteId(int id)
     {
-        auto connectionMatches = [id](auto const& connection) { return connection.second == id; };
-
         m_incidencesBySrc.erase(id);
         m_incidencesByDst.erase(id);
 
         for(auto& connections : m_incidencesBySrc)
-            std::erase_if(connections.second, connectionMatches);
+            std::erase(connections.second, id);
 
         for(auto& connections : m_incidencesByDst)
-            std::erase_if(connections.second, connectionMatches);
+            std::erase(connections.second, id);
     }
 
     Generator<int> HypergraphIncidenceContainer::getSrcs(int id) const
     {
         if(!m_incidencesByDst.contains(id))
             co_return;
-
-        for(auto const& connection : m_incidencesByDst.at(id))
+        auto srcs = m_incidencesByDst.at(id);
+        for(int src : srcs)
         {
-            co_yield connection.second;
+            co_yield src;
         }
     }
 
@@ -70,10 +68,10 @@ namespace rocRoller::Graph
     {
         if(!m_incidencesBySrc.contains(id))
             co_return;
-
-        for(auto const& connection : m_incidencesBySrc.at(id))
+        auto dsts = m_incidencesBySrc.at(id);
+        for(int dst : dsts)
         {
-            co_yield connection.second;
+            co_yield dst;
         }
     }
 
@@ -93,11 +91,11 @@ namespace rocRoller::Graph
 
     Generator<HypergraphIncidence> HypergraphIncidenceContainer::getAllIncidences() const
     {
-        for(auto const& s : m_incidencesBySrc)
+        for(auto const& connections : m_incidencesBySrc)
         {
-            for(auto const& d : s.second)
+            for(int dst : connections.second)
             {
-                HypergraphIncidence incidence{.src = s.first, .dst = d.second};
+                HypergraphIncidence incidence{.src = connections.first, .dst = dst};
                 co_yield incidence;
             }
         }
@@ -106,9 +104,9 @@ namespace rocRoller::Graph
     void HypergraphIncidenceContainer::accountForId(int id)
     {
         if(!m_incidencesBySrc.contains(id))
-            m_incidencesBySrc.emplace(id, std::map<int, int>{});
+            m_incidencesBySrc.emplace(id, std::vector<int>{});
         if(!m_incidencesByDst.contains(id))
-            m_incidencesByDst.emplace(id, std::map<int, int>{});
+            m_incidencesByDst.emplace(id, std::vector<int>{});
     }
 
     std::string HypergraphIncidenceContainer::toDOTSection(std::string const& prefix) const

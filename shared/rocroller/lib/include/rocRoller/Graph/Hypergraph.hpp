@@ -146,10 +146,7 @@ namespace rocRoller
             int addElement(T&& element, T_Inputs const& inputs, T_Outputs const& outputs);
 
             template <typename T, CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-            void addElement(int              id,
-                            T&&              element,
-                            T_Inputs const&  inputs,
-                            T_Outputs const& outputs);
+            void addElement(int id, T&& element, T_Inputs const& inputs, T_Outputs const& outputs);
 
             void deleteElement(int id);
 

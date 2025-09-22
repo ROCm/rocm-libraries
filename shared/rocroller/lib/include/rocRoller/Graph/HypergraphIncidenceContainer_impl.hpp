@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <rocRoller/Graph/HypergraphIncidenceContainer.hpp>
 
 namespace rocRoller::Graph
@@ -35,31 +37,14 @@ namespace rocRoller::Graph
                                                             T_Inputs const&  inputs,
                                                             T_Outputs const& outputs)
     {
-        auto addIncidence = [](int target, auto& connections) {
-            int incidenceOrder = 0;
-            if(!connections.empty())
-            {
-                if(std::any_of(
-                       connections.begin(), connections.end(), [target](auto const& connection) {
-                           return connection.second == target;
-                       }))
-                {
-                    // Don't add duplicate incidence
-                    return;
-                }
-                incidenceOrder = connections.rbegin()->first + 1;
-            }
-            connections.emplace(incidenceOrder, target);
-        };
+        auto addIncidence = [this](int src, int dst) {
+            auto& dsts = this->m_incidencesBySrc[src];
+            if(std::find(dsts.begin(), dsts.end(), dst) == dsts.end())
+                dsts.push_back(dst);
 
-        auto addIncidenceSrc = [this, &addIncidence](int src, int dst) {
-            auto& connections = this->m_incidencesBySrc.at(src);
-            addIncidence(dst, connections);
-        };
-
-        auto addIncidenceDst = [this, &addIncidence](int src, int dst) {
-            auto& connections = this->m_incidencesByDst.at(dst);
-            addIncidence(src, connections);
+            auto& srcs = this->m_incidencesByDst[dst];
+            if(std::find(srcs.begin(), srcs.end(), src) == srcs.end())
+                srcs.push_back(src);
         };
 
         accountForId(id);
@@ -67,14 +52,12 @@ namespace rocRoller::Graph
         for(int input : inputs)
         {
             accountForId(input);
-            addIncidenceSrc(input, id);
-            addIncidenceDst(input, id);
+            addIncidence(input, id);
         }
         for(int output : outputs)
         {
             accountForId(output);
-            addIncidenceSrc(id, output);
-            addIncidenceDst(id, output);
+            addIncidence(id, output);
         }
     }
 }
