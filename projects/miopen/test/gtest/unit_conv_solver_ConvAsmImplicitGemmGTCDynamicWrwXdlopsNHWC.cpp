@@ -197,24 +197,26 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn(GetConvFullTestCases(miopenFloat))));
 
 // High Tol tests
-INSTANTIATE_TEST_SUITE_P(FullHighTol,
-                         GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_FP16,
-                         testing::Combine(testing::Values(GetHighTolTestParams(miopenHalf)),
-                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
-                                          testing::ValuesIn(GetConvHighTolTestCases(miopenHalf))));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrwHighTol_FP16,
+    testing::Combine(testing::Values(GetHighTolTestParams(miopenHalf)),
+                     testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                     testing::ValuesIn(GetConvHighTolTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    FullHighTol,
-    GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_BFP16,
+    Full,
+    GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrwHighTol_BFP16,
     testing::Combine(testing::Values(GetHighTolTestParams(miopenBFloat16)),
                      testing::Values(miopenConvolutionAlgoImplicitGEMM),
                      testing::ValuesIn(GetConvHighTolTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(FullHighTol,
-                         GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_FP32,
-                         testing::Combine(testing::Values(GetHighTolTestParams(miopenFloat)),
-                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
-                                          testing::ValuesIn(GetConvHighTolTestCases(miopenFloat))));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrwHighTol_FP32,
+    testing::Combine(testing::Values(GetHighTolTestParams(miopenFloat)),
+                     testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                     testing::ValuesIn(GetConvHighTolTestCases(miopenFloat))));
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(
