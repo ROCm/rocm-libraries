@@ -26,6 +26,7 @@
 #ifndef GUARD_MIOPEN_GEMM_DRIVER_HPP
 #define GUARD_MIOPEN_GEMM_DRIVER_HPP
 
+#include "timer.hpp"
 #include <miopen/config.h>
 
 #if MIOPEN_USE_GEMM
@@ -43,7 +44,6 @@
 #include <cstdlib>
 #include <float.h>
 #include <memory>
-#include <numeric>
 #include <vector>
 
 #define GEMM_DRIVER_DEBUG 0
@@ -112,6 +112,76 @@ void callCpuGemmStridedBatched(bool isColMajor,
 }
 
 template <typename T>
+void callCpuGemmStridedBatchedPar(bool isColMajor,
+                               bool transA,
+                               bool transB,
+                               int m,
+                               int n,
+                               int k,
+                               T alpha,
+                               const void* A,
+                               int a_offset,
+                               int lda,
+                               long long int strideA,
+                               const void* B,
+                               int b_offset,
+                               int ldb,
+                               long long int strideB,
+                               T beta,
+                               void* C,
+                               int c_offset,
+                               int ldc,
+                               long long int strideC,
+                               int batch_count)
+{
+    const T* a_ptr = static_cast<const T*>(A);
+    const T* b_ptr = static_cast<const T*>(B);
+    T* c_ptr       = static_cast<T*>(C);
+
+    // our cpu GEMM logic is row-major
+    if(isColMajor)
+    {
+        isColMajor = false;
+        std::swap(a_ptr, b_ptr);
+        std::swap(a_offset, b_offset);
+        std::swap(transA, transB);
+        std::swap(m, n);
+        std::swap(lda, ldb);
+        std::swap(strideA, strideB);
+    }
+
+    auto work = [&](const int mi) {
+        for(int bi = 0; bi < batch_count; ++bi)
+        {
+            for(int ni = 0; ni < n; ++ni)
+            {
+                double y = 0;
+                for(int ki = 0; ki < k; ++ki)
+                {
+                    int aindex = transA ? a_offset + strideA * bi + lda * ki + mi
+                                        : a_offset + strideA * bi + lda * mi + ki;
+                    int bindex = transB ? b_offset + strideB * bi + ldb * ni + ki
+                                        : b_offset + strideB * bi + ldb * ki + ni;
+                    y += static_cast<double>(a_ptr[aindex]) * static_cast<double>(b_ptr[bindex]);
+                }
+                int cindex = c_offset + strideC * bi + ldc * mi + ni;
+                c_ptr[cindex] =
+                    static_cast<T>(static_cast<double>(alpha) * y +
+                                   static_cast<double>(beta) * static_cast<double>(c_ptr[cindex]));
+            }
+        }
+    };
+
+    if(m * n * k * batch_count > 1<<18) {
+        par_ford(m)(work);
+    } else {
+        for(int mi = 0; mi < m; mi++) {
+            work(mi);
+        }
+    }
+}
+
+template <typename T>
 class GemmDriver : public Driver
 {
 public:
@@ -169,7 +239,7 @@ int GemmDriver<T>::AddCmdLineArgs()
     inflags.AddInputFlag("transA", 'u', "0", "Transpose A matrix (Default=0)", "int");
     inflags.AddInputFlag("transB", 'v', "0", "Transpose B matrix (Default=0)", "int");
     inflags.AddInputFlag("iter", 'i', "10", "Number of Iterations (Default=10)", "int");
-    inflags.AddInputFlag("verify", 'V', "0", "Verify Each Layer (Default=1)", "int");
+    inflags.AddInputFlag("verify", 'V', "1", "Verify Each Layer (Default=1)", "int");
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
 
     return 0;
