@@ -7,11 +7,13 @@
 #include <hipdnn_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_backend::test_utilities
 {
 
 using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_sdk::utilities;
 
 inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 {
@@ -32,14 +34,13 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 inline flatbuffers::FlatBufferBuilder
     createValidBatchnormGraph(std::vector<int64_t> strides = {1, 3, 224, 224},
                               std::vector<int64_t> dims = {1, 3, 224, 224},
-                              bool hasOptionalAttributes = true,
                               hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedStrides = {1, strides[1], 1, 1};
-    std::vector<int64_t> derivedDims = {1, dims[1], 1, 1};
+    std::vector<int64_t> derivedStrides = getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = getDerivedShape(dims);
 
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
@@ -63,36 +64,31 @@ inline flatbuffers::FlatBufferBuilder
         &derivedStrides,
         &derivedDims));
 
-    if(hasOptionalAttributes)
-    {
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-            builder,
-            5,
-            "est_mean",
-            hipdnn_sdk::data_objects::DataType::FLOAT,
-            &derivedStrides,
-            &derivedDims));
-
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-            builder,
-            6,
-            "est_variance",
-            hipdnn_sdk::data_objects::DataType::FLOAT,
-            &derivedStrides,
-            &derivedDims));
-    }
-
-    auto bnormAttributes = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
-        1, // x uid
-        hasOptionalAttributes ? flatbuffers::Optional<int64_t>(5)
-                              : flatbuffers::nullopt, // mean uid
-        hasOptionalAttributes ? flatbuffers::Optional<int64_t>(6)
-                              : flatbuffers::nullopt, // inv_variance uid
-        3, // scale uid
-        4, // bias uid
-        2 // y uid
-    );
+        5,
+        "est_mean",
+        hipdnn_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "est_variance",
+        hipdnn_sdk::data_objects::DataType::FLOAT,
+        &derivedStrides,
+        &derivedDims));
+
+    auto bnormAttributes
+        = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(builder,
+                                                                       1, // x uid
+                                                                       5, // mean uid
+                                                                       6, // inv_variance uid
+                                                                       3, // scale uid
+                                                                       4, // bias uid
+                                                                       2 // y uid
+        );
 
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
     auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
@@ -122,8 +118,8 @@ inline flatbuffers::FlatBufferBuilder
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedStrides = {1, strides[1], 1, 1};
-    std::vector<int64_t> derivedDims = {1, dims[1], 1, 1};
+    std::vector<int64_t> derivedStrides = getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = getDerivedShape(dims);
 
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));

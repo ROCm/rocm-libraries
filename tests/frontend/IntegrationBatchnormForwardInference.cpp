@@ -12,6 +12,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
@@ -80,7 +81,7 @@ protected:
     struct SimpleBatchnorm2DTensorBundle
     {
         SimpleBatchnorm2DTensorBundle(const std::vector<int64_t>& dims)
-            : derivedDims({1, dims[1], 1, 1})
+            : derivedDims(getDerivedShape(dims))
             , xTensor(Tensor<Input_type>(dims))
             , yTensor(Tensor<Input_type>(dims))
             , scaleTensor(Tensor<Intermediate_type>(derivedDims))

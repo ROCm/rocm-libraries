@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
@@ -54,7 +55,7 @@ protected:
     {
         std::vector<int64_t> dims = {testCase.n, testCase.c, testCase.h, testCase.w};
 
-        std::vector<int64_t> derivedDims = {1, dims[1]};
+        std::vector<int64_t> derivedDims = getDerivedShape(dims);
 
         std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
 

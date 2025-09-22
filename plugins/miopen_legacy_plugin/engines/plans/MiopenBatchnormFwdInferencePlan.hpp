@@ -24,18 +24,16 @@ public:
     const MiopenTensor& y() const;
     const MiopenTensor& scale() const;
     const MiopenTensor& bias() const;
-
-    const std::optional<MiopenTensor>& estMean() const;
-    const std::optional<MiopenTensor>& estVariance() const;
+    const MiopenTensor& estMean() const;
+    const MiopenTensor& estVariance() const;
 
 private:
     MiopenTensor _x;
     MiopenTensor _y;
     MiopenTensor _scale;
     MiopenTensor _bias;
-
-    std::optional<MiopenTensor> _estMean;
-    std::optional<MiopenTensor> _estVariance;
+    MiopenTensor _estMean;
+    MiopenTensor _estVariance;
 };
 
 class BatchnormFwdInferencePlan : public IPlan

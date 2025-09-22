@@ -132,15 +132,13 @@ public:
         auto mean = get_mean();
         auto invVariance = get_inv_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
-            builder,
-            get_x()->get_uid(),
-            mean ? flatbuffers::Optional<int64_t>(mean->get_uid()) : flatbuffers::nullopt,
-            invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
-                        : flatbuffers::nullopt,
-            get_scale()->get_uid(),
-            get_bias()->get_uid(),
-            get_y()->get_uid());
+        return hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(builder,
+                                                                            get_x()->get_uid(),
+                                                                            mean->get_uid(),
+                                                                            invVariance->get_uid(),
+                                                                            get_scale()->get_uid(),
+                                                                            get_bias()->get_uid(),
+                                                                            get_y()->get_uid());
     }
 
 private:

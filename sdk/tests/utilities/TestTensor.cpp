@@ -222,3 +222,191 @@ TEST(TestTensor, GetIndexConsistency)
         }
     }
 }
+
+TEST(TestTensor, DefaultPackedStrides1D)
+{
+    Tensor<float> tensor({10});
+
+    EXPECT_EQ(tensor.dims(), (std::vector<int64_t>{10}));
+    EXPECT_EQ(tensor.strides(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(tensor.memory().count(), 10);
+}
+
+TEST(TestTensor, DefaultPackedStrides2D)
+{
+    Tensor<float> tensor({5, 8});
+
+    EXPECT_EQ(tensor.dims(), (std::vector<int64_t>{5, 8}));
+    // Row-major: outer dim stride = 8, inner dim stride = 1
+    EXPECT_EQ(tensor.strides(), (std::vector<int64_t>{8, 1}));
+    EXPECT_EQ(tensor.memory().count(), 40);
+}
+
+TEST(TestTensor, DefaultPackedStrides3D)
+{
+    Tensor<float> tensor({4, 5, 6});
+
+    EXPECT_EQ(tensor.dims(), (std::vector<int64_t>{4, 5, 6}));
+    // Row-major: strides = {5*6, 6, 1} = {30, 6, 1}
+    EXPECT_EQ(tensor.strides(), (std::vector<int64_t>{30, 6, 1}));
+    EXPECT_EQ(tensor.memory().count(), 120);
+}
+
+TEST(TestTensor, DefaultPackedStrides4D)
+{
+    Tensor<float> tensor({2, 3, 4, 5});
+
+    EXPECT_EQ(tensor.dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+    // Row-major: strides = {3*4*5, 4*5, 5, 1} = {60, 20, 5, 1}
+    EXPECT_EQ(tensor.strides(), (std::vector<int64_t>{60, 20, 5, 1}));
+    EXPECT_EQ(tensor.memory().count(), 120);
+}
+
+TEST(TestTensor, DefaultPackedStrides5D)
+{
+    Tensor<float> tensor({2, 3, 4, 5, 6});
+
+    EXPECT_EQ(tensor.dims(), (std::vector<int64_t>{2, 3, 4, 5, 6}));
+    // Row-major: strides = {3*4*5*6, 4*5*6, 5*6, 6, 1} = {360, 120, 30, 6, 1}
+    EXPECT_EQ(tensor.strides(), (std::vector<int64_t>{360, 120, 30, 6, 1}));
+    EXPECT_EQ(tensor.memory().count(), 720);
+}
+
+TEST(TestTensor, DefaultPackedStrides6D)
+{
+    Tensor<float> tensor({1, 2, 3, 4, 5, 6});
+
+    EXPECT_EQ(tensor.dims(), (std::vector<int64_t>{1, 2, 3, 4, 5, 6}));
+    // Row-major: strides = {2*3*4*5*6, 3*4*5*6, 4*5*6, 5*6, 6, 1} = {720, 360, 120, 30, 6, 1}
+    EXPECT_EQ(tensor.strides(), (std::vector<int64_t>{720, 360, 120, 30, 6, 1}));
+    EXPECT_EQ(tensor.memory().count(), 720);
+}
+
+TEST(TestTensor, DefaultPackedStridesIndexing)
+{
+    Tensor<float> tensor({3, 4, 5});
+    tensor.fillWithValue(0.0f);
+
+    // Test setting and getting values with default packed strides
+    tensor.setHostValue(1.0f, 0, 0, 0);
+    tensor.setHostValue(2.0f, 1, 2, 3);
+    tensor.setHostValue(3.0f, 2, 3, 4);
+
+    EXPECT_FLOAT_EQ(tensor.getHostValue(0, 0, 0), 1.0f);
+    EXPECT_FLOAT_EQ(tensor.getHostValue(1, 2, 3), 2.0f);
+    EXPECT_FLOAT_EQ(tensor.getHostValue(2, 3, 4), 3.0f);
+
+    // Verify index calculation
+    // For (1, 2, 3) with strides {20, 5, 1}: 1*20 + 2*5 + 3*1 = 33
+    EXPECT_EQ(tensor.getIndex(1, 2, 3), 33);
+}
+
+TEST(TestTensor, DefaultPackedStridesCompatibleWithNchw)
+{
+    // Default packed strides should be equivalent to NCHW for 4D tensors
+    std::vector<int64_t> dims = {2, 3, 4, 5};
+    Tensor<float> tensorDefault(dims);
+    Tensor<float> tensorNchw(dims, TensorLayout::NCHW);
+
+    EXPECT_EQ(tensorDefault.strides(), tensorNchw.strides());
+}
+
+TEST(TestTensor, DefaultPackedStridesCompatibleWithNcdhw)
+{
+    // Default packed strides should be equivalent to NCDHW for 5D tensors
+    std::vector<int64_t> dims = {2, 3, 4, 5, 6};
+    Tensor<float> tensorDefault(dims);
+    Tensor<float> tensorNcdhw(dims, TensorLayout::NCDHW);
+
+    EXPECT_EQ(tensorDefault.strides(), tensorNcdhw.strides());
+}
+
+TEST(TestTensor, BasicNcdhwUsage)
+{
+    Tensor<float> tensor({1, 2, 3, 4, 5}, TensorLayout::NCDHW);
+
+    // NCDHW (row-major) strides with dims {N=1, C=2, D=3, H=4, W=5}:
+    // N stride = C*D*H*W = 2*3*4*5 = 120
+    // C stride = D*H*W = 3*4*5 = 60
+    // D stride = H*W = 4*5 = 20
+    // H stride = W = 5
+    // W stride = 1 (innermost dimension)
+    EXPECT_EQ(tensor.memory().count(), 120);
+    EXPECT_EQ(tensor.strides()[0], 120);
+    EXPECT_EQ(tensor.strides()[1], 60);
+    EXPECT_EQ(tensor.strides()[2], 20);
+    EXPECT_EQ(tensor.strides()[3], 5);
+    EXPECT_EQ(tensor.strides()[4], 1);
+}
+
+TEST(TestTensor, BasicNdhwcUsage)
+{
+    Tensor<float> tensor({1, 2, 3, 4, 5}, TensorLayout::NDHWC);
+
+    EXPECT_EQ(tensor.memory().count(), 120);
+    // NDHWC strides with dims {N=1, C=2, D=3, H=4, W=5}:
+    // N stride = D*H*W*C = 3*4*5*2 = 120
+    // C stride = 1 (innermost dimension)
+    // D stride = H*W*C = 4*5*2 = 40
+    // H stride = W*C = 5*2 = 10
+    // W stride = C = 2
+    EXPECT_EQ(tensor.strides()[0], 120);
+    EXPECT_EQ(tensor.strides()[1], 1);
+    EXPECT_EQ(tensor.strides()[2], 40);
+    EXPECT_EQ(tensor.strides()[3], 10);
+    EXPECT_EQ(tensor.strides()[4], 2);
+}
+
+TEST(TestTensor, GetAndSetHostValueNcdhw)
+{
+    Tensor<float> tensor({1, 2, 3, 4, 5}, TensorLayout::NCDHW);
+    tensor.fillWithValue(0.0f);
+    tensor.setHostValue(99.0f, 0, 1, 2, 3, 4);
+
+    EXPECT_FLOAT_EQ(tensor.getHostValue(0, 1, 2, 3, 4), 99.0f);
+}
+
+TEST(TestTensor, GetAndSetHostValueNdhwc)
+{
+    Tensor<float> tensor({1, 2, 3, 4, 5}, TensorLayout::NDHWC);
+    tensor.fillWithValue(0.0f);
+    tensor.setHostValue(99.0f, 0, 1, 2, 3, 4);
+
+    EXPECT_FLOAT_EQ(tensor.getHostValue(0, 1, 2, 3, 4), 99.0f);
+}
+
+TEST(TestTensor, GetIndex5D)
+{
+    //Strides {120, 60, 20, 5, 1}
+    Tensor<float> tensor({2, 2, 3, 4, 5}, TensorLayout::NCDHW);
+
+    // 1*120 + 1*60 + 2*20 + 3*5 + 4*1 = 239
+    EXPECT_EQ(tensor.getIndex(1, 1, 2, 3, 4), 239);
+    std::vector<int64_t> indices1 = {1, 1, 2, 3, 4};
+    EXPECT_EQ(tensor.getIndex(indices1), 239);
+
+    // Test first element
+    EXPECT_EQ(tensor.getIndex(0, 0, 0, 0, 0), 0);
+    std::vector<int> indices2 = {0, 0, 0, 0, 0};
+    EXPECT_EQ(tensor.getIndex(indices2), 0);
+
+    // Test partial indices
+    EXPECT_EQ(tensor.getIndex(1, 0), 120);
+    std::vector<size_t> indices3 = {1, 0};
+    EXPECT_EQ(tensor.getIndex(indices3), 120);
+
+    EXPECT_EQ(tensor.getIndex(0, 1), 60);
+    std::vector<size_t> indices4 = {0, 1};
+    EXPECT_EQ(tensor.getIndex(indices4), 60);
+}
+
+TEST(TestTensor, GetIndex5DNdhwc)
+{
+    //Strides {120, 1, 40, 10, 2}
+    Tensor<float> tensor({2, 2, 3, 4, 5}, TensorLayout::NDHWC);
+
+    // 1*120 + 1*1 + 2*40 + 3*10 + 4*2 = 239
+    EXPECT_EQ(tensor.getIndex(1, 1, 2, 3, 4), 239);
+    std::vector<int64_t> indices = {1, 1, 2, 3, 4};
+    EXPECT_EQ(tensor.getIndex(indices), 239);
+}

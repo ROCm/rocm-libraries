@@ -14,6 +14,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
@@ -45,15 +46,36 @@ struct Batchnorm2dTestCase
     }
 };
 
-template <typename InputType, typename IntermediateType>
-class BatchnormForwardInference : public ::testing::TestWithParam<Batchnorm2dTestCase>
+struct Batchnorm3dTestCase
 {
-    struct Batchnorm2dTensorBundle
+    int64_t n;
+    int64_t c;
+    int64_t d;
+    int64_t h;
+    int64_t w;
+    unsigned int seed;
+
+    friend std::ostream& operator<<(std::ostream& ss, const Batchnorm3dTestCase& tc)
     {
-        Batchnorm2dTensorBundle(const std::vector<int64_t>& dims,
-                                unsigned int seed = 1,
-                                const TensorLayout& layout = TensorLayout::NCHW)
-            : derivedDims({1, dims[1], 1, 1})
+        return ss << "(n:" << tc.n << " c:" << tc.c << " d:" << tc.d << " h:" << tc.h
+                  << " w:" << tc.w << " seed:" << tc.seed << ")";
+    }
+
+    std::vector<int64_t> getDims() const
+    {
+        return {n, c, d, h, w};
+    }
+};
+
+template <typename InputType, typename IntermediateType, typename TestCaseType>
+class BatchnormForwardInference : public ::testing::TestWithParam<TestCaseType>
+{
+    struct TensorBundle
+    {
+        TensorBundle(const std::vector<int64_t>& dims,
+                     unsigned int seed = 1,
+                     const TensorLayout& layout = TensorLayout::NCHW)
+            : derivedDims(getDerivedShape(dims))
             , xTensor(dims, layout)
             , yTensor(dims, layout)
             , scaleTensor(derivedDims)
@@ -131,7 +153,7 @@ protected:
                           const graph::TensorAttributes& invVarianceTensorAttr,
                           const graph::TensorAttributes& scaleTensorAttr,
                           const graph::TensorAttributes& biasTensorAttr,
-                          Batchnorm2dTensorBundle& tensorBundle)
+                          TensorBundle& tensorBundle)
     {
         std::unordered_map<int64_t, void*> variantPack;
         variantPack[xTensorAttr.get_uid()] = tensorBundle.xTensor.memory().deviceData();
@@ -145,7 +167,7 @@ protected:
         return variantPack;
     }
 
-    void runMiopenBatchnormFwd(Batchnorm2dTensorBundle& graphTensorBundle,
+    void runMiopenBatchnormFwd(TensorBundle& graphTensorBundle,
                                hipdnn_frontend::DataType inputDataType,
                                hipdnn_frontend::DataType intermediateDataType)
     {
@@ -224,7 +246,7 @@ protected:
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
 
-    void runCpuBatchnormFwd(Batchnorm2dTensorBundle& cpuTensorBundle)
+    void runCpuBatchnormFwd(TensorBundle& cpuTensorBundle)
     {
         CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormFwdInference(
             cpuTensorBundle.xTensor,
@@ -239,16 +261,16 @@ protected:
     void runBatchnormTest(InputType tolerance = 1e-4f,
                           const TensorLayout& layout = TensorLayout::NCHW)
     {
-        Batchnorm2dTestCase testCase = GetParam();
+        TestCaseType testCase = this->GetParam();
 
         auto inputDataType = getDataTypeEnumFromType<InputType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
 
         HIPDNN_LOG_INFO("Test is using {} for its random seed", testCase.seed);
 
-        Batchnorm2dTensorBundle graphTensorBundle(testCase.getDims(), testCase.seed, layout);
+        TensorBundle graphTensorBundle(testCase.getDims(), testCase.seed, layout);
 
-        Batchnorm2dTensorBundle cpuTensorBundle(testCase.getDims(), testCase.seed, layout);
+        TensorBundle cpuTensorBundle(testCase.getDims(), testCase.seed, layout);
 
         runMiopenBatchnormFwd(graphTensorBundle, inputDataType, intermediateDataType);
         graphTensorBundle.yTensor.memory().markDeviceModified();
@@ -267,32 +289,62 @@ private:
 };
 
 class IntegrationGpuBatchnormForwardInferenceNchwFp32
-    : public BatchnormForwardInference<float, float>
+    : public BatchnormForwardInference<float, float, Batchnorm2dTestCase>
 {
 };
 
 class IntegrationGpuBatchnormForwardInferenceNchwBfp16
-    : public BatchnormForwardInference<hip_bfloat16, float>
+    : public BatchnormForwardInference<hip_bfloat16, float, Batchnorm2dTestCase>
 {
 };
 
 class IntegrationGpuBatchnormForwardInferenceNchwFp16
-    : public BatchnormForwardInference<half, float>
+    : public BatchnormForwardInference<half, float, Batchnorm2dTestCase>
 {
 };
 
 class IntegrationGpuBatchnormForwardInferenceNhwcFp32
-    : public BatchnormForwardInference<float, float>
+    : public BatchnormForwardInference<float, float, Batchnorm2dTestCase>
 {
 };
 
 class IntegrationGpuBatchnormForwardInferenceNhwcBfp16
-    : public BatchnormForwardInference<hip_bfloat16, float>
+    : public BatchnormForwardInference<hip_bfloat16, float, Batchnorm2dTestCase>
 {
 };
 
 class IntegrationGpuBatchnormForwardInferenceNhwcFp16
-    : public BatchnormForwardInference<half, float>
+    : public BatchnormForwardInference<half, float, Batchnorm2dTestCase>
+{
+};
+
+class IntegrationGpuBatchnormForwardInferenceNcdhwFp32
+    : public BatchnormForwardInference<float, float, Batchnorm3dTestCase>
+{
+};
+
+class IntegrationGpuBatchnormForwardInferenceNcdhwBfp16
+    : public BatchnormForwardInference<hip_bfloat16, float, Batchnorm3dTestCase>
+{
+};
+
+class IntegrationGpuBatchnormForwardInferenceNcdhwFp16
+    : public BatchnormForwardInference<half, float, Batchnorm3dTestCase>
+{
+};
+
+class IntegrationGpuBatchnormForwardInferenceNdhwcFp32
+    : public BatchnormForwardInference<float, float, Batchnorm3dTestCase>
+{
+};
+
+class IntegrationGpuBatchnormForwardInferenceNdhwcBfp16
+    : public BatchnormForwardInference<hip_bfloat16, float, Batchnorm3dTestCase>
+{
+};
+
+class IntegrationGpuBatchnormForwardInferenceNdhwcFp16
+    : public BatchnormForwardInference<half, float, Batchnorm3dTestCase>
 {
 };
 
@@ -309,6 +361,16 @@ std::vector<Batchnorm2dTestCase> getBnFwdInferenceTestCases()
         {.n = 32, .c = 3, .h = 14, .w = 1, .seed = seed},
         {.n = 64, .c = 64, .h = 112, .w = 112, .seed = seed},
         {.n = 64, .c = 512, .h = 14, .w = 14, .seed = seed},
+    };
+}
+
+std::vector<Batchnorm3dTestCase> getBnFwdInference3dTestCases()
+{
+    unsigned int seed = std::random_device{}();
+
+    return {
+        {.n = 2, .c = 3, .d = 3, .h = 1, .w = 1, .seed = seed},
+        {.n = 16, .c = 3, .d = 8, .h = 14, .w = 14, .seed = seed},
     };
 }
 
@@ -367,3 +429,57 @@ TEST_P(IntegrationGpuBatchnormForwardInferenceNhwcFp16, Correctness)
 INSTANTIATE_TEST_SUITE_P(,
                          IntegrationGpuBatchnormForwardInferenceNhwcFp16,
                          testing::ValuesIn(getBnFwdInferenceTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwFp32, Correctness)
+{
+    runBatchnormTest(1e-6f, TensorLayout::NCDHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         IntegrationGpuBatchnormForwardInferenceNcdhwFp32,
+                         testing::ValuesIn(getBnFwdInference3dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwBfp16, Correctness)
+{
+    runBatchnormTest(1e-2_bf, TensorLayout::NCDHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         IntegrationGpuBatchnormForwardInferenceNcdhwBfp16,
+                         testing::ValuesIn(getBnFwdInference3dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNcdhwFp16, Correctness)
+{
+    runBatchnormTest(1e-2_h, TensorLayout::NCDHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         IntegrationGpuBatchnormForwardInferenceNcdhwFp16,
+                         testing::ValuesIn(getBnFwdInference3dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcFp32, Correctness)
+{
+    runBatchnormTest(1e-6f, TensorLayout::NDHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         IntegrationGpuBatchnormForwardInferenceNdhwcFp32,
+                         testing::ValuesIn(getBnFwdInference3dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcBfp16, Correctness)
+{
+    runBatchnormTest(1e-2_bf, TensorLayout::NDHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         IntegrationGpuBatchnormForwardInferenceNdhwcBfp16,
+                         testing::ValuesIn(getBnFwdInference3dTestCases()));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceNdhwcFp16, Correctness)
+{
+    runBatchnormTest(1e-2_h, TensorLayout::NDHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         IntegrationGpuBatchnormForwardInferenceNdhwcFp16,
+                         testing::ValuesIn(getBnFwdInference3dTestCases()));
