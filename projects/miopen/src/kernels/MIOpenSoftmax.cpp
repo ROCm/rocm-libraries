@@ -1,0 +1,636 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
+#endif
+
+#include "float_types.h"
+
+#define NEGATIVE_CUTOFF_VAL -1e20
+
+template <typename T>
+__device__ T logaddexp(T x, T y)
+{
+    T a = max(x, y);
+    T b = min(x, y);
+    T c = b - a;
+
+    return c <= T(NEGATIVE_CUTOFF_VAL) ? max(a, T(NEGATIVE_CUTOFF_VAL))
+                                       : max(T(a + log(T(1) + exp(b - a))), T(NEGATIVE_CUTOFF_VAL));
+}
+
+template <typename TI, typename TO>
+__device__ void softmaxfwd(const TI* __restrict__ x,
+                           TO* __restrict__ y,
+                           const int x_offset,
+                           const int y_offset,
+                           const float alpha,
+                           const float beta)
+{
+    const auto lid = threadIdx.x;
+
+    __shared__ FLOAT_ACCUM ltmp[LOCAL_SIZE];
+    FLOAT_ACCUM tmp;
+
+    if constexpr(NUM_BATCH == 1) // CSR-Vector like approach
+    {
+        /* Entire workgroup works on one spatial_dim.
+         * We use logarthmic reductions to compute max and sum per channel.
+         * This approach reads in the same data thrice from DRAM but is still better
+         * than launching three different kernels.
+         * The workgroup begins by computing the nth image and s (spatial_dim) it
+         * is working on and iterates over the entire grid until finished.
+         */
+
+        // Total number of workgroups launched can be less than the gridsize, hence iterate over.
+        for(auto gid = blockIdx.x; gid < GRID_SIZE; gid += WORKGROUPS)
+        {
+            auto n  = gid / SPATIAL_DIM; // nth image
+            auto s  = gid % SPATIAL_DIM; // spatial dimension (h * w)
+            auto s0 = s / W;
+            auto s1 = s % W;
+
+            FLOAT_ACCUM channel_max;
+
+            if constexpr(!USE_SOFTMAX_FAST)
+            {
+                ltmp[lid] = -MAX_VAL_ACCUM;
+                tmp       = -MAX_VAL_ACCUM;
+
+                // Compute max per channel
+                // Iterate over all the channels one thread is supposed to loop over
+                // and compute max
+                for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
+                {
+                    auto x_idx = x_offset + n * N_STRIDE;
+                    if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                    {
+                        auto i0 = i / (H * W);
+                        auto i1 = (i % (H * W)) / W;
+                        auto i2 = (i % (H * W)) % W;
+                        x_idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                    }
+                    else
+                    {
+                        x_idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                    }
+                    tmp = max(CVT_FLOAT2ACCUM(x[x_idx]), tmp);
+                }
+
+                // Now we have to compute the max from 256 values (one per each thread)
+                ltmp[lid] = tmp;
+                __syncthreads();
+
+                // Logarithmic reduction to compute the max.
+                for(auto i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
+                {
+                    if(lid < i)
+                    {
+                        ltmp[lid] = max(ltmp[lid], ltmp[lid + i]);
+                    }
+                    __syncthreads();
+                }
+
+                channel_max = ltmp[0];
+                __syncthreads();
+            }
+
+            if constexpr(USE_SOFTMAX_LOG)
+            {
+                tmp = NEGATIVE_CUTOFF_VAL;
+            }
+            else
+            {
+                tmp = 0;
+            }
+
+            // Subtract channel_max from each value
+            for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
+            {
+                auto x_idx = x_offset + n * N_STRIDE;
+                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                {
+                    auto i0 = i / (H * W);
+                    auto i1 = (i % (H * W)) / W;
+                    auto i2 = (i % (H * W)) % W;
+                    x_idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                }
+                else
+                {
+                    x_idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                }
+                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[x_idx]);
+
+                // Compute exponent of each value
+                // Then sum all the values touched by this thread
+                if constexpr(USE_SOFTMAX_LOG)
+                {
+                    tmp = logaddexp(value - channel_max, tmp);
+                }
+                else if constexpr(USE_SOFTMAX_FAST)
+                {
+                    tmp += exp(value);
+                }
+                else
+                {
+                    tmp += exp(value - channel_max);
+                }
+            }
+
+            ltmp[lid] = tmp;
+            __syncthreads();
+
+            // Compute sum of 256 values (one for each thread)
+            // Logarithmic reduction to compute the sum
+            for(auto i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
+            {
+                if(lid < i)
+                {
+                    if constexpr(USE_SOFTMAX_LOG)
+                    {
+                        ltmp[lid] = logaddexp(ltmp[lid], ltmp[lid + i]);
+                    }
+                    else
+                    {
+                        ltmp[lid] += ltmp[lid + i];
+                    }
+                }
+                __syncthreads();
+            }
+
+            FLOAT_ACCUM channel_sum = ltmp[0];
+
+            // Normalize each value in the channel by the channel_sum
+            for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
+            {
+                auto idx = n * N_STRIDE;
+                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                {
+                    auto i0 = i / (H * W);
+                    auto i1 = (i % (H * W)) / W;
+                    auto i2 = (i % (H * W)) % W;
+                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                }
+                else
+                {
+                    idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                }
+
+                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[idx + x_offset]);
+
+                // Subtracting max again because we do not write the output of
+                // value-max to DRAM above. Doing a subtraction again is much
+                // faster than writing uncoalesced to DRAM
+                if constexpr(!USE_SOFTMAX_FAST)
+                {
+                    value = value - channel_max;
+                }
+                if constexpr(!USE_SOFTMAX_LOG)
+                {
+                    value = exp(value);
+                }
+
+                if constexpr(USE_SOFTMAX_LOG)
+                {
+                    value -= channel_sum;
+                }
+                else
+                {
+                    value /= channel_sum;
+                }
+
+                value = value * FLOAT_ACCUM(alpha) +
+                        CVT_FLOAT2ACCUM(y[idx + y_offset]) * FLOAT_ACCUM(beta);
+                y[idx + y_offset] = CVT_ACCUM2FLOAT(value);
+            }
+        }
+    }
+    else // CSR-Stream like approach
+    {
+        /* Each workgroup is computing the softmax for NUM_BATCH spatial_dims ala CSR-Stream.
+         * The number of threads iterting over channels to compute softmax for one batch is
+         * BATCH_SIZE. The number of values each thread works on is U_BATCH_SIZE (read micro batch
+         * size). Each batch in the workgroup works on its nth image and s (spatial_dim). E.g. a 256
+         * thread workgroup with c=31 has 8 batches and a batchsize of 32. The number of workgroups
+         * launched are exactly the number as required hence, there is no for-loop.
+         */
+
+        const auto gid = blockIdx.x;
+
+        // ID of the thread within the batch
+        const auto batch_lid = lid & (BATCH_SIZE - 1); // thread specific channel_st
+        const auto batch     = lid / BATCH_SIZE;       // which spatial_dim or pixel
+
+        // Batch specific n and s
+        const auto batch_n  = (NUM_BATCH * gid + batch) / SPATIAL_DIM; // nth image
+        const auto batch_s  = (NUM_BATCH * gid + batch) % SPATIAL_DIM; // which spatial_dim/pixel
+        const auto batch_s0 = batch_s / W;
+        const auto batch_s1 = batch_s % W;
+
+        if constexpr(!USE_SOFTMAX_FAST)
+        {
+            ltmp[lid] = -MAX_VAL;
+            tmp       = -MAX_VAL;
+        }
+
+        FLOAT_ACCUM values[U_BATCH_SIZE];
+        for(FLOAT_ACCUM& value : values)
+        {
+            value = -MAX_VAL;
+        }
+
+        // Compute max per channel
+        // BATCH_SIZE threads iterate over the channels
+        const auto index0 = batch_lid / BATCH_SIZE;
+        auto index        = index0;
+        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
+        {
+            if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
+            {
+                auto idx = x_offset + batch_n * N_STRIDE;
+                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                {
+                    auto i0 = i / (H * W);
+                    auto i1 = (i % (H * W)) / W;
+                    auto i2 = (i % (H * W)) % W;
+                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                }
+                else
+                {
+                    idx += i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                }
+
+                values[index] = CVT_FLOAT2ACCUM(x[idx]);
+                if constexpr(!USE_SOFTMAX_FAST)
+                {
+                    tmp = max(values[index], tmp);
+                }
+            }
+        }
+
+        FLOAT_ACCUM channel_max;
+        if constexpr(!USE_SOFTMAX_FAST)
+        {
+            // Now we have to compute the max from 256 values (one per each thread)
+            ltmp[lid] = tmp;
+            __syncthreads();
+
+            // Logarithmic reduction to compute the max.
+            for(auto i = BATCH_SIZE >> 1; i > 0; i >>= 1)
+            {
+                if(batch_lid < i)
+                {
+                    ltmp[lid] = max(ltmp[lid], ltmp[lid + i]);
+                }
+                __syncthreads();
+            }
+
+            channel_max = ltmp[batch * BATCH_SIZE];
+            __syncthreads();
+        }
+
+        if constexpr(USE_SOFTMAX_LOG)
+        {
+            tmp = NEGATIVE_CUTOFF_VAL;
+        }
+        else
+        {
+            tmp = 0;
+        }
+
+        // Subtract channel_max from each value
+        index = index0;
+        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
+        {
+            // Compute exponent of each value
+            // Then sum all the values touched by this thread
+            FLOAT_ACCUM value = values[index];
+            if constexpr(!USE_SOFTMAX_FAST)
+            {
+                value -= channel_max;
+            }
+            if constexpr(!USE_SOFTMAX_LOG)
+            {
+                value = exp(value);
+            }
+            if constexpr(USE_SOFTMAX_LOG)
+            {
+                tmp = logaddexp(tmp, value);
+            }
+            else
+            {
+                tmp += value;
+            }
+
+            values[index] = value;
+        }
+
+        ltmp[lid] = tmp;
+        __syncthreads();
+
+        // Compute sum of 256 values (one for each thread)
+        // Logarithmic reduction to compute the sum
+        for(auto i = BATCH_SIZE >> 1; i > 0; i >>= 1)
+        {
+            if(batch_lid < i)
+            {
+                if constexpr(USE_SOFTMAX_LOG)
+                {
+                    ltmp[lid] = logaddexp(ltmp[lid], ltmp[lid + i]);
+                }
+                else
+                {
+                    ltmp[lid] += ltmp[lid + i];
+                }
+            }
+            __syncthreads();
+        }
+
+        FLOAT_ACCUM channel_sum = ltmp[batch * BATCH_SIZE];
+
+        // Normalize each value in the channel by the channel_sum
+        index = index0;
+        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
+        {
+            if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
+            {
+                auto y_idx = y_offset + batch_n * N_STRIDE;
+                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                {
+                    auto i0 = i / (H * W);
+                    auto i1 = (i % (H * W)) / W;
+                    auto i2 = (i % (H * W)) % W;
+                    y_idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                }
+                else
+                {
+                    y_idx += i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                }
+
+                auto v_idx = index;
+
+                if constexpr(USE_SOFTMAX_LOG)
+                {
+                    values[v_idx] -= channel_sum;
+                }
+                else
+                {
+                    values[v_idx] /= channel_sum;
+                }
+
+                values[v_idx] = values[v_idx] * FLOAT_ACCUM(alpha) +
+                                CVT_FLOAT2ACCUM(y[y_idx]) * FLOAT_ACCUM(beta);
+
+                y[y_idx] = CVT_ACCUM2FLOAT(values[v_idx]);
+            }
+        }
+    }
+}
+
+template <typename TI, typename TO>
+__device__ void softmaxbwd(const TI* __restrict__ y,
+                           const TI* __restrict__ dy,
+                           TO* __restrict__ dx,
+                           const int y_offset,
+                           const int dy_offset,
+                           const int dx_offset,
+                           const float alpha,
+                           const float beta)
+{
+    __shared__ FLOAT_ACCUM ltmp[LOCAL_SIZE];
+
+    const auto lid = threadIdx.x;
+
+    if constexpr(NUM_BATCH == 1) // CSR-Vector like approach
+    {
+        // Total number of workgroups launched can be less than the gridsize, hence iterate over.
+        for(auto gid = blockIdx.x; gid < GRID_SIZE; gid += WORKGROUPS)
+        {
+            auto n  = gid / SPATIAL_DIM; // nth image
+            auto s  = gid % SPATIAL_DIM; // spatial dimension (H * W)
+            auto s0 = s / W;
+            auto s1 = s % W;
+
+            // Compute dot product per channel
+            // Iterate over all the channels one thread is supposed to loop over
+            // and compute dot-product
+            FLOAT_ACCUM channel_dot = static_cast<FLOAT_ACCUM>(0);
+            for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
+            {
+                auto idx = n * N_STRIDE;
+                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                {
+                    auto i0 = i / (H * W);
+                    auto i1 = (i % (H * W)) / W;
+                    auto i2 = (i % (H * W)) % W;
+                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                }
+                else
+                {
+                    idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                }
+
+                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[idx + dy_offset]);
+                if constexpr(!USE_SOFTMAX_LOG)
+                {
+                    value *= CVT_FLOAT2ACCUM(y[idx + y_offset]);
+                }
+                channel_dot += value;
+            }
+
+            // Now we have to compute the sum from 256 values (one per each thread)
+            ltmp[lid] = channel_dot;
+            __syncthreads();
+
+            // Logarithmic reduction to compute the sum.
+            for(auto i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
+            {
+                if(lid < i)
+                {
+                    ltmp[lid] += ltmp[lid + i];
+                }
+                __syncthreads();
+            }
+
+            channel_dot = ltmp[0];
+
+            // Subtract and element-wise multiplication
+            for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
+            {
+                auto idx = n * N_STRIDE;
+                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                {
+                    auto i0 = i / (H * W);
+                    auto i1 = (i % (H * W)) / W;
+                    auto i2 = (i % (H * W)) % W;
+                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                }
+                else
+                {
+                    idx += i * C_STRIDE + s0 * H_STRIDE + s1;
+                }
+
+                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[idx + dy_offset]);
+                if constexpr(USE_SOFTMAX_LOG)
+                {
+                    value -= channel_dot * exp(CVT_FLOAT2ACCUM(y[idx + y_offset]));
+                }
+                else
+                {
+                    value = (value - channel_dot) * CVT_FLOAT2ACCUM(y[idx + y_offset]);
+                }
+                value = value * FLOAT_ACCUM(alpha) +
+                        CVT_FLOAT2ACCUM(dx[idx + dx_offset]) * FLOAT_ACCUM(beta);
+                dx[idx + dx_offset] = CVT_ACCUM2FLOAT(value);
+            }
+        }
+    }
+    else // CSR-Stream like approach
+    {
+        const auto gid = blockIdx.x;
+
+        // ID of the thread within the batch
+        const auto batch_lid = lid & (BATCH_SIZE - 1); // thread specific channel_st
+        const auto batch     = lid / BATCH_SIZE;       // which spatial_dim or pixel
+
+        // Batch specific n and s
+        const auto batch_n  = (NUM_BATCH * gid + batch) / SPATIAL_DIM; // nth image
+        const auto batch_s  = (NUM_BATCH * gid + batch) % SPATIAL_DIM; // which spatial_dim/pixel
+        const auto batch_s0 = batch_s / W;
+        const auto batch_s1 = batch_s % W;
+        FLOAT_ACCUM channel_dot = static_cast<FLOAT_ACCUM>(0);
+
+        // stores all the values touched by one thread so that we do not have load
+        // again as the CSR-Vector approach
+        FLOAT_ACCUM y_values[U_BATCH_SIZE]  = {0};
+        FLOAT_ACCUM dy_values[U_BATCH_SIZE] = {0};
+
+        // Compute dot product per channel
+        // BATCH_SIZE threads iterate over the channels
+        const auto index0 = batch_lid / BATCH_SIZE;
+        auto index        = index0;
+        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
+        {
+            if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
+            {
+                auto idx = batch_n * N_STRIDE;
+                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                {
+                    auto i0 = i / (H * W);
+                    auto i1 = (i % (H * W)) / W;
+                    auto i2 = (i % (H * W)) % W;
+                    idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                }
+                else
+                {
+                    idx += i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                }
+
+                y_values[index]  = CVT_FLOAT2ACCUM(y[idx + y_offset]);
+                dy_values[index] = CVT_FLOAT2ACCUM(dy[idx + dx_offset]);
+                auto value       = dy_values[index];
+                if constexpr(!USE_SOFTMAX_LOG)
+                {
+                    value *= y_values[index];
+                }
+                channel_dot += value;
+            }
+        }
+
+        // Now we have to compute the sum from 256 values (one per each thread)
+        ltmp[lid] = channel_dot;
+        __syncthreads();
+
+        // Logarithmic reduction to compute the sum.
+        for(auto i = BATCH_SIZE >> 1; i > 0; i >>= 1)
+        {
+            if(batch_lid < i)
+            {
+                ltmp[lid] += ltmp[lid + i];
+            }
+            __syncthreads();
+        }
+
+        channel_dot = ltmp[batch * BATCH_SIZE];
+
+        // Subtract and element-wise multiplication
+        index = index0;
+        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
+        {
+            if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
+            {
+                auto dx_idx = dx_offset + batch_n * N_STRIDE;
+                if constexpr(USE_SOFTMAX_MODE_INSTANCE)
+                {
+                    auto i0 = i / (H * W);
+                    auto i1 = (i % (H * W)) / W;
+                    auto i2 = (i % (H * W)) % W;
+                    dx_idx += i0 * C_STRIDE + i1 * H_STRIDE + i2;
+                }
+                else
+                {
+                    dx_idx += i * C_STRIDE + batch_s0 * H_STRIDE + batch_s1;
+                }
+
+                if constexpr(USE_SOFTMAX_LOG)
+                {
+                    dy_values[index] -= channel_dot * exp(y_values[index]);
+                }
+                else
+                {
+                    dy_values[index] = (dy_values[index] - channel_dot) * y_values[index];
+                }
+
+                auto value = dy_values[index] * FLOAT_ACCUM(alpha) +
+                             CVT_FLOAT2ACCUM(dx[dx_idx]) * FLOAT_ACCUM(beta);
+                dx[dx_idx] = CVT_ACCUM2FLOAT(value);
+            }
+        }
+    }
+}
+
+extern "C" __global__ void SoftmaxFwd(const INPUT_TYPE* __restrict__ x,
+                                      OUTPUT_TYPE* __restrict__ y,
+                                      const int x_offset,
+                                      const int y_offset,
+                                      const float alpha,
+                                      const float beta)
+{
+    softmaxfwd<INPUT_TYPE, OUTPUT_TYPE>(x, y, x_offset, y_offset, alpha, beta);
+}
+
+extern "C" __global__ void SoftmaxBwd(const INPUT_TYPE* __restrict__ y,
+                                      const INPUT_TYPE* __restrict__ dy,
+                                      OUTPUT_TYPE* __restrict__ dx,
+                                      const int y_offset,
+                                      const int dy_offset,
+                                      const int dx_offset,
+                                      const float alpha,
+                                      const float beta)
+{
+    softmaxbwd<INPUT_TYPE, OUTPUT_TYPE>(y, dy, dx, y_offset, dy_offset, dx_offset, alpha, beta);
+}

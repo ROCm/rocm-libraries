@@ -59,14 +59,11 @@ void AddTestCasesForDifferentScales(std::vector<TestCase>& test_cases,
                                     int mode,
                                     const std::vector<std::vector<float>>& scales)
 {
-    /// \todo Apply mix-precision in softmax to improve the stability of fp16
-    if(miopen_type<T>{} == miopenHalf)
+    // Result does not fit in data type
+    if(miopen_type<T>{} == miopenHalf && in_dim[1] * in_dim[2] * in_dim[3] >= 2048 &&
+       mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
     {
-        if((in_dim[1] * in_dim[2] * in_dim[3] >= 2048) && mode == MIOPEN_SOFTMAX_MODE_INSTANCE)
-            return;
-
-        if(in_dim[1] >= 96 && in_dim[2] >= 14 && in_dim[3] >= 14 && algo == MIOPEN_SOFTMAX_FAST)
-            return;
+        return;
     }
 
     for(const auto& scale : scales)
@@ -86,20 +83,6 @@ std::vector<TestCase> GenCases()
     int batch_factor = 0;
 
     std::set<std::vector<size_t>> in_dim_set = get_inputs<size_t>(batch_factor);
-
-    /// \todo Resolve this workaround. Random failure on Jenkins (ROCm3.0):
-    /// --float --input-dim 1 480 128 256 --algorithm 2 --mode 1 --scales 1 0 --tolerance 8000
-    /// FAILED: inf
-    in_dim_set.erase({1, 480, 128, 256});
-
-    /// \todo Resolve this workaround. Regular failures on Radeon VII, ROCm 3.3:
-    /// --float --input-dim 1 1 8 8 --algorithm 0 --mode 1 --scales 1 0 --tolerance 8000
-    /// FAILED: -nan
-    in_dim_set.erase({1, 1, 8, 8});
-    in_dim_set.erase({1, 1, 14, 14});
-    in_dim_set.erase({1, 1, 27, 27});
-    in_dim_set.erase({1, 32, 7, 7});
-    in_dim_set.erase({1, 32, 8, 8});
 
     std::vector<int> algos                 = {0, 1, 2};
     std::vector<int> modes                 = {0, 1};
@@ -156,7 +139,7 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
         std::vector<T> tensorGpuDataForward = GetForwardGpu();
 
         // check forward results
-        CompareResults(tensorGpuDataForward, tensorCpuDataForward);
+        CompareResults(tensorGpuDataForward, tensorCpuDataForward, true);
 
         dout   = tensor<T>{test_case.in_dim}.generate([&](int n, int c, int h, int w) {
             T x      = input(n, c, h, w);
@@ -169,7 +152,7 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
         std::vector<T> tensorGpuDataBackward = GetBackwardGpu();
 
         // check backward results
-        CompareResults(tensorGpuDataBackward, tensorCpuDataBackward);
+        CompareResults(tensorGpuDataBackward, tensorCpuDataBackward, false);
     }
 
     std::vector<T> GetForwardCpu() const
@@ -324,7 +307,6 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
     {
         const TestCase& test_case = GetParam();
         auto&& handle             = get_handle();
-        // auto out      = output;
 
         auto in_dev  = handle.Write(input.data);
         auto out_dev = handle.Write(output.data);
@@ -462,7 +444,9 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
         return handle.Read<T>(din_dev, dinput.data.size());
     }
 
-    void CompareResults(const std::vector<T>& tensorGPUData, const std::vector<T>& tensorCPUData)
+    void CompareResults(const std::vector<T>& tensorGPUData,
+                        const std::vector<T>& tensorCPUData,
+                        bool isForward)
     {
         const TestCase& test_case = GetParam();
 
@@ -481,7 +465,8 @@ struct SoftmaxCommon : public testing::TestWithParam<TestCase>
             << "Tensor Dims: " << test_case.in_dim[0] << ", " << test_case.in_dim[1] << ", "
             << test_case.in_dim[2] << ", " << test_case.in_dim[3] << ", "
             << "Alpha / Beta: " << test_case.scale[0] << ", " << test_case.scale[1]
-            << ". Algo: " << test_case.algo << ". Mode: " << test_case.mode << std::endl;
+            << ". Algo: " << test_case.algo << ". Mode: " << test_case.mode
+            << ". Direction: " << (isForward ? "Forward" : "Backward") << std::endl;
     }
 
 private:
