@@ -317,7 +317,7 @@ namespace rocsparse
                 seq_ptr);
         }
 
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(seq_ptr));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(seq_ptr, handle->stream));
         return rocsparse_status_success;
     }
 }
