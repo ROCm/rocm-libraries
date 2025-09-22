@@ -88,6 +88,50 @@ int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormForwardRunHost2(miopenTensorDescriptor_t xDesc,
+                                      Tgpu* x,
+                                      Tgpu* weight,
+                                      Tcheck* yhost,
+                                      Tcheck* rstdhost,
+                                      float eps,
+                                      miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(xDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    par_ford(outer_size)([&](int32_t o) {
+        Tcheck pvar = static_cast<Tcheck>(0);
+
+        ford(inner_size)([&](int32_t i) {
+            Tcheck tmp = static_cast<Tcheck>(x[o * inner_size + i]);
+            pvar += tmp * tmp;
+        });
+
+        pvar         = pvar / inner_size;
+        Tcheck prstd = static_cast<Tcheck>(1.0) / sqrt(pvar + eps);
+
+        rstdhost[o] = prstd;
+
+        ford(inner_size)([&](int32_t i) {
+            Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
+                                 ? static_cast<Tcheck>(1)
+                                 : static_cast<Tcheck>(weight[i]);
+            yhost[o * inner_size + i] =
+                (static_cast<Tcheck>(x[o * inner_size + i])) * prstd * pweight;
+        });
+    });
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                       Tgpu* dy,
                                       Tgpu* x,
@@ -140,6 +184,55 @@ int32_t mloT5LayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormBackwardRunHost2(miopenTensorDescriptor_t dyDesc,
+                                       Tgpu* dy,
+                                       Tgpu* x,
+                                       Tgpu* weight,
+                                       Tcheck* rstdhost,
+                                       Tcheck* dxhost,
+                                       miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(dyDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    par_ford(outer_size)([&](int32_t o) {
+        Tcheck sum = static_cast<Tcheck>(0);
+
+        ford(inner_size)([&](int32_t i) {
+            Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
+                                 ? static_cast<Tcheck>(1)
+                                 : static_cast<Tcheck>(weight[i]);
+            Tcheck pdy = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : static_cast<Tcheck>(0);
+            Tcheck px  = static_cast<Tcheck>(x[o * inner_size + i]);
+            sum += pdy * px * pweight;
+        });
+
+        Tcheck s     = static_cast<Tcheck>(1) / inner_size;
+        Tcheck prstd = rstdhost[o];
+        Tcheck a     = sum * prstd * prstd * prstd * s;
+
+        ford(inner_size)([&](int32_t i) {
+            Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
+                                 ? static_cast<Tcheck>(1)
+                                 : static_cast<Tcheck>(weight[i]);
+            Tcheck pdy = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : static_cast<Tcheck>(0);
+
+            Tcheck val = prstd * pdy * pweight - a * static_cast<Tcheck>(x[o * inner_size + i]);
+            dxhost[o * inner_size + i] = static_cast<Tcheck>(val);
+        });
+    });
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormBackckwardweightRunHost(
     miopenTensorDescriptor_t dyDesc, Tgpu* dy, Tgpu* x, Tcheck* rstdhost, Tcheck* dwhost)
 {
@@ -168,6 +261,37 @@ int32_t mloT5LayerNormBackckwardweightRunHost(
 
         dwhost[o] = sum;
     }
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormBackckwardweightRunHost2(
+    miopenTensorDescriptor_t dyDesc, Tgpu* dy, Tgpu* x, Tcheck* rstdhost, Tcheck* dwhost)
+{
+    auto dims         = miopen::deref(dyDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    par_ford(inner_size)([&](int32_t o) {
+        Tcheck sum = static_cast<Tcheck>(0);
+
+        ford(outer_size)([&](uint64_t i) {
+            Tcheck prstd = static_cast<Tcheck>(rstdhost[i]);
+            Tcheck pdy   = dy ? static_cast<Tcheck>(dy[i * inner_size + o]) : 0;
+            Tcheck px    = static_cast<Tcheck>(x[i * inner_size + o]);
+
+            sum += pdy * px * prstd;
+        });
+
+        dwhost[o] = sum;
+    });
     return ret;
 }
 
@@ -389,7 +513,7 @@ int T5LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     for(int i = 0; i < weight_sz; i++)
     {
-        if(mode == MIOPEN_ELEMENTWISE_AFFINE)
+        if(mode == MIOPEN_ELEMENTWISE_AFFINE_T5)
             weight[i] = Tgpu1val;
         else
             weight[i] = prng::gen_A_to_B<Tgpu>(Tgpuminus1val, Tgpu1val);
