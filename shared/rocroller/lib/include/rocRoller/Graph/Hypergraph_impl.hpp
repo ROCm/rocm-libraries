@@ -411,8 +411,8 @@ namespace rocRoller
             }
 
             Location rv{.id       = id,
-                        .incoming = m_incidences.getSrcs(id).to<std::vector>(),
-                        .outgoing = m_incidences.getDsts(id).to<std::vector>(),
+                        .incoming = m_incidences.getSrcs(id),
+                        .outgoing = m_incidences.getDsts(id),
                         .element  = getElement(id)};
 
             m_locationCache[id] = rv;
@@ -783,11 +783,13 @@ namespace rocRoller
                         ShowValue(id));
             if constexpr(Dir == Direction::Downstream)
             {
-                co_yield m_incidences.getDsts(id);
+                for(int dst : m_incidences.getDsts(id))
+                    co_yield dst;
             }
             else
             {
-                co_yield m_incidences.getSrcs(id);
+                for(int src : m_incidences.getSrcs(id))
+                    co_yield src;
             }
         }
 
@@ -1143,7 +1145,7 @@ namespace rocRoller
                         ShowValue(tail),
                         ShowValue(head));
 
-            auto dsts = m_incidences.getDsts(tail).to<std::vector>();
+            auto dsts = m_incidences.getDsts(tail);
             for(int src : m_incidences.getSrcs(head))
             {
                 auto rv = std::find(dsts.begin(), dsts.end(), src);

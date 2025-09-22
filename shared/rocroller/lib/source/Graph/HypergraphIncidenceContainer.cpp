@@ -53,26 +53,18 @@ namespace rocRoller::Graph
             std::erase(connections.second, id);
     }
 
-    Generator<int> HypergraphIncidenceContainer::getSrcs(int id) const
+    std::vector<int> HypergraphIncidenceContainer::getSrcs(int id) const
     {
         if(!m_incidencesByDst.contains(id))
-            co_return;
-        auto srcs = m_incidencesByDst.at(id);
-        for(int src : srcs)
-        {
-            co_yield src;
-        }
+            return {};
+        return m_incidencesByDst.at(id);
     }
 
-    Generator<int> HypergraphIncidenceContainer::getDsts(int id) const
+    std::vector<int> HypergraphIncidenceContainer::getDsts(int id) const
     {
         if(!m_incidencesBySrc.contains(id))
-            co_return;
-        auto dsts = m_incidencesBySrc.at(id);
-        for(int dst : dsts)
-        {
-            co_yield dst;
-        }
+            return {};
+        return m_incidencesBySrc.at(id);
     }
 
     size_t HypergraphIncidenceContainer::getSrcCount(int id) const

@@ -75,17 +75,17 @@ namespace rocRoller
              * @brief Get all connected sources
              * 
              * @param id Graph id of element to be queried
-             * @return Generator<int> Yields a series of graph indices for incoming elements
+             * @return std::vector<int> a series of graph indices for incoming elements
              */
-            Generator<int> getSrcs(int id) const;
+            std::vector<int> getSrcs(int id) const;
 
             /**
              * @brief Get all connected destinations
              * 
              * @param id Graph id of element to be queried
-             * @return Generator<int> Yields a series of graph indices for outgoing elements
+             * @return std::vector<int> a series of graph indices for outgoing elements
              */
-            Generator<int> getDsts(int id) const;
+            std::vector<int> getDsts(int id) const;
 
             /**
              * @brief Get a count of all connected sources to element at id
