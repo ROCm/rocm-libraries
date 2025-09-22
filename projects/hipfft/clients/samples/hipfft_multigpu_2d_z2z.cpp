@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -24,14 +24,14 @@
 #include <vector>
 
 #include <hipfft/hipfft.h>
+#include <hipfft/hipfftXt.h>
+
 
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
-
-#include "../hipfft_params.h"
 
 int main()
 {
@@ -78,7 +78,7 @@ int main()
     // Create the multi-gpu plan
     hipLibXtDesc* desc; // input descriptor
 
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
+    hipfftHandle plan{};
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
