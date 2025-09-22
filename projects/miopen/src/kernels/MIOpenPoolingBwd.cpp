@@ -24,13 +24,8 @@
  *
  *******************************************************************************/
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
 #include <hip/hip_runtime.h>
-#endif
-
-#include <limits.h>
-
-#include "miopen_limits.hpp"
+#include <climits>
 #include "float_types.h"
 #include "pooling_functions.h"
 
@@ -52,20 +47,19 @@
 #define AVERAGE_OPS 0
 #endif
 
-#define MLO_POOLBWD_GROUP_SZ2 1
+constexpr auto MLO_POOLBWD_GROUP_SZ2 = 1;
 
-#define MLO_POOLBWD_LCL_DATA_WIDTH                                                   \
-    ((MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX + MLO_POOLING_KERNEL_SZ0 + \
-      MLO_POOLING_STRIDE0 - 2) /                                                     \
-     MLO_POOLING_STRIDE0)
-#define MLO_POOLBWD_LCL_DATA_HEIGHT                                                 \
-    ((MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX + MLO_POOLING_KERNEL_SZ1 + \
-      MLO_POOLING_STRIDE1 - 2) /                                                    \
-     MLO_POOLING_STRIDE1)
+constexpr auto MLO_POOLBWD_LCL_DATA_WIDTH = (MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX +
+                                             MLO_POOLING_KERNEL_SZ0 + MLO_POOLING_STRIDE0 - 2) /
+                                            MLO_POOLING_STRIDE0;
+constexpr auto MLO_POOLBWD_LCL_DATA_HEIGHT = (MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX +
+                                              MLO_POOLING_KERNEL_SZ1 + MLO_POOLING_STRIDE1 - 2) /
+                                             MLO_POOLING_STRIDE1;
 
 constexpr int block_size = MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_GROUP_SZ2;
 
 #if AVERAGE_OPS
+
 extern "C" __global__ __launch_bounds__(block_size) //
     void mloPoolingAveBwd(const FLOAT* top_diff,
                           FLOAT* bot_diff,
@@ -89,7 +83,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
     int y       = blockIdx.y * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
     int lcl_id0 = threadIdx.x;
     int lcl_id1 = threadIdx.y;
-    //		int lcl_id = (lcl_id1 << MLO_POOLBWD_GROUP_LG2SZ1) + lcl_id0;
+    //        int lcl_id = (lcl_id1 << MLO_POOLBWD_GROUP_LG2SZ1) + lcl_id0;
     int ob = blockIdx.z * blockDim.z + threadIdx.z; // outputs * batch_sz
     int b  = ob / mlo_n_outputs;
     int o  = ob - b * mlo_n_outputs;
@@ -107,7 +101,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
     {
         for(int l = 0; l < MLO_POOLBWD_N_HORIZ_OUT_PIX; l++)
         {
-            res[k][l] = (FLOAT_ACCUM)0;
+            res[k][l] = FLOAT_ACCUM{0};
         }
     }
 
@@ -123,7 +117,6 @@ extern "C" __global__ __launch_bounds__(block_size) //
 
         for(int ti = lcl_id0; ti < MLO_POOLBWD_LCL_DATA_WIDTH; ti += MLO_POOLBWD_GROUP_SZ0)
         {
-
             int top_x_act = top_x + ti;
 
             bool invisibleX = (top_x_act >= mlo_top_width);
@@ -136,10 +129,10 @@ extern "C" __global__ __launch_bounds__(block_size) //
 
             lcl_top_diff[lcl_off_v + ti] = top_val;
 #if 0
-				if (lcl_id1==0&&o==0&&b==0)
-				{
-				  printf("K:in: %d %d %d   %f\n", top_off + top_y_off + top_x_act, top_y_act, top_x_act, top_val);
-				}
+            if (lcl_id1 == 0 && o == 0 && b == 0)
+            {
+                printf("K:in: %d %d %d   %f\n", top_off + top_y_off + top_x_act, top_y_act, top_x_act, top_val);
+            }
 #endif
         }
     }
@@ -179,27 +172,25 @@ extern "C" __global__ __launch_bounds__(block_size) //
                     int wstart = top_w * MLO_POOLING_STRIDE0 - mlo_pad0;
                     int wend   = min(wstart + MLO_POOLING_KERNEL_SZ0, mlo_bot_width);
                     wstart     = max(wstart, 0);
-                    int pool_size =
-#if MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE
-                        MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1;
-                    (void)wend;
-                    (void)hend;
-#else
-                        (hend - hstart) * (wend - wstart);
-#endif
+
+                    int pool_size = MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE //
+                                        ? MLO_POOLING_KERNEL_SZ0 * MLO_POOLING_KERNEL_SZ1
+                                        : (hend - hstart) * (wend - wstart);
                     pool_size     = (pool_size == 0) ? 1 : pool_size;
+
                     int lcl_top_h = top_h - top_y;
                     int lcl_top_w = top_w - top_x;
                     FLOAT_ACCUM add_val =
                         CVT_FLOAT2ACCUM(
                             lcl_top_diff[lcl_top_h * MLO_POOLBWD_LCL_DATA_WIDTH + lcl_top_w]) /
                         CVT_INTEGRAL2ACCUM(pool_size);
+
                     res[k][l] += add_val;
 #if 0
-				if (bot_x+l==6&&bot_y+k==0&&o==3&&b==0)
-				{
-				  printf("K:com: %d %d %d %d %d %d   %10.8f %10.8f %10.8f %d\n", k,l,top_h, top_w, lcl_top_h, lcl_top_w, res[k][l], add_val, lcl_top_diff[lcl_top_h *  MLO_POOLBWD_LCL_DATA_WIDTH + lcl_top_w], pool_size);
-				}
+                    if (bot_x+l==6&&bot_y+k==0&&o==3&&b==0)
+                    {
+                        printf("K:com: %d %d %d %d %d %d   %10.8f %10.8f %10.8f %d\n", k,l,top_h, top_w, lcl_top_h, lcl_top_w, res[k][l], add_val, lcl_top_diff[lcl_top_h *  MLO_POOLBWD_LCL_DATA_WIDTH + lcl_top_w], pool_size);
+                    }
 #endif
                 }
             }
@@ -216,18 +207,20 @@ extern "C" __global__ __launch_bounds__(block_size) //
             {
                 bot_diff[bot_off + k * mlo_botdf_str + l] = CVT_ACCUM2FLOAT(res[k][l]);
 #if 0
-					if (lcl_id0==0&&lcl_id1==0&&o==0&&b==0)
-					{
-						printf("K:out: %d %d %d  %f\n", bot_off + k * mlo_botdf_str +l, k, l, bot_diff[bot_off + k * mlo_botdf_str +l]);
-					}
+                if (lcl_id0==0&&lcl_id1==0&&o==0&&b==0)
+                {
+                    printf("K:out: %d %d %d  %f\n", bot_off + k * mlo_botdf_str +l, k, l, bot_diff[bot_off + k * mlo_botdf_str +l]);
+                }
 #endif
             }
         }
     }
 }
+
 #endif // AVERAGE_OPS
 
 #if MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
+
 extern "C" __global__ __launch_bounds__(block_size) //
     void mloPoolingMaxBwd(const FLOAT* top_df,
                           FLOAT* bot_df,
@@ -338,25 +331,25 @@ extern "C" __global__ __launch_bounds__(block_size) //
                 {
                     int lcl_th = th - top_y;
                     int lcl_tw = tw - top_x;
-#if USE_IMG_INDEX
-                    index_t img_idx = b_x + b_y * mlo_bot_width;
-#else
-                    int filter_x   = b_x - tw * MLO_POOLING_STRIDE0 + mlo_pad0;
-                    int filter_y   = b_y - th * MLO_POOLING_STRIDE1 + mlo_pad1;
-                    int filter_idx = filter_x + filter_y * MLO_POOLING_KERNEL_SZ0;
-#endif
+
                     bool visible = (lcl_th < MLO_POOLBWD_LCL_DATA_HEIGHT) &&
                                    (lcl_tw < MLO_POOLBWD_LCL_DATA_WIDTH);
                     int lcl_idx = visible ? (lcl_th * MLO_POOLBWD_LCL_DATA_WIDTH + lcl_tw) : 0;
 
-                    bool match = visible &&
-#if USE_IMG_INDEX
-                                 (img_idx == lcl_mask[lcl_idx])
-#else
-                                 (filter_idx == lcl_mask[lcl_idx]) && (filter_x >= 0) &&
-                                 (filter_y >= 0)
-#endif
-                        ;
+                    bool match = visible;
+                    if constexpr(USE_IMG_INDEX)
+                    {
+                        index_t img_idx = b_x + b_y * mlo_bot_width;
+                        match           = match && (img_idx == lcl_mask[lcl_idx]);
+                    }
+                    else
+                    {
+                        const int filter_x   = b_x - tw * MLO_POOLING_STRIDE0 + mlo_pad0;
+                        const int filter_y   = b_y - th * MLO_POOLING_STRIDE1 + mlo_pad1;
+                        const int filter_idx = filter_x + filter_y * MLO_POOLING_KERNEL_SZ0;
+                        match = match && (filter_idx == lcl_mask[lcl_idx]) && (filter_x >= 0) &&
+                                (filter_y >= 0);
+                    }
 
                     // FLOAT add_val = lcl_top_df[lcl_idx] * match;
                     // FLOAT add_val = match ? lcl_top_df[lcl_idx] : (FLOAT)0;
@@ -383,4 +376,5 @@ extern "C" __global__ __launch_bounds__(block_size) //
         }
     }
 }
+
 #endif // MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
