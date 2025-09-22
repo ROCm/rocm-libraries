@@ -643,7 +643,7 @@ catch(...)
  ******************************************************************************/
 extern "C" bool rocblas_device_malloc_success(rocblas_device_malloc_base* ptr)
 {
-    using _device_malloc = decltype(rocblas_handle{}->device_malloc(0));
+    using _device_malloc = decltype(rocblas_handle {} -> device_malloc(0));
     return ptr && *static_cast<_device_malloc*>(ptr);
 }
 
@@ -659,7 +659,7 @@ extern "C" bool rocblas_device_malloc_success(rocblas_device_malloc_base* ptr)
 extern "C" rocblas_status rocblas_device_malloc_ptr(rocblas_device_malloc_base* ptr, void** res)
 try
 {
-    using _device_malloc = decltype(rocblas_handle{}->device_malloc(0));
+    using _device_malloc = decltype(rocblas_handle {} -> device_malloc(0));
     if(!ptr || !res)
         return rocblas_status_invalid_pointer;
     *res = static_cast<void*>(*static_cast<_device_malloc*>(ptr));
@@ -684,7 +684,7 @@ extern "C" rocblas_status
     rocblas_device_malloc_get(rocblas_device_malloc_base* ptr, size_t index, void** res)
 try
 {
-    using _device_malloc = decltype(rocblas_handle{}->device_malloc(0));
+    using _device_malloc = decltype(rocblas_handle {} -> device_malloc(0));
     if(!ptr || !res)
         return rocblas_status_invalid_pointer;
     *res = (*static_cast<_device_malloc*>(ptr))[index];
@@ -703,7 +703,7 @@ catch(...)
 */
 extern "C" rocblas_status rocblas_device_malloc_free(rocblas_device_malloc_base* ptr)
 {
-    using _device_malloc = decltype(rocblas_handle{}->device_malloc(0));
+    using _device_malloc = decltype(rocblas_handle {} -> device_malloc(0));
     delete static_cast<_device_malloc*>(ptr);
     return rocblas_status_success;
 }
