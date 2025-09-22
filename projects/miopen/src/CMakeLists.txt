@@ -561,6 +561,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenLRNFwd.cl
         kernels/MIOpenMultiMarginLoss.cpp
         kernels/MIOpenNeuron.cl
+        kernels/MIOpenNeuronHip.cpp
         kernels/MIOpenPReLU.cpp
         kernels/MIOpenPooling.cpp
         kernels/MIOpenPoolingBwd.cpp

@@ -93,7 +93,7 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
     const auto read_len  = (packed) ? x_elem_sz : x_width2D;
     const auto read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
 
-    const auto READ_TYPE = (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string(read_unit);
+    const auto READ_TYPE = ((read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit));
 
     const auto height = (x_lens.size() == 2)   ? x_lens[0]
                         : (x_lens.size() == 3) ? x_lens[1]
@@ -127,7 +127,7 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
 
     {
         auto kernel_info         = KernelInfo{};
-        kernel_info.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel_info.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel_info.l_wk.push_back(256);
         kernel_info.l_wk.push_back(1);
@@ -139,8 +139,8 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
         kernel_info.g_wk.push_back(packed ? 1 : height);
         kernel_info.g_wk.push_back(1);
 
-        kernel_info.kernel_file = "MIOpenNeuron.cl";
-        kernel_info.kernel_name = (packed) ? "MIOpenActiveFwdLite" : "MIOpenActiveFwd2DLite";
+        kernel_info.kernel_file = "MIOpenNeuron.cpp";
+        kernel_info.kernel_name = packed ? "MIOpenActiveFwdLite" : "MIOpenActiveFwd2DLite";
 
         result.construction_params.push_back(kernel_info);
     }

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,72 +52,6 @@
 #include "activation_functions.h"
 
 #ifdef LITE
-
-/**********************************************************************************************
-**********************************************************************************************/
-
-// N - batch size
-// C - # of maps
-// H - map height
-// W - map width
-// TENS_LEN = (N*C*H*W);
-// RD_BLCK = (TENS_LEN%4==0) ? 4 : (TENS_LEN%3==0)? 3 : (TENS_LEN%2==0)? 2 : 1;
-// READ_TYPE = (RD_BLCK==4) ? "float4" : (RD_BLCK == 3) ? "float3" : (RD_BLC==2) ? "float2" :
-// "float";
-// local size = (256, 1, 1)
-// global size = ((TENS_LEN/RD_BLCK), 1, 1)
-
-__kernel void MIOpenActiveFwdLite(const __global _FLOAT* bot,
-                                  __global _FLOAT* top,
-                                  _FLOAT gamma,
-                                  _FLOAT beta,
-                                  _FLOAT alpha,
-                                  const long bot_offset,
-                                  const long top_offset)
-{
-    uint gid0 = get_global_id(0);
-
-    uint index = gid0 * MIOPEN_READ_UNIT;
-
-    _FLOAT data[MIOPEN_READ_UNIT];
-    _FLOAT response[MIOPEN_READ_UNIT];
-
-    *((MIOPEN_READ_TYPE*)data) = *((const __global MIOPEN_READ_TYPE*)(bot + bot_offset + index));
-
-    ActivationFunction(MIOPEN_READ_UNIT, response, (const _FLOAT*)data, gamma, beta, alpha);
-
-    *((__global MIOPEN_READ_TYPE*)(top + top_offset + index)) = *((MIOPEN_READ_TYPE*)response);
-}
-
-/**********************************************************************************************
-**********************************************************************************************/
-
-__kernel void MIOpenActiveFwd2DLite(const __global _FLOAT* bot,
-                                    __global _FLOAT* top,
-                                    _FLOAT gamma,
-                                    _FLOAT beta,
-                                    _FLOAT alpha,
-                                    const long bot_offset,
-                                    const long top_offset,
-                                    const uint bot_stride,
-                                    const uint top_stride)
-{
-    uint x_id = get_global_id(0);
-    uint y    = get_global_id(1);
-
-    uint bot_index = y * bot_stride + x_id * MIOPEN_READ_UNIT;
-    uint top_index = y * top_stride + x_id * MIOPEN_READ_UNIT;
-
-    _FLOAT data[MIOPEN_READ_UNIT];
-    _FLOAT response[MIOPEN_READ_UNIT];
-
-    *((MIOPEN_READ_TYPE*)data) =
-        *((const __global MIOPEN_READ_TYPE*)(bot + bot_offset + bot_index));
-
-    ActivationFunction(MIOPEN_READ_UNIT, response, (const _FLOAT*)data, gamma, beta, alpha);
-
-    *((__global MIOPEN_READ_TYPE*)(top + top_offset + top_index)) = *((MIOPEN_READ_TYPE*)response);
-}
 
 /**********************************************************************************************
 **********************************************************************************************/
