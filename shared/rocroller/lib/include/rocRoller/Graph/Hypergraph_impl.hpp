@@ -294,7 +294,7 @@ namespace rocRoller
             }
 
             auto match = false;
-            for(auto e : getNeighbours<Graph::Direction::Downstream>(inputs[0]))
+            for(int e : getNeighbours<Graph::Direction::Downstream>(inputs[0]))
             {
                 auto elem = getElement(e);
                 if(!edgePredicate(std::get<Edge>(elem)))
@@ -302,8 +302,7 @@ namespace rocRoller
 
                 match = true;
 
-                auto srcs = getNeighbours<Graph::Direction::Upstream>(e)
-                                .template to<std::unordered_set>();
+                auto srcs = getNeighbours<Graph::Direction::Upstream>(e);
                 if(srcs.size() != inputs.size())
                 {
                     match = false;
@@ -311,7 +310,7 @@ namespace rocRoller
                 }
                 for(auto src : inputs)
                 {
-                    if(srcs.find(src) == srcs.end())
+                    if(std::find(srcs.begin(), srcs.end(), src) == srcs.end())
                     {
                         match = false;
                         break;
@@ -320,8 +319,7 @@ namespace rocRoller
 
                 if(match)
                 {
-                    auto dsts = getNeighbours<Graph::Direction::Downstream>(e)
-                                    .template to<std::unordered_set>();
+                    auto dsts = getNeighbours<Graph::Direction::Downstream>(e);
                     if(dsts.size() != outputs.size())
                     {
                         match = false;
@@ -329,7 +327,7 @@ namespace rocRoller
                     }
                     for(auto dst : outputs)
                     {
-                        if(dsts.find(dst) == dsts.end())
+                        if(std::find(dsts.begin(), dsts.end(), dst) == dsts.end())
                         {
                             match = false;
                             break;
@@ -451,7 +449,8 @@ namespace rocRoller
             }
             else
             {
-                co_yield getNeighbours<Direction::Downstream>(parent);
+                for(int child : getNeighbours<Direction::Downstream>(parent))
+                    co_yield child;
             }
         }
 
@@ -475,7 +474,8 @@ namespace rocRoller
             }
             else
             {
-                co_yield getNeighbours<Direction::Upstream>(child);
+                for(int parent : getNeighbours<Direction::Upstream>(child))
+                    co_yield parent;
             }
         }
 
@@ -765,34 +765,32 @@ namespace rocRoller
 
         template <typename Node, typename Edge, bool Hyper>
         template <Direction Dir>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const id) const
+        std::vector<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const id) const
         {
             AssertFatal(m_elements.contains(id),
                         "Graph id not registered, element not in graph",
                         ShowValue(id));
             if constexpr(Dir == Direction::Downstream)
             {
-                for(int dst : m_incidences.getDsts(id))
-                    co_yield dst;
+                return m_incidences.getDsts(id);
             }
             else
             {
-                for(int src : m_incidences.getSrcs(id))
-                    co_yield src;
+                return m_incidences.getSrcs(id);
             }
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const id,
-                                                                    Direction Dir) const
+        std::vector<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const id,
+                                                                      Direction Dir) const
         {
             if(Dir == Direction::Downstream)
             {
-                co_yield getNeighbours<Direction::Downstream>(id);
+                return getNeighbours<Direction::Downstream>(id);
             }
             else
             {
-                co_yield getNeighbours<Direction::Upstream>(id);
+                return getNeighbours<Direction::Upstream>(id);
             }
         }
 
@@ -1018,11 +1016,12 @@ namespace rocRoller
         {
             AssertFatal(getElementType(dst) == ElementType::Node, "Require a node handle");
 
-            for(int const elem : getNeighbours<Dir>(dst))
+            for(int elem : getNeighbours<Dir>(dst))
             {
                 if(edgePredicate(std::get<Edge>(getElement(elem))))
                 {
-                    co_yield getNeighbours<Dir>(elem);
+                    for(int id : getNeighbours<Dir>(elem))
+                        co_yield id;
                 }
             }
         }

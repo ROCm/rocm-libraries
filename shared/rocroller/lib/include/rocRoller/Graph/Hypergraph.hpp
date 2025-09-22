@@ -283,9 +283,9 @@ namespace rocRoller
             Generator<int> path(RangeStart const& starts, RangeEnd const& ends) const;
 
             template <Direction Dir>
-            Generator<int> getNeighbours(int const id) const;
+            std::vector<int> getNeighbours(int const id) const;
 
-            Generator<int> getNeighbours(int const id, Direction Dir) const;
+            std::vector<int> getNeighbours(int const id, Direction Dir) const;
 
             /**
              * @brief Return edges in topological order.

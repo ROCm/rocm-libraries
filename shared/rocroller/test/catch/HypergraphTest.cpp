@@ -338,13 +338,13 @@ namespace HypergraphTest
         SECTION("getNeighbours")
         {
             CHECK((std::vector<int>{u0})
-                  == g.getNeighbours<Graph::Direction::Upstream>(TestSplit0).to<std::vector>());
+                  == g.getNeighbours<Graph::Direction::Upstream>(TestSplit0));
             CHECK((std::vector<int>{TestSplit0})
-                  == g.getNeighbours<Graph::Direction::Upstream>(sd0).to<std::vector>());
+                  == g.getNeighbours<Graph::Direction::Upstream>(sd0));
             CHECK((std::vector<int>{TestSplit0})
-                  == g.getNeighbours<Graph::Direction::Upstream>(sd1).to<std::vector>());
+                  == g.getNeighbours<Graph::Direction::Upstream>(sd1));
             CHECK((std::vector<int>{sd0, sd1})
-                  == g.getNeighbours<Graph::Direction::Downstream>(TestSplit0).to<std::vector>());
+                  == g.getNeighbours<Graph::Direction::Downstream>(TestSplit0));
         }
 
         SECTION("Adding a node to the graph")
