@@ -1,11 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-find_package(hipdnn_sdk CONFIG REQUIRED)
-
-# todo: improve this
-get_filename_component(HIPDNN_SDK_CONFIG_DIR "${hipdnn_sdk_CONFIG}" DIRECTORY)
-include(${HIPDNN_SDK_CONFIG_DIR}/hipdnn_sdk_plugin_config.cmake)
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     message(STATUS "Building miopen legacy plugin standalone")
@@ -63,6 +58,10 @@ else()
     message(STATUS "Building miopen legacy plugin as a dependency")
 endif()
 
+if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+    find_package(hipdnn_sdk CONFIG REQUIRED)
+endif()
+
 set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
 
 message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
@@ -91,9 +90,13 @@ target_include_directories(miopen_legacy_plugin_private
 )
 target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_sdk)
 target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(miopen_legacy_plugin_private PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
 
-clang_tidy_check(miopen_legacy_plugin_private)
-
+if(BUILD_PLUGIN_AS_DEPENDENCY)
+    clang_tidy_check(miopen_legacy_plugin_private)
+endif()
 
 add_library(miopen_legacy_plugin SHARED
     MiopenLegacyPlugin.cpp
@@ -119,8 +122,10 @@ endif()
 
 set(MIOPEN_LEGACY_PLUGIN_PATH ./hipdnn_plugins/engines/miopen_legacy_plugin CACHE INTERNAL "miopen legacy plugin dir" FORCE)
 
+if(BUILD_PLUGIN_AS_DEPENDENCY)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
+endif()
 
 install(
     TARGETS miopen_legacy_plugin
