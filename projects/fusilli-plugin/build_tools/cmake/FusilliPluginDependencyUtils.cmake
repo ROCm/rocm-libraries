@@ -104,13 +104,13 @@ macro(_fetch_GTest)
         message(FATAL_ERROR "GTEST_VERSION is required")
     endif()
 
-	FetchContent_Declare(
-		GTest
-		URL https://github.com/google/googletest/archive/refs/tags/v${ARG_GTEST_VERSION}.zip
+    FetchContent_Declare(
+        GTest
+        URL https://github.com/google/googletest/archive/refs/tags/v${ARG_GTEST_VERSION}.zip
     )
-	set(INSTALL_GTEST OFF)
-	set(BUILD_GMOCK OFF)
-	FetchContent_MakeAvailable(GTest)
+    set(INSTALL_GTEST OFF)
+    set(BUILD_GMOCK OFF)
+    FetchContent_MakeAvailable(GTest)
 endmacro()
 
 # hipdnn_frontend
@@ -119,24 +119,35 @@ endmacro()
 #   Git commit hash or tag to fetch
 macro(_fetch_hipdnn_frontend)
     cmake_parse_arguments(
-        ARG             # prefix for parsed variables
-        ""              # options (flags)
-        "HIP_DNN_HASH"  # single-value arguments
-        ""              # multi-value arguments
+        ARG                        # prefix for parsed variables
+        ""                         # options (flags)
+        "HIP_DNN_HASH;LOCAL_PATH"  # single-value arguments
+        ""                         # multi-value arguments
         ${ARGN}
     )
-    if(NOT DEFINED ARG_HIP_DNN_HASH)
-        message(FATAL_ERROR "HIP_DNN_HASH is required")
+    if(NOT DEFINED ARG_LOCAL_PATH AND NOT DEFINED ARG_HIP_DNN_HASH)
+        message(FATAL_ERROR "Required argument: one of LOCAL_PATH or HIP_DNN_HASH")
     endif()
 
-    FetchContent_Declare(
-        hipdnn_frontend
-        GIT_REPOSITORY https://github.com/ROCm/hipDNN.git
-        GIT_TAG        ${ARG_HIP_DNN_HASH}
-        # When FIND_PACKAGE_ARGS is passed, FetchContent_Declare tries to
-        # find_package an installed version before downloading.
-        FIND_PACKAGE_ARGS CONFIG
-    )
+    if(DEFINED ARG_LOCAL_PATH AND DEFINED ARG_HIP_DNN_HASH)
+        message(FATAL_ERROR "Argument error: passing both LOCAL_PATH and HIP_DNN_HASH is ambiguous.")
+    endif()
+
+    if (DEFINED ARG_HIP_DNN_HASH)
+        FetchContent_Declare(
+            hipdnn_frontend
+            GIT_REPOSITORY https://github.com/ROCm/hipDNN.git
+            GIT_TAG        ${ARG_HIP_DNN_HASH}
+            # When FIND_PACKAGE_ARGS is passed, FetchContent_Declare tries to
+            # find_package an installed version before downloading.
+            FIND_PACKAGE_ARGS CONFIG
+        )
+    else()
+        FetchContent_Declare(
+            hipdnn_frontend
+            SOURCE_DIR ${ARG_LOCAL_PATH}
+        )
+    endif()
 
     set(HIP_DNN_BUILD_BACKEND ON)
     set(HIP_DNN_BUILD_FRONTEND ON)
@@ -181,7 +192,7 @@ macro(_fetch_Fusilli)
     if(NOT ARG_USE_LOCAL)
         # For the time being we're keeping fusilli-plugin setup as in sync as
         # possible with fusilli.
-        message(FATAL_ERROR "Only LOCAL builds supported currently")
+        message(FATAL_ERROR "Only LOCAL builds are supported currently")
     endif()
 
     message(STATUS "Using local Fusilli build from ../sharkfuser")
