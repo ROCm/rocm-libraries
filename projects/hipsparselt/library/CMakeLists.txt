@@ -56,7 +56,13 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 include(src/CMakeLists.txt)
 
 # Create hipSPARSELt library
-add_library(hipsparselt ${hipsparselt_source} ${hipsparselt_headers_public})
+
+if(HIPSPARSELT_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
+    add_library(hipsparselt SHARED ${hipsparselt_source} ${hipsparselt_headers_public} )
+else()
+    add_library(hipsparselt STATIC ${hipsparselt_source} ${hipsparselt_headers_public} )
+    target_compile_definitions(hipsparselt PRIVATE HIPSPARSELT_STATIC_LIB)
+endif()
 add_library(roc::hipsparselt ALIAS hipsparselt)
 
 if( BUILD_CODE_COVERAGE )
@@ -78,50 +84,65 @@ if(NOT BUILD_CUDA)
   target_compile_definitions(hipsparselt PRIVATE ROCM_USE_FLOAT16 __HIP_PLATFORM_AMD__)
 
   if( BUILD_WITH_TENSILE )
-    if( BUILD_SHARED_LIBS )
-      target_link_libraries( hipsparselt PRIVATE TensileHost )
-    else()
-      target_compile_definitions( hipsparselt PRIVATE HIPSPARSELT_STATIC_LIB )
-
-      # bypassing cmake dependencies chain for static link as it won't allow target from different directory
-
-      # including tensile headers into rocblas tensileHost client so get compile properties
-      get_target_property(TensileHost_INCLUDES TensileHost INCLUDE_DIRECTORIES)
-      target_include_directories( hipsparselt PRIVATE ${TensileHost_INCLUDES} )
-      get_target_property(TensileHost_DEFINES TensileHost COMPILE_DEFINITIONS)
-      target_compile_definitions( hipsparselt PRIVATE ${TensileHost_DEFINES} )
-
-      get_target_property( TensileHost_LIBDIR TensileHost BINARY_DIR )
-
-      message (STATUS "TensileHost_INCLUDES == ${TensileHost_INCLUDES}")
-      message (STATUS "TensileHost_DEFINES == ${TensileHost_DEFINES}")
-      message (STATUS "TensileHost_LIBDIR == ${TensileHost_LIBDIR}")
-      # recreate LLVM static dependencies
-      if (${Tensile_LIBRARY_FORMAT} STREQUAL "yaml")
-        find_package(LLVM 6.0 QUIET CONFIG)
-        if(NOT LLVM_FOUND)
-            find_package(LLVM 7.0 QUIET CONFIG)
-            if(NOT LLVM_FOUND)
-                find_package(LLVM 9.0 QUIET CONFIG)
-                if(NOT LLVM_FOUND)
-                    find_package(LLVM REQUIRED CONFIG)
-                endif()
-            endif()
-        endif()
-        find_library(LLVMObjectYAML_LIBRARY
-          NAMES LLVMObjectYAML
-          PATHS ${LLVM_LIBRARY_DIR})
-        message("LLVMObjectYAML_LIBRARY: ${LLVMObjectYAML_LIBRARY}")
-        target_link_libraries(hipsparselt PRIVATE LLVMObjectYAML )  # match tensile
+    if (BUILD_USE_LOCAL_TENSILE_HIPBLASLT_NEXT_CMAKE)
+      target_compile_definitions(hipsparselt PRIVATE BUILD_WITH_TENSILE)
+      if( Tensile_NO_LAZY_LIBRARY_LOADING )
+        target_compile_definitions(hipsparselt PRIVATE ROCSPARSELT_TENSILE_LAZY_LOAD=0)
+      else()
+        target_compile_definitions(hipsparselt PRIVATE ROCSPARSELT_TENSILE_LAZY_LOAD=1)
       endif()
+      target_sources(hipsparselt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/hcc_detail/rocsparselt/src/tensile_host.cpp")
+      target_include_directories(hipsparselt PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/src/hcc_detail/rocsparselt/src/spmm/Tensile")
+      target_link_libraries(hipsparselt PRIVATE tensilelite::tensilelite-host)
 
-      # to get TensileHost built first, not to link target
-      # as dependency chain can not be created
-      add_dependencies(hipsparselt TensileHost)
+      set(tensile_source_files "${CMAKE_CURRENT_SOURCE_DIR}/src/hcc_detail/rocsparselt/src/tensile_host.cpp")
+      list(APPEND hipsparselt_source_backend ${tensile_source_files})
+
+    else()
+      if( BUILD_SHARED_LIBS )
+        target_link_libraries( hipsparselt PRIVATE TensileHost )
+      else()
+        target_compile_definitions( hipsparselt PRIVATE HIPSPARSELT_STATIC_LIB )
+
+        # bypassing cmake dependencies chain for static link as it won't allow target from different directory
+
+        # including tensile headers into rocblas tensileHost client so get compile properties
+        get_target_property(TensileHost_INCLUDES TensileHost INCLUDE_DIRECTORIES)
+        target_include_directories( hipsparselt PRIVATE ${TensileHost_INCLUDES} )
+        get_target_property(TensileHost_DEFINES TensileHost COMPILE_DEFINITIONS)
+        target_compile_definitions( hipsparselt PRIVATE ${TensileHost_DEFINES} )
+
+        get_target_property( TensileHost_LIBDIR TensileHost BINARY_DIR )
+
+        message (STATUS "TensileHost_INCLUDES == ${TensileHost_INCLUDES}")
+        message (STATUS "TensileHost_DEFINES == ${TensileHost_DEFINES}")
+        message (STATUS "TensileHost_LIBDIR == ${TensileHost_LIBDIR}")
+        # recreate LLVM static dependencies
+        if (${Tensile_LIBRARY_FORMAT} STREQUAL "yaml")
+          find_package(LLVM 6.0 QUIET CONFIG)
+          if(NOT LLVM_FOUND)
+              find_package(LLVM 7.0 QUIET CONFIG)
+              if(NOT LLVM_FOUND)
+                  find_package(LLVM 9.0 QUIET CONFIG)
+                  if(NOT LLVM_FOUND)
+                      find_package(LLVM REQUIRED CONFIG)
+                  endif()
+              endif()
+          endif()
+          find_library(LLVMObjectYAML_LIBRARY
+            NAMES LLVMObjectYAML
+            PATHS ${LLVM_LIBRARY_DIR})
+          message("LLVMObjectYAML_LIBRARY: ${LLVMObjectYAML_LIBRARY}")
+          target_link_libraries(hipsparselt PRIVATE LLVMObjectYAML )  # match tensile
+        endif()
+
+        # to get TensileHost built first, not to link target
+        # as dependency chain can not be created
+        add_dependencies(hipsparselt TensileHost)
+      endif()
+      target_compile_definitions(hipsparselt PRIVATE ${TENSILE_DEFINES} )
     endif()
-    target_compile_definitions(hipsparselt PRIVATE ${TENSILE_DEFINES} )
-  endif()
-
+  endif( )
 else()
   target_compile_definitions(hipsparselt PRIVATE __HIP_PLATFORM_NVIDIA__)
 endif()
@@ -205,8 +226,13 @@ if ( NOT BUILD_CUDA )
     endif()
     # For ASAN Enabled Build package only library & license
     if( NOT ENABLE_ASAN_PACKAGING )
+      if(BUILD_USE_LOCAL_TENSILE_HIPBLASLT_NEXT_CMAKE)
+        set(HIPSPARSELT_TENSILE_BUILD_DIR ${CMAKE_BINARY_DIR}/hipblaslt/Tensile/library)
+      else()
+        set(HIPSPARSELT_TENSILE_BUILD_DIR ${CMAKE_BINARY_DIR}/Tensile/library)
+      endif()
       rocm_install(
-        DIRECTORY ${CMAKE_BINARY_DIR}/Tensile/library
+        DIRECTORY ${HIPSPARSELT_TENSILE_BUILD_DIR}
         DESTINATION ${HIPSPARSELT_TENSILE_LIBRARY_DIR}
         COMPONENT ${CMAKE_INSTALL_DEFAULT_COMPONENT_NAME}) # Use this cmake variable to be compatible with rocm-cmake 0.6 and 0.7
     endif()
@@ -227,6 +253,12 @@ if ( NOT BUILD_CUDA )
 endif()
 
 if ( NOT BUILD_CUDA )
+  # export the tensilelite-host when hipsparselt is static library.
+  if(BUILD_USE_LOCAL_TENSILE_HIPBLASLT_NEXT_CMAKE AND NOT BUILD_SHARED_LIBS)
+    rocm_install(
+      TARGETS tensilelite-host 
+      EXPORT hipsparselt-targets)
+  endif()
     rocm_export_targets(
         TARGETS roc::hipsparselt
 	DEPENDS PACKAGE hip

@@ -921,6 +921,9 @@ double get_time_us(void);
 /*! \brief Return path of this executable */
 std::string rocsparse_exepath();
 
+/*! \brief Return path of rocsparse_gentest.py file */
+std::string rocsparse_gentestpath();
+
 /*! \brief Return path where the test data file (rocsparse_test.data) is located */
 std::string rocsparse_datapath();
 

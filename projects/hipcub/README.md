@@ -75,6 +75,7 @@ mkdir build; cd build
 #   BUILD_EXAMPLE                - OFF by default, builds examples.
 #   BUILD_ADDRESS_SANITIZER      - OFF by default, builds with clang address sanitizer enabled.
 #   BUILD_COMPUTE_SANITIZER      - OFF by default, (Nvidia CUB backend only) builds tests with CUDA's compute sanitizer enabled.
+#   USE_SYSTEM_LIB               - OFF by default, builds tests using the installed hipCUB provided by the system. This only takes effect when BUILD_TEST is ON.
 #   USE_HIPCXX                   - OFF by default, builds with CMake HIP language support. This eliminates the need to set CXX.
 #
 # ! IMPORTANT !

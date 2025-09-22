@@ -135,7 +135,7 @@ void simpleGemm(hipblasLtHandle_t  handle,
 
     hipDataType tciA = HIP_R_8F_E4M3_FNUZ;
     hipDataType tciB = HIP_R_8F_E4M3_FNUZ;
-   
+
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
         matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT, &tciA, sizeof(void*)));
 

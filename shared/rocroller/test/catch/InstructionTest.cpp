@@ -61,7 +61,105 @@ TEST_CASE("Instruction class works", "[codegen][instruction]")
     CHECK(inst.numExecutedInstructions() == 1);
 }
 
-// TEST_F(InstructionTest, ImplicitAllocation)
+TEST_CASE("Instruction class isCommentOnly() works", "[codegen][instruction]")
+{
+    auto context = TestContext::ForDefaultTarget();
+
+    auto dst = std::make_shared<Register::Value>(
+        context.get(), Register::Type::Vector, DataType::Float, 1);
+    dst->setName("C");
+
+    SECTION("Actual comment only instruction")
+    {
+        auto inst = Instruction::Comment("Knock knock!");
+        CHECK(inst.isCommentOnly());
+
+        inst.addComment("Who's There?");
+        CHECK(inst.isCommentOnly());
+    }
+
+    SECTION("Allocate")
+    {
+        auto inst = Instruction::Allocate(dst);
+        CHECK_FALSE(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK_FALSE(inst.isCommentOnly());
+    }
+
+    SECTION("Directive")
+    {
+        auto inst = Instruction::Directive(".text");
+        CHECK_FALSE(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK_FALSE(inst.isCommentOnly());
+    }
+
+    SECTION("Warning")
+    {
+        auto inst = Instruction::Warning("Bad stuff ahead!");
+        CHECK(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK(inst.isCommentOnly());
+    }
+
+    SECTION("Nop")
+    {
+        auto inst = Instruction::Nop();
+        CHECK_FALSE(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK_FALSE(inst.isCommentOnly());
+    }
+
+    SECTION("Label")
+    {
+        auto inst = Instruction::Label("foo");
+        CHECK_FALSE(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK_FALSE(inst.isCommentOnly());
+    }
+
+    SECTION("Wait")
+    {
+        auto inst = Instruction::Wait(WaitCount::Zero(context->targetArchitecture()));
+        CHECK_FALSE(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK_FALSE(inst.isCommentOnly());
+    }
+
+    SECTION("Lock")
+    {
+        auto inst = Instruction::Lock(Scheduling::Dependency::VCC);
+        CHECK_FALSE(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK_FALSE(inst.isCommentOnly());
+    }
+
+    SECTION("Unlock")
+    {
+        auto inst = Instruction::Unlock(Scheduling::Dependency::VCC);
+        CHECK_FALSE(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK_FALSE(inst.isCommentOnly());
+    }
+
+    SECTION("Unlock None")
+    {
+        auto inst = Instruction::Unlock("No specific dependency");
+        CHECK_FALSE(inst.isCommentOnly());
+
+        inst.addComment("K");
+        CHECK_FALSE(inst.isCommentOnly());
+    }
+}
+
 TEST_CASE("Instruction will implicitly allocate destination registers", "[codegen][instruction]")
 {
     auto context = TestContext::ForDefaultTarget();
@@ -91,7 +189,6 @@ TEST_CASE("Instruction will implicitly allocate destination registers", "[codege
     CHECK_THAT(context.output(), Catch::Matchers::ContainsSubstring(coreString));
 }
 
-// TEST_F(InstructionTest, NoSourceAllocation)
 TEST_CASE("Instruction won't implicitly allocate source registers", "[codegen][instruction]")
 {
     auto context = TestContext::ForDefaultTarget();

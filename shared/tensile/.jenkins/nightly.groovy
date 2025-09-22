@@ -79,7 +79,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false) {
               --library-format=msgpack \
               --architecture=\$gfx_name
             mprof plot -o memeory_profile.svg
-            
+
             """
 
     platform.runCommand(this, command)

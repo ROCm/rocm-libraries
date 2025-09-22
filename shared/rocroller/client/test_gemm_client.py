@@ -257,6 +257,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 types:
   trans_A: N
   trans_B: N
@@ -315,6 +316,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 matchMemoryAccess: true
 types:
   trans_A: N
@@ -372,6 +374,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 matchMemoryAccess: true
 types:
   trans_A: N
