@@ -64,7 +64,7 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 8, 8, 2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]
+        - ClusterLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
@@ -136,7 +136,7 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 8, 8, 2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]
+        - ClusterLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
@@ -208,7 +208,7 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 8, 8, 2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]
+        - ClusterLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
@@ -280,7 +280,7 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 8, 8, 2, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]
+        - ClusterLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
