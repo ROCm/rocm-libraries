@@ -9,8 +9,13 @@ Documentation for hipBLAS is available at
 
 * `--clients-only` build option to only build clients against a prebuilt library
 * gfx1103, gfx1150, gfx1151, gfx1200, and gfx1201 support to clients
+* FORTRAN enabled for windows build and testing
+* Addition reference library fallback options added
 
-## (Unreleased) hipBLAS 3.0.0
+Changed
+* Improve build time of clients by removing clients_common.cpp from hipblas-test build
+
+## hipBLAS 3.0.0 for ROCm 7.0
 
 ### Added
 
