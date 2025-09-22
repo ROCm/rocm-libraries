@@ -2,6 +2,17 @@
 
 Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/index.html).
 
+## hipSOLVER 3.1.0 for ROCm 7.1.0
+
+### Added
+
+* Extended test suites for hipsolverDn compatibility functions
+
+### Changed
+
+* Changed code coverage to use llvm-cov instead of gcov
+
+
 ## hipSOLVER 3.0.0 for ROCm 7.0.0
 
 ### Added

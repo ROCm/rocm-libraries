@@ -29,7 +29,7 @@ BenchmarkProblems:
     - LoopTail: [true]
     - KernelLanguage: [Assembly]
     - EdgeType: [ShiftPtr]
-    BenchmarkFinalParameters: 
+    BenchmarkFinalParameters:
       - ProblemSizes:
         - Exact: [ 5504, 5504, 1, 3104 ]
         - Exact: [ 5504, 5604, 1, 3104 ]

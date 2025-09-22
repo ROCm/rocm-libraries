@@ -30,13 +30,13 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpVV_bufferSize computes the required user allocated buffer size needed when computing the 
+*  \p hipsparseSpVV_bufferSize computes the required user allocated buffer size needed when computing the
 *  inner dot product of a sparse vector with a dense vector:
 *  \f[
 *    \text{result} := op(x) \cdot y,
 *  \f]
 *
-*  \p hipsparseSpVV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpVV for a complete 
+*  \p hipsparseSpVV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpVV for a complete
 *  listing of all the data type and compute type combinations available.
 *
 *  @param[in]
@@ -52,7 +52,7 @@ extern "C" {
 *  @param[in]
 *  computeType         floating point precision for the SpVV computation.
 *  @param[out]
-*  pBufferSizeInBytes  number of bytes of the temporary storage buffer. 
+*  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result or \p pBufferSizeInBytes
@@ -108,12 +108,12 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *      }
 *  \endcode
 *
-*  Performing the above operation involves two steps. First, the user calls \p hipsparseSpVV_bufferSize which will return the 
-*  required temporary buffer size. The user then allocates this buffer. Finally, the user then completes the computation by 
-*  calling \p hipsparseSpVV with the newly allocated buffer. Once the computation is complete, the user is free to deallocate 
-*  the buffer. 
+*  Performing the above operation involves two steps. First, the user calls \p hipsparseSpVV_bufferSize which will return the
+*  required temporary buffer size. The user then allocates this buffer. Finally, the user then completes the computation by
+*  calling \p hipsparseSpVV with the newly allocated buffer. Once the computation is complete, the user is free to deallocate
+*  the buffer.
 *
-*  \p hipsparseSpVV supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \p hipsparseSpVV supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and
 *  \f$y\f$ and compute types for the scalar \f$result\f$.
 *
 *  \par Uniform Precisions:
@@ -133,6 +133,7 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *  <tr><td>HIP_R_8I  <td>HIP_R_32I
 *  <tr><td>HIP_R_8I  <td>HIP_R_32F
 *  <tr><td>HIP_R_16F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  @param[in]

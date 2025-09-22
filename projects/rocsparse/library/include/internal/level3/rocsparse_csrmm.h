@@ -142,61 +142,7 @@ extern "C" {
 *
 *  \par Example
 *  This example multiplies a CSR matrix with a column-oriented dense matrix.
-*  \code{.c}
-*      //     1 2 0 3 0
-*      // A = 0 4 5 0 0
-*      //     6 0 0 7 8
-*
-*      rocsparse_int m   = 3;
-*      rocsparse_int k   = 5;
-*      rocsparse_int nnz = 8;
-*
-*      csr_row_ptr[m+1] = {0, 3, 5, 8};             // device memory
-*      csr_col_ind[nnz] = {0, 1, 3, 1, 2, 0, 3, 4}; // device memory
-*      csr_val[nnz]     = {1, 2, 3, 4, 5, 6, 7, 8}; // device memory
-*
-*      // Set dimension n of B
-*      rocsparse_int n = 64;
-*
-*      // Allocate and generate column-oriented dense matrix B
-*      std::vector<float> hB(k * n);
-*      for(rocsparse_int i = 0; i < k * n; ++i)
-*      {
-*          hB[i] = static_cast<float>(rand()) / RAND_MAX;
-*      }
-*
-*      // Copy B to the device
-*      float* B;
-*      hipMalloc((void**)&B, sizeof(float) * k * n);
-*      hipMemcpy(B, hB.data(), sizeof(float) * k * n, hipMemcpyHostToDevice);
-*
-*      // alpha and beta
-*      float alpha = 1.0f;
-*      float beta  = 0.0f;
-*
-*      // Allocate memory for the resulting matrix C
-*      float* C;
-*      hipMalloc((void**)&C, sizeof(float) * m * n);
-*
-*      // Perform the matrix multiplication
-*      rocsparse_scsrmm(handle,
-*                       rocsparse_operation_none,
-*                       rocsparse_operation_none,
-*                       m,
-*                       n,
-*                       k,
-*                       nnz,
-*                       &alpha,
-*                       descr,
-*                       csr_val,
-*                       csr_row_ptr,
-*                       csr_col_ind,
-*                       B,
-*                       k,
-*                       &beta,
-*                       C,
-*                       m);
-*  \endcode
+*  \snippet example_rocsparse_csrmm.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

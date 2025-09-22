@@ -198,7 +198,7 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Find rocprim package
-find_package(rocprim REQUIRED)
+find_package(rocprim 4.0.0 REQUIRED)
 
 # Find rocblas package
 if (BUILD_WITH_ROCBLAS)
@@ -212,7 +212,7 @@ if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
 endif( )
 
 # Setup version
-set(VERSION_STRING "4.0.2")
+set(VERSION_STRING "4.1.0")
 set(SOVERSION_STRING "1.0")
 
 rocm_setup_version(VERSION ${VERSION_STRING})

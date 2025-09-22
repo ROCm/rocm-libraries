@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup generic_module
    *  \details
    *  \p rocsparse_extract_buffer_size calculates the required buffer size in bytes for a given stage \p stage.
-   *  This routine is used in conjunction with \ref rocsparse_extract_nnz and \ref rocsparse_extract to extract 
+   *  This routine is used in conjunction with \ref rocsparse_extract_nnz and \ref rocsparse_extract to extract
    *  a lower or upper triangular sparse matrix from an input sparse matrix. See \ref rocsparse_extract for more
    *  details.
    *
@@ -72,9 +72,9 @@ rocsparse_status rocsparse_extract_buffer_size(rocsparse_handle            handl
 
 /*! \ingroup generic_module
    *  \details
-   *  \p rocsparse_extract_nnz returns the number of non-zeros in the extracted matrix. The value is 
-   *  available after the analysis phase \ref rocsparse_extract_stage_analysis has been executed. This routine 
-   *  is used in conjunction with \ref rocsparse_extract_buffer_size and \ref rocsparse_extract to extract a lower 
+   *  \p rocsparse_extract_nnz returns the number of non-zeros in the extracted matrix. The value is
+   *  available after the analysis phase \ref rocsparse_extract_stage_analysis has been executed. This routine
+   *  is used in conjunction with \ref rocsparse_extract_buffer_size and \ref rocsparse_extract to extract a lower
    *  or upper triangular sparse matrix from an input sparse matrix. See \ref rocsparse_extract for more
    *  details.
    *
@@ -103,7 +103,7 @@ rocsparse_status
    *  \details
    *  \p rocsparse_extract performs the extraction of the lower or upper part of a sparse matrix into a new matrix.
    *
-   *  \p rocsparse_extract requires multiple steps to complete. First, the user creates the source and target sparse matrix 
+   *  \p rocsparse_extract requires multiple steps to complete. First, the user creates the source and target sparse matrix
    *  descriptors. For example, in the case of CSR matrix format this might look like:
    *  \code{.c}
    *   // Build Source
@@ -136,9 +136,9 @@ rocsparse_status
    *                              rocsparse_index_base_zero,
    *                              rocsparse_datatype_f32_r);
    *  \endcode
-   *  Next, the user creates the extraction descriptor and calls \ref rocsparse_extract_buffer_size with the stage 
-   *  \ref rocsparse_extract_stage_analysis in order to determine the amount of temporary storage required. 
-   *  The user allocates this temporary storage buffer and passes it to \p rocsparse_extract with the stage 
+   *  Next, the user creates the extraction descriptor and calls \ref rocsparse_extract_buffer_size with the stage
+   *  \ref rocsparse_extract_stage_analysis in order to determine the amount of temporary storage required.
+   *  The user allocates this temporary storage buffer and passes it to \p rocsparse_extract with the stage
    *  \ref rocsparse_extract_stage_analysis
    *  \code{.c}
    *  // Create descriptor
@@ -167,22 +167,22 @@ rocsparse_status
    *                    dbuffer);
    *  hipFree(dbuffer);
    *  \endcode
-   *  The user then calls \ref rocsparse_extract_nnz in order to determine the number of non-zeros that will exist in the 
-   *  target matrix. Once determined, the user can allocate the column indices and values arrays of the target sparse 
+   *  The user then calls \ref rocsparse_extract_nnz in order to determine the number of non-zeros that will exist in the
+   *  target matrix. Once determined, the user can allocate the column indices and values arrays of the target sparse
    *  matrix:
    *  \code{.c}
    *  int64_t target_nnz;
    *  rocsparse_extract_nnz(handle, descr, &target_nnz);
-   * 
-   *  void* dtarget_col_ind, 
+   *
+   *  void* dtarget_col_ind,
    *  void* dtarget_val;
    *  hipMalloc(&dtarget_col_ind, sizeof(int32_t) * target_nnz);
    *  hipMalloc(&dtarget_val, sizeof(float) * target_nnz);
    *  rocsparse_csr_set_pointers(target, dtarget_row_ptr, dtarget_col_ind, dtarget_val);
    *  \endcode
-   *  Finally, the user calls \ref rocsparse_extract_buffer_size with the stage \ref rocsparse_extract_stage_compute in order 
-   *  to determine the size of the temporary user allocated storage needed for the computation of the column indices and values 
-   *  in the sparse target. The user allocates this buffer and completes the conversion by calling \p rocsparse_extract using 
+   *  Finally, the user calls \ref rocsparse_extract_buffer_size with the stage \ref rocsparse_extract_stage_compute in order
+   *  to determine the size of the temporary user allocated storage needed for the computation of the column indices and values
+   *  in the sparse target. The user allocates this buffer and completes the conversion by calling \p rocsparse_extract using
    *  the \ref rocsparse_extract_stage_compute stage:
    *  \code{.c}
    *  // Calculation phase
@@ -204,9 +204,9 @@ rocsparse_status
    *  \endcode
    *  The target row pointer, column indices, and values arrays will now be filled with the upper or lower part of the source matrix.
    *
-   *  The source and the target matrices must have the same format (see \ref rocsparse_format) and the same storage mode (see 
-   *  \ref rocsparse_storage_mode). The attributes of the target matrix, the fill mode \ref rocsparse_fill_mode and the diagonal 
-   *  type \ref rocsparse_diag_type are used to parametrise the algorithm. These can be set on the target matrix using 
+   *  The source and the target matrices must have the same format (see \ref rocsparse_format) and the same storage mode (see
+   *  \ref rocsparse_storage_mode). The attributes of the target matrix, the fill mode \ref rocsparse_fill_mode and the diagonal
+   *  type \ref rocsparse_diag_type are used to parametrise the algorithm. These can be set on the target matrix using
    *  \ref rocsparse_spmat_set_attribute. See full example below.
    *
    *  \note
@@ -237,111 +237,7 @@ rocsparse_status
    *               pointer is invalid.
    *  \par Example
    *  This example extracts the lower part of CSR matrix into a CSR matrix.
-   *  \code{.c}
-   *  std::vector<int> hsource_row_ptr;  // Filled with source host matrix data
-   *  std::vector<int> hsource_col_ind;  // Filled with source host matrix data
-   *  std::vector<float> hsource_val;  // Filled with source host matrix data
-   *
-   *  int* dsource_row_ptr = nullptr;
-   *  int* dsource_col_ind = nullptr;
-   *  float* dsource_val = nullptr;
-   *  hipMalloc((void**)&dsource_row_ptr, sizeof(int) * (M + 1));
-   *  hipMalloc((void**)&dsource_col_ind, sizeof(int) * nnz);
-   *  hipMalloc((void**)&dsource_val, sizeof(float) * nnz);
-   *
-   *  hipMemcpy(dsource_row_ptr, hsource_row_ptr.data(), sizeof(int) * (M + 1), hipMemcpyHostToDevice);
-   *  hipMemcpy(dsource_col_ind, hsource_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-   *  hipMemcpy(dsource_val, hsource_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-   *
-   *  rocsparse_handle handle;
-   *  rocsparse_create_handle(&handle);
-   *
-   *  // Build Source
-   *  rocsparse_spmat_descr source;
-   *  rocsparse_create_csr_descr(&source,
-   *                             M,
-   *                             N,
-   *                             nnz,
-   *                             dsource_row_ptr,
-   *                             dsource_col_ind,
-   *                             dsource_val,
-   *                             rocsparse_indextype_i32,
-   *                             rocsparse_indextype_i32,
-   *                             rocsparse_index_base_zero,
-   *                             rocsparse_datatype_f32_r);
-   *
-   *  // Build target
-   *  void * dtarget_row_ptr;
-   *  hipMalloc(&dtarget_row_ptr, sizeof(int32_t) * (M + 1));
-   *  rocsparse_spmat_descr target;
-   *  rocsparse_create_csr_descr(&target,
-   *                             M,
-   *                             N,
-   *                             0,
-   *                             dtarget_row_ptr,
-   *                             nullptr,
-   *                             nullptr,
-   *                             rocsparse_indextype_i32,
-   *                             rocsparse_indextype_i32,
-   *                             rocsparse_index_base_zero,
-   *                             rocsparse_datatype_f32_r);
-   *
-   *  const rocsparse_fill_mode fill_mode   = rocsparse_fill_mode_lower;
-   *  const rocsparse_diag_type diag_type   = rocsparse_diag_type_non_unit;
-   *
-   *  rocsparse_spmat_set_attribute(target, rocsparse_spmat_fill_mode, &fill_mode, sizeof(fill_mode));
-   *  rocsparse_spmat_set_attribute(target, rocsparse_spmat_diag_type, &diag_type, sizeof(diag_type));
-   *
-   *  // Create descriptor
-   *  rocsparse_extract_descr descr;
-   *  rocsparse_create_extract_descr(&descr, source, target, rocsparse_extract_alg_default);
-   *
-   *  // Analysis phase
-   *  size_t buffer_size;
-   *  rocsparse_extract_buffer_size(handle,
-   *                                descr,
-   *                                source,
-   *                                target,
-   *                                rocsparse_extract_stage_analysis,
-   *                                &buffer_size);
-   *  void* dbuffer = nullptr;
-   *  hipMalloc(&dbuffer, buffer_size);
-   *  rocsparse_extract(handle,
-   *                    descr,
-   *                    source,
-   *                    target,
-   *                    rocsparse_extract_stage_analysis,
-   *                    buffer_size,
-   *                    dbuffer);
-   *  hipFree(dbuffer);
-   *
-   *  // The user is responsible to allocate target arrays after the analysis phase.
-   *  int64_t target_nnz;
-   *  rocsparse_extract_nnz(handle, descr, &target_nnz);
-   *
-   *  void* dtarget_col_ind, 
-   *  void* dtarget_val;
-   *  hipMalloc(&dtarget_col_ind, sizeof(int32_t) * target_nnz);
-   *  hipMalloc(&dtarget_val, sizeof(float) * target_nnz);
-   *  rocsparse_csr_set_pointers(target, dtarget_row_ptr, dtarget_col_ind, dtarget_val);
-   *
-   *  // Calculation phase
-   *  rocsparse_extract_buffer_size(handle,
-   *                                descr,
-   *                                source,
-   *                                target,
-   *                                rocsparse_extract_stage_compute,
-   *                                &buffer_size);
-   *  hipMalloc(&dbuffer, buffer_size);
-   *  rocsparse_extract(handle,
-   *                    descr,
-   *                    source,
-   *                    target,
-   *                    rocsparse_extract_stage_compute,
-   *                    buffer_size,
-   *                    dbuffer);
-   *  hipFree(dbuffer);
-   *  \endcode
+   *  \snippet example_rocsparse_extract.cpp doc example
    */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_extract(rocsparse_handle            handle,

@@ -179,8 +179,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph LoadPacked::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::LoadPacked");
-
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace LoadPackedDetail;

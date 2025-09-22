@@ -269,7 +269,7 @@ class LSUOn(LSU):
                 module.add(VAddU32(vgpr(addr), vgpr(tmpVgpr), vgpr(addr), \
                     comment="addr += tmp"))
 
-            module.add(SWaitCnt(lgkmcnt=0, vscnt=0, comment="wait for all writes"))
+            module.add(SWaitCnt(dscnt=0, comment="wait for all writes"))
             module.add(writer._syncThreads(kernel, "pre-lsu local write"))
 
             module.add(Label("localSplitULocalWrite_%d"%(reUseIdx+1), ""))
@@ -308,7 +308,7 @@ class LSUOn(LSU):
                     module.add(VAddU32(vgpr(addr+i), maxLDSConstOffset*i, vgpr(addr), \
                     comment="addr += maxLDSConstOffset*%u"%(i)))
 
-            module.add(SWaitCnt(lgkmcnt=0, vscnt=0, comment="wait for all writes"))
+            module.add(SWaitCnt(dscnt=0, comment="wait for all writes"))
             module.add(writer._syncThreads(kernel, "post-lsu local write"))
             module.add(Label("localSplitULocalRead_%d"%(reUseIdx+1), ""))
 
@@ -337,9 +337,7 @@ class LSUOn(LSU):
                             numTotalInst  = numVgprPerLSU // self.LSUfullVw * numInstPerVW * kernel["LocalSplitU"]
                             numPassedInst = (i * numInstPerVW + (v + 1)) * kernel["LocalSplitU"]
                             numLRWaitCnt = numTotalInst - numPassedInst
-                            moduleReduction.add(SWaitCnt(lgkmcnt=numLRWaitCnt, comment="wait count is (%u-%u)"%(numTotalInst, numPassedInst)))
-                            if writer.states.archCaps["SeparateVscnt"]:
-                                moduleReduction.add(SWaitCnt(vscnt=numLRWaitCnt))
+                            moduleReduction.add(SWaitCnt(dscnt=numLRWaitCnt, comment="wait count is (%u-%u)"%(numTotalInst, numPassedInst)))
                         if r > 0:
                             for regToAdd in range(regsPerStore):
                                 if kernel["ProblemType"]["ComputeDataType"].isSingle():
@@ -552,7 +550,7 @@ class LSUOn(LSU):
         vectorWidths     = [fullVw, edgeVw]
         vectorWidths_1 = [fullVw_1, edgeVw_1]
 
-        noGSUBranch = (kernel["GlobalSplitU"] == 0)
+        noGSUBranch = (kernel["GlobalSplitU"] == 0 and kernel["StreamK"] != 3)
         module = Module("localSplitUGlobalWrite")
         module.add(writer.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch))
         writer.cleanupGlobalWrite(kernel)

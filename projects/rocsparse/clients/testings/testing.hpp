@@ -84,7 +84,9 @@ inline rocsparse_double_complex rocsparse_inf<rocsparse_double_complex>()
 template <typename T>
 floating_data_t<T> get_near_check_tol(const Arguments& arg)
 {
-    return static_cast<floating_data_t<T>>(arg.tolm) * default_tolerance<T>::value;
+    return arg.convert_to_int
+               ? static_cast<floating_data_t<T>>(0)
+               : static_cast<floating_data_t<T>>(arg.tolm) * default_tolerance<T>::value;
 }
 
 //

@@ -4,13 +4,13 @@ hipSPARSE is a SPARSE marshalling library with multiple supported backends. It s
 application and a 'worker' SPARSE library, where it marshals inputs to the backend library and marshals
 results to your application. hipSPARSE exports an interface that doesn't require the client to change,
 regardless of the chosen backend. Currently, hipSPARSE supports
-[rocSPARSE](https://github.com/ROCmSoftwarePlatform/rocSPARSE) and
+[rocSPARSE](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse) and
 [NVIDIA CUDA cuSPARSE](https://developer.nvidia.com/cusparse) backends.
 
 ## Documentation
 
 > [!NOTE]
-> The published hipSPARSE documentation is available at [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the hipSPARSE/docs folder of this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+> The published hipSPARSE documentation is available at [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `rocm-libraries/projects/hipsparse` folder of this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 To build our documentation locally, run the following code:
 
@@ -44,7 +44,8 @@ To build hipSPARSE, you can use our bash helper script (for Ubuntu only) or you 
 build (for all supported platforms).
 
 * Bash helper script (`install.sh`):
-  This script, which is located in the root of this repository, builds and installs hipSPARSE on Ubuntu
+  This script, which is located in the `rocm-libraries/projects/hipsparse` folder
+  of the rocm-libraries repository, builds and installs hipSPARSE on Ubuntu
   with a single command. Note that this option doesn't allow much customization and hard-codes
   configurations that can be specified through invoking CMake directly. Some commands in the script
   require sudo access, so it may prompt you for a password.
@@ -56,14 +57,13 @@ build (for all supported platforms).
 
 * Manual build:
     If you use a distribution other than Ubuntu, or would like more control over the build process,
-    the [hipSPARSE build wiki](https://github.com/ROCmSoftwarePlatform/hipSPARSE/wiki/Build)
+    the [hipSPARSE installation guide](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/install/install.html)
     provides information on how to configure CMake and build hipSPARSE manually.
 
 ### Supported functions
 
-You can find a list of
-[exported functions](https://github.com/ROCmSoftwarePlatform/hipSPARSE/wiki/Exported-functions)
-on our wiki.
+See the hipSPARSE documentation for a list of
+[exported functions](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/reference/api.html).
 
 ## Interface examples
 

@@ -41,7 +41,6 @@
 #include "../hipfft_params.h"
 #include "hipfft/hipfft.h"
 #include "hipfft_accuracy_test.h"
-#include "hipfft_test_params.h"
 
 // initialize static class member of hipfft_params
 std::vector<gpubuf> hipfft_params::externally_managed_workareas = std::vector<gpubuf>();
@@ -328,9 +327,9 @@ int main(int argc, char* argv[])
         ->default_val(default_seed_dev());
     app.add_flag("--smoketest", "Run a short (approx 5 minute) randomized selection of tests")
         ->each([&](const std::string&) {
-            // The objective is to have an test that takes about 5 minutes, so just set the probability
-            // per test to a small value to achieve this result.
-            test_prob = 0.02;
+            // The objective is to have an test that takes about 5 minutes, so just set the
+            // probability per test to a small value to achieve this result.
+            test_prob = 0.002;
         });
     // Token string to fully specify fft params for the manual test.
     std::string test_token;

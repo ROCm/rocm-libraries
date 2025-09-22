@@ -29,11 +29,18 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if _CCCL_STD_VER >= 2017
 
-#  ifdef _CCCL_CUDA_COMPILER
+#  if _CCCL_HAS_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -42,15 +49,14 @@
 #    include <thrust/system/cuda/detail/async/customization.h>
 #    include <thrust/system/cuda/detail/util.h>
 #    include <thrust/system/cuda/future.h>
-#    include <thrust/type_traits/remove_cvref.h>
+
+#    include <cuda/std/type_traits>
 
 #    include <type_traits>
 
 // TODO specialize for thrust::plus to use e.g. InclusiveSum instead of IncScan
-//  - Note that thrust::plus<> is transparent, cub::Sum is not. This should be
-//    fixed in CUB first).
-//  - Need to check if CUB actually optimizes for sums before putting in effort
 
+_CCCL_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -133,24 +139,26 @@ unique_eager_event async_inclusive_scan_n(
     __accumulator_t<BinaryOp, typename ::cuda::std::iterator_traits<ForwardIt>::value_type, InitialValueType>;
   constexpr bool ForceInclusive = true;
 
-  using Dispatch32 =
-    cub::DispatchScan<ForwardIt,
-                      OutputIt,
-                      BinaryOp,
-                      InputValueT,
-                      std::int32_t,
-                      AccumT,
-                      cub::DeviceScanPolicy<AccumT, BinaryOp>,
-                      ForceInclusive>;
-  using Dispatch64 =
-    cub::DispatchScan<ForwardIt,
-                      OutputIt,
-                      BinaryOp,
-                      InputValueT,
-                      std::int64_t,
-                      AccumT,
-                      cub::DeviceScanPolicy<AccumT, BinaryOp>,
-                      ForceInclusive>;
+  using Dispatch32 = cub::DispatchScan<
+    ForwardIt,
+    OutputIt,
+    BinaryOp,
+    InputValueT,
+    std::int32_t,
+    AccumT,
+    cub::detail::scan::
+      policy_hub<cub::detail::value_t<ForwardIt>, cub::detail::value_t<OutputIt>, AccumT, std::int32_t, BinaryOp>,
+    ForceInclusive>;
+  using Dispatch64 = cub::DispatchScan<
+    ForwardIt,
+    OutputIt,
+    BinaryOp,
+    InputValueT,
+    std::int64_t,
+    AccumT,
+    cub::detail::scan::
+      policy_hub<cub::detail::value_t<ForwardIt>, cub::detail::value_t<OutputIt>, AccumT, std::int64_t, BinaryOp>,
+    ForceInclusive>;
 
   InputValueT init_value(init);
 
@@ -239,8 +247,9 @@ auto async_inclusive_scan(
 
 } // namespace cuda_cub
 
+_CCCL_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
 
 #  endif // _CCCL_CUDA_COMPILER
 
-#endif // C++14
+#endif // C++17

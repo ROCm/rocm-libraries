@@ -5,15 +5,16 @@
 .. _windows-install:
 
 ********************************************************************
-Installing and building rocSPARSE for Windows
+Installing and building rocSPARSE for Microsoft Windows
 ********************************************************************
 
-This topic describes how to install or build rocSPARSE on Windows by using prebuilt packages or building from source.
+This topic describes how to install or build rocSPARSE on Microsoft Windows by using prebuilt packages or building from source.
+For information on installing and building rocSPARSE on Linux, see :doc:`rocSPARSE for Linux <./Linux_Install_Guide>`.
 
 Prerequisites
 =============
 
-rocSPARSE on Windows requires an AMD HIP SDK enabled platform. It's supported on the
+rocSPARSE on Windows requires an AMD HIP SDK-enabled platform. It's supported on the
 same Windows versions and toolchains that the HIP SDK supports. For more information, see
 :doc:`HIP SDK installation for Windows <rocm-install-on-windows:index>`.
 
@@ -26,7 +27,7 @@ The simplest way to add rocSPARSE to your code is to use CMake.
 Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.
 
 .. note::
-   
+
    You must use quotes because the path contains a space.
 
 .. code-block:: shell
@@ -42,7 +43,7 @@ In your ``CMakeLists.txt`` file, use these lines:
 
 After rocSPARSE is installed, it can be used just like any other library with a C API.
 To call rocSPARSE, the ``rocsparse.h`` header file must be included in the user code.
-This means the rocSPARSE  import library and dynamic link library respectively become link-time and run-time dependencies 
+This means the rocSPARSE  import library and dynamic link library respectively become link-time and run-time dependencies
 for the user application.
 
 After the installation, you can find ``rocsparse.h`` in the HIP SDK ``\\include\\rocsparse``
@@ -92,14 +93,14 @@ you can run the HIP SDK compiler from the ``bin/`` folder to display the version
 
    hipcc --version
 
-The HIP version has major, minor, and patch fields, possibly followed by a build specific identifier.
+The HIP version number consists of major, minor, and patch fields, and is sometimes followed by a build-specific identifier.
 For example, the HIP version might be ``5.4.22880-135e1ab4``.
 This corresponds to major release ``5``, minor release ``4``, patch ``22880``, and build identifier ``135e1ab4``.
 The rocSPARSE GitHub includes branches with names like ``release/rocm-rel-major.minor``,
 where major and minor have the same meaning as the HIP version.
 
 To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
-This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce the data download.
 Use the following commands for a sparse checkout:
 
 .. note::
@@ -137,8 +138,8 @@ Add the SDK tools to your path with an entry like the following:
 
    %HIP_PATH%\bin
 
-Building using make
---------------------
+Building using the Python script
+---------------------------------
 
 This section describes the steps required to build rocSPARSE using the ``rmake.py`` script. You can build:
 
