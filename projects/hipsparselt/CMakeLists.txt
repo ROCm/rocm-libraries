@@ -311,26 +311,28 @@ rocm_create_package(
 
 if(HIPSPARSELT_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
     message(STATUS "Configuring code coverage target")
+    
+    # Apply coverage flags to library target
     target_compile_options(hipsparselt PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(hipsparselt PRIVATE -fprofile-instr-generate)
 
-    set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
-    set(coverage_test_arguments "--precompile=hipsparselt-test-precompile.db")
+    set(_coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+    set(_coverage_test_arguments "--precompile=hipsparselt-test-precompile.db")
     if(HIPSPARSELT_COVERAGE_GTEST_FILTER)
-        list(APPEND coverage_test_arguments "--gtest_filter=${HIPSPARSELT_COVERAGE_GTEST_FILTER}")
+        list(APPEND _coverage_test_arguments "--gtest_filter=${HIPSPARSELT_COVERAGE_GTEST_FILTER}")
     endif()
 
     add_custom_target(
         code_cov_tests
         DEPENDS hipsparselt-test
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_coverage_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_coverage_dir}/profraw"
         COMMAND
             ${CMAKE_COMMAND} -E env
-            LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipsparselt-coverage_%p.profraw"
-            $<TARGET_FILE:hipsparselt-test> ${coverage_test_arguments}
+            LLVM_PROFILE_FILE="${_coverage_dir}/profraw/hipsparselt-coverage_%p.profraw"
+            $<TARGET_FILE:hipsparselt-test> ${_coverage_test_arguments}
         COMMENT
-            "Running coverage with test command: $<TARGET_FILE:hipsparselt-test> ${coverage_test_arguments}"
+            "Running coverage with test command: $<TARGET_FILE:hipsparselt-test> ${_coverage_test_arguments}"
     )
 
     set(_llvm_tool_hints)
@@ -345,14 +347,14 @@ if(HIPSPARSELT_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
         coverage
         DEPENDS code_cov_tests
         COMMAND
-            ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipsparselt-coverage_*.profraw"
-            -o "${coverage_dir}/hipsparselt.profdata"
+            ${LLVM_PROFDATA} merge -sparse "${_coverage_dir}/profraw/hipsparselt-coverage_*.profraw"
+            -o "${_coverage_dir}/hipsparselt.profdata"
         COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipsparselt>
-                -instr-profile="${coverage_dir}/hipsparselt.profdata"
+                -instr-profile="${_coverage_dir}/hipsparselt.profdata"
         COMMAND
             ${LLVM_COV} show -object $<TARGET_FILE:hipsparselt>
-            -instr-profile="${coverage_dir}/hipsparselt.profdata" -format=html
-            -output-dir="${coverage_dir}"
-        COMMENT "Generating coverage... report can be found in ${coverage_dir}/index.html"
+            -instr-profile="${_coverage_dir}/hipsparselt.profdata" -format=html
+            -output-dir="${_coverage_dir}"
+        COMMENT "Generating coverage... report can be found in ${_coverage_dir}/index.html"
     )
 endif()
