@@ -66,8 +66,8 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 4, 8, 1, 1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]        
-        - DepthU: [128]
+        - ClusterLocalRead: [1]        
+        - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [-1]
@@ -90,7 +90,7 @@ BenchmarkProblems:
         - ProblemSizes:
           # - Exact: [16, 16, 1, 32] # classic format
           - Exact: [16, 16, 1, 64] # classic format
-          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
           # - Exact: [24, 24, 1, 48] # classic format
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 128] # classic format
@@ -141,7 +141,7 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 4, 8, 1, 1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]        
+        - ClusterLocalRead: [1]        
         - DepthU: [128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
@@ -216,7 +216,7 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 4, 8, 1, 1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]        
+        - ClusterLocalRead: [1]        
         - DepthU: [128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
@@ -291,7 +291,7 @@ BenchmarkProblems:
           # - [16, 16, 128, 1, 1, 4, 8, 1, 1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]        
+        - ClusterLocalRead: [1]        
         - DepthU: [128]       # [128, 256] FIXME: DU256 has set_vgpr range issue.
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]

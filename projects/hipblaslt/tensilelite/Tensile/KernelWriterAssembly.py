@@ -1156,7 +1156,7 @@ class KernelWriterAssembly(KernelWriter):
                     ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackMetadata * kernel["MIWaveTileMetadata"]
                   for iui in range(0, kernel["InnerUnroll"]):
                     moduleVgprMacroValuMPack.add(RegSet("v", "vgprValuMetadata_X%u_I%u_D%u"%(bi,iui,data),"vgprValuMetadata_X0_I0_D0_PACK", ri))
-                    ri += self.states.m.numVgprValuPerBlock
+                    ri += kernel["MIWaveTileMetadata"]
 
     if not kernel["LocalWriteUseSgprA"] and self.states.a.numVgprLocalWriteAddr > 0:
       module.add(RegSet("v", "vgprLocalWriteAddrA", \
@@ -7716,7 +7716,7 @@ class KernelWriterAssembly(KernelWriter):
     vgprPerInputB    = int(numMIInputB * numRegistersInB)
     vgprPerInputMXSA = ceil(numMIInputMXSA * numRegistersInMXSA)
     vgprPerInputMXSB = ceil(numMIInputMXSB * numRegistersInMXSB)
-    vgprPerInputM    = int(ceil(numMIInputM // self.states.bpr))
+    vgprPerInputM    = int(ceil(numMIInputM / self.states.bpr))
     vgprPerInput     = max(vgprPerInputA, vgprPerInputB)
     vgprPerInUnrollA = vgprPerInputA // numTileInInstA
     vgprPerInUnrollB = vgprPerInputB // numTileInInstB
@@ -8352,7 +8352,7 @@ class KernelWriterAssembly(KernelWriter):
 
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             idxM     = idxB if kernel["ProblemType"]["Sparse"] == 2 else idxA
-            m_new    = idxM * (self.states.numReadsIterCoalescedMetadata if not kernel["enableLDSTrMetadata"] else ceil(self.states.numReadsIterCoalescedMetadata / 2) * 2)
+            m_new    = idxM * (self.states.numReadsIterCoalescedMetadata * vgprPerInputM if not kernel["enableLDSTrMetadata"] else ceil(self.states.numReadsIterCoalescedMetadata * vgprPerInputM / 2) * 2)
             mStr     = "ValuMetadata_X%u_I%u+%u+%u+%u" % (vgprBufferM_new, iuiM_new, m_new, vgprBufferM_new_offset, iuiM_new_offset)
             mStr     = vgpr(mStr, vgprPerInputM)
 
