@@ -54,8 +54,8 @@ namespace rocRoller
             auto edges = graph.getEdges().filter(edgePredicate).template to<std::vector>();
             for(auto edge : edges)
             {
-                auto tail = graph.template getNeighbours<Direction::Upstream>(edge).front();
-                auto head = graph.template getNeighbours<Direction::Downstream>(edge).front();
+                auto tail = only(graph.template getNeighbours<Direction::Upstream>(edge)).value();
+                auto head = only(graph.template getNeighbours<Direction::Downstream>(edge)).value();
 
                 auto onlyFollowDifferentMatchingEdges
                     = [&](int x) -> bool { return x != edge && edgePredicate(x); };
