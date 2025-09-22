@@ -34,7 +34,7 @@ so it might prompt you for a password.
 
 .. note::
 
-   To build hipSOLVER for ROCm 7.0.2 and earlier, use the hipBLAS repository at `<https://github.com/ROCm/hipSOLVER>`_.
+   To build hipSOLVER for ROCm 7.0.2 and earlier, use the hipSOLVER repository at `<https://github.com/ROCm/hipSOLVER>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Here are some typical examples of using the script:

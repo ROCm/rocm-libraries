@@ -48,7 +48,7 @@ as follows.
 
 .. note::
 
-   To build rocSOLVER for ROCm 7.0.2 and earlier, use the hipBLAS repository at `<https://github.com/ROCm/rocSOLVER>`_.
+   To build rocSOLVER for ROCm 7.0.2 and earlier, use the rocSOLVER repository at `<https://github.com/ROCm/rocSOLVER>`_.
    For more information, see the documentation associated with the release you want to build.
 
 To limit your local checkout to only the rocSOLVER project, configure ``sparse-checkout`` before cloning.
