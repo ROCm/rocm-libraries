@@ -37,8 +37,8 @@ split into a separate library. As of version 6.0, hipRAND can no longer be built
 * C++ compiler with C++11 support to consume the library.
 * For AMD platforms:
   * [ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/native-install/index.html) (1.7 or later)
-  * [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler, which must be
-    set as C++ compiler on ROCm platform.
+  * [HIP-clang](https://rocm.docs.amd.com/projects/HIP/en/latest/install/install.html) compiler, which must be
+    set as the C++ compiler for the ROCm platform.
 * Python 3.6 or higher (HIP on Windows only, only required for install script)
 * Visual Studio 2019 with clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
