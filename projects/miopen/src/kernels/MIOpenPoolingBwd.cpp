@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,13 @@
  *
  *******************************************************************************/
 
+#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#include <hip/hip_runtime.h>
+#endif
+
+#include <limits.h>
+
+#include "miopen_limits.hpp"
 #include "float_types.h"
 #include "pooling_functions.h"
 
@@ -39,7 +46,7 @@
 #error "MLO_POOLING_INDEX_MAX not defined"
 #endif
 
-#if(MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE) || (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
+#if (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE) || (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
 #define AVERAGE_OPS 1
 #else
 #define AVERAGE_OPS 0
@@ -56,34 +63,34 @@
       MLO_POOLING_STRIDE1 - 2) /                                                    \
      MLO_POOLING_STRIDE1)
 
-#if AVERAGE_OPS
-__attribute__((reqd_work_group_size(MLO_POOLBWD_GROUP_SZ0,
-                                    MLO_POOLBWD_GROUP_SZ1,
-                                    MLO_POOLBWD_GROUP_SZ2))) __kernel void
-mloPoolingAveBwd(const __global _FLOAT* top_diff,
-                 __global _FLOAT* bot_diff,
-                 int mlo_pad1,
-                 int mlo_pad0,
-                 int mlo_n_outputs,
-                 int mlo_bot_height,
-                 int mlo_bot_width,
-                 int mlo_top_height,
-                 int mlo_top_width,
-                 int mlo_botdf_batch_str,
-                 int mlo_botdf_channel_str,
-                 int mlo_botdf_str,
-                 int mlo_topdf_batch_str,
-                 int mlo_topdf_channel_str,
-                 int mlo_topdf_str)
-{
-    __local _FLOAT lcl_top_diff[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
+constexpr int block_size = MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_GROUP_SZ2;
 
-    int x       = get_group_id(0) * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
-    int y       = get_group_id(1) * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
-    int lcl_id0 = get_local_id(0);
-    int lcl_id1 = get_local_id(1);
+#if AVERAGE_OPS
+extern "C" __global__ __launch_bounds__(block_size) //
+    void mloPoolingAveBwd(const FLOAT* top_diff,
+                          FLOAT* bot_diff,
+                          int mlo_pad1,
+                          int mlo_pad0,
+                          int mlo_n_outputs,
+                          int mlo_bot_height,
+                          int mlo_bot_width,
+                          int mlo_top_height,
+                          int mlo_top_width,
+                          int mlo_botdf_batch_str,
+                          int mlo_botdf_channel_str,
+                          int mlo_botdf_str,
+                          int mlo_topdf_batch_str,
+                          int mlo_topdf_channel_str,
+                          int mlo_topdf_str)
+{
+    __shared__ FLOAT lcl_top_diff[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
+
+    int x       = blockIdx.x * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
+    int y       = blockIdx.y * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
+    int lcl_id0 = threadIdx.x;
+    int lcl_id1 = threadIdx.y;
     //		int lcl_id = (lcl_id1 << MLO_POOLBWD_GROUP_LG2SZ1) + lcl_id0;
-    int ob = get_global_id(2); // outputs * batch_sz
+    int ob = blockIdx.z * blockDim.z + threadIdx.z; // outputs * batch_sz
     int b  = ob / mlo_n_outputs;
     int o  = ob - b * mlo_n_outputs;
 
@@ -95,12 +102,12 @@ mloPoolingAveBwd(const __global _FLOAT* top_diff,
                       : (y + mlo_pad1 - MLO_POOLING_KERNEL_SZ1) / MLO_POOLING_STRIDE1 + 1;
     int top_off = b * mlo_topdf_batch_str + o * mlo_topdf_channel_str;
 
-    _FLOAT_ACCUM res[MLO_POOLBWD_N_VERT_OUT_PIX][MLO_POOLBWD_N_HORIZ_OUT_PIX];
+    FLOAT_ACCUM res[MLO_POOLBWD_N_VERT_OUT_PIX][MLO_POOLBWD_N_HORIZ_OUT_PIX];
     for(int k = 0; k < MLO_POOLBWD_N_VERT_OUT_PIX; k++)
     {
         for(int l = 0; l < MLO_POOLBWD_N_HORIZ_OUT_PIX; l++)
         {
-            res[k][l] = (_FLOAT_ACCUM)0;
+            res[k][l] = (FLOAT_ACCUM)0;
         }
     }
 
@@ -123,7 +130,7 @@ mloPoolingAveBwd(const __global _FLOAT* top_diff,
 
             int top_diff_off = (invisibleX || invisibleY) ? 0 : top_off + top_y_off + top_x_act;
 
-            _FLOAT top_val = top_diff[top_diff_off];
+            FLOAT top_val = top_diff[top_diff_off];
 
             top_val = (invisibleX || invisibleY) ? 0 : top_val;
 
@@ -137,7 +144,7 @@ mloPoolingAveBwd(const __global _FLOAT* top_diff,
         }
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __syncthreads();
 
     int bot_y = (y + lcl_id1 * MLO_POOLBWD_N_VERT_OUT_PIX);
     int bot_x = (x + lcl_id0 * MLO_POOLBWD_N_HORIZ_OUT_PIX);
@@ -183,7 +190,7 @@ mloPoolingAveBwd(const __global _FLOAT* top_diff,
                     pool_size     = (pool_size == 0) ? 1 : pool_size;
                     int lcl_top_h = top_h - top_y;
                     int lcl_top_w = top_w - top_x;
-                    _FLOAT_ACCUM add_val =
+                    FLOAT_ACCUM add_val =
                         CVT_FLOAT2ACCUM(
                             lcl_top_diff[lcl_top_h * MLO_POOLBWD_LCL_DATA_WIDTH + lcl_top_w]) /
                         CVT_INTEGRAL2ACCUM(pool_size);
@@ -221,36 +228,34 @@ mloPoolingAveBwd(const __global _FLOAT* top_diff,
 #endif // AVERAGE_OPS
 
 #if MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
-__attribute__((reqd_work_group_size(MLO_POOLBWD_GROUP_SZ0,
-                                    MLO_POOLBWD_GROUP_SZ1,
-                                    MLO_POOLBWD_GROUP_SZ2))) __kernel void
-mloPoolingMaxBwd(const __global _FLOAT* top_df,
-                 __global _FLOAT* bot_df,
-                 __global index_t* mask,
-                 int mlo_pad1,
-                 int mlo_pad0,
-                 int mlo_n_outputs,
-                 int mlo_bot_height,
-                 int mlo_bot_width,
-                 int mlo_top_height,
-                 int mlo_top_width,
-                 int mlo_botdf_batch_str,
-                 int mlo_botdf_channel_str,
-                 int mlo_botdf_str,
-                 int mlo_topdf_batch_str,
-                 int mlo_topdf_channel_str,
-                 int mlo_topdf_str)
+extern "C" __global__ __launch_bounds__(block_size) //
+    void mloPoolingMaxBwd(const FLOAT* top_df,
+                          FLOAT* bot_df,
+                          index_t* mask,
+                          int mlo_pad1,
+                          int mlo_pad0,
+                          int mlo_n_outputs,
+                          int mlo_bot_height,
+                          int mlo_bot_width,
+                          int mlo_top_height,
+                          int mlo_top_width,
+                          int mlo_botdf_batch_str,
+                          int mlo_botdf_channel_str,
+                          int mlo_botdf_str,
+                          int mlo_topdf_batch_str,
+                          int mlo_topdf_channel_str,
+                          int mlo_topdf_str)
 {
-    __local _FLOAT lcl_top_df[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
-    __local index_t lcl_mask[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
+    __shared__ FLOAT lcl_top_df[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
+    __shared__ index_t lcl_mask[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
 
-    int gid0    = get_group_id(0);
-    int gid1    = get_group_id(1);
+    int gid0    = blockIdx.x;
+    int gid1    = blockIdx.y;
     int x       = gid0 * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
     int y       = gid1 * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
-    int lcl_id0 = get_local_id(0);
-    int lcl_id1 = get_local_id(1);
-    int ob      = get_global_id(2); // outputs * batch_sz
+    int lcl_id0 = threadIdx.x;
+    int lcl_id1 = threadIdx.y;
+    int ob      = blockIdx.z * blockDim.z + threadIdx.z; // outputs * batch_sz
     int b       = ob / mlo_n_outputs;
     int o       = ob - b * mlo_n_outputs;
 
@@ -262,8 +267,8 @@ mloPoolingMaxBwd(const __global _FLOAT* top_df,
                          : (y + mlo_pad1 - MLO_POOLING_KERNEL_SZ1) / MLO_POOLING_STRIDE1 + 1;
     int top_df_off = b * mlo_topdf_batch_str + o * mlo_topdf_channel_str;
 
-    _FLOAT res[MLO_POOLBWD_N_VERT_OUT_PIX][MLO_POOLBWD_N_HORIZ_OUT_PIX];
-    _FLOAT top_df_val;
+    FLOAT res[MLO_POOLBWD_N_VERT_OUT_PIX][MLO_POOLBWD_N_HORIZ_OUT_PIX];
+    FLOAT top_df_val;
     index_t mask_val;
     // load tiles
     // top df and top
@@ -297,8 +302,8 @@ mloPoolingMaxBwd(const __global _FLOAT* top_df,
         }
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
-    _FLOAT add_val;
+    __syncthreads();
+    FLOAT add_val;
     int bt_y = (y + lcl_id1 * MLO_POOLBWD_N_VERT_OUT_PIX);
     int bt_x = (x + lcl_id0 * MLO_POOLBWD_N_HORIZ_OUT_PIX);
 
@@ -326,11 +331,10 @@ mloPoolingMaxBwd(const __global _FLOAT* top_df,
                                                MLO_POOLING_STRIDE1;
                 ++th)
             {
-                __attribute__((opencl_unroll_hint(2))) for(int tw = lt_x;
-                                                           tw < lt_x + (MLO_POOLING_KERNEL_SZ0 +
-                                                                        MLO_POOLING_STRIDE0 - 1) /
-                                                                           MLO_POOLING_STRIDE0;
-                                                           ++tw)
+#pragma unroll 2
+                for(int tw = lt_x; tw < lt_x + (MLO_POOLING_KERNEL_SZ0 + MLO_POOLING_STRIDE0 - 1) /
+                                                   MLO_POOLING_STRIDE0;
+                    ++tw)
                 {
                     int lcl_th = th - top_y;
                     int lcl_tw = tw - top_x;
@@ -354,8 +358,8 @@ mloPoolingMaxBwd(const __global _FLOAT* top_df,
 #endif
                         ;
 
-                    //_FLOAT add_val = lcl_top_df[lcl_idx] * match;
-                    //_FLOAT add_val = match ? lcl_top_df[lcl_idx] : (_FLOAT)0;
+                    // FLOAT add_val = lcl_top_df[lcl_idx] * match;
+                    // FLOAT add_val = match ? lcl_top_df[lcl_idx] : (FLOAT)0;
                     if(match)
                     {
                         add_val = lcl_top_df[lcl_idx];

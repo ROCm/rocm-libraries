@@ -194,7 +194,7 @@ PoolingBackward2d::GetSolution(const ExecutionContext&,
     {
         auto kernel = KernelInfo{};
 
-        kernel.kernel_file = "MIOpenPoolingBwd.cl";
+        kernel.kernel_file = "MIOpenPoolingBwd.cpp";
 
         if(problem.GetPooling().GetMode() == miopenPoolingMax)
         {
@@ -239,7 +239,7 @@ PoolingBackward2d::GetSolution(const ExecutionContext&,
             }
             << GetDataTypeKBP(problem.GetXDesc().GetType());
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk = {kp.grp_tile0, kp.grp_tile1, 1};
         kernel.g_wk = {
