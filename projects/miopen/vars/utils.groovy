@@ -225,7 +225,7 @@ def getDockerImageName(dockerArgs)
     }
 
     def image = "${dockerUrl}/${env.MIOPEN_PRIVATE_DOCKER_IMAGE_PROJECT}"
-    sh "cd ${env.WORKSPACE}/${env.REPO_DIR}/ && md5sum Dockerfile.ci requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
+    sh "cd ${env.WORKSPACE}/${env.REPO_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     sh "echo ${env.MIOPEN_ARTF_IMAGE_VERSION} >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
@@ -248,11 +248,7 @@ def getDockerImage(Map conf=[:])
 
     def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 " +
                      "--build-arg PREFIX=${prefixpath} " +
-                     "--build-arg GPU_ARCHS=\"${gpu_arch}\" " +
-                     "--build-arg ARTF_SERV=${env.ARTF_SERV} " +
-                     "--build-arg ARTF_IMAGE_SUB_URL=${env.MIOPEN_ARTF_IMAGE_SUB_URL} " +
-                     "--build-arg ARTF_IMAGE_NAME=${env.MIOPEN_ARTF_IMAGE_NAME} " +
-                     "--build-arg ARTF_IMAGE_VERSION=${env.MIOPEN_ARTF_IMAGE_VERSION} "
+                     "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
     if(env.CCACHE_HOST)
     {
         def check_host = sh(script:"""(printf "PING\r\n";) | nc -N ${env.CCACHE_HOST} 6379 """, returnStdout: true).trim()
@@ -291,7 +287,7 @@ def getDockerImage(Map conf=[:])
     catch(Exception ex)
     {
         echo "Building image..."
-        dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile.ci .")
+        dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile .")
         withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
             dockerImage.push()
         }
