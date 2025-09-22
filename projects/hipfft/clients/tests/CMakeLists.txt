@@ -60,7 +60,7 @@ set( Boost_USE_STATIC_LIBS OFF )
 # searching FFTW with FindFFTW.cmake that is provided by project
 # because distro versions of FFTW does not include the cmake specific
 # helper files
-find_package( FFTW 3.0 REQUIRED MODULE COMPONENTS FLOAT DOUBLE )
+find_package( FFTW 3.0 MODULE COMPONENTS FLOAT DOUBLE )
 if( FFTW_FOUND )
   message(STATUS "FFTW found by FindFFTW.cmake")
 else()
