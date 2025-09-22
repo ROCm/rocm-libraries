@@ -11,7 +11,7 @@ ARG CCACHE_COMMIT=7f1572ae9ca958fa923a66235f6a64a360b03523
 ARG MIOPEN_SCCACHE=""
 ARG MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="MiOpen-Docker-CK"
 
-# GPU_ARCHS should be defined as a build arg rather than hardcoded here. 
+# GPU_ARCHS should be defined as a build arg rather than hardcoded here.
 ARG GPU_ARCHS=none
 
 ARG COMPILER_LAUNCHER=""
@@ -52,6 +52,12 @@ RUN if [ "$MIOPEN_SCCACHE" != "" ]; then \
     chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
     fi
 
+# Add DVC repo
+RUN mkdir -p /etc/apt/keyrings && \
+    wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | sudo tee /etc/apt/sources.list.d/dvc.list && \
+    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list
+
 # Install dependencies
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
@@ -74,7 +80,8 @@ RUN apt-get update && \
     rocm-developer-tools \
     rocm-llvm-dev \
     rpm \
-    software-properties-common && \
+    software-properties-common \
+    dvc && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* &&\
     rm -rf amdgpu-install* && \
@@ -161,10 +168,10 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
     -D DISABLE_OFFLOAD_COMPRESS=ON \
     -D CMAKE_CXX_FLAGS=" -O3 " .. && \
-    make -j ${num_threads} install && \ 
+    make -j ${num_threads} install && \
     sccache -s
 
-# Composable Kernel installed separated from rbuild to take in values from GPU_ARCHS 
+# Composable Kernel installed separated from rbuild to take in values from GPU_ARCHS
 RUN sed -i '/composable_kernel/d' /requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt
@@ -173,7 +180,7 @@ RUN if [ "$USE_FIN" = "ON" ]; then \
     else \
     rbuild prepare -s develop -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
     fi && \
-    ccache -s 
+    ccache -s
 
 # Utilize multi-stage build in order to squash the container.
 FROM ubuntu:22.04

@@ -51,7 +51,7 @@ extern "C" {
 *  @param[in]
 *  nnz         number of non-zero entries of the sparse COO matrix.
 *  @param[in]
-*  descr       the descriptor of the column-oriented dense matrix \p A, the supported matrix type is 
+*  descr       the descriptor of the column-oriented dense matrix \p A, the supported matrix type is
 *              \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  coo_val     array of nnz nonzero elements of matrix \p A.
