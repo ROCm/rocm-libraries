@@ -153,26 +153,35 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
     rocm_package_setup_client_component(
       tests
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
   if(BUILD_CLIENTS_BENCHMARKS)
     rocm_package_setup_client_component(
       benchmarks
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
   if(BUILD_CLIENTS_SAMPLES)
-    rocm_package_setup_client_component(
+    rocm_package_setup_client_component( 
       samples
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
+  if(BUILD_FORTRAN_CLIENTS)
+    if(BUILD_CLIENTS_TESTS)
+      rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
+    endif()
+    if(BUILD_CLIENTS_BENCHMARKS)
+      rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
+    endif()
+    if(BUILD_CLIENTS_SAMPLES)
+      rocm_package_add_rpm_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_DEB}")
+    endif()
+  endif()
+
   add_subdirectory( clients )
 endif( )
 

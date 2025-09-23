@@ -23,7 +23,7 @@ set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
 # Linking lapack library requires fortran flags
-if(NOT WIN32)
+if(BUILD_FORTRAN_CLIENTS OR NOT WIN32)
     enable_language( Fortran )
 endif()
 
@@ -113,7 +113,7 @@ set( hipblas_test_common
   ${BLIS_CPP}
 )
 
-if(NOT WIN32)
+if(BUILD_FORTRAN_CLIENTS)
   add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} $<TARGET_OBJECTS:hipblas_fortran_client> )
 else()
   add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
@@ -139,7 +139,7 @@ target_include_directories( hipblas-test
 
 target_link_libraries( hipblas-test PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
 
-if (NOT WIN32)
+if (BUILD_FORTRAN_CLIENTS)
     target_link_libraries( hipblas-test PRIVATE hipblas_fortran_client )
 endif()
 
