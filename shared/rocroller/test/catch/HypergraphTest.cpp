@@ -432,6 +432,12 @@ namespace HypergraphTest
                 CHECK_THROWS_AS(g.getElement(-1), FatalError);
             }
         }
+
+        SECTION("Adding identical connections only adds the first instance")
+        {
+            CHECK_NOTHROW(g.addElement(TestSplit{}, {u0, u0}, {sd0, sd1}));
+            CHECK_NOTHROW(g.addElement(TestSplit{}, {u0}, {sd1, sd1}));
+        }
     }
 
     TEST_CASE("Hypergraph pathing", "[hypergraph][kernel-graph]")
