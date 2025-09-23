@@ -21,15 +21,9 @@
 #include <unittest/unittest.h>
 
 template <class Vector>
-void TestMinMaxElementSimple(void)
+void TestMinMaxElementSimple()
 {
-  Vector data(6);
-  data[0] = 3;
-  data[1] = 5;
-  data[2] = 1;
-  data[3] = 2;
-  data[4] = 5;
-  data[5] = 1;
+  Vector data{3, 5, 1, 2, 5, 1};
 
   ASSERT_EQUAL(*thrust::minmax_element(data.begin(), data.end()).first, 1);
   ASSERT_EQUAL(*thrust::minmax_element(data.begin(), data.end()).second, 5);
@@ -39,17 +33,11 @@ void TestMinMaxElementSimple(void)
 DECLARE_VECTOR_UNITTEST(TestMinMaxElementSimple);
 
 template <class Vector>
-void TestMinMaxElementWithTransform(void)
+void TestMinMaxElementWithTransform()
 {
   using T = typename Vector::value_type;
 
-  Vector data(6);
-  data[0] = 3;
-  data[1] = 5;
-  data[2] = 1;
-  data[3] = 2;
-  data[4] = 5;
-  data[5] = 1;
+  Vector data{3, 5, 1, 2, 5, 1};
 
   ASSERT_EQUAL(*thrust::minmax_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
                                        thrust::make_transform_iterator(data.end(), thrust::negate<T>()))
@@ -145,8 +133,10 @@ void TestMinMaxElementWithBigIndexesHelper(int magnitude)
 void TestMinMaxElementWithBigIndexes()
 {
   TestMinMaxElementWithBigIndexesHelper(30);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestMinMaxElementWithBigIndexesHelper(31);
   TestMinMaxElementWithBigIndexesHelper(32);
   TestMinMaxElementWithBigIndexesHelper(33);
+#endif
 }
 DECLARE_UNITTEST(TestMinMaxElementWithBigIndexes);

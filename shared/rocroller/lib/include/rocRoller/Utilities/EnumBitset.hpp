@@ -76,6 +76,9 @@ namespace rocRoller
     std::string toString(EnumBitset<Enum> const& bs);
 
     template <CCountedEnum Enum>
+    std::string shortString(EnumBitset<Enum> const& bs);
+
+    template <CCountedEnum Enum>
     std::ostream& operator<<(std::ostream& stream, EnumBitset<Enum> const& bs);
 }
 

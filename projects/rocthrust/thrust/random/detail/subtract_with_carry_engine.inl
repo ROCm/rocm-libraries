@@ -210,4 +210,3 @@ template<typename UIntType, size_t w, size_t s, size_t r>
 } // end random
 
 THRUST_NAMESPACE_END
-

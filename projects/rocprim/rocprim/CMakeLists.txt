@@ -29,15 +29,6 @@ configure_file(
   @ONLY
 )
 
-if (ROCPRIM_INSTALL AND BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_file(
-    "rocprim_version.hpp"
-    WRAPPER_LOCATIONS rocprim/include/rocprim
-    OUTPUT_LOCATIONS rocprim/wrapper/include/rocprim
-    ORIGINAL_FILES ${CMAKE_CURRENT_BINARY_DIR}/include/rocprim/rocprim_version.hpp
-  )
-endif( )
-
 # Only header target, does not include dependencies
 add_library(rocprim INTERFACE)
 target_include_directories(rocprim
@@ -45,7 +36,7 @@ target_include_directories(rocprim
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/rocprim>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 # This target links against HIP library
@@ -63,22 +54,14 @@ if (ROCPRIM_INSTALL)
 
   rocm_install(
     DIRECTORY
-      "include/"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/"
       "${PROJECT_BINARY_DIR}/rocprim/include/"
-      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
     PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
   )
-
-
-  if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_install(
-      DIRECTORY
-        "${PROJECT_BINARY_DIR}/rocprim/wrapper/"
-          DESTINATION rocprim/ )
-  endif()
 
   # Export targets
   rocm_export_targets(

@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gtsv_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_sgtsv "rocsparse_Xgtsv()". The temporary 
+*  that is required by \ref rocsparse_sgtsv "rocsparse_Xgtsv()". The temporary
 *  storage buffer must be allocated by the user.
 *
 *  \note
@@ -172,85 +172,7 @@ rocsparse_status rocsparse_zgtsv_buffer_size(rocsparse_handle                han
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*   // Size of square tridiagonal matrix
-*   rocsparse_int m = 5;
-*
-*   // Number of columns in right-hand side (column ordered) matrix
-*   rocsparse_int n = 3;
-*
-*   // Leading dimension of right-hand side (column ordered) matrix
-*   rocsparse_int ldb = m;
-*
-*   // Host tri-diagonal matrix
-*   // 2 3 0 0 0
-*   // 2 4 2 0 0
-*   // 0 1 1 1 0
-*   // 0 0 1 3 1
-*   // 0 0 0 1 4
-*   std::vector<float> hdl = {0.0f, 2.0f, 1.0f, 1.0f, 1.0f};
-*   std::vector<float> hd = {2.0f, 4.0f, 1.0f, 3.0f, 4.0f};
-*   std::vector<float> hdu = {3.0f, 2.0f, 1.0f, 1.0f, 0.0f};
-*
-*   // Host right-hand side column vectors
-*   std::vector<float> hB(ldb * n, 2.0f);
-*
-*   float* ddl = nullptr;
-*   float* dd = nullptr;
-*   float* ddu = nullptr;
-*   float* dB = nullptr;
-*   hipMalloc((void**)&ddl, sizeof(float) * m);
-*   hipMalloc((void**)&dd, sizeof(float) * m);
-*   hipMalloc((void**)&ddu, sizeof(float) * m);
-*   hipMalloc((void**)&dB, sizeof(float) * ldb * n);
-*
-*   hipMemcpy(ddl, hdl.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*   hipMemcpy(dd, hd.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*   hipMemcpy(ddu, hdu.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*   hipMemcpy(dB, hB.data(), sizeof(float) * ldb * n, hipMemcpyHostToDevice);
-*
-*   // rocSPARSE handle
-*   rocsparse_handle handle;
-*   rocsparse_create_handle(&handle);
-*
-*   // Obtain required buffer size
-*   size_t buffer_size;
-*   rocsparse_sgtsv_buffer_size(handle,
-*                               m,
-*                               n,
-*                               ddl,
-*                               dd,
-*                               ddu,
-*                               dB,
-*                               ldb,
-*                               &buffer_size);
-*
-*   void* dbuffer;
-*   hipMalloc(&dbuffer, buffer_size);
-*
-*   rocsparse_sgtsv(handle,
-*                   m,
-*                   n,
-*                   ddl,
-*                   dd,
-*                   ddu,
-*                   dB,
-*                   ldb,
-*                   dbuffer);
-*
-*   // Copy right-hand side to host
-*   hipMemcpy(hB.data(), dB, sizeof(float) * ldb * n, hipMemcpyDeviceToHost);
-*
-*   // Clear rocSPARSE
-*   rocsparse_destroy_handle(handle);
-*
-*   // Clear device memory
-*   hipFree(ddl);
-*   hipFree(dd);
-*   hipFree(ddu);
-*   hipFree(dB);
-*   hipFree(dbuffer);
-*  \endcode
+*  \snippet example_rocsparse_gtsv.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -301,7 +223,7 @@ rocsparse_status rocsparse_zgtsv(rocsparse_handle                handle,
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gtsv_no_pivot_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_sgtsv_no_pivot "rocsparse_Xgtsv_no_pivot()". The temporary 
+*  that is required by \ref rocsparse_sgtsv_no_pivot "rocsparse_Xgtsv_no_pivot()". The temporary
 *  storage buffer must be allocated by the user.
 *
 *  \note
@@ -438,85 +360,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot_buffer_size(rocsparse_handle          
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*   // Size of square tridiagonal matrix
-*   rocsparse_int m = 5;
-*
-*   // Number of columns in right-hand side (column ordered) matrix
-*   rocsparse_int n = 3;
-*
-*   // Leading dimension of right-hand side (column ordered) matrix
-*   rocsparse_int ldb = m;
-*
-*   // Host tri-diagonal matrix
-*   //  2 -1  0  0  0
-*   // -1  2 -1  0  0
-*   //  0 -1  2 -1  0
-*   //  0  0 -1  2 -1
-*   //  0  0  0 -1  2
-*   std::vector<float> hdl = {0.0f, -1.0f, -1.0f, -1.0f, -1.0f};
-*   std::vector<float> hd = {2.0f, 2.0f, 2.0f, 2.0f, 2.0f};
-*   std::vector<float> hdu = {-1.0f, -1.0f, -1.0f, -1.0f, 0.0f};
-*
-*   // Host right-hand side column vectors
-*   std::vector<float> hB(ldb * n, 1.0f);
-*
-*   float* ddl = nullptr;
-*   float* dd = nullptr;
-*   float* ddu = nullptr;
-*   float* dB = nullptr;
-*   hipMalloc((void**)&ddl, sizeof(float) * m);
-*   hipMalloc((void**)&dd, sizeof(float) * m);
-*   hipMalloc((void**)&ddu, sizeof(float) * m);
-*   hipMalloc((void**)&dB, sizeof(float) * ldb * n);
-*
-*   hipMemcpy(ddl, hdl.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*   hipMemcpy(dd, hd.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*   hipMemcpy(ddu, hdu.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*   hipMemcpy(dB, hB.data(), sizeof(float) * ldb * n, hipMemcpyHostToDevice);
-*
-*   // rocSPARSE handle
-*   rocsparse_handle handle;
-*   rocsparse_create_handle(&handle);
-*
-*   // Obtain required buffer size
-*   size_t buffer_size;
-*   rocsparse_sgtsv_no_pivot_buffer_size(handle,
-*                                        m,
-*                                        n,
-*                                        ddl,
-*                                        dd,
-*                                        ddu,
-*                                        dB,
-*                                        ldb,
-*                                        &buffer_size);
-*
-*   void* dbuffer;
-*   hipMalloc(&dbuffer, buffer_size);
-*
-*   rocsparse_sgtsv_no_pivot(handle,
-*                            m,
-*                            n,
-*                            ddl,
-*                            dd,
-*                            ddu,
-*                            dB,
-*                            ldb,
-*                            dbuffer);
-*
-*   // Copy right-hand side to host
-*   hipMemcpy(hB.data(), dB, sizeof(float) * ldb * n, hipMemcpyDeviceToHost);
-*
-*   // Clear rocSPARSE
-*   rocsparse_destroy_handle(handle);
-*
-*   // Clear device memory
-*   hipFree(ddl);
-*   hipFree(dd);
-*   hipFree(ddu);
-*   hipFree(dB);
-*   hipFree(dbuffer);
-*  \endcode
+*  \snippet example_rocsparse_gtsv_no_pivot.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -567,7 +411,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot(rocsparse_handle                handle
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gtsv_no_pivot_strided_batch_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_sgtsv_no_pivot_strided_batch "rocsparse_Xgtsv_no_pivot_strided_batch()". 
+*  that is required by \ref rocsparse_sgtsv_no_pivot_strided_batch "rocsparse_Xgtsv_no_pivot_strided_batch()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note
@@ -740,113 +584,7 @@ rocsparse_status
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*   // Size of each square tridiagonal matrix
-*    int m = 6;
-*
-*    // Number of batches
-*    int batch_count = 4;
-*
-*    // Batch stride
-*    int batch_stride = m;
-*
-*    // Host tridiagonal matrix
-*    std::vector<float> hdl(batch_stride * batch_count);
-*    std::vector<float> hd(batch_stride * batch_count);
-*    std::vector<float> hdu(batch_stride * batch_count);
-*
-*    // Solve multiple tridiagonal matrix systems:
-*    //
-*    //      4 2 0 0 0 0        5 3 0 0 0 0        6 4 0 0 0 0        7 5 0 0 0 0
-*    //      2 4 2 0 0 0        3 5 3 0 0 0        4 6 4 0 0 0        5 7 5 0 0 0
-*    // A1 = 0 2 4 2 0 0   A2 = 0 3 5 3 0 0   A3 = 0 4 6 4 0 0   A4 = 0 5 7 5 0 0
-*    //      0 0 2 4 2 0        0 0 3 5 3 0        0 0 4 6 4 0        0 0 5 7 5 0
-*    //      0 0 0 2 4 2        0 0 0 3 5 3        0 0 0 4 6 4        0 0 0 5 7 5
-*    //      0 0 0 0 2 4        0 0 0 0 3 5        0 0 0 0 4 6        0 0 0 0 5 7
-*    //
-*    // hdl = 0 2 2 2 2 2 0 3 3 3 3 3 0 4 4 4 4 4 0 5 5 5 5 5
-*    // hd  = 4 4 4 4 4 4 5 5 5 5 5 5 6 6 6 6 6 6 7 7 7 7 7 7
-*    // hdu = 2 2 2 2 2 0 3 3 3 3 3 0 4 4 4 4 4 0 5 5 5 5 5 0
-*    for(int b = 0; b < batch_count; ++b)
-*    {
-*        for(rocsparse_int i = 0; i < m; ++i)
-*        {
-*            hdl[batch_stride * b + i] = 2 + b;
-*            hd[batch_stride * b + i]  = 4 + b;
-*            hdu[batch_stride * b + i] = 2 + b;
-*        }
-*
-*        hdl[batch_stride * b + 0]       = 0.0f;
-*        hdu[batch_stride * b + (m - 1)] = 0.0f;
-*    }
-*
-*    // Host dense rhs
-*    std::vector<float> hx(batch_stride * batch_count);
-*
-*    for(int b = 0; b < batch_count; ++b)
-*    {
-*        for(int i = 0; i < m; ++i)
-*        {
-*            hx[batch_stride * b + i] = static_cast<float>(b + 1);
-*        }
-*    }
-*
-*    float* ddl = nullptr;
-*    float* dd = nullptr;
-*    float* ddu = nullptr;
-*    float* dx = nullptr;
-*    hipMalloc((void**)&ddl, sizeof(float) * batch_stride * batch_count);
-*    hipMalloc((void**)&dd, sizeof(float) * batch_stride * batch_count);
-*    hipMalloc((void**)&ddu, sizeof(float) * batch_stride * batch_count);
-*    hipMalloc((void**)&dx, sizeof(float) * batch_stride * batch_count);
-*
-*    hipMemcpy(ddl, hdl.data(), sizeof(float) * batch_stride * batch_count, hipMemcpyHostToDevice);
-*    hipMemcpy(dd, hd.data(), sizeof(float) * batch_stride * batch_count, hipMemcpyHostToDevice);
-*    hipMemcpy(ddu, hdu.data(), sizeof(float) * batch_stride * batch_count, hipMemcpyHostToDevice);
-*    hipMemcpy(dx, hx.data(), sizeof(float) * batch_stride * batch_count, hipMemcpyHostToDevice);
-*
-*    // rocSPARSE handle
-*    rocsparse_handle handle;
-*    rocsparse_create_handle(&handle);
-*
-*    // Obtain required buffer size
-*    size_t buffer_size;
-*    rocsparse_sgtsv_no_pivot_strided_batch_buffer_size(handle,
-*                                                       m,
-*                                                       ddl,
-*                                                       dd,
-*                                                       ddu,
-*                                                       dx,
-*                                                       batch_count,
-*                                                       batch_stride,
-*                                                       &buffer_size);
-*
-*    void* dbuffer;
-*    hipMalloc(&dbuffer, buffer_size);
-*
-*    rocsparse_sgtsv_no_pivot_strided_batch(handle,
-*                                           m,
-*                                           ddl,
-*                                           dd,
-*                                           ddu,
-*                                           dx,
-*                                           batch_count,
-*                                           batch_stride,
-*                                           dbuffer);
-*
-*    // Copy right-hand side to host
-*    hipMemcpy(hx.data(), dx, sizeof(float) * batch_stride * batch_count, hipMemcpyDeviceToHost);
-*
-*    // Clear rocSPARSE
-*    rocsparse_destroy_handle(handle);
-*
-*    // Clear device memory
-*    hipFree(ddl);
-*    hipFree(dd);
-*    hipFree(ddu);
-*    hipFree(dx);
-*    hipFree(dbuffer);
-*  \endcode
+*  \snippet example_rocsparse_gtsv_no_pivot_strided_batch.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -897,7 +635,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot_strided_batch(rocsparse_handle        
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gtsv_interleaved_batch_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_sgtsv_interleaved_batch "rocsparse_Xgtsv_interleaved_batch()". 
+*  that is required by \ref rocsparse_sgtsv_interleaved_batch "rocsparse_Xgtsv_interleaved_batch()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note
@@ -1088,116 +826,7 @@ rocsparse_status rocsparse_zgtsv_interleaved_batch_buffer_size(rocsparse_handle 
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*   // Size of each square tridiagonal matrix
-*   rocsparse_int m = 6;
-*
-*   // Number of batches
-*   rocsparse_int batch_count = 4;
-*
-*   // Batch stride
-*   rocsparse_int batch_stride = batch_count;
-*
-*   // Host tridiagonal matrix
-*   std::vector<float> hdl(m * batch_stride);
-*   std::vector<float> hd(m * batch_stride);
-*   std::vector<float> hdu(m * batch_stride);
-*
-*   // Solve multiple tridiagonal matrix systems by interleaving matrices for better memory access:
-*   //
-*   //      4 2 0 0 0 0        5 3 0 0 0 0        6 4 0 0 0 0        7 5 0 0 0 0
-*   //      2 4 2 0 0 0        3 5 3 0 0 0        4 6 4 0 0 0        5 7 5 0 0 0
-*   // A1 = 0 2 4 2 0 0   A2 = 0 3 5 3 0 0   A3 = 0 4 6 4 0 0   A4 = 0 5 7 5 0 0
-*   //      0 0 2 4 2 0        0 0 3 5 3 0        0 0 4 6 4 0        0 0 5 7 5 0
-*   //      0 0 0 2 4 2        0 0 0 3 5 3        0 0 0 4 6 4        0 0 0 5 7 5
-*   //      0 0 0 0 2 4        0 0 0 0 3 5        0 0 0 0 4 6        0 0 0 0 5 7
-*   //
-*   // hdl = 0 0 0 0 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5
-*   // hd  = 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7
-*   // hdu = 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 0 0 0 0
-*   for(int b = 0; b < batch_count; ++b)
-*   {
-*       for(rocsparse_int i = 0; i < m; ++i)
-*       {
-*           hdl[batch_stride * i + b] = 2 + b;
-*           hd[batch_stride * i + b]  = 4 + b;
-*           hdu[batch_stride * i + b] = 2 + b;
-*       }
-*
-*       hdl[batch_stride * 0 + b]       = 0.0f;
-*       hdu[batch_stride * (m - 1) + b] = 0.0f;
-*   }
-*
-*   // Host dense rhs
-*   std::vector<float> hx(m * batch_stride);
-*
-*   for(int b = 0; b < batch_count; ++b)
-*   {
-*       for(int i = 0; i < m; ++i)
-*       {
-*           hx[batch_stride * i + b] = static_cast<float>(b + 1);
-*       }
-*   }
-*
-*   float* ddl = nullptr;
-*   float* dd = nullptr;
-*   float* ddu = nullptr;
-*   float* dx = nullptr;
-*   hipMalloc((void**)&ddl, sizeof(float) * m * batch_stride);
-*   hipMalloc((void**)&dd, sizeof(float) * m * batch_stride);
-*   hipMalloc((void**)&ddu, sizeof(float) * m * batch_stride);
-*   hipMalloc((void**)&dx, sizeof(float) * m * batch_stride);
-*
-*   hipMemcpy(ddl, hdl.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*   hipMemcpy(dd, hd.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*   hipMemcpy(ddu, hdu.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*   hipMemcpy(dx, hx.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*
-*   // rocSPARSE handle
-*   rocsparse_handle handle;
-*   rocsparse_create_handle(&handle);
-*
-*   // Obtain required buffer size
-*   size_t buffer_size;
-*   rocsparse_sgtsv_interleaved_batch_buffer_size(handle,
-*                                                 rocsparse_gtsv_interleaved_alg_default,
-*                                                 m,
-*                                                 ddl,
-*                                                 dd,
-*                                                 ddu,
-*                                                 dx,
-*                                                 batch_count,
-*                                                 batch_stride,
-*                                                 &buffer_size);
-*
-*   void* dbuffer;
-*   hipMalloc(&dbuffer, buffer_size);
-*
-*   rocsparse_sgtsv_interleaved_batch(handle,
-*                                     rocsparse_gtsv_interleaved_alg_default,
-*                                     m,
-*                                     ddl,
-*                                     dd,
-*                                     ddu,
-*                                     dx,
-*                                     batch_count,
-*                                     batch_stride,
-*                                     dbuffer);
-*
-*   // Copy right-hand side to host
-*   hipMemcpy(hx.data(), dx, sizeof(float) * m * batch_stride, hipMemcpyDeviceToHost);
-*
-*   // Clear rocSPARSE
-*   rocsparse_destroy_handle(handle);
-*
-*   // Clear device memory
-*   hipFree(ddl);
-*   hipFree(dd);
-*   hipFree(ddu);
-*   hipFree(dx);
-*   hipFree(dbuffer);
-*
-*  \endcode
+*  \snippet example_rocsparse_gtsv_interleaved_batch.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

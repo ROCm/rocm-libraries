@@ -6,11 +6,13 @@ subtrees:
 - caption: Installation
   entries:
   - file: install/rocPRIM-prerequisites.rst
-    title: roPRIM prerequisites
+    title: Prerequisites
+  - file: install/rocPRIM-install-overview.rst
+    title: Installation overview
   - file: install/rocPRIM-build-install-linux.rst
-    title: Installing rocPRIM on Linux
+    title: Installing on Linux
   - file: install/rocPRIM-build-install-windows.rst
-    title: Building and installing rocAL from source
+    title: Building and installing from source
 
 - caption: Conceptual
   entries:

@@ -46,4 +46,3 @@ if(NOT ROCM_FOUND)
 
   find_package( ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
 endif()
-

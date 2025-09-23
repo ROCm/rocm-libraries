@@ -35,10 +35,19 @@
 // Parse YAML data
 static std::string hipblas_parse_yaml(const std::string& yaml)
 {
+#ifdef WIN32
+    // Explicitly run via `python.exe`, without relying on the .py file being
+    // treated as an executable that should be run via the python interpreter.
+    std::string python_command_launcher = "python ";
+#else
+    // Rely on the shebang in the file, e.g. `#!/usr/bin/env python3`.
+    std::string python_command_launcher = "";
+#endif
+
     std::string tmp     = hipblas_tempname();
     auto        exepath = hipblas_exepath();
-    auto cmd = exepath + "hipblas_gentest.py --template " + exepath + "hipblas_template.yaml -o "
-               + tmp + " " + yaml;
+    auto        cmd = python_command_launcher + exepath + "hipblas_gentest.py --template " + exepath
+               + "hipblas_template.yaml -o " + tmp + " " + yaml;
     std::cerr << cmd << std::endl;
 
 #ifdef WIN32
@@ -46,7 +55,7 @@ static std::string hipblas_parse_yaml(const std::string& yaml)
     if(status == -1)
         exit(EXIT_FAILURE);
 #else
-    int status = system(cmd.c_str());
+    int         status                  = system(cmd.c_str());
     if(status == -1 || !WIFEXITED(status) || WEXITSTATUS(status))
         exit(EXIT_FAILURE);
 #endif

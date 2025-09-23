@@ -66,7 +66,7 @@ def run_benchmarks(benchmark_context):
             subprocess.check_call(args)
             end_time = time.time()
             duration = end_time - start_time
-            
+
             print(f'Benchmark {benchmark_name} took {duration:.3f} seconds to run', file=sys.stderr, flush=True)
         except subprocess.CalledProcessError as error:
             print(f'Could not run benchmark at {benchmark_path}. Error: "{error}"', file=sys.stderr, flush=True)

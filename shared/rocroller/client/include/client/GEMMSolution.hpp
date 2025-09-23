@@ -80,10 +80,11 @@ namespace rocRoller
                     return commandKernel;
                 }
 
-                virtual void validateRunParameters(CommandPtr               command,
-                                                   ProblemParameters const& problemParams,
-                                                   RunParameters const&     runParams,
-                                                   CommandKernelPtr         commandKernel)
+                virtual void validateRunParameters(CommandPtr                 command,
+                                                   ProblemParameters const&   problemParams,
+                                                   RunParameters const&       runParams,
+                                                   BenchmarkParameters const& benchmarkParams,
+                                                   CommandKernelPtr           commandKernel)
                 {
                     auto commandArgs = this->commandArguments(command, problemParams, runParams);
                     AssertFatal(commandKernel->matchesPredicates(commandArgs.runtimeArguments(),

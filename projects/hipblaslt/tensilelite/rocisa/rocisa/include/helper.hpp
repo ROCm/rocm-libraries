@@ -39,7 +39,7 @@ inline std::string getGfxNameTuple(const IsaVersion& isaVersion)
 
     Args:
         arch: An object representing the major, minor, and step version of the ISA.
-    
+
     Returns:
         The name of the GPU architecture (e.g., 'gfx906').
     */

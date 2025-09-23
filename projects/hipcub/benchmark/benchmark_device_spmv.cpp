@@ -23,7 +23,7 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/device/device_spmv.hpp"
+#include <hipcub/device/device_spmv.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 32;
@@ -126,6 +126,7 @@ void run_benchmark(benchmark::State& state,
     size_t temp_storage_size_bytes;
 
     // Get size of d_temp_storage
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     HIP_CHECK(hipcub::DeviceSpmv::CsrMV(nullptr,
                                         temp_storage_size_bytes,
                                         d_values,
@@ -137,6 +138,7 @@ void run_benchmark(benchmark::State& state,
                                         size,
                                         num_nonzeroes,
                                         stream));
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     HIP_CHECK(hipDeviceSynchronize());
 
     // allocate temporary storage
@@ -147,6 +149,7 @@ void run_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         HIP_CHECK(hipcub::DeviceSpmv::CsrMV(d_temp_storage,
                                             temp_storage_size_bytes,
                                             d_values,
@@ -158,6 +161,7 @@ void run_benchmark(benchmark::State& state,
                                             size,
                                             num_nonzeroes,
                                             stream));
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -166,6 +170,7 @@ void run_benchmark(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
+            HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
             HIP_CHECK(hipcub::DeviceSpmv::CsrMV(d_temp_storage,
                                                 temp_storage_size_bytes,
                                                 d_values,
@@ -177,6 +182,7 @@ void run_benchmark(benchmark::State& state,
                                                 size,
                                                 num_nonzeroes,
                                                 stream));
+            HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
         }
         HIP_CHECK(hipDeviceSynchronize());
 

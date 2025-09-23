@@ -33,8 +33,6 @@ namespace rocRoller
 {
     namespace InstructionGenerators
     {
-        RegisterComponent(MatrixMultiplyGenerator);
-
         const std::string MatrixMultiply::Basename = "MatrixMultiply";
 
         std::string toString(MatrixMultiplySizes mi)

@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 /**
  * @name Checks for aliases for pointer types
  * @description Finding declarations of 'std::shared_ptr<Type>' (and other std dynamic memory types) when an alias 'using TypePtr = std::shared_ptr<Type>' exists.

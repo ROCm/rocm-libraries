@@ -13,6 +13,7 @@
 "project: hipblaslt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
+  - any-glob-to-any-file: 'shared/origami/**/*'
 
 "project: hipcub":
 - changed-files:
@@ -42,9 +43,14 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/miopen/**/*'
 
+"project: none":
+- changed-files:
+  - all-globs-to-all-files: ['!projects/**/*', '!shared/**/*']
+
 "project: rocblas":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocblas/**/*'
+  - any-glob-to-any-file: 'shared/tensile/**/*'
 
 "project: rocfft":
 - changed-files:
@@ -81,6 +87,10 @@
 "shared: tensile":
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
+
+"shared: origami":
+- changed-files:
+  - any-glob-to-any-file: 'shared/origami/**/*'
 
 documentation:
 - changed-files:

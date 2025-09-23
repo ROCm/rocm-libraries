@@ -60,6 +60,3 @@ def test_paths():
     assert Common.globalParameters["WorkingPath"] == expectedSet1WorkingPath
     Common.popWorkingPath()
     assert Common.globalParameters["WorkingPath"] == expectedWorkingPath
-
-
-

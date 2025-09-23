@@ -55,8 +55,8 @@ rocblas_status rocsolver_sygvd_hegvd_batched_impl(rocblas_handle handle,
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_sygv_hegv_argCheck(handle, itype, evect, uplo, n, lda, ldb, A, B,
-                                                     D, E, info, batch_count);
+    rocblas_status st = rocsolver_sygvd_hegvd_argCheck(handle, itype, evect, uplo, n, lda, ldb, A,
+                                                       B, D, E, info, batch_count);
     if(st != rocblas_status_continue)
         return st;
 
