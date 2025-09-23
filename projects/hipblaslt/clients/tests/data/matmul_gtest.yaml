@@ -860,6 +860,33 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
+- name: matmul_stride_lt_ld
+  category: pre_checkin
+  function:
+    matmul: *xf32_precision
+  M: 41
+  N: 128
+  K: 6
+  lda: 106266
+  ldb: 2267008
+  ldc: 41
+  ldd: 41
+  stride_a: 6
+  stride_b: 128
+  stride_c: 5248
+  stride_d: 5248
+  batch_count: 17711
+  transA: T
+  transB: T
+  alpha: 1
+  beta: 2.0
+  bias_vector: 1
+  bias_type: f32_r
+  unit_check: 0
+  iters: 1
+  cold_iters: 1
+  gpu_arch: '950'
+
 - name: matmul_swizzleA
   category: pre_checkin
   function:
@@ -1767,6 +1794,22 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   gpu_arch: '9(42|50)'
+
+- name: matmul_gemm_f32_fast_bf16
+  category: pre_checkin
+  function:
+    matmul: *single_precision_bf16computeIn_precision
+  matrix_size:
+    - { M:  128,  N:  128,  K:  128  }
+    - { M:  131,  N:  131,  K:  131  }
+    - { M:  1024, N:  1024, K:  1024 }
+    - { M:  1031, N:  1031, K:  1031 }
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '950'
 
 - name: matmul_gemm_double
   category: pre_checkin

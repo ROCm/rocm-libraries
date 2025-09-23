@@ -176,7 +176,7 @@ namespace rocsparse
                 }
                 else
                 {
-                    dense_C[shift_C] = rocsparse::fma(beta, dense_C[shift_C], alpha * sum);
+                    dense_C[shift_C] = rocsparse::fma<T>(beta, dense_C[shift_C], alpha * sum);
                 }
             }
         }

@@ -211,7 +211,10 @@ namespace TensileLite
                 else if(value == "DID_NOT_SATISFY_ASSERTS")
                     m_rowLevel = LogLevel::Terse;
                 else if(value == "INVALID")
+                {
                     m_rowLevel = LogLevel::Error;
+                    ++m_exceptionsReported;
+                }
             }
 
             virtual bool logAtLevel(LogLevel level) override
