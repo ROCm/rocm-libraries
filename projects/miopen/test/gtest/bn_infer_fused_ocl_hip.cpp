@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,7 @@ void BatchNormFusedInferencGPU(const miopen::Handle& handle,
                                ConstData_t estimatedMean,
                                ConstData_t estimatedVariance,
                                double epsilon,
-                               PerfHelper<float>& perf_helper,
+                               PerfHelper& perf_helper,
                                bool use_hip)
 {
     int n, c, h, w;
@@ -352,8 +352,7 @@ protected:
     const float activ_beta  = static_cast<float>(0.5f);
     const float activ_gamma = static_cast<float>(0.5f);
     double epsilon          = 1.0e-5;
-    // GetKernelTime returns time in float
-    PerfHelper<float> perf_helper;
+    PerfHelper perf_helper;
 };
 
 template <typename XDataType,
