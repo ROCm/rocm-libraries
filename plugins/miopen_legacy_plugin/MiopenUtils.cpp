@@ -44,18 +44,39 @@ miopenDataType_t tensorDataTypeToMiopenDataType(const hipdnn_sdk::data_objects::
     }
 }
 
-MiopenTensor createTensor(
+const hipdnn_sdk::data_objects::TensorAttributes& findTensorAttributes(
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
     int64_t uid)
 {
     if(auto tensorAttr = tensorMap.find(uid); tensorAttr != tensorMap.end())
     {
-        return {*tensorAttr->second};
+        return *tensorAttr->second;
     }
 
     throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                "Failed to find tensor with UID in tensorMap: "
                                                    + std::to_string(uid));
+}
+
+MiopenTensor createTensor(
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+    int64_t uid)
+{
+    const auto& tensorAttr = findTensorAttributes(tensorMap, uid);
+    return {tensorAttr};
+}
+
+size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr)
+{
+    if(attr.dims()->size() < 3)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Tensor must have at least 3 dimensions, but got: "
+                + std::to_string(attr.dims()->size()));
+    }
+
+    return attr.dims()->size() - 2;
 }
 
 }

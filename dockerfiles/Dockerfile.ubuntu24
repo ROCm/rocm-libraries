@@ -13,7 +13,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV HIP_PLATFORM=amd
 
 RUN apt-get update && apt-get install -y \
-    clang-format-18 \
     git \
     gdb \
     gfortran \
@@ -84,6 +83,7 @@ WORKDIR /TheRock
 
 RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
         echo "Checking out specific hash: $THEROCK_GIT_HASH"; \
+        git fetch; \
         git checkout $THEROCK_GIT_HASH; \
     else \
         echo "Using default branch"; \
@@ -122,6 +122,28 @@ FROM install_therock_$BUILD_TYPE AS install_therock
 FROM base AS hipdnn
 
 COPY --from=install_therock /opt/rocm /opt/rocm
+
+# Install explicit version of tools that are supported for hipDNN development
+# (clang-format, clang-tidy, llvm)
+RUN apt-get update && apt-get install -y \
+    clang-format-18 \
+    clang-tidy-20 \
+    llvm-20 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use update-alternatives to set default versions
+RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+
+RUN update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
+
+# Set up update-alternatives for all LLVM tools
+RUN for tool in /usr/bin/llvm*-20; do \
+        if [ -f "$tool" ]; then \
+            base=$(basename "$tool" -20); \
+            update-alternatives --install "/usr/bin/$base" "$base" "$tool" 100; \
+            echo "Set alternative for $base -> $tool"; \
+        fi \
+    done
 
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"

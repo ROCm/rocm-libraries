@@ -18,6 +18,12 @@
 #error "Unsupported platform or compiler"
 #endif
 
+#ifdef __cplusplus
+#define HIPDNN_PLUGIN_NODISCARD [[nodiscard]]
+#else
+#define HIPDNN_PLUGIN_NODISCARD
+#endif
+
 /**
  * @file PluginApi.h
  * @brief The hipDNN Plugin API
@@ -44,7 +50,8 @@ extern "C" {
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetName(const char** name);
+HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+    hipdnnPluginGetName(const char** name);
 
 /**
  * @brief Retrieves the version of the plugin.
@@ -53,7 +60,8 @@ HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version);
+HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+    hipdnnPluginGetVersion(const char** version);
 
 /**
  * @brief Retrieves the type of the plugin.
@@ -62,7 +70,8 @@ HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** ve
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type);
+HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+    hipdnnPluginGetType(hipdnnPluginType_t* type);
 
 /**
  * @brief Retrieves the last error string from the plugin.
@@ -94,7 +103,8 @@ HIPDNN_PLUGIN_EXPORT void hipdnnPluginGetLastErrorString(const char** error_str)
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  */
-HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback);
+HIPDNN_PLUGIN_EXPORT HIPDNN_PLUGIN_NODISCARD hipdnnPluginStatus_t
+    hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback);
 
 /** @} */ // End of PluginFunctions group
 

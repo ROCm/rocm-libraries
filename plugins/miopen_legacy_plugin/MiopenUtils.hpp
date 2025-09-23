@@ -43,9 +43,15 @@ hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
 
 miopenDataType_t tensorDataTypeToMiopenDataType(const hipdnn_sdk::data_objects::DataType& dataType);
 
+const hipdnn_sdk::data_objects::TensorAttributes& findTensorAttributes(
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
+    int64_t uid);
+
 MiopenTensor createTensor(
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap,
     int64_t uid);
+
+size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr);
 
 }
 

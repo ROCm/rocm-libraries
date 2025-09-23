@@ -15,7 +15,10 @@ namespace miopen_legacy_plugin
 class MockPlanBuilder : public IPlanBuilder
 {
 public:
-    MOCK_METHOD(bool, isApplicable, (const hipdnn_plugin::IGraph& opGraph), (const, override));
+    MOCK_METHOD(bool,
+                isApplicable,
+                (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph),
+                (const, override));
     MOCK_METHOD(size_t,
                 getWorkspaceSize,
                 (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin::IGraph& opGraph),

@@ -28,10 +28,13 @@
 #### Required Dependencies
 | Dependency | Version | Description |
 |------------|---------|-------------|
-| ROCm | 6.4+ | AMD GPU compute stack |
+| ROCm | Matching TheRock (ROCm version 7.0+) | AMD GPU programming stack (see [TheRock releases](https://github.com/ROCm/TheRock/releases)) |
 | CMake | 3.25.2+ | Build system generator |
-| C++ Compiler | C++20 compatible | AMD Clang (included with ROCm) |
-| HIP | Matching ROCm install | GPU programming interface |
+| C++ Compiler | C++20 compatible | AMD Clang (included with ROCm/TheRock) |
+| HIP | Matching TheRock | GPU programming interface (included with ROCm/TheRock) |
+| clang-format | 18.x | Code formatting tool |
+| clang-tidy | 20.x | Static analysis tool |
+| LLVM Tools | 20.x | LLVM tools for code_coverage, and ASAN enabled builds |
 
 #### Optional Dependencies
 | Dependency | Version | Description |

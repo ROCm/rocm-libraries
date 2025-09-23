@@ -260,7 +260,7 @@ protected:
                                              *invVarianceTensorAttr,
                                              graphTensorBundle);
 
-        result = graphObj->execute(_handle, variantPack, _stream);
+        result = graphObj->execute(_handle, variantPack, nullptr);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
 
@@ -277,7 +277,7 @@ protected:
             cpuTensorBundle.dbiasTensor);
     }
 
-    void runBatchnormTest(InputType tolerance = 1e4f,
+    void runBatchnormTest(InputType tolerance = 1e-4f,
                           const TensorLayout& layout = TensorLayout::NCHW)
     {
         TestCaseType testCase = this->GetParam();

@@ -5,33 +5,11 @@
 
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <iostream>
-#include <vector>
 
-namespace test_operations_common
+namespace test_helpers
 {
 
-using namespace hipdnn_sdk::test_utilities;
-
-struct Batchnorm2dTestCase
-{
-    int64_t n;
-    int64_t c;
-    int64_t h;
-    int64_t w;
-    unsigned int seed;
-
-    friend std::ostream& operator<<(std::ostream& ss, const Batchnorm2dTestCase& tc)
-    {
-        return ss << "(n:" << tc.n << " c:" << tc.c << " h:" << tc.h << " w:" << tc.w
-                  << " seed:" << tc.seed << ")";
-    }
-
-    std::vector<int64_t> getDims() const
-    {
-        return {n, c, h, w};
-    }
-};
+using namespace hipdnn_sdk::utilities;
 
 template <typename T>
 hipdnnPluginDeviceBuffer_t
@@ -63,14 +41,4 @@ hipdnnPluginDeviceBuffer_t generateEmptyDeviceBuffer(TensorBase<T>& tensor, int 
     return buffer;
 }
 
-inline std::vector<Batchnorm2dTestCase> getBatchnorm2dTestCases()
-{
-    unsigned int seed = std::random_device{}();
-
-    return {
-        {.n = 1, .c = 3, .h = 14, .w = 14, .seed = seed},
-        {.n = 2, .c = 3, .h = 14, .w = 14, .seed = seed},
-    };
-}
-
-} // namespace test_operation_common
+} // namespace test_utils

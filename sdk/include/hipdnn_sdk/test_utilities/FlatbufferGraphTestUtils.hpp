@@ -6,10 +6,11 @@
 #include <hipdnn_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
-namespace hipdnn_backend::test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 using namespace hipdnn_sdk::data_objects;
@@ -32,9 +33,10 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 }
 
 inline flatbuffers::FlatBufferBuilder
-    createValidBatchnormGraph(std::vector<int64_t> strides = {1, 3, 224, 224},
-                              std::vector<int64_t> dims = {1, 3, 224, 224},
-                              hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT)
+    createValidBatchnormInferenceGraph(std::vector<int64_t> strides = {1, 3, 224, 224},
+                                       std::vector<int64_t> dims = {1, 3, 224, 224},
+                                       hipdnn_sdk::data_objects::DataType inputDataType
+                                       = DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
@@ -207,6 +209,143 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+// TODO: Replace with a createValidBatchnormGraph function once one is made and tested
+// This may be useful to keep in general though, as it has distinct and non-null values for all fields
+inline flatbuffers::FlatBufferBuilder createBatchnormGraph()
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    std::vector<int64_t> peerStats = {-1, -2, -3, -4};
+    auto batchnormNode = CreateBatchnormAttributesDirect(
+        builder, 0, 1, 2, 3, &peerStats, 4, 5, 6, 7, 8, 9, 10, 11);
+    nodes.push_back(CreateNodeDirect(
+        builder, "Node", NodeAttributes::BatchnormAttributes, batchnormNode.Union()));
+
+    std::array tensorNames = {"x",
+                              "scale",
+                              "bias",
+                              "epsilon",
+                              "peer_stats",
+                              "prev_running_mean",
+                              "momentum",
+                              "y",
+                              "mean",
+                              "inv_variance",
+                              "next_running_mean",
+                              "next_running_variance"};
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.reserve(tensorNames.size());
+    int64_t tensorUid = 0;
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    std::vector<int64_t> strides = {5, 6, 7, 8};
+    for(auto name : tensorNames)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, tensorUid++, name, DataType::UINT8, &strides, &dims, false));
+    }
+
+    auto graph = CreateGraphDirect(builder,
+                                   "BatchnormGraph",
+                                   DataType::FLOAT,
+                                   DataType::HALF,
+                                   DataType::BFLOAT16,
+                                   &tensors,
+                                   &nodes);
+
+    builder.Finish(graph);
+
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder
+    createValidConvFwdGraph(std::vector<int64_t> xDims = {4, 4, 4, 4},
+                            std::vector<int64_t> xStrides = {64, 16, 4, 1},
+                            std::vector<int64_t> wDims = {4, 4, 1, 1},
+                            std::vector<int64_t> wStrides = {4, 1, 1, 1},
+                            std::vector<int64_t> yDims = {4, 4, 4, 4},
+                            std::vector<int64_t> yStrides = {64, 16, 4, 1},
+                            std::vector<int64_t> convPrePadding = {0, 0},
+                            std::vector<int64_t> convPostPadding = {0, 0},
+                            std::vector<int64_t> convStrides = {1, 1},
+                            std::vector<int64_t> convDilation = {1, 1},
+                            DataType dataType = DataType::FLOAT)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 1, "x", dataType, &xStrides, &xDims));
+
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 2, "w", dataType, &wStrides, &wDims));
+
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, 3, "y", dataType, &yStrides, &yDims));
+
+    auto convAttributes = CreateConvolutionFwdAttributesDirect(builder,
+                                                               1, // x tensor uid
+                                                               2, // w tensor uid
+                                                               3, // y tensor uid
+                                                               &convPrePadding,
+                                                               &convPostPadding,
+                                                               &convStrides,
+                                                               &convDilation,
+                                                               ConvMode::CROSS_CORRELATION);
+
+    std::vector<::flatbuffers::Offset<Node>> nodes;
+    auto node = CreateNodeDirect(
+        builder, "conv_fwd", NodeAttributes::ConvolutionFwdAttributes, convAttributes.Union());
+    nodes.push_back(node);
+
+    auto graphOffset = CreateGraphDirect(builder,
+                                         "test",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensorAttributes,
+                                         &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+// TODO: Replace with a createValidPointwiseGraph function once one is made and tested
+// This may be useful to keep in general though, as it has distinct and non-null values for all fields
+inline flatbuffers::FlatBufferBuilder createPointwiseGraph()
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    auto pointwiseNode
+        = CreatePointwiseAttributes(builder, PointwiseMode::DIV, 1.f, 2.f, 3.f, 0, 1, 2, 3, 4);
+    nodes.push_back(CreateNodeDirect(
+        builder, "Node", NodeAttributes::PointwiseAttributes, pointwiseNode.Union()));
+
+    std::array tensorNames = {"axis", "in_0", "in_1", "in_2", "out_0"};
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.reserve(tensorNames.size());
+    int64_t tensorUid = 0;
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    std::vector<int64_t> strides = {5, 6, 7, 8};
+    for(auto name : tensorNames)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, tensorUid++, name, DataType::UINT8, &strides, &dims, false));
+    }
+
+    auto graph = CreateGraphDirect(builder,
+                                   "PointwiseGraph",
+                                   DataType::FLOAT,
+                                   DataType::HALF,
+                                   DataType::BFLOAT16,
+                                   &tensors,
+                                   &nodes);
+
+    builder.Finish(graph);
+
+    return builder;
+}
+
 inline hipdnnPluginConstData_t
     createValidConstDataGraph(flatbuffers::DetachedBuffer& serializedGraph)
 {
@@ -219,7 +358,7 @@ inline hipdnnPluginConstData_t
 inline flatbuffers::FlatBufferBuilder createValidEngineDetails(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetailsOffset = hipdnn_sdk::data_objects::CreateEngineDetails(builder, engineId);
+    auto engineDetailsOffset = CreateEngineDetails(builder, engineId);
     builder.Finish(engineDetailsOffset);
     return builder;
 }
@@ -236,7 +375,7 @@ inline hipdnnPluginConstData_t
 inline flatbuffers::FlatBufferBuilder createValidEngineConfig(int64_t configId)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineConfigOffset = hipdnn_sdk::data_objects::CreateEngineConfig(builder, configId);
+    auto engineConfigOffset = CreateEngineConfig(builder, configId);
     builder.Finish(engineConfigOffset);
     return builder;
 }

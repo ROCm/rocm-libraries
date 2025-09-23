@@ -3,6 +3,8 @@
 
 # Platform-specific compiler configuration
 
+include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
+
 if(UNIX)
     # Unix/Linux: Use ROCm LLVM Clang
     set(ROCM_LLVM_BIN_DIR /opt/rocm/llvm/bin)
@@ -12,7 +14,9 @@ if(UNIX)
         # Set the C and C++ compilers to clang and clang++ with a specific directory hint
         set(CMAKE_C_COMPILER ${ROCM_LLVM_BIN_DIR}/clang)
         set(CMAKE_CXX_COMPILER ${ROCM_LLVM_BIN_DIR}/clang++)
-        set(CMAKE_SYMBOLIZER ${ROCM_LLVM_BIN_DIR}/llvm-symbolizer)
+        
+        findAndCheckLlvmSymbolizer()
+        
         message(STATUS "Using ROCm Clang compilers from ${ROCM_LLVM_BIN_DIR}")
     else()
         message(FATAL_ERROR "The directory /opt/rocm/llvm/bin does not exist. Cannot auto select clang compilers.")

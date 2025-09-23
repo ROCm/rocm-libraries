@@ -18,6 +18,7 @@ add_executable(miopen_plugin_integration_test
     main.cpp
     IntegrationGpuBatchnormBackward.cpp
     IntegrationGpuBatchnormForwardInference.cpp
+    IntegrationGpuConvForward.cpp
 )
 
 target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

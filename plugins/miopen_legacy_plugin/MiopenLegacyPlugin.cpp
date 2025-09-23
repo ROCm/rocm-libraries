@@ -244,7 +244,7 @@ hipdnnPluginStatus_t
         auto& engineManager = handle->getEngineManager();
         GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
 
-        auto applicableEngines = engineManager.getApplicableEngineIds(opGraphWrapper);
+        auto applicableEngines = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);
 
         *numEngines = 0;
         for(auto& engineId : applicableEngines)
