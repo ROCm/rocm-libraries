@@ -233,7 +233,7 @@ if(BUILD_CLIENTS_TESTS)
   rocm_install(
     PROGRAMS "${ROCSPARSE_GENTEST}"
     COMPONENT clients-common
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/rocsparse/test"
+    DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/rocsparse/test"
     )
   #
   rocm_install(

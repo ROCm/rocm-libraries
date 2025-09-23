@@ -374,6 +374,9 @@ class StoreState:
             numVgprs = int(ceil(kernel["ProblemType"]["ComputeDataType"].numRegisters()))
             self.numVgprsPerElement += numVgprs * gwvw + (numVgprs * min(gwvw, 2)) # Loaded data
 
+        if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
+            self.numVgprsPerElement += self.cfg.numVgprsPerAddr   # addrGSUSyncVgprs
+
         # Calculate align
         self.align = 1
         # align adjustment

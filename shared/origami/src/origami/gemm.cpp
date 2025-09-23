@@ -1102,6 +1102,10 @@ namespace origami
                 if(MT_M == 256 && MT_N == 256 && MT_K == 64)
                 {
                     total_latency = total_latency * 0.85;
+                    if((transA && !transB) && (M == MT_M && N > 256 * MT_N && K >= 4*MT_K))
+                    {
+                        total_latency = total_latency * 0.3;
+                    }
                 }
 
                 // The kernel for this is less optimized, for some reason

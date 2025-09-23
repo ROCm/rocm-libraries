@@ -50,7 +50,6 @@ inline constexpr char rocblas2char_precision<rocblas_float_complex> = 'c';
 template <>
 inline constexpr char rocblas2char_precision<rocblas_double_complex> = 'z';
 
-
 /* ============================================================================================
  */
 /*  Convert rocblas constants to lapack char. */

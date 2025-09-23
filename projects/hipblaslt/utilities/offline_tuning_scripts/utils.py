@@ -11,19 +11,19 @@ def parse_input_log(args, tuning_info):
         for line in f:
             if 'hipblaslt-bench' not in line:
                 continue
-            
+
             if line in tuning_info:
                 tuning_info[line]['count'] += 1
                 continue
             else:
                 tuning_info[line] = {}
                 tuning_info[line]['count'] = 1
-                f_out.write(line)               
+                f_out.write(line)
             matches = re.findall(r"-(m|n|k)\s+(\d+)", line)
             matches.extend(re.findall(r"--(lda|ldb|ldc|ldd)\s+(\d+)", line))
             matches.extend(re.findall(r"--(a_type|b_type|c_type|d_type)\s+(\S+)", line))
             tuning_info[line].update({key: value for key, value in matches})
-    
+
     return unique_log_name
 
 def parse_hipblaslt_output(output, line, tuning_info, mode):
@@ -43,13 +43,13 @@ def parse_hipblaslt_output(output, line, tuning_info, mode):
         ratio = tuning_info[line]['baseline_latency(us)'] / latency * 100
         ratio = round(ratio, 2)
         tuning_info[line].update({"baseline/tuned": f"{ratio}%"})
-    
+
 def export_csv(input_file, tuning_info, args):
     fieldnames = ['m', 'n', 'k', 'lda', 'ldb', 'ldc', 'ldd', 'a_type', 'b_type', 'c_type', 'd_type', 'count', 'baseline_latency(us)', 'baseline_solution_idx', 'tuned_latency(us)', 'tuned_solution_idx', 'baseline/tuned']
     tuning_info_list = []
-    
+
     with open(input_file, 'r') as f:
-        for line in f: 
+        for line in f:
             tuning_info_list.append(tuning_info[line])
 
     with open(args.output_path + '/tuning_result.csv', 'w') as file:
@@ -66,7 +66,7 @@ def dynamic_iters(input_cmd, cold_iters, iters, tuning_info):
             cold_iters, iters = 50, 20
         else:
             cold_iters, iters = 10, 2
-    return cold_iters, iters 
+    return cold_iters, iters
 
 def convert_command(input_cmd, args, tuning_info, mode):
     requested_solution = args.requested_solution
@@ -94,8 +94,11 @@ def convert_command(input_cmd, args, tuning_info, mode):
     else:
         output_cmd = output_cmd + f" --requested_solution {requested_solution}"
         output_cmd = output_cmd + f" --skip_slow_solution_ratio 0.8"
-        if args.swizzleA == True:
+        if (args.swizzleA == True) or (args.swizzleB == True):
             output_cmd = re.sub("--transA\s+\S+", "--transA T", output_cmd)
-            output_cmd = output_cmd + f" --swizzleA"
+            if args.swizzleA == True:
+                output_cmd = output_cmd + f" --swizzleA"
+            if args.swizzleB == True:
+                output_cmd = output_cmd + f" --swizzleB"
 
     return output_cmd
