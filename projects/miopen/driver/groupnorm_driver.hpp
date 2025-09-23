@@ -114,6 +114,9 @@ private:
     std::vector<Tref> outhost;
     std::vector<Tref> meanhost;
     std::vector<Tref> rstdhost;
+    std::vector<Tref> outhost_mt;
+    std::vector<Tref> meanhost_mt;
+    std::vector<Tref> rstdhost_mt;
 
     int num_groups;
     float eps;
@@ -226,15 +229,18 @@ int GroupNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     mean_dev   = std::unique_ptr<GPUMem>(new GPUMem(ctx, mean_sz, sizeof(Tgpu)));
     rstd_dev   = std::unique_ptr<GPUMem>(new GPUMem(ctx, rstd_sz, sizeof(Tgpu)));
 
-    in       = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
-    weight   = std::vector<Tgpu>(weight_sz, static_cast<Tgpu>(0));
-    bias     = std::vector<Tgpu>(bias_sz, static_cast<Tgpu>(0));
-    out      = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
-    mean     = std::vector<Tgpu>(mean_sz, static_cast<Tgpu>(0));
-    rstd     = std::vector<Tgpu>(rstd_sz, static_cast<Tgpu>(0));
-    outhost  = std::vector<Tref>(out_sz, static_cast<Tref>(0));
-    meanhost = std::vector<Tref>(mean_sz, static_cast<Tref>(0));
-    rstdhost = std::vector<Tref>(rstd_sz, static_cast<Tref>(0));
+    in          = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
+    weight      = std::vector<Tgpu>(weight_sz, static_cast<Tgpu>(0));
+    bias        = std::vector<Tgpu>(bias_sz, static_cast<Tgpu>(0));
+    out         = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
+    mean        = std::vector<Tgpu>(mean_sz, static_cast<Tgpu>(0));
+    rstd        = std::vector<Tgpu>(rstd_sz, static_cast<Tgpu>(0));
+    outhost     = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+    meanhost    = std::vector<Tref>(mean_sz, static_cast<Tref>(0));
+    rstdhost    = std::vector<Tref>(rstd_sz, static_cast<Tref>(0));
+    outhost_mt  = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+    meanhost_mt = std::vector<Tref>(mean_sz, static_cast<Tref>(0));
+    rstdhost_mt = std::vector<Tref>(rstd_sz, static_cast<Tref>(0));
 
     int status;
 
@@ -334,6 +340,17 @@ int GroupNormDriver<Tgpu, Tref>::RunForwardCPU()
                                            eps,
                                            mode);
 
+    mloGroupNormForwardRunHost_mt<Tgpu, Tref>(inputDesc,
+                                              in.data(),
+                                              weight.data(),
+                                              bias.data(),
+                                              outhost_mt.data(),
+                                              meanhost_mt.data(),
+                                              rstdhost_mt.data(),
+                                              num_groups,
+                                              eps,
+                                              mode);
+
     return miopenStatusSuccess;
 }
 
@@ -365,34 +382,74 @@ int GroupNormDriver<Tgpu, Tref>::VerifyForward()
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward GroupNorm FAILED: " << error << std::endl;
+        std::cout << "Single-threaded forward GroupNorm FAILED: " << error << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        printf("Forward GroupNorm Verifies on CPU and GPU (err=%f)\n", error);
+        std::cout << "Single-threaded forward GroupNorm Verifies on CPU and GPU (err=" << error
+                  << ")" << std::endl;
     }
 
     auto meanerror = miopen::rms_range(meanhost, mean);
     if(!std::isfinite(meanerror) || meanerror > tolerance)
     {
-        std::cout << "Forward GroupNorm mean FAILED: " << meanerror << std::endl;
+        std::cout << "Single-threaded forward GroupNorm mean FAILED: " << meanerror << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        printf("Forward GroupNorm mean Verifies on CPU and GPU (err=%f)\n", meanerror);
+        std::cout << "Single-threaded forward GroupNorm mean Verifies on CPU and GPU (err="
+                  << meanerror << ")" << std::endl;
     }
 
     auto rstderror = miopen::rms_range(rstdhost, rstd);
     if(!std::isfinite(rstderror) || rstderror > tolerance)
     {
-        std::cout << "Forward GroupNorm rstd FAILED: " << rstderror << std::endl;
+        std::cout << "Single-threaded forward GroupNorm rstd FAILED: " << rstderror << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        printf("Forward GroupNorm rstd Verifies on CPU and GPU (err=%f)\n", rstderror);
+        std::cout << "Single-threaded forward GroupNorm rstd Verifies on CPU and GPU (err="
+                  << rstderror << ")" << std::endl;
+    }
+
+    auto error_mt = miopen::rms_range(outhost_mt, out);
+
+    if(!std::isfinite(error_mt) || error_mt > tolerance)
+    {
+        std::cout << "Multi-threaded forward GroupNorm FAILED: " << error_mt << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded forward GroupNorm Verifies on CPU and GPU (err=" << error_mt
+                  << ")" << std::endl;
+    }
+
+    auto meanerror_mt = miopen::rms_range(meanhost_mt, mean);
+    if(!std::isfinite(meanerror_mt) || meanerror_mt > tolerance)
+    {
+        std::cout << "Multi-threaded forward GroupNorm mean FAILED: " << meanerror_mt << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded forward GroupNorm mean Verifies on CPU and GPU (err="
+                  << meanerror_mt << ")" << std::endl;
+    }
+
+    auto rstderror_mt = miopen::rms_range(rstdhost_mt, rstd);
+    if(!std::isfinite(rstderror_mt) || rstderror_mt > tolerance)
+    {
+        std::cout << "Multi-threaded forward GroupNorm rstd FAILED: " << rstderror_mt << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded forward GroupNorm rstd Verifies on CPU and GPU (err="
+                  << rstderror_mt << ")" << std::endl;
     }
 
     return miopenStatusSuccess;

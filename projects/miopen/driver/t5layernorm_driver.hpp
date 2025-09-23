@@ -88,13 +88,13 @@ int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
-int32_t mloT5LayerNormForwardRunHost2(miopenTensorDescriptor_t xDesc,
-                                      Tgpu* x,
-                                      Tgpu* weight,
-                                      Tcheck* yhost,
-                                      Tcheck* rstdhost,
-                                      float eps,
-                                      miopenNormMode_t mode)
+int32_t mloT5LayerNormForwardRunHost_mt(miopenTensorDescriptor_t xDesc,
+                                        Tgpu* x,
+                                        Tgpu* weight,
+                                        Tcheck* yhost,
+                                        Tcheck* rstdhost,
+                                        float eps,
+                                        miopenNormMode_t mode)
 {
     auto dims         = miopen::deref(xDesc).GetLengths();
     size_t outer_size = 1;
@@ -184,13 +184,13 @@ int32_t mloT5LayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
-int32_t mloT5LayerNormBackwardRunHost2(miopenTensorDescriptor_t dyDesc,
-                                       Tgpu* dy,
-                                       Tgpu* x,
-                                       Tgpu* weight,
-                                       Tcheck* rstdhost,
-                                       Tcheck* dxhost,
-                                       miopenNormMode_t mode)
+int32_t mloT5LayerNormBackwardRunHost_mt(miopenTensorDescriptor_t dyDesc,
+                                         Tgpu* dy,
+                                         Tgpu* x,
+                                         Tgpu* weight,
+                                         Tcheck* rstdhost,
+                                         Tcheck* dxhost,
+                                         miopenNormMode_t mode)
 {
     auto dims         = miopen::deref(dyDesc).GetLengths();
     size_t outer_size = 1;
@@ -265,7 +265,7 @@ int32_t mloT5LayerNormBackckwardweightRunHost(
 }
 
 template <typename Tgpu, typename Tcheck>
-int32_t mloT5LayerNormBackckwardweightRunHost2(
+int32_t mloT5LayerNormBackckwardweightRunHost_mt(
     miopenTensorDescriptor_t dyDesc, Tgpu* dy, Tgpu* x, Tcheck* rstdhost, Tcheck* dwhost)
 {
     auto dims         = miopen::deref(dyDesc).GetLengths();
@@ -370,11 +370,15 @@ private:
     std::vector<Tgpu> rstd;
     std::vector<Tref> yhost;
     std::vector<Tref> rstdhost;
+    std::vector<Tref> yhost_mt;
+    std::vector<Tref> rstdhost_mt;
     std::vector<Tgpu> dy;
     std::vector<Tgpu> dx;
     std::vector<Tgpu> dw;
     std::vector<Tref> dxhost;
     std::vector<Tref> dwhost;
+    std::vector<Tref> dxhost_mt;
+    std::vector<Tref> dwhost_mt;
 
     size_t ws_sizeInBytes;
 
@@ -488,17 +492,21 @@ int T5LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     dw_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dw_sz, sizeof(Tgpu)));
     workspace_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, ws_sizeInBytes, sizeof(std::byte)));
 
-    x        = std::vector<Tgpu>(x_sz, Tgpu0val);
-    weight   = std::vector<Tgpu>(weight_sz, Tgpu0val);
-    y        = std::vector<Tgpu>(y_sz, Tgpu0val);
-    rstd     = std::vector<Tgpu>(rstd_sz, Tgpu0val);
-    dy       = std::vector<Tgpu>(dy_sz, Tgpu0val);
-    dx       = std::vector<Tgpu>(dx_sz, Tgpu0val);
-    dw       = std::vector<Tgpu>(dw_sz, Tgpu0val);
-    yhost    = std::vector<Tref>(y_sz, Tref0ref);
-    rstdhost = std::vector<Tref>(rstd_sz, Tref0ref);
-    dxhost   = std::vector<Tref>(dx_sz, Tref0ref);
-    dwhost   = std::vector<Tref>(dw_sz, Tref0ref);
+    x           = std::vector<Tgpu>(x_sz, Tgpu0val);
+    weight      = std::vector<Tgpu>(weight_sz, Tgpu0val);
+    y           = std::vector<Tgpu>(y_sz, Tgpu0val);
+    rstd        = std::vector<Tgpu>(rstd_sz, Tgpu0val);
+    dy          = std::vector<Tgpu>(dy_sz, Tgpu0val);
+    dx          = std::vector<Tgpu>(dx_sz, Tgpu0val);
+    dw          = std::vector<Tgpu>(dw_sz, Tgpu0val);
+    yhost       = std::vector<Tref>(y_sz, Tref0ref);
+    rstdhost    = std::vector<Tref>(rstd_sz, Tref0ref);
+    yhost_mt    = std::vector<Tref>(y_sz, Tref0ref);
+    rstdhost_mt = std::vector<Tref>(rstd_sz, Tref0ref);
+    dxhost      = std::vector<Tref>(dx_sz, Tref0ref);
+    dwhost      = std::vector<Tref>(dw_sz, Tref0ref);
+    dxhost_mt   = std::vector<Tref>(dx_sz, Tref0ref);
+    dwhost_mt   = std::vector<Tref>(dw_sz, Tref0ref);
 
     for(int i = 0; i < x_sz; i++)
     {
@@ -597,6 +605,9 @@ int T5LayerNormDriver<Tgpu, Tref>::RunForwardCPU()
     mloT5LayerNormForwardRunHost<Tgpu, Tref>(
         xDesc, x.data(), weight.data(), yhost.data(), rstdhost.data(), eps, mode);
 
+    mloT5LayerNormForwardRunHost_mt<Tgpu, Tref>(
+        xDesc, x.data(), weight.data(), yhost_mt.data(), rstdhost_mt.data(), eps, mode);
+
     return miopenStatusSuccess;
 }
 
@@ -667,6 +678,12 @@ int T5LayerNormDriver<Tgpu, Tref>::RunBackwardCPU()
     mloT5LayerNormBackckwardweightRunHost<Tgpu, Tref>(
         dyDesc, dy.data(), x.data(), rstdhost.data(), dwhost.data());
 
+    mloT5LayerNormBackwardRunHost_mt<Tgpu, Tref>(
+        dyDesc, dy.data(), x.data(), weight.data(), rstdhost_mt.data(), dxhost_mt.data(), mode);
+
+    mloT5LayerNormBackckwardweightRunHost_mt<Tgpu, Tref>(
+        dyDesc, dy.data(), x.data(), rstdhost_mt.data(), dwhost_mt.data());
+
     return miopenStatusSuccess;
 }
 
@@ -693,26 +710,54 @@ int T5LayerNormDriver<Tgpu, Tref>::VerifyForward()
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward T5LayerNorm FAILED: " << error << " > " << tolerance << std::endl;
-        return EC_VerifyFwd;
-    }
-    else
-    {
-        std::cout << "Forward T5LayerNorm Verifies OK on CPU reference (" << error << " < "
-                  << tolerance << ')' << std::endl;
-    }
-
-    auto rstderror = miopen::rms_range(rstdhost, rstd);
-    if(!std::isfinite(rstderror) || rstderror > tolerance)
-    {
-        std::cout << "Forward T5LayerNorm rstd FAILED: " << rstderror << " > " << tolerance
+        std::cout << "Single-threaded forward T5LayerNorm FAILED: " << error << " > " << tolerance
                   << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Forward T5LayerNorm rstd Verifies OK on CPU reference (" << rstderror << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Single-threaded forward T5LayerNorm Verifies OK on CPU reference (" << error
+                  << " < " << tolerance << ')' << std::endl;
+    }
+
+    auto rstderror = miopen::rms_range(rstdhost, rstd);
+    if(!std::isfinite(rstderror) || rstderror > tolerance)
+    {
+        std::cout << "Single-threaded forward T5LayerNorm rstd FAILED: " << rstderror << " > "
+                  << tolerance << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Single-threaded forward T5LayerNorm rstd Verifies OK on CPU reference ("
+                  << rstderror << " < " << tolerance << ')' << std::endl;
+    }
+
+    auto error_mt = miopen::rms_range(yhost_mt, y);
+
+    if(!std::isfinite(error_mt) || error_mt > tolerance)
+    {
+        std::cout << "Multi-threaded forward T5LayerNorm FAILED: " << error_mt << " > " << tolerance
+                  << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded forward T5LayerNorm Verifies OK on CPU reference (" << error_mt
+                  << " < " << tolerance << ')' << std::endl;
+    }
+
+    auto rstderror_mt = miopen::rms_range(rstdhost_mt, rstd);
+    if(!std::isfinite(rstderror_mt) || rstderror_mt > tolerance)
+    {
+        std::cout << "Multi-threaded forward T5LayerNorm rstd FAILED: " << rstderror_mt << " > "
+                  << tolerance << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded forward T5LayerNorm rstd Verifies OK on CPU reference ("
+                  << rstderror_mt << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
@@ -728,26 +773,54 @@ int T5LayerNormDriver<Tgpu, Tref>::VerifyBackward()
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Backward T5LayerNorm FAILED: " << error << " > " << tolerance << std::endl;
-        return EC_VerifyBwd;
-    }
-    else
-    {
-        std::cout << "Backward T5LayerNorm Verifies OK on CPU reference (" << error << " < "
-                  << tolerance << ')' << std::endl;
-    }
-
-    auto dwerror = miopen::rms_range(dwhost, dw);
-    if(!std::isfinite(dwerror) || dwerror > tolerance)
-    {
-        std::cout << "Backward T5LayerNorm dw FAILED: " << dwerror << " > " << tolerance
+        std::cout << "Single-threaded backward T5LayerNorm FAILED: " << error << " > " << tolerance
                   << std::endl;
         return EC_VerifyBwd;
     }
     else
     {
-        std::cout << "Backward T5LayerNorm dw Verifies OK on CPU reference (" << dwerror << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Single-threaded backward T5LayerNorm Verifies OK on CPU reference (" << error
+                  << " < " << tolerance << ')' << std::endl;
+    }
+
+    auto dwerror = miopen::rms_range(dwhost, dw);
+    if(!std::isfinite(dwerror) || dwerror > tolerance)
+    {
+        std::cout << "Single-threaded backward T5LayerNorm dw FAILED: " << dwerror << " > "
+                  << tolerance << std::endl;
+        return EC_VerifyBwd;
+    }
+    else
+    {
+        std::cout << "Single-threaded backward T5LayerNorm dw Verifies OK on CPU reference ("
+                  << dwerror << " < " << tolerance << ')' << std::endl;
+    }
+
+    auto error_mt = miopen::rms_range(dxhost_mt, dx);
+
+    if(!std::isfinite(error) || error > tolerance)
+    {
+        std::cout << "Multi-threaded backward T5LayerNorm FAILED: " << error_mt << " > "
+                  << tolerance << std::endl;
+        return EC_VerifyBwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded backward T5LayerNorm Verifies OK on CPU reference ("
+                  << error_mt << " < " << tolerance << ')' << std::endl;
+    }
+
+    auto dwerror_mt = miopen::rms_range(dwhost_mt, dw);
+    if(!std::isfinite(dwerror_mt) || dwerror_mt > tolerance)
+    {
+        std::cout << "Multi-threaded backward T5LayerNorm dw FAILED: " << dwerror_mt << " > "
+                  << tolerance << std::endl;
+        return EC_VerifyBwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded backward T5LayerNorm dw Verifies OK on CPU reference ("
+                  << dwerror_mt << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
