@@ -81,18 +81,13 @@ configure_package_config_file(
 
 # Export targets for build tree
 export(
-    TARGETS hipdnn_sdk FlatBuffers spdlog_header_only
+    TARGETS hipdnn_sdk FlatBuffers spdlog_header_only nlohmann_json
     FILE "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkTargets.cmake"
 )
 
 install(
     TARGETS hipdnn_sdk FlatBuffers spdlog_header_only nlohmann_json
     EXPORT hipdnn_sdk_targets
-)
-
-export(
-    TARGETS hipdnn_sdk FlatBuffers spdlog_header_only nlohmann_json
-    FILE  ${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake
 )
 
 install(
