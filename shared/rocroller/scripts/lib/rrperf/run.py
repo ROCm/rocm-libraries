@@ -76,7 +76,9 @@ def run_problems(
     failed = []
 
     for i, problem in enumerate(generator):
-        if id_filter is not None and problem.id not in id_filter:
+        if id_filter is not None and not any(
+            problem.id.startswith(filt) for filt in id_filter
+        ):
             continue
 
         if problem in already_run:
