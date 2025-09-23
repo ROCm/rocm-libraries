@@ -27,7 +27,7 @@
 #include "../common/utils_half.hpp"
 
 #ifdef BENCHMARK_USE_AMDSMI
-#include <amd_smi/amdsmi.h>
+    #include <amd_smi/amdsmi.h>
 #endif
 
 #include <benchmark/benchmark.h>
@@ -1013,10 +1013,10 @@ class amdsmi
 {
 public:
     amdsmi(std::string iteration_info_out)
-        : m_iteration_info_out(iteration_info_out)
-        , m_is_active(!iteration_info_out.empty())
+        : m_iteration_info_out(iteration_info_out), m_is_active(!iteration_info_out.empty())
     {
-        if(!m_is_active) return;
+        if(!m_is_active)
+            return;
 
         amdsmi_init(AMDSMI_INIT_AMD_GPUS);
 
@@ -1026,7 +1026,8 @@ public:
 
     ~amdsmi()
     {
-        if(!m_is_active) return;
+        if(!m_is_active)
+            return;
 
         amdsmi_shut_down();
     }
@@ -1070,7 +1071,8 @@ public:
 
     stats get_stats() const
     {
-        if(!m_is_active) return {};
+        if(!m_is_active)
+            return {};
 
         stats it{};
 
@@ -1117,7 +1119,8 @@ private:
 public:
     void output_iteration_info(const std::string& name) const
     {
-        if(!m_is_active) return;
+        if(!m_is_active)
+            return;
 
         // Try opening file
         std::fstream outfile(m_iteration_info_out, std::ios::in | std::ios::out | std::ios::ate);
@@ -1189,7 +1192,7 @@ private:
     {
         struct context ctx;
 
-        amdsmi_board_info_t   board_info;
+        amdsmi_board_info_t board_info;
         if(amdsmi_get_gpu_board_info(target, &board_info) == AMDSMI_STATUS_SUCCESS)
             ctx.product_name = board_info.product_name;
 
@@ -1272,7 +1275,6 @@ private:
         return oss.str();
     }
 
-    // TODO: Put all methods in this class in a logical order
     amdsmi_processor_handle get_target() const
     {
         // Get HIP device
@@ -1474,9 +1476,9 @@ private:
             ss << "]";
         };
 
-// Convenience macros to avoid repeating field names
-#define ADD(field) add_field(#field, metrics.field)
-#define ADD_ARRAY(field) add_array(#field, metrics.field)
+    // Convenience macros to avoid repeating field names
+    #define ADD(field) add_field(#field, metrics.field)
+    #define ADD_ARRAY(field) add_array(#field, metrics.field)
 
         struct RevisionBlock
         {
@@ -1596,8 +1598,8 @@ private:
             block.serialize();
         }
 
-#undef ADD
-#undef ADD_ARRAY
+    #undef ADD
+    #undef ADD_ARRAY
 
         ss << "}";
         return ss.str();
@@ -1616,7 +1618,7 @@ class state
 {
 public:
     state(hipStream_t         stream,
-          size_t              size,
+          size_t              bytes,
           const managed_seed& seed,
           size_t              batch_iterations,
           benchmark::State&   gbench_state,
@@ -1625,48 +1627,46 @@ public:
           std::string         iteration_info_out,
           int                 trials) // TODO: Remove this trials parameter once gbench is removed
         : stream(stream)
-        , size(size)
-        , bytes(size)
+        , bytes(bytes)
         , seed(seed)
         , batch_iterations(batch_iterations)
         , gbench_state(gbench_state)
-        , warmup_iterations(warmup_iterations)
-        , cold(cold)
-        , trials(trials)
-        , events(batch_iterations * 2)
+        , m_warmup_iterations(warmup_iterations)
+        , m_cold(cold)
+        , m_trials(trials)
+        , m_events(batch_iterations * 2)
 #ifdef BENCHMARK_USE_AMDSMI
-        , amdsmi(iteration_info_out)
+        , m_amdsmi(iteration_info_out)
 #endif
-    {
-    }
+    {}
 
     // Used to reset the input array of algorithms like device_merge_inplace.
     void run_before_every_iteration(std::function<void()> lambda)
     {
-        run_before_every_iteration_lambda = lambda;
+        m_run_before_every_iteration_lambda = lambda;
     }
 
     // Used to accumulate the results of state.run() calls.
     void accumulate_total_gbench_iterations_every_run()
     {
-        reset_total_gbench_iterations_every_run = false;
+        m_reset_total_gbench_iterations_every_run = false;
     }
 
     void run(std::function<void()> kernel)
     {
-        for(auto& event : events)
+        for(auto& event : m_events)
         {
             HIP_CHECK(hipEventCreate(&event));
         }
 
         // Warm-up
-        for(size_t i = 0; i < warmup_iterations; ++i)
+        for(size_t i = 0; i < m_warmup_iterations; ++i)
         {
             // Benchmarks may expect their kernel input to be prepared by this lambda,
             // so to prevent any potential crashes, we call the lambda during warm-up.
-            if(run_before_every_iteration_lambda)
+            if(m_run_before_every_iteration_lambda)
             {
-                run_before_every_iteration_lambda();
+                m_run_before_every_iteration_lambda();
             }
 
             kernel();
@@ -1678,30 +1678,30 @@ public:
         {
             for(size_t i = 0; i < batch_iterations; ++i)
             {
-                if(run_before_every_iteration_lambda)
+                if(m_run_before_every_iteration_lambda)
                 {
-                    run_before_every_iteration_lambda();
+                    m_run_before_every_iteration_lambda();
                 }
 
-                if(cold)
+                if(m_cold)
                 {
                     clear_gpu_cache(stream);
                 }
 
-                // Even events record the start time.
-                HIP_CHECK(hipEventRecord(events[i * 2], stream));
+                // Even m_events record the start time.
+                HIP_CHECK(hipEventRecord(m_events[i * 2], stream));
 
                 kernel();
 
-                // Odd events record the stop time.
-                HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
+                // Odd m_events record the stop time.
+                HIP_CHECK(hipEventRecord(m_events[i * 2 + 1], stream));
             }
 
             // Wait until the last record event has completed.
-            HIP_CHECK(hipEventSynchronize(events[batch_iterations * 2 - 1]));
+            HIP_CHECK(hipEventSynchronize(m_events[batch_iterations * 2 - 1]));
 
 #ifdef BENCHMARK_USE_AMDSMI
-            amdsmi::stats stats = amdsmi.get_stats();
+            amdsmi::stats       stats = m_amdsmi.get_stats();
             std::vector<double> batch_times;
 #endif
 
@@ -1710,8 +1710,8 @@ public:
             for(size_t i = 0; i < batch_iterations; i++)
             {
                 float iteration_ms;
-                HIP_CHECK(hipEventElapsedTime(&iteration_ms, events[i * 2], events[i * 2 + 1]));
-                times.emplace_back(iteration_ms);
+                HIP_CHECK(hipEventElapsedTime(&iteration_ms, m_events[i * 2], m_events[i * 2 + 1]));
+                m_times.emplace_back(iteration_ms);
                 elapsed_ms += iteration_ms;
 
 #ifdef BENCHMARK_USE_AMDSMI
@@ -1722,7 +1722,7 @@ public:
             gbench_state.SetIterationTime(elapsed_ms / 1000);
 
 #ifdef BENCHMARK_USE_AMDSMI
-            amdsmi.save_batch(batch_times, stats);
+            m_amdsmi.save_batch(batch_times, stats);
 
             // TODO: When gbench is removed in the future, replace the gbench_state loop
             // with an infinite while-loop, and use this instead:
@@ -1733,21 +1733,21 @@ public:
             //     amdsmi.output_iteration_info(escaped_name)
             //     break
             // }
-            if(amdsmi.get_batches_count() >= trials)
+            if(m_amdsmi.get_batches_count() >= m_trials)
             {
                 std::string escaped_name = get_escaped_name(gbench_state.name());
-                amdsmi.output_iteration_info(escaped_name);
+                m_amdsmi.output_iteration_info(escaped_name);
             }
 #endif
         }
 
-        if(reset_total_gbench_iterations_every_run)
+        if(m_reset_total_gbench_iterations_every_run)
         {
-            total_gbench_iterations = 0;
+            m_total_gbench_iterations = 0;
         }
-        total_gbench_iterations += gbench_state.iterations();
+        m_total_gbench_iterations += gbench_state.iterations();
 
-        for(const auto& event : events)
+        for(const auto& event : m_events)
         {
             HIP_CHECK(hipEventDestroy(event));
         }
@@ -1755,24 +1755,23 @@ public:
 
     void set_throughput(size_t actual_size, size_t type_size)
     {
-        if(has_set_throughput)
+        if(m_has_set_throughput)
         {
             std::cerr << "Error: Benchmarks should only ever call set_throughput() once, at the "
                          "very end.\n";
             exit(EXIT_FAILURE);
         }
-        has_set_throughput = true;
+        m_has_set_throughput = true;
 
-        gbench_state.SetBytesProcessed(total_gbench_iterations * batch_iterations * actual_size
+        gbench_state.SetBytesProcessed(m_total_gbench_iterations * batch_iterations * actual_size
                                        * type_size);
-        gbench_state.SetItemsProcessed(total_gbench_iterations * batch_iterations * actual_size);
+        gbench_state.SetItemsProcessed(m_total_gbench_iterations * batch_iterations * actual_size);
 
         output_statistics();
     }
 
-    // TODO: Consider prefixing these with m_
+    // These are directly read by benchmarks.
     hipStream_t       stream;
-    size_t            size;
     size_t            bytes;
     managed_seed      seed;
     size_t            batch_iterations;
@@ -1821,12 +1820,12 @@ private:
 
     double get_mean() const
     {
-        return std::reduce(times.begin(), times.end()) / times.size();
+        return std::reduce(m_times.begin(), m_times.end()) / m_times.size();
     }
 
     double get_median() const
     {
-        auto tmp = times; // Copy, so we don’t mutate *this.
+        auto tmp = m_times; // Copy, so we don’t mutate *this.
         std::sort(tmp.begin(), tmp.end());
 
         size_t n = tmp.size();
@@ -1850,34 +1849,32 @@ private:
         auto Sqrt = [](double dat) { return dat < 0.0 ? 0.0 : std::sqrt(dat); };
 
         double stddev = 0.0;
-        if(times.size() > 1)
+        if(m_times.size() > 1)
         {
-            double avg_squares = SumSquares(times) * (1.0 / times.size());
-            stddev = Sqrt(times.size() / (times.size() - 1.0) * (avg_squares - Sqr(mean)));
+            double avg_squares = SumSquares(m_times) * (1.0 / m_times.size());
+            stddev = Sqrt(m_times.size() / (m_times.size() - 1.0) * (avg_squares - Sqr(mean)));
         }
         return stddev;
     }
 
     double get_cv(double stddev, double mean) const
     {
-        return times.size() >= 2 ? stddev / mean : 0.0;
+        return m_times.size() >= 2 ? stddev / mean : 0.0;
     }
 
-    // TODO: Consider prefixing these with m_
-    size_t      warmup_iterations;
-    bool        cold;
-    int         trials;
+    size_t m_warmup_iterations;
+    bool   m_cold;
+    int    m_trials;
 
-    // TODO: Consider prefixing these with m_
-    std::vector<hipEvent_t> events;
-    std::function<void()>   run_before_every_iteration_lambda       = nullptr;
-    size_t                  total_gbench_iterations                 = 0;
-    bool                    reset_total_gbench_iterations_every_run = true;
-    std::vector<double>     times;
-    bool                    has_set_throughput = false;
+    std::vector<hipEvent_t> m_events;
+    std::function<void()>   m_run_before_every_iteration_lambda       = nullptr;
+    size_t                  m_total_gbench_iterations                 = 0;
+    bool                    m_reset_total_gbench_iterations_every_run = true;
+    std::vector<double>     m_times;
+    bool                    m_has_set_throughput = false;
 
 #ifdef BENCHMARK_USE_AMDSMI
-    class amdsmi            amdsmi;
+    class amdsmi m_amdsmi;
 #endif
 };
 
@@ -1959,7 +1956,7 @@ public:
 
     void run()
     {
-        register_sorted_subset(parallel_instance, parallel_instances);
+        register_sorted_subset(m_parallel_instance, m_parallel_instances);
         benchmark::ConsoleReporter cr;
         benchmark::RunSpecifiedBenchmarks(&cr);
     }
@@ -2012,33 +2009,32 @@ private:
 
     void parse(cli::Parser& parser)
     {
-        size = parser.get<size_t>("size");
+        m_bytes = parser.get<size_t>("size");
 
-        seed_type = parser.get<std::string>("seed");
+        m_seed_type = parser.get<std::string>("seed");
+        m_seed      = managed_seed(m_seed_type);
 
-        seed = managed_seed(seed_type);
+        m_batch_iterations  = parser.get<size_t>("batch_iterations");
+        m_warmup_iterations = parser.get<size_t>("warmup_iterations");
 
-        batch_iterations  = parser.get<size_t>("batch_iterations");
-        warmup_iterations = parser.get<size_t>("warmup_iterations");
+        m_cold = !parser.get<bool>("hot");
 
-        cold = !parser.get<bool>("hot");
+        m_iteration_info_out = parser.get<std::string>("iteration_info_out");
 
-        iteration_info_out = parser.get<std::string>("iteration_info_out");
-
-        trials             = parser.get<int>("trials");
-        parallel_instance  = parser.get<int>("parallel_instance");
-        parallel_instances = parser.get<int>("parallel_instances");
+        m_trials             = parser.get<int>("trials");
+        m_parallel_instance  = parser.get<int>("parallel_instance");
+        m_parallel_instances = parser.get<int>("parallel_instances");
 
         bench_naming::set_format(parser.get<std::string>("name_format"));
     }
 
     void add_context()
     {
-        benchmark::AddCustomContext("size", std::to_string(size));
-        benchmark::AddCustomContext("seed", seed_type);
+        benchmark::AddCustomContext("size", std::to_string(m_bytes));
+        benchmark::AddCustomContext("seed", m_seed_type);
 
-        benchmark::AddCustomContext("batch_iterations", std::to_string(batch_iterations));
-        benchmark::AddCustomContext("warmup_iterations", std::to_string(warmup_iterations));
+        benchmark::AddCustomContext("batch_iterations", std::to_string(m_batch_iterations));
+        benchmark::AddCustomContext("warmup_iterations", std::to_string(m_warmup_iterations));
 
         hipDeviceProp_t devProp;
         int             device_id = 0;
@@ -2148,15 +2144,15 @@ private:
 
     state new_state(benchmark::State& gbench_state)
     {
-        return state(stream,
-                     size,
-                     seed,
-                     batch_iterations,
+        return state(m_stream,
+                     m_bytes,
+                     m_seed,
+                     m_batch_iterations,
                      gbench_state,
-                     warmup_iterations,
-                     cold,
-                     iteration_info_out,
-                     trials);
+                     m_warmup_iterations,
+                     m_cold,
+                     m_iteration_info_out,
+                     m_trials);
     }
 
     void apply_settings(benchmark::internal::Benchmark* b)
@@ -2165,9 +2161,9 @@ private:
         b->Unit(benchmark::kMillisecond);
 
         // trials is -1 by default.
-        if(trials > 0)
+        if(m_trials > 0)
         {
-            b->Iterations(trials);
+            b->Iterations(m_trials);
         }
     }
 
@@ -2196,18 +2192,18 @@ private:
         }
     }
 
-    hipStream_t  stream = hipStreamDefault;
-    size_t       size;
-    std::string  seed_type;
-    managed_seed seed;
-    size_t       batch_iterations;
-    size_t       warmup_iterations;
-    bool         cold;
-    std::string  iteration_info_out;
+    hipStream_t  m_stream = hipStreamDefault;
+    size_t       m_bytes;
+    std::string  m_seed_type;
+    managed_seed m_seed;
+    size_t       m_batch_iterations;
+    size_t       m_warmup_iterations;
+    bool         m_cold;
+    std::string  m_iteration_info_out;
 
-    int trials;
-    int parallel_instance;
-    int parallel_instances;
+    int m_trials;
+    int m_parallel_instance;
+    int m_parallel_instances;
 };
 
 } // namespace benchmark_utils
