@@ -94,7 +94,7 @@ namespace ExpressionTest
             auto vv = v->placeholder(Register::Type::Vector, {});
             co_yield m_context->copier()->copy(vv, v);
             co_yield m_context->mem()->storeGlobal(
-                result, vv, 0, DataTypeInfo::Get(DataType::UInt64).elementBytes);
+                result, vv, 0, DataTypeInfo::Get(ResultDataType).elementBytes);
         }
 
         void generate() override
@@ -102,13 +102,13 @@ namespace ExpressionTest
             auto k = m_context->kernel();
 
             k->addArgument({.name          = "result",
-                            .variableType  = {DataType::UInt64, PointerType::PointerGlobal},
+                            .variableType  = {ResultDataType, PointerType::PointerGlobal},
                             .dataDirection = DataDirection::WriteOnly});
             k->addArgument({.name          = "operandA",
-                            .variableType  = DataType::UInt32,
+                            .variableType  = OperandDataType,
                             .dataDirection = DataDirection::ReadOnly});
             k->addArgument({.name          = "operandB",
-                            .variableType  = DataType::UInt32,
+                            .variableType  = OperandDataType,
                             .dataDirection = DataDirection::ReadOnly});
 
             m_context->schedule(k->preamble());
