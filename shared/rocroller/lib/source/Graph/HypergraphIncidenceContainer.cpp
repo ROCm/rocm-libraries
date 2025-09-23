@@ -151,14 +151,6 @@ namespace rocRoller::Graph
         return rv;
     }
 
-    void HypergraphIncidenceContainer::accountForId(int id)
-    {
-        if(!m_incidencesBySrc.contains(id))
-            m_incidencesBySrc.emplace(id, std::vector<int>{});
-        if(!m_incidencesByDst.contains(id))
-            m_incidencesByDst.emplace(id, std::vector<int>{});
-    }
-
     std::string HypergraphIncidenceContainer::toDOTSection(std::string const& prefix) const
     {
         std::ostringstream s;

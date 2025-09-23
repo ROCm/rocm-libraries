@@ -116,13 +116,6 @@ namespace rocRoller
 
         private:
             /**
-             * @brief A check to ensure internal maps are able to be queried using std::map::at
-             * 
-             * @param id Graph id that might be accessed by internal maps
-             */
-            void accountForId(int id);
-
-            /**
              * @brief All incidences, sorted by sources, then by edge order.
              */
             std::map<int, std::vector<int>> m_incidencesBySrc;

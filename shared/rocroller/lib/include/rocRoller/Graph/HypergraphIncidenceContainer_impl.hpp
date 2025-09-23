@@ -47,16 +47,12 @@ namespace rocRoller::Graph
                 srcs.push_back(src);
         };
 
-        accountForId(id);
-
         for(int input : inputs)
         {
-            accountForId(input);
             addIncidence(input, id);
         }
         for(int output : outputs)
         {
-            accountForId(output);
             addIncidence(id, output);
         }
     }
