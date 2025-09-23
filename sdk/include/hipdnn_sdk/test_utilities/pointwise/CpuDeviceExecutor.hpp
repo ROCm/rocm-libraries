@@ -56,9 +56,7 @@ public:
             auto input1Val = input1.getHostValue(input1_idx);
             auto input2Val = input2.getHostValue(input2_idx);
 
-            DataType outputVal;
-            op(outputVal, input1Val, input2Val);
-            output.setHostValue(outputVal, indices);
+            output.setHostValue(static_cast<DataType>(op(input1Val, input2Val)), indices);
         };
 
         auto parallelFunc = makeParallelTensorFunctor(func, broadcast_shape);

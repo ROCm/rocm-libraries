@@ -12,19 +12,19 @@ namespace pointwise
 
 struct Add
 {
-    template <typename Y, typename X0, typename X1>
-    void operator()(Y& y, const X0& x0, const X1& x1) const
+    template <typename X0, typename X1>
+    auto operator()(const X0& x0, const X1& x1) const -> decltype(x0 + x1)
     {
-        y = static_cast<Y>(x0 + x1);
+        return x0 + x1;
     }
 };
 
 struct Subtract
 {
-    template <typename Y, typename X0, typename X1>
-    void operator()(Y& y, const X0& x0, const X1& x1) const
+    template <typename X0, typename X1>
+    auto operator()(const X0& x0, const X1& x1) const -> decltype(x0 - x1)
     {
-        y = static_cast<Y>(x0 - x1);
+        return x0 - x1;
     }
 };
 
