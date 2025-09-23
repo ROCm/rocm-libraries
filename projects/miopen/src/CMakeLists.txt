@@ -351,6 +351,9 @@ set( MIOpen_Source
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source conv/heuristics/ai_heuristics.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/metadata_3d.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/ai_candidate_selection.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/ai_conv_3d_kernel_tuning_utils.cpp)
     list(APPEND MIOpen_Source anyramdb.cpp)
 endif()
 
@@ -509,10 +512,9 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_gfx11_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_metadata.inc
         kernels/winograd/Conv_Winograd_Rage_v4_6_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_X_X_metadata.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_fp32_fp32acc_f2x3_stride1.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_bf16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_6_0_metadata.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_7_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_7_0_metadata.inc
         kernels/xform_bidirect_winograd_code.inc
         kernels/xform_data_filter.inc
         kernels/xform_kd_cov2.inc
@@ -648,9 +650,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c32_stride1.s
         kernels/winograd/Conv_Winograd_Rage_v4_6_0_fp16_fp32acc_f2x3_stride1.s
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_fp16_fp32acc_f2x3_stride1.s
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_fp32_fp32acc_f2x3_stride1.s
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_bf16_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_7_0_fp16_fp32acc_f2x3_stride1.s
         kernels/xform_data.s
         kernels/xform_filter.s
         kernels/xform_bidirect_winograd_data.s
@@ -1061,8 +1061,8 @@ rocm_export_targets(
 if(NOT MIOPEN_EMBED_DB STREQUAL "")
     include(embed)
     if(MIOPEN_EMBED_BINCACHE AND MIOPEN_BINCACHE_PATH STREQUAL "")
-        if(MIOPEN_NO_LFS_PULLED)
-            message(WARNING "Binary cache files have not been pulled down from git-lfs, will not embed.")
+        if(MIOPEN_NO_DVC_PULLED)
+            message(WARNING "Binary cache files have not been pulled down from DVC, will not embed.")
         else()
             set(MIOPEN_BINCACHE_PATH ${KERNELS_BINARY_DIR})
             message("MIOPEN_BINCACHE_PATH: ${MIOPEN_BINCACHE_PATH}")

@@ -45,6 +45,10 @@ Definitions:
     - {}
     - { stride_a: 0 }
 
+  - &swizzleB_strideB_support
+    - {}
+    - { stride_b: 0 }
+
 Tests:
 - name: matmul_bad_arg
   category: pre_checkin
@@ -883,6 +887,44 @@ Tests:
   N: [128, 129]
   K: [128, 129]
   lda: [129, 2440]
+  batch_count: [1, 5]
+  transA: T
+  transB: N
+  use_ext: [1]
+  use_ext_setproblem: [0, 1]
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  bias_vector: [0, 1]
+  unit_check: 1
+  gpu_arch: '942'
+
+- name: matmul_swizzleB
+  category: pre_checkin
+  function:
+    matmul: *real_precisions_swizzleB_support
+  arguments: *swizzleB_strideB_support
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  ldb: [129, 2440]
+  batch_count: [1, 5]
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  bias_vector: [0, 1]
+  unit_check: 1
+  gpu_arch: '942'
+
+- name: matmul_extapi_swizzleB
+  category: pre_checkin
+  function:
+    matmul: *real_precisions_swizzleB_support
+  arguments: *swizzleB_strideB_support
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  ldb: [129, 2440]
   batch_count: [1, 5]
   transA: T
   transB: N
