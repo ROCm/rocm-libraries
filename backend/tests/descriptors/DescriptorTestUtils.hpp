@@ -5,7 +5,7 @@
 
 #include "descriptors/BackendDescriptor.hpp"
 
-namespace hipdnn_backend::test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 template <typename T>

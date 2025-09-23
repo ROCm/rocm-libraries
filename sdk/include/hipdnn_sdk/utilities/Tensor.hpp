@@ -22,10 +22,14 @@ struct TensorLayout
 
     static const TensorLayout NCHW;
     static const TensorLayout NHWC;
+    static const TensorLayout NCDHW;
+    static const TensorLayout NDHWC;
 };
 
 inline const TensorLayout TensorLayout::NCHW{.name = "NCHW", .strideOrder = {3, 2, 1, 0}};
 inline const TensorLayout TensorLayout::NHWC{.name = "NHWC", .strideOrder = strideOrderNhwc(4)};
+inline const TensorLayout TensorLayout::NCDHW{.name = "NCDHW", .strideOrder = {4, 3, 2, 1, 0}};
+inline const TensorLayout TensorLayout::NDHWC{.name = "NDHWC", .strideOrder = strideOrderNhwc(5)};
 
 inline std::ostream& operator<<(std::ostream& os, const TensorLayout& layout)
 {
@@ -45,6 +49,8 @@ class TensorBase
 {
 public:
     virtual ~TensorBase() = default;
+
+    using value_type = T;
 
     virtual const std::vector<int64_t>& dims() const = 0;
     virtual const std::vector<int64_t>& strides() const = 0;
@@ -131,8 +137,13 @@ public:
         }
     }
 
-    Tensor(const std::vector<int64_t>& dims, const TensorLayout& layout = TensorLayout::NCHW)
+    Tensor(const std::vector<int64_t>& dims, const TensorLayout& layout)
         : Tensor(dims, generateStrides(dims, layout.strideOrder))
+    {
+    }
+
+    Tensor(const std::vector<int64_t>& dims)
+        : Tensor(dims, generateStrides(dims))
     {
     }
 

@@ -78,6 +78,24 @@ inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
     return stride;
 }
 
+// Generates packed strides for the provided dims.
+// NCHW stride order for 4d, NCDHW for 5d, etc.
+inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dims)
+{
+    if(dims.empty())
+    {
+        return {};
+    }
+
+    std::vector<int64_t> strides(dims.size());
+    strides.back() = 1;
+    for(size_t i = dims.size() - 1; i > 0; --i)
+    {
+        strides[i - 1] = strides[i] * dims[i];
+    }
+    return strides;
+}
+
 // Sets stride order as NHWC for the provided dims.
 // Ex. 4 will return {3, 0, 2, 1} for NHWC
 inline std::vector<int64_t> strideOrderNhwc(size_t numDims)
@@ -98,6 +116,22 @@ inline std::vector<int64_t> strideOrderNhwc(size_t numDims)
     strideOrder[0] = order;
 
     return strideOrder;
+}
+
+// Gets the derived (per channel) shape from a full Tensor shape.
+// Ex. {1, 3, 224, 224} will return {1, 3, 1, 1}
+inline std::vector<int64_t> getDerivedShape(const std::vector<int64_t>& shape)
+{
+    if(shape.size() < 2)
+    {
+        throw std::runtime_error(
+            "A shape must consist of at least 2 dimensions (batch and channel)");
+    }
+
+    auto result = std::vector<int64_t>(shape.size(), 1);
+    result[1] = shape[1];
+
+    return result;
 }
 
 }

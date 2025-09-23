@@ -27,7 +27,8 @@ public:
 
     void addEngine(std::unique_ptr<IEngine> engine);
 
-    std::vector<int64_t> getApplicableEngineIds(const hipdnn_plugin::IGraph& opGraph);
+    std::vector<int64_t> getApplicableEngineIds(HipdnnEnginePluginHandle& handle,
+                                                const hipdnn_plugin::IGraph& opGraph);
 
     void getEngineDetails(HipdnnEnginePluginHandle& handle,
                           const hipdnn_plugin::IGraph& opGraph,

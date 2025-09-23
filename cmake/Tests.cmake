@@ -139,23 +139,23 @@ function(_append_test_to_check_target_internal TARGET WORKING_DIR TEST_TYPE STAT
         set(CACHE_DESC "Accumulated check targets")
     endif()
 
+    # Build environment list properly
+    set(ENVIRONMENT_LIST "")
+    if(DEFINED TEST_ENVIRONMENT)
+        set(ENVIRONMENT_LIST ${TEST_ENVIRONMENT})
+    endif()
     
     if(CODE_COVERAGE)
         # For code coverage builds, we want each profraw file to have a unique name.  The %m
         # in the LLVM_PROFILE_FILE environment variable will auto generate a unique id.
-        if(DEFINED TEST_ENVIRONMENT)
-            set(TEST_ENVIRONMENT "${TEST_ENVIRONMENT} LLVM_PROFILE_FILE=./bin/%m.profraw")
-        else()
-            set(TEST_ENVIRONMENT "LLVM_PROFILE_FILE=./%m.profraw")
-        endif()
-
+        list(APPEND ENVIRONMENT_LIST "LLVM_PROFILE_FILE=./bin/%m.profraw")
     endif()
     
     set(NEW_COMMAND "")
     if("${${COMMAND_VAR}}" STREQUAL "")
-        set(NEW_COMMAND ${TEST_ENVIRONMENT} ${CMAKE_BINARY_DIR}/bin/${TARGET})
+        set(NEW_COMMAND ${CMAKE_COMMAND} -E env ${ENVIRONMENT_LIST} ${CMAKE_BINARY_DIR}/bin/${TARGET})
     else()
-        set(NEW_COMMAND && ${TEST_ENVIRONMENT} ${CMAKE_BINARY_DIR}/bin/${TARGET})
+        set(NEW_COMMAND && ${CMAKE_COMMAND} -E env ${ENVIRONMENT_LIST} ${CMAKE_BINARY_DIR}/bin/${TARGET})
     endif()
     
     set(${COMMAND_VAR} ${${COMMAND_VAR}} ${NEW_COMMAND} CACHE INTERNAL "${CACHE_DESC}" FORCE)
@@ -192,7 +192,8 @@ endfunction()
 enable_testing() # Cmake wont discover or run tests without this line
 
 # Add a check_ctest target which will run all tests discovered by gtest_discover_tests via ctest. 
-add_custom_target(check_ctest COMMAND ${TEST_ENVIRONMENT} ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR})
+add_custom_target(check_ctest 
+    COMMAND ${CMAKE_COMMAND} -E env ${TEST_ENVIRONMENT} ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR})
 
 function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     if("${APPEND_FUNCTION_SUFFIX}" STREQUAL "test")

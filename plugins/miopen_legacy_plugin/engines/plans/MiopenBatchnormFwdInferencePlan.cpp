@@ -18,16 +18,9 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
     , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
     , _bias(miopen_utils::createTensor(tensorMap, attributes.bias_tensor_uid()))
+    , _estMean(miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid()))
+    , _estVariance(miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid()))
 {
-    if(attributes.mean_tensor_uid().has_value())
-    {
-        _estMean = miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid().value());
-    }
-    if(attributes.inv_variance_tensor_uid().has_value())
-    {
-        _estVariance
-            = miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid().value());
-    }
 }
 
 const MiopenTensor& BatchnormFwdInferenceParams::x() const
@@ -50,18 +43,17 @@ const MiopenTensor& BatchnormFwdInferenceParams::bias() const
     return _bias;
 }
 
-const std::optional<MiopenTensor>& BatchnormFwdInferenceParams::estMean() const
+const MiopenTensor& BatchnormFwdInferenceParams::estMean() const
 {
     return _estMean;
 }
 
-const std::optional<MiopenTensor>& BatchnormFwdInferenceParams::estVariance() const
+const MiopenTensor& BatchnormFwdInferenceParams::estVariance() const
 {
     return _estVariance;
 }
 
-BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(
-    std::unique_ptr<BatchnormFwdInferenceParams> inferenceParams)
+BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams)
     : _inferenceParams(std::move(inferenceParams))
 {
 }
@@ -77,45 +69,31 @@ void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
     double epsilon = 1e-3;
 
     auto xBuffer = miopen_utils::findDeviceBuffer(
-        _inferenceParams->x().uid(), deviceBuffers, numDeviceBuffers);
+        _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
     auto yBuffer = miopen_utils::findDeviceBuffer(
-        _inferenceParams->y().uid(), deviceBuffers, numDeviceBuffers);
+        _inferenceParams.y().uid(), deviceBuffers, numDeviceBuffers);
     auto scaleBuffer = miopen_utils::findDeviceBuffer(
-        _inferenceParams->scale().uid(), deviceBuffers, numDeviceBuffers);
+        _inferenceParams.scale().uid(), deviceBuffers, numDeviceBuffers);
     auto biasBuffer = miopen_utils::findDeviceBuffer(
-        _inferenceParams->bias().uid(), deviceBuffers, numDeviceBuffers);
-
-    hipdnnPluginDeviceBuffer_t estMeanBuffer = {0, nullptr};
-    if(_inferenceParams->estMean().has_value())
-    {
-        estMeanBuffer = miopen_utils::findDeviceBuffer(
-            _inferenceParams->estMean().value().uid(), deviceBuffers, numDeviceBuffers);
-    }
-
-    hipdnnPluginDeviceBuffer_t estVarianceBuffer = {0, nullptr};
-    if(_inferenceParams->estVariance().has_value())
-    {
-        estVarianceBuffer = miopen_utils::findDeviceBuffer(
-            _inferenceParams->estVariance().value().uid(), deviceBuffers, numDeviceBuffers);
-    }
+        _inferenceParams.bias().uid(), deviceBuffers, numDeviceBuffers);
+    auto estMeanBuffer = miopen_utils::findDeviceBuffer(
+        _inferenceParams.estMean().uid(), deviceBuffers, numDeviceBuffers);
+    auto estVarianceBuffer = miopen_utils::findDeviceBuffer(
+        _inferenceParams.estVariance().uid(), deviceBuffers, numDeviceBuffers);
 
     THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardInference_V2(
         handle.miopenHandle,
         MIOPEN_BATCHNORM_MODE,
         &alpha,
         &beta,
-        _inferenceParams->x().tensorDescriptor(),
+        _inferenceParams.x().tensorDescriptor(),
         xBuffer.ptr,
-        _inferenceParams->y().tensorDescriptor(),
+        _inferenceParams.y().tensorDescriptor(),
         yBuffer.ptr,
-        _inferenceParams->scale().tensorDescriptor(),
-        _inferenceParams->bias().tensorDescriptor(),
-        _inferenceParams->estMean().has_value()
-            ? _inferenceParams->estMean().value().tensorDescriptor()
-            : nullptr,
-        _inferenceParams->estVariance().has_value()
-            ? _inferenceParams->estVariance().value().tensorDescriptor()
-            : nullptr,
+        _inferenceParams.scale().tensorDescriptor(),
+        _inferenceParams.bias().tensorDescriptor(),
+        _inferenceParams.estMean().tensorDescriptor(),
+        _inferenceParams.estVariance().tensorDescriptor(),
         scaleBuffer.ptr,
         biasBuffer.ptr,
         estMeanBuffer.ptr,

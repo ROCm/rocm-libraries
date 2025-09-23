@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <stdexcept>

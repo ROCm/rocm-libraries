@@ -18,7 +18,10 @@ class MockEngine : public IEngine
 {
 public:
     MOCK_METHOD(int64_t, id, (), (const, override));
-    MOCK_METHOD(bool, isApplicable, (const hipdnn_plugin::IGraph& opGraph), (const, override));
+    MOCK_METHOD(bool,
+                isApplicable,
+                (HipdnnEnginePluginHandle & handle, const hipdnn_plugin::IGraph& opGraph),
+                (const, override));
     MOCK_METHOD(void,
                 getDetails,
                 (HipdnnEnginePluginHandle & handle, hipdnnPluginConstData_t& detailsOut),

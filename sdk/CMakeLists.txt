@@ -55,8 +55,10 @@ _restore_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
 
 hipdnn_add_dependency(spdlog VERSION 1.15.2)
 
+hipdnn_add_dependency(nlohmann_json VERSION 3.12.0)
+
 add_library(hipdnn_sdk INTERFACE)
-target_link_libraries(hipdnn_sdk INTERFACE FlatBuffers spdlog_header_only)
+target_link_libraries(hipdnn_sdk INTERFACE FlatBuffers spdlog_header_only nlohmann_json)
 add_dependencies(hipdnn_sdk generate_hipdnn_sdk_headers)
 
 target_include_directories(hipdnn_sdk INTERFACE
@@ -79,18 +81,17 @@ configure_file(
 )
 
 install(
-    TARGETS hipdnn_sdk FlatBuffers spdlog_header_only
+    TARGETS hipdnn_sdk FlatBuffers spdlog_header_only nlohmann_json
     EXPORT hipdnn_sdk_targets
 )
 
 export(
-    TARGETS hipdnn_sdk FlatBuffers spdlog_header_only
+    TARGETS hipdnn_sdk FlatBuffers spdlog_header_only nlohmann_json
     FILE  ${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake
 )
 
-#todo, get spdlog to install its headers
 install(
-    DIRECTORY ${HIP_DNN_SDK_INCLUDE_DIR}/ ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}/ ${HIP_DNN_SPDLOG_INCLUDE_DIR}/
+    DIRECTORY ${HIP_DNN_SDK_INCLUDE_DIR}/ ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}/ ${HIP_DNN_SPDLOG_INCLUDE_DIR}/ ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_SDK_INSTALL_INCLUDE_DIR}
 )
 

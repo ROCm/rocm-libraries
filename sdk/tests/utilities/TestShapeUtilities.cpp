@@ -308,3 +308,142 @@ TEST(TestShapeUtils, GenerateStridesEmptyDimsWithNonEmptyStridesValid)
 
     EXPECT_EQ(strides, (std::vector<int64_t>{}));
 }
+
+TEST(TestShapeUtils, GenerateDefaultPackedStridesEmpty)
+{
+    std::vector<int64_t> dims = {};
+    auto strides = generateStrides(dims);
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStrides1D)
+{
+    std::vector<int64_t> dims = {10};
+    auto strides = generateStrides(dims);
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStrides2D)
+{
+    std::vector<int64_t> dims = {5, 8};
+    auto strides = generateStrides(dims);
+
+    // Row-major: {8, 1}
+    EXPECT_EQ(strides, (std::vector<int64_t>{8, 1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStrides3D)
+{
+    std::vector<int64_t> dims = {4, 5, 6};
+    auto strides = generateStrides(dims);
+
+    // Row-major: {5*6, 6, 1} = {30, 6, 1}
+    EXPECT_EQ(strides, (std::vector<int64_t>{30, 6, 1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStrides4D)
+{
+    std::vector<int64_t> dims = {2, 3, 4, 5};
+    auto strides = generateStrides(dims);
+
+    // Row-major: {3*4*5, 4*5, 5, 1} = {60, 20, 5, 1}
+    EXPECT_EQ(strides, (std::vector<int64_t>{60, 20, 5, 1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStrides5D)
+{
+    std::vector<int64_t> dims = {2, 3, 4, 5, 6};
+    auto strides = generateStrides(dims);
+
+    // Row-major: {3*4*5*6, 4*5*6, 5*6, 6, 1} = {360, 120, 30, 6, 1}
+    EXPECT_EQ(strides, (std::vector<int64_t>{360, 120, 30, 6, 1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStrides6D)
+{
+    std::vector<int64_t> dims = {1, 2, 3, 4, 5, 6};
+    auto strides = generateStrides(dims);
+
+    // Row-major: {2*3*4*5*6, 3*4*5*6, 4*5*6, 5*6, 6, 1} = {720, 360, 120, 30, 6, 1}
+    EXPECT_EQ(strides, (std::vector<int64_t>{720, 360, 120, 30, 6, 1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStrides7D)
+{
+    std::vector<int64_t> dims = {2, 2, 2, 2, 2, 2, 2};
+    auto strides = generateStrides(dims);
+
+    // Row-major: {64, 32, 16, 8, 4, 2, 1}
+    EXPECT_EQ(strides, (std::vector<int64_t>{64, 32, 16, 8, 4, 2, 1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStridesWithOnes)
+{
+    std::vector<int64_t> dims = {1, 1, 5, 1, 3};
+    auto strides = generateStrides(dims);
+
+    // Row-major: {1*5*1*3, 5*1*3, 1*3, 3, 1} = {15, 15, 3, 3, 1}
+    EXPECT_EQ(strides, (std::vector<int64_t>{15, 15, 3, 3, 1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStridesLargeDims)
+{
+    std::vector<int64_t> dims = {100, 200};
+    auto strides = generateStrides(dims);
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{200, 1}));
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStridesMatchesNchwFor4D)
+{
+    std::vector<int64_t> dims = {2, 3, 4, 5};
+    auto packedStrides = generateStrides(dims);
+    auto nchwStrides = generateStrides(dims, {3, 2, 1, 0}); // NCHW stride order
+
+    EXPECT_EQ(packedStrides, nchwStrides);
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStridesMatchesNcdhwFor5D)
+{
+    std::vector<int64_t> dims = {2, 3, 4, 5, 6};
+    auto packedStrides = generateStrides(dims);
+    auto ncdhwStrides = generateStrides(dims, {4, 3, 2, 1, 0}); // NCDHW stride order
+
+    EXPECT_EQ(packedStrides, ncdhwStrides);
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStridesCalculation)
+{
+    // Test the actual calculation logic
+    std::vector<int64_t> dims = {3, 4, 5};
+    auto strides = generateStrides(dims);
+
+    // Verify each stride is product of dimensions after it
+    EXPECT_EQ(strides[0], dims[1] * dims[2]); // 4 * 5 = 20
+    EXPECT_EQ(strides[1], dims[2]); // 5
+    EXPECT_EQ(strides[2], 1); // 1 (always for last dimension)
+}
+
+TEST(TestShapeUtils, GenerateDefaultPackedStridesAllOnes)
+{
+    std::vector<int64_t> dims = {1, 1, 1, 1};
+    auto strides = generateStrides(dims);
+
+    EXPECT_EQ(strides, (std::vector<int64_t>{1, 1, 1, 1}));
+}
+
+TEST(TestShapeUtils, GetDerivedShape5DValid)
+{
+    std::vector<int64_t> shape = {2, 4, 8, 16, 32};
+    auto derivedShape = getDerivedShape(shape);
+
+    EXPECT_EQ(derivedShape, (std::vector<int64_t>{1, 4, 1, 1, 1}));
+}
+
+TEST(TestShapeUtils, GetDerivedShapeThrowsForSingleDimension)
+{
+    std::vector<int64_t> shape = {10};
+    EXPECT_THROW(getDerivedShape(shape), std::runtime_error);
+}

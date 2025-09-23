@@ -20,28 +20,38 @@ public:
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
+    BatchnormFwdInferenceParams(const BatchnormFwdInferenceParams&) = delete;
+    BatchnormFwdInferenceParams& operator=(const BatchnormFwdInferenceParams&) = delete;
+
+    BatchnormFwdInferenceParams(BatchnormFwdInferenceParams&&) = default;
+    BatchnormFwdInferenceParams& operator=(BatchnormFwdInferenceParams&&) = default;
+
     const MiopenTensor& x() const;
     const MiopenTensor& y() const;
     const MiopenTensor& scale() const;
     const MiopenTensor& bias() const;
-
-    const std::optional<MiopenTensor>& estMean() const;
-    const std::optional<MiopenTensor>& estVariance() const;
+    const MiopenTensor& estMean() const;
+    const MiopenTensor& estVariance() const;
 
 private:
     MiopenTensor _x;
     MiopenTensor _y;
     MiopenTensor _scale;
     MiopenTensor _bias;
-
-    std::optional<MiopenTensor> _estMean;
-    std::optional<MiopenTensor> _estVariance;
+    MiopenTensor _estMean;
+    MiopenTensor _estVariance;
 };
 
 class BatchnormFwdInferencePlan : public IPlan
 {
 public:
-    BatchnormFwdInferencePlan(std::unique_ptr<BatchnormFwdInferenceParams> inferenceParams);
+    BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams);
+
+    BatchnormFwdInferencePlan(const BatchnormFwdInferencePlan&) = delete;
+    BatchnormFwdInferencePlan& operator=(const BatchnormFwdInferencePlan&) = delete;
+
+    BatchnormFwdInferencePlan(BatchnormFwdInferencePlan&&) = default;
+    BatchnormFwdInferencePlan& operator=(BatchnormFwdInferencePlan&&) = default;
 
     void execute(const HipdnnEnginePluginHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -49,7 +59,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    std::unique_ptr<BatchnormFwdInferenceParams> _inferenceParams;
+    BatchnormFwdInferenceParams _inferenceParams;
 };
 
 }

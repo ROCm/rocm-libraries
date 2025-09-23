@@ -74,7 +74,7 @@ const std::optional<MiopenTensor>& BatchnormBwdParams::optInvVariance() const
     return _optInvVariance;
 }
 
-BatchnormBwdPlan::BatchnormBwdPlan(std::unique_ptr<BatchnormBwdParams> params)
+BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
     : _params(std::move(params))
 {
 }
@@ -91,30 +91,30 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     double epsilon = 1e-3;
 
     auto xBuffer
-        = miopen_utils::findDeviceBuffer(_params->x().uid(), deviceBuffers, numDeviceBuffers);
+        = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
     auto dyBuffer
-        = miopen_utils::findDeviceBuffer(_params->dy().uid(), deviceBuffers, numDeviceBuffers);
+        = miopen_utils::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
     auto dxBuffer
-        = miopen_utils::findDeviceBuffer(_params->dx().uid(), deviceBuffers, numDeviceBuffers);
+        = miopen_utils::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
     auto scaleBuffer
-        = miopen_utils::findDeviceBuffer(_params->scale().uid(), deviceBuffers, numDeviceBuffers);
+        = miopen_utils::findDeviceBuffer(_params.scale().uid(), deviceBuffers, numDeviceBuffers);
     auto dscaleBuffer
-        = miopen_utils::findDeviceBuffer(_params->dscale().uid(), deviceBuffers, numDeviceBuffers);
+        = miopen_utils::findDeviceBuffer(_params.dscale().uid(), deviceBuffers, numDeviceBuffers);
     auto dbiasBuffer
-        = miopen_utils::findDeviceBuffer(_params->dbias().uid(), deviceBuffers, numDeviceBuffers);
+        = miopen_utils::findDeviceBuffer(_params.dbias().uid(), deviceBuffers, numDeviceBuffers);
 
     hipdnnPluginDeviceBuffer_t meanBuffer = {0, nullptr};
-    if(_params->optMean().has_value())
+    if(_params.optMean().has_value())
     {
         meanBuffer = miopen_utils::findDeviceBuffer(
-            _params->optMean().value().uid(), deviceBuffers, numDeviceBuffers);
+            _params.optMean().value().uid(), deviceBuffers, numDeviceBuffers);
     }
 
     hipdnnPluginDeviceBuffer_t invVarianceBuffer = {0, nullptr};
-    if(_params->optInvVariance().has_value())
+    if(_params.optInvVariance().has_value())
     {
         invVarianceBuffer = miopen_utils::findDeviceBuffer(
-            _params->optInvVariance().value().uid(), deviceBuffers, numDeviceBuffers);
+            _params.optInvVariance().value().uid(), deviceBuffers, numDeviceBuffers);
     }
 
     THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationBackward_V2(
@@ -124,17 +124,17 @@ void BatchnormBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
         &betaDataDiff,
         &alphaParamDiff,
         &betaParamDiff,
-        _params->x().tensorDescriptor(),
+        _params.x().tensorDescriptor(),
         xBuffer.ptr,
-        _params->dy().tensorDescriptor(),
+        _params.dy().tensorDescriptor(),
         dyBuffer.ptr,
-        _params->dx().tensorDescriptor(),
+        _params.dx().tensorDescriptor(),
         dxBuffer.ptr,
-        _params->scale().tensorDescriptor(),
-        _params->scale().tensorDescriptor(),
-        _params->optMean().has_value() ? _params->optMean().value().tensorDescriptor() : nullptr,
-        _params->optInvVariance().has_value() ? _params->optInvVariance().value().tensorDescriptor()
-                                              : nullptr,
+        _params.scale().tensorDescriptor(),
+        _params.scale().tensorDescriptor(),
+        _params.optMean().has_value() ? _params.optMean().value().tensorDescriptor() : nullptr,
+        _params.optInvVariance().has_value() ? _params.optInvVariance().value().tensorDescriptor()
+                                             : nullptr,
         scaleBuffer.ptr,
         dscaleBuffer.ptr,
         dbiasBuffer.ptr,

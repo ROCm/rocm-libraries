@@ -20,7 +20,8 @@ public:
 
     int64_t id() const override;
 
-    bool isApplicable(const hipdnn_plugin::IGraph& opGraph) const override;
+    bool isApplicable(HipdnnEnginePluginHandle& handle,
+                      const hipdnn_plugin::IGraph& opGraph) const override;
     void getDetails(HipdnnEnginePluginHandle& handle,
                     hipdnnPluginConstData_t& detailsOut) const override;
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,

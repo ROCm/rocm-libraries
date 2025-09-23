@@ -520,8 +520,7 @@ TEST(TestEnginePluginResourceManager, GetEngineDetails)
                                      const hipdnnPluginConstData_t*,
                                      hipdnnPluginConstData_t* output) {
             // Create valid flatbuffer engine details
-            static auto s_builder
-                = hipdnn_backend::test_utilities::createValidEngineDetails(engineId);
+            static auto s_builder = hipdnn_sdk::test_utilities::createValidEngineDetails(engineId);
             output->ptr = s_builder.GetBufferPointer();
             output->size = s_builder.GetSize();
         }));
@@ -669,8 +668,8 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedPlan)
         = std::make_shared<MockEnginePluginManager>();
 
     auto executionPlanWrapper
-        = hipdnn_backend::test_utilities::createDescriptor<MockExecutionPlanDescriptor>();
-    auto variantWrapper = hipdnn_backend::test_utilities::createDescriptor<MockVariantDescriptor>();
+        = hipdnn_sdk::test_utilities::createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockVariantDescriptor>();
 
     auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
         executionPlanWrapper.get());
@@ -708,8 +707,8 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailNonFinalizedVariant)
         = std::make_shared<MockEnginePluginManager>();
 
     auto executionPlanWrapper
-        = hipdnn_backend::test_utilities::createDescriptor<MockExecutionPlanDescriptor>();
-    auto variantWrapper = hipdnn_backend::test_utilities::createDescriptor<MockVariantDescriptor>();
+        = hipdnn_sdk::test_utilities::createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockVariantDescriptor>();
 
     auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
         executionPlanWrapper.get());
@@ -748,11 +747,11 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphFailTensorMismatch)
         = std::make_shared<MockEnginePluginManager>();
 
     auto engineConfigWrapper
-        = hipdnn_backend::test_utilities::createDescriptor<MockEngineConfigDescriptor>();
-    auto engineWrapper = hipdnn_backend::test_utilities::createDescriptor<MockEngineDescriptor>();
+        = hipdnn_sdk::test_utilities::createDescriptor<MockEngineConfigDescriptor>();
+    auto engineWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockEngineDescriptor>();
     auto executionPlanWrapper
-        = hipdnn_backend::test_utilities::createDescriptor<MockExecutionPlanDescriptor>();
-    auto variantWrapper = hipdnn_backend::test_utilities::createDescriptor<MockVariantDescriptor>();
+        = hipdnn_sdk::test_utilities::createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockVariantDescriptor>();
 
     auto mockEngineConfig = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
         engineConfigWrapper.get());
@@ -811,11 +810,11 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
         = std::make_shared<MockEnginePluginManager>();
 
     auto engineConfigWrapper
-        = hipdnn_backend::test_utilities::createDescriptor<MockEngineConfigDescriptor>();
-    auto engineWrapper = hipdnn_backend::test_utilities::createDescriptor<MockEngineDescriptor>();
+        = hipdnn_sdk::test_utilities::createDescriptor<MockEngineConfigDescriptor>();
+    auto engineWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockEngineDescriptor>();
     auto executionPlanWrapper
-        = hipdnn_backend::test_utilities::createDescriptor<MockExecutionPlanDescriptor>();
-    auto variantWrapper = hipdnn_backend::test_utilities::createDescriptor<MockVariantDescriptor>();
+        = hipdnn_sdk::test_utilities::createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockVariantDescriptor>();
 
     auto mockEngineConfig = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
         engineConfigWrapper.get());

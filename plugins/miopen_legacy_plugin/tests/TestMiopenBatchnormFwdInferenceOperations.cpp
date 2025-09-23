@@ -9,6 +9,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
@@ -17,10 +18,12 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
-#include "common/TestOperationsCommon.hpp"
+#include "common/BatchnormCommon.hpp"
+#include "common/Helpers.hpp"
 
 using namespace hipdnn_sdk::test_utilities;
-using namespace test_operations_common;
+using namespace test_bn_common;
+using namespace test_helpers;
 
 template <typename InputType, typename IntermediateType>
 class BatchnormFwdInferenceExecuteGraphBase : public ::testing::TestWithParam<Batchnorm2dTestCase>
@@ -44,7 +47,8 @@ protected:
     {
         if(_handle != nullptr)
         {
-            hipdnnEnginePluginDestroy(_handle);
+            hipdnnPluginStatus_t status = hipdnnEnginePluginDestroy(_handle);
+            ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         }
     }
 
@@ -54,7 +58,7 @@ protected:
     {
         auto dims = std::vector<int64_t>{testCase.n, testCase.c, testCase.h, testCase.w};
 
-        auto derivedDims = std::vector<int64_t>{1, dims[1], 1, 1};
+        auto derivedDims = getDerivedShape(dims);
 
         auto deviceBuffers = std::vector<hipdnnPluginDeviceBuffer_t>{};
 
@@ -93,33 +97,35 @@ protected:
                                                            static_cast<IntermediateType>(1.0f),
                                                            testCase.seed));
 
-        auto batchnormBuilder = hipdnn_backend::test_utilities::createValidBatchnormGraph(
-            xTensor.strides(), xTensor.dims(), true, inputDataType);
+        auto batchnormBuilder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph(
+            xTensor.strides(), xTensor.dims(), inputDataType);
 
         hipdnnPluginConstData_t opGraph;
         opGraph.ptr = batchnormBuilder.GetBufferPointer();
         opGraph.size = batchnormBuilder.GetSize();
 
-        auto engineConfigBuilder = hipdnn_backend::test_utilities::createValidEngineConfig(1);
+        auto engineConfigBuilder = hipdnn_sdk::test_utilities::createValidEngineConfig(1);
         hipdnnPluginConstData_t engineConfig;
         engineConfig.ptr = engineConfigBuilder.GetBufferPointer();
         engineConfig.size = engineConfigBuilder.GetSize();
 
+        hipdnnPluginStatus_t status;
         hipdnnEnginePluginExecutionContext_t executionContext;
-        hipdnnEnginePluginCreateExecutionContext(
+        status = hipdnnEnginePluginCreateExecutionContext(
             _handle, &engineConfig, &opGraph, &executionContext);
+        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-        hipdnnPluginStatus_t status
-            = hipdnnEnginePluginExecuteOpGraph(_handle,
-                                               executionContext,
-                                               nullptr,
-                                               deviceBuffers.data(),
-                                               static_cast<uint32_t>(deviceBuffers.size()));
-        EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
+        status = hipdnnEnginePluginExecuteOpGraph(_handle,
+                                                  executionContext,
+                                                  nullptr,
+                                                  deviceBuffers.data(),
+                                                  static_cast<uint32_t>(deviceBuffers.size()));
+        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         yTensor.memory().markDeviceModified();
 
-        hipdnnEnginePluginDestroyExecutionContext(_handle, executionContext);
+        status = hipdnnEnginePluginDestroyExecutionContext(_handle, executionContext);
+        ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         Tensor<InputType> xTensorCpu(dims, _layout);
         xTensorCpu.fillWithRandomValues(

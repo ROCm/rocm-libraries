@@ -42,6 +42,8 @@ TEST(TestBatchnormInferenceNode, PreValidateNode)
     batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_scale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
 
     GraphAttributes graphAttributes;
     BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
@@ -82,6 +84,20 @@ TEST(TestBatchnormInferenceNode, PreValidateNodeMissingValues)
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributesCopy = batchnormAttributes;
+    BatchnormInferenceNode nodeWithBias(std::move(batchnormAttributesCopy), graphAttributes);
+
+    error = nodeWithBias.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+
+    batchnormAttributes.set_mean(std::make_shared<TensorAttributes>());
+    batchnormAttributesCopy = batchnormAttributes;
+    BatchnormInferenceNode nodeWithMean(std::move(batchnormAttributesCopy), graphAttributes);
+
+    error = nodeWithMean.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+
+    batchnormAttributes.set_inv_variance(std::make_shared<TensorAttributes>());
     batchnormAttributesCopy = batchnormAttributes;
     BatchnormInferenceNode nodeWithAllValues(std::move(batchnormAttributesCopy), graphAttributes);
 
@@ -194,72 +210,6 @@ TEST(TestBatchnormInferenceNode, PackNode)
     EXPECT_EQ(packedAttributes->y_tensor_uid(), yTensor->get_uid());
     EXPECT_EQ(packedAttributes->mean_tensor_uid(), meanTensor->get_uid());
     EXPECT_EQ(packedAttributes->inv_variance_tensor_uid(), invVarianceTensor->get_uid());
-    EXPECT_EQ(packedAttributes->scale_tensor_uid(), scaleTensor->get_uid());
-    EXPECT_EQ(packedAttributes->bias_tensor_uid(), biasTensor->get_uid());
-}
-
-TEST(TestBatchnormInferenceNode, PackNodeWithoutMeanAndInvVariance)
-{
-    BatchnormInferenceAttributes batchnormAttributes;
-    batchnormAttributes.set_name("BatchnormInference");
-
-    auto xTensor = std::make_shared<TensorAttributes>();
-    xTensor->set_uid(1)
-        .set_name("XTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 3, 4})
-        .set_stride({4, 3, 2, 1});
-    batchnormAttributes.set_x(xTensor);
-
-    auto yTensor = std::make_shared<TensorAttributes>();
-    yTensor->set_uid(2)
-        .set_name("YTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 3, 4})
-        .set_stride({4, 3, 2, 1});
-    batchnormAttributes.set_y(yTensor);
-
-    auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_uid(3)
-        .set_name("ScaleTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1})
-        .set_stride({2, 1, 1, 1});
-    batchnormAttributes.set_scale(scaleTensor);
-
-    auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_uid(4)
-        .set_name("BiasTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_dim({1, 2, 1, 1})
-        .set_stride({2, 1, 1, 1});
-    batchnormAttributes.set_bias(biasTensor);
-
-    // Do not set mean and inv_variance
-
-    GraphAttributes graphAttributes;
-    BatchnormInferenceNode node(std::move(batchnormAttributes), graphAttributes);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = node.pack_node(builder);
-    EXPECT_NE(offset.o, 0);
-
-    builder.Finish(offset);
-    auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Node>(bufferPointer);
-
-    EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "BatchnormInference");
-    EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes);
-
-    auto packedAttributes = nodeFlatbuffer->attributes_as_BatchnormInferenceAttributes();
-    ASSERT_NE(packedAttributes, nullptr);
-
-    EXPECT_EQ(packedAttributes->x_tensor_uid(), xTensor->get_uid());
-    EXPECT_EQ(packedAttributes->y_tensor_uid(), yTensor->get_uid());
-    EXPECT_EQ(packedAttributes->mean_tensor_uid(), flatbuffers::nullopt); // Verify mean is null
-    EXPECT_EQ(packedAttributes->inv_variance_tensor_uid(),
-              flatbuffers::nullopt); // Verify inv_variance is null
     EXPECT_EQ(packedAttributes->scale_tensor_uid(), scaleTensor->get_uid());
     EXPECT_EQ(packedAttributes->bias_tensor_uid(), biasTensor->get_uid());
 }
