@@ -35,45 +35,41 @@ struct JoinableThread : std::thread
     }
 };
 
-template <typename F, typename T, std::size_t... Is>
-static auto callFuncUnpackArgsImpl(F f, T args, std::index_sequence<Is...>)
-{
-    return f(std::get<Is>(args)...);
-}
-
-template <typename F, typename T>
-static auto callFuncUnpackArgs(F f, T args)
-{
-    constexpr std::size_t N = std::tuple_size<T>{};
-    return callFuncUnpackArgsImpl(f, args, std::make_index_sequence<N>{});
-}
-
-template <typename F, typename... Xs>
-struct ParallelTensorFunctor
+// Dynamic dimension version of ParallelTensorFunctor
+template <typename F>
+struct ParallelTensorFunctorDynamic
 {
     F _func;
-    static constexpr std::size_t NDIM = sizeof...(Xs);
-    std::array<std::size_t, NDIM> _lengths;
-    std::array<std::size_t, NDIM> _strides;
+    std::vector<std::size_t> _lengths;
+    std::vector<std::size_t> _strides;
     std::size_t _totalElements;
 
-    ParallelTensorFunctor(F f, Xs... xs)
+    ParallelTensorFunctorDynamic(F f, const std::vector<int64_t>& dimensions)
         : _func(f)
-        , _lengths({static_cast<std::size_t>(xs)...})
+        , _lengths(dimensions.begin(), dimensions.end())
+        , _strides(dimensions.size())
+        , _totalElements(1)
     {
+        if(_lengths.empty())
+        {
+            _totalElements = 0;
+            return;
+        }
+
+        // Calculate strides in the same way as the static version
         _strides.back() = 1;
-        std::partial_sum(_lengths.rbegin(),
-                         _lengths.rend() - 1,
-                         _strides.rbegin() + 1,
-                         std::multiplies<std::size_t>());
+        for(std::size_t i = _lengths.size() - 1; i > 0; --i)
+        {
+            _strides[i - 1] = _strides[i] * _lengths[i];
+        }
         _totalElements = _strides[0] * _lengths[0];
     }
 
-    std::array<std::size_t, NDIM> getNdIndices(std::size_t i) const
+    std::vector<std::size_t> getNdIndices(std::size_t i) const
     {
-        std::array<std::size_t, NDIM> indices;
+        std::vector<std::size_t> indices(_lengths.size());
 
-        for(std::size_t idim = 0; idim < NDIM; ++idim)
+        for(std::size_t idim = 0; idim < _lengths.size(); ++idim)
         {
             indices[idim] = i / _strides[idim];
             i -= indices[idim] * _strides[idim];
@@ -101,7 +97,7 @@ struct ParallelTensorFunctor
             auto threadFunc = [=, *this] {
                 for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
                 {
-                    callFuncUnpackArgs(_func, getNdIndices(workIdx));
+                    _func(getNdIndices(workIdx));
                 }
             };
             threads[threadIdx] = JoinableThread(threadFunc);
@@ -109,10 +105,11 @@ struct ParallelTensorFunctor
     }
 };
 
-template <typename F, typename... Xs>
-static auto makeParallelTensorFunctor(F f, Xs... xs)
+// Factory function for dynamic dimension version
+template <typename F>
+static auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimensions)
 {
-    return ParallelTensorFunctor<F, Xs...>(f, xs...);
+    return ParallelTensorFunctorDynamic<F>(f, dimensions);
 }
 
 } // namespace test_utilities

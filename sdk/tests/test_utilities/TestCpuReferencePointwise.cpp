@@ -199,9 +199,13 @@ protected:
 
         std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
 
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
+        // 2D operations now work with dynamic tensor functor
+        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+
+        T expected = static_cast<T>(3.0);
+        EXPECT_EQ(output.getHostValue(0, 0), expected);
+        EXPECT_EQ(output.getHostValue(1, 1), expected);
+        EXPECT_EQ(output.getHostValue(3, 2), expected);
     }
 
     void testAddOperation3D()
@@ -215,9 +219,13 @@ protected:
 
         std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
 
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
+        // 3D operations now work with dynamic tensor functor
+        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+
+        T expected = static_cast<T>(4.0);
+        EXPECT_EQ(output.getHostValue(0, 0, 0), expected);
+        EXPECT_EQ(output.getHostValue(1, 2, 9), expected);
+        EXPECT_EQ(output.getHostValue(0, 1, 5), expected);
     }
 
     void testSingleElementTensors()
@@ -319,4 +327,243 @@ TYPED_TEST(CpuReferencePointwiseTemplate, SingleElementTensors)
 TYPED_TEST(CpuReferencePointwiseTemplate, NumericalPrecision)
 {
     this->testNumericalPrecision();
+}
+
+// Broadcasting test cases
+template <typename T>
+class CpuReferencePointwiseBroadcastTemplate : public ::testing::Test
+{
+protected:
+    T getTolerance() const
+    {
+        if constexpr(std::is_same_v<T, half> || std::is_same_v<T, hip_bfloat16>)
+        {
+            return static_cast<T>(1e-2f);
+        }
+        else
+        {
+            return static_cast<T>(1e-4f);
+        }
+    }
+
+    // Test case: 1D × 1D: [N] + [N] (no broadcasting needed)
+    void testBroadcast1Dx1D()
+    {
+        Tensor<T> input1({5});
+        Tensor<T> input2({5});
+        Tensor<T> output({5});
+
+        for(int i = 0; i < 5; ++i)
+        {
+            input1.setHostValue(static_cast<T>(static_cast<float>(i + 1)), i);
+            input2.setHostValue(static_cast<T>(static_cast<float>(i * 2)), i);
+        }
+
+        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
+
+        CpuReferencePointwiseImpl<T>::pointwiseForwardBroadcast(inputs, output, PointwiseMode::ADD);
+
+        // Verify results: [1,2,3,4,5] + [0,2,4,6,8] = [1,4,7,10,13]
+        EXPECT_EQ(output.getHostValue(0), static_cast<T>(static_cast<float>(1)));
+        EXPECT_EQ(output.getHostValue(1), static_cast<T>(static_cast<float>(4)));
+        EXPECT_EQ(output.getHostValue(2), static_cast<T>(static_cast<float>(7)));
+        EXPECT_EQ(output.getHostValue(3), static_cast<T>(static_cast<float>(10)));
+        EXPECT_EQ(output.getHostValue(4), static_cast<T>(static_cast<float>(13)));
+    }
+
+    // Test case: 2D × 1D: [M,N] + [N] → broadcast to [M,N]
+    void testBroadcast2Dx1D()
+    {
+        Tensor<T> input1({3, 4});  // [M,N] = [3,4]
+        Tensor<T> input2({4});     // [N] = [4]
+        Tensor<T> output({3, 4});  // Output: [3,4]
+
+        // Fill input1 with pattern: row*10 + col
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(static_cast<T>(static_cast<float>((m * 10) + n)), m, n);
+            }
+        }
+
+        // Fill input2 with pattern: [100, 200, 300, 400]
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(static_cast<T>(static_cast<float>((n + 1) * 100)), n);
+        }
+
+        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
+
+        CpuReferencePointwiseImpl<T>::pointwiseForwardBroadcast(inputs, output, PointwiseMode::ADD);
+
+        // Verify broadcasting: input2[n] is added to all input1[m,n]
+        EXPECT_EQ(output.getHostValue(0, 0), static_cast<T>(static_cast<float>(0 + 100)));   // 0 + 100 = 100
+        EXPECT_EQ(output.getHostValue(0, 1), static_cast<T>(static_cast<float>(1 + 200)));   // 1 + 200 = 201
+        EXPECT_EQ(output.getHostValue(1, 2), static_cast<T>(static_cast<float>(12 + 300)));  // 12 + 300 = 312
+        EXPECT_EQ(output.getHostValue(2, 3), static_cast<T>(static_cast<float>(23 + 400)));  // 23 + 400 = 423
+    }
+
+    // Test case: 4D × 4D: [N,C,H,W] + [1,C,1,1] → broadcast to [N,C,H,W]
+    void testBroadcast4Dx4D()
+    {
+        Tensor<T> input1({2, 3, 2, 2});  // [N,C,H,W] = [2,3,2,2]
+        Tensor<T> input2({1, 3, 1, 1});  // [1,C,1,1] = [1,3,1,1]
+        Tensor<T> output({2, 3, 2, 2});  // Output: [2,3,2,2]
+
+        input1.fillWithValue(static_cast<T>(1.0));
+
+        // Set channel-specific values in input2
+        input2.setHostValue(static_cast<T>(10.0), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(static_cast<T>(20.0), 0, 1, 0, 0); // Channel 1
+        input2.setHostValue(static_cast<T>(30.0), 0, 2, 0, 0); // Channel 2
+
+        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
+
+        CpuReferencePointwiseImpl<T>::pointwiseForwardBroadcast(inputs, output, PointwiseMode::ADD);
+
+        // Verify channel-wise broadcasting
+        // Channel 0: all should be 1.0 + 10.0 = 11.0
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), static_cast<T>(11.0));
+        EXPECT_EQ(output.getHostValue(0, 0, 1, 1), static_cast<T>(11.0));
+        EXPECT_EQ(output.getHostValue(1, 0, 0, 1), static_cast<T>(11.0));
+
+        // Channel 1: all should be 1.0 + 20.0 = 21.0
+        EXPECT_EQ(output.getHostValue(0, 1, 0, 0), static_cast<T>(21.0));
+        EXPECT_EQ(output.getHostValue(1, 1, 1, 1), static_cast<T>(21.0));
+
+        // Channel 2: all should be 1.0 + 30.0 = 31.0
+        EXPECT_EQ(output.getHostValue(0, 2, 0, 0), static_cast<T>(31.0));
+        EXPECT_EQ(output.getHostValue(1, 2, 1, 0), static_cast<T>(31.0));
+    }
+
+    // Test case: Complex N-D broadcasting: [2,1,3,1] + [1,2,1,4] → [2,2,3,4]
+    void testBroadcastComplexND()
+    {
+        Tensor<T> input1({2, 1, 3, 1});  // [2,1,3,1]
+        Tensor<T> input2({1, 2, 1, 4});  // [1,2,1,4]
+        Tensor<T> output({2, 2, 3, 4});  // Output: [2,2,3,4]
+
+        // Fill input1 with pattern based on batch and height
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int h = 0; h < 3; ++h)
+            {
+                input1.setHostValue(static_cast<T>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
+            }
+        }
+
+        // Fill input2 with pattern based on channel and width
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                input2.setHostValue(static_cast<T>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
+            }
+        }
+
+        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
+
+        CpuReferencePointwiseImpl<T>::pointwiseForwardBroadcast(inputs, output, PointwiseMode::ADD);
+
+        // Verify specific positions
+        // output[0,0,0,0] = input1[0,0,0,0] + input2[0,0,0,0] = 0 + 0 = 0
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), static_cast<T>(static_cast<float>(0)));
+        
+        // output[1,1,2,3] = input1[1,0,2,0] + input2[0,1,0,3] = 12 + 103 = 115
+        EXPECT_EQ(output.getHostValue(1, 1, 2, 3), static_cast<T>(static_cast<float>(115)));
+        
+        // output[0,1,1,2] = input1[0,0,1,0] + input2[0,1,0,2] = 1 + 102 = 103
+        EXPECT_EQ(output.getHostValue(0, 1, 1, 2), static_cast<T>(static_cast<float>(103)));
+    }
+
+    // Test case: 3D broadcasting
+    void testBroadcast3D()
+    {
+        Tensor<T> input1({2, 3, 4});  // [2,3,4]
+        Tensor<T> input2({1, 3, 1});  // [1,3,1] - broadcasts to [2,3,4]
+        Tensor<T> output({2, 3, 4});  // Output: [2,3,4]
+
+        input1.fillWithValue(static_cast<T>(5.0));
+
+        // Set channel-specific values in input2
+        input2.setHostValue(static_cast<T>(1.0), 0, 0, 0); // Channel 0
+        input2.setHostValue(static_cast<T>(2.0), 0, 1, 0); // Channel 1
+        input2.setHostValue(static_cast<T>(3.0), 0, 2, 0); // Channel 2
+
+        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
+
+        CpuReferencePointwiseImpl<T>::pointwiseForwardBroadcast(inputs, output, PointwiseMode::SUB);
+
+        // Verify channel-wise broadcasting
+        EXPECT_EQ(output.getHostValue(0, 0, 0), static_cast<T>(4.0)); // 5.0 - 1.0
+        EXPECT_EQ(output.getHostValue(1, 1, 3), static_cast<T>(3.0)); // 5.0 - 2.0
+        EXPECT_EQ(output.getHostValue(0, 2, 2), static_cast<T>(2.0)); // 5.0 - 3.0
+    }
+
+    // Test error case: incompatible shapes
+    void testBroadcastErrorIncompatibleShapes()
+    {
+        Tensor<T> input1({2, 3, 2, 2});
+        Tensor<T> input2({2, 2, 2, 2}); // Incompatible: channel dimension 3 vs 2
+        Tensor<T> output({2, 3, 2, 2});
+
+        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
+
+        EXPECT_THROW(
+            CpuReferencePointwiseImpl<T>::pointwiseForwardBroadcast(inputs, output, PointwiseMode::ADD),
+            std::runtime_error);
+    }
+
+    // Test error case: wrong output shape
+    void testBroadcastErrorWrongOutputShape()
+    {
+        Tensor<T> input1({2, 2, 2, 2});
+        Tensor<T> input2({1, 2, 1, 1});
+        Tensor<T> output({2, 3, 2, 2}); // Wrong output shape
+
+        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
+
+        EXPECT_THROW(
+            CpuReferencePointwiseImpl<T>::pointwiseForwardBroadcast(inputs, output, PointwiseMode::ADD),
+            std::runtime_error);
+    }
+};
+
+using BroadcastTestTypes = ::testing::Types<float, double, half, hip_bfloat16>;
+TYPED_TEST_SUITE(CpuReferencePointwiseBroadcastTemplate, BroadcastTestTypes);
+
+TYPED_TEST(CpuReferencePointwiseBroadcastTemplate, Broadcast1Dx1D)
+{
+    this->testBroadcast1Dx1D();
+}
+
+TYPED_TEST(CpuReferencePointwiseBroadcastTemplate, Broadcast2Dx1D)
+{
+    this->testBroadcast2Dx1D();
+}
+
+TYPED_TEST(CpuReferencePointwiseBroadcastTemplate, Broadcast4Dx4D)
+{
+    this->testBroadcast4Dx4D();
+}
+
+TYPED_TEST(CpuReferencePointwiseBroadcastTemplate, BroadcastComplexND)
+{
+    this->testBroadcastComplexND();
+}
+
+TYPED_TEST(CpuReferencePointwiseBroadcastTemplate, Broadcast3D)
+{
+    this->testBroadcast3D();
+}
+
+TYPED_TEST(CpuReferencePointwiseBroadcastTemplate, BroadcastErrorIncompatibleShapes)
+{
+    this->testBroadcastErrorIncompatibleShapes();
+}
+
+TYPED_TEST(CpuReferencePointwiseBroadcastTemplate, BroadcastErrorWrongOutputShape)
+{
+    this->testBroadcastErrorWrongOutputShape();
 }

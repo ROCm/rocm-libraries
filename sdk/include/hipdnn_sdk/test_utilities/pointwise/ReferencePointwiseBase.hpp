@@ -61,6 +61,36 @@ public:
         policy.markOutputModified(output);
     }
 
+    static void pointwiseForwardBroadcast(const std::vector<const TensorBase<DataType>*>& inputs,
+                                         TensorBase<DataType>& output,
+                                         hipdnn_sdk::data_objects::PointwiseMode operation)
+    {
+        if(inputs.empty())
+        {
+            throw std::runtime_error("Pointwise operation requires at least one input tensor.");
+        }
+
+        // Note: We intentionally do NOT call validateTensorDimensions here
+        // because we want to support broadcasting between different shapes
+
+        ExecutionPolicy policy;
+
+        switch(operation)
+        {
+        case hipdnn_sdk::data_objects::PointwiseMode::ADD:
+            policy.executeBinaryBroadcast(inputs, output, pointwise::Add{});
+            break;
+        case hipdnn_sdk::data_objects::PointwiseMode::SUB:
+            policy.executeBinaryBroadcast(inputs, output, pointwise::Subtract{});
+            break;
+        default:
+            throw std::runtime_error("Unsupported pointwise operation: "
+                                     + std::to_string(static_cast<int>(operation)));
+        }
+
+        policy.markOutputModified(output);
+    }
+
 private:
     static void validateTensorDimensions(const std::vector<const TensorBase<DataType>*>& inputs,
                                          const TensorBase<DataType>& output)
