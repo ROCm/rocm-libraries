@@ -40,9 +40,7 @@ public:
         const auto& input1 = *inputs[0];
         const auto& input2 = *inputs[1];
 
-        std::vector<std::vector<int64_t>> input_shapes = {
-            input1.dims(), input2.dims()
-        };
+        std::vector<std::vector<int64_t>> input_shapes = {input1.dims(), input2.dims()};
 
         auto broadcast_shape = computeBroadcastShape(input_shapes);
 
@@ -67,15 +65,14 @@ public:
         parallelFunc();
     }
 
-
     void markOutputModified(TensorBase<DataType>& output)
     {
         output.memory().markHostModified();
     }
-private: 
 
-    static std::vector<int64_t> computeBroadcastShape(
-        const std::vector<std::vector<int64_t>>& input_shapes)
+private:
+    static std::vector<int64_t>
+        computeBroadcastShape(const std::vector<std::vector<int64_t>>& input_shapes)
     {
         if(input_shapes.empty())
         {
@@ -93,7 +90,7 @@ private:
         for(size_t dim = 0; dim < max_dims; ++dim)
         {
             int64_t max_size = 1;
-            
+
             for(const auto& shape : input_shapes)
             {
                 int64_t dim_size = 1;
@@ -123,9 +120,8 @@ private:
         return broadcast_shape;
     }
 
-    static std::vector<int64_t> getBroadcastableIndex(
-        const std::vector<int64_t>& output_index,
-        const std::vector<int64_t>& tensor_dims)
+    static std::vector<int64_t> getBroadcastableIndex(const std::vector<int64_t>& output_index,
+                                                      const std::vector<int64_t>& tensor_dims)
     {
         if(output_index.size() < tensor_dims.size())
         {
@@ -133,9 +129,9 @@ private:
         }
 
         std::vector<int64_t> broadcasted_index(tensor_dims.size());
-        
+
         size_t dim_offset = output_index.size() - tensor_dims.size();
-        
+
         for(size_t i = 0; i < tensor_dims.size(); ++i)
         {
             size_t output_dim_idx = dim_offset + i;

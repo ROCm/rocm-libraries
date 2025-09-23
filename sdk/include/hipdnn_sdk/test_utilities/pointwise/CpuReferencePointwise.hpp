@@ -27,7 +27,6 @@ public:
         ReferencePointwiseBase<DataType, DeviceExecutor>::pointwiseForward(
             inputs, output, operation);
     }
-
 };
 
 template <class DataType>

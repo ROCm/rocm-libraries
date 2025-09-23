@@ -155,14 +155,15 @@ public:
 
         auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
             [&](const std::vector<int64_t>& indices) {
-                auto g = indices[0];   // group index
-                auto n = indices[1];   // batch index
-                auto k = indices[2];   // output channel within group
-                auto ho = indices[3];  // output height
-                auto wo = indices[4];  // output width
+                auto g = indices[0]; // group index
+                auto n = indices[1]; // batch index
+                auto k = indices[2]; // output channel within group
+                auto ho = indices[3]; // output height
+                auto wo = indices[4]; // output width
                 convolutionFunc(g, n, k, ho, wo);
             },
-            std::vector<int64_t>{nGroups, nBatch, outputChannelsPerGroup, outputHeight, outputWidth});
+            std::vector<int64_t>{
+                nGroups, nBatch, outputChannelsPerGroup, outputHeight, outputWidth});
         parallelFunc(std::thread::hardware_concurrency());
 
         output.memory().markHostModified();

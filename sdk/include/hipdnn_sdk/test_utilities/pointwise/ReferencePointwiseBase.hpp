@@ -73,10 +73,10 @@ public:
 
 private:
     static bool canExecuteOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                   const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+                                    const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
     {
         using namespace hipdnn_sdk::data_objects;
-        
+
         if(attrs == nullptr)
         {
             return false;
@@ -99,7 +99,7 @@ private:
             // Any operation not in pointwiseForward is unsupported
             return false;
         }
-        
+
         // Note: We don't validate tensor dimensions, data types, or broadcasting compatibility here
         // because our N-dimensional broadcasting implementation handles these dynamically at runtime
     }
