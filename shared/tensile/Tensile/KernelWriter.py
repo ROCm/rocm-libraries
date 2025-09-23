@@ -371,7 +371,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Assign GRPM and LWPM
       #####
       # HOW THIS WORK
-      # padding each globalReadInstruction to 100 with empty instruction, 
+      # padding each globalReadInstruction to 100 with empty instruction,
       # each mfma will schedule intructions GRPM*100 times from padded globalReadInstruction.
       #   Ex. GRPM = 0.5
       #        GR ---------99--------- GR --------99---------- GR
@@ -379,7 +379,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.numGlobalReadInsPerMfma = roundUp(kernel["GlobalReadPerMfma"]*PRECISION)
 
       # HOW THIS WORK
-      # padding each globalReadInstruction to 100 with empty instruction, 
+      # padding each globalReadInstruction to 100 with empty instruction,
       # each mfma will schedule intructions GRPM*100 times from padded globalReadInstruction.
       #   Ex. LWPM = 0.5
       #        LW ---------99--------- LW --------99---------- LW
@@ -2384,7 +2384,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # NGLL or pack DTV case, no deep copy for pack
         # pack code for local prefetch is generated in noLoadLoopBody and used for DTV even
         deepCopyPack = pack
-      else: 
+      else:
         # deepCopy packCode for OptNLL noLoadLoop
         deepCopyPack = copy.deepcopy(pack)
       # keep StoreCInUnroll related code for the next noLoadLoop
@@ -4767,7 +4767,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def endSummation(self, kernel, label = None, isOptNLL = False):
     return ""
-  
+
   ##############################################################################
   # MAC Iteration
   # useMacro : if true, call the MAC* macro. If False, inline the MACs
@@ -4801,7 +4801,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def globalReadDo(self, kernel, mode, tP, vregSetIdx=0):
     return ""
-  
+
   ##############################################################################
   # Global Read A/B completed
   ##############################################################################
@@ -5438,7 +5438,7 @@ for codeObjectFileName in codeObjectFileNames:
     coFileName = base + '.co'
 
     args = self.getLinkCodeObjectArgs([objectFileName], coFileName)
-    
+
     tPrint(2, 'Single Code Object File: ' + ' '.join(args))
 
     # change to use  check_output to force windows cmd block util command finish

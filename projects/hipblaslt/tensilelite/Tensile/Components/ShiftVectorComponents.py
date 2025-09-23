@@ -185,7 +185,7 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
                     SOrSaveExecBX = SOrSaveExecB64 if kernel["WavefrontSize"] == 64 else SOrSaveExecB32
                     module.add(SMovB32(sgpr(tmpSgpr, writer.states.laneSGPRCount), all1mask, "to restore all threads active"))
                     module.add(SOrSaveExecBX(dst=VCC(), src=sgpr(tmpSgpr, writer.states.laneSGPRCount), comment="all threads active"))
-                    module.add(SBranch(labelName=svrLabels[glvw-1].getLabelName(), comment="done shifting" ))            
+                    module.add(SBranch(labelName=svrLabels[glvw-1].getLabelName(), comment="done shifting" ))
             module.add(svrLabels[glvw-1])
 
         # checkin scratch vgprs
@@ -411,7 +411,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             for r in range(1, glvw):
                 module.add(VCmpEQU32(dst=VCC(), src0=vgpr(rReg), src1=hex(r), comment="wgMT%%VW == %u"%r ))
                 module.add(SCBranchVCCNZ(labelName=glvwLabels[(r-1)].getLabelName(), comment="branch to shift d%u r=%u"%(tP["idx"], r)))
-                
+
             label_name = glvwLabels[glvw-1].getLabelName().replace("label_", "")
             place_holder = "%d_%s_placeholder"%(len(shiftVectorComponentsPlaceHolders), label_name)
             shiftVectorComponentsPlaceHolders.append(place_holder)
@@ -781,4 +781,3 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             writer.vgprPool.checkIn(wgMT)
 
         return module
-

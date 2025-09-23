@@ -284,219 +284,219 @@ TestKernel:
 .endm
 
 .macro _v_cmpx_lt_i16 dst, src0, src1=
-   v_cmpx_lt_i16 \dst, \src0, \src1 
+   v_cmpx_lt_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_i32 dst, src0, src1=
-   v_cmpx_lt_i32 \dst, \src0, \src1 
+   v_cmpx_lt_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_i64 dst, src0, src1=
-   v_cmpx_lt_i64 \dst, \src0, \src1 
+   v_cmpx_lt_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_u16 dst, src0, src1=
-   v_cmpx_lt_u16 \dst, \src0, \src1 
+   v_cmpx_lt_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_u32 dst, src0, src1=
-   v_cmpx_lt_u32 \dst, \src0, \src1 
+   v_cmpx_lt_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lt_u64 dst, src0, src1=
-   v_cmpx_lt_u64 \dst, \src0, \src1 
+   v_cmpx_lt_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_i16 dst, src0, src1=
-   v_cmpx_eq_i16 \dst, \src0, \src1 
+   v_cmpx_eq_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_i32 dst, src0, src1=
-   v_cmpx_eq_i32 \dst, \src0, \src1 
+   v_cmpx_eq_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_i64 dst, src0, src1=
-   v_cmpx_eq_i64 \dst, \src0, \src1 
+   v_cmpx_eq_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_u16 dst, src0, src1=
-   v_cmpx_eq_u16 \dst, \src0, \src1 
+   v_cmpx_eq_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_u32 dst, src0, src1=
-   v_cmpx_eq_u32 \dst, \src0, \src1 
+   v_cmpx_eq_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_eq_u64 dst, src0, src1=
-   v_cmpx_eq_u64 \dst, \src0, \src1 
+   v_cmpx_eq_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_i16 dst, src0, src1=
-   v_cmpx_le_i16 \dst, \src0, \src1 
+   v_cmpx_le_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_i32 dst, src0, src1=
-   v_cmpx_le_i32 \dst, \src0, \src1 
+   v_cmpx_le_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_i64 dst, src0, src1=
-   v_cmpx_le_i64 \dst, \src0, \src1 
+   v_cmpx_le_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_u16 dst, src0, src1=
-   v_cmpx_le_u16 \dst, \src0, \src1 
+   v_cmpx_le_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_u32 dst, src0, src1=
-   v_cmpx_le_u32 \dst, \src0, \src1 
+   v_cmpx_le_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_le_u64 dst, src0, src1=
-   v_cmpx_le_u64 \dst, \src0, \src1 
+   v_cmpx_le_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_i16 dst, src0, src1=
-   v_cmpx_gt_i16 \dst, \src0, \src1 
+   v_cmpx_gt_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_i32 dst, src0, src1=
-   v_cmpx_gt_i32 \dst, \src0, \src1 
+   v_cmpx_gt_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_i64 dst, src0, src1=
-   v_cmpx_gt_i64 \dst, \src0, \src1 
+   v_cmpx_gt_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_u16 dst, src0, src1=
-   v_cmpx_gt_u16 \dst, \src0, \src1 
+   v_cmpx_gt_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_u32 dst, src0, src1=
-   v_cmpx_gt_u32 \dst, \src0, \src1 
+   v_cmpx_gt_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_gt_u64 dst, src0, src1=
-   v_cmpx_gt_u64 \dst, \src0, \src1 
+   v_cmpx_gt_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_i16 dst, src0, src1=
-   v_cmpx_ne_i16 \dst, \src0, \src1 
+   v_cmpx_ne_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_i32 dst, src0, src1=
-   v_cmpx_ne_i32 \dst, \src0, \src1 
+   v_cmpx_ne_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_i64 dst, src0, src1=
-   v_cmpx_ne_i64 \dst, \src0, \src1 
+   v_cmpx_ne_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_u16 dst, src0, src1=
-   v_cmpx_ne_u16 \dst, \src0, \src1 
+   v_cmpx_ne_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_u32 dst, src0, src1=
-   v_cmpx_ne_u32 \dst, \src0, \src1 
+   v_cmpx_ne_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ne_u64 dst, src0, src1=
-   v_cmpx_ne_u64 \dst, \src0, \src1 
+   v_cmpx_ne_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_i16 dst, src0, src1=
-   v_cmpx_lg_i16 \dst, \src0, \src1 
+   v_cmpx_lg_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_i32 dst, src0, src1=
-   v_cmpx_lg_i32 \dst, \src0, \src1 
+   v_cmpx_lg_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_i64 dst, src0, src1=
-   v_cmpx_lg_i64 \dst, \src0, \src1 
+   v_cmpx_lg_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_u16 dst, src0, src1=
-   v_cmpx_lg_u16 \dst, \src0, \src1 
+   v_cmpx_lg_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_u32 dst, src0, src1=
-   v_cmpx_lg_u32 \dst, \src0, \src1 
+   v_cmpx_lg_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_lg_u64 dst, src0, src1=
-   v_cmpx_lg_u64 \dst, \src0, \src1 
+   v_cmpx_lg_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_i16 dst, src0, src1=
-   v_cmpx_ge_i16 \dst, \src0, \src1 
+   v_cmpx_ge_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_i32 dst, src0, src1=
-   v_cmpx_ge_i32 \dst, \src0, \src1 
+   v_cmpx_ge_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_i64 dst, src0, src1=
-   v_cmpx_ge_i64 \dst, \src0, \src1 
+   v_cmpx_ge_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_u16 dst, src0, src1=
-   v_cmpx_ge_u16 \dst, \src0, \src1 
+   v_cmpx_ge_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_u32 dst, src0, src1=
-   v_cmpx_ge_u32 \dst, \src0, \src1 
+   v_cmpx_ge_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_ge_u64 dst, src0, src1=
-   v_cmpx_ge_u64 \dst, \src0, \src1 
+   v_cmpx_ge_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_i16 dst, src0, src1=
-   v_cmpx_o_i16 \dst, \src0, \src1 
+   v_cmpx_o_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_i32 dst, src0, src1=
-   v_cmpx_o_i32 \dst, \src0, \src1 
+   v_cmpx_o_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_i64 dst, src0, src1=
-   v_cmpx_o_i64 \dst, \src0, \src1 
+   v_cmpx_o_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_u16 dst, src0, src1=
-   v_cmpx_o_u16 \dst, \src0, \src1 
+   v_cmpx_o_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_u32 dst, src0, src1=
-   v_cmpx_o_u32 \dst, \src0, \src1 
+   v_cmpx_o_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_o_u64 dst, src0, src1=
-   v_cmpx_o_u64 \dst, \src0, \src1 
+   v_cmpx_o_u64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_i16 dst, src0, src1=
-   v_cmpx_u_i16 \dst, \src0, \src1 
+   v_cmpx_u_i16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_i32 dst, src0, src1=
-   v_cmpx_u_i32 \dst, \src0, \src1 
+   v_cmpx_u_i32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_i64 dst, src0, src1=
-   v_cmpx_u_i64 \dst, \src0, \src1 
+   v_cmpx_u_i64 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_u16 dst, src0, src1=
-   v_cmpx_u_u16 \dst, \src0, \src1 
+   v_cmpx_u_u16 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_u32 dst, src0, src1=
-   v_cmpx_u_u32 \dst, \src0, \src1 
+   v_cmpx_u_u32 \dst, \src0, \src1
 .endm
 
 .macro _v_cmpx_u_u64 dst, src0, src1=
-   v_cmpx_u_u64 \dst, \src0, \src1 
+   v_cmpx_u_u64 \dst, \src0, \src1
 .endm
 
 /******************************************/
@@ -650,32 +650,32 @@ v_lshlrev_b32 v[\vgprAddr+0], 0x2, v[\vgprAddr+0]  // offset *= bytes/element
 /* Dynamic Scalar Divide: vQuotient=vDividend/vDivisor; vRemainder=vDividend%vDivisor; */
 /******************************************/
 .macro DYNAMIC_VECTOR_DIVIDE vQuotient vRemainder vDividend vDivisor vTmp0 vTmp1 sTmp
-v_cvt_f32_u32 v[\vQuotient], v[\vDivisor]          // 
-v_rcp_f32 v[\vQuotient], v[\vQuotient]             // 
-v_mul_f32 v[\vQuotient], 0x4f800000, v[\vQuotient] // 
-v_cvt_u32_f32 v[\vQuotient], v[\vQuotient]         // 
-v_mul_lo_u32 v[\vRemainder], v[\vDivisor], v[\vQuotient] // 
-v_mul_hi_u32 v[\vTmp0], v[\vDivisor], v[\vQuotient] // 
-_v_sub_co_u32 v[\vTmp1], vcc, 0x0, v[\vRemainder]  // 
-v_cmp_ne_i32 s[\sTmp:\sTmp+1], 0x0, v[\vTmp0]      // 
-v_cndmask_b32 v[\vRemainder], v[\vTmp1], v[\vRemainder], s[\sTmp:\sTmp+1] // 
-v_mul_hi_u32 v[\vRemainder], v[\vRemainder], v[\vQuotient] // 
-_v_sub_co_u32 v[\vTmp0], vcc, v[\vQuotient], v[\vRemainder] // 
-_v_add_co_u32 v[\vQuotient], vcc, v[\vQuotient], v[\vRemainder] // 
-v_cndmask_b32 v[\vQuotient], v[\vQuotient], v[\vTmp0], s[\sTmp:\sTmp+1] // 
-v_mul_hi_u32 v[\vQuotient], v[\vQuotient], v[\vDividend] // 
-v_mul_lo_u32 v[\vRemainder], v[\vQuotient], v[\vDivisor] // 
-_v_sub_co_u32 v[\vTmp0], vcc, v[\vDividend], v[\vRemainder] // 
-v_cmp_ge_u32 s[\sTmp:\sTmp+1], v[\vDividend], v[\vRemainder] // 
-_v_add_co_u32 v[\vRemainder], vcc, 0x1, v[\vQuotient] // 
-_v_add_co_u32 v[\vTmp1], vcc, -1, v[\vQuotient]    // 
-v_cmp_le_u32 vcc, v[\vDivisor], v[\vTmp0]          // 
-s_and_b64 vcc, s[\sTmp:\sTmp+1], vcc               // 
-v_cndmask_b32 v[\vQuotient], v[\vQuotient], v[\vRemainder], vcc // 
-v_cndmask_b32 v[\vQuotient], v[\vTmp1], v[\vQuotient], s[\sTmp:\sTmp+1] // 
-v_cmp_ne_i32 vcc, 0x0, v[\vDivisor]                // 
+v_cvt_f32_u32 v[\vQuotient], v[\vDivisor]          //
+v_rcp_f32 v[\vQuotient], v[\vQuotient]             //
+v_mul_f32 v[\vQuotient], 0x4f800000, v[\vQuotient] //
+v_cvt_u32_f32 v[\vQuotient], v[\vQuotient]         //
+v_mul_lo_u32 v[\vRemainder], v[\vDivisor], v[\vQuotient] //
+v_mul_hi_u32 v[\vTmp0], v[\vDivisor], v[\vQuotient] //
+_v_sub_co_u32 v[\vTmp1], vcc, 0x0, v[\vRemainder]  //
+v_cmp_ne_i32 s[\sTmp:\sTmp+1], 0x0, v[\vTmp0]      //
+v_cndmask_b32 v[\vRemainder], v[\vTmp1], v[\vRemainder], s[\sTmp:\sTmp+1] //
+v_mul_hi_u32 v[\vRemainder], v[\vRemainder], v[\vQuotient] //
+_v_sub_co_u32 v[\vTmp0], vcc, v[\vQuotient], v[\vRemainder] //
+_v_add_co_u32 v[\vQuotient], vcc, v[\vQuotient], v[\vRemainder] //
+v_cndmask_b32 v[\vQuotient], v[\vQuotient], v[\vTmp0], s[\sTmp:\sTmp+1] //
+v_mul_hi_u32 v[\vQuotient], v[\vQuotient], v[\vDividend] //
+v_mul_lo_u32 v[\vRemainder], v[\vQuotient], v[\vDivisor] //
+_v_sub_co_u32 v[\vTmp0], vcc, v[\vDividend], v[\vRemainder] //
+v_cmp_ge_u32 s[\sTmp:\sTmp+1], v[\vDividend], v[\vRemainder] //
+_v_add_co_u32 v[\vRemainder], vcc, 0x1, v[\vQuotient] //
+_v_add_co_u32 v[\vTmp1], vcc, -1, v[\vQuotient]    //
+v_cmp_le_u32 vcc, v[\vDivisor], v[\vTmp0]          //
+s_and_b64 vcc, s[\sTmp:\sTmp+1], vcc               //
+v_cndmask_b32 v[\vQuotient], v[\vQuotient], v[\vRemainder], vcc //
+v_cndmask_b32 v[\vQuotient], v[\vTmp1], v[\vQuotient], s[\sTmp:\sTmp+1] //
+v_cmp_ne_i32 vcc, 0x0, v[\vDivisor]                //
 v_cndmask_b32 v[\vQuotient], -1, v[\vQuotient], vcc // final result
-v_mul_lo_u32 v[\vRemainder], v[\vQuotient], v[\vDivisor] // 
+v_mul_lo_u32 v[\vRemainder], v[\vQuotient], v[\vDivisor] //
 _v_sub_co_u32 v[\vRemainder], vcc, v[\vDividend], v[\vRemainder] // final result
 .endm
 
@@ -748,7 +748,7 @@ v_mac_f32 v[vgprValuC+4+7*8], v[vgprValuA_X0_I0+4], v[vgprValuB_X0_I0+7]
 v_mac_f32 v[vgprValuC+5+7*8], v[vgprValuA_X0_I0+5], v[vgprValuB_X0_I0+7]
 v_mac_f32 v[vgprValuC+6+7*8], v[vgprValuA_X0_I0+6], v[vgprValuB_X0_I0+7]
 v_mac_f32 v[vgprValuC+7+7*8], v[vgprValuA_X0_I0+7], v[vgprValuB_X0_I0+7]
-s_setprio 0 // Reset priority after macs 
+s_setprio 0 // Reset priority after macs
 .endm
 .macro MAC_8x8_X1
 v_mac_f32 v[vgprValuC+0+0*8], v[vgprValuA_X1_I0+0], v[vgprValuB_X1_I0+0]
@@ -816,7 +816,7 @@ v_mac_f32 v[vgprValuC+4+7*8], v[vgprValuA_X1_I0+4], v[vgprValuB_X1_I0+7]
 v_mac_f32 v[vgprValuC+5+7*8], v[vgprValuA_X1_I0+5], v[vgprValuB_X1_I0+7]
 v_mac_f32 v[vgprValuC+6+7*8], v[vgprValuA_X1_I0+6], v[vgprValuB_X1_I0+7]
 v_mac_f32 v[vgprValuC+7+7*8], v[vgprValuA_X1_I0+7], v[vgprValuB_X1_I0+7]
-s_setprio 0 // Reset priority after macs 
+s_setprio 0 // Reset priority after macs
 .endm
 
 
@@ -829,8 +829,8 @@ s_mov_b32 m0, 0x3800                               // LDS clamp at 14336 bytes
 v_mov_b32 v[vgprSerial], v0                        // thread serial id
 
 /* Load Kernel Args */
-s_load_dwordx16 s[24:39], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x8 // 
-s_load_dwordx16 s[40:55], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x48 // 
+s_load_dwordx16 s[24:39], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x8 //
+s_load_dwordx16 s[40:55], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x48 //
 s_waitcnt lgkmcnt(0)                               // wait for 136 bytes of kern args
 v_lshrrev_b32  v0, 0x6, v[vgprSerial]              // Wavefront Serial Id
 v_readfirstlane_b32 s[sgprWaveId], v0              // WaveId
@@ -1157,16 +1157,16 @@ s_cmov_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0]    // Move shadow to real if we 
 /* End setupNewTile, isPap=False             */
 /******************************************/
 
-ShadowInitStart_9: // 
+ShadowInitStart_9: //
 
 s_mov_b32 s[sgprSrdD+0], s[sgprAddressD+0]         // init SRD base address (lower)
 s_mov_b32 s[sgprSrdD+1], s[sgprAddressD+1]         // init SRD base address (upper) + other fields
-s_mov_b32 s[sgprSrdD+2], 0x80000000                // 
+s_mov_b32 s[sgprSrdD+2], 0x80000000                //
 s_mov_b32 s[sgprSrdD+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
 s_mov_b32 s[sgprSrdC+0], s[sgprAddressC+0]         // init SRD base address (lower)
 s_mov_b32 s[sgprSrdC+1], s[sgprAddressC+1]         // init SRD base address (upper) + other fields
-s_mov_b32 s[sgprSrdC+2], 0x80000000                // 
+s_mov_b32 s[sgprSrdC+2], 0x80000000                //
 s_mov_b32 s[sgprSrdC+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
 
@@ -1342,7 +1342,7 @@ LoopBeginL_1:
 /* Unrolled Loop 1/2 - Begin              */
 /******************************************/
 
-label_0012: // LoopCopy1 
+label_0012: // LoopCopy1
 
 
 
@@ -1591,7 +1591,7 @@ s_cbranch_scc1 LoopEndL_oddexit_3                  // exit LoopL
 /* Unrolled Loop 2/2 - Begin              */
 /******************************************/
 
-label_0013: // LoopCopy2 
+label_0013: // LoopCopy2
 
 
 
@@ -1854,13 +1854,13 @@ s_cmp_eq_u32 s[sgprAlpha], 1.0                     // Alpha == 1.0 ?
 s_cbranch_scc0 OptNLL_End_14                       // branch if alpha != 1
 
 s_and_b32 s66, 63, s[sgprSizeI]                    // s66 = s[sgprSizeI] % 64
-s_add_u32 s68, -0x1, s[sgprNumWorkGroups0]         // 
+s_add_u32 s68, -0x1, s[sgprNumWorkGroups0]         //
 s_cmp_ge_u32 s[sgprWorkGroup0], s68                // wg0 >= nwg0-1 ?
 s_cselect_b32 s66, s66, 0                          // set rMT0
 s_cmpk_gt_u32 s66, 0x0                             // rMT0 > 0
 s_cbranch_scc1 OptNLL_End_14                       // jump if edges required
 s_and_b32 s66, 127, s[sgprSizeJ]                   // s66 = s[sgprSizeJ] % 128
-s_add_u32 s68, -0x1, s[sgprNumWorkGroups1]         // 
+s_add_u32 s68, -0x1, s[sgprNumWorkGroups1]         //
 s_cmp_ge_u32 s[sgprWorkGroup1], s68                // wg1 >= nwg1-1
 s_cselect_b32 s66, s66, 0                          // set rMT1
 s_cmpk_gt_u32 s66, 0x0                             // rMT1 > 0
@@ -2288,7 +2288,7 @@ s_cbranch_scc1 SkipTailLoopL_7                     // skip to end of tail loop b
 
 /* remove stagger offsets for tail loop */
 
-s_sub_i32 s66, 3, s[sgprStaggerUIter]              // 
+s_sub_i32 s66, 3, s[sgprStaggerUIter]              //
 s_mul_hi_i32 s67, s66, s[sgprGlobalReadIncsA+0]    // start offset S in bytes
 s_mul_i32 s66, s66, s[sgprGlobalReadIncsA+0]       // start offset S in bytes
 s_sub_u32 s66, s66, s[sgprWrapUA]                  // S - WrapU
@@ -2300,7 +2300,7 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s67 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cmov_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0]    // Move shadow to real if we are within 2^32
 
-s_sub_i32 s66, 3, s[sgprStaggerUIter]              // 
+s_sub_i32 s66, 3, s[sgprStaggerUIter]              //
 s_mul_hi_i32 s67, s66, s[sgprGlobalReadIncsB+0]    // start offset S in bytes
 s_mul_i32 s66, s66, s[sgprGlobalReadIncsB+0]       // start offset S in bytes
 s_sub_u32 s66, s66, s[sgprWrapUB]                  // S - WrapU
@@ -2489,13 +2489,13 @@ s_cmpk_eq_u32 s[sgprBeta], 0x0                     // Beta == 0
 s_cbranch_scc0 GW_Beta_38                          // Branch if Beta is not zero
 
 s_and_b32 s54, 63, s[sgprSizeI]                    // s54 = s[sgprSizeI] % 64
-s_add_u32 s56, -0x1, s[sgprNumWorkGroups0]         // 
+s_add_u32 s56, -0x1, s[sgprNumWorkGroups0]         //
 s_cmp_ge_u32 s[sgprWorkGroup0], s56                // wg0 >= nwg0-1 ?
 s_cselect_b32 s54, s54, 0                          // set rMT0
 s_cmpk_gt_u32 s54, 0x0                             // rMT0 > 0
 s_cbranch_scc1 GW_B0_E1_29                         // jump if edges required
 s_and_b32 s54, 127, s[sgprSizeJ]                   // s54 = s[sgprSizeJ] % 128
-s_add_u32 s56, -0x1, s[sgprNumWorkGroups1]         // 
+s_add_u32 s56, -0x1, s[sgprNumWorkGroups1]         //
 s_cmp_ge_u32 s[sgprWorkGroup1], s56                // wg1 >= nwg1-1
 s_cselect_b32 s54, s54, 0                          // set rMT1
 s_cmpk_gt_u32 s54, 0x0                             // rMT1 > 0
@@ -3285,13 +3285,13 @@ buffer_store_dword v63, v69, s[sgprSrdD:sgprSrdD+3], 0, offen, offset:0 // store
 s_branch label_GW_End_37                           // jump to end
 GW_Beta_38:
 s_and_b32 s54, 63, s[sgprSizeI]                    // s54 = s[sgprSizeI] % 64
-s_add_u32 s56, -0x1, s[sgprNumWorkGroups0]         // 
+s_add_u32 s56, -0x1, s[sgprNumWorkGroups0]         //
 s_cmp_ge_u32 s[sgprWorkGroup0], s56                // wg0 >= nwg0-1 ?
 s_cselect_b32 s54, s54, 0                          // set rMT0
 s_cmpk_gt_u32 s54, 0x0                             // rMT0 > 0
 s_cbranch_scc1 GW_B1_E1_36                         // jump if edges required
 s_and_b32 s54, 127, s[sgprSizeJ]                   // s54 = s[sgprSizeJ] % 128
-s_add_u32 s56, -0x1, s[sgprNumWorkGroups1]         // 
+s_add_u32 s56, -0x1, s[sgprNumWorkGroups1]         //
 s_cmp_ge_u32 s[sgprWorkGroup1], s56                // wg1 >= nwg1-1
 s_cselect_b32 s54, s54, 0                          // set rMT1
 s_cmpk_gt_u32 s54, 0x0                             // rMT1 > 0
@@ -4360,5 +4360,3 @@ label_GW_End_37:
 
 label_0039:  /// KernelEnd
 s_endpgm                                           // Kernel End
-
-
