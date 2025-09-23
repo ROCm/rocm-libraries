@@ -27,7 +27,6 @@ include(ConfigAutotuneSettings.cmake)
 option(BENCHMARK_TUNE_PARAM_NAMES "Tuning parameter names" "")
 option(BENCHMARK_TUNE_PARAMS "Tuning parameters" "")
 
-# TODO: Document this somewhere
 option(BENCHMARK_USE_AMDSMI "Let benchmarks use AMD SMI to output more GPU statistics" OFF)
 
 if(BENCHMARK_CONFIG_TUNING)
