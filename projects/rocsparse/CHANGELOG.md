@@ -3,6 +3,12 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## rocSPARSE 4.0.3 for ROCm 7.0.2
+
+### Resolved issues
+
+* Resolved an issue causing premature deallocation of internal buffers still in use.
+
 ## rocSPARSE 4.0.2 for ROCm 7.0.0
 
 ### Added
