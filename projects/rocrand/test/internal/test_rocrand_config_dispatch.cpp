@@ -147,7 +147,7 @@ TEST(rocrand_config_dispatch_tests, get_config_on_host_and_device)
     ASSERT_EQ(grid_size, config.blocks);
 }
 
-#ifdef USE_DEVICE_DISPATCH
+#if USE_DEVICE_DISPATCH
 TEST(rocrand_config_dispatch_tests, device_id_from_stream)
 {
     using rocrand_impl::host::get_device_from_stream;

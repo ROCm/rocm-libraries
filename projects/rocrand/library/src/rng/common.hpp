@@ -26,8 +26,12 @@
     #define ROCRAND_DETAIL_BM_NOT_IN_STATE
 #endif
 
-#if !defined(USE_DEVICE_DISPATCH) && !defined(_WIN32) && defined(__HIP_PLATFORM_AMD__)
-    #define USE_DEVICE_DISPATCH
+#if !defined(USE_DEVICE_DISPATCH)
+    #if !defined(_WIN32) && defined(__HIP_PLATFORM_AMD__)
+        #define USE_DEVICE_DISPATCH 1
+    #else
+        #define USE_DEVICE_DISPATCH 0
+    #endif
 #endif
 
 #include <rocrand/rocrand_common.h>

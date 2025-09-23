@@ -60,7 +60,7 @@ enum class target_arch : unsigned int
 /// @brief Returns the detected processor architecture of the device that is currently compiled against.
 __host__ __device__ constexpr target_arch get_device_arch()
 {
-#if !defined(USE_DEVICE_DISPATCH)
+#if !USE_DEVICE_DISPATCH
     return target_arch::unknown;
 #elif defined(__gfx900__)
     return target_arch::gfx900;
@@ -147,7 +147,7 @@ inline target_arch parse_gcn_arch(const std::string& arch_name)
 /// @return \ref hipSuccess if the querying was successful, a different error code otherwise.
 inline hipError_t get_device_arch([[maybe_unused]] int device_id, target_arch& arch)
 {
-#ifdef USE_DEVICE_DISPATCH
+#if USE_DEVICE_DISPATCH
     constexpr unsigned int          device_arch_cache_size             = 512;
     static std::atomic<target_arch> arch_cache[device_arch_cache_size] = {};
 
@@ -180,7 +180,7 @@ inline hipError_t get_device_arch([[maybe_unused]] int device_id, target_arch& a
     return hipSuccess;
 }
 
-#ifdef USE_DEVICE_DISPATCH
+#if USE_DEVICE_DISPATCH
 /// @brief Queries a device corresponding to a stream using the HIP API.
 /// @param stream The stream in question.
 /// @param device_id Out parameter. The result of the device query is written here.
@@ -212,7 +212,7 @@ inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_i
 /// @return \ref hipSuccess if the querying was successful, a different error code otherwise.
 inline hipError_t get_device_arch(const hipStream_t stream, target_arch& arch)
 {
-#ifdef USE_DEVICE_DISPATCH
+#if USE_DEVICE_DISPATCH
     int              device_id;
     const hipError_t result = get_device_from_stream(stream, device_id);
     if(result != hipSuccess)

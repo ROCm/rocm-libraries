@@ -96,6 +96,11 @@ ctest --output-on-failure
 [sudo] make install
 ```
 
+### SPIR-V
+
+rocRAND supports the `amdgcnspirv` target, but it should be built with `USE_DEVICE_DISPATCH`
+turned off like `-DUSE_DEVICE_DISPATCH=0`.
+
 ### HIP on Windows
 
 We've added initial support for HIP on Windows, which you can install using the `rmake.py` python
