@@ -441,7 +441,7 @@ namespace rocRoller
             bool includeRegisterComments = true;
 
             template <typename Expr>
-            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) std::string
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr> || CNary<Expr>) std::string
                 operator()(Expr const& expr) const
             {
                 return expr.comment;
