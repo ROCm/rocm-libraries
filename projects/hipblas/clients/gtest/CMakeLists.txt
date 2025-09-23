@@ -27,10 +27,6 @@ if(NOT WIN32)
     enable_language( Fortran )
 endif()
 
-if( NOT TARGET hipblas )
-  find_package( hipblas REQUIRED CONFIG PATHS /opt/rocm/hipblas )
-endif( )
-
 set(hipblas_test_source
   hipblas_gtest_main.cpp
   hipblas_test.cpp
@@ -105,7 +101,6 @@ endif( )
 set( hipblas_test_common
   ../common/utility.cpp
   ../common/cblas_interface.cpp
-  ../common/clients_common.cpp
   ../common/norm.cpp
   ../common/unit.cpp
   ../common/near.cpp
@@ -118,7 +113,11 @@ set( hipblas_test_common
   ${BLIS_CPP}
 )
 
-add_executable( hipblas-test ${hipblas_f90_source} ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
+if(NOT WIN32)
+  add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} $<TARGET_OBJECTS:hipblas_fortran_client> )
+else()
+  add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
+endif()
 
 target_include_directories( hipblas-test
   PRIVATE
@@ -152,6 +151,8 @@ target_compile_options(hipblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_C
 target_compile_definitions( hipblas-test PRIVATE ${COMMON_DEFINES} )
 
 target_link_libraries( hipblas-test PRIVATE ${BLAS_LIBRARY} ${COMMON_LINK_LIBS} )
+apply_omp_settings( hipblas-test )
+
 if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE stdc++fs )
 endif()

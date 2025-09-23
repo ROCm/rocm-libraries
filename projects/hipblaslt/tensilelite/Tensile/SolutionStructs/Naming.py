@@ -120,7 +120,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
                                                            "StaggerUMapping",
                                                            "GlobalSplitUCoalesced",
                                                            "GlobalSplitUWorkGroupMappingRoundRobin"])
-  components = [f'{str(state["ProblemType"])}']
+  components = [f'{str(ProblemType(state["ProblemType"],printIndexAssignmentInfo=False))}']
 
   if "MacroTile0" in state \
       and "MacroTile1" in state \
@@ -132,6 +132,9 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     requiredParametersTemp.add("MIWaveTile")
   else:
     requiredParametersTemp.add("ThreadTile")
+
+  if state["UseCustomMainLoopSchedule"]:
+    components.append('CMS')
 
   components.append('SN')
   for key in sorted(state.keys()):
@@ -176,4 +179,3 @@ def getSolutionNameMin(solution, splitGSU: bool):
 
 def getSolutionNameFull(state, splitGSU: bool):
   return _getName(state, getRequiredParametersFull(), splitGSU, False)
-

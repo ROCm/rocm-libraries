@@ -63,7 +63,9 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING_CMD)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_ENFORCE)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_MODE)
+MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_USER_DB_PATH)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_LEVEL)
+MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS)
 
 namespace miopen {
 namespace debug {
@@ -102,7 +104,7 @@ private:
     template <class T>
     struct LibEnvVarImpl : LibEnvVarBase
     {
-        using value_type = T::value_type;
+        using value_type = typename T::value_type;
         static_assert(is_type_bool<value_type> || is_type_int<value_type> ||
                       is_type_str<value_type>);
 
@@ -198,6 +200,8 @@ const LibEnvVar& FindEnvVariable(std::string_view name)
         {MIOPEN_FIND_ENFORCE.GetName(), MIOPEN_FIND_ENFORCE},
         {MIOPEN_FIND_MODE.GetName(), MIOPEN_FIND_MODE},
         {MIOPEN_LOG_LEVEL.GetName(), MIOPEN_LOG_LEVEL},
+        {MIOPEN_USER_DB_PATH.GetName(), MIOPEN_USER_DB_PATH},
+        {MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS.GetName(), MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS}
         // clang-format on
     };
 

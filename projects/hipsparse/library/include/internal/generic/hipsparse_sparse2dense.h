@@ -30,11 +30,11 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSparseToDense_bufferSize computes the required user allocated buffer size needed when converting 
-*  a sparse matrix to a dense matrix. This routine currently accepts the sparse matrix descriptor \p matA in CSR, 
+*  \p hipsparseSparseToDense_bufferSize computes the required user allocated buffer size needed when converting
+*  a sparse matrix to a dense matrix. This routine currently accepts the sparse matrix descriptor \p matA in CSR,
 *  CSC, or COO format. This routine is used to determine the size of the buffer needed in \ref hipsparseSparseToDense.
 *
-*  \p hipsparseSparseToDense_bufferSize supports different data types for the sparse and dense matrices. See 
+*  \p hipsparseSparseToDense_bufferSize supports different data types for the sparse and dense matrices. See
 *  \ref hipsparseSparseToDense for a complete listing of all the data types available.
 *
 *  @param[in]
@@ -72,17 +72,17 @@ hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           
 *  \brief Sparse matrix to dense matrix conversion
 *
 *  \details
-*  \p hipsparseSparseToDense converts a sparse matrix to a dense matrix. This routine currently accepts 
-*  the sparse matrix descriptor \p matA in CSR, CSC, or COO format. This routine takes a user allocated buffer 
+*  \p hipsparseSparseToDense converts a sparse matrix to a dense matrix. This routine currently accepts
+*  the sparse matrix descriptor \p matA in CSR, CSC, or COO format. This routine takes a user allocated buffer
 *  whose size must first be computed by calling \ref hipsparseSparseToDense_bufferSize
 *
-*  The conversion of a sparse matrix into a dense one involves two steps. First, the user creates the sparse and 
-*  dense matrix descriptors and calls \ref hipsparseSparseToDense_bufferSize to determine the size of the required 
-*  temporary storage buffer. The user then allocates this buffer and passes it to \ref hipsparseSparseToDense in 
-*  order to complete the conversion. Once the conversion is complete, the user is free to deallocate the storage 
+*  The conversion of a sparse matrix into a dense one involves two steps. First, the user creates the sparse and
+*  dense matrix descriptors and calls \ref hipsparseSparseToDense_bufferSize to determine the size of the required
+*  temporary storage buffer. The user then allocates this buffer and passes it to \ref hipsparseSparseToDense in
+*  order to complete the conversion. Once the conversion is complete, the user is free to deallocate the storage
 *  buffer. See full example below for details.
 *
-*  \p hipsparseSparseToDense supports the following uniform precision data types for the sparse and dense matrices \f$A\f$ 
+*  \p hipsparseSparseToDense supports the following uniform precision data types for the sparse and dense matrices \f$A\f$
 *  and \f$B\f$:
 *
 *  \par Uniform Precisions:
@@ -90,6 +90,7 @@ hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           
 *  <caption id="sparse2dense_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B
 *  <tr><td>HIP_R_16F
+*  <tr><td>HIP_R_16BF
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
 *  <tr><td>HIP_C_32F

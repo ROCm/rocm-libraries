@@ -236,19 +236,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_gemm(rocblas_handle handle,
     rocblas_get_pointer_mode(handle, &pmode);
 
     // get warp size
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t deviceProperties;
-    HIP_CHECK(hipGetDeviceProperties(&deviceProperties, device));
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
-    std::string deviceArch(deviceProperties.gcnArchName);
+    std::string deviceArch(props->gcnArchName);
 
     if((deviceArch.find("gfx90a") != std::string::npos)
        || (deviceArch.find("gfx940") != std::string::npos)
        || (deviceArch.find("gfx941") != std::string::npos)
        || (deviceArch.find("gfx942") != std::string::npos))
     {
-        const auto warpSize = deviceProperties.warpSize;
+        const auto warpSize = props->warpSize;
 
         // launch specialized kernel
         const I numWarpsX = 4;

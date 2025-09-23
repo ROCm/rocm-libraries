@@ -147,6 +147,19 @@ namespace rocRoller
             {
                 if(rhs == 0)
                     return lhs;
+
+                if(CIsAnyOf<ShiftType, ShiftL, LogicalShiftR>)
+                {
+                    auto const elementSize = resultVarType.getElementSize();
+                    //
+                    // Literal 0 can only accept Int32/UInt32/Int64/UInt64/Half/Float/Double
+                    //
+                    if((elementSize == 4u or elementSize == 8u) and (rhs >= elementSize * 8u))
+                    {
+                        return literal(0, resultVarType);
+                    }
+                }
+
                 return nullptr;
             }
 
@@ -502,6 +515,14 @@ namespace rocRoller
                     cpy.r2hs = call(expr.r2hs);
                 }
                 return std::make_shared<Expression>(cpy);
+            }
+
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression>(std::move(cpy));
             }
 
             template <CValue Value>

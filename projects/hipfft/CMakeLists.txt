@@ -37,7 +37,6 @@ else()
     "Install path prefix, prepended onto install directories" )
 endif()
 
-
 # Workarounds..
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
 list( APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake )
@@ -176,7 +175,7 @@ endif()
 message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 
 # Version
-set( VERSION_STRING "1.0.20" )
+set( VERSION_STRING "1.0.21" )
 set( hipfft_SOVERSION 0.1 )
 
 if( ROCmCMakeBuildTools_FOUND )

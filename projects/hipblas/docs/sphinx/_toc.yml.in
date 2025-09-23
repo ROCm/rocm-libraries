@@ -22,7 +22,7 @@ subtrees:
       title: Contribute to hipBLAS
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/hipBLAS/tree/develop/clients/samples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas/clients/samples
     title: hipBLAS client examples
 - caption: API Reference
   entries:

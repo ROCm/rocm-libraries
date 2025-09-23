@@ -852,6 +852,28 @@ namespace rocRoller
             return op;
         }
 
+        void deleteControlNode(KernelGraph& graph, int nodeIdx)
+        {
+            using namespace rocRoller::KernelGraph::ControlGraph;
+
+            {
+                auto incomingNodes
+                    = graph.control.getInputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
+                for(auto inc : incomingNodes)
+                    graph.control.deleteElement(graph.control.findEdge(inc, nodeIdx).value());
+            }
+
+            {
+                auto outgoingNodes
+                    = graph.control.getOutputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
+                for(auto out : outgoingNodes)
+                    graph.control.deleteElement(graph.control.findEdge(nodeIdx, out).value());
+            }
+
+            graph.control.deleteElement(nodeIdx);
+            graph.mapper.purge(nodeIdx);
+        }
+
         void updateThreadTileForLongDwords(int& t_m,
                                            int& t_n,
                                            int  maxWidth,
@@ -1115,8 +1137,11 @@ namespace rocRoller
 
         Expression::ExpressionPtr tileCeilDivide(Expression::ExpressionPtr sdSize, int tileSize)
         {
-            auto tileSizeExpr = Expression::literal(static_cast<uint>(tileSize));
-            auto one          = Expression::literal(1u);
+            auto tileSizeExpr = std::has_single_bit(static_cast<uint>(tileSize))
+                                    ? Expression::literal(static_cast<uint>(tileSize))
+                                    : Expression::literal(static_cast<int64_t>(tileSize));
+
+            auto one = Expression::literal(1u);
 
             return (sdSize + tileSizeExpr - one) / tileSizeExpr;
         }

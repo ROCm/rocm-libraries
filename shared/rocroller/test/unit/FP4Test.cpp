@@ -279,7 +279,7 @@ namespace rocRollerTest
                 = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
 
             params->setDimensionInfo(tagLoadA, macTileVGPR);
-            params->transposeMemoryAccess[LayoutType::None] = true;
+            params->transposeMemoryAccess.set(LayoutType::None, true);
 
             commandKernel = std::make_shared<CommandKernel>(command, "loadStoreTileFP4");
             commandKernel->setContext(m_context);

@@ -4,12 +4,12 @@
 > The published rocRAND documentation is available [here](https://rocm.docs.amd.com/projects/rocRAND/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 The rocRAND project provides functions that generate pseudorandom and quasirandom numbers.
-The rocRAND library is implemented in the [HIP](https://github.com/ROCm/HIP)
+The rocRAND library is implemented in the [HIP](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip)
 programming language and optimized for AMD's latest discrete GPUs. It is designed to run on top
-of AMD's [ROCm](https://rocm.docs.amd.com) runtime, but it also works on CUDA-enabled GPUs.
+of AMD's [ROCm](https://rocm.docs.amd.com) runtime.
 
 Prior to ROCm version 5.0, this project included the
-[hipRAND](https://github.com/ROCm/hipRAND.git) wrapper. As of version 5.0, it was
+[hipRAND](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand) wrapper. As of version 5.0, it was
 split into a separate library. As of version 6.0, hipRAND can no longer be built from rocRAND.
 
 ## Supported random number generators
@@ -37,11 +37,8 @@ split into a separate library. As of version 6.0, hipRAND can no longer be built
 * C++ compiler with C++11 support to consume the library.
 * For AMD platforms:
   * [ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/native-install/index.html) (1.7 or later)
-  * [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler, which must be
-    set as C++ compiler on ROCm platform.
-* For CUDA platforms:
-  * [HIP](https://github.com/ROCm/HIP)
-  * Latest CUDA SDK
+  * [HIP-clang](https://rocm.docs.amd.com/projects/HIP/en/latest/install/install.html) compiler, which must be
+    set as the C++ compiler for the ROCm platform.
 * Python 3.6 or higher (HIP on Windows only, only required for install script)
 * Visual Studio 2019 with clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
@@ -64,11 +61,18 @@ dependencies, rather than using the system-installed libraries.
 
 ## Build and install
 
+> [!NOTE]
+> The following clone command downloads all components in the [rocm-libraries](https://github.com/ROCm/rocm-libraries) GitHub repository.
+This is recommended for working with multiple library components, but can take a very long time to
+download. For a shorter download process that only clones the rocRAND library, see the
+[rocRAND installation documentation](https://rocm.docs.amd.com/projects/rocRAND/en/latest/install/installing.html)
+for ROCm 7.0 or later.
+
 ```shell
-git clone https://github.com/ROCm/rocRAND.git
+git clone https://github.com/ROCm/rocm-libraries.git
 
 # Go to rocRAND directory, create and go to build directory
-cd rocRAND; mkdir build; cd build
+cd rocm-libraries/projects/rocrand; mkdir build; cd build
 
 # Configure rocRAND, setup options for your system
 # Build options: BUILD_TEST (off by default), BUILD_BENCHMARK (off by default), BUILD_SHARED_LIBS (on by default)
@@ -82,14 +86,6 @@ cd rocRAND; mkdir build; cd build
 #
 [CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../. -DCMAKE_PREFIX_PATH=/opt/rocm # or cmake-gui ../.
 
-# To configure rocRAND for NVIDIA platforms, the CXX compiler must be set to a host compiler. The CUDA compiler can
-# be set explicitly using `-DCMAKE_CUDA_COMPILER=<path-to-nvcc>`.
-# Additionally, the path to FindHIP.cmake should be passed via CMAKE_MODULE_PATH. By default, this is module is
-# installed in /opt/rocm/hip/cmake.
-cmake -DBUILD_BENCHMARK=ON ../. -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_MODULE_PATH=/opt/rocm/hip/cmake # or cmake-gui ../.
-# or
-[CXX=g++] cmake -DBUILD_BENCHMARK=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_MODULE_PATH=/opt/rocm/hip/cmake ../. # or cmake-gui ../.
-
 # Build
 make -j4
 
@@ -100,14 +96,19 @@ ctest --output-on-failure
 [sudo] make install
 ```
 
+### SPIR-V
+
+rocRAND supports the `amdgcnspirv` target, but it should be built with `USE_DEVICE_DISPATCH`
+turned off like `-DUSE_DEVICE_DISPATCH=0`.
+
 ### HIP on Windows
 
 We've added initial support for HIP on Windows, which you can install using the `rmake.py` python
 script:
 
 ```shell
-git clone https://github.com/ROCm/rocRAND.git
-cd rocRAND
+git clone https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries/projects/rocrand
 
 # the -i option will install rocPRIM to C:\hipSDK by default
 python rmake.py -i
@@ -125,7 +126,7 @@ help to solve the problem.
 
 ```shell
 # Go to rocRAND build directory
-cd rocRAND; cd build
+cd rocm-libraries/projects/rocrand; cd build
 
 # To run all tests
 ctest
@@ -138,7 +139,7 @@ ctest
 
 ```shell
 # Go to rocRAND build directory
-cd rocRAND; cd build
+cd rocm-libraries/projects/rocrand; cd build
 
 # To run benchmark for the host generate functions:
 # The benchmarks are registered with Google Benchmark as `device_generate<engine,distribution>`, where
@@ -257,7 +258,7 @@ You can then open `docs/_build/html/index.html` in your browser to view the docu
 ## Support
 
 Bugs and feature requests can be reported through the
-[issue tracker](https://github.com/ROCm/rocRAND/issues).
+[issue tracker](https://github.com/ROCm/rocm-libraries/issues).
 
 ## Contributions and license
 

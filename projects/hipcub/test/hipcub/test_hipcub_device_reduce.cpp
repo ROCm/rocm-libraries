@@ -23,14 +23,13 @@
 #include "common_test_header.hpp"
 
 // Thread operators fixes for extended float types
+#include "hipcub/config.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_thread_operators.hpp"
 
 // hipcub API
-#include "hipcub/device/device_reduce.hpp"
-#include "hipcub/iterator/constant_input_iterator.hpp"
-
-#include <bitset>
+#include <hipcub/device/device_reduce.hpp>
+#include <hipcub/iterator/constant_input_iterator.hpp>
 
 // Params for tests
 template<class InputType, class OutputType = InputType, bool UseGraphs = false>
@@ -456,6 +455,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMaximum)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
+template<class NumItemsT = int>
 struct ArgMinDispatch
 {
     template<typename InputIteratorT, typename OutputIteratorT>
@@ -463,18 +463,21 @@ struct ArgMinDispatch
                     size_t&         temp_storage_bytes,
                     InputIteratorT  d_in,
                     OutputIteratorT d_out,
-                    int             num_items,
+                    NumItemsT       num_items,
                     hipStream_t     stream) const
     {
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         return hipcub::DeviceReduce::ArgMin(d_temp_storage,
                                             temp_storage_bytes,
                                             d_in,
                                             d_out,
                                             num_items,
                                             stream);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 };
 
+template<class NumItemsT = int>
 struct ArgMaxDispatch
 {
     template<typename InputIteratorT, typename OutputIteratorT>
@@ -482,13 +485,59 @@ struct ArgMaxDispatch
                     size_t&         temp_storage_bytes,
                     InputIteratorT  d_in,
                     OutputIteratorT d_out,
-                    int             num_items,
+                    NumItemsT       num_items,
                     hipStream_t     stream) const
+    {
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+        return hipcub::DeviceReduce::ArgMax(d_temp_storage,
+                                            temp_storage_bytes,
+                                            d_in,
+                                            d_out,
+                                            num_items,
+                                            stream);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+    }
+};
+
+template<class NumItemsT = int>
+struct ArgMin2Dispatch
+{
+    template<typename InputIteratorT, typename OutputIteratorT, typename OutputIndexIteratorT>
+    auto operator()(void*                d_temp_storage,
+                    size_t&              temp_storage_bytes,
+                    InputIteratorT       d_in,
+                    OutputIteratorT      d_out,
+                    OutputIndexIteratorT d_index_out,
+                    NumItemsT            num_items,
+                    hipStream_t          stream) const
+    {
+        return hipcub::DeviceReduce::ArgMin(d_temp_storage,
+                                            temp_storage_bytes,
+                                            d_in,
+                                            d_out,
+                                            d_index_out,
+                                            num_items,
+                                            stream);
+    }
+};
+
+template<class NumItemsT = int>
+struct ArgMax2Dispatch
+{
+    template<typename InputIteratorT, typename OutputIteratorT, typename OutputIndexIteratorT>
+    auto operator()(void*                d_temp_storage,
+                    size_t&              temp_storage_bytes,
+                    InputIteratorT       d_in,
+                    OutputIteratorT      d_out,
+                    OutputIndexIteratorT d_index_out,
+                    NumItemsT            num_items,
+                    hipStream_t          stream) const
     {
         return hipcub::DeviceReduce::ArgMax(d_temp_storage,
                                             temp_storage_bytes,
                                             d_in,
                                             d_out,
+                                            d_index_out,
                                             num_items,
                                             stream);
     }
@@ -616,7 +665,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
     using T = typename TestFixture::input_type;
     // Because NVIDIA's hipcub::ArgMin doesn't work with bfloat16 (HOST-SIDE)
     using HostOp = typename ArgMinSelector<T>::type;
-    test_argminmax<TestFixture, ArgMinDispatch, HostOp>(test_utils::numeric_limits<T>::max());
+    test_argminmax<TestFixture, ArgMinDispatch<>, HostOp>(test_utils::numeric_limits<T>::max());
 }
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
@@ -624,7 +673,153 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
     using T = typename TestFixture::input_type;
     // Because NVIDIA's hipcub::ArgMax doesn't work with bfloat16 (HOST-SIDE)
     using HostOp = typename ArgMaxSelector<T>::type;
-    test_argminmax<TestFixture, ArgMaxDispatch, HostOp>(test_utils::numeric_limits<T>::lowest());
+    test_argminmax<TestFixture, ArgMaxDispatch<>, HostOp>(test_utils::numeric_limits<T>::lowest());
+}
+
+template<typename TestFixture, typename DispatchFunction, typename HostOp>
+void test_argminmax2(typename TestFixture::input_type empty_value)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T             = typename TestFixture::input_type;
+    using Iterator      = typename hipcub::ArgIndexInputIterator<T*, int>;
+    using argidx_type   = typename Iterator::value_type;
+    using extremum_type = typename argidx_type::value_type;
+    using index_type    = typename argidx_type::key_type;
+
+    DispatchFunction function;
+
+    hipStream_t stream = 0; // default
+    if(TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        std::vector<size_t> sizes = test_utils::get_sizes(seed_value);
+        sizes.push_back(0);
+
+        for(size_t size : sizes)
+        {
+            SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 0, 200, seed_value);
+            std::vector<extremum_type> extremum(1);
+            std::vector<index_type>    index(1);
+
+            T*             d_input;
+            extremum_type* d_extremum;
+            index_type*    d_index;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_extremum,
+                                                         extremum.size() * sizeof(extremum_type)));
+            HIP_CHECK(
+                test_common_utils::hipMallocHelper(&d_index, index.size() * sizeof(index_type)));
+            HIP_CHECK(
+                hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            argidx_type expected;
+            if(size > 0)
+            {
+                // Calculate expected results on host
+                Iterator          x(input.data());
+                const argidx_type max = x[0];
+                expected              = std::accumulate(x, x + size, max, HostOp());
+            }
+            else
+            {
+                // Empty inputs result in a special value
+                expected = argidx_type(1, empty_value);
+            }
+
+            size_t temp_storage_size_bytes{};
+            void*  d_temp_storage{};
+            HIP_CHECK(function(d_temp_storage,
+                               temp_storage_size_bytes,
+                               d_input,
+                               d_extremum,
+                               d_index,
+                               input.size(),
+                               stream));
+
+            // temp_storage_size_bytes must be > 0
+            ASSERT_GT(temp_storage_size_bytes, 0U);
+
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
+
+            // Run
+            HIP_CHECK(function(d_temp_storage,
+                               temp_storage_size_bytes,
+                               d_input,
+                               d_extremum,
+                               d_index,
+                               input.size(),
+                               stream));
+
+            if(TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
+
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            HIP_CHECK(hipMemcpy(extremum.data(),
+                                d_extremum,
+                                extremum.size() * sizeof(extremum_type),
+                                hipMemcpyDeviceToHost));
+            HIP_CHECK(hipMemcpy(index.data(),
+                                d_index,
+                                index.size() * sizeof(index_type),
+                                hipMemcpyDeviceToHost));
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_extremum));
+            HIP_CHECK(hipFree(d_temp_storage));
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(index[0], expected.key));
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(extremum[0],
+                                        expected.value,
+                                        test_utils::precision<T>::value * size));
+
+            if(TestFixture::use_graphs)
+                gHelper.cleanupGraphHelper();
+        }
+    }
+
+    if(TestFixture::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
+}
+
+TYPED_TEST(HipcubDeviceReduceTests, ReduceArg2Minimum)
+{
+    using T = typename TestFixture::input_type;
+    // Because NVIDIA's hipcub::ArgMin doesn't work with bfloat16 (HOST-SIDE)
+    using HostOp = typename ArgMinSelector<T>::type;
+    test_argminmax2<TestFixture, ArgMin2Dispatch<>, HostOp>(test_utils::numeric_limits<T>::max());
+}
+
+TYPED_TEST(HipcubDeviceReduceTests, ReduceArg2Maximum)
+{
+    using T = typename TestFixture::input_type;
+    // Because NVIDIA's hipcub::ArgMax doesn't work with bfloat16 (HOST-SIDE)
+    using HostOp = typename ArgMaxSelector<T>::type;
+    test_argminmax2<TestFixture, ArgMax2Dispatch<>, HostOp>(
+        test_utils::numeric_limits<T>::lowest());
 }
 
 template<class T>
@@ -702,18 +897,99 @@ void test_argminmax_allinf(TypeParam value, TypeParam empty_value)
     }
 }
 
+template<typename TypeParam, typename DispatchFunction>
+void test_argminmax_extremum(TypeParam value, TypeParam empty_value)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T         = TypeParam;
+    using Iterator  = typename hipcub::ArgIndexInputIterator<T*, int64_t>;
+    using key_value = typename Iterator::value_type;
+
+    hipStream_t      stream = 0; // default
+    DispatchFunction function;
+    constexpr size_t size = 200'000;
+
+    // Generate data
+    std::vector<T>         input(size, value);
+    std::vector<key_value> output(1);
+
+    T*         d_input;
+    key_value* d_output;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(key_value)));
+    HIP_CHECK(hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    size_t temp_storage_size_bytes{};
+    void*  d_temp_storage{};
+
+    HIP_CHECK(
+        function(d_temp_storage, temp_storage_size_bytes, d_input, d_output, input.size(), stream));
+
+    // temp_storage_size_bytes must be > 0
+    ASSERT_GT(temp_storage_size_bytes, 0U);
+
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(
+        function(d_temp_storage, temp_storage_size_bytes, d_input, d_output, input.size(), stream));
+    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipMemcpy(output.data(),
+                        d_output,
+                        output.size() * sizeof(key_value),
+                        hipMemcpyDeviceToHost));
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_temp_storage));
+
+    if(size > 0)
+    {
+        // all +/- infinity should produce +/- infinity
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 0));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, value));
+    }
+    else
+    {
+        // empty input should produce a special value
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 1));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, empty_value));
+    }
+}
+
 // ArgMin with all +Inf should result in +Inf.
 TYPED_TEST(HipcubDeviceReduceArgMinMaxSpecialTests, ReduceArgMinInf)
 {
-    test_argminmax_allinf<TypeParam, ArgMinDispatch>(
+    test_argminmax_allinf<TypeParam, ArgMinDispatch<>>(
         test_utils::numeric_limits<TypeParam>::infinity(),
         test_utils::numeric_limits<TypeParam>::max());
+}
+
+// ArgMin with all +Inf should result in +Inf.
+TYPED_TEST(HipcubDeviceReduceArgMinMaxSpecialTests, ReduceArgMinExtream)
+{
+    test_argminmax_extremum<TypeParam, ArgMinDispatch<int64_t>>(
+        test_utils::numeric_limits<TypeParam>::infinity(),
+        test_utils::numeric_limits<TypeParam>::min());
 }
 
 // ArgMax with all -Inf should result in -Inf.
 TYPED_TEST(HipcubDeviceReduceArgMinMaxSpecialTests, ReduceArgMaxInf)
 {
-    test_argminmax_allinf<TypeParam, ArgMaxDispatch>(
+    test_argminmax_allinf<TypeParam, ArgMaxDispatch<>>(
+        test_utils::numeric_limits<TypeParam>::infinity_neg(),
+        test_utils::numeric_limits<TypeParam>::lowest());
+}
+
+TYPED_TEST(HipcubDeviceReduceArgMinMaxSpecialTests, ReduceArgMaxExtream)
+{
+    test_argminmax_extremum<TypeParam, ArgMaxDispatch<int64_t>>(
         test_utils::numeric_limits<TypeParam>::infinity_neg(),
         test_utils::numeric_limits<TypeParam>::lowest());
 }
@@ -884,8 +1160,7 @@ TYPED_TEST(HipcubDeviceReduceLargeIndicesTests, LargeIndices)
 
     using T            = typename TestFixture::input_type;
     using U            = typename TestFixture::output_type;
-    using IteratorType = hipcub::ConstantInputIterator<T>;
-
+    using IteratorType                  = rocprim::constant_iterator<T>;
     const std::vector<size_t> exponents = {30, 31, 32, 33, 34};
     for(auto exponent : exponents)
     {

@@ -82,6 +82,8 @@ namespace rocRoller
 
         ConstraintStatus NoConstructDestructMT(const KernelGraph& k)
         {
+            TIMER(t, "Constraint::NoConstructDestructMT");
+
             ConstraintStatus retval;
             for(auto element : k.coordinates.getEdges<CoordinateTransformEdge>())
             {
@@ -2031,7 +2033,6 @@ namespace rocRoller
 
         KernelGraph LowerTile::apply(KernelGraph const& graph)
         {
-            TIMER(t, "KernelGraph::lowerTile");
             auto visitor = LowerTileVisitor(m_params, m_context);
             return rewrite(graph, visitor);
         }

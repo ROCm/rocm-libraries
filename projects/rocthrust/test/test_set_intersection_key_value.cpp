@@ -19,7 +19,9 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(SetIntersectionKeyValueTests, NumericalTestsParams);
 
@@ -77,7 +79,7 @@ TYPED_TEST(SetIntersectionKeyValueTests, TestSetIntersectionKeyValue)
 
       thrust::host_vector<T> d_result_host(d_result);
 
-      ASSERT_EQ(h_result, d_result_host);
+      ASSERT_EQ_QUIET(h_result, d_result_host);
     }
   }
 }

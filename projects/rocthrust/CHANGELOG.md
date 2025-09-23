@@ -3,6 +3,32 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.1.0 for ROCm 7.1
+
+### Added
+
+* Added a new CMake option `-DSQLITE_USE_SYSTEM_PACKAGE` to allow SQLite to be provided by the system.
+* Introduced `libhipcxx` as a soft depedency. When `liphipcxx` can be included, rocthrust, may use structs and methods defined in `libhipcxx`. This allows for a more complete behaviour parity with CCCL and mirrors CCCL's thrust own depedency on `libcudacxx`.
+* Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
+
+### Known Issues
+* `event` test is failing on CI and local runs on MI300, MI250 and MI210.
+
+* rocThrust, as well as its dependencies rocPRIM and rocRAND have been moved into the new rocm-libraries "monorepo" repository (https://github.com/ROCm/rocm-libraries). This repository contains a number of ROCm libraries that are frequently used together.
+  * The repository migration requires a few changes to the way that rocThrust's ROCm library dependencies are fetched.
+  * There are new cmake options for obtaining rocPRIM and (optionally, if BUILD_BENCHMARKS is enabled) rocRAND.
+  * cmake build options `ROCPRIM_FETCH_METHOD` and `ROCRAND_FETCH_METHOD` may be set to one of the following:
+    * `PACKAGE` - (default) searches for a preinstalled packaged version of the dependency. If it is not found, the build will fall back using option `DOWNLOAD`, described below.
+    * `DOWNLOAD` - downloads the dependency from the rocm-libraries repository. If git >= 2.25 is present, this option uses a sparse checkout that avoids downloading more than it needs to. If not, the whole monorepo is downloaded (this may take some time).
+    * `MONOREPO` - this options is intended to be used if you are building rocThrust from within a copy of the rocm-libraries repository that you have cloned (and therefore already contains the dependencies rocPRIM and rocRAND). When selected, the build will try find the dependency in the local repository tree. If it cannot be found, the build will attempt to add it to the local tree using a sparse-checkout. If that also fails, it will fall back to using the `DOWNLOAD` option.
+
+### Changed
+
+* The previously hidden cmake build option `FORCE_DEPENDENCIES_DOWNLOAD` has been unhidden and renamed `EXTERNAL_DEPS_FORCE_DOWNLOAD` to differentiate it from the new rocPRIM and rocRAND dependency options described above. It's behaviour remains the same - it forces non-ROCm dependencies (Google Benchmark, Google Test, and SQLite) to be downloaded instead of searching for existing installed packages. This option defaults to `OFF`.
+
+### Removed
+  * The previous dependency-related build options `DOWNLOAD_ROCPRIM` and `DOWNLOAD_ROCRAND` have been removed. Please use `ROCPRIM_FETCH_METHOD=DOWNLOAD` and `ROCRAND_FETCH_METHOD=DOWNLOAD` instead.
+
 ## rocThrust 4.0.0 for ROCm 7.0
 
 ### Changed
@@ -10,11 +36,34 @@ Documentation for rocThrust available at
 * Updated the required version of Google Benchmark from 1.8.0 to 1.9.0.
 * Drop `c++14` support for rocthrust.
 * Renamed `cpp14_required.h` to `cpp_version_check.h`
+* Refactored `test_header.hpp` into separte modules `test_param_fixtures.hpp`, `test_real_assertions.hpp`, `test_imag_assertions.hpp`, and `test_utils.hpp`.
+  * This is done to prevent unit tests from having access to modules that they're not testing. This will improve the accuracy of code coverage reports.
+
+### Added
+* Additional unit tests for:
+  * binary_search
+  * complex
+  * c99math
+  * catrig
+  * ccosh
+  * cexp
+  * clog
+  * csin
+  * csqrt
+  * ctan
+* Added `test_param_fixtures.hpp` to store all the parameters for typed test suites.
+* Added `test_real_assertions.hpp` to handle unit test assertions for real numbers.
+* Added `test_imag_assertions.hpp` to handle unit test assertions for imaginary numbers.
+* `clang++` is now used to compile google benchmarks on Windows.
+* Added gfx950 support.
+* Merged changes from upstream CCCL/thrust 2.6.0
 
 ### Removed
 
 * `device_malloc_allocator.h` has been removed. This header file was unused and should not impact users.
 * Removed C++14 support, only C++17 is supported.
+* `test_header.hpp` has been removed. The `HIP_CHECK` function, as well as the `test` and `inter_run_bwr` namespaces, have been moved to `test_utils.hpp`.
+* `test_assertions.hpp` has been split into `test_real_assertions.hpp` and `test_imag_assertions.hpp`.
 
 ### Upcoming changes
 
@@ -24,15 +73,9 @@ Documentation for rocThrust available at
 
 * Fixed an issue with internal calls to unqualified `distance()` which would be ambigious due to also visibile implementation through ADL.
 
-## rocThrust 3.4.0 for ROCm 6.5
-
-### Added
-
-* Added gfx950 support.
-* Merged changes from upstream CCCL/thrust 2.6.0
-
 ### Known Issues
 * The order of the values being compared by thrust::exclusive_scan_by_key and thrust::inclusive_scan_by_key can change between runs when integers are being compared. This can cause incorrect output when a non-commutative operator such as division is being used.
+
 ## rocThrust 3.3.0 for ROCm 6.4
 
 ### Added
@@ -58,8 +101,8 @@ Documentation for rocThrust available at
 * Fixed `copy_if` to work with large data types (512 bytes)
 
 ### Known Issues
-*  `thrust::inclusive_scan_by_key` might produce incorrect results when it's used with -O2 or -O3 optimization.  
-  - The error is caused by a recent compiler change. There is a fix available that will be released at a later date. 
+*  `thrust::inclusive_scan_by_key` might produce incorrect results when it's used with -O2 or -O3 optimization.
+  - The error is caused by a recent compiler change. There is a fix available that will be released at a later date.
 
 ## rocThrust 3.2.0 for ROCm 6.3
 

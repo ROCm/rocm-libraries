@@ -51,7 +51,7 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p hipsparseAxpby supports the following precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \p hipsparseAxpby supports the following precision data types for the sparse and dense vectors \f$x\f$ and
 *  \f$y\f$ and compute types for the scalars \f$\alpha\f$ and \f$\beta\f$.
 *
 *  \par Uniform Precisions:
@@ -67,8 +67,9 @@ extern "C" {
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="axpby_mixed">Mixed Precisions</caption>
-*  <tr><th>X / Y     <th>compute_type
-*  <tr><td>HIP_R_16F <td>HIP_R_32F
+*  <tr><th>X / Y      <th>compute_type
+*  <tr><td>HIP_R_16F  <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  @param[in]

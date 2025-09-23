@@ -407,6 +407,106 @@ TEST_CASE("FastArithmetic includes translate time evaluation",
     CHECK_THAT(fastArith(c * zero), IdenticalTo(literal(0.f)));
 }
 
+TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    using enum DataType;
+    using Expression::literal;
+    auto context = TestContext::ForDefaultTarget();
+
+    std::vector<Expression::ExpressionPtr> r64{
+        3,
+        Register::Value::Placeholder(context.get(), Register::Type::Vector, Int64, 1)
+            ->expression()};
+
+    std::vector<Expression::ExpressionPtr> r32{
+        3,
+        Register::Value::Placeholder(context.get(), Register::Type::Vector, Int32, 1)
+            ->expression()};
+
+    Expression::FastArithmetic fastArith(context.get());
+    CHECK(fastArith(nullptr).get() == nullptr);
+
+    SECTION("basic")
+    {
+        // Int32(r64 + r64) -> Int32(Int32(r64) + Int32(r64))
+        CHECK_THAT(convertPropagation(convert(Int32, r64[0] + r64[1])),
+                   IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int32, r64[1]))));
+
+        // Int32(r64 + r64 * r64) -> Int32(Int32(r64) + Int32(r64) * Int32(r64))
+        CHECK_THAT(
+            convertPropagation(convert(Int32, r64[0] + r64[1] * r64[2])),
+            IdenticalTo(convert(
+                Int32, convert(Int32, r64[0]) + convert(Int32, r64[1]) * convert(Int32, r64[2]))));
+
+        // r64 + Int32(r64 * r64) -> r64 + Int32(Int32(r64) * Int32(r64))
+        CHECK_THAT(
+            convertPropagation(r64[0] + convert(Int32, r64[1] * r64[2])),
+            IdenticalTo(r64[0] + convert(Int32, convert(Int32, r64[1]) * convert(Int32, r64[2]))));
+
+        // Int64(r64) -> no change
+        CHECK_THAT(convertPropagation(convert(Int64, r64[0])), IdenticalTo(convert(Int64, r64[0])));
+
+        // Int32(r64) -> Int32(Int32(r64))
+        CHECK_THAT(convertPropagation(convert(Int32, r64[0])),
+                   IdenticalTo(convert(Int32, convert(Int32, r64[0]))));
+
+        // Int32(r64 << r64) -> Int32(Int32(r64) << r64)
+        CHECK_THAT(convertPropagation(convert(Int32, r64[0] << r64[1])),
+                   IdenticalTo(convert(Int32, convert(Int32, r64[0]) << r64[1])));
+
+        // Int32((r64 + r64) << r64) -> Int32((Int32(r64) + Int32(r64)) << r64)
+        CHECK_THAT(convertPropagation(convert(Int32, addShiftL(r64[0], r64[1], r64[2]))),
+                   IdenticalTo(convert(
+                       Int32, addShiftL(convert(Int32, r64[0]), convert(Int32, r64[1]), r64[2]))));
+
+        // Int32((r64 << r64) + r64) -> Int32((Int32(r64) << r64) + Int32(r64))
+        CHECK_THAT(convertPropagation(convert(Int32, shiftLAdd(r64[0], r64[1], r64[2]))),
+                   IdenticalTo(convert(
+                       Int32, shiftLAdd(convert(Int32, r64[0]), r64[1], convert(Int32, r64[2])))));
+    }
+
+    SECTION("skipped datatypes")
+    {
+        Expression::ExpressionPtr f1 = literal(1.0);
+        CHECK_THAT(convertPropagation(convert(Float, f1 + f1)),
+                   IdenticalTo(convert(Float, f1 + f1)));
+
+        Expression::ExpressionPtr halfx2
+            = Register::Value::Placeholder(context.get(), Register::Type::Vector, Halfx2, 1)
+                  ->expression();
+        CHECK_THAT(convertPropagation(convert(Float, halfx2 + halfx2)),
+                   IdenticalTo((convert(Float, halfx2 + halfx2))));
+    }
+
+    SECTION("nested convert")
+    {
+        // Int32(r64 + Int64(r32 * r32)) -> Int32(Int32(r64), Int64(r32 * r32))
+        CHECK_THAT(
+            convertPropagation(convert(Int32, r64[0] + convert(Int64, r32[1] * r32[2]))),
+            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int64, r32[1] * r32[2]))));
+
+        // Do not propagate existing converts to larger types
+        // Int32(r64 + Int64(r64 * r64)) -> Int32(Int32(r64) + Int64(r64 * r64))
+        auto expr = convertPropagation(convert(Int32, r64[0] + convert(Int64, r64[1] * r64[2])));
+        CHECK_THAT(
+            expr,
+            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int64, r64[1] * r64[2]))));
+    }
+
+    SECTION("conditional")
+    {
+        auto cond = Register::Value::Placeholder(context.get(), Register::Type::Vector, Bool32, 1)
+                        ->expression();
+        auto expr
+            = convertPropagation(convert(Int32, Expression::conditional(cond, r64[0], r64[1])));
+        CHECK_THAT(expr,
+                   IdenticalTo(convert(Int32,
+                                       Expression::conditional(
+                                           cond, convert(Int32, r64[0]), convert(Int32, r64[1])))));
+    }
+}
+
 TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformation]")
 {
     using namespace rocRoller;
@@ -568,7 +668,11 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
         {
             auto exp     = (argExp << literal(5u)) >> literal(4u);
             auto fastExp = fast(exp);
-            CHECK_THAT(fastExp, IdenticalTo(exp));
+            if(dataTypeInfo.isSigned)
+                CHECK_THAT(fastExp, IdenticalTo(exp));
+            else
+                CHECK_THAT(fastExp,
+                           IdenticalTo(logicalShiftR((argExp << literal(5u)), literal(4u))));
         }
 
         SECTION("Shift right then left masks off LSBs.")
@@ -594,7 +698,27 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
         {
             auto exp     = (argExp >> literal(2u)) << literal(5u);
             auto fastExp = fast(exp);
-            CHECK_THAT(fastExp, IdenticalTo(exp));
+            if(dataTypeInfo.isSigned)
+                CHECK_THAT(fastExp, IdenticalTo(exp));
+            else
+                CHECK_THAT(fastExp, IdenticalTo(logicalShiftR(argExp, literal(2u)) << literal(5u)));
+        }
+
+        SECTION("Direct combineShift with shift left then right (arithmetic) masks off MSBs for "
+                "unsigned.")
+        {
+            auto exp    = (argExp << literal(4u)) >> literal(4u);
+            auto newExp = combineShifts(exp);
+
+            auto maskExp = argExp & literal(0b00001111111111111111111111111111u, dataType);
+            if(dataTypeInfo.isSigned)
+            {
+                CHECK_THAT(newExp, IdenticalTo(exp));
+            }
+            else
+            {
+                CHECK_THAT(newExp, IdenticalTo(maskExp));
+            }
         }
     }
 
@@ -663,7 +787,10 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
         {
             auto exp     = (argExp << literal(5u)) >> literal(4u);
             auto fastExp = fast(exp);
-            CHECK_THAT(fastExp, IdenticalTo(exp));
+            if(dataTypeInfo.isSigned)
+                CHECK_THAT(fastExp, IdenticalTo(exp));
+            else
+                CHECK_THAT(fastExp, IdenticalTo(logicalShiftR(argExp << literal(5u), literal(4u))));
         }
 
         SECTION("Shift right then left masks off LSBs.")
@@ -692,7 +819,131 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
         {
             auto exp     = (argExp >> literal(2u)) << literal(5u);
             auto fastExp = fast(exp);
-            CHECK_THAT(fastExp, IdenticalTo(exp));
+            if(dataTypeInfo.isSigned)
+                CHECK_THAT(fastExp, IdenticalTo(exp));
+            else
+                CHECK_THAT(fastExp,
+                           IdenticalTo((logicalShiftR(argExp, literal(2u)) << literal(5u))));
         }
+
+        SECTION("Direct combineShift with shift left then right (arithmetic) masks off MSBs for "
+                "unsigned.")
+        {
+            auto exp    = (argExp << literal(4u)) >> literal(4u);
+            auto newExp = combineShifts(exp);
+
+            auto maskExp
+                = argExp
+                  & literal(0b0000111111111111111111111111111111111111111111111111111111111111ull,
+                            dataType);
+
+            if(dataTypeInfo.isSigned)
+            {
+                CHECK_THAT(newExp, IdenticalTo(exp));
+            }
+            else
+            {
+                CHECK_THAT(newExp, IdenticalTo(maskExp));
+            }
+        }
+    }
+}
+
+TEST_CASE("Simplify Shift ExpressionTransformation works",
+          "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    auto context = TestContext::ForDefaultTarget();
+
+    auto zero = Expression::literal(0);
+    auto one  = Expression::literal(1);
+    auto a    = Expression::literal(33);
+    auto b    = Expression::literal(35);
+    auto c    = Expression::literal(30);
+    auto e    = Expression::literal(64);
+
+    SECTION("Shift right by more than 31 bits")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr = fuseAssociative(logicalShiftR(logicalShiftR(logicalShiftR(v, one), one), a));
+
+        CHECK_THAT(expr, IdenticalTo(logicalShiftR(v, b)));
+        auto expected = Expression::literal(0, DataType::Int32);
+        CHECK_THAT(simplify(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Shift right by more than 63 bits")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int64, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr = fuseAssociative(logicalShiftR(logicalShiftR(logicalShiftR(v, one), a), c));
+
+        CHECK_THAT(expr, IdenticalTo(logicalShiftR(v, e)));
+        auto expected = Expression::literal(0, DataType::Int64);
+        CHECK_THAT(simplify(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Shift left by more than 31 bits")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr     = v << a;
+        auto expected = Expression::literal(0, DataType::Int32);
+        CHECK_THAT(simplify(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Shift left by more than 63 bits")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int64, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr     = v << e;
+        auto expected = Expression::literal(0, DataType::Int64);
+        CHECK_THAT(simplify(expr), IdenticalTo(expected));
+    }
+}
+
+TEST_CASE("LowerUnsignedArithmeticShiftR ExpressionTransformation works",
+          "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    auto context = TestContext::ForDefaultTarget();
+
+    auto a = Expression::literal(21);
+
+    SECTION("Unsigned ArithmeticShiftR should be lowered to LogicalShiftR")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::UInt32, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr = std::make_shared<rocRoller::Expression::Expression>(
+            rocRoller::Expression::ArithmeticShiftR{v, a});
+        CHECK_THAT(lowerUnsignedArithmeticShiftR(expr), IdenticalTo(logicalShiftR(v, a)));
+    }
+
+    SECTION("Signed ArithmeticShiftR should NOT be lowered to LogicalShiftR")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr = std::make_shared<rocRoller::Expression::Expression>(
+            rocRoller::Expression::ArithmeticShiftR{v, a});
+        CHECK_THAT(lowerUnsignedArithmeticShiftR(expr), IdenticalTo(expr));
     }
 }

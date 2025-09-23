@@ -26,8 +26,9 @@
 #include <type_traits>
 
 #include "../config.hpp"
-#include "../functional.hpp"
 #include "../detail/various.hpp"
+#include "../functional.hpp"
+#include "detail/common.hpp"
 
 /// \addtogroup iteratormodule
 /// @{
@@ -138,7 +139,7 @@ public:
     /// \brief A reference type of the type iterated over (\p value_type).
     using reference = const value_type&;
     /// \brief A pointer type of the type iterated over (\p value_type).
-    using pointer = const value_type*;
+    using pointer = detail::proxy_pointer<value_type>;
     /// A type used for identify distance between iterators.
     using difference_type = Difference;
     /// The category of the iterator.
@@ -236,10 +237,11 @@ public:
         #endif
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    pointer operator->() const
+    ROCPRIM_HOST_DEVICE
+    inline pointer
+        operator->() const
     {
-        return &(*(*this));
+        return pointer(*(*this));
     }
 
     ROCPRIM_HOST_DEVICE inline
@@ -306,25 +308,25 @@ public:
     ROCPRIM_HOST_DEVICE inline
     bool operator<(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) > 0;
+        return (ptr - other.ptr) < 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator<=(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) >= 0;
+        return (ptr - other.ptr) <= 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) < 0;
+        return (ptr - other.ptr) > 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>=(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) <= 0;
+        return (ptr - other.ptr) >= 0;
     }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 

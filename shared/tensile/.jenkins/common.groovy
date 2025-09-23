@@ -34,7 +34,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
     // Do release build of HostLibraryTests on CI until it is upgraded to rocm 5.3 to
     // avoid bug causing long build times of certain files.
     String buildType = (debug || codecov) ? 'Debug' : 'Release'
-    
+
     int systemCPUs = sh(script: 'nproc', returnStdout: true ).trim().toInteger()
     long containerRAMbytes = sh(script: 'if [ -f /sys/fs/cgroup/memory.max ]; then cat /sys/fs/cgroup/memory.max; else cat /sys/fs/cgroup/memory/memory.limit_in_bytes; fi', returnStdout: true ).trim().toLong()
     int containerRAM = containerRAMbytes / (1024 * 1024)
@@ -42,15 +42,8 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
     if (maxThreads > systemCPUs) maxThreads = systemCPUs
     if (maxThreads > 64) maxThreads = 64
     if (maxThreads < 1) maxThreads = 1
-    
+
     String buildThreads = maxThreads.toString() // if hipcc is used may be multiplied by parallel-jobs
-
-    String sclCommand = ""
-    if (platform.os.contains("rhel9"))
-    {
-        sclCommand = "source scl_source enable gcc-toolset-12"
-    }
-
     String codeCovString = codecov ? "-DTENSILE_ENABLE_COVERAGE=ON" : ""
 
     def command = """#!/usr/bin/env bash
@@ -62,23 +55,18 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
             export HOME=/home/jenkins
             export TENSILE_COMPILER=${compiler}
             export HIPCC_COMPILE_FLAGS_APPEND='-O3 -Wno-format-nonliteral -parallel-jobs=4'
-            ${sclCommand}           
 
-            mkdir build && pushd build
-
-            cmake ../HostLibraryTests \
+            cmake --trace-expand \
+                -B build -S HostLibraryTests \
                 -DCMAKE_BUILD_TYPE=${buildType} \
                 -DCMAKE_CXX_COMPILER=${compiler} \
                 -DCMAKE_CXX_FLAGS="-D__HIP_HCC_COMPAT_MODE__=1" \
                 -DTensile_CPU_THREADS=${buildThreads} \
-                -DTensile_ROOT=`pwd`/../Tensile \
+                -DTensile_ROOT=`pwd`/Tensile \
                 -DCMAKE_FIND_DEBUG_MODE=ON \
                 ${codeCovString}
 
-            
-            make -j\$((`nproc`<16 ? `nproc` : 16))
-
-            popd
+            cmake --build build --parallel -j\$((`nproc`<16 ? `nproc` : 16)) --verbose
             """
 
     platform.runCommand(this, command)

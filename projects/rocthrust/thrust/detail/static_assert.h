@@ -27,6 +27,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/preprocessor.h>
 #include <thrust/detail/type_traits.h>
 
@@ -38,7 +45,7 @@ namespace detail
 template <typename, bool x>
 struct depend_on_instantiation
 {
-  THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT bool value = x;
+  static constexpr bool value = x;
 };
 
 #if THRUST_CPP_DIALECT >= 2017

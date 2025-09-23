@@ -27,12 +27,11 @@
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/BitwiseAnd.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {
-    RegisterComponent(BitwiseAndGenerator);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::BitwiseAnd>>
         GetGenerator<Expression::BitwiseAnd>(Register::ValuePtr dst,
@@ -76,7 +75,11 @@ namespace rocRoller
         }
         else if(dest->regType() == Register::Type::Vector)
         {
-            co_yield swapIfRHSLiteral(lhs, rhs);
+            co_yield m_context->copier()->ensureTypeCommutative(
+                {Register::Type::Vector, Register::Type::Literal},
+                lhs,
+                {Register::Type::Vector},
+                rhs);
 
             if(elementBits <= 32u)
             {

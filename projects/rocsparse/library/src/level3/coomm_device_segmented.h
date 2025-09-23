@@ -306,7 +306,7 @@ namespace rocsparse
             {
 
                 const T v = rocsparse::shfl(val, i, WF_SIZE);
-                const I c = __shfl(col, i, WF_SIZE);
+                const I c = rocsparse::shfl(col, i, WF_SIZE);
 
                 if(!TRANSB)
                 {

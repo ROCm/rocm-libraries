@@ -42,12 +42,11 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
   set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-if (NOT WIN32)
-    if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
-      set( CMAKE_Fortran_COMPILER  "gfortran" )
-    endif()
-    set( fortran_language "Fortran" )
-endif( )
+if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
+  set( CMAKE_Fortran_COMPILER  "gfortran" )
+endif()
+
+set( fortran_language "Fortran" )
 
 project( hipblas LANGUAGES CXX ${fortran_language} )
 
@@ -66,7 +65,7 @@ list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/ll
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
 include(dependencies)
 
-set ( VERSION_STRING "3.0.0" )
+set ( VERSION_STRING "3.1.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 option( BUILD_VERBOSE "Output additional build information" OFF )
@@ -114,10 +113,6 @@ if(HIP_PLATFORM STREQUAL nvidia)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
-if(BUILD_CODE_COVERAGE)
-  #add_compile_options(-fprofile-arcs -ftest-coverage)
-  #add_link_options(--coverage)
-endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 if(BUILD_ADDRESS_SANITIZER)
@@ -125,7 +120,9 @@ if(BUILD_ADDRESS_SANITIZER)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
 endif()
 
-add_subdirectory( library )
+if(NOT SKIP_LIBRARY)
+  add_subdirectory(library)
+endif()
 
 include( clients/cmake/build-options.cmake )
 
@@ -192,14 +189,15 @@ endif( )
 
 # Package specific CPACK vars
 if(HIP_PLATFORM STREQUAL amd)
-  set(rocblas_minimum 5.0.0)
-  set(rocsolver_minimum 3.30.0)
+  set(rocblas_minimum 5.1.0)
+  set(rocsolver_minimum 3.31.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
 endif( )
 
-set(hipblas_common_minimum 1.1.0)
+set(hipblas_common_minimum 1.3.0)
+
 if(BUILD_SHARED_LIBS)
   rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
   rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
@@ -268,37 +266,37 @@ if(BUILD_CODE_COVERAGE)
 
   add_custom_target(coverage_analysis
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage/profraw
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipblas-coverage_%m.profraw" ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
   add_dependencies(coverage_analysis hipblas)
 
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
 
-  # source path substitute adjustment only for CI
-  get_filename_component(PARENT_DIR ${CMAKE_SOURCE_DIR} DIRECTORY)
-  get_filename_component(GRANDPARENT_DIR ${PARENT_DIR} DIRECTORY)
-  set(base_path "/var/jenkins_home/library")
-  set(hash_path "${CMAKE_SOURCE_DIR}/library")
-  message(STATUS "BASE ${base_path} to HASHED ${hash_path}")
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
 
-  add_custom_target(coverage
+  add_custom_target(
+    coverage
     DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
-    COMMAND lcov --ignore-errors unused --directory . --base-directory "${CMAKE_SOURCE_DIR}" --gcov-tool ./llvm-gcov.sh --capture --substitute "'s#${base_path}#${hash_path}#g'" -o ./lcoverage/raw_main_coverage.info
-    COMMAND lcov --ignore-errors unused --remove ./lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o ./lcoverage/main_coverage.info
-    COMMAND genhtml --ignore-errors source ./lcoverage/main_coverage.info --output-directory ./lcoverage --prefix ${CMAKE_SOURCE_DIR}
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipblas-coverage_*.profraw -o ./coverage-report/hipblas.profdata
+    COMMAND ${LLVM_COV} report -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata
+    COMMAND ${LLVM_COV} show -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata -format=html -output-dir=coverage-report
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-
+  )
 
   #
   # Coverage cleanup

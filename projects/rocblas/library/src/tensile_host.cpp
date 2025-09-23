@@ -309,6 +309,26 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx1102;
         }
+        else if(deviceString.find("gfx1103") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1103;
+        }
+        else if(deviceString.find("gfx1150") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1150;
+        }
+        else if(deviceString.find("gfx1151") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1151;
+        }
+        else if(deviceString.find("gfx1200") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1200;
+        }
+        else if(deviceString.find("gfx1201") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1201;
+        }
         return Tensile::LazyLoadingInit::None;
     }
 
@@ -1100,7 +1120,7 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
     if constexpr(sizeof(Ti) >= 4)
     {
         // TODO remove after tuning
-        if(rocblas_internal_get_arch(prob.handle) == 950)
+        if(rocblas_internal_get_arch(prob.handle) == 950 && !prob.handle->isHipBLASLtForcedOn())
         {
             return false;
         }

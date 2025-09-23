@@ -90,6 +90,38 @@ std::string rocsparse_exepath()
 }
 
 /* ==================================================================================== */
+// Return path where the rocsparse_gentest.py file is located
+std::string rocsparse_gentestpath()
+{
+#ifdef WIN32
+    fs::path        share_path = fs::path(rocsparse_exepath() + "../libexec/rocsparse/test");
+    std::error_code ec;
+    fs::path        path = fs::canonical(share_path, ec);
+    if(!ec)
+    {
+        if(fs::exists(path, ec) && !ec)
+        {
+            path += path.empty() ? "" : "/";
+            return path.string();
+        }
+    }
+#else
+    std::string pathstr;
+    std::string share_path = rocsparse_exepath() + "../libexec/rocsparse/test";
+    char*       path       = realpath(share_path.c_str(), 0);
+    if(path != NULL)
+    {
+        pathstr = path;
+        pathstr += "/";
+        free(path);
+        return pathstr;
+    }
+#endif
+
+    return rocsparse_exepath();
+}
+
+/* ==================================================================================== */
 // Return path where the test data file (rocsparse_test.data) is located
 std::string rocsparse_datapath()
 {
@@ -143,21 +175,8 @@ double get_time_us(void)
     return (static_cast<double>(duration));
 };
 
-/*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time */
-double get_time_us_sync(hipStream_t stream)
-{
-    std::ignore = hipStreamSynchronize(stream);
-    auto now    = std::chrono::steady_clock::now();
-
-    // struct timeval tv;
-    // gettimeofday(&tv, NULL);
-    // return (tv.tv_sec * 1000 * 1000) + tv.tv_usec;
-    auto duration
-        = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    return (static_cast<double>(duration));
-};
-
-rocsparse_clients::timer::timer()
+rocsparse_clients::timer::timer(hipStream_t stream)
+    : m_stream(stream)
 {
     auto status = hipEventCreate(&this->m_start);
     if(status != hipSuccess)
@@ -173,13 +192,13 @@ rocsparse_clients::timer::timer()
 
 void rocsparse_clients::timer::start()
 {
-    CHECK_HIP_ERROR(hipEventRecord(this->m_start));
+    CHECK_HIP_ERROR(hipEventRecord(this->m_start, this->m_stream));
 }
 
 float rocsparse_clients::timer::stop()
 {
     float time;
-    auto  status = hipEventRecord(this->m_stop);
+    auto  status = hipEventRecord(this->m_stop, this->m_stream);
     if(status != hipSuccess)
     {
         throw status;

@@ -2,7 +2,8 @@
 
 MIOpen is AMD's library for high-performance machine learning primitives.
 
-You can find sources and binaries in our [GitHub repository](https://github.com/ROCm/MIOpen).
+You can find sources and binaries in the [MIOpen folder](https://github.com/ROCm/rocm-libraries/tree/develop/projects/miopen)
+of the [rocm-libraries GitHub](https://github.com/ROCm/rocm-libraries) repository.
 
 > [!NOTE]
 > The published MIOpen documentation is available at [MIOpen](https://rocm.docs.amd.com/projects/MIOpen/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the MIOpen/docs folder of this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
@@ -14,10 +15,11 @@ MIOpen supports these programming models (backends):
 
 ## Building our documentation
 
-To build the MIOpen documentation locally, run the following code from within the `docs` folder in
-our repository:
+To build the MIOpen documentation locally, run the following code from within the `docs` folder of the MIOpen project:
 
 ``` shell
+sudo apt install doxygen
+
 cd docs
 
 pip3 install -r sphinx/requirements.txt
@@ -31,7 +33,7 @@ To install MIOpen, you must first install these prerequisites:
 
 * A [ROCm](https://rocm.docs.amd.com/)-enabled platform
 * A base software stack that includes either:
-  *HIP (HIP and HCC libraries and header files)
+  * HIP (HIP and HCC libraries and header files)
   * OpenCL (OpenCL libraries and header files)--this is now deprecated
 * [ROCm CMake](https://github.com/ROCm/rocm-cmake): provides CMake modules for common build
   tasks needed for the ROCm software stack
@@ -42,13 +44,13 @@ To install MIOpen, you must first install these prerequisites:
     [kernel cache](https://rocm.docs.amd.com/projects/MIOpen/en/latest/cache.html)
 * [SQLite3](https://sqlite.org/index.html): A reading and writing performance database
 * lbzip2: A multi-threaded compress or decompress utility
-* [rocBLAS](https://github.com/ROCm/rocBLAS): AMD's library for Basic Linear Algebra Subprograms
+* [rocBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas): AMD's library for Basic Linear Algebra Subprograms
   (BLAS) on the ROCm platform.
   * Minimum version branch for pre-ROCm 3.5 [master-rocm-2.10](https://github.com/ROCm/rocBLAS/tree/master-rocm-2.10)
   * Minimum version branch for post-ROCm 3.5 [master-rocm-3.5](https://github.com/ROCm/rocBLAS/tree/master-rocm-3.5)
-* [hipBLASLt](https://github.com/ROCm/hipBLASLt): AMD's flexible Basic Linear Algebra Subprograms
+* [hipBLASLt](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt): AMD's flexible Basic Linear Algebra Subprograms
   (BLAS) API.
-* [hipBLAS](https://github.com/ROCm/hipBLAS): AMD's (BLAS) marshalling library.
+* [hipBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas): AMD's (BLAS) marshalling library.
 * [Multi-Level Intermediate Representation (MLIR)](https://github.com/ROCm/rocMLIR) with its
   MIOpen dialect to support and complement kernel development
 * [Composable Kernel](https://github.com/ROCm/composable_kernel): A C++ templated device library
@@ -104,6 +106,9 @@ for more information.
 
 You can install dependencies using the `install_deps.cmake` script (`cmake -P install_deps.cmake`).
 
+>[!NOTE]
+> You can run this script from the ``rocm-libraries/projects/miopen`` directory.
+
 By default, this installs to `/usr/local`, but you can specify another location using the `--prefix`
 argument:
 
@@ -120,12 +125,12 @@ cmake -P install_deps.cmake --minimum --prefix /root/MIOpen/install_dir
 You can use this prefix to specify the dependency path during the configuration phase using
 `CMAKE_PREFIX_PATH`.
 
-MIOpen's HIP backend uses [rocBLAS](https://github.com/ROCm/rocBLAS) by default. You can install
+MIOpen's HIP backend uses [rocBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas) by default. You can install
 rocBLAS' minimum release using `apt-get install rocblas`. To disable rocBLAS, set the configuration flag
 `-DMIOPEN_USE_ROCBLAS=Off`. rocBLAS is **not** available with OpenCL.
 
-MIOpen's HIP backend can use [hipBLASLt](https://github.com/ROCm/hipBLASLt). You can install hipBLASLt's minimum
-release using ``apt-get install hipblaslt``. In addition to needing hipblaslt, you will also need to install [hipBLAS](https://github.com/ROCm/hipBLAS).
+MIOpen's HIP backend can use [hipBLASLt](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt). You can install hipBLASLt's minimum
+release using ``apt-get install hipblaslt``. In addition to needing hipblaslt, you will also need to install [hipBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas).
 You can install hipBLAS's minimum release using ``apt-get install hipblas``.
 To disable hipBLASLt, set the configuration flag ``-DMIOPEN_USE_HIPBLASLT=Off``.
 hipBLASLt is **not** available with OpenCL.
@@ -258,7 +263,7 @@ This installs the library to the `CMAKE_INSTALL_PREFIX` path that you specified.
 
 ## Building the driver
 
-MIOpen provides an [application-driver](https://github.com/ROCm/MIOpen/tree/master/driver) that
+MIOpen provides an [application-driver](https://github.com/ROCm/rocm-libraries/tree/develop/projects/miopen/driver) that
 you can use to run any layer in isolation, and measure library performance and verification.
 
 You can build the driver using the `MIOpenDriver` target:
@@ -289,10 +294,13 @@ cd ./test/utils && python3 gtest_formating_checks.py
 
 ## Formatting the code
 
+The easiest way to format the repo is to run `make format` from your build directory.  You can also
+use the methods below if you need custom formating behaviour.
+
 All the code is formatted using `clang-format`. To format a file, use:
 
 ```shell
-clang-format-10 -style=file -i <path-to-source-file>
+clang-format -style=file -i <path-to-source-file>
 ```
 
 To format the code per commit, you can install githooks:
@@ -301,42 +309,24 @@ To format the code per commit, you can install githooks:
 ./.githooks/install
 ```
 
-## Storing large file using Git Large File Storage
+## Storing large files using Data Versioning System
 
-Git Large File Storage (LFS) replaces large files, such as audio samples, videos, datasets, and graphics
-with text pointers inside Git, while storing the file contents on a remote server. In MIOpen, we use Gi
-LFS to store our large files, such as our kernel database files (*.kdb) that are normally > 0.5 GB.
+[Data Versioning System (DVS)](https://dvc.org/) replaces large files, such as audio samples, videos, datasets, and
+graphics with text pointers inside Git, while storing the file contents on a remote server. In MIOpen, we use DVC to
+store our large files, such as our kernel database files (*.kdb) that are normally > 0.5 GB.
 
-You can install Git LFS using the following code:
+You can install DVC using the [instructions provided for your platform here](https://dvc.org/doc/install).
 
-```shell
-sudo apt install git-lfs
-git lfs install
-```
-
-In the Git repository where you want to use Git LFS, track the file type using the following code (if the
-file type has already been tracked, you can skip this step):
+You can [pull](https://dvc.org/doc/command-reference/pull) all large files or a single large file using:
 
 ```shell
-git lfs track "*.file_type"
-git add .gitattributes
-```
-
-You can pull all or a single large file using:
-
-```shell
-git lfs pull --exclude=
+dvc pull
 or
-git lfs pull --exclude= --include "filename"
+dvc pull "filename"
 ```
 
-Update the large files and push to GitHub using:
-
-```shell
-git add my_large_files
-git commit -m "the message"
-git push
-```
+If you are familiar with using Git LFS, a key difference with DVC is that you must manually run `dvc pull` after you 
+switch branches or merge changes in Git to ensure any large binaries are kept in sync with your checkout.
 
 ## Installing the dependencies manually
 

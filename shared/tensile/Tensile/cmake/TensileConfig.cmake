@@ -176,7 +176,7 @@ function(TensileCreateLibraryFiles
     set(Options ${Options} "--verbose=${Tensile_VERBOSE}")
   else()
     set(Options ${Options} "--verbose=0")
-  endif()  
+  endif()
 
   if(Tensile_EMBED_LIBRARY)
     set(Options ${Options} "--embed-library=${Tensile_EMBED_LIBRARY}")
@@ -214,9 +214,6 @@ function(TensileCreateLibraryFiles
     # uses _ separator to avoid cmake ; list interpretation, either ; or _ decoded in TensileCreateLibrary
     set(Options ${Options} "--architecture=${archString}")
   endif()
-
-  # We do not need to do device enumeration at library build time.
-  set(Options ${Options} "--no-enumerate")
 
   set(CommandLine ${Script} ${Options} ${Tensile_LOGIC_PATH} ${Tensile_OUTPUT_PATH} HIP)
   if (WIN32 OR (VIRTUALENV_BIN_DIR AND VIRTUALENV_PYTHON_EXENAME))
@@ -284,9 +281,9 @@ function(TensileCreateLibraryFiles
       set_source_files_properties(${Tensile_EMBED_LIBRARY_SOURCE} PROPERTIES GENERATED TRUE)
       add_library(${Tensile_EMBED_LIBRARY} ${Tensile_EMBED_LIBRARY_SOURCE})
       target_link_libraries(${Tensile_EMBED_LIBRARY} PUBLIC TensileHost)
-      
+
       add_dependencies(${Tensile_EMBED_LIBRARY} ${Tensile_VAR_PREFIX}_LIBRARY_TARGET)
-    
+
       add_custom_command(
           TARGET ${Tensile_EMBED_LIBRARY} PRE_BUILD
           COMMAND ${CMAKE_COMMAND} -E copy
@@ -297,4 +294,3 @@ function(TensileCreateLibraryFiles
   endif()
 
 endfunction()
-

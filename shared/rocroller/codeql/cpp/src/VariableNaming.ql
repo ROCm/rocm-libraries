@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 /**
  * @name Enforce variable naming
  * @description Ensures the naming convention for code base is followed, refer to the repo README for more info.

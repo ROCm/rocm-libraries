@@ -42,6 +42,7 @@ Tests:
   orderB: [R]
   orderC: [R]
   orderD: [R]
+  inEqualOut: [ true, false]
 
 - name: prune_medium_HMM
   category: HMM

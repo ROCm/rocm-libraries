@@ -1,38 +1,38 @@
-# ########################################################################
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-set(hipblaslt_source_common hipblaslt_ostream.cpp)
+add_subdirectory(amd_detail)
 
-if(NOT BUILD_CUDA)
-  # hipBLASLt source
-  add_subdirectory(amd_detail/rocblaslt)
-  target_sources(hipblaslt
-      PRIVATE
-          amd_detail/hipblaslt.cpp
-          amd_detail/hipblaslt-ext.cpp
-          amd_detail/hipblaslt-ext-op.cpp
-          ${hipblaslt_source_common}
-          ${rocblaslt_source}
-  )
-  #set_source_files_properties(${hipblaslt_source} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++17")
-endif()
+target_sources(hipblaslt
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/auxiliary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/exceptions.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/hipblaslt_ostream.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblaslt_internal.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblaslt-ext-op-internal.hpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/include/Debug.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/include/rocblaslt-auxiliary.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/include/rocblaslt-functions.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/include/rocblaslt-types.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/include/rocblaslt.h"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/debug.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/definitions.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/handle.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/logging.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/rocblaslt_mat_utils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/status.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/tuple_helper.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/tensile_host.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/UserDrivenTuningParser.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/utility.hpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/analytical_utils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/gemm.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/kernel_type.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/parameter_selection.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/rocroller_host.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/runtime_args_selection.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/solution_selection.hpp"
+)

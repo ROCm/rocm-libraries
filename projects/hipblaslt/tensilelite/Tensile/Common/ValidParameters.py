@@ -89,7 +89,7 @@ def makeValidWMMA():
 def makeValidMFMA():
     validMFMA = {}
     validMFMA["H"] = [[32, 32, 16, 1], [32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 32, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
-    validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16]]
+    validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16], [16, 16, 32, 1], [32, 32, 16, 1]]
     validMFMA["B"] = [[32, 32, 16, 1], [32, 32, 2, 2], [32, 32, 4, 1], [16, 16, 32, 1], [16, 16, 2, 4], [16, 16, 8, 1], [4, 4, 2, 16]]
     validMFMA["4xi8"] = [
         [32, 32, 4, 2],
@@ -111,7 +111,7 @@ def makeValidMFMA():
         [16, 16, 16, 1],
         [4, 4, 4, 16],
     ] + [[32, 32, 16, 1], [16, 16, 32, 1],] + [[16, 16, 64, 1],[32, 32, 32, 1]]
-    validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1]]
+    validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [32, 32, 16, 1]]
     validMFMA["F8"] = [[32, 32, 16, 1], [16, 16, 32, 1], [32, 32, 64, 1], [16, 16, 128, 1]]
     validMFMA["B8"] = validMFMA["F8"]
     validMFMA["F8B8"] = validMFMA["F8"]
@@ -815,6 +815,7 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
+    "UseCustomMainLoopSchedule" : [0, 1]
 }
 
 newMIValidParameters = {

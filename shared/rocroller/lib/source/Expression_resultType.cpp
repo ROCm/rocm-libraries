@@ -102,6 +102,28 @@ namespace rocRoller
                 return {regType, varType};
             }
 
+            ResultType operator()(AddShiftL const& expr)
+            {
+                auto lhsVal  = call(expr.lhs);
+                auto r1hsVal = call(expr.r1hs);
+
+                auto regType = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
+                auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
+
+                return {regType, varType};
+            }
+
+            ResultType operator()(ShiftLAdd const& expr)
+            {
+                auto lhsVal  = call(expr.lhs);
+                auto r2hsVal = call(expr.r2hs);
+
+                auto regType = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
+                auto varType = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
+
+                return {regType, varType};
+            }
+
             ResultType operator()(ScaledMatrixMultiply const& expr)
             {
                 auto matAVal = call(expr.matA);
@@ -126,6 +148,9 @@ namespace rocRoller
                     return {argVal.regType, DataType::Int32};
                 else if constexpr(std::same_as<T, MagicShiftAndSign>)
                     return {argVal.regType, DataType::UInt32};
+
+                if constexpr(std::same_as<T, ToScalar>)
+                    return {Register::Type::Scalar, argVal.varType};
 
                 return argVal;
             }
@@ -300,6 +325,43 @@ namespace rocRoller
                 return {Register::Type::Scalar, varType};
             }
 
+            ResultType operator()(Concatenate const& expr)
+            {
+                auto         registerType = Register::Type::Literal;
+                VariableType variableType{expr.destinationType};
+
+                auto expectedNumRegister   = DataTypeInfo::Get(expr.destinationType).registerCount;
+                unsigned actualNumRegister = 0;
+
+                for(auto const& operand : expr.operands)
+                {
+                    auto&& [operandRegisterType, operandVariableType] = call(operand);
+                    switch(operandRegisterType)
+                    {
+                    case Register::Type::Literal:
+                    case Register::Type::Scalar:
+                    case Register::Type::Vector:
+                        break;
+                    default:
+                        Throw<FatalError>(
+                            "Invalid register type for concatenate expression operands",
+                            ShowValue(operand));
+                    }
+
+                    registerType = Register::PromoteType(registerType, operandRegisterType);
+                    actualNumRegister
+                        = actualNumRegister
+                          + DataTypeInfo::Get(operandVariableType.dataType).registerCount;
+                }
+
+                AssertFatal(expectedNumRegister == actualNumRegister,
+                            ShowValue(expr.destinationType),
+                            ShowValue(expectedNumRegister),
+                            ShowValue(actualNumRegister));
+
+                return {registerType, variableType};
+            }
+
             ResultType operator()(CommandArgumentPtr const& expr)
             {
                 if(expr == nullptr)
@@ -337,7 +399,7 @@ namespace rocRoller
 
             ResultType operator()(PositionalArgument const& expr)
             {
-                Throw<FatalError>("Can not get result type of PositionalArgument.");
+                return {expr.regType, expr.varType};
             }
 
             ResultType operator()(WaveTilePtr const& expr)

@@ -268,6 +268,18 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
+- name: spmv_bsr
+  category: pre_checkin
+  function: spmv_bsr
+  indextype: *i32_i64
+  precision: *bfloat16_bfloat16_float32_float32_axyt_precision
+  M: [23649]
+  N: [12129]
+  block_dim: [9]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: spmv_bsr_file
   category: pre_checkin

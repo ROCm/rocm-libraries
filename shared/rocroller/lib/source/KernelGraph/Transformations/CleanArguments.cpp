@@ -133,6 +133,14 @@ namespace rocRoller
                 return std::make_shared<Expression::Expression>(cpy);
             }
 
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression::Expression>(std::move(cpy));
+            }
+
             // Finds the AssemblyKernelArgument with the same name as the provided
             // CommandArgument.
             ExpressionPtr operator()(CommandArgumentPtr const& expr) const
@@ -315,7 +323,6 @@ namespace rocRoller
          */
         KernelGraph CleanArguments::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::cleanArguments");
             rocRoller::Log::getLogger()->debug("KernelGraph::cleanArguments()");
             auto visitor = CleanArgumentsVisitor(k, m_context, m_command);
             return rewriteDimensions(k, visitor);

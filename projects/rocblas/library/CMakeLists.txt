@@ -141,9 +141,8 @@ function( rocblas_library_settings lib_target_ )
   endif()
 
   if(BUILD_CODE_COVERAGE)
-    #target_compile_options(-fprofile-instr-generate -fcoverage-mapping)
-    target_compile_options( ${lib_target_} PRIVATE -fprofile-arcs -ftest-coverage )
-    target_link_libraries( ${lib_target_} PRIVATE --coverage -lgcov)
+    target_compile_options(${lib_target_} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${lib_target_} PRIVATE -fprofile-instr-generate)
   endif()
 
   rocm_set_soversion( ${lib_target_} ${rocblas_SOVERSION} )
@@ -202,10 +201,11 @@ find_package(Git REQUIRED)
 
 # Get the git hash of the rocBLAS branch
 execute_process(
-          COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
-          WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+          COMMAND "${GIT_EXECUTABLE}" log -1 --format=%H . # was rev-parse HEAD
+          WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} # top rocBLAS directory
           OUTPUT_VARIABLE GIT_HASH_ROCBLAS
-          OUTPUT_STRIP_TRAILING_WHITESPACE)
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+          )
 
 #set the rocBLAS commit hash
 set(rocblas_VERSION_COMMIT_ID "${GIT_HASH_ROCBLAS}")

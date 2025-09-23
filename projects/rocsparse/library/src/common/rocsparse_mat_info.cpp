@@ -45,6 +45,16 @@ void _rocsparse_mat_info::set_bsrmv_info(rocsparse_bsrmv_info value)
     this->bsrmv_info = value;
 }
 
+void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
+{
+    this->m_sorted_coo2csr_info = value;
+}
+
+rocsparse::sorted_coo2csr_info_t* _rocsparse_mat_info::get_sorted_coo2csr_info()
+{
+    return this->m_sorted_coo2csr_info;
+}
+
 _rocsparse_mat_info::~_rocsparse_mat_info()
 {
     // Uncouple shared meta data
@@ -187,6 +197,13 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     // Clear csritsv info struct
     WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_csritsv_info(this->csritsv_info));
 
+    // Due to the changes in the hipFree introduced in HIP 7.0
+    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+
     // Clear zero pivot
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->zero_pivot));
 
@@ -201,6 +218,16 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     if(this->bsrmv_info != nullptr)
     {
         delete this->bsrmv_info;
+    }
+
+    rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = this->get_sorted_coo2csr_info();
+    if(sorted_coo2csr_info != nullptr)
+    {
+        hipStream_t default_stream = 0;
+        std::ignore                = sorted_coo2csr_info->free_memory(default_stream);
+
+        delete sorted_coo2csr_info;
+        this->set_sorted_coo2csr_info(nullptr);
     }
 }
 

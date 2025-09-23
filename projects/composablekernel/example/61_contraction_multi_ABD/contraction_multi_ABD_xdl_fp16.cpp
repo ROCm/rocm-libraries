@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <iostream>
 #include <numeric>
@@ -94,10 +94,10 @@ using DeviceOpInstance = ck::tensor_operation::device::DeviceContractionMultiple
     32,
     8,
     8,
-    32,
-    32,
+    16,
+    16,
+    8,
     4,
-    2,
     S<4, 64, 1>,
     S<1, 0, 2>,
     S<1, 0, 2>,
@@ -115,7 +115,7 @@ using DeviceOpInstance = ck::tensor_operation::device::DeviceContractionMultiple
     1,
     1,
     S<1, 32, 1, 8>,
-    8>;
+    4>;
 
 int main(int argc, char* argv[])
 {
@@ -213,7 +213,7 @@ int main(int argc, char* argv[])
     auto invoker   = device_op.MakeInvoker();
     auto argument  = device_op.MakeArgument(
         std::array<const void*, 2>{a0_device_buf.GetDeviceBuffer(),
-                                   a1_device_buf.GetDeviceBuffer()},
+                                    a1_device_buf.GetDeviceBuffer()},
         std::array<const void*, 1>{b_device_buf.GetDeviceBuffer()},
         std::array<const void*, 1>{d_device_buf.GetDeviceBuffer()},
         e_device_buf.GetDeviceBuffer(),

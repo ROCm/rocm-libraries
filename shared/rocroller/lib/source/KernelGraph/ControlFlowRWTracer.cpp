@@ -110,6 +110,12 @@ namespace rocRoller::KernelGraph
             }
         }
 
+        template <Expression::CNary Expr>
+        void operator()(Expr const& expr)
+        {
+            std::ranges::for_each(expr.operands, [this](auto const& op) { call(op); });
+        }
+
         void operator()(Expression::DataFlowTag const& expr)
         {
             tags.insert(expr.tag);
@@ -178,6 +184,17 @@ namespace rocRoller::KernelGraph
         if(control < 0 || coordinate < 0)
             return;
         m_trace.push_back({control, coordinate, rw});
+
+        if(m_graph.coordinates.getElementType(coordinate) == Graph::ElementType::Node)
+        {
+            for(auto indexCoord :
+                m_graph.coordinates.getOutputNodeIndices(coordinate, CT::isEdge<CT::Index>))
+                trackRegister(control, indexCoord, rw);
+
+            for(auto segmentCoord :
+                m_graph.coordinates.getOutputNodeIndices(coordinate, CT::isEdge<CT::Segment>))
+                trackRegister(control, segmentCoord, rw);
+        }
     }
 
     void ControlFlowRWTracer::trackConnections(int                            control,
@@ -196,6 +213,21 @@ namespace rocRoller::KernelGraph
                 continue;
             if(m_graph.coordinates.exists(c.coordinate))
                 m_trace.push_back({control, c.coordinate, rw});
+        }
+    }
+
+    // It can be removed once trackConnections can be used
+    void ControlFlowRWTracer::trackOffsetAndStride(int control, ReadWrite rw)
+    {
+        AssertFatal(control > 0);
+        for(auto const& c : m_graph.mapper.getConnections(control))
+        {
+            auto maybeStride = m_graph.coordinates.get<Stride>(c.coordinate).has_value();
+            auto maybeOffset = m_graph.coordinates.get<Offset>(c.coordinate).has_value();
+            if(maybeStride || maybeOffset)
+            {
+                trackRegister(control, c.coordinate, rw);
+            }
         }
     }
 
@@ -258,6 +290,7 @@ namespace rocRoller::KernelGraph
     {
         CollectDataFlowExpressionVisitor visitor;
         visitor.call(op.expression);
+
         for(auto src : visitor.tags)
         {
             trackRegister(tag, src, ReadWrite::READ);
@@ -267,7 +300,13 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
-    void ControlFlowRWTracer::operator()(Barrier const& op, int tag) {}
+    void ControlFlowRWTracer::operator()(Barrier const& op, int tag)
+    {
+        for(auto const& c : m_graph.mapper.getConnections(tag))
+        {
+            m_trace.push_back({tag, c.coordinate, ReadWrite::READ});
+        }
+    }
 
     void ControlFlowRWTracer::operator()(ComputeIndex const& op, int tag)
     {
@@ -352,8 +391,8 @@ namespace rocRoller::KernelGraph
         // auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
         // generate(init);
 
-        // auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
-        // generate(incr);
+        auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
+        generate(incr);
 
         CollectDataFlowExpressionVisitor visitor;
         visitor.call(op.condition);
@@ -385,6 +424,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, lds, ReadWrite::READ);
         trackConnections(tag, {dst, lds}, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadLinear const& op, int tag)
@@ -417,6 +457,7 @@ namespace rocRoller::KernelGraph
 
         trackConnections(tag, {dst}, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadVGPR const& op, int tag)
@@ -442,8 +483,6 @@ namespace rocRoller::KernelGraph
         {
             auto aScale = m_graph.mapper.get(
                 tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
-            aScale = only(m_graph.coordinates.getOutputNodeIndices(aScale, CT::isEdge<CT::Index>))
-                         .value_or(aScale);
             trackRegister(tag, aScale, ReadWrite::READ);
         }
         else if(op.scaleA == Operations::ScaleMode::SingleScale)
@@ -460,8 +499,6 @@ namespace rocRoller::KernelGraph
         {
             auto bScale = m_graph.mapper.get(
                 tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
-            bScale = only(m_graph.coordinates.getOutputNodeIndices(bScale, CT::isEdge<CT::Index>))
-                         .value_or(bScale);
             trackRegister(tag, bScale, ReadWrite::READ);
         }
         else if(op.scaleB == Operations::ScaleMode::SingleScale)
@@ -507,6 +544,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::READ);
         trackConnections(tag, {dst, lds}, ReadWrite::READ);
         trackRegister(tag, lds, ReadWrite::WRITE);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadTileDirect2LDS const& op, int tag)
@@ -516,6 +554,7 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, source, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {source, dst}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)
@@ -534,6 +573,7 @@ namespace rocRoller::KernelGraph
 
         trackRegister(tag, src, ReadWrite::READ);
         trackConnections(tag, {src}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreVGPR const& op, int tag)
@@ -562,8 +602,6 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::operator()(Exchange const& op, int tag)
     {
         auto src = m_graph.mapper.get<MacroTile>(tag);
-        src      = only(m_graph.coordinates.getOutputNodeIndices(src, CT::isEdge<CT::Index>))
-                  .value_or(src);
         trackRegister(tag, src, ReadWrite::READ);
 
         auto dst

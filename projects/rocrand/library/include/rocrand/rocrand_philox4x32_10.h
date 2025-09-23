@@ -176,6 +176,7 @@ public:
     #else
         unsigned int ret = (&m_state.result.x)[m_state.substate];
     #endif
+
         m_state.substate++;
         if(m_state.substate == 4)
         {

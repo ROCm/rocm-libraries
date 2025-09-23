@@ -19,7 +19,9 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(SetDifferenceDescendingTests, FullTestsParams);
 TESTS_DEFINE(SetDifferenceDescendingPrimitiveTests, NumericalTestsParams);
@@ -27,34 +29,19 @@ TESTS_DEFINE(SetDifferenceDescendingPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(SetDifferenceDescendingTests, TestSetDifferenceDescendingSimple)
 {
   using Vector   = typename TestFixture::input_type;
-  using Policy   = typename TestFixture::execution_policy;
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a(4), b(5);
+  Vector a{5, 4, 2, 0}, b{6, 4, 3, 3, 0};
 
-  a[0] = 5;
-  a[1] = 4;
-  a[2] = 2;
-  a[3] = 0;
-  b[0] = 6;
-  b[1] = 4;
-  b[2] = 3;
-  b[3] = 3;
-  b[4] = 0;
-
-  Vector ref(2);
-  ref[0] = 5;
-  ref[1] = 2;
-
+  Vector ref{5, 2};
   Vector result(2);
 
-  Iterator end =
-    thrust::set_difference(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+  Iterator end = thrust::set_difference(a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
 
-  EXPECT_EQ(result.end(), end);
+  ASSERT_EQ_QUIET(result.end(), end);
   ASSERT_EQ(ref, result);
 }
 
@@ -74,7 +61,6 @@ TYPED_TEST(SetDifferenceDescendingPrimitiveTests, TestSetDifferenceDescending)
 
       thrust::host_vector<T> temp =
         get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
       thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
 

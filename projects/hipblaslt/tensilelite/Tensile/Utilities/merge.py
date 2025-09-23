@@ -531,4 +531,7 @@ if __name__ == "__main__":
     elif forceMerge in ["true", "1"]: forceMerge=True
     elif forceMerge in ["false", "0"]: forceMerge=False
 
+    msg("***************************************************************")
+    msg("Warning: merge.py is deprecated, please use TensileMergeLibrary")
+    msg("***************************************************************")
     avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, trimSize, add_solution_tags, no_eff)

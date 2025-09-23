@@ -3,7 +3,28 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## rocSPARSE 4.0.1 for ROCm 7.0.0
+## rocSPARSE 4.1.0 for ROCm 7.1.0
+
+### Added
+
+* Added brain half float mixed precision to `rocsparse_axpby` where X and Y use bfloat16 and result and the compute type use float.
+* Added brain half float mixed precision to `rocsparse_spvv` where X and Y use bfloat16 and result and the compute type use float.
+* Added brain half float mixed precision to `rocsparse_spmv` where A and X use bfloat16 and Y and the compute type use float.
+* Added brain half float mixed precision to `rocsparse_spmm` where A and B use bfloat16 and C and the compute type use float.
+* Added brain half float mixed precision to `rocsparse_sddmm` where A and B use bfloat16 and C and the compute type use float.
+* Added brain half float mixed precision to `rocsparse_sddmm` where A and B and C use bfloat16 and the compute type use float.
+* Added half float mixed precision to `rocsparse_sddmm` where A and B and C use float16 and the compute type use float.
+* Added brain half float uniform precision to `rocsparse_scatter` and `rocsparse_gather` routines.
+
+### Optimized
+
+* Improved the user documentation.
+
+### Upcoming changes
+
+* Deprecate trace, debug, and bench logging using environment variable `ROCSPARSE_LAYER`.
+
+## rocSPARSE 4.0.2 for ROCm 7.0.0
 
 ### Added
 
@@ -39,6 +60,7 @@ Documentation for rocSPARSE is available at
 * Fixed failures that could occur in `rocsparse_Xbsrsm_solve` or `rocsparse_spsm` with BSR format when using host pointer mode.
 * Fixed ASAN compilation failures
 * Fixed failure that occurred when using const descriptor `rocsparse_create_const_csr_descr` with the generic routine `rocsparse_sparse_to_sparse`. Issue was not observed when using non-const descriptor `rocsparse_create_csr_descr` with `rocsparse_sparse_to_sparse`.
+* Fixed a memory leak in the rocsparse handle
 
 ### Removed
 

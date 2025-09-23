@@ -36,6 +36,7 @@
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation_fwd.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -218,6 +219,10 @@ namespace rocRoller
             // (valueCount / variableType.packing) registers will be allocated.
             std::optional<VariableType> variableType = std::nullopt;
 
+            // If the destination coordinate is Stride then
+            // set the register expression attributes
+            std::optional<RegisterExpressionAttributes> strideExpressionAttributes = std::nullopt;
+
             std::string name() const;
             std::string toString() const;
         };
@@ -245,16 +250,12 @@ namespace rocRoller
             // TODO: might be nicer to have UInt32 for strides; need
             // to allow user to specify stride types instead of
             // forcing size_t.
-            ComputeIndex();
-            ComputeIndex(bool     forward,
-                         DataType valueType,
-                         DataType offsetType = DataType::UInt64,
-                         DataType strideType = DataType::UInt64);
 
-            bool     forward    = false;
-            DataType valueType  = DataType::Count;
-            DataType offsetType = DataType::Count;
-            DataType strideType = DataType::Count;
+            bool     forward      = false;
+            bool     isDirect2LDS = false;
+            DataType valueType    = DataType::Count;
+            DataType offsetType   = DataType::Count;
+            DataType strideType   = DataType::Count;
 
             std::string name() const;
         };
@@ -454,6 +455,8 @@ namespace rocRoller
             Operations::ScaleMode scaleModeB = Operations::ScaleMode::None;
             std::vector<size_t>   scaleStridesA;
             std::vector<size_t>   scaleStridesB;
+            std::vector<size_t>   scalePreShuffledTileA;
+            std::vector<size_t>   scalePreShuffledTileB;
             VariableType          accType = DataType::Float;
 
             std::string name() const;

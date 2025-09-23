@@ -76,9 +76,9 @@ namespace rocRoller
     }
 
     template <CCountedEnum Enum>
-    inline typename EnumBitset<Enum>::Base::reference EnumBitset<Enum>::operator[](Enum val)
+    void EnumBitset<Enum>::set(Enum target, bool value)
     {
-        return (*this)[static_cast<size_t>(val)];
+        std::bitset<static_cast<size_t>(Enum::Count)>::set(static_cast<size_t>(target), value);
     }
 
     template <CCountedEnum Enum>
@@ -96,6 +96,29 @@ namespace rocRoller
         }
 
         return msg.str();
+    }
+
+    template <CCountedEnum Enum>
+    std::string shortString(EnumBitset<Enum> const& set)
+    {
+        std::string rv = "{";
+
+        bool first = true;
+        for(int i = 0; i < static_cast<int>(Enum::Count); i++)
+        {
+            auto enumValue = static_cast<Enum>(i);
+
+            if(set[enumValue])
+            {
+                if(!first)
+                    rv += ", ";
+
+                rv += toString(enumValue);
+                first = false;
+            }
+        }
+
+        return rv + "}";
     }
 
     template <CCountedEnum Enum>

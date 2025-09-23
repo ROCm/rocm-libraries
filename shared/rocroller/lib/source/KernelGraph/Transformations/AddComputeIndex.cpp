@@ -127,14 +127,15 @@ namespace rocRoller::KernelGraph
                          int          buffer,
                          bool         forward,
                          DataType     valueType,
-                         DataType     offsetType = DataType::UInt64,
-                         DataType     strideType = DataType::UInt64)
+                         DataType     offsetType,
+                         DataType     strideType,
+                         bool         isDirect2LDS)
     {
         using CCI = Connections::ComputeIndex;
         using CCA = Connections::ComputeIndexArgument;
 
-        auto ci
-            = graph.control.addElement(ComputeIndex(forward, valueType, offsetType, strideType));
+        auto ci = graph.control.addElement(
+            ComputeIndex{forward, isDirect2LDS, valueType, offsetType, strideType});
 
         if(base > 0)
             graph.mapper.connect(ci, base, CCI{CCA::BASE});
@@ -298,16 +299,70 @@ namespace rocRoller::KernelGraph
      * generating `op`.
      */
     DataType getOffsetDataType(int op, KernelGraph const& graph, bool direct2LDS)
-
     {
         DataType rv = DataType::UInt64;
+        auto     s  = graph.control.get<StoreTiled>(op);
+        auto     l  = graph.control.get<LoadTiled>(op);
         auto     ll = graph.control.get<LoadLDSTile>(op);
         auto     sl = graph.control.get<StoreLDSTile>(op);
-        if(ll || sl || direct2LDS)
+        if(s || l || ll || sl || direct2LDS)
         {
             rv = DataType::UInt32;
         }
         return rv;
+    }
+
+    void addUnrollStrideConnection(KernelGraph&                     kgraph,
+                                   int                              candidate,
+                                   bool                             isDirect2LDS,
+                                   const std::vector<int>&          strideCoords,
+                                   std::vector<DeferredConnection>& connections)
+    {
+        auto [target, direction] = getOperationTarget(candidate, kgraph, isDirect2LDS);
+        auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
+        auto unrolls             = filterCoordinates<Unroll>(required, kgraph);
+
+        for(auto const& unroll : unrolls)
+        {
+            {
+                {
+                    auto const subDimension
+                        = kgraph.mapper.getConnectionSubdimension(candidate, unroll);
+                    // Find the neighbour of the Unroll that:
+                    // 1. is in the load/store coordinate transform path
+                    // 2. has a Stride edge connected to it
+                    std::vector<int> neighbourNodes;
+                    if(direction == Graph::Direction::Downstream)
+                        neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
+                    else
+                        neighbourNodes = kgraph.coordinates.childNodes(unroll).to<std::vector>();
+
+                    for(auto neighbourNode : neighbourNodes)
+                    {
+                        if(path.contains(neighbourNode))
+                        {
+                            auto neighbourEdges = kgraph.coordinates.getNeighbours(
+                                neighbourNode, Graph::opposite(direction));
+                            for(auto neighbourEdge : neighbourEdges)
+                            {
+                                auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
+                                if(maybeStride
+                                   && std::find(
+                                          strideCoords.begin(), strideCoords.end(), neighbourEdge)
+                                          != strideCoords.end())
+                                {
+                                    auto maybeStrideTag = neighbourEdge;
+                                    auto newConnection
+                                        = makeConnection<Stride, Connections::UnrollStride>(
+                                            maybeStrideTag, subDimension);
+                                    connections.push_back(newConnection);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -333,9 +388,13 @@ namespace rocRoller::KernelGraph
         std::vector<int>                chain;
         std::vector<DeferredConnection> connections;
         std::map<int, int>              offsetOfCoord;
+        bool                            hasUnroll = false;
+        std::vector<int>                strideCoords;
 
         for(auto info : getRequiredCoordinatesInfo(op, location, graph, isDirect2LDS))
         {
+            if(info.isUnroll)
+                hasUnroll = true;
             // Add ComputeIndex operation
             int offset = -1, stride = -1, buffer = -1;
             if(direction == Graph::Direction::Downstream)
@@ -359,8 +418,10 @@ namespace rocRoller::KernelGraph
 
             int base = (info.base == -1) ? -1 : offsetOfCoord.at(info.base);
 
+            // For future: choose type based on buffer or non-buffer
             auto offsetDataType = getOffsetDataType(op, graph, isDirect2LDS);
             auto strideDataType = DataType::UInt64;
+
             if(info.isUnroll)
             {
                 offsetDataType = DataType::Int64;
@@ -376,7 +437,8 @@ namespace rocRoller::KernelGraph
                                              direction == Graph::Direction::Upstream,
                                              dtype,
                                              offsetDataType,
-                                             strideDataType));
+                                             strideDataType,
+                                             isDirect2LDS));
 
             // Add connections for register allocate, and so tracer
             // can determine correct lifetimes
@@ -386,23 +448,34 @@ namespace rocRoller::KernelGraph
                 connections.push_back(DC<Stride>(stride, info.sdim));
             if(buffer != -1)
                 connections.push_back(DC<Buffer>(buffer));
+            if(base != -1)
+                connections.push_back(
+                    makeConnection<Offset, Connections::BaseOffset>(base, info.sdim));
+
+            // save all stride coordinates for the memory operation
+            // then select the unroll stride and add it to connection
+            if(stride != -1)
+                strideCoords.push_back(stride);
 
             if(info.needsUpdate)
             {
                 auto offsetExpr = std::make_shared<Expression::Expression>(
-                    Expression::DataFlowTag{offset, Register::Type::Vector, DataType::UInt64});
+                    Expression::DataFlowTag{offset, Register::Type::Vector, offsetDataType});
                 auto strideExpr = std::make_shared<Expression::Expression>(
                     Expression::DataFlowTag{stride, Register::Type::Scalar, DataType::UInt64});
 
                 if(step == nullptr)
-                    update = graph.control.addElement(
-                        Assign{Register::Type::Vector, offsetExpr + strideExpr});
+                    update = graph.control.addElement(Assign{
+                        Register::Type::Vector, convert(offsetDataType, offsetExpr + strideExpr)});
                 else
                     update = graph.control.addElement(
-                        Assign{Register::Type::Vector, offsetExpr + step * strideExpr});
+                        Assign{Register::Type::Vector,
+                               convert(offsetDataType, offsetExpr + step * strideExpr)});
                 graph.mapper.connect(update, offset, NaryArgument::DEST);
             }
         }
+
+        addUnrollStrideConnection(graph, op, isDirect2LDS, strideCoords, connections);
 
         for(int i = 1; i < chain.size(); ++i)
             graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
@@ -701,8 +774,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddComputeIndex::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::AddComputeIndex");
-
         AddComputeIndexer indexer;
 
         for(auto candidate :
