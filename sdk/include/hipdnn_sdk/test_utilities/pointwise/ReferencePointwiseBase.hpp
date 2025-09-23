@@ -87,8 +87,6 @@ private:
             return false;
         }
 
-        // Use the same switch statement logic as pointwiseForward
-        // This is our single source of truth for supported operations
         switch(operation)
         {
         case PointwiseMode::ADD:
@@ -99,9 +97,6 @@ private:
             // Any operation not in pointwiseForward is unsupported
             return false;
         }
-
-        // Note: We don't validate tensor dimensions, data types, or broadcasting compatibility here
-        // because our N-dimensional broadcasting implementation handles these dynamically at runtime
     }
 };
 
