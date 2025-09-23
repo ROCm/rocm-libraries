@@ -48,7 +48,7 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "src", inc.src);
                 iot::mapRequired(io, "dst", inc.dst);
-                iot::mapRequired(io, "order", inc.order);
+                iot::mapRequired(io, "edgeOrder", inc.order);
             }
 
             static void mapping(IO& io, typename Graph::HypergraphIncidence& inc, EmptyContext&)
