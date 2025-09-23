@@ -763,11 +763,13 @@ namespace TensileLite
                 assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
                 int fullTiles = pAMDGPU->skFullTiles;
 
+                size_t skGrid = numWorkGroups.x;
+                
                 bool bigEnough = tiles > skGrid;
                 uint32_t skTiles = skGrid;
                 if(tiles % skGrid != 0)
                 {
-                    skTiles = bigEnough ? sk.grid * fullTiles + tiles % skGrid : tiles;
+                    skTiles = bigEnough ? skGrid * fullTiles + tiles % skGrid : tiles;
                     skTiles = min(skTiles, tiles);
                 }
 
@@ -776,7 +778,7 @@ namespace TensileLite
                 uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);
 
                 // safe guard
-                if(sk.grid > 65535 || skTiles > 65535)
+                if(skGrid > 65535 || skTiles > 65535)
                 {
                     throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
                 }
