@@ -28,13 +28,6 @@ public:
             inputs, output, operation);
     }
 
-    static void pointwiseForwardBroadcast(const std::vector<const TensorBase<DataType>*>& inputs,
-                                         TensorBase<DataType>& output,
-                                         hipdnn_sdk::data_objects::PointwiseMode operation)
-    {
-        ReferencePointwiseBase<DataType, ExecutionPolicy>::pointwiseForwardBroadcast(
-            inputs, output, operation);
-    }
 };
 
 template <class DataType>

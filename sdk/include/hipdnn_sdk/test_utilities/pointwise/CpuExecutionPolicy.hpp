@@ -147,33 +147,6 @@ public:
         parallelFunc();
     }
 
-    template <typename Op>
-    void executeBinary(const std::vector<const TensorBase<DataType>*>& inputs,
-                       TensorBase<DataType>& output,
-                       Op op)
-    {
-        if(inputs.size() != 2)
-        {
-            throw std::runtime_error("Binary operation requires exactly 2 input tensors.");
-        }
-
-        const auto& input1 = *inputs[0];
-        const auto& input2 = *inputs[1];
-        const auto& dims = output.dims();
-
-        auto func = [&](const std::vector<std::size_t>& indices) {
-            std::vector<int64_t> idxVec(indices.begin(), indices.end());
-            auto input1Val = input1.getHostValue(idxVec);
-            auto input2Val = input2.getHostValue(idxVec);
-            DataType outputVal;
-            op(outputVal, input1Val, input2Val);
-            output.setHostValue(outputVal, idxVec);
-        };
-
-        // Use dynamic parallel functor that supports any number of dimensions
-        auto parallelFunc = makeParallelTensorFunctor(func, dims);
-        parallelFunc();
-    }
 
     void markOutputModified(TensorBase<DataType>& output)
     {
