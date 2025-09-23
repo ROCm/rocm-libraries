@@ -95,16 +95,6 @@ ROCSOLVER_BEGIN_NAMESPACE
             _log_token = std::make_unique<rocsolver_logger::scope_guard<T>>(false, handle);   \
         }                                                                                     \
     } while(0)
-#if ROCSOLVER_USE_ASYNC_LOGGER
-#define ROCSOLVER_LAUNCH_KERNEL(name, ...) \
-    do { \
-        if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
-            rocsolver_logger::instance()->log_enter<T>(handle, nullptr, #name); \
-        hipLaunchKernelGGL((name), __VA_ARGS__); \
-        if (rocsolver_logger::is_logging_enabled() && rocsolver_logger::is_kernel_logging_enabled()) \
-            rocsolver_logger::instance()->log_exit<T>(handle); \
-    } while(0)
-#else
 #define ROCSOLVER_LAUNCH_KERNEL(name, ...)                                                          \
     do                                                                                              \
     {                                                                                               \
@@ -116,7 +106,6 @@ ROCSOLVER_BEGIN_NAMESPACE
         }                                                                                           \
         hipLaunchKernelGGL((name), __VA_ARGS__);                                                    \
     } while(0)
-#endif
 
 /***************************************************************************
  * The rocsolver_log_entry struct records function data for trace and
