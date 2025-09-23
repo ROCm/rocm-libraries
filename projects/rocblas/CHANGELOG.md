@@ -6,11 +6,11 @@ rocBLAS documentation is available at
 ## (Unreleased) rocBLAS 5.1.0
 
 ### Added
-* sample in clients using OpenMP threads calling rocBLAS functions
-* gfx1103, gfx1150, gfx1151 enabled
+* Sample for clients using OpenMP threads calling rocBLAS functions.
+* gfx1103, gfx1150, and gfx1151 enabled.
 
 ### Changed
-* Tensile build by default is no longer based on tensile_tag.txt but uses the same commit from shared/tensile in the mono-repo. rmake/install option -t can build from other local path with different commit
+* By default, the Tensile build is no longer based on `tensile_tag.txt` but uses the same commit from shared/tensile in the rocm-libraries repository. The rmake or install `-t` option can build from another local path with a different commit.
 
 ### Optimized
 
