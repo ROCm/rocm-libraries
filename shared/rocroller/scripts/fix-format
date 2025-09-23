@@ -146,6 +146,10 @@ def check_python(dir: pathlib.Path):
 def fix_python(dir: pathlib.Path):
     isort_avail = is_tool_available("isort")
     black_avail = is_tool_available("black")
+    if not isort_avail and not black_avail:
+        print("isort and black are not available, skipping Python formatting.")
+        return
+
     if not isort_avail:
         print("isort is not available, skipping.")
     if not black_avail:
