@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 SOURCE_COMMIT="$1"
 if [ "$#" -gt 0 ]; then
