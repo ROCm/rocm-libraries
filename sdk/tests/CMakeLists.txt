@@ -22,14 +22,17 @@ add_executable(hipdnn_sdk_tests
     plugin/flatbuffer_utilities/TestGraphWrapper.cpp
     plugin/flatbuffer_utilities/TestEngineConfigWrapper.cpp
     plugin/flatbuffer_utilities/TestEngineDetailsWrapper.cpp
-    utilities/TestScopedResource.cpp
+    utilities/TestAllocators.cpp
     utilities/TestCallbackLogger.cpp
     utilities/TestMigratableMemory.cpp
-    utilities/TestAllocators.cpp
     utilities/TestFloats.cpp
+    utilities/TestJson.cpp
+    utilities/TestScopedResource.cpp
     utilities/TestShapeUtilities.cpp
     utilities/TestTensor.cpp
     utilities/TestPlatformUtils.cpp
+    utilities/TestShallowHostOnlyMigratableMemory.cpp
+    utilities/TestShallowTensor.cpp
     test_utilities/TestCpuFpReferenceBatchnorm.cpp
     test_utilities/TestCpuFpReferenceConvolution.cpp
     test_utilities/TestCpuFpReferenceUtilities.cpp
@@ -38,6 +41,13 @@ add_executable(hipdnn_sdk_tests
     test_utilities/TestTempDirectory.cpp
     test_utilities/TestScopedEnvironmentVariableSetter.cpp
     test_utilities/TestLoggingUtils.cpp
+    test_utilities/TestFlatbufferDatatypeMapping.cpp
+    test_utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
+    test_utilities/cpu_graph_executor/TestTensorVariant.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormSignatureRegistryKey.cpp
+
+
+
 )
 
 target_compile_definitions(hipdnn_sdk_tests PRIVATE

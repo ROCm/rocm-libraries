@@ -29,7 +29,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
 
-    bool applicable = planBuilder.isApplicable(mockGraph);
+    bool applicable = planBuilder.isApplicable(dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -41,7 +41,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAtt
     EXPECT_CALL(mockGraph, hasOnlySupportedAttributes(::testing::_))
         .WillOnce(::testing::Return(false));
 
-    bool applicable = planBuilder.isApplicable(mockGraph);
+    bool applicable = planBuilder.isApplicable(dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -53,7 +53,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForSupportedSingle
     EXPECT_CALL(mockGraph, hasOnlySupportedAttributes(::testing::_))
         .WillOnce(::testing::Return(true));
 
-    bool applicable = planBuilder.isApplicable(mockGraph);
+    bool applicable = planBuilder.isApplicable(dummyHandle, mockGraph);
 
     EXPECT_TRUE(applicable);
 }
@@ -70,7 +70,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, GetWorkspaceSizeReturnsExpectedValue)
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedNode)
 {
     // Use a real flatbuffer graph with a valid batchnorm node
-    auto builder = hipdnn_backend::test_utilities::createValidBatchnormGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 

@@ -6,6 +6,8 @@
 # This is where it looks for libs, includes, etc., and installs here.
 set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
 
+include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
+
 if(UNIX)
     # Unix/Linux: Use ROCm LLVM Clang
     set(ROCM_LLVM_BIN_DIR ${ROCM_PATH}/llvm/bin)
@@ -15,7 +17,9 @@ if(UNIX)
         # Set the C and C++ compilers to clang and clang++ with a specific directory hint
         set(CMAKE_C_COMPILER ${ROCM_LLVM_BIN_DIR}/clang)
         set(CMAKE_CXX_COMPILER ${ROCM_LLVM_BIN_DIR}/clang++)
-        set(CMAKE_SYMBOLIZER ${ROCM_LLVM_BIN_DIR}/llvm-symbolizer)
+        
+        findAndCheckLlvmSymbolizer()
+        
         message(STATUS "Using ROCm Clang compilers from ${ROCM_LLVM_BIN_DIR}")
     else()
         message(FATAL_ERROR "The directory ${ROCM_LLVM_BIN_DIR} does not exist. Cannot auto select clang compilers.")

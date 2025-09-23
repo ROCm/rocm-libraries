@@ -19,7 +19,8 @@ public:
     MiopenBatchnormPlanBuilder(const MiopenBatchnormPlanBuilder&) = delete;
     MiopenBatchnormPlanBuilder& operator=(const MiopenBatchnormPlanBuilder&) = delete;
 
-    bool isApplicable(const hipdnn_plugin::IGraph& opGraph) const override;
+    bool isApplicable(const HipdnnEnginePluginHandle& handle,
+                      const hipdnn_plugin::IGraph& opGraph) const override;
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                             const hipdnn_plugin::IGraph& opGraph) const override;
 

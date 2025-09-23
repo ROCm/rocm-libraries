@@ -73,7 +73,7 @@ TEST(TestDescriptorFactory, NullDescriptorPointer)
 
 TEST(TestDescriptorFactory, CreateGraphExtValidInput)
 {
-    auto builder = hipdnn_backend::test_utilities::createValidGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidGraph();
     auto serializedGraph = builder.Release();
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
@@ -87,7 +87,7 @@ TEST(TestDescriptorFactory, CreateGraphExtValidInput)
 
 TEST(TestDescriptorFactory, CreateGraphExtNullDescriptorPointer)
 {
-    auto builder = hipdnn_backend::test_utilities::createValidGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidGraph();
     auto serializedGraph = builder.Release();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -106,7 +106,7 @@ TEST(TestDescriptorFactory, CreateGraphExtNullSerializedGraph)
 
 TEST(TestDescriptorFactory, CreateGraphExtZeroByteSize)
 {
-    auto builder = hipdnn_backend::test_utilities::createValidGraph();
+    auto builder = hipdnn_sdk::test_utilities::createValidGraph();
     auto serializedGraph = builder.Release();
 
     hipdnnBackendDescriptor_t descriptor = nullptr;

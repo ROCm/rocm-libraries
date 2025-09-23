@@ -50,6 +50,8 @@ class TensorBase
 public:
     virtual ~TensorBase() = default;
 
+    using value_type = T;
+
     virtual const std::vector<int64_t>& dims() const = 0;
     virtual const std::vector<int64_t>& strides() const = 0;
 

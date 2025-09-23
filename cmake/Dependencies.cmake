@@ -21,6 +21,7 @@ set(_hipdnn_all_local_deps
     GTest
     flatbuffers
     spdlog
+    nlohmann_json
 )
 # Dependencies where we never look for a local version
 set(_hipdnn_all_remote_deps
@@ -48,7 +49,6 @@ function(hipdnn_add_dependency dep_name)
         "${multiValueArgs}"
         ${ARGN}
     )
-
     if(dep_name IN_LIST _hipdnn_all_local_deps)
         if(NOT PARSE_NO_LOCAL)
             find_package(
@@ -190,6 +190,19 @@ function(_fetch_spdlog VERSION HASH)
 
     _exclude_from_all(${spdlog_SOURCE_DIR})
     _mark_targets_as_system(${spdlog_SOURCE_DIR})
+endfunction()
+
+# Doesn't conform with the others and ignores the VERSION and HASH arguments, but this will change very soon
+function(_fetch_nlohmann_json VERSION HASH)
+    FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
+
+    FetchContent_MakeAvailable(json)
+
+    set(HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR ${json_SOURCE_DIR}/include CACHE PATH "Path to nlohmann::json include")
+
+    _exclude_from_all(${json_SOURCE_DIR})
+    _mark_targets_as_system(${json_SOURCE_DIR})
+
 endfunction()
 
 # Utility functions, pulled from rocroller repo

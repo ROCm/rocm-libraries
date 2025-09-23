@@ -19,7 +19,9 @@ public:
 
     virtual int64_t id() const = 0;
 
-    virtual bool isApplicable(const hipdnn_plugin::IGraph& opGraph) const = 0;
+    virtual bool isApplicable(HipdnnEnginePluginHandle& handle,
+                              const hipdnn_plugin::IGraph& opGraph) const
+        = 0;
     virtual void getDetails(HipdnnEnginePluginHandle& handle,
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;

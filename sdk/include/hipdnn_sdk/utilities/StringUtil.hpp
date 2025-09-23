@@ -4,11 +4,14 @@
 #pragma once
 
 #include <cstring>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace hipdnn_sdk::utilities
 {
 
-static void copyMaxSizeWithNullTerminator(char* destination, const char* source, size_t maxSize)
+inline void copyMaxSizeWithNullTerminator(char* destination, const char* source, size_t maxSize)
 {
     if(source == nullptr || destination == nullptr || maxSize == 0)
     {
@@ -22,4 +25,20 @@ static void copyMaxSizeWithNullTerminator(char* destination, const char* source,
 #endif
     destination[maxSize - 1] = '\0';
 }
+
+template <typename T>
+inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
+{
+    if(vec.empty())
+    {
+        os << "[]";
+        return;
+    }
+
+    os << "[";
+    std::copy(vec.begin(), vec.end() - 1, std::ostream_iterator<T>(os, ", "));
+    os << vec.back();
+    os << "]";
+}
+
 }

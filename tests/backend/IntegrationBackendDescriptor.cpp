@@ -4,6 +4,7 @@
 #include "hipdnn_backend.h"
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <vector>
 
@@ -101,6 +102,7 @@ TEST(IntegrationBackendDescriptor, CreateAndDeserializeGraphExtWithNullGraph)
 
 TEST(IntegrationBackendDescriptor, SetOperationGraph)
 {
+    SKIP_IF_NO_DEVICES();
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;

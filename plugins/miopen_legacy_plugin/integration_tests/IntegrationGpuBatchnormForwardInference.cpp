@@ -242,7 +242,7 @@ protected:
                                              *biasTensorAttr,
                                              graphTensorBundle);
 
-        result = graph->execute(_handle, variantPack, _stream);
+        result = graph->execute(_handle, variantPack, nullptr);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
 

@@ -26,18 +26,21 @@ TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
 
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
-    EXPECT_CALL(*mockEngine1, isApplicable(::testing::_)).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mockEngine1, isApplicable(::testing::_, ::testing::_))
+        .WillRepeatedly(Return(true));
 
     auto mockEngine2 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine2, id()).WillRepeatedly(Return(2));
-    EXPECT_CALL(*mockEngine2, isApplicable(::testing::_)).WillRepeatedly(Return(false));
+    EXPECT_CALL(*mockEngine2, isApplicable(::testing::_, ::testing::_))
+        .WillRepeatedly(Return(false));
 
     EngineManager manager;
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
     MockGraph mockGraph;
-    auto applicable = manager.getApplicableEngineIds(mockGraph);
+    HipdnnEnginePluginHandle dummyHandle;
+    auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
     EXPECT_EQ(applicable.size(), 1);
     EXPECT_EQ(applicable[0], 1);
@@ -47,20 +50,23 @@ TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
 {
     std::set<std::unique_ptr<IEngine>> engines;
 
-    MockGraph mockGraph;
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
-    EXPECT_CALL(*mockEngine1, isApplicable(::testing::_)).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mockEngine1, isApplicable(::testing::_, ::testing::_))
+        .WillRepeatedly(Return(true));
 
     auto mockEngine2 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine2, id()).WillRepeatedly(Return(2));
-    EXPECT_CALL(*mockEngine2, isApplicable(::testing::_)).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mockEngine2, isApplicable(::testing::_, ::testing::_))
+        .WillRepeatedly(Return(true));
 
     EngineManager manager;
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
-    auto applicable = manager.getApplicableEngineIds(mockGraph);
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
     EXPECT_EQ(applicable.size(), 2);
     EXPECT_TRUE(std::ranges::find(applicable, 1) != applicable.end());
@@ -73,18 +79,21 @@ TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
 
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
-    EXPECT_CALL(*mockEngine1, isApplicable(::testing::_)).WillRepeatedly(Return(false));
+    EXPECT_CALL(*mockEngine1, isApplicable(::testing::_, ::testing::_))
+        .WillRepeatedly(Return(false));
 
     auto mockEngine2 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine2, id()).WillRepeatedly(Return(2));
-    EXPECT_CALL(*mockEngine2, isApplicable(::testing::_)).WillRepeatedly(Return(false));
+    EXPECT_CALL(*mockEngine2, isApplicable(::testing::_, ::testing::_))
+        .WillRepeatedly(Return(false));
 
     EngineManager manager;
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
     MockGraph mockGraph;
-    auto applicable = manager.getApplicableEngineIds(mockGraph);
+    HipdnnEnginePluginHandle dummyHandle;
+    auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
     EXPECT_TRUE(applicable.empty());
 }
