@@ -119,8 +119,8 @@ inline std::map<std::string, int>
     rv["HasSMulHi"]
         = tryAssembler(isaVersion, assemblerPath, "s_mul_hi_u32 s47, s36, s34", isDebug);
     rv["HasScalarStore"]
-        = tryAssembler(isaVersion, assemblerPath, "s_store_dword s79, s[s70:s71], s77", isDebug)
-          || tryAssembler(isaVersion, assemblerPath, "s_store_b32 s79, s[s70:s71], s77", isDebug);
+        = tryAssembler(isaVersion, assemblerPath, "s_store_dword s79, s[70:71], s77", isDebug)
+          || tryAssembler(isaVersion, assemblerPath, "s_store_b32 s79, s[70:71], s77", isDebug);
     rv["HasMFMA_explictB"] = tryAssembler(
         isaVersion, assemblerPath, "v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31]", isDebug);
     rv["HasMFMA"] = tryAssembler(isaVersion,
