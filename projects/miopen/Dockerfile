@@ -89,7 +89,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* &&\
     rm -rf amdgpu-install* && \
 # Remove unnecessary rocm components that take a lot of space
-    apt-get remove -y composablekernel-dev miopen-hip rocfft rocsparse
+    apt-get remove -y miopen-hip
 
 # Setup ubsan environment to printstacktrace
 ENV UBSAN_OPTIONS=print_stacktrace=1
@@ -169,7 +169,7 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     -D CMAKE_BUILD_TYPE=Release \
     -D GPU_ARCHS=${GPU_ARCHS} \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
-    -D DISABLE_OFFLOAD_COMPRESS=OFF \
+    -D DISABLE_OFFLOAD_COMPRESS=ON \
     -D CMAKE_CXX_FLAGS=" -O3 " .. && \
     make -j ${num_threads} install && \    
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
