@@ -16,7 +16,7 @@ namespace test_utilities
 
 using namespace hipdnn_sdk::utilities;
 
-template <class DataType, class ExecutionPolicy>
+template <class DataType, class DeviceExecutor>
 class ReferencePointwiseBase
 {
 public:
@@ -25,6 +25,18 @@ public:
         using namespace hipdnn_sdk::data_objects;
 
         if(node.attributes_type() != NodeAttributes::PointwiseAttributes)
+        {
+            return false;
+        }
+
+        const auto* pointwise_attrs = node.attributes_as_PointwiseAttributes();
+        if(pointwise_attrs == nullptr)
+        {
+            return false;
+        }
+
+        PointwiseMode operation = pointwise_attrs->operation();
+        if(!canExecuteOperation(operation, pointwise_attrs))
         {
             return false;
         }
@@ -41,17 +53,7 @@ public:
             throw std::runtime_error("Pointwise operation requires at least one input tensor.");
         }
 
-        // Validate null pointers
-        for(size_t i = 0; i < inputs.size(); ++i)
-        {
-            if(inputs[i] == nullptr)
-            {
-                throw std::runtime_error("Input tensor " + std::to_string(i) + " is null.");
-            }
-        }
-
-        // Use broadcasting implementation which handles both same-shape and broadcasting cases
-        ExecutionPolicy policy;
+        DeviceExecutor policy;
 
         switch(operation)
         {
@@ -69,32 +71,37 @@ public:
         policy.markOutputModified(output);
     }
 
-
 private:
-    static void validateTensorDimensions(const std::vector<const TensorBase<DataType>*>& inputs,
-                                         const TensorBase<DataType>& output)
+    static bool canExecuteOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                   const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
     {
-        if(inputs.empty())
+        using namespace hipdnn_sdk::data_objects;
+        
+        if(attrs == nullptr)
         {
-            throw std::runtime_error("No input tensors provided.");
+            return false;
         }
 
-        const auto& outputDims = output.dims();
-
-        for(size_t i = 0; i < inputs.size(); ++i)
+        if(attrs->in_0_tensor_uid() == 0 || attrs->out_0_tensor_uid() == 0)
         {
-            if(inputs[i] == nullptr)
-            {
-                throw std::runtime_error("Input tensor " + std::to_string(i) + " is null.");
-            }
-
-            const auto& inputDims = inputs[i]->dims();
-            if(inputDims != outputDims)
-            {
-                throw std::runtime_error("Input tensor " + std::to_string(i)
-                                         + " dimensions do not match output tensor dimensions.");
-            }
+            return false;
         }
+
+        // Use the same switch statement logic as pointwiseForward
+        // This is our single source of truth for supported operations
+        switch(operation)
+        {
+        case PointwiseMode::ADD:
+        case PointwiseMode::SUB:
+            // Binary operations require second input
+            return (attrs->in_1_tensor_uid() != 0);
+        default:
+            // Any operation not in pointwiseForward is unsupported
+            return false;
+        }
+        
+        // Note: We don't validate tensor dimensions, data types, or broadcasting compatibility here
+        // because our N-dimensional broadcasting implementation handles these dynamically at runtime
     }
 };
 

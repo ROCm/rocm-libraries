@@ -154,7 +154,7 @@ public:
         };
 
         auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
-            [&](const std::vector<std::size_t>& indices) {
+            [&](const std::vector<int64_t>& indices) {
                 auto g = indices[0];   // group index
                 auto n = indices[1];   // batch index
                 auto k = indices[2];   // output channel within group

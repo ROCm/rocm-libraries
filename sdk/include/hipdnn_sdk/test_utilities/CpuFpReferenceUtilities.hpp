@@ -15,8 +15,6 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
-// Parallel execution utilities for CPU reference implementations
-
 struct JoinableThread : std::thread
 {
     template <typename... Xs>
@@ -35,7 +33,6 @@ struct JoinableThread : std::thread
     }
 };
 
-// Dynamic dimension version of ParallelTensorFunctor
 template <typename F>
 struct ParallelTensorFunctorDynamic
 {
@@ -56,7 +53,6 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        // Calculate strides in the same way as the static version
         _strides.back() = 1;
         for(std::size_t i = _lengths.size() - 1; i > 0; --i)
         {
@@ -65,14 +61,14 @@ struct ParallelTensorFunctorDynamic
         _totalElements = _strides[0] * _lengths[0];
     }
 
-    std::vector<std::size_t> getNdIndices(std::size_t i) const
+    std::vector<int64_t> getNdIndices(std::size_t i) const
     {
-        std::vector<std::size_t> indices(_lengths.size());
+        std::vector<int64_t> indices(_lengths.size());
 
         for(std::size_t idim = 0; idim < _lengths.size(); ++idim)
         {
-            indices[idim] = i / _strides[idim];
-            i -= indices[idim] * _strides[idim];
+            indices[idim] = static_cast<int64_t>(i / _strides[idim]);
+            i -= static_cast<std::size_t>(indices[idim]) * _strides[idim];
         }
 
         return indices;
@@ -105,7 +101,6 @@ struct ParallelTensorFunctorDynamic
     }
 };
 
-// Factory function for dynamic dimension version
 template <typename F>
 static auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimensions)
 {

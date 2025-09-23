@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <numbers>
+#include <cmath>
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::data_objects;
@@ -17,17 +20,20 @@ class CpuReferencePointwiseTemplate : public ::testing::Test
 protected:
     T getTolerance() const
     {
-        if constexpr(std::is_same_v<T, half> || std::is_same_v<T, hip_bfloat16>)
+        if constexpr(std::is_same_v<T, half>)
         {
-            return static_cast<T>(1e-2f);
+            return static_cast<T>(1e-3f);  // Half has better precision than bfloat16
+        }
+        else if constexpr(std::is_same_v<T, hip_bfloat16>)
+        {
+            return static_cast<T>(1e-2f);  // Bfloat16 has lower precision due to fewer mantissa bits
         }
         else
         {
-            return static_cast<T>(1e-4f);
+            return static_cast<T>(1e-5f);
         }
     }
 
-    // Basic same-shape operations
     void testAddOperation()
     {
         Tensor<T> input1({1, 3, 2, 2});
@@ -41,10 +47,12 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        T expected = static_cast<T>(3.0);
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), expected);
-        EXPECT_EQ(output.getHostValue(0, 1, 1, 1), expected);
-        EXPECT_EQ(output.getHostValue(0, 2, 0, 1), expected);
+        Tensor<T> expected({1, 3, 2, 2});
+        expected.fillWithValue(static_cast<T>(3.0));
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testSubtractOperation()
@@ -60,10 +68,12 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
 
-        T expected = static_cast<T>(3.0);
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), expected);
-        EXPECT_EQ(output.getHostValue(0, 1, 1, 1), expected);
-        EXPECT_EQ(output.getHostValue(0, 2, 0, 1), expected);
+        Tensor<T> expected({1, 3, 2, 2});
+        expected.fillWithValue(static_cast<T>(3.0));
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testAddOperationSanityValidation()
@@ -72,34 +82,29 @@ protected:
         Tensor<T> input2({1, 1, 2, 2});
         Tensor<T> output({1, 1, 2, 2});
 
-        // Set known values: [1, 2, 3, 4] + [0.1, 0.2, 0.3, 0.4]
-        input1.setHostValue(static_cast<T>(1.0f), 0, 0, 0, 0);
-        input1.setHostValue(static_cast<T>(2.0f), 0, 0, 0, 1);
-        input1.setHostValue(static_cast<T>(3.0f), 0, 0, 1, 0);
-        input1.setHostValue(static_cast<T>(4.0f), 0, 0, 1, 1);
+        input1.setHostValue(static_cast<T>(std::numbers::pi_v<float>), 0, 0, 0, 0);
+        input1.setHostValue(static_cast<T>(std::numbers::e_v<float>), 0, 0, 0, 1); 
+        input1.setHostValue(static_cast<T>(std::numbers::sqrt2_v<float>), 0, 0, 1, 0);
+        input1.setHostValue(static_cast<T>(std::numbers::phi_v<float>), 0, 0, 1, 1);
 
-        input2.setHostValue(static_cast<T>(0.1f), 0, 0, 0, 0);
-        input2.setHostValue(static_cast<T>(0.2f), 0, 0, 0, 1);
-        input2.setHostValue(static_cast<T>(0.3f), 0, 0, 1, 0);
-        input2.setHostValue(static_cast<T>(0.4f), 0, 0, 1, 1);
+        input2.setHostValue(static_cast<T>(std::numbers::ln2_v<float>), 0, 0, 0, 0);
+        input2.setHostValue(static_cast<T>(std::sin(1.0f)), 0, 0, 0, 1);
+        input2.setHostValue(static_cast<T>(std::cos(1.0f)), 0, 0, 1, 0);
+        input2.setHostValue(static_cast<T>(std::tan(1.0f)), 0, 0, 1, 1);
 
         std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // Expected: [1.1, 2.2, 3.3, 4.4]
+        // Create expected tensor with computed results
+        Tensor<T> expected({1, 1, 2, 2});
+        expected.setHostValue(static_cast<T>(std::numbers::pi_v<float> + std::numbers::ln2_v<float>), 0, 0, 0, 0);  
+        expected.setHostValue(static_cast<T>(std::numbers::e_v<float> + std::sin(1.0f)), 0, 0, 0, 1); 
+        expected.setHostValue(static_cast<T>(std::numbers::sqrt2_v<float> + std::cos(1.0f)), 0, 0, 1, 0);
+        expected.setHostValue(static_cast<T>(std::numbers::phi_v<float> + std::tan(1.0f)), 0, 0, 1, 1);
+
         auto tolerance = getTolerance();
-        EXPECT_NEAR(static_cast<float>(output.getHostValue(0, 0, 0, 0)),
-                    1.1f,
-                    static_cast<float>(tolerance));
-        EXPECT_NEAR(static_cast<float>(output.getHostValue(0, 0, 0, 1)),
-                    2.2f,
-                    static_cast<float>(tolerance));
-        EXPECT_NEAR(static_cast<float>(output.getHostValue(0, 0, 1, 0)),
-                    3.3f,
-                    static_cast<float>(tolerance));
-        EXPECT_NEAR(static_cast<float>(output.getHostValue(0, 0, 1, 1)),
-                    4.4f,
-                    static_cast<float>(tolerance));
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testSubtractOperationSanityValidation()
@@ -108,28 +113,31 @@ protected:
         Tensor<T> input2({1, 1, 2, 2});
         Tensor<T> output({1, 1, 2, 2});
 
-        // Set known values: [5, 4, 3, 2] - [1, 1, 1, 1]
-        input1.setHostValue(static_cast<T>(5.0), 0, 0, 0, 0);
-        input1.setHostValue(static_cast<T>(4.0), 0, 0, 0, 1);
-        input1.setHostValue(static_cast<T>(3.0), 0, 0, 1, 0);
-        input1.setHostValue(static_cast<T>(2.0), 0, 0, 1, 1);
+        input1.setHostValue(static_cast<T>(2.0f * std::numbers::pi_v<float>), 0, 0, 0, 0);
+        input1.setHostValue(static_cast<T>(std::numbers::e_v<float> * std::numbers::e_v<float>), 0, 0, 0, 1);  // e²
+        input1.setHostValue(static_cast<T>(std::sqrt(5.0f)), 0, 0, 1, 0);  // √5
+        input1.setHostValue(static_cast<T>(2.0f), 0, 0, 1, 1);         // log₁₀(100)
 
-        input2.setHostValue(static_cast<T>(1.0), 0, 0, 0, 0);
-        input2.setHostValue(static_cast<T>(1.0), 0, 0, 0, 1);
-        input2.setHostValue(static_cast<T>(1.0), 0, 0, 1, 0);
-        input2.setHostValue(static_cast<T>(1.0), 0, 0, 1, 1);
+        input2.setHostValue(static_cast<T>(std::numbers::pi_v<float> / 2.0f), 0, 0, 0, 0);  // π/2
+        input2.setHostValue(static_cast<T>(std::numbers::e_v<float>), 0, 0, 0, 1);  // e
+        input2.setHostValue(static_cast<T>(std::numbers::sqrt3_v<float>), 0, 0, 1, 0);  // √3
+        input2.setHostValue(static_cast<T>(1.0f), 0, 0, 1, 1);         // log₁₀(10)
 
         std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
 
-        // Expected: [4, 3, 2, 1]
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), static_cast<T>(4.0));
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 1), static_cast<T>(3.0));
-        EXPECT_EQ(output.getHostValue(0, 0, 1, 0), static_cast<T>(2.0));
-        EXPECT_EQ(output.getHostValue(0, 0, 1, 1), static_cast<T>(1.0));
+        // Create expected tensor with computed results
+        Tensor<T> expected({1, 1, 2, 2});
+        expected.setHostValue(static_cast<T>((2.0f * std::numbers::pi_v<float>) - (std::numbers::pi_v<float> / 2.0f)), 0, 0, 0, 0);  // 2π - π/2 = 3π/2
+        expected.setHostValue(static_cast<T>((std::numbers::e_v<float> * std::numbers::e_v<float>) - std::numbers::e_v<float>), 0, 0, 0, 1);  // e² - e
+        expected.setHostValue(static_cast<T>(std::sqrt(5.0f) - std::numbers::sqrt3_v<float>), 0, 0, 1, 0);  // √5 - √3
+        expected.setHostValue(static_cast<T>(2.0f - 1.0f), 0, 0, 1, 1);               // log₁₀(100) - log₁₀(10)
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
-    // Multi-dimensional same-shape operations
     void testAddOperation2D()
     {
         Tensor<T> input1({4, 3});
@@ -143,10 +151,12 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        T expected = static_cast<T>(3.0);
-        EXPECT_EQ(output.getHostValue(0, 0), expected);
-        EXPECT_EQ(output.getHostValue(1, 1), expected);
-        EXPECT_EQ(output.getHostValue(3, 2), expected);
+        Tensor<T> expected({4, 3});
+        expected.fillWithValue(static_cast<T>(3.0));
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testAddOperation3D()
@@ -162,10 +172,12 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        T expected = static_cast<T>(4.0);
-        EXPECT_EQ(output.getHostValue(0, 0, 0), expected);
-        EXPECT_EQ(output.getHostValue(1, 2, 9), expected);
-        EXPECT_EQ(output.getHostValue(0, 1, 5), expected);
+        Tensor<T> expected({2, 3, 10});
+        expected.fillWithValue(static_cast<T>(4.0));
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testSingleElementTensors()
@@ -174,13 +186,18 @@ protected:
         Tensor<T> input2({1, 1, 1, 1});
         Tensor<T> output({1, 1, 1, 1});
 
-        input1.setHostValue(static_cast<T>(5.0), 0, 0, 0, 0);
-        input2.setHostValue(static_cast<T>(3.0), 0, 0, 0, 0);
+        input1.setHostValue(static_cast<T>(std::numbers::e_v<float> * std::numbers::e_v<float>), 0, 0, 0, 0);  // e²
+        input2.setHostValue(static_cast<T>(std::numbers::e_v<float>), 0, 0, 0, 0);  // e
 
         std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
 
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), static_cast<T>(2.0));
+        Tensor<T> expected({1, 1, 1, 1});
+        expected.setHostValue(static_cast<T>((std::numbers::e_v<float> * std::numbers::e_v<float>) - std::numbers::e_v<float>), 0, 0, 0, 0);  // e² - e
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testNumericalPrecision()
@@ -189,19 +206,20 @@ protected:
         Tensor<T> input2({1, 1, 1, 1});
         Tensor<T> output({1, 1, 1, 1});
 
-        // Test with values that should be exactly representable in all types
-        input1.setHostValue(static_cast<T>(0.125), 0, 0, 0, 0); // 1/8 - exactly representable
-        input2.setHostValue(static_cast<T>(0.25), 0, 0, 0, 0); // 1/4 - exactly representable
+        input1.setHostValue(static_cast<T>(0.123456789f), 0, 0, 0, 0); 
+        input2.setHostValue(static_cast<T>(0.987654321f), 0, 0, 0, 0);
 
         std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        T expected = static_cast<T>(0.375); // 3/8 - exactly representable
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), expected);
+        Tensor<T> expected({1, 1, 1, 1});
+        expected.setHostValue(static_cast<T>(0.123456789f + 0.987654321f), 0, 0, 0, 0);
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
-    // Broadcasting test cases
-    // Test case: 1D × 1D: [N] + [N] (no broadcasting needed)
     void testBroadcast1Dx1D()
     {
         Tensor<T> input1({5});
@@ -226,7 +244,6 @@ protected:
         EXPECT_EQ(output.getHostValue(4), static_cast<T>(static_cast<float>(13)));
     }
 
-    // Test case: 2D × 1D: [M,N] + [N] → broadcast to [M,N]
     void testBroadcast2Dx1D()
     {
         Tensor<T> input1({3, 4});  // [M,N] = [3,4]
@@ -259,7 +276,6 @@ protected:
         EXPECT_EQ(output.getHostValue(2, 3), static_cast<T>(static_cast<float>(23 + 400)));  // 23 + 400 = 423
     }
 
-    // Test case: 3D broadcasting
     void testBroadcast3D()
     {
         Tensor<T> input1({2, 3, 4});  // [2,3,4]
@@ -268,7 +284,6 @@ protected:
 
         input1.fillWithValue(static_cast<T>(5.0));
 
-        // Set channel-specific values in input2
         input2.setHostValue(static_cast<T>(1.0), 0, 0, 0); // Channel 0
         input2.setHostValue(static_cast<T>(2.0), 0, 1, 0); // Channel 1
         input2.setHostValue(static_cast<T>(3.0), 0, 2, 0); // Channel 2
@@ -277,7 +292,6 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
 
-        // Verify channel-wise broadcasting
         EXPECT_EQ(output.getHostValue(0, 0, 0), static_cast<T>(4.0)); // 5.0 - 1.0
         EXPECT_EQ(output.getHostValue(1, 1, 3), static_cast<T>(3.0)); // 5.0 - 2.0
         EXPECT_EQ(output.getHostValue(0, 2, 2), static_cast<T>(2.0)); // 5.0 - 3.0
@@ -292,7 +306,6 @@ protected:
 
         input1.fillWithValue(static_cast<T>(1.0));
 
-        // Set channel-specific values in input2
         input2.setHostValue(static_cast<T>(10.0), 0, 0, 0, 0); // Channel 0
         input2.setHostValue(static_cast<T>(20.0), 0, 1, 0, 0); // Channel 1
         input2.setHostValue(static_cast<T>(30.0), 0, 2, 0, 0); // Channel 2
@@ -301,7 +314,6 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // Verify channel-wise broadcasting
         // Channel 0: all should be 1.0 + 10.0 = 11.0
         EXPECT_EQ(output.getHostValue(0, 0, 0, 0), static_cast<T>(11.0));
         EXPECT_EQ(output.getHostValue(0, 0, 1, 1), static_cast<T>(11.0));
@@ -319,11 +331,10 @@ protected:
     // Test case: Complex N-D broadcasting: [2,1,3,1] + [1,2,1,4] → [2,2,3,4]
     void testBroadcastComplexND()
     {
-        Tensor<T> input1({2, 1, 3, 1});  // [2,1,3,1]
-        Tensor<T> input2({1, 2, 1, 4});  // [1,2,1,4]
-        Tensor<T> output({2, 2, 3, 4});  // Output: [2,2,3,4]
+        Tensor<T> input1({2, 1, 3, 1});  
+        Tensor<T> input2({1, 2, 1, 4});  
+        Tensor<T> output({2, 2, 3, 4});  
 
-        // Fill input1 with pattern based on batch and height
         for(int n = 0; n < 2; ++n)
         {
             for(int h = 0; h < 3; ++h)
@@ -332,7 +343,6 @@ protected:
             }
         }
 
-        // Fill input2 with pattern based on channel and width
         for(int c = 0; c < 2; ++c)
         {
             for(int w = 0; w < 4; ++w)
@@ -345,7 +355,6 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // Verify specific positions
         // output[0,0,0,0] = input1[0,0,0,0] + input2[0,0,0,0] = 0 + 0 = 0
         EXPECT_EQ(output.getHostValue(0, 0, 0, 0), static_cast<T>(static_cast<float>(0)));
         
@@ -356,10 +365,8 @@ protected:
         EXPECT_EQ(output.getHostValue(0, 1, 1, 2), static_cast<T>(static_cast<float>(103)));
     }
 
-    // Test case: 5D broadcasting: [N,C,D,H,W] + [1,C,1,1,1] → broadcast to [N,C,D,H,W]
     void testBroadcast5D()
     {
-        // Create 5D tensors with explicit strides (row-major order)
         std::vector<int64_t> dims1 = {2, 3, 2, 2, 2};  // [N,C,D,H,W] = [2,3,2,2,2]
         std::vector<int64_t> strides1 = {24, 8, 4, 2, 1};  // Row-major strides for [2,3,2,2,2]
         Tensor<T> input1(dims1, strides1);
@@ -383,7 +390,6 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // Verify channel-wise broadcasting across all 5 dimensions
         // Channel 0: all should be 2.0 + 10.0 = 12.0
         EXPECT_EQ(output.getHostValue(0, 0, 0, 0, 0), static_cast<T>(12.0));
         EXPECT_EQ(output.getHostValue(0, 0, 1, 1, 1), static_cast<T>(12.0));
@@ -400,7 +406,6 @@ protected:
         EXPECT_EQ(output.getHostValue(1, 2, 0, 1, 1), static_cast<T>(32.0));
     }
 
-    // Error handling tests
     void testErrorHandlingWrongInputCount()
     {
         Tensor<T> input1({1, 3, 2, 2});
@@ -464,7 +469,7 @@ protected:
     void testBroadcastErrorIncompatibleShapes()
     {
         Tensor<T> input1({2, 3, 2, 2});
-        Tensor<T> input2({2, 2, 2, 2}); // Incompatible: channel dimension 3 vs 2
+        Tensor<T> input2({2, 2, 2, 2}); 
         Tensor<T> output({2, 3, 2, 2});
 
         std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
@@ -478,8 +483,7 @@ protected:
     {
         Tensor<T> input1({2, 2, 2, 2});
         Tensor<T> input2({1, 2, 1, 1});
-        Tensor<T> output({2, 3, 2, 2}); // Wrong output shape
-
+        Tensor<T> output({2, 3, 2, 2}); 
         std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
 
         EXPECT_THROW(
@@ -491,7 +495,6 @@ protected:
 using TestTypes = ::testing::Types<float, double, half, hip_bfloat16>;
 TYPED_TEST_SUITE(CpuReferencePointwiseTemplate, TestTypes);
 
-// Basic same-shape operation tests
 TYPED_TEST(CpuReferencePointwiseTemplate, AddOperation)
 {
     this->testAddOperation();
@@ -512,7 +515,6 @@ TYPED_TEST(CpuReferencePointwiseTemplate, SubtractOperationSanityValidation)
     this->testSubtractOperationSanityValidation();
 }
 
-// Multi-dimensional same-shape tests
 TYPED_TEST(CpuReferencePointwiseTemplate, AddOperation2D)
 {
     this->testAddOperation2D();
@@ -533,7 +535,6 @@ TYPED_TEST(CpuReferencePointwiseTemplate, NumericalPrecision)
     this->testNumericalPrecision();
 }
 
-// Broadcasting tests
 TYPED_TEST(CpuReferencePointwiseTemplate, Broadcast1Dx1D)
 {
     this->testBroadcast1Dx1D();
@@ -564,7 +565,6 @@ TYPED_TEST(CpuReferencePointwiseTemplate, Broadcast5D)
     this->testBroadcast5D();
 }
 
-// Error handling tests
 TYPED_TEST(CpuReferencePointwiseTemplate, ErrorHandlingWrongInputCount)
 {
     this->testErrorHandlingWrongInputCount();
