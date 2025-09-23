@@ -12,8 +12,9 @@ Documentation for hipBLAS is available at
 * FORTRAN enabled for windows build and testing
 * Addition reference library fallback options added
 
-Changed
-* Improve build time of clients by removing clients_common.cpp from hipblas-test build
+### Changed
+
+* Improve the build time for clients by removing `clients_common.cpp` from the hipblas-test build.
 
 ## hipBLAS 3.0.0 for ROCm 7.0
 
