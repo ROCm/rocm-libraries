@@ -150,7 +150,7 @@ namespace HypergraphTest
     using myHypergraph = Graph::Hypergraph<TestDimension, TestTransform>;
     using myCalmGraph  = Graph::Hypergraph<TestDimension, TestTransform, false>;
 
-    TEST_CASE("Calm graph find edge", "[kernel-graph]")
+    TEST_CASE("Calm graph find edge", "[hypergraph][kernel-graph]")
     {
         myCalmGraph g;
         auto        n0 = g.addElement(TestUser{});
@@ -174,7 +174,7 @@ namespace HypergraphTest
         CHECK(g.findEdge(n3, n2) == std::nullopt);
     }
 
-    TEST_CASE("Basic Hypergraph", "[kernel-graph]")
+    TEST_CASE("Basic Hypergraph", "[hypergraph][kernel-graph]")
     {
         myHypergraph g;
 
@@ -434,7 +434,7 @@ namespace HypergraphTest
         }
     }
 
-    TEST_CASE("Hypergraph pathing", "[kernel-graph]")
+    TEST_CASE("Hypergraph pathing", "[hypergraph][kernel-graph]")
     {
 
         myHypergraph g;
@@ -480,7 +480,7 @@ namespace HypergraphTest
                      .to<std::vector>());
     }
 
-    TEST_CASE("Bad Hypergraph setup", "[kernel-graph]")
+    TEST_CASE("Bad Hypergraph setup", "[hypergraph][kernel-graph]")
     {
         myHypergraph g;
 
@@ -504,7 +504,7 @@ namespace HypergraphTest
         CHECK_THROWS_AS(g.addElement(TestSubDimension{}, {u0}, {}), FatalError);
     }
 
-    TEST_CASE("Hypergraph sorting and visiting", "[kernel-graph]")
+    TEST_CASE("Hypergraph sorting and visiting", "[hypergraph][kernel-graph]")
     {
         myHypergraph g;
 
@@ -562,7 +562,7 @@ namespace HypergraphTest
         }
     }
 
-    TEST_CASE("Hypergraph delete element", "[kernel-graph]")
+    TEST_CASE("Hypergraph delete element", "[hypergraph][kernel-graph]")
     {
         myHypergraph g;
 
@@ -585,7 +585,7 @@ namespace HypergraphTest
         g.deleteElement<TestForget>(std::vector<int>{sd0, sd1}, std::vector<int>{TestVGPR0});
     }
 
-    TEST_CASE("Hypergraph with parallel edges", "[kernel-graph]")
+    TEST_CASE("Hypergraph with parallel edges", "[hypergraph][kernel-graph]")
     {
         myHypergraph g;
 
@@ -603,7 +603,7 @@ namespace HypergraphTest
         CHECK(parentVec == std::vector<int>({1}));
     }
 
-    TEST_CASE("Follow Hypergraph edges", "[kernel-graph]")
+    TEST_CASE("Follow Hypergraph edges", "[hypergraph][kernel-graph]")
     {
         myHypergraph g;
 
@@ -626,7 +626,7 @@ namespace HypergraphTest
         CHECK(g.followEdges<TestForget>({sd2}) == std::set<int>({sd2}));
     }
 
-    TEST_CASE("Hypergraph with reachable nodes", "[kernel-graph]")
+    TEST_CASE("Hypergraph with reachable nodes", "[hypergraph][kernel-graph]")
     {
         myHypergraph g;
 
@@ -678,7 +678,7 @@ namespace HypergraphTest
               == std::set<int>({u0, u2}));
     }
 
-    TEST_CASE("Edge Ordering in Hypergraph", "[kernel-graph][serialization]")
+    TEST_CASE("Edge Ordering in Hypergraph", "[hypergraph][kernel-graph][serialization]")
     {
         // NOTE: ControlGraph Operations and Edges are used here for their serialization properties
         using pseudoControlGraph = Graph::Hypergraph<KernelGraph::ControlGraph::Operation,
