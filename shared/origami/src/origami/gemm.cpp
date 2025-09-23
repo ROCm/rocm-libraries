@@ -750,6 +750,7 @@ namespace origami
                                 data_type_t     mi_datatype,
                                 size_t          mx_block_size,
                                 int             WGM,
+                                size_t occupancy,
                                 size_t          numActiveCUs,
                                 size_t          splittingFactor,
                                 bool            debug)
@@ -796,6 +797,8 @@ namespace origami
         // 3) Prologue: 2.2× memory latency
         double L_prologue = 1.5 * L_mem; // 1.5 chosen emprically
 
+
+
         // 4) Epilogue: writes from all active CUs with limited bandwidth
         double epilogue_limite = (static_cast<double>(numActiveCUs) / hardware.N_CU);
         double limited_mem1 = hardware.mem1_perf_ratio * epilogue_limite;
@@ -806,7 +809,12 @@ namespace origami
         double L_epilogue = (static_cast<double>(numActiveCUs)
                                 * MT_M * MT_N * safe_ceil_div(element_size_out, 8))
                                 / limited_mem1;
+        //One compute iteration happens in the prologue
         L_epilogue += L_compute;
+
+        //Epilogue and Prologue overhead are reduced with higher occupancy kernels.
+        L_prologue = L_prologue * pow(0.9,occupancy); //Factor chosen empirically
+        L_epilogue = L_epilogue * pow(0.9,occupancy); //Factor chosen empirically
         // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N tiles to coherent memory
             if(splittingFactor > 1)
             {
@@ -832,7 +840,7 @@ namespace origami
                 //                                   * n_partials);
 
                 double L_reduce = partial_readwrite_bytes / (mem_bw_occ_limited);
-                L_epilogue += L_reduce * 1;
+                L_epilogue += L_reduce;
             }
         // 4'') tf32 emu has some more overhead
         double L_cvt    = 0;
@@ -912,6 +920,7 @@ namespace origami
                                 data_type_t     mi_datatype,
                                 size_t          mx_block_size,
                                 int             WGM,
+                                size_t occupancy,
                                 size_t          numActiveCUs,
                                 size_t          splittingFactor,
                                 bool            debug)
@@ -936,6 +945,7 @@ namespace origami
                                                 mi_datatype,
                                                 mx_block_size,
                                                 WGM,
+                                                occupancy,
                                                 numActiveCUs,
                                                 splittingFactor,
                                                 debug);
@@ -1055,6 +1065,7 @@ namespace origami
                                                 mi_datatype,
                                                 mx_block_size,
                                                 WGM,
+                                                occupancy,
                                                 numActiveCUs,
                                                 splittingFactor,
                                                 debug);
@@ -1236,6 +1247,8 @@ namespace origami
 
 
 
+
+
         }
 
         if(heuristics && largen_block_panel)
@@ -1313,7 +1326,9 @@ namespace origami
             {
                 total_latency = total_latency * 4;
             }
+            
         }
+
 
         if(heuristics && !tf32_emu && !largek_panel_panel && !largen_block_panel && !mixed_medium_gemms)
         {

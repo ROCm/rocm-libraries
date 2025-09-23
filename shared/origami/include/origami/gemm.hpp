@@ -142,6 +142,7 @@ namespace origami
                                     data_type_t     mi_datatype,
                                     size_t          mx_block_size,
                                     int             WGM,
+                                    size_t occupancy,
                                     size_t          numActiveCUs,
                                     size_t          splittingFactor,
                                     bool            debug);
@@ -167,6 +168,7 @@ namespace origami
                                     data_type_t     mi_datatype,
                                     size_t          mx_block_size,
                                     int             WGM,
+                                    size_t occupancy,
                                     size_t          numActiveCUs,
                                     size_t          splittingFactor,
                                     bool            debug);
