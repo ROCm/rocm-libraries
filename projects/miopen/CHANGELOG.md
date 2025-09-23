@@ -4,17 +4,23 @@
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 ## MIOpen 3.5.1 for ROCm 7.1.0
 ### Added
-* Kernel DBs moved from Git LFS to DVC (Data Version Control)
-* Added a new trust verify find mode
-* Ported Op4dTensorLite kernel from OpenCL to HIP
-* Implemented a generic HIP kernel for backwards layer normalization
+
+* Added a new trust verify find mode.
+* Ported Op4dTensorLite kernel from OpenCL to HIP.
+* Implemented a generic HIP kernel for backwards layer normalization.
+
+### Changed
+
+* Kernel DBs moved from Git LFS to DVC (Data Version Control).
 
 ### Optimized
-* [Conv] Enabled Composable Kernel (CK) implicit gemms on gfx950
+
+* [Conv] Enabled Composable Kernel (CK) implicit gemms on gfx950.
 
 ### Resolved issues
-* [BatchNorm] Fixed a bug for NHWC layout when a variant was not applicable
-* Fixed a bug that caused a zero-size LDS array to be defined on Navi
+
+* [BatchNorm] Fixed a bug for the NHWC layout when a variant was not applicable.
+* Fixed a bug that caused a zero-size LDS array to be defined on Navi.
 
 ## MIOpen 3.5.0 for ROCm 7.0.0
 ### Added
