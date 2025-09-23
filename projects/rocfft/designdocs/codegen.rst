@@ -308,7 +308,7 @@ tiling.  Different twiddle table strategies should extend the
 ``multiply`` methods.
 
 Twiddle tables may also require additional templates and arguments.
-See :ref:`Stockham tiling implementation`.
+See the Stockham tiling implementation section.
 
 Copyright and disclaimer
 ========================

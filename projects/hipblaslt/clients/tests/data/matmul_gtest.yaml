@@ -860,6 +860,33 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
+- name: matmul_stride_lt_ld
+  category: pre_checkin
+  function:
+    matmul: *xf32_precision
+  M: 41
+  N: 128
+  K: 6
+  lda: 106266
+  ldb: 2267008
+  ldc: 41
+  ldd: 41
+  stride_a: 6
+  stride_b: 128
+  stride_c: 5248
+  stride_d: 5248
+  batch_count: 17711
+  transA: T
+  transB: T
+  alpha: 1
+  beta: 2.0
+  bias_vector: 1
+  bias_type: f32_r
+  unit_check: 0
+  iters: 1
+  cold_iters: 1
+  gpu_arch: '950'
+
 - name: matmul_swizzleA
   category: pre_checkin
   function:
