@@ -199,7 +199,9 @@ namespace TensileLite
                                                               std::get<5>(tile),
                                                               std::get<6>(tile),
                                                               std::get<7>(tile),
-                                                              std::get<8>(tile)
+                                                              std::get<8>(tile),
+                                                              std::get<9>(tile),
+                                                              std::get<10>(tile)
                                                             ));
                 auto smapiter = solutionmap.find(mapiter->second);
                 if(mapiter != tile_map.end() && smapiter != solutionmap.end())
