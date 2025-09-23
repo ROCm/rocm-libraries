@@ -3,7 +3,7 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## (Unreleased) rocBLAS 5.1.0
+## rocBLAS 5.1.0 for ROCm 7.1
 
 ### Added
 * Sample for clients using OpenMP threads calling rocBLAS functions.
