@@ -171,17 +171,19 @@ public:
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
-    CUB_DEPRECATED_BECAUSE("CUB has superseded this interface in favor of the ArgMin interface "
-                           "that takes two separate "
-                           "iterators: one iterator to which the extremum is written and another "
-                           "iterator to which the "
-                           "index of the found extremum is written. ")
-    HIPCUB_RUNTIME_FUNCTION static hipError_t ArgMin(void*           d_temp_storage,
-                                                     size_t&         temp_storage_bytes,
-                                                     InputIteratorT  d_in,
-                                                     OutputIteratorT d_out,
-                                                     NumItemsT       num_items,
-                                                     hipStream_t     stream = 0)
+    HIPCUB_DEPRECATED_BECAUSE(
+        "CUB has superseded this interface in favor of the ArgMin interface "
+        "that takes two separate "
+        "iterators: one iterator to which the extremum is written and another "
+        "iterator to which the "
+        "index of the found extremum is written. ")
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMin(void*           d_temp_storage,
+                             size_t&         temp_storage_bytes,
+                             InputIteratorT  d_in,
+                             OutputIteratorT d_out,
+                             NumItemsT       num_items,
+                             hipStream_t     stream = 0)
     {
         _CCCL_SUPPRESS_DEPRECATED_PUSH
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMin(d_temp_storage,
@@ -257,17 +259,19 @@ public:
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
-    CUB_DEPRECATED_BECAUSE("CUB has superseded this interface in favor of the ArgMax interface "
-                           "that takes two separate "
-                           "iterators: one iterator to which the extremum is written and another "
-                           "iterator to which the "
-                           "index of the found extremum is written. ")
-    HIPCUB_RUNTIME_FUNCTION static hipError_t ArgMax(void*           d_temp_storage,
-                                                     size_t&         temp_storage_bytes,
-                                                     InputIteratorT  d_in,
-                                                     OutputIteratorT d_out,
-                                                     NumItemsT       num_items,
-                                                     hipStream_t     stream = 0)
+    HIPCUB_DEPRECATED_BECAUSE(
+        "CUB has superseded this interface in favor of the ArgMax interface "
+        "that takes two separate "
+        "iterators: one iterator to which the extremum is written and another "
+        "iterator to which the "
+        "index of the found extremum is written. ")
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMax(void*           d_temp_storage,
+                             size_t&         temp_storage_bytes,
+                             InputIteratorT  d_in,
+                             OutputIteratorT d_out,
+                             NumItemsT       num_items,
+                             hipStream_t     stream = 0)
     {
         _CCCL_SUPPRESS_DEPRECATED_PUSH
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMax(d_temp_storage,
