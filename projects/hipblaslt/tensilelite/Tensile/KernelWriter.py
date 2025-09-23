@@ -3114,6 +3114,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       globalReadMode1st = 3 if tensorParameters1st["isSwizzled"] else globalReadMode1st
       globalReadMode2nd = 3 if tensorParameters2nd["isSwizzled"] else globalReadMode2nd
 
+      # Use mode 3 for ss_bss type
+      if tensorParameters1st["bpeGR"] == 4 and tensorParameters1st["bpeDS"] == 2:
+        globalReadMode1st = 3
+      if tensorParameters2nd["bpeGR"] == 4 and tensorParameters2nd["bpeDS"] == 2:
+        globalReadMode2nd = 3
+
       if kernel["DirectToLdsA"] and kernel["NonDTLTailLoopA"]:
         if tc1 == 'A':
           globalReadMode1st = 2
@@ -4777,15 +4783,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["StreamK"]:
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
+      self.defineSgpr("MagicNumberItersPerTile", 1)
+      self.defineSgpr("MagicShiftItersPerTile", 1)
       self.defineSgpr("TotalIters", 1)
       self.defineSgpr("SKItersPerWG", 1)
-      self.states.numSgprStreamK += 3
+      self.states.numSgprStreamK += 5
       if kernel["StreamK"] >= 2: # Two-tile SK
         self.defineSgpr("skGrid", 1)
         self.defineSgpr("skTiles", 1)
-        self.defineSgpr("skExtraIters", 1)
-        # self.defineSgpr("dpTilesPerWG", 1, kernarg=True)
-        self.states.numSgprStreamK += 3
+        self.states.numSgprStreamK += 2
 
     if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("LocalWriteAddrA", 1)
