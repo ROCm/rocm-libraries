@@ -39,13 +39,23 @@ from rrperf.utils import sjoin
 
 
 def generate_kernels(
-    generator, architecture: str, build_dir: Path, work_dir: Path, env: Dict[str, str]
+    generator,
+    architecture: str,
+    build_dir: Path,
+    work_dir: Path,
+    env: Dict[str, str],
+    id_filter: list[str],
 ) -> bool:
 
     already_run = set()
     failed = []
 
     for i, problem in enumerate(generator):
+        if id_filter is not None and not any(
+            problem.id.startswith(filt) for filt in id_filter
+        ):
+            continue
+
         if problem in already_run:
             continue
 
@@ -94,6 +104,7 @@ def generate(
     suite: str = None,
     rundir: str = None,
     build_dir: str = None,
+    id_filter: list[str] = None,
     **kwargs,
 ):
     """Generate kernels!"""
@@ -123,7 +134,9 @@ def generate(
     except Exception:
         git_commit.write_text("NO_COMMIT\n")
 
-    success = generate_kernels(generator, architecture, build_dir, run_dir, env)
+    success = generate_kernels(
+        generator, architecture, build_dir, run_dir, env, id_filter
+    )
 
     if not success:
         raise RuntimeError("Some jobs failed.")
@@ -133,6 +146,7 @@ def get_args(parser: argparse.ArgumentParser):
     common_args = [
         rrperf.args.rundir,
         rrperf.args.suite,
+        rrperf.args.id_filter,
     ]
     for arg in common_args:
         arg(parser)
