@@ -54,13 +54,6 @@ function( rocblas_client_library_settings lib_target_ )
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/common>
   )
 
-  if(BUILD_WITH_HIPBLASLT)
-    target_include_directories( ${lib_target_}
-      SYSTEM BEFORE PRIVATE
-        $<BUILD_INTERFACE:${HIPBLASLT_INCLUDE_DIR}>
-    )
-  endif()
-
   target_compile_definitions( ${lib_target_} PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERNAL_API ROCBLAS_NO_DEPRECATED_WARNINGS )
   target_compile_definitions( ${lib_target_} PRIVATE ${TENSILE_DEFINES} ${HIPBLASLT_DEFINES} GOOGLE_TEST )
   # GOOGLE_TEST left off for reuse of this function by by gemm tuner
@@ -169,7 +162,8 @@ target_compile_definitions( rocblas_clients_common PRIVATE ROCBLAS_REFERENCE_LIB
 
 
 # target is not linked as OBJECT library but we want any interface flags from dependencies, e.g. COMMON_LINK_LIBS may bring OpenMP
-target_link_libraries( rocblas_clients_common roc::rocblas hip::host hip::device $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
+target_link_libraries( rocblas_clients_common PUBLIC roc::rocblas hip::host hip::device $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
+if(BUILD_WITH_HIPBLASLT)
+    target_link_libraries( rocblas_clients_common PRIVATE roc::hipblaslt )
+endif()
 target_link_libraries( rocblas_clients_testing_common roc::rocblas hip::host hip::device ${BLAS_LIBRARY} $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
-
-

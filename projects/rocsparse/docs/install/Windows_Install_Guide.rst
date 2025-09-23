@@ -27,7 +27,7 @@ The simplest way to add rocSPARSE to your code is to use CMake.
 Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.
 
 .. note::
-   
+
    You must use quotes because the path contains a space.
 
 .. code-block:: shell
@@ -43,7 +43,7 @@ In your ``CMakeLists.txt`` file, use these lines:
 
 After rocSPARSE is installed, it can be used just like any other library with a C API.
 To call rocSPARSE, the ``rocsparse.h`` header file must be included in the user code.
-This means the rocSPARSE  import library and dynamic link library respectively become link-time and run-time dependencies 
+This means the rocSPARSE  import library and dynamic link library respectively become link-time and run-time dependencies
 for the user application.
 
 After the installation, you can find ``rocsparse.h`` in the HIP SDK ``\\include\\rocsparse``
@@ -129,7 +129,7 @@ longer but is recommended for those working with a large number of libraries.
 
 .. note::
 
-   To build ROCm 6.4.2 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   To build ROCm 6.4.3 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Add the SDK tools to your path with an entry like the following:

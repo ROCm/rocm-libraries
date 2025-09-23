@@ -105,6 +105,7 @@ set(rocsparse_source
   src/level2/rocsparse_csrmv_template_rowsplit.cpp
   src/level2/rocsparse_csrmv_template_adaptive.cpp
   src/level2/rocsparse_csrmv_template_lrb.cpp
+  src/level2/rocsparse_csrmv_template_nnzsplit.cpp
   src/level2/rocsparse_csrmv_impl.cpp
   src/level2/rocsparse_csrmv.cpp
   src/level2/rocsparse_csrmv_info.cpp
@@ -155,7 +156,9 @@ set(rocsparse_source
   src/level3/rocsparse_bsrmm_template_large_ext.cpp
   src/level3/rocsparse_bsrmm_template_general.cpp
   src/level3/rocsparse_bsrmm_template_bsralg.cpp
+  src/level3/rocsparse_bsrmm_impl.cpp
   src/level3/rocsparse_bsrmm.cpp
+  src/level3/rocsparse_bellmm_impl.cpp
   src/level3/rocsparse_bellmm.cpp
   src/level3/rocsparse_bellmm_template_general.cpp
   # csrmm row split
@@ -342,12 +345,21 @@ set(rocsparse_source
   src/level3/rocsparse_csrmm_template_row_split.cpp
   src/level3/rocsparse_csrmm_template_nnz_split.cpp
   src/level3/rocsparse_csrmm_template_merge.cpp
+  src/level3/rocsparse_csrmm_buffer_size_impl.cpp
+  src/level3/rocsparse_csrmm_analysis_impl.cpp
+  src/level3/rocsparse_csrmm_impl.cpp
   src/level3/rocsparse_csrmm_buffer_size.cpp
   src/level3/rocsparse_csrmm_analysis.cpp
   src/level3/rocsparse_csrmm.cpp
+  src/level3/rocsparse_cscmm_impl.cpp
+  src/level3/rocsparse_cscmm_buffer_size.cpp
+  src/level3/rocsparse_cscmm_analysis.cpp
   src/level3/rocsparse_cscmm.cpp
   src/level3/rocsparse_coomm_buffer_size.cpp
   src/level3/rocsparse_coomm_analysis.cpp
+  src/level3/rocsparse_coomm_buffer_size_impl.cpp
+  src/level3/rocsparse_coomm_analysis_impl.cpp
+  src/level3/rocsparse_coomm_impl.cpp
   src/level3/rocsparse_coomm.cpp
   src/level3/rocsparse_coomm_template_atomic.cpp
   src/level3/rocsparse_coomm_template_segmented.cpp

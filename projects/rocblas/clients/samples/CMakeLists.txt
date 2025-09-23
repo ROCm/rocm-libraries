@@ -71,7 +71,7 @@ set( sample_list_L3 rocblas-example-sgemm rocblas-example-sgemm-strided-batched 
 # device includes
 set( sample_list_hip_device ${sample_list_base} ${sample_list_tensile} ${sample_list_L3} )
 
-if ( (TARGET OpenMP::OpenMP_CXX) OR (TARGET OpenMP::omp) ) 
+if ( (TARGET OpenMP::OpenMP_CXX) OR (TARGET OpenMP::omp) )
   add_executable( rocblas-example-openmp example_openmp.cpp )
   target_link_libraries( rocblas-example-openmp PRIVATE ${COMMON_LINK_LIBS} )
   apply_omp_settings( rocblas-example-openmp )

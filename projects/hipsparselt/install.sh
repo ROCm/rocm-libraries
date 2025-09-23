@@ -679,7 +679,7 @@ pushd .
   if [[ "${tensile_no_lazy_library_loading}" == true ]]; then
     tensile_opt="${tensile_opt} -DTensile_NO_LAZY_LIBRARY_LOADING=ON"
   fi
-  
+
   if [[ "${disable_hipsparselt_marker}" == true ]]; then
     tensile_opt="${tensile_opt} -DHIPSPARSELT_ENABLE_MARKER=OFF"
   fi

@@ -154,6 +154,7 @@ else()
 endif()
 if(CODE_COVERAGE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+    add_definitions(-DCODE_COVERAGE_ENABLED)
 endif()
 
 if (CMAKE_CXX_STANDARD EQUAL 14)
@@ -212,7 +213,7 @@ if (BUILD_BENCHMARK)
 endif()
 
 # Package (make package)
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 if( HIP_RUNTIME_LOWER STREQUAL "rocclr" )
