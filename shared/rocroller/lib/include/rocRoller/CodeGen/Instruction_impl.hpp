@@ -615,9 +615,6 @@ namespace rocRoller
         AssertFatal(m_lockOp == Scheduling::LockOperation::None,
                     "An instruction can only lock or unlock once.");
 
-        // AssertFatal(dependency != Scheduling::Dependency::Count,
-        //             "Can not create lock instruction with Unlock or Count dependency");
-
         m_lockOp     = Scheduling::LockOperation::Lock;
         m_dependency = dependency;
         addComment(std::move(comment));
