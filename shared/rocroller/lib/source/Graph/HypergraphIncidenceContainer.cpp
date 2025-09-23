@@ -26,12 +26,54 @@
 
 #include <iostream>
 #include <numeric>
+#include <ranges>
 
 #include <rocRoller/Graph/HypergraphIncidenceContainer.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller::Graph
 {
+    HypergraphIncidenceContainer::HypergraphIncidenceContainer(
+        std::vector<HypergraphIncidence> const& incidences)
+    {
+        for(auto const& incidence : incidences)
+        {
+            if(!m_incidencesBySrc.contains(incidence.src))
+            {
+                int                              src = incidence.src;
+                std::vector<HypergraphIncidence> filtered;
+                std::ranges::copy_if(incidences,
+                                     std::back_inserter(filtered),
+                                     [src](auto const& i) { return i.src == src; });
+                std::ranges::sort(filtered, {}, &HypergraphIncidence::order);
+
+                m_incidencesBySrc[src] = std::vector<int>{};
+                m_incidencesBySrc[src].reserve(filtered.size());
+                std::transform(filtered.begin(),
+                               filtered.end(),
+                               std::back_inserter(m_incidencesBySrc[src]),
+                               [](auto const& i) { return i.dst; });
+            }
+
+            if(!m_incidencesByDst.contains(incidence.dst))
+            {
+                int                              dst = incidence.dst;
+                std::vector<HypergraphIncidence> filtered;
+                std::ranges::copy_if(incidences,
+                                     std::back_inserter(filtered),
+                                     [dst](auto const& i) { return i.dst == dst; });
+                std::ranges::sort(filtered, {}, &HypergraphIncidence::order);
+
+                m_incidencesByDst[dst] = std::vector<int>{};
+                m_incidencesByDst[dst].reserve(filtered.size());
+                std::transform(filtered.begin(),
+                               filtered.end(),
+                               std::back_inserter(m_incidencesByDst[dst]),
+                               [](auto const& i) { return i.src; });
+            }
+        }
+    }
+
     size_t HypergraphIncidenceContainer::size() const
     {
         return std::accumulate(
@@ -81,16 +123,32 @@ namespace rocRoller::Graph
         return 0;
     }
 
-    Generator<HypergraphIncidence> HypergraphIncidenceContainer::getAllIncidences() const
+    std::vector<HypergraphIncidence> HypergraphIncidenceContainer::getAllIncidences() const
     {
-        for(auto const& connections : m_incidencesBySrc)
+        std::vector<HypergraphIncidence> rv;
+        rv.reserve(this->size());
+        for(auto const& connection : m_incidencesBySrc)
         {
-            for(int dst : connections.second)
+            auto const& dsts = connection.second;
+            for(auto it = dsts.begin(); it != dsts.end(); it++)
             {
-                HypergraphIncidence incidence{.src = connections.first, .dst = dst};
-                co_yield incidence;
+                rv.push_back(HypergraphIncidence{
+                    .src   = connection.first,
+                    .dst   = *it,
+                    .order = static_cast<int>(std::distance(dsts.begin(), it))});
             }
         }
+
+        // Incidence ordering may be higher when assesed from other direction
+        for(auto& incidence : rv)
+        {
+            auto const& srcs = m_incidencesByDst.at(incidence.dst);
+            auto        it   = std::find(srcs.begin(), srcs.end(), incidence.src);
+            AssertFatal(it != srcs.end(), "Mismatched internal incendence storage");
+            incidence.order
+                = std::max(incidence.order, static_cast<int>(std::distance(srcs.begin(), it)));
+        }
+        return rv;
     }
 
     void HypergraphIncidenceContainer::accountForId(int id)

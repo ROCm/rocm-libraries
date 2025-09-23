@@ -30,7 +30,6 @@
 #include <vector>
 
 #include <rocRoller/Utilities/Concepts.hpp>
-#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {
@@ -40,11 +39,14 @@ namespace rocRoller
         {
             int src;
             int dst;
+            int order;
         };
 
         class HypergraphIncidenceContainer
         {
         public:
+            HypergraphIncidenceContainer(std::vector<HypergraphIncidence> const& incidences = {});
+
             /**
              * @brief Add incidences to container. Incidences indicate a connection between elements of a graph.
              * 
@@ -106,9 +108,9 @@ namespace rocRoller
             /**
              * @brief Get all incidences in container, sorted by sources
              * 
-             * @return Generator<HypergraphIncidence> Yields a series of HypergraphIncidence
+             * @return vector<HypergraphIncidence> A series of HypergraphIncidence
              */
-            Generator<HypergraphIncidence> getAllIncidences() const;
+            std::vector<HypergraphIncidence> getAllIncidences() const;
 
             std::string toDOTSection(std::string const& prefix = "") const;
 

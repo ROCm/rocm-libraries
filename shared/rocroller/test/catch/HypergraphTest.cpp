@@ -38,6 +38,9 @@
 #include <common/SourceMatcher.hpp>
 
 #include <rocRoller/Graph/Hypergraph.hpp>
+#include <rocRoller/Serialization/ControlGraph.hpp>
+#include <rocRoller/Serialization/Hypergraph.hpp>
+#include <rocRoller/Serialization/YAML.hpp>
 
 namespace HypergraphTest
 {
@@ -675,4 +678,39 @@ namespace HypergraphTest
               == std::set<int>({u0, u2}));
     }
 
+    TEST_CASE("Edge Ordering in Hypergraph", "[kernel-graph][serialization]")
+    {
+        // NOTE: ControlGraph Operations and Edges are used here for their serialization properties
+        using pseudoControlGraph = Graph::Hypergraph<KernelGraph::ControlGraph::Operation,
+                                                     KernelGraph::ControlGraph::ControlEdge,
+                                                     true>;
+        pseudoControlGraph g;
+
+        auto u0  = g.addElement(KernelGraph::ControlGraph::SetCoordinate{});
+        auto op0 = g.addElement(KernelGraph::ControlGraph::DoWhileOp{});
+        auto op1 = g.addElement(KernelGraph::ControlGraph::ConditionalOp{});
+        auto op2 = g.addElement(KernelGraph::ControlGraph::AssertOp{});
+        auto op4 = g.addElement(KernelGraph::ControlGraph::Barrier{});
+
+        auto body0 = g.addElement(KernelGraph::ControlGraph::Body{}, {u0}, {op0, op2, op1});
+        auto body1 = g.addElement(KernelGraph::ControlGraph::Body{}, {op0, op2, op1}, {op4});
+
+        SECTION("Elements are sorted in the order they were added")
+        {
+            CHECK(g.getNeighbours<Graph::Direction::Downstream>(body0)
+                  == std::vector<int>{op0, op2, op1});
+            CHECK(g.getNeighbours<Graph::Direction::Upstream>(body1)
+                  == std::vector<int>{op0, op2, op1});
+        }
+
+        SECTION("Serialization preserves ordering")
+        {
+            auto yaml          = Serialization::toYAML(g);
+            auto gDeserialized = Serialization::fromYAML<pseudoControlGraph>(yaml);
+            CHECK(gDeserialized.getNeighbours<Graph::Direction::Downstream>(body0)
+                  == std::vector<int>{op0, op2, op1});
+            CHECK(gDeserialized.getNeighbours<Graph::Direction::Upstream>(body1)
+                  == std::vector<int>{op0, op2, op1});
+        }
+    }
 }

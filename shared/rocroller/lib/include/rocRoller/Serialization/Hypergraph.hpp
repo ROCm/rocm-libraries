@@ -48,6 +48,7 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "src", inc.src);
                 iot::mapRequired(io, "dst", inc.dst);
+                iot::mapRequired(io, "order", inc.order);
             }
 
             static void mapping(IO& io, typename Graph::HypergraphIncidence& inc, EmptyContext&)
@@ -124,22 +125,18 @@ namespace rocRoller
                         graph.m_elements[entry.id] = entry.value;
                 }
 
-                std::vector<Graph::HypergraphIncidence> incidence;
+                std::vector<Graph::HypergraphIncidence> incidences;
 
                 if(iot::outputting(io))
                 {
-                    incidence = graph.m_incidences.getAllIncidences().template to<std::vector>();
+                    incidences = graph.m_incidences.getAllIncidences();
                 }
 
-                iot::mapRequired(io, "incidence", incidence);
+                iot::mapRequired(io, "incidences", incidences);
 
                 if(!iot::outputting(io))
                 {
-                    for(auto& i : incidence)
-                    {
-                        graph.m_incidences.addIncidences(
-                            i.src, std::initializer_list<int>{}, std::initializer_list<int>{i.dst});
-                    }
+                    graph.m_incidences = Graph::HypergraphIncidenceContainer(incidences);
                 }
             }
 
