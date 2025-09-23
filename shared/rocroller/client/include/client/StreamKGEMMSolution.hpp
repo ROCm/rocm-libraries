@@ -84,6 +84,7 @@ namespace rocRoller
                     params->loopOverOutputTilesDimensions = {0, 1};
                     params->streamK                       = true;
                     params->streamKTwoTile                = solutionParams.streamKTwoTile;
+                    params->streamKTwoTileDPFirst         = solutionParams.streamKTwoTileDPFirst;
 
                     return params;
                 }

@@ -130,6 +130,8 @@ namespace rocRoller
                     if(streamKTwoTile)
                     {
                         rv << "2T";
+                        if(streamKTwoTileDPFirst)
+                            rv << "DPFirst";
                     }
                 }
 
@@ -183,7 +185,8 @@ namespace rocRoller
                 s << "Arch:      " << x.architecture.toString() << std::endl;
                 if(x.streamK)
                 {
-                    s << "Algorithm: StreamK twoTile:" << x.streamKTwoTile << std::endl;
+                    s << "Algorithm: StreamK twoTile:" << x.streamKTwoTile
+                      << "(DPFirst:" << x.streamKTwoTileDPFirst << ")" << std::endl;
                 }
                 else
                 {

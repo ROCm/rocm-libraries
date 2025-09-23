@@ -134,7 +134,15 @@ namespace rocRoller
         bool prefetchMixMemOps = false;
 
         bool streamK        = false;
-        bool streamKTwoTile = false;
+        // TODO Add StreamKMode enum? e.g.
+        // enum class StreamKMode {
+        //     Default,
+        //     TwoTile,
+        //     TwoTileDPFirst,
+        // };
+        // StreamKMode streamKMode = StreamKMode::Default;
+        bool streamKTwoTile        = false;
+        bool streamKTwoTileDPFirst = false;
 
         std::vector<int>  loopOverOutputTilesDimensions    = {};
         std::string       loopOverOutputTilesTopLoop       = XLOOP;

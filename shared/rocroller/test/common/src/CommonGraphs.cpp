@@ -435,6 +435,7 @@ namespace rocRollerTest::Graphs
             params->loopOverOutputTilesDimensions = {0, 1};
             params->streamK                       = true;
             params->streamKTwoTile                = m_problem.streamKTwoTile;
+            params->streamKTwoTileDPFirst         = m_problem.streamKTwoTileDPFirst;
         }
 
         return params;

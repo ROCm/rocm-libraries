@@ -87,9 +87,10 @@ struct GEMMProblem
 
     bool packMultipleElementsInto1VGPR = true;
 
-    bool loopOverTiles  = false;
-    bool streamK        = false;
-    bool streamKTwoTile = false;
+    bool loopOverTiles         = false;
+    bool streamK               = false;
+    bool streamKTwoTile        = false;
+    bool streamKTwoTileDPFirst = false;
 
     bool splitStoreTileIntoWaveBlocks = false;
 
