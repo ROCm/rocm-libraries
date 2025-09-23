@@ -64,8 +64,6 @@ namespace rocRoller
         msg << ShowValue(prefetchMixMemOps);
 
         msg << ShowValue(streamK);
-        msg << ShowValue(streamKTwoTile);
-        msg << ShowValue(streamKTwoTileDPFirst);
 
         msg << "loopOverOutputTilesDimensions: ";
         streamJoin(msg, loopOverOutputTilesDimensions, ", ");
@@ -350,13 +348,13 @@ namespace rocRoller
 
         // TODO: simplify the condition by making ConstantPropagation and
         // Streamk work simultaneously
-        if(!m_commandParameters->streamK)
+        if(!m_commandParameters->streamK.enabled)
         {
             transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
         }
 
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
-        if(m_commandParameters->streamK)
+        if(m_commandParameters->streamK.enabled)
         {
             Expression::ExpressionPtr numWGsExpr;
             {

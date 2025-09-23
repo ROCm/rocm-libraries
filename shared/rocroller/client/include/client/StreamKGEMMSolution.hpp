@@ -82,9 +82,13 @@ namespace rocRoller
                         = DataParallelGEMMSolution::makeCommandParameters(command, solutionParams);
 
                     params->loopOverOutputTilesDimensions = {0, 1};
-                    params->streamK                       = true;
-                    params->streamKTwoTile                = solutionParams.streamKTwoTile;
-                    params->streamKTwoTileDPFirst         = solutionParams.streamKTwoTileDPFirst;
+
+                    StreamKMode streamKMode = StreamKMode::Default;
+                    if(solutionParams.streamKTwoTileDPFirst)
+                        streamKMode = StreamKMode::TwoTileDPFirst;
+                    else if(solutionParams.streamKTwoTile)
+                        streamKMode = StreamKMode::TwoTile;
+                    params->streamK = {true, streamKMode};
 
                     return params;
                 }

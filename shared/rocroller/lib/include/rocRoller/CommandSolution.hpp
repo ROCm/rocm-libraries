@@ -40,6 +40,7 @@
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/StreamK_detail.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
@@ -133,16 +134,7 @@ namespace rocRoller
         int  prefetchLDSFactor = 0;
         bool prefetchMixMemOps = false;
 
-        bool streamK        = false;
-        // TODO Add StreamKMode enum? e.g.
-        // enum class StreamKMode {
-        //     Default,
-        //     TwoTile,
-        //     TwoTileDPFirst,
-        // };
-        // StreamKMode streamKMode = StreamKMode::Default;
-        bool streamKTwoTile        = false;
-        bool streamKTwoTileDPFirst = false;
+        StreamKConfig streamK{false};
 
         std::vector<int>  loopOverOutputTilesDimensions    = {};
         std::string       loopOverOutputTilesTopLoop       = XLOOP;

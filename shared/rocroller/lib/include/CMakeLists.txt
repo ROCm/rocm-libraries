@@ -34,6 +34,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ReplaceKernelArgs.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/StreamK_detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor_impl.hpp"
 

@@ -107,7 +107,7 @@ namespace GEMMDriverTest
                 numWorkgroupX = M * N / gemm.macM / gemm.macN / 2;
                 numWorkgroupY = 1;
             }
-            else if(gemm.streamK)
+            else if(gemm.streamK.enabled)
             {
                 numWorkgroupX = gemm.numWGs;
                 numWorkgroupY = 1;
@@ -253,7 +253,7 @@ namespace GEMMDriverTest
                 params->loopOverOutputTilesIteratedTiles = 2;
             }
 
-            if(gemm.streamK)
+            if(gemm.streamK.enabled)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
 
@@ -263,8 +263,7 @@ namespace GEMMDriverTest
                     "with numWorkgroupY == 1");
 
                 params->loopOverOutputTilesDimensions = {0, 1};
-                params->streamK                       = true;
-                params->streamKTwoTile                = gemm.streamKTwoTile;
+                params->streamK = gemm.streamK;
             }
 
             auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
@@ -326,7 +325,7 @@ namespace GEMMDriverTest
             commandArgs.setArgument(
                 tagScalarReluAlpha, ArgumentType::Value, static_cast<T>(reluAlpha));
             // Create scratch space
-            if(gemm.streamK)
+            if(gemm.streamK.enabled)
             {
                 commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numWGs);
             }

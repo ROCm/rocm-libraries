@@ -222,7 +222,7 @@ namespace GEMMDriverTest
                 numWorkgroupX = M * N / gemm.macM / gemm.macN / 2;
                 numWorkgroupY = 1;
             }
-            else if(gemm.streamK)
+            else if(gemm.streamK.enabled)
             {
                 numWorkgroupX = gemm.numWGs;
                 numWorkgroupY = 1;
@@ -460,7 +460,7 @@ namespace GEMMDriverTest
                                       rocRoller::SCRATCH);
 
             Operations::OperationTag tagNumWGs;
-            if(gemm.streamK)
+            if(gemm.streamK.enabled)
             {
                 tagNumWGs      = command->allocateTag();
                 auto numWGsArg = command->allocateArgument(DataType::UInt32,
@@ -528,7 +528,7 @@ namespace GEMMDriverTest
                 params->loopOverOutputTilesIteratedTiles = 2;
             }
 
-            if(gemm.streamK)
+            if(gemm.streamK.enabled)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
 
@@ -538,8 +538,7 @@ namespace GEMMDriverTest
                     "with numWorkgroupY == 1");
 
                 params->loopOverOutputTilesDimensions = {0, 1};
-                params->streamK                       = true;
-                params->streamKTwoTile                = gemm.streamKTwoTile;
+                params->streamK = gemm.streamK;
             }
 
             auto memoryTypeA = MemoryType::WAVE;
@@ -678,7 +677,7 @@ namespace GEMMDriverTest
                 commandArgs.setArgument(tagScalarSeed, ArgumentType::Value, srCvtSeed.value());
 
             // Create scratch space
-            if(gemm.streamK)
+            if(gemm.streamK.enabled)
             {
                 commandArgs.setArgument(tagNumWGs, ArgumentType::Value, gemm.numWGs);
             }
@@ -1095,8 +1094,8 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
-        gemm.k       = gemm.macK * 8;
+        gemm.streamK.enabled = true;
+        gemm.k               = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
@@ -1111,7 +1110,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             basicGEMM<float>(gemm);
         }
     }
@@ -1134,8 +1133,8 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
-        gemm.k       = gemm.macK * 8;
+        gemm.streamK.enabled = true;
+        gemm.k               = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
@@ -1148,7 +1147,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             basicGEMM<float>(gemm);
         }
     }
@@ -1179,8 +1178,8 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
-        gemm.k       = gemm.macK * 8;
+        gemm.streamK.enabled = true;
+        gemm.k               = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
@@ -1189,7 +1188,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             for(auto loadLDSA : {false, true})
             {
                 gemm.loadLDSA = loadLDSA;
@@ -1232,12 +1231,12 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = true;
-        gemm.k       = gemm.macK * 8;
+        gemm.streamK.enabled = true;
+        gemm.k               = gemm.macK * 8;
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamKTwoTile = twoTile;
+            gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             basicGEMM<Half>(gemm);
         }
     }
