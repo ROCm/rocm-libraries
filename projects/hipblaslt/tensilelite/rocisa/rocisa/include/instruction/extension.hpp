@@ -250,6 +250,7 @@ namespace rocisa
     // longBranchVccnz - 32 bit offset
     // Conditional branch to label when VCC != 0
     // Use when erroring out "invalid operand due to label > SIMM16"
+    // VCC != 0 executes long branch, VCC == 0 do SCBranchVCCZ to skip long branch.
     //////////////////////////////////////////////////////////////////////////////
     inline std::shared_ptr<Module> SCLongBranchVccnz(const Label&        label,
                                                      ContinuousRegister& tmpSgprRes,
@@ -260,7 +261,7 @@ namespace rocisa
     {
         auto  module = std::make_shared<Module>("SCLongBranchVccnz " + label.getLabelName());
         Label noBranchLabel(noBranchLabelStr, "");
-        module->addT<SCBranchVCCNZ>(noBranchLabel.getLabelName(), "Only branch on vccnz");
+        module->addT<SCBranchVCCZ>(noBranchLabel.getLabelName(), "Only branch on vccz");
         if(posNeg > 0)
         {
             module->add(SLongBranchPositive(label, tmpSgprRes, comment));

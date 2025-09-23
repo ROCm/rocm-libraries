@@ -161,6 +161,7 @@ Datatypes:
         rocsparse_spmv_alg_coo_atomic: 5
         rocsparse_spmv_alg_bsr: 6
         rocsparse_spmv_alg_csr_lrb: 7
+        rocsparse_spmv_alg_csr_nnzsplit: 8
   - rocsparse_spsv_alg:
       bases: [c_int ]
       attr:
@@ -423,12 +424,14 @@ All rocsparse_spmv_alg: &all_rocsparse_spmv_alg
          rocsparse_spmv_alg_ell,
          rocsparse_spmv_alg_coo_atomic,
          rocsparse_spmv_alg_bsr,
-         rocsparse_spmv_alg_csr_lrb]
+         rocsparse_spmv_alg_csr_lrb,
+         rocsparse_spmv_alg_csr_nnzsplit]
 
 All rocsparse_spmv_alg_csr: &all_rocsparse_spmv_alg_csr
         [rocsparse_spmv_alg_csr_adaptive,
          rocsparse_spmv_alg_csr_rowsplit,
-         rocsparse_spmv_alg_csr_lrb]
+         rocsparse_spmv_alg_csr_lrb,
+         rocsparse_spmv_alg_csr_nnzsplit]
 
 All rocsparse_spsv_alg: &all_rocsparse_spsv_alg
         [rocsparse_spsv_alg_default]

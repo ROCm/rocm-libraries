@@ -42,7 +42,7 @@ __global__ void fill_kernel(T* A, size_t size, size_t offset, F f)
 template <typename T, typename F>
 void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, const F& f)
 {
-    size_t           size_64   = lda * N + size_t(batch_count - 1) * stride;
+    size_t           size_64   = stride >= lda ? lda * N + size_t(batch_count - 1) * stride : lda * N;
     constexpr size_t c_i32_max = size_t(std::numeric_limits<int32_t>::max());
     for(size_t offset = 0; offset < size_64; offset += c_i32_max)
     {
@@ -146,32 +146,65 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 });
             else if(abc == ABC_dims::B)
             {
-                stride = std::max(lda * N, stride);
-                fill_batch(A, M, N, lda, stride, batch_count, [stride, lda](size_t idx) -> T {
-                    auto b     = idx / stride;
-                    auto j     = (idx - b * stride) / lda;
-                    auto i     = (idx - b * stride) - j * lda;
-                    auto value = random_int<T>(idx);
-                    return (i ^ j) & 1 ? value : negate(value);
-                });
+                if(stride >= lda)
+                {
+                    stride = std::max(lda * N, stride);
+                    fill_batch(A, M, N, lda, stride, batch_count, [stride, lda](size_t idx) -> T {
+                        auto b     = idx / stride;
+                        auto j     = (idx - b * stride) / lda;
+                        auto i     = (idx - b * stride) - j * lda;
+                        auto value = random_int<T>(idx);
+                        return (i ^ j) & 1 ? value : negate(value);
+                    });
+                }
+                else
+                {
+                    fill_batch(A, M, N, lda, stride, batch_count, [stride, lda](size_t idx) -> T {
+                        auto j     = idx / lda;
+                        auto b     = (idx - j * lda) / stride;
+                        auto i     = (idx - j * lda) - b * stride;
+                        auto value = random_int<T>(idx);
+                        return (i ^ j) & 1 ? value : negate(value);
+                    });
+                }
             }
             break;
         case hipblaslt_initialization::trig_float:
-            stride = std::max(lda * N, stride);
-            if(abc == ABC_dims::A || abc == ABC_dims::C)
-                fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                    auto b = idx / stride;
-                    auto j = (idx - b * stride) / lda;
-                    auto i = (idx - b * stride) - j * lda;
-                    return T(sin(double(i + j * M + b * M * N)));
-                });
-            else if(abc == ABC_dims::B)
-                fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                    auto b = idx / stride;
-                    auto j = (idx - b * stride) / lda;
-                    auto i = (idx - b * stride) - j * lda;
-                    return T(cos(double(i + j * M + b * M * N)));
-                });
+            if(stride >= lda)
+            {
+                stride = std::max(lda * N, stride);
+                if(abc == ABC_dims::A || abc == ABC_dims::C)
+                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
+                        auto b = idx / stride;
+                        auto j = (idx - b * stride) / lda;
+                        auto i = (idx - b * stride) - j * lda;
+                        return T(sin(double(i + j * M + b * M * N)));
+                    });
+                else if(abc == ABC_dims::B)
+                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
+                        auto b = idx / stride;
+                        auto j = (idx - b * stride) / lda;
+                        auto i = (idx - b * stride) - j * lda;
+                        return T(cos(double(i + j * M + b * M * N)));
+                    });
+            }
+            else
+            {
+                if(abc == ABC_dims::A || abc == ABC_dims::C)
+                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
+                        auto j = idx / lda;
+                        auto b = (idx - j * lda) / stride;
+                        auto i = (idx - j * lda) - b * stride;
+                        return T(sin(double(i + j * M + b * M * N)));
+                    });
+                else if(abc == ABC_dims::B)
+                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
+                        auto j = idx / lda;
+                        auto b = (idx - j * lda) / stride;
+                        auto i = (idx - j * lda) - b * stride;
+                        return T(cos(double(i + j * M + b * M * N)));
+                    });
+            }
             break;
         case hipblaslt_initialization::hpl:
             fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {

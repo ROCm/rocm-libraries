@@ -2,7 +2,7 @@
 
 rocBLAS is the [ROCm](https://rocm.docs.amd.com/en/latest) Basic Linear Algebra Subprograms (BLAS)
 library. rocBLAS is implemented in the
-[HIP programming language](https://github.com/ROCm/HIP) and optimized for AMD
+[HIP programming language](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip) and optimized for AMD
 GPUs.
 
 ## Requirements

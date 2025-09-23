@@ -304,14 +304,14 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename T>
+    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void scale_2d_kernel(I       m,
                          I       n,
                          int64_t ld,
                          int64_t stride,
                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
-                         T* __restrict__ array,
+                         A* __restrict__ array,
                          rocsparse_order order,
                          bool            is_host_mode)
     {
@@ -469,7 +469,7 @@ rocsparse_status
     return rocsparse_status_success;
 }
 
-template <typename I, typename T>
+template <typename I, typename A, typename T>
 rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
                                            I                m,
                                            I                n,
@@ -477,7 +477,7 @@ rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
                                            int64_t          batch_count,
                                            int64_t          stride,
                                            const T*         scalar_device_host,
-                                           T*               array,
+                                           A*               array,
                                            rocsparse_order  order)
 {
     const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
@@ -679,7 +679,7 @@ INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, TTYPE)                                                            \
+#define INSTANTIATE(ITYPE, ATYPE, TTYPE)                                                     \
     template rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,             \
                                                         ITYPE            m,                  \
                                                         ITYPE            n,                  \
@@ -687,22 +687,22 @@ INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
                                                         int64_t          batch_count,        \
                                                         int64_t          stride,             \
                                                         const TTYPE*     scalar_device_host, \
-                                                        TTYPE*           array,              \
+                                                        ATYPE*           array,              \
                                                         rocsparse_order  order);
 
-INSTANTIATE(int32_t, _Float16);
-INSTANTIATE(int32_t, int32_t);
-INSTANTIATE(int32_t, float);
-INSTANTIATE(int32_t, double);
-INSTANTIATE(int32_t, rocsparse_float_complex);
-INSTANTIATE(int32_t, rocsparse_double_complex);
+INSTANTIATE(int32_t, _Float16, _Float16);
+INSTANTIATE(int32_t, int32_t, int32_t);
+INSTANTIATE(int32_t, float, float);
+INSTANTIATE(int32_t, double, double);
+INSTANTIATE(int32_t, rocsparse_float_complex, rocsparse_float_complex);
+INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex);
 
-INSTANTIATE(int64_t, _Float16);
-INSTANTIATE(int64_t, int32_t);
-INSTANTIATE(int64_t, float);
-INSTANTIATE(int64_t, double);
-INSTANTIATE(int64_t, rocsparse_float_complex);
-INSTANTIATE(int64_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, _Float16, _Float16);
+INSTANTIATE(int64_t, int32_t, int32_t);
+INSTANTIATE(int64_t, float, float);
+INSTANTIATE(int64_t, double, double);
+INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
+INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
 #undef INSTANTIATE
 
 #define INSTANTIATE(ITYPE, JTYPE)                                               \

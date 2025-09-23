@@ -259,6 +259,7 @@ if ( USE_HIPRAND )
   PRIVATE
   hip::hiprand
   )
+  target_compile_definitions( rocfft-test PRIVATE USE_HIPRAND )
 endif()
 
 if( ROCFFT_MPI_ENABLE )
