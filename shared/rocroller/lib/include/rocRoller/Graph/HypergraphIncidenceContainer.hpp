@@ -52,12 +52,12 @@ namespace rocRoller
              * 
              * @tparam T_Inputs Range
              * @tparam T_Outputs Range
-             * @param id Graph id of element to be connected by incidences
+             * @param tag Graph tag of element to be connected by incidences
              * @param inputs Graph indices of input elements to be connected
              * @param outputs Graph indices of output elements to be connected
              */
             template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-            void addIncidences(int id, T_Inputs const& inputs, T_Outputs const& outputs);
+            void addIncidences(int tag, T_Inputs const& inputs, T_Outputs const& outputs);
 
             /**
              * @brief Gets the number of incidences in the container
@@ -67,43 +67,43 @@ namespace rocRoller
             size_t size() const;
 
             /**
-             * @brief Purge incidences that refer to this id
+             * @brief Purge incidences that refer to this tag
              * 
-             * @param id Graph id of element to be deleted
+             * @param tag Graph tag of element to be deleted
              */
-            void deleteId(int id);
+            void deleteTag(int tag);
 
             /**
              * @brief Get all connected sources
              * 
-             * @param id Graph id of element to be queried
+             * @param tag Graph tag of element to be queried
              * @return std::vector<int> a series of graph indices for incoming elements
              */
-            std::vector<int> getSrcs(int id) const;
+            std::vector<int> getSrcs(int tag) const;
 
             /**
              * @brief Get all connected destinations
              * 
-             * @param id Graph id of element to be queried
+             * @param tag Graph tag of element to be queried
              * @return std::vector<int> a series of graph indices for outgoing elements
              */
-            std::vector<int> getDsts(int id) const;
+            std::vector<int> getDsts(int tag) const;
 
             /**
-             * @brief Get a count of all connected sources to element at id
+             * @brief Get a count of all connected sources to element at tag
              * 
-             * @param id Graph id of element to be queried
+             * @param tag Graph tag of element to be queried
              * @return size_t Count of all connected sources
              */
-            size_t getSrcCount(int id) const;
+            size_t getSrcCount(int tag) const;
 
             /**
-             * @brief Get a count of all connected destinations to element at id
+             * @brief Get a count of all connected destinations to element at tag
              * 
-             * @param id Graph id of element to be queried
+             * @param tag Graph tag of element to be queried
              * @return size_t Count of all connected destinations
              */
-            size_t getDstCount(int id) const;
+            size_t getDstCount(int tag) const;
 
             /**
              * @brief Get all incidences in container, sorted by sources

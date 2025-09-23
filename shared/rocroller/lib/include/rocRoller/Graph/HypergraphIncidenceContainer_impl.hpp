@@ -33,7 +33,7 @@
 namespace rocRoller::Graph
 {
     template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-    inline void HypergraphIncidenceContainer::addIncidences(int              id,
+    inline void HypergraphIncidenceContainer::addIncidences(int              tag,
                                                             T_Inputs const&  inputs,
                                                             T_Outputs const& outputs)
     {
@@ -49,11 +49,11 @@ namespace rocRoller::Graph
 
         for(int input : inputs)
         {
-            addIncidence(input, id);
+            addIncidence(input, tag);
         }
         for(int output : outputs)
         {
-            addIncidence(id, output);
+            addIncidence(tag, output);
         }
     }
 }

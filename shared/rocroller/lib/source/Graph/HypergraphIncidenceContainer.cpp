@@ -83,43 +83,43 @@ namespace rocRoller::Graph
             [](size_t sum, auto const& value) { return sum + value.second.size(); });
     }
 
-    void HypergraphIncidenceContainer::deleteId(int id)
+    void HypergraphIncidenceContainer::deleteTag(int tag)
     {
-        m_incidencesBySrc.erase(id);
-        m_incidencesByDst.erase(id);
+        m_incidencesBySrc.erase(tag);
+        m_incidencesByDst.erase(tag);
 
         for(auto& connections : m_incidencesBySrc)
-            std::erase(connections.second, id);
+            std::erase(connections.second, tag);
 
         for(auto& connections : m_incidencesByDst)
-            std::erase(connections.second, id);
+            std::erase(connections.second, tag);
     }
 
-    std::vector<int> HypergraphIncidenceContainer::getSrcs(int id) const
+    std::vector<int> HypergraphIncidenceContainer::getSrcs(int tag) const
     {
-        if(!m_incidencesByDst.contains(id))
+        if(!m_incidencesByDst.contains(tag))
             return {};
-        return m_incidencesByDst.at(id);
+        return m_incidencesByDst.at(tag);
     }
 
-    std::vector<int> HypergraphIncidenceContainer::getDsts(int id) const
+    std::vector<int> HypergraphIncidenceContainer::getDsts(int tag) const
     {
-        if(!m_incidencesBySrc.contains(id))
+        if(!m_incidencesBySrc.contains(tag))
             return {};
-        return m_incidencesBySrc.at(id);
+        return m_incidencesBySrc.at(tag);
     }
 
-    size_t HypergraphIncidenceContainer::getSrcCount(int id) const
+    size_t HypergraphIncidenceContainer::getSrcCount(int tag) const
     {
-        if(m_incidencesByDst.contains(id))
-            return m_incidencesByDst.at(id).size();
+        if(m_incidencesByDst.contains(tag))
+            return m_incidencesByDst.at(tag).size();
         return 0;
     }
 
-    size_t HypergraphIncidenceContainer::getDstCount(int id) const
+    size_t HypergraphIncidenceContainer::getDstCount(int tag) const
     {
-        if(m_incidencesBySrc.contains(id))
-            return m_incidencesBySrc.at(id).size();
+        if(m_incidencesBySrc.contains(tag))
+            return m_incidencesBySrc.at(tag).size();
         return 0;
     }
 

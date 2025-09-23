@@ -269,7 +269,7 @@ namespace HypergraphTest
             CHECK(expectedNodes == nodes);
 
             auto loc = g.getLocation(nodes[0]);
-            CHECK(u0 == loc.id);
+            CHECK(u0 == loc.tag);
             CHECK(std::holds_alternative<TestDimension>(loc.element));
             CHECK(std::holds_alternative<TestUser>(std::get<TestDimension>(loc.element)));
             CHECK(0 == loc.incoming.size());
@@ -283,7 +283,7 @@ namespace HypergraphTest
                 TestSplit0, {u0}, {sd0, sd1}, TestTransform{TestSplit{}}};
             CHECK(expected == loc);
 
-            CHECK(TestSplit0 == loc.id);
+            CHECK(TestSplit0 == loc.tag);
 
             CHECK(myHypergraph::Element{TestTransform{TestSplit{}}} == loc.element);
             CHECK(std::vector<int>{u0} == loc.incoming);
