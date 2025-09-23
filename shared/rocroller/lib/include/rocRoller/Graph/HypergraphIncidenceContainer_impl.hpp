@@ -47,11 +47,11 @@ namespace rocRoller::Graph
                 srcs.push_back(src);
         };
 
-        for(int input : inputs)
+        for(auto input : inputs)
         {
             addIncidence(input, tag);
         }
-        for(int output : outputs)
+        for(auto output : outputs)
         {
             addIncidence(tag, output);
         }

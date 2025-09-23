@@ -154,7 +154,7 @@ namespace rocRoller
         template <typename T>
         int Hypergraph<Node, Edge, Hyper>::addElement(T&& element)
         {
-            int tag = nextAvailableTag();
+            auto tag = nextAvailableTag();
             m_elements.emplace(tag, std::forward<T>(element));
 
             AssertFatal(isModificationAllowed(tag), "addElement is disallowed on this graph");
@@ -197,7 +197,7 @@ namespace rocRoller
                                                       T_Inputs const&  inputs,
                                                       T_Outputs const& outputs)
         {
-            int tag = nextAvailableTag();
+            auto tag = nextAvailableTag();
             addElement(tag, std::forward<T>(element), inputs, outputs);
 
             return tag;
@@ -215,11 +215,11 @@ namespace rocRoller
             auto elementType    = getElementType(element);
             auto connectingType = getConnectingType(elementType);
 
-            for(int input : inputs)
+            for(auto input : inputs)
             {
                 AssertFatal(getElementType(input) == connectingType);
             }
-            for(int output : outputs)
+            for(auto output : outputs)
             {
                 AssertFatal(getElementType(output) == connectingType);
             }
@@ -245,12 +245,12 @@ namespace rocRoller
                 }
                 else
                 {
-                    for(int input : inputs)
+                    for(auto input : inputs)
                     {
                         AssertFatal(
                             m_incidences.getDstCount(input) <= 1, errorMsg, ShowValue(input));
                     }
-                    for(int output : outputs)
+                    for(auto output : outputs)
                     {
                         AssertFatal(
                             m_incidences.getSrcCount(output) <= 1, errorMsg, ShowValue(output));
@@ -284,17 +284,17 @@ namespace rocRoller
 
             clearCache(GraphModification::DeleteElement);
 
-            for(int input : inputs)
+            for(auto input : inputs)
             {
                 AssertFatal(getElementType(input) == ElementType::Node, "Requires node handles");
             }
-            for(int output : outputs)
+            for(auto output : outputs)
             {
                 AssertFatal(getElementType(output) == ElementType::Node, "Requires node handles");
             }
 
             auto match = false;
-            for(int e : getNeighbours<Graph::Direction::Downstream>(inputs[0]))
+            for(auto e : getNeighbours<Graph::Direction::Downstream>(inputs[0]))
             {
                 auto elem = getElement(e);
                 if(!edgePredicate(std::get<Edge>(elem)))
@@ -412,7 +412,7 @@ namespace rocRoller
         {
             for(auto const& pair : m_elements)
             {
-                int tag = pair.first;
+                auto tag = pair.first;
                 if(m_incidences.getSrcCount(tag) == 0)
                     co_yield tag;
             }
@@ -423,7 +423,7 @@ namespace rocRoller
         {
             for(auto const& pair : m_elements)
             {
-                int tag = pair.first;
+                auto tag = pair.first;
                 if(m_incidences.getDstCount(tag) == 0)
                     co_yield tag;
             }
@@ -435,9 +435,9 @@ namespace rocRoller
             if(getElementType(parent) == ElementType::Node)
             {
                 std::set<int> visited;
-                for(int edgeTag : getNeighbours<Direction::Downstream>(parent))
+                for(auto edgeTag : getNeighbours<Direction::Downstream>(parent))
                 {
-                    for(int neighbour : getNeighbours<Direction::Downstream>(edgeTag))
+                    for(auto neighbour : getNeighbours<Direction::Downstream>(edgeTag))
                     {
                         if(!visited.contains(neighbour))
                         {
@@ -449,7 +449,7 @@ namespace rocRoller
             }
             else
             {
-                for(int child : getNeighbours<Direction::Downstream>(parent))
+                for(auto child : getNeighbours<Direction::Downstream>(parent))
                     co_yield child;
             }
         }
@@ -460,9 +460,9 @@ namespace rocRoller
             if(getElementType(child) == ElementType::Node)
             {
                 std::set<int> visited;
-                for(int edgeTag : getNeighbours<Direction::Upstream>(child))
+                for(auto edgeTag : getNeighbours<Direction::Upstream>(child))
                 {
-                    for(int neighbour : getNeighbours<Direction::Upstream>(edgeTag))
+                    for(auto neighbour : getNeighbours<Direction::Upstream>(edgeTag))
                     {
                         if(!visited.contains(neighbour))
                         {
@@ -474,7 +474,7 @@ namespace rocRoller
             }
             else
             {
-                for(int parent : getNeighbours<Direction::Upstream>(child))
+                for(auto parent : getNeighbours<Direction::Upstream>(child))
                     co_yield parent;
             }
         }
@@ -487,12 +487,12 @@ namespace rocRoller
             std::unordered_set<int> visitedNodes;
             if(dir == Direction::Downstream)
             {
-                for(int tag : starts)
+                for(auto tag : starts)
                     co_yield depthFirstVisit<Direction::Downstream>(tag, visitedNodes);
             }
             else
             {
-                for(int tag : starts)
+                for(auto tag : starts)
                     co_yield depthFirstVisit<Direction::Upstream>(tag, visitedNodes);
             }
         }
@@ -506,13 +506,13 @@ namespace rocRoller
             std::unordered_set<int> visitedNodes;
             if(dir == Direction::Downstream)
             {
-                for(int tag : starts)
+                for(auto tag : starts)
                     co_yield depthFirstVisit<Direction::Downstream>(
                         tag, edgePredicate, visitedNodes);
             }
             else
             {
-                for(int tag : starts)
+                for(auto tag : starts)
                     co_yield depthFirstVisit<Direction::Upstream>(tag, edgePredicate, visitedNodes);
             }
         }
@@ -588,8 +588,8 @@ namespace rocRoller
             std::deque<std::pair<int, int>> toExplore;
             std::set<std::pair<int, int>>   noted;
 
-            for(int connected : dir == Direction::Downstream ? m_incidences.getDsts(start)
-                                                             : m_incidences.getSrcs(start))
+            for(auto connected : dir == Direction::Downstream ? m_incidences.getDsts(start)
+                                                              : m_incidences.getSrcs(start))
             {
                 std::pair<int, int> candidate = {start, connected};
                 toExplore.push_back(candidate);
@@ -607,8 +607,8 @@ namespace rocRoller
                 visitedNodes.insert(node);
                 co_yield node;
 
-                for(int connected : dir == Direction::Downstream ? m_incidences.getDsts(node)
-                                                                 : m_incidences.getSrcs(node))
+                for(auto connected : dir == Direction::Downstream ? m_incidences.getDsts(node)
+                                                                  : m_incidences.getSrcs(node))
                 {
                     std::pair<int, int> candidate = {node, connected};
                     if(!noted.contains(candidate))
@@ -633,7 +633,7 @@ namespace rocRoller
 
             co_yield start;
 
-            for(int element : getNeighbours<Dir>(start))
+            for(auto element : getNeighbours<Dir>(start))
             {
                 co_yield depthFirstVisit<Dir>(element, visitedNodes);
             }
@@ -651,12 +651,12 @@ namespace rocRoller
 
             co_yield start;
 
-            for(int tag : getNeighbours<Dir>(start))
+            for(auto tag : getNeighbours<Dir>(start))
             {
                 visitedElements.insert(tag);
                 if(edgePredicate(tag))
                 {
-                    for(int child : getNeighbours<Dir>(tag))
+                    for(auto child : getNeighbours<Dir>(tag))
                     {
                         co_yield depthFirstVisit<Dir>(child, edgePredicate, visitedElements);
                     }
@@ -699,7 +699,7 @@ namespace rocRoller
         {
             constexpr Direction reverseDir = opposite(Dir);
 
-            for(int end : ends)
+            for(auto end : ends)
             {
                 if(visitedElements.contains(end))
                 {
@@ -716,7 +716,7 @@ namespace rocRoller
                 visitedElements[end] = false;
 
                 std::vector<int> results;
-                for(int nextElement : getNeighbours<reverseDir>(end))
+                for(auto nextElement : getNeighbours<reverseDir>(end))
                 {
                     if(getElementType(nextElement) == ElementType::Edge
                        && !edgeSelector(nextElement))
@@ -739,7 +739,7 @@ namespace rocRoller
 
                 if(visitedElements.at(end))
                 {
-                    for(int const result : results)
+                    for(auto const result : results)
                     {
                         co_yield result;
                     }
@@ -753,7 +753,7 @@ namespace rocRoller
         bool Hypergraph<Node, Edge, Hyper>::edgeSatisfied(
             int const edge, std::map<int, bool> const& visitedElements) const
         {
-            for(int element : getNeighbours<Dir>(edge))
+            for(auto element : getNeighbours<Dir>(edge))
             {
                 auto iter = visitedElements.find(element);
                 if(iter == visitedElements.end() || !iter->second)
@@ -849,7 +849,7 @@ namespace rocRoller
                 {
                     msg << "{\nrank=same\n";
                     bool first = true;
-                    for(int idx : loc.incoming)
+                    for(auto idx : loc.incoming)
                     {
                         if(!first)
                             msg << "->";
@@ -863,7 +863,7 @@ namespace rocRoller
                 {
                     msg << "{\nrank=same\n";
                     bool first = true;
-                    for(int idx : loc.outgoing)
+                    for(auto idx : loc.outgoing)
                     {
                         if(!first)
                             msg << "->";
@@ -1016,11 +1016,11 @@ namespace rocRoller
         {
             AssertFatal(getElementType(dst) == ElementType::Node, "Require a node handle");
 
-            for(int elem : getNeighbours<Dir>(dst))
+            for(auto elem : getNeighbours<Dir>(dst))
             {
                 if(edgePredicate(std::get<Edge>(getElement(elem))))
                 {
-                    for(int tag : getNeighbours<Dir>(elem))
+                    for(auto tag : getNeighbours<Dir>(elem))
                         co_yield tag;
                 }
             }
@@ -1111,7 +1111,7 @@ namespace rocRoller
                                       auto                                        edgePredicate,
                                       auto                                        destNodePredicate)
         {
-            for(int nextNode : graph.template getConnectedNodeIndices<Dir>(start, edgePredicate))
+            for(auto nextNode : graph.template getConnectedNodeIndices<Dir>(start, edgePredicate))
             {
                 auto const& node = graph.getNode(nextNode);
                 if(destNodePredicate(node))
@@ -1134,7 +1134,7 @@ namespace rocRoller
                         ShowValue(head));
 
             auto dsts = m_incidences.getDsts(tail);
-            for(int src : m_incidences.getSrcs(head))
+            for(auto src : m_incidences.getSrcs(head))
             {
                 auto rv = std::find(dsts.begin(), dsts.end(), src);
                 if(rv != dsts.end())
