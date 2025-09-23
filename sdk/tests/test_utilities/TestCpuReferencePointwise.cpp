@@ -22,11 +22,11 @@ protected:
     {
         if constexpr(std::is_same_v<T, half>)
         {
-            return static_cast<T>(1e-3f); // Half has better precision than bfloat16
+            return static_cast<T>(1e-3f);
         }
         else if constexpr(std::is_same_v<T, hip_bfloat16>)
         {
-            return static_cast<T>(1e-2f); // Bfloat16 has lower precision due to fewer mantissa bits
+            return static_cast<T>(1e-2f);
         }
         else
         {
@@ -258,12 +258,17 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // Verify results: [1,2,3,4,5] + [0,2,4,6,8] = [1,4,7,10,13]
-        EXPECT_EQ(output.getHostValue(0), static_cast<T>(static_cast<float>(1)));
-        EXPECT_EQ(output.getHostValue(1), static_cast<T>(static_cast<float>(4)));
-        EXPECT_EQ(output.getHostValue(2), static_cast<T>(static_cast<float>(7)));
-        EXPECT_EQ(output.getHostValue(3), static_cast<T>(static_cast<float>(10)));
-        EXPECT_EQ(output.getHostValue(4), static_cast<T>(static_cast<float>(13)));
+        // Create expected tensor: [1,2,3,4,5] + [0,2,4,6,8] = [1,4,7,10,13]
+        Tensor<T> expected({5});
+        expected.setHostValue(static_cast<T>(static_cast<float>(1)), 0);
+        expected.setHostValue(static_cast<T>(static_cast<float>(4)), 1);
+        expected.setHostValue(static_cast<T>(static_cast<float>(7)), 2);
+        expected.setHostValue(static_cast<T>(static_cast<float>(10)), 3);
+        expected.setHostValue(static_cast<T>(static_cast<float>(13)), 4);
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testBroadcast2Dx1D()
@@ -291,15 +296,21 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // Verify broadcasting: input2[n] is added to all input1[m,n]
-        EXPECT_EQ(output.getHostValue(0, 0),
-                  static_cast<T>(static_cast<float>(0 + 100))); // 0 + 100 = 100
-        EXPECT_EQ(output.getHostValue(0, 1),
-                  static_cast<T>(static_cast<float>(1 + 200))); // 1 + 200 = 201
-        EXPECT_EQ(output.getHostValue(1, 2),
-                  static_cast<T>(static_cast<float>(12 + 300))); // 12 + 300 = 312
-        EXPECT_EQ(output.getHostValue(2, 3),
-                  static_cast<T>(static_cast<float>(23 + 400))); // 23 + 400 = 423
+        // Create expected tensor: broadcasting input2[n] to all input1[m,n]
+        Tensor<T> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto input1Val = static_cast<float>((m * 10) + n);
+                auto input2Val = static_cast<float>((n + 1) * 100);
+                expected.setHostValue(static_cast<T>(input1Val + input2Val), m, n);
+            }
+        }
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testBroadcast3D()
@@ -318,9 +329,24 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
 
-        EXPECT_EQ(output.getHostValue(0, 0, 0), static_cast<T>(4.0)); // 5.0 - 1.0
-        EXPECT_EQ(output.getHostValue(1, 1, 3), static_cast<T>(3.0)); // 5.0 - 2.0
-        EXPECT_EQ(output.getHostValue(0, 2, 2), static_cast<T>(2.0)); // 5.0 - 3.0
+        // Create expected tensor: broadcasting subtraction
+        Tensor<T> expected({2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 4; ++h)
+                {
+                    float input1Val = 5.0f;
+                    auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
+                    expected.setHostValue(static_cast<T>(input1Val - input2Val), n, c, h);
+                }
+            }
+        }
+
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     // Test case: 4D × 4D: [N,C,H,W] + [1,C,1,1] → broadcast to [N,C,H,W]
@@ -340,18 +366,28 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // Channel 0: all should be 1.0 + 10.0 = 11.0
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), static_cast<T>(11.0));
-        EXPECT_EQ(output.getHostValue(0, 0, 1, 1), static_cast<T>(11.0));
-        EXPECT_EQ(output.getHostValue(1, 0, 0, 1), static_cast<T>(11.0));
+        // Create expected tensor: broadcasting addition
+        Tensor<T> expected({2, 3, 2, 2});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        float input1Val = 1.0f;
+                        auto input2Val
+                            = static_cast<float>((c + 1) * 10); // Channel values: 10.0, 20.0, 30.0
+                        expected.setHostValue(static_cast<T>(input1Val + input2Val), n, c, h, w);
+                    }
+                }
+            }
+        }
 
-        // Channel 1: all should be 1.0 + 20.0 = 21.0
-        EXPECT_EQ(output.getHostValue(0, 1, 0, 0), static_cast<T>(21.0));
-        EXPECT_EQ(output.getHostValue(1, 1, 1, 1), static_cast<T>(21.0));
-
-        // Channel 2: all should be 1.0 + 30.0 = 31.0
-        EXPECT_EQ(output.getHostValue(0, 2, 0, 0), static_cast<T>(31.0));
-        EXPECT_EQ(output.getHostValue(1, 2, 1, 0), static_cast<T>(31.0));
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     // Test case: Complex N-D broadcasting: [2,1,3,1] + [1,2,1,4] → [2,2,3,4]
@@ -381,14 +417,29 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // output[0,0,0,0] = input1[0,0,0,0] + input2[0,0,0,0] = 0 + 0 = 0
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), static_cast<T>(static_cast<float>(0)));
+        // Create expected tensor: broadcasting addition
+        Tensor<T> expected({2, 2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        // input1[n,0,h,0] broadcasts to input1[n,c,h,w]
+                        auto input1Val = static_cast<float>((n * 10) + h);
+                        // input2[0,c,0,w] broadcasts to input2[n,c,h,w]
+                        auto input2Val = static_cast<float>((c * 100) + w);
+                        expected.setHostValue(static_cast<T>(input1Val + input2Val), n, c, h, w);
+                    }
+                }
+            }
+        }
 
-        // output[1,1,2,3] = input1[1,0,2,0] + input2[0,1,0,3] = 12 + 103 = 115
-        EXPECT_EQ(output.getHostValue(1, 1, 2, 3), static_cast<T>(static_cast<float>(115)));
-
-        // output[0,1,1,2] = input1[0,0,1,0] + input2[0,1,0,2] = 1 + 102 = 103
-        EXPECT_EQ(output.getHostValue(0, 1, 1, 2), static_cast<T>(static_cast<float>(103)));
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testBroadcast5D()
@@ -416,20 +467,32 @@ protected:
 
         CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
 
-        // Channel 0: all should be 2.0 + 10.0 = 12.0
-        EXPECT_EQ(output.getHostValue(0, 0, 0, 0, 0), static_cast<T>(12.0));
-        EXPECT_EQ(output.getHostValue(0, 0, 1, 1, 1), static_cast<T>(12.0));
-        EXPECT_EQ(output.getHostValue(1, 0, 0, 1, 0), static_cast<T>(12.0));
+        // Create expected tensor: broadcasting addition
+        Tensor<T> expected(outputDims, outputStrides);
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int d = 0; d < 2; ++d)
+                {
+                    for(int h = 0; h < 2; ++h)
+                    {
+                        for(int w = 0; w < 2; ++w)
+                        {
+                            auto input1Val = 2.0f;
+                            auto input2Val = static_cast<float>(
+                                (c + 1) * 10); // Channel values: 10.0, 20.0, 30.0
+                            expected.setHostValue(
+                                static_cast<T>(input1Val + input2Val), n, c, d, h, w);
+                        }
+                    }
+                }
+            }
+        }
 
-        // Channel 1: all should be 2.0 + 20.0 = 22.0
-        EXPECT_EQ(output.getHostValue(0, 1, 0, 0, 0), static_cast<T>(22.0));
-        EXPECT_EQ(output.getHostValue(1, 1, 1, 1, 1), static_cast<T>(22.0));
-        EXPECT_EQ(output.getHostValue(0, 1, 1, 0, 1), static_cast<T>(22.0));
-
-        // Channel 2: all should be 2.0 + 30.0 = 32.0
-        EXPECT_EQ(output.getHostValue(0, 2, 0, 0, 0), static_cast<T>(32.0));
-        EXPECT_EQ(output.getHostValue(1, 2, 1, 0, 1), static_cast<T>(32.0));
-        EXPECT_EQ(output.getHostValue(1, 2, 0, 1, 1), static_cast<T>(32.0));
+        auto tolerance = getTolerance();
+        CpuFpReferenceValidation<T> validator(tolerance, tolerance);
+        EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
     void testErrorHandlingWrongInputCount()
