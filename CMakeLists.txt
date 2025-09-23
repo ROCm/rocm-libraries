@@ -10,10 +10,6 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE 
 set(HIPDNN_VERSION "0.0.1")
 
 if(NOT WIN32)
-    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
-endif()
-
-if(NOT WIN32)
     if(CMAKE_GENERATOR STREQUAL "Ninja")
         message(STATUS "The CMake generator is Ninja.")
     else()
@@ -25,8 +21,17 @@ project(
     hipDNN
     VERSION ${HIPDNN_VERSION}
     LANGUAGES CXX)
+
+# Set default install prefix after project() so ROCM_PATH is available
+if(NOT WIN32 AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+endif()
     
 set(CMAKE_CXX_STANDARD 20)
+
+# Define standard install directories (replaces GNUInstallDirs)
+set(CMAKE_INSTALL_LIBDIR "lib" CACHE PATH "Object code libraries")
+set(CMAKE_INSTALL_INCLUDEDIR "include" CACHE PATH "C header files")
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -52,7 +57,6 @@ list(
     CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake
     ${ROCM_PATH}/lib/cmake/hip
-    /opt/rocm/lib/cmake/hip
     ${HIP_DIR}/cmake
 )
 
@@ -64,9 +68,6 @@ list(
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
     ${ROCM_PATH}/hip
-    /opt/rocm/llvm
-    /opt/rocm
-    /opt/rocm/hip 
 )
 
 include(cmake/Dependencies.cmake)
@@ -153,9 +154,9 @@ if(CODE_COVERAGE)
 
     add_custom_target(
         code_coverage
-        COMMAND cd ${CMAKE_BINARY_DIR} && find . -name \"*.profraw\" -print0 | xargs -0 /opt/rocm/llvm/bin/llvm-profdata merge -sparse -o ./hipdnn.profdata
-        COMMAND /opt/rocm/llvm/bin/llvm-cov report ${CODE_COVERAGE_OBJECTS} -instr-profile=./hipdnn.profdata -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" > ./code_cov_hipdnn.report
-        COMMAND /opt/rocm/llvm/bin/llvm-cov show -Xdemangler=/opt/rocm/llvm/bin/llvm-cxxfilt ${CODE_COVERAGE_OBJECTS} -instr-profile=./hipdnn.profdata -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html --output-dir=./hipdnn_coverage_html
+        COMMAND cd ${CMAKE_BINARY_DIR} && find . -name \"*.profraw\" -print0 | xargs -0 ${ROCM_PATH}/llvm/bin/llvm-profdata merge -sparse -o ./hipdnn.profdata
+        COMMAND ${ROCM_PATH}/llvm/bin/llvm-cov report ${CODE_COVERAGE_OBJECTS} -instr-profile=./hipdnn.profdata -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" > ./code_cov_hipdnn.report
+        COMMAND ${ROCM_PATH}/llvm/bin/llvm-cov show -Xdemangler=${ROCM_PATH}/llvm/bin/llvm-cxxfilt ${CODE_COVERAGE_OBJECTS} -instr-profile=./hipdnn.profdata -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html --output-dir=./hipdnn_coverage_html
         DEPENDS check
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report"

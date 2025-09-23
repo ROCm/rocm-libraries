@@ -7,8 +7,11 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     
+    # Set ROCM_PATH with default value
+    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
+    
     if(NOT WIN32)
-        set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
+        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
     endif()
 
     set(MIOPEN_LEGACY_PLUGIN "0.0.1")
@@ -47,9 +50,6 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         ${ROCM_PATH}/llvm
         ${ROCM_PATH}
         ${ROCM_PATH}/hip
-        /opt/rocm/llvm
-        /opt/rocm
-        /opt/rocm/hip 
     )
     
     find_package(hip REQUIRED)
@@ -110,7 +110,7 @@ target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPT
 set_target_properties(miopen_legacy_plugin PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-    INSTALL_RPATH "/opt/rocm/lib"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
     INSTALL_RPATH_USE_LINK_PATH TRUE
     BUILD_WITH_INSTALL_RPATH TRUE
     ENABLE_EXPORTS ON  # Enable symbol exports for proper dependency resolution

@@ -11,7 +11,7 @@ if(ENABLE_CLANG_TIDY)
         PATH_SUFFIXES
             compiler/bin
         PATHS
-            /opt/rocm/llvm/bin
+            ${ROCM_PATH}/llvm/bin
             /usr/local/opt/llvm/bin
     )
 
