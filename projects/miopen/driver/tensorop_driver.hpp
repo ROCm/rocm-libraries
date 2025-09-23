@@ -37,6 +37,9 @@
 #include <miopen/float_equal.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
+#include <miopen/par_transform.hpp>
+
+#include <execution>
 
 template <typename Tgpu, typename Tref>
 class TensorOpDriver : public Driver
@@ -67,6 +70,7 @@ public:
 
     int RunForwardGPU() override;
     int RunForwardCPU();
+    int RunForwardCPUMT();
 
     int RunBackwardGPU() override { return 0; }
     int RunBackwardCPU() { return 0; }
@@ -85,6 +89,7 @@ private:
     std::function<Tgpu(Tgpu, Tgpu)> TensorOpFn(miopenTensorOp_t op);
     int CheckTensor(std::vector<Tgpu>& cpu_res, std::vector<Tgpu>& gpu_res, double allowedEps);
     InputFlags inflags;
+    Timer timer;
 
     miopenTensorDescriptor_t aTensor;
     miopenTensorDescriptor_t bTensor;
@@ -101,6 +106,10 @@ private:
     std::vector<Tgpu> a_verif;
     std::vector<Tgpu> b_verif;
     std::vector<Tgpu> c_verif;
+
+    std::vector<Tgpu> a_mt_verif;
+    std::vector<Tgpu> b_mt_verif;
+    std::vector<Tgpu> c_mt_verif;
 
     miopenTensorOp_t op;
     bool is_set;
@@ -379,6 +388,41 @@ int TensorOpDriver<Tgpu, Tref>::RunForwardCPU()
 }
 
 template <typename Tgpu, typename Tref>
+int TensorOpDriver<Tgpu, Tref>::RunForwardCPUMT()
+{
+    int iters = inflags.GetValueInt("iter");
+    for(auto idx = 0; idx < iters; ++idx)
+    {
+        if(is_set)
+            miopen::par_transform(a_mt_verif.begin(), a_mt_verif.end(), a_mt_verif.begin(), [&](auto) {
+                return static_cast<Tgpu>(tensor_val);
+            });
+        else if(is_scale)
+            miopen::par_transform(a_mt_verif.begin(), a_mt_verif.end(), a_mt_verif.begin(), [&](auto element) {
+                return (element * static_cast<Tgpu>(tensor_val));
+            });
+        else
+        {
+            auto op_fn = TensorOpFn(op);
+            if(miopen::float_equal(beta, 0.0))
+                miopen::par_transform(
+                    a_mt_verif.begin(), a_mt_verif.end(), b_mt_verif.begin(), c_mt_verif.begin(), op_fn);
+            else
+            {
+                std::vector<Tgpu> tmp(a_mt_verif.size(), static_cast<Tgpu>(0.0));
+                miopen::par_transform(a_mt_verif.begin(), a_mt_verif.end(), b_mt_verif.begin(), tmp.begin(), op_fn);
+                miopen::par_transform(tmp.begin(),
+                               tmp.end(),
+                               c_mt_verif.begin(),
+                               c_mt_verif.begin(),
+                               [&](auto el_tmp, auto el_c) { return el_tmp + (beta * el_c); });
+            }
+        }
+    }
+    return miopenStatusSuccess;
+}
+
+template <typename Tgpu, typename Tref>
 int TensorOpDriver<Tgpu, Tref>::CheckTensor(std::vector<Tgpu>& cpu_res,
                                             std::vector<Tgpu>& gpu_res,
                                             double allowedEps)
@@ -409,13 +453,33 @@ int TensorOpDriver<Tgpu, Tref>::VerifyForward()
     double allowedEps = std::numeric_limits<Tgpu>::epsilon() * 80;
     int match         = 1;
 
+    timer.start();
     RunForwardCPU();
+    timer.stop();
+
+    printf("Tensor Op CPU singlethreaded time: %f\n", timer.gettime_ms());
 
     match = CheckTensor(
         (!is_set && !is_scale) ? c_verif : a_verif, (!is_set && !is_scale) ? c : a, allowedEps);
 
-    if(match)
-        printf("Tensor Op verifies on CPU and GPU\n");
+    if(!match)
+        return miopenStatusInternalError;
+
+    printf("Tensor Op verifies on CPU and GPU\n");
+
+    timer.start();
+    RunForwardCPUMT();
+    timer.stop();
+    printf("Tensor Op CPU multithreaded time: %f\n", timer.gettime_ms());
+
+    match = CheckTensor(
+        (!is_set && !is_scale) ? c_mt_verif : a_mt_verif, (!is_set && !is_scale) ? c : a, allowedEps);
+
+    if(!match)
+        return miopenStatusInternalError;
+
+    printf("Tensor Op verifies on CPU MT and GPU\n");
+
     return miopenStatusSuccess;
 }
 
