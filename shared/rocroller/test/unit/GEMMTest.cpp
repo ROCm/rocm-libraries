@@ -41,6 +41,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
+#include <rocRoller/StreamK_detail.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
@@ -538,7 +539,7 @@ namespace GEMMDriverTest
                     "with numWorkgroupY == 1");
 
                 params->loopOverOutputTilesDimensions = {0, 1};
-                params->streamK = gemm.streamK;
+                params->streamK                       = gemm.streamK;
             }
 
             auto memoryTypeA = MemoryType::WAVE;
@@ -1150,6 +1151,26 @@ namespace GEMMDriverTest
             gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             basicGEMM<float>(gemm);
         }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKTwoTileDPFirst)
+    {
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+
+        GEMMProblem gemm;
+        gemm.numWGs = deviceProperties.multiProcessorCount;
+        gemm.m      = gemm.macM * 8;
+        gemm.n      = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
+        gemm.k = gemm.macK * 8;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = true;
+        gemm.streamK   = {true, StreamKMode::TwoTileDPFirst};
+
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)

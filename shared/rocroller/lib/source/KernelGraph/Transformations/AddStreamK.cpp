@@ -1203,15 +1203,21 @@ namespace rocRoller
             if(params->streamK.mode == StreamKMode::TwoTile
                or params->streamK.mode == StreamKMode::TwoTileDPFirst)
             {
-                auto scopeSK
-                    = replaceWith(graph, forTileSKOp, graph.control.addElement(Scope()), false);
-                auto scopeDP = graph.control.addElement(Scope());
-                graph.control.addElement(Body(), {scopeSK}, {forTileSKOp});
+                int scopeSK = graph.control.addElement(Scope());
+                int scopeDP = graph.control.addElement(Scope());
 
                 if(params->streamK.mode == StreamKMode::TwoTileDPFirst)
+                {
+                    scopeDP = replaceWith(graph, forTileSKOp, scopeDP, false);
                     graph.control.addElement(Sequence(), {scopeDP}, {scopeSK});
+                }
                 else
+                {
+                    scopeSK = replaceWith(graph, forTileSKOp, scopeSK, false);
                     graph.control.addElement(Sequence(), {scopeSK}, {scopeDP});
+                }
+
+                graph.control.addElement(Body(), {scopeSK}, {forTileSKOp});
 
                 //
                 // Set SK/DP selectors to select DP

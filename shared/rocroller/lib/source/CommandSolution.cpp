@@ -368,11 +368,7 @@ namespace rocRoller
             }
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
-                m_context,
-                m_commandParameters,
-                rocRoller::XLOOP,
-                rocRoller::KLOOP,
-                numWGsExpr));
+                m_context, m_commandParameters, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
         }
         else if(!m_commandParameters->loopOverOutputTilesDimensions.empty())
         {

@@ -88,7 +88,7 @@ struct GEMMProblem
 
     bool packMultipleElementsInto1VGPR = true;
 
-    bool loopOverTiles         = false;
+    bool                     loopOverTiles = false;
     rocRoller::StreamKConfig streamK{false};
 
     bool splitStoreTileIntoWaveBlocks = false;

@@ -71,11 +71,13 @@ namespace rocRoller
         }
     };
 
-    inline std::ostream& operator<<(std::ostream& stream, StreamKConfig const& config) {
+    inline std::ostream& operator<<(std::ostream& stream, StreamKConfig const& config)
+    {
         return stream << config.toString();
     }
 
-    inline std::string   toString(StreamKConfig const& config) {
+    inline std::string toString(StreamKConfig const& config)
+    {
         return config.toString();
     }
 }
