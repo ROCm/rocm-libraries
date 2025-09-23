@@ -7,10 +7,10 @@ Documentation for hipBLAS is available at
 
 ### Added
 
-* `--clients-only` build option to only build clients against a prebuilt library
-* gfx1103, gfx1150, gfx1151, gfx1200, and gfx1201 support to clients
-* FORTRAN enabled for windows build and testing
-* Addition reference library fallback options added
+* `--clients-only` build option to only build clients against a prebuilt library.
+* gfx1103, gfx1150, gfx1151, gfx1200, and gfx1201 support to clients.
+* FORTRAN enabled for the Microsoft Windows build and tests.
+* Additional reference library fallback options added.
 
 ### Changed
 
