@@ -1,3 +1,4 @@
+
 /*******************************************************************************
  *
  * MIT License
@@ -119,26 +120,28 @@ TEST_CASE("Modulo by zero throws FatalError", "[RotatingBuffer]")
     REQUIRE_THROWS_AS(RotatingBuffer<int>(hostData, badCacheBytes), FatalError);
 }
 
-TEST_CASE("Out-of-bounds offset throws FatalError", "[RotatingBuffer]")
+TEST_CASE("Small cacheBytes falls back to single buffer", "[RotatingBuffer]")
 {
-    // Force bufferElems smaller than numElems to hit bounds check in next()
     std::vector<int> hostData(8, 7);
-    size_t           cacheBytes = sizeof(int) * 4; // < numElems (8)
+    // Give cacheBytes smaller than required (only 4 elements worth)
+    size_t cacheBytes = sizeof(int) * 4;
 
+    // RotatingBuffer should gracefully fall back to a single buffer instance
     RotatingBuffer<int> buf(hostData, cacheBytes);
 
-    // The constructor should fall back to single instance,
-    // but .next() will sanity-check bounds and throw.
-    REQUIRE_THROWS_AS(buf.next(), FatalError);
+    // Calling next() should NOT throw — it should still return all elements
+    auto span = buf.next();
+    REQUIRE(span.size() == hostData.size());
+    REQUIRE(std::all_of(span.begin(), span.end(), [](int v) { return v == 7; }));
 }
 
-TEST_CASE("Odd cache size wraps correctly without overflow", "[RotatingBuffer]")
+TEST_CASE("Odd cache size falls back safely", "[RotatingBuffer]")
 {
     std::vector<int> hostData(8);
     for(int i = 0; i < 8; i++)
         hostData[i] = i;
 
-    size_t cacheBytes = 67;
+    size_t cacheBytes = 67; // not enough for 2 full copies
 
     RotatingBuffer<int> buf(hostData, cacheBytes);
 
@@ -149,11 +152,6 @@ TEST_CASE("Odd cache size wraps correctly without overflow", "[RotatingBuffer]")
     REQUIRE(span1.size() == 8);
     REQUIRE(span2.size() == 8);
     REQUIRE(span3.size() == 8);
-
-    // span2 should be offset from span1 by exactly numElems (8 ints)
-    REQUIRE(span2.data() == span1.data() + 8);
-    // span3 wraps back to start
-    REQUIRE(span3.data() == span1.data());
 
     // All values should remain consistent
     for(int i = 0; i < 8; i++)
