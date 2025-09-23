@@ -135,7 +135,7 @@ def createTileList(arch, gemmType):
 
                         if MT0*MT1 > 256*256:
                             continue
-                        for DU in [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]:
+                        for DU in [16, 32, 64, 128, 256, 512, 1024]:
                             tile_list.add((MT0, MT1, DU, MI[0], MI[1], MI[2], 1, 6, 0, 0))
 
     return [tile for tile in tile_list]
