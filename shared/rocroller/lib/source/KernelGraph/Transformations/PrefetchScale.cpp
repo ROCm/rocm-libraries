@@ -367,8 +367,6 @@ namespace rocRoller
                     if(!numInFlight.has_value())
                         numInFlight = prefetchPosition.size();
 
-                    std::cout << numInFlight.value() << std::endl;
-
                     // the swizzle scale loads must be inside the loop K
                     auto maybeForLoop = findContainingOperation<ForLoopOp>(loadTag, graph);
                     AssertFatal(maybeForLoop.has_value());
@@ -376,7 +374,6 @@ namespace rocRoller
                     auto unrollMap  = colouring.operationColour.at(loadTag);
                     auto unrollKDim = graph.mapper.get<Unroll>(loadTag, 2);
                     auto subiter    = unrollMap.at(unrollKDim);
-                    std::cout << macTile.memoryType << " " << subiter << std::endl;
 
                     auto topOp = getTopSetCoordinate(graph, loadTag);
                     replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
@@ -438,7 +435,6 @@ namespace rocRoller
                                 if(maybeExchange)
                                 {
                                     auto exchange = c.control;
-                                    std::cout << loadTag << " : " << exchange << std::endl;
                                     replaceWith(
                                         graph, exchange, graph.control.addElement(NOP()), false);
                                     exchangePrefetch[subiter].push_back(exchange);
@@ -462,7 +458,6 @@ namespace rocRoller
                         auto unrollKSize = getUnrollSize(graph, unrollKDim);
                         for(auto const exchange : exchanges)
                         {
-                            std::cout << loadTag << " : " << exchange << std::endl;
                             replaceWith(graph, exchange, graph.control.addElement(NOP()), false);
                             exchangePrefetch[subiter].push_back(exchange);
 
@@ -557,8 +552,6 @@ namespace rocRoller
                 insertBefore(graph, prefetchPosition[subiter], preNOP, prev);
             }
 
-            std::cout << exchangePosition.size() << std::endl;
-            std::cout << exchangePrefetch.size() << std::endl;
             for(auto const [subiter, exchangeNodes] : exchangePrefetch)
             {
                 auto preNOP = graph.control.addElement(NOP());

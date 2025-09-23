@@ -604,8 +604,7 @@ namespace rocRoller::KernelGraph
         auto src = m_graph.mapper.get<MacroTile>(tag);
         trackRegister(tag, src, ReadWrite::READ);
 
-        auto dst
-            = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
+        auto dst = m_graph.mapper.get(tag, NaryArgument::DEST);
         trackRegister(tag, dst, ReadWrite::READWRITE);
     }
 
