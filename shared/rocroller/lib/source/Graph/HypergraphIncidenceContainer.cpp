@@ -97,29 +97,33 @@ namespace rocRoller::Graph
 
     std::vector<int> HypergraphIncidenceContainer::getSrcs(int tag) const
     {
-        if(!m_incidencesByDst.contains(tag))
-            return {};
-        return m_incidencesByDst.at(tag);
+        auto it = m_incidencesByDst.find(tag);
+        if(it != m_incidencesByDst.end())
+            return it->second;
+        return {};
     }
 
     std::vector<int> HypergraphIncidenceContainer::getDsts(int tag) const
     {
-        if(!m_incidencesBySrc.contains(tag))
-            return {};
-        return m_incidencesBySrc.at(tag);
+        auto it = m_incidencesBySrc.find(tag);
+        if(it != m_incidencesBySrc.end())
+            return it->second;
+        return {};
     }
 
     size_t HypergraphIncidenceContainer::getSrcCount(int tag) const
     {
-        if(m_incidencesByDst.contains(tag))
-            return m_incidencesByDst.at(tag).size();
+        auto it = m_incidencesByDst.find(tag);
+        if(it != m_incidencesByDst.end())
+            return it->second.size();
         return 0;
     }
 
     size_t HypergraphIncidenceContainer::getDstCount(int tag) const
     {
-        if(m_incidencesBySrc.contains(tag))
-            return m_incidencesBySrc.at(tag).size();
+        auto it = m_incidencesBySrc.find(tag);
+        if(it != m_incidencesBySrc.end())
+            return it->second.size();
         return 0;
     }
 
