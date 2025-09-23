@@ -5198,7 +5198,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 1
@@ -5219,7 +5219,7 @@
     _DepthUB: 256
     _DepthUMetadata: 256
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -5422,7 +5422,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 4
@@ -5443,7 +5443,7 @@
     _DepthUB: 256
     _DepthUMetadata: 256
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -11694,7 +11694,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 1
@@ -11715,7 +11715,7 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -11961,12 +11961,12 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Alik_Bljk_BBS_BH_BiasSB_HAS_SAV_UserArgs_MT320x192x64_MI164jsNtuTS2vE7k1zBzLyTMhjMRqgDnHetaIHeEt0mS0k=
+    BaseName: Cijk_Alik_Bljk_BBS_BH_BiasSB_HAS_SAV_UserArgs_MT320x192x64_MI16gTpnipJdwFA7AyTwZmlMbqKv37AXX1JXgpS0XjjTycw=
     BufferLoad: true
     BufferStore: true
     CUCount: null
     CUOccupancy: -1
-    ClusterLocalRead: 0
+    ClusterLocalRead: 1
     CodeObjectVersion: 4
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -11991,7 +11991,7 @@
     GlobalSplitUAlgorithm: MultipleBuffer
     GlobalSplitUCoalesced: false
     GlobalSplitUWorkGroupMappingRoundRobin: false
-    GlobalWriteVectorWidth: 4
+    GlobalWriteVectorWidth: 2
     GroupLoadStore: 0
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
@@ -12003,7 +12003,7 @@
       SupportUserGSU: false, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT320x192x64_MI16x16x1_SN_LDSB1_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA512_LBSPPB128_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT20_3_MO40_NTn1_NTA2_NTB0_NTC4_NTD7_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO1_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
+    KernelNameMin: Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT320x192x64_MI16x16x1_SN_LDSB1_AFC0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA256_LBSPPB256_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT10_6_MO40_NTn1_NTA3_NTB3_NTC1_NTD6_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO1_SRVW0_SSO1_SVW2_SK3_SKXCCM4_TLDS2_ULSGRO0_USL1_UIOFGRO0_USFGRO1_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
     LDSTrInst: false
     LSCA: 64
     LSCB: 64
@@ -12013,24 +12013,24 @@
     LVCB: 8
     LVPA: 4
     LVPB: 4
-    LdsBlockSizePerPadA: 512
-    LdsBlockSizePerPadB: 128
+    LdsBlockSizePerPadA: 256
+    LdsBlockSizePerPadB: 256
     LdsBlockSizePerPadMetadata: 0
-    LdsBytesNoAmax: 74240
+    LdsBytesNoAmax: 73728
     LdsInitCVgprs: false
-    LdsNumBytes: 74240
-    LdsNumElementsAlignedA: 43520
-    LdsNumElementsAlignedB: 30720
+    LdsNumBytes: 73728
+    LdsNumElementsAlignedA: 46080
+    LdsNumElementsAlignedB: 27648
     LdsNumElementsAlignedMetadata: 0
     LdsOffsetA: 0
     LdsOffsetA_Blk: 131072
-    LdsOffsetB: 43520
-    LdsOffsetB_Blk: 174592
+    LdsOffsetB: 46080
+    LdsOffsetB_Blk: 177152
     LdsOffsetBias: 0
     LdsOffsetBiasGSU: 0
     LdsOffsetBiasNonGSU: 0
-    LdsOffsetMetadata: 74240
-    LdsOffsetMetadata_Blk: 174592
+    LdsOffsetMetadata: 73728
+    LdsOffsetMetadata_Blk: 177152
     LdsPadA: 16
     LdsPadB: 16
     LdsPadMetadata: 0
@@ -12051,10 +12051,10 @@
     MIInputPerThreadMetadata: 8
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [20, 3]
-    MIWaveTileA: 20
-    MIWaveTileB: 3
+    MIWaveGroup: [2, 2]
+    MIWaveTile: [10, 6]
+    MIWaveTileA: 10
+    MIWaveTileB: 6
     MIWaveTileMetadata: 0
     MacroTile0: 320
     MacroTile1: 192
@@ -12078,16 +12078,16 @@
     NonDTLTailLoopA: true
     NonDTLTailLoopB: true
     NonTemporal: -1
-    NonTemporalA: 2
-    NonTemporalB: 0
-    NonTemporalC: 4
-    NonTemporalD: 7
+    NonTemporalA: 3
+    NonTemporalB: 3
+    NonTemporalC: 1
+    NonTemporalD: 6
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
     NumElementsPerBatchStore: 0
     NumElementsPerThread: 240
-    NumGlobalWriteVectorsPerThread: 60
+    NumGlobalWriteVectorsPerThread: 120
     NumLoadsA: 10
     NumLoadsB: 6
     NumLoadsCoalescedA: 1
@@ -12108,53 +12108,53 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 53
-    SolutionNameMin: Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT320x192x64_MI16x16x1_SN_LDSB1_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA512_LBSPPB128_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT20_3_MO40_NTn1_NTA2_NTB0_NTC4_NTD7_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW4_SK3_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO1_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM8_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT320x192x64_MI16x16x1_SN_LDSB1_AFC0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA256_LBSPPB256_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT10_6_MO40_NTn1_NTA3_NTB3_NTC1_NTD6_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SU8_SUM0_SUS128_SPO1_SRVW0_SSO1_SVW2_SK3_SKXCCM4_TLDS2_ULSGRO0_USL1_UIOFGRO0_USFGRO1_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM0_WGMXCC1_WGMXCCGn1
     SourceSwap: 1
-    StaggerU: 0
+    StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 0
-    StorePriorityOpt: 0
+    StaggerUStride: 128
+    StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 1
-    StoreVectorWidth: 4
+    StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 0
-    SubGroup0: 4
-    SubGroup1: 64
-    SubGroupA: 4
-    SubGroupB: 64
+    StreamKXCCMapping: 4
+    SubGroup0: 8
+    SubGroup1: 32
+    SubGroupA: 8
+    SubGroupB: 32
     SuppressNoLoadLoop: false
     ThreadTile: [1, 1]
-    ThreadTile0: 80
-    ThreadTile1: 3
-    ThreadTileA: 80
-    ThreadTileB: 3
-    TransposeLDS: 1
+    ThreadTile0: 40
+    ThreadTile1: 6
+    ThreadTileA: 40
+    ThreadTileB: 6
+    TransposeLDS: 2
     TransposeLDSMetadata: true
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
-    UnrollMajorLDSA: true
-    UnrollMajorLDSB: true
+    UnrollMajorLDSA: 1
+    UnrollMajorLDSB: 1
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: 1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
-    VectorWidthA: 4
-    VectorWidthB: 1
+    VectorWidthA: 2
+    VectorWidthB: 2
     WaveSeparateGlobalReadA: 0
     WaveSeparateGlobalReadB: 0
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 8
-    WorkGroupMappingXCC: 8
+    WorkGroup: [32, 8, 1]
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -12163,7 +12163,7 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -12814,7 +12814,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: 1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 2
@@ -12835,7 +12835,7 @@
     _DepthUB: 256
     _DepthUMetadata: 256
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -15278,7 +15278,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 1
@@ -15299,7 +15299,7 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -22894,7 +22894,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 4
@@ -22915,7 +22915,7 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -28494,7 +28494,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: 1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 2
@@ -28515,7 +28515,7 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -29838,7 +29838,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 8
@@ -29859,7 +29859,7 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -30958,7 +30958,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 4
@@ -30979,7 +30979,7 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -31854,7 +31854,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: 1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 2
@@ -31875,7 +31875,7 @@
     _DepthUB: 64
     _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -33870,7 +33870,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: -1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 1
@@ -33891,7 +33891,7 @@
     _DepthUB: 32
     _DepthUMetadata: 32
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -34094,7 +34094,7 @@
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
-    UseSgprForGRO: 1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 1
@@ -34115,7 +34115,7 @@
     _DepthUB: 32
     _DepthUMetadata: 32
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4

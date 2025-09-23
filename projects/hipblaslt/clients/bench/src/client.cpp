@@ -413,7 +413,7 @@ try
 
         ("compute_type",
          value<std::string>(&compute_type)->default_value("f32_r"), "Precision of computation. "
-         "Options: s,f32_r,x,xf32_r,f64_r,i32_r")
+         "Options: s,f32_r,x,xf32_r,f64_r,i32_r,f32_bf16_r")
 
         ("compute_input_typeA",
          value<std::string>(&compute_input_typeA), "Precision of computation input A. "
