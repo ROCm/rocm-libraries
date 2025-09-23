@@ -382,7 +382,7 @@ TEST(rocfft_UnitTest, hipGraph_execution)
         ASSERT_EQ(hipGraphLaunch(graph_exec, stream), hipSuccess);
 
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
-    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+    stream.free();
 
     // check for correctness of the output data
     compare_data(host_mem_in, device_mem_out);
@@ -393,5 +393,5 @@ TEST(rocfft_UnitTest, hipGraph_execution)
     fill(host_mem_counter_modified.begin(), host_mem_counter_modified.end(), num_graph_launches);
     compare_data_exact_match<size_t>(other_stream, host_mem_counter_modified, device_mem_counter);
 
-    ASSERT_EQ(hipStreamDestroy(other_stream), hipSuccess);
+    other_stream.free();
 }
