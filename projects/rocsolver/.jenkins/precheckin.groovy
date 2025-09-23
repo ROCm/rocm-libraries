@@ -87,4 +87,3 @@ ci: {
         runCI([ubuntu18:['gfx900', 'gfx906']], urlJobName)
     }
 }
-

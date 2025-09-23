@@ -1370,6 +1370,11 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_I8_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
+            case TypedGemm_S_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_S_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
 #endif // TENSILE_USE_BF16
 #ifdef TENSILE_USE_FP8_BF8
             case TypedGemm_F8_S_S::TypeId():

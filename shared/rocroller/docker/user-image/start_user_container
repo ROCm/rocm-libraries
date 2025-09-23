@@ -32,7 +32,6 @@ import argparse
 import grp
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 dockerfiles = {
@@ -187,10 +186,25 @@ def parseArgs():
     return parser.parse_args()
 
 
+def buildx_available():
+    try:
+        subprocess.run(
+            ["docker", "buildx", "version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def buildImage(dockerfile, name, context="./", *args):
-    printAndRun(
-        ["docker", "build", "-t", name, "-f", dockerfile] + list(args) + [context]
-    )
+    build_command = ["docker", "build"]
+    if buildx_available():
+        build_command = ["docker", "buildx", "build"]
+
+    printAndRun(build_command + ["-t", name, "-f", dockerfile] + list(args) + [context])
 
 
 def get_render_group():
