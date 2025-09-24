@@ -7,27 +7,27 @@
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
 
-// When implicit conversions are defined, the explicit conversion function is disabled in the nlohmann json library. 
+// When implicit conversions are defined, the explicit conversion function is disabled in the nlohmann json library.
 // This may be unintended behavior
 #ifdef JSON_USE_IMPLICIT_CONVERSIONS
 NLOHMANN_JSON_NAMESPACE_BEGIN
-namespace detail{
-    template<typename BasicJsonType, typename T>
-    void from_json(const BasicJsonType& j, std::optional<T>& opt)
+namespace detail
+{
+template <typename BasicJsonType, typename T>
+void from_json(const BasicJsonType& j, std::optional<T>& opt)
+{
+    if(j.is_null())
     {
-        if (j.is_null())
-        {
-            opt = std::nullopt;
-        }
-        else
-        {
-            opt.emplace(j.template get<T>());
-        }
-    }  
+        opt = std::nullopt;
+    }
+    else
+    {
+        opt.emplace(j.template get<T>());
+    }
 }
-NLOHMANN_JSON_NAMESPACE_END  
+}
+NLOHMANN_JSON_NAMESPACE_END
 #endif
-
 
 namespace flatbuffers
 {
@@ -36,7 +36,8 @@ template <class T>
 void to_json(nlohmann::json& vectorList, const Vector<T>* vec)
 {
     vectorList = nlohmann::json::array();
-    if(vec == nullptr){
+    if(vec == nullptr)
+    {
         return;
     }
 
@@ -51,7 +52,8 @@ template <class T>
 void to_json(nlohmann::json& vectorList, const Vector<Offset<T>>* vec)
 {
     vectorList = nlohmann::json::array();
-    if(vec == nullptr){
+    if(vec == nullptr)
+    {
         return;
     }
     for(auto v : *vec)
