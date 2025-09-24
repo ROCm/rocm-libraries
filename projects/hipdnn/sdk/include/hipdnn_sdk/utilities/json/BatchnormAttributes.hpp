@@ -18,7 +18,7 @@ void to_json(nlohmann::json& batchnormJson, BatchnormAttributes const& bn)
     inputs["scale_tensor_uid"] = bn.scale_tensor_uid();
     inputs["bias_tensor_uid"] = bn.bias_tensor_uid();
     inputs["epsilon_tensor_uid"] = bn.epsilon_tensor_uid();
-    inputs["peer_stats_tensor_uid"] = *bn.peer_stats_tensor_uid();
+    inputs["peer_stats_tensor_uid"] = bn.peer_stats_tensor_uid();
     inputs["prev_running_mean_tensor_uid"] = bn.prev_running_mean_tensor_uid();
     inputs["prev_running_variance_tensor_uid"] = bn.prev_running_variance_tensor_uid();
     inputs["momentum_tensor_uid"] = bn.momentum_tensor_uid();
