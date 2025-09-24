@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include <hip/hip_runtime.h>
-#include <climits>
+#include "miopen_cstdint.hpp"
 #include "pooling_functions.h"
 
 #if (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE) || (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)

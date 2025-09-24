@@ -25,7 +25,8 @@
  *******************************************************************************/
 
 #include <hip/hip_runtime.h>
-#include <climits>
+#include "miopen_cstdint.hpp"
+#include "miopen_limits.hpp"
 #include "float_types.h"
 #include "pooling_functions.h"
 
@@ -35,10 +36,6 @@
 #endif
 #else
 #define USE_IMG_INDEX 1
-#endif
-
-#ifndef MLO_POOLING_INDEX_MAX
-#error "MLO_POOLING_INDEX_MAX not defined"
 #endif
 
 #if (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE) || (MLO_POOLING_OP_ID == MLO_POOLING_OP_AVE_INCLUSIVE)
@@ -276,7 +273,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
 
         for(int ti = lcl_id0; ti < MLO_POOLBWD_LCL_DATA_WIDTH; ti += MLO_POOLBWD_GROUP_SZ0)
         {
-            mask_val      = MLO_POOLING_INDEX_MAX;
+            mask_val      = std::numeric_limits<MLO_POOLING_INDEX_TYPE>::max();
             int top_x_act = top_x + ti;
             int lcl_idx   = lcl_off_v + ti;
 

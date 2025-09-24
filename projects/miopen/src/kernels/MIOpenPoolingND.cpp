@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 #include <hip/hip_runtime.h>
-#include <climits>
+#include "miopen_cstdint.hpp"
 #include "pooling_functions.h"
 
 #ifndef USE_GLOBAL_INDEX

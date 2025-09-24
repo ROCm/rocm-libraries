@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include <hip/hip_runtime.h>
-#include <climits>
+#include "miopen_cstdint.hpp"
 #include "pooling_functions.h"
 
 #ifdef USE_IMG_INDEX

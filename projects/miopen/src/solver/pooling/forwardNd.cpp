@@ -182,8 +182,6 @@ ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
             {"STRIDE_W", kp.stride_w},
             {"MLO_POOLING_INDEX_TYPE",
              get_pooling_index_type_name(problem.GetPooling().GetIndexType())},
-            {"MLO_POOLING_INDEX_MAX",
-             get_pooling_index_type_max_name(problem.GetPooling().GetIndexType())},
         };
 
         if(problem.SaveIndex())

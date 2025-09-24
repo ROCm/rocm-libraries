@@ -230,8 +230,6 @@ PoolingBackward2d::GetSolution(const ExecutionContext&,
                 {"MLO_POOLBWD_GROUP_SZ1", kp.grp_tile1},
                 {"MLO_POOLING_INDEX_TYPE",
                  get_pooling_index_type_name(problem.GetPooling().GetIndexType())},
-                {"MLO_POOLING_INDEX_MAX",
-                 get_pooling_index_type_max_name(problem.GetPooling().GetIndexType())},
                 {"USE_IMG_INDEX",
                  problem.GetPooling().GetWorkspaceIndexMode() == miopenPoolingWorkspaceIndexImage
                      ? 1

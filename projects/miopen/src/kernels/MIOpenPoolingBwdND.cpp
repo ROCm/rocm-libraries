@@ -24,15 +24,12 @@
  *
  *******************************************************************************/
 #include <hip/hip_runtime.h>
-#include <climits>
+#include "miopen_cstdint.hpp"
+#include "miopen_limits.hpp"
 #include "float_types.h"
 #include "pooling_functions.h"
 
 #if MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
-
-#ifndef MLO_POOLING_INDEX_MAX
-#error "MLO_POOLING_INDEX_MAX not defined"
-#endif
 
 extern "C" __global__ __launch_bounds__((MLO_POOLING_GROUP_SZ0)) //
     void mloPoolingNDMaxBwd(const FLOAT* top_df,
@@ -105,7 +102,9 @@ extern "C" __global__ __launch_bounds__((MLO_POOLING_GROUP_SZ0)) //
                         b_id * top_str_b + c_id * top_str_c + h * top_str_d + j * top_str_h + i;
 
                     FLOAT top_val    = b_id < batch ? top_df[top_gbl_off] : FLOAT{0};
-                    index_t mask_idx = b_id < batch ? mask[top_gbl_off] : MLO_POOLING_INDEX_MAX;
+                    index_t mask_idx = b_id < batch
+                                           ? mask[top_gbl_off]
+                                           : std::numeric_limits<MLO_POOLING_INDEX_TYPE>::max();
 
                     unsigned int mask_d_id = mask_idx / bot_h / bot_w;
                     unsigned int mask_h_id = (mask_idx / bot_w) % bot_h;

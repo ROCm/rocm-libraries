@@ -196,7 +196,6 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
             {"MLO_POOLING_GROUP_SZ0", grp_tile0},
             {"MLO_POOLING_GROUP_SZ1", grp_tile1},
             {"MLO_POOLING_INDEX_TYPE", get_pooling_index_type_name(pool_d.GetIndexType())},
-            {"MLO_POOLING_INDEX_MAX", get_pooling_index_type_max_name(pool_d.GetIndexType())},
         };
 
         if(problem.SaveIndex())

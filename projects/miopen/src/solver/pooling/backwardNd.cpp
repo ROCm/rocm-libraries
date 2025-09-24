@@ -165,8 +165,6 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
             {"TERRITORY_OVERLAP", static_cast<int>(territory_overlap)},
             {"MLO_POOLING_INDEX_TYPE",
              get_pooling_index_type_name(problem.GetPooling().GetIndexType())},
-            {"MLO_POOLING_INDEX_MAX",
-             get_pooling_index_type_max_name(problem.GetPooling().GetIndexType())},
         }
         << GetDataTypeKBP(problem.GetDYDesc().GetType());
 
