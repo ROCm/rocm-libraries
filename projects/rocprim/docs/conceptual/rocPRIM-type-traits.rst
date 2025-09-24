@@ -18,6 +18,7 @@ The rocPRIM type traits interface lets users add custom trait information for th
 
 This interface is similar to operator overloading.
 
+
 Traits should be implemented as required by specific algorithms. Some traits can't be defined if they can be inferred from others.
 
 Interface
