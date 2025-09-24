@@ -2,9 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #pragma once
-#include <origami/gemm.hpp>
-#include <origami/hardware.hpp>
-#include <origami/utils.hpp>
+#include "origami/gemm.hpp"
+#include "origami/hardware.hpp"
+#include "origami/utils.hpp"
 #include <gtest/gtest.h>
 #include <map>
 #include <string>
