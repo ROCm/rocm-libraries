@@ -62,6 +62,7 @@ if(HIPSPARSELT_ENABLE_CLIENT)
     option(HIPSPARSELT_ENABLE_BLIS "Enable BLIS support for reference implementations." ON)
 endif()
 
+option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
 option(HIPSPARSELT_ENABLE_MARKER "Enable rocTracer marker support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_VERBOSE "Output additional build information." OFF)
@@ -98,6 +99,10 @@ endif()
 
 if(HIPSPARSELT_ENABLE_FORTRAN)
     enable_language(Fortran)
+endif()
+
+if(HIPSPARSELT_ENABLE_OPENMP)
+    find_package(OpenMP REQUIRED)
 endif()
 
 # --- Dependency Setup ---
@@ -176,7 +181,8 @@ endif()
 
 if(HIPSPARSELT_ENABLE_CLIENT)
     include(ROCmClientPackages)
-    rocm_setup_client_components(clients clients-common)
+    rocm_package_setup_component(clients)
+    rocm_package_setup_client_component(clients-common)
 endif()
 
 if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
@@ -185,10 +191,6 @@ if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
         DEPENDS
         COMPONENT
         clients-common
-        DEB
-        "${OPENMP_DEB}"
-        RPM
-        "${OPENMP_RPM}"
     )
 endif()
 
@@ -198,10 +200,6 @@ if(HIPSPARSELT_ENABLE_BENCHMARKS)
         DEPENDS
         COMPONENT
         clients-common
-        DEB
-        "${OPENMP_DEB}"
-        RPM
-        "${OPENMP_RPM}"
     )
 endif()
 
