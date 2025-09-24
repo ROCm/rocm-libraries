@@ -42,33 +42,33 @@ def extract_specific_lines(csv_file):
         return ['N/A'] * 4
 
 
-def calculate_median_latency(csv_file):
-    """Calculate median latency from s_waitcnt instructions."""
+def get_metric(csv_file):
+    """Analyze CSV data and return a metric as (column_name, value) tuple."""
+    COLUMN_NAME = 'Latency'
+    ret = (COLUMN_NAME, None)
     try:
         df = pd.read_csv(csv_file)
         
         # Filter for s_waitcnt instructions
         if 'Instruction' not in df.columns or 'Latency' not in df.columns or 'Hitcount' not in df.columns:
-            return None
+            return ret
             
         waitcnt_df = df[df['Instruction'].str.contains('s_waitcnt', na=False)]
         
         if waitcnt_df.empty:
-            return None
+            return ret
         
-        # Get the last s_waitcnt instruction
-        last_row = waitcnt_df.iloc[-1]
-        latency = int(last_row['Latency'])
+        # Get the first s_waitcnt instruction
+        first_row = waitcnt_df.iloc[0]
+        latency = int(first_row['Latency'])
+        hitcount = int(first_row['Hitcount'])
         
-        # Calculate mode of hitcounts
-        hitcounts = waitcnt_df['Hitcount'].astype(int)
-        mode_hitcount = hitcounts.mode()[0] if not hitcounts.empty else 1
-        
-        return latency / mode_hitcount
+        # Return Latency / Hitcount
+        return (COLUMN_NAME, latency / hitcount)
 
     except Exception as e:
         print(f"Error processing {csv_file}: {e}")
-        return None
+        return ret
 
 
 def load_env_vars(csv_file):
@@ -107,9 +107,11 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
         if not env_var_keys and env_vars:
             env_var_keys = list(env_vars.keys())
         
+        metric_name, metric_value = get_metric(csv_file)
+        
         result = {
             'Directory': dir_name,
-            'Median Latency': calculate_median_latency(csv_file),
+            metric_name: metric_value,
             'Full Path': os.path.abspath(csv_file),
             **{k: int(v) for k, v in env_vars.items()}
         }
@@ -129,7 +131,17 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
     if env_var_keys:
         df = df.sort_values(env_var_keys)
     
-    column_headers = ['Directory', 'Median Latency']
+    # Get the metric column name from the first result
+    metric_column = None
+    if results:
+        for key in results[0].keys():
+            if key not in ['Directory', 'Full Path'] and key not in env_var_keys and not key.startswith('Row '):
+                metric_column = key
+                break
+    
+    column_headers = ['Directory']
+    if metric_column:
+        column_headers.append(metric_column)
     if show_env_vars:
         column_headers += env_var_keys
     if show_path:
