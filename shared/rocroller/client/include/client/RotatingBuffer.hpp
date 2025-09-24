@@ -59,8 +59,7 @@ class RotatingBuffer
 public:
     RotatingBuffer(const std::vector<T>& hostData, size_t rotatingBufferSizeBytes)
         : m_numElems(hostData.size())
-        , m_rotatingBufferElems(rotatingBufferSizeBytes > 0 ? rotatingBufferSizeBytes / sizeof(T)
-                                                            : 0)
+        , m_rotatingBufferElems(0)
         , m_currentOffset(0)
     {
         if(hostData.empty())
@@ -77,15 +76,26 @@ public:
             return;
         }
 
-        if(m_rotatingBufferElems == 0)
+        // Ensure buffer can hold at least one copy
+        size_t tensorBytes = m_numElems * sizeof(T);
+        if(rotatingBufferSizeBytes < tensorBytes)
         {
-            Throw<FatalError>("RotatingBuffer: rotatingBufferSizeBytes too small for element size");
+            Throw<FatalError>(
+                "RotatingBuffer: rotatingBufferSizeBytes too small to hold one tensor copy");
         }
 
+        // Align rotation buffer to multiples of tensor size
+        size_t alignedBytes = (rotatingBufferSizeBytes / tensorBytes) * tensorBytes;
+        if(alignedBytes < tensorBytes)
+        {
+            Throw<FatalError>("RotatingBuffer: adjusted rotation buffer too small after alignment");
+        }
+        m_rotatingBufferElems = alignedBytes / sizeof(T);
+
+        // If no room for rotation, just allocate one copy
         if(m_numElems >= m_rotatingBufferElems)
         {
             m_buffer = makeSharedDeviceUninitialized<T>(m_numElems);
-
             HIP_CHECK(hipMemcpy(
                 m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
         }
@@ -119,8 +129,9 @@ public:
         {
             m_currentOffset = 0; // always return base
         }
-        if(m_currentOffset + m_numElems
-           > (m_numElems < m_rotatingBufferElems ? m_rotatingBufferElems : m_numElems))
+
+        // Enforce offset stays within buffer
+        if(m_currentOffset + m_numElems > m_rotatingBufferElems)
         {
             Throw<FatalError>("RotatingBuffer::next: computed offset out of bounds");
         }
