@@ -20,7 +20,6 @@ endforeach()
 target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Analytical_gtest.cpp"       
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
@@ -35,8 +34,6 @@ target_sources(tensilelite-tests
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# Copy the Analytical_gtest.yaml from src -> build
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Analytical_gtest.yaml ${CMAKE_CURRENT_BINARY_DIR}/Analytical_gtest.yaml COPYONLY)
 
 if(HIPBLASLT_ENABLE_LLVM OR HIPBLASLT_ENABLE_MSGPACK)
     target_sources(tensilelite-tests
