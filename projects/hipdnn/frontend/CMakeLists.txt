@@ -19,12 +19,12 @@ target_include_directories(hipdnn_frontend INTERFACE
 )
 
 install( 
-    TARGETS hipdnn_frontend hipdnn_sdk hipdnn_backend FlatBuffers spdlog_header_only
+    TARGETS hipdnn_frontend hipdnn_sdk hipdnn_backend FlatBuffers spdlog_header_only nlohmann_json
     EXPORT hipdnn-frontend
 )
 
 export(
-    TARGETS hipdnn_frontend hipdnn_sdk hipdnn_backend FlatBuffers spdlog_header_only
+    TARGETS hipdnn_frontend hipdnn_sdk hipdnn_backend FlatBuffers spdlog_header_only nlohmann_json
     FILE  ${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake
 )
 

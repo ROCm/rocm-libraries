@@ -3,12 +3,15 @@
 
 # Platform-specific compiler configuration
 
+# This is where it looks for libs, includes, etc., and installs here.
+set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
+
 include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
 if(UNIX)
     # Unix/Linux: Use ROCm LLVM Clang
-    set(ROCM_LLVM_BIN_DIR /opt/rocm/llvm/bin)
-    set(ROCM_LLVM_LIB_DIR /opt/rocm/llvm/lib)
+    set(ROCM_LLVM_BIN_DIR ${ROCM_PATH}/llvm/bin)
+    set(ROCM_LLVM_LIB_DIR ${ROCM_PATH}/llvm/lib)
 
     if(EXISTS ${ROCM_LLVM_BIN_DIR})
         # Set the C and C++ compilers to clang and clang++ with a specific directory hint
@@ -19,7 +22,7 @@ if(UNIX)
         
         message(STATUS "Using ROCm Clang compilers from ${ROCM_LLVM_BIN_DIR}")
     else()
-        message(FATAL_ERROR "The directory /opt/rocm/llvm/bin does not exist. Cannot auto select clang compilers.")
+        message(FATAL_ERROR "The directory ${ROCM_LLVM_BIN_DIR} does not exist. Cannot auto select clang compilers.")
     endif()
 
     add_compile_options(-fPIC) # Position Independent Code (not needed/supported on Windows)

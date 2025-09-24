@@ -10,10 +10,6 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE 
 set(HIPDNN_VERSION "0.0.1")
 
 if(NOT WIN32)
-    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
-endif()
-
-if(NOT WIN32)
     if(CMAKE_GENERATOR STREQUAL "Ninja")
         message(STATUS "The CMake generator is Ninja.")
     else()
@@ -27,6 +23,10 @@ project(
     LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+
+# Define standard install directories (replaces GNUInstallDirs)
+set(CMAKE_INSTALL_LIBDIR "lib" CACHE PATH "Object code libraries")
+set(CMAKE_INSTALL_INCLUDEDIR "include" CACHE PATH "C header files")
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -52,7 +52,6 @@ list(
     CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake
     ${ROCM_PATH}/lib/cmake/hip
-    /opt/rocm/lib/cmake/hip
     ${HIP_DIR}/cmake
 )
 
@@ -64,9 +63,6 @@ list(
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
     ${ROCM_PATH}/hip
-    /opt/rocm/llvm
-    /opt/rocm
-    /opt/rocm/hip 
 )
 
 include(cmake/Dependencies.cmake)
