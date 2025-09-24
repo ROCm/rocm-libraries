@@ -493,10 +493,12 @@ void BestMacroTileSize(const origami::hardware_t& hardware,
                            size_t, // MI_N
                            size_t, // MI_K
                            size_t, // Occupancy
-                           int     // wgm
+                           int,    // wgm
+                           size_t, // non_temporal_a
+                           size_t  // non_temporal_b
                            >>
         MT_list
-        = {{256, 256, 32, 32, 32, 8, 1, 6}, {128, 128, 64, 32, 32, 8, 1, 6}, {64, 64, 64, 32, 32, 8, 1, 6}};
+        = {{256, 256, 32, 32, 32, 8, 1, 6, 0, 0}, {128, 128, 64, 32, 32, 8, 1, 6, 0, 0}, {64, 64, 64, 32, 32, 8, 1, 6, 0, 0}};
     auto results = select_best_macro_tile_size(
         M, N, K, batch, transA, transB, hardware, MT_list, element_size_A, element_size_B, element_size_out, origami::data_type_t::BFloat16, mx_block_size, H_L2, false, WGM);
 
