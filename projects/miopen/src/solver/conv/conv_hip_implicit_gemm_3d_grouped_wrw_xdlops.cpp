@@ -326,7 +326,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(const ProblemDescrip
         break;
     }
     index     = 0;
-    split_k   = CkSplitkAutoDeduce;
+    split_k   = 1;
     kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
@@ -368,7 +368,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
     [[maybe_unused]] const ProblemDescription& problem)
 {
     index     = 0;
-    split_k   = CkSplitkAutoDeduce;
+    split_k   = 1;
     kernel_id = "";
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL

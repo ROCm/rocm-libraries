@@ -61,12 +61,12 @@ inline static bool NextCKSplitkValue(int& v)
     if(v == H)
     {
         v = CkSplitkAutoDeduce;
-        return true;
+        return false;
     }
     if(v == CkSplitkAutoDeduce)
     {
         v = L;
-        return false;
+        return true;
     }
 
     v *= 2;

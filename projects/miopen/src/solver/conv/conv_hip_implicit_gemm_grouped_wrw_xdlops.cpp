@@ -222,7 +222,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::Init(const ProblemDescripti
 {
     valid_kernels = FillValidKernelsIDs<DeviceOpGWrwPtrs<DataType>, CKArgs>(problem);
     index         = 0;
-    split_k       = CkSplitkAutoDeduce;
+    split_k       = 1;
     kernel_id     = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
@@ -439,7 +439,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     [[maybe_unused]] const ProblemDescription& problem)
 {
     // these seem redundant
-    split_k   = CkSplitkAutoDeduce;
+    split_k   = 1;
     index     = 0;
     kernel_id = "";
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
