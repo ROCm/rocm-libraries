@@ -52,7 +52,7 @@ def parse_args():
                         help='Skip building the library and only build the clients with a pre-built library.')
 
     parser.add_argument(     '--clients_no_fortran', required=False, default=False, action='store_true',
-                        help='When building clients, build them without Fortran API testing or Fortran examples. (optional, default:False')
+                        help='When building clients, build them without Fortran API testing or Fortran examples. (optional, default:False)')
 
     parser.add_argument(      '--cmake-arg', dest='cmake_args', type=str, required=False, default="",
                         help='Forward the given arguments to CMake when configuring the build.')
