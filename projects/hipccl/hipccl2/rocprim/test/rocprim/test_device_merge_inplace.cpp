@@ -341,7 +341,17 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
             continue;
         }
 
-        std::vector<value_type> h_data(size_total);
+        // Wrap the host vector allocation in a try/catch, since
+        // we may actually run out of host memory here on some systems.
+        std::vector<value_type> h_data(0);
+        try
+        {
+            h_data.resize(size_total);
+        }
+        catch (const std::bad_alloc& err)
+        {
+            continue;
+        }
 
         size_t total_bytes = sizeof(value_type) * size_total;
 
