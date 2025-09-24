@@ -165,28 +165,28 @@ auto flat_block_id()
            (blockIdx.z * gridDim.y * gridDim.x);
 }
 // Returns the warp lane mask of all lanes less than the calling thread
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+ROCPRIM_DEVICE ROCPRIM_INLINE
 uint64_t get_sreg_lanemask_lt()
 {
     return (uint64_t(1) << ::rocprim::lane_id()) - 1;
 }
 
 // Returns the warp lane mask of all lanes less than or equal to the calling thread
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+ROCPRIM_DEVICE ROCPRIM_INLINE
 uint64_t get_sreg_lanemask_le()
 {
     return ((uint64_t(1) << ::rocprim::lane_id()) << 1) - 1;
 }
 
 // Returns the warp lane mask of all lanes greater than the calling thread
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+ROCPRIM_DEVICE ROCPRIM_INLINE
 uint64_t get_sreg_lanemask_gt()
 {
     return uint64_t(-1) ^ get_sreg_lanemask_le();
 }
 
 // Returns the warp lane mask of all lanes greater than or equal to the calling thread
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+ROCPRIM_DEVICE ROCPRIM_INLINE
 uint64_t get_sreg_lanemask_ge()
 {
     return uint64_t(-1) ^ get_sreg_lanemask_lt();
