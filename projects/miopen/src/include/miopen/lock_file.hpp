@@ -43,8 +43,75 @@
 #include <shared_mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace miopen {
+
+class FSLockFile
+{
+public:
+    FSLockFile(){}
+    FSLockFile(const fs::path& path_) : path(path_)
+    {
+        link_path = path.string() + ".fslock";
+    }
+
+    bool timed_lock(const boost::posix_time::ptime& abs_time)
+    {
+        auto now = boost::posix_time::second_clock::universal_time();
+        bool acquired = false;
+        while(!acquired && now < abs_time)
+        {
+            now = boost::posix_time::second_clock::universal_time();
+            try {
+                fs::create_symlink(path, link_path);
+                acquired = true;
+            }
+            catch(const fs::filesystem_error) {
+                if(now < abs_time)
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+            }
+        }
+        return acquired;
+    }
+
+    void lock()
+    {
+        bool acquired = false;
+        while(!acquired)
+        {
+            try {
+                fs::create_symlink(path, link_path);
+                acquired = true;
+            }
+            catch(const fs::filesystem_error) {
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+            }
+        }
+    }
+
+    bool try_lock()
+    {
+        bool acquired = false;
+        try {
+            fs::create_symlink(path, link_path);
+            acquired = true;
+        }
+        catch(const fs::filesystem_error) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        return acquired;
+    }
+
+    void unlock()
+    {
+        fs::remove(link_path);
+    }
+
+private:
+    fs::path path;
+    fs::path link_path;
+};
 
 MIOPEN_INTERNALS_EXPORT fs::path LockFilePath(const fs::path& filename_);
 // LockFile class is a wrapper around boost::interprocess::file_lock providing MT-safety.
@@ -66,7 +133,7 @@ public:
     bool timed_lock(const boost::posix_time::ptime& abs_time)
     {
         access_mutex.lock();
-        return flock.timed_lock(abs_time);
+        return fs_lock.timed_lock(abs_time);
     }
 
     bool timed_lock_shared(const boost::posix_time::ptime& abs_time)
@@ -76,7 +143,7 @@ public:
     }
     void lock()
     {
-        LockOperation("lock", MIOPEN_GET_FN_NAME, [&]() { std::lock(access_mutex, flock); });
+        LockOperation("lock", MIOPEN_GET_FN_NAME, [&]() { std::lock(access_mutex, fs_lock); });
     }
 
     void lock_shared()
@@ -95,7 +162,7 @@ public:
     bool try_lock()
     {
         return TryLockOperation(
-            "lock", MIOPEN_GET_FN_NAME, [&]() { return std::try_lock(access_mutex, flock) != 0; });
+            "lock", MIOPEN_GET_FN_NAME, [&]() { return std::try_lock(access_mutex, fs_lock) != 0; });
     }
 
     bool try_lock_shared()
@@ -112,7 +179,7 @@ public:
 
     void unlock()
     {
-        LockOperation("unlock", MIOPEN_GET_FN_NAME, [&]() { flock.unlock(); });
+        LockOperation("unlock", MIOPEN_GET_FN_NAME, [&]() { fs_lock.unlock(); });
         access_mutex.unlock();
     }
 
@@ -131,7 +198,7 @@ public:
             return false;
 
         if(TryLockOperation("timed lock", MIOPEN_GET_FN_NAME, [&]() {
-               return flock.timed_lock(ToPTime(duration));
+               return fs_lock.timed_lock(ToPTime(duration));
            }))
             return true;
         access_mutex.unlock();
@@ -168,6 +235,7 @@ private:
     fs::path path; // For logging purposes
     std::shared_timed_mutex access_mutex;
     boost::interprocess::file_lock flock;
+    FSLockFile fs_lock;
 
     static std::map<fs::path, LockFile>& LockFiles()
     {
