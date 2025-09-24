@@ -29,7 +29,7 @@ def extract_specific_lines(csv_file):
         instructions = []
         
         # Get rows 2-5 (lines 3-6 in 1-based counting)
-        for i in range(2, 6):
+        for i in range(1, 5):
             if i < len(df):
                 instruction = df.iloc[i]['Instruction'] if 'Instruction' in df.columns else 'N/A'
                 instructions.append(str(instruction)[:40])  # Truncate to 40 chars
@@ -86,7 +86,7 @@ def load_env_vars(csv_file):
     return {}
 
 
-def process_all_files(directory, show_instructions=False, show_env_vars=False):
+def process_all_files(directory, show_instructions=False, show_path=False, show_env_vars=False):
     """Process all CSV files and return results as a DataFrame."""
     csv_files = find_csv_files(directory)
     
@@ -115,9 +115,9 @@ def process_all_files(directory, show_instructions=False, show_env_vars=False):
         }
         
         if show_instructions:
-            instructions = extract_specific_lines(csv_file)
-            for i, instr in enumerate(instructions, 3):
-                result[f'Line {i} Instruction'] = instr
+            lines = extract_specific_lines(csv_file)
+            for i, line in enumerate(lines, 3):
+                result[f'Row {i}'] = line
         
         for key, value in env_vars.items():
             result[key] = int(value)
@@ -129,7 +129,14 @@ def process_all_files(directory, show_instructions=False, show_env_vars=False):
     if env_var_keys:
         df = df.sort_values(env_var_keys)
     
-    return df
+    column_headers = ['Directory', 'Median Latency']
+    if show_env_vars:
+        column_headers += env_var_keys
+    if show_path:
+        column_headers.append('Full Path')
+    if show_instructions:
+        column_headers += [f'Row {i}' for i in range(3, 7)]
+    return df, list(column_headers)
 
 
 def main():
@@ -164,37 +171,11 @@ def main():
         print(f"Directory {args.directory} not found!")
         return
 
-    # Process all files
-    df = process_all_files(args.directory, args.instructions, args.env_vars)
+    df, display_columns = process_all_files(args.directory, show_instructions=args.instructions, show_path=args.path, show_env_vars=args.env_vars)
     
     if df is None or df.empty:
         return
-    
-    # Format median latency column
-    df['Median Latency'] = df['Median Latency'].apply(
-        lambda x: f"{x:.1f}" if pd.notna(x) else "N/A"
-    )
-    
-    # Select columns to display
-    display_columns = ['Directory', 'Median Latency']
-    
-    if args.instructions:
-        # Add instruction columns
-        instruction_cols = [col for col in df.columns if col.startswith('Line ')]
-        display_columns.extend(instruction_cols)
-    
-    if args.env_vars:
-        # Add all environment variable columns from env_vars.json
-        env_cols = ['WRITE', 'INSTR_WIDTH', 'BYTE_STRIDE', 'ITERS']
-        # Add any env columns that exist in the dataframe
-        for col in env_cols:
-            if col in df.columns:
-                display_columns.append(col)
-    
-    if args.path:
-        # Add path column at the end
-        display_columns.append('Full Path')
-    
+        
     # Display the table
     table = tabulate(
         df[display_columns], 
