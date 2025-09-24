@@ -280,8 +280,11 @@ namespace TensileLite
 
             virtual int error() const override
             {
-                return 0;
+                return m_exceptionsReported;
             }
+
+        protected:
+            size_t m_exceptionsReported = 0;
         };
 
     } // namespace Client

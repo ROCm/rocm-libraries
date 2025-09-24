@@ -2575,7 +2575,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"])))
             swzBlkVWSizeVgpr = self.vgprPool.checkOut(1)
             module.add(SMovB32(dst=sgpr(swzBlkVWSizeSgpr), src=hex(swzBlockSize * vw), \
-              comment="swizzled block * VW = (MI_M(%u) * MI_K(%u) * kPack) * VW(%u)" %(swzMorN, int(swzStride / kPack), vw)))
+              comment="swizzled block * VW = (MI_MorN(%u) * MI_K(%u) * kPack) * VW(%u)" %(swzMorN, int(swzStride / kPack), vw)))
             module.add(VMovB32(dst=vgpr(swzBlkVWSizeVgpr), src=sgpr(swzBlkVWSizeSgpr)))
             module.add(VMulU32U24(dst=vgpr(v), src0=vgpr(v), src1=vgpr(swzBlkVWSizeVgpr)))
 
@@ -2588,9 +2588,8 @@ class KernelWriterAssembly(KernelWriter):
               lsuStride  = du // lsu
               numWaves   = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
               # codes
-              module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"], tmpVgprRes))
-              module.add(vectorStaticDivide(wave_id, wave_id, numWaves, tmpVgprRes, comment="LSU offset: Get LSU wave_id"))
-              module.add(VLShiftLeftB32(dst=vgpr(wave_id), shiftHex=hex(log2(lsuStride*16)), src=vgpr(wave_id), comment="LSU offset: LSU_wave_id*MI_M(%u)*lsuStrideK(%u)"%(16, lsuStride)))
+              module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"] * numWaves, tmpVgprRes, comment="LSU offset: Get LSU wave_id"))
+              module.add(VLShiftLeftB32(dst=vgpr(wave_id), shiftHex=hex(log2(lsuStride*swzMorN)), src=vgpr(wave_id), comment="LSU offset: LSU_wave_id*MI_MorN(%u)*lsuStrideK(%u)"%(swzMorN, lsuStride)))
               module.add(VAddU32(dst=vgpr(v), src0=vgpr(wave_id), src1=vgpr(v), comment="tileOffset += LSU offset"))
               self.vgprPool.checkIn(wave_id)
 
@@ -3698,7 +3697,6 @@ class KernelWriterAssembly(KernelWriter):
         tmp = self.sgprPool.checkOut(1)
         numKr = sgpr(tmp)
         swzStride = tP["swizzleK"]
-        lsu = kernel["LocalSplitU"]
         module.addComment(f"Align to {swzStride}")
         module.add(SAddU32(numKr, sgpr("SizesSum"), swzStride-1))
         module.add(SLShiftRightB32(dst=numKr, shiftHex=hex(log2(swzStride)), src=numKr,  comment="%s: numKr = DimK / %s"%(swizzledOrTrName, swzStride)))
@@ -3714,12 +3712,16 @@ class KernelWriterAssembly(KernelWriter):
 
       WvG_M = kernel["MIWaveGroup"][0]
       if tP["isA"]:
-        module.add(VAndB32(dst=vgpr(qReg), src0=hex(WvG_M-1), src1=vgpr(qReg), comment="%s: wave_id (along_M) mod MIWG[0]"%(swizzledOrTrName)))
+        module.add(VAndB32(dst=vgpr(qReg), src0=hex(WvG_M-1), src1=vgpr(qReg), comment="%s: wave_id (along_M) %%= MIWG[0]"%(swizzledOrTrName)))
         module.add(VMulU32U24(dst=vgpr(qReg), src0=numKr, src1=vgpr(qReg), comment="%s: wave_id (along_M) *= numKr"%(swizzledOrTrName)))
       elif tP["isB"]:
         # NB:
         #   Calc of w_id is: /= MIWG[0], not %= MIWG[1]
         module.add(VLShiftRightB32(dst=vgpr(qReg), shiftHex=log2(WvG_M), src=vgpr(qReg), comment="%s: wave_id (along_N) /= MIWG[0]"%(swizzledOrTrName)))
+        if kernel["LocalSplitU"] > 1:
+          # LSU for swizzleB: make sure wave_id is in the range of MIWG[1], so need extra %=MIWG[1]
+          WvG_N = kernel["MIWaveGroup"][1]
+          module.add(VAndB32(dst=vgpr(qReg), src0=hex(WvG_N-1), src1=vgpr(qReg), comment="%s: LSU Case: wave_id (along_N) %%= MIWG[1]"%(swizzledOrTrName)))
         module.add(VMulU32U24(dst=vgpr(qReg), src0=numKr, src1=vgpr(qReg), comment="%s: wave_id (along_N) *= numKr"%(swizzledOrTrName)))
 
       if tP["isSwizzled"]:
@@ -3769,7 +3771,8 @@ class KernelWriterAssembly(KernelWriter):
         numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         # generate instruction
         module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"] * numWaves, tmpVgprRes, comment="LSU offset: Get LSU wave_id"))
-        module.add(VMulLOU32(dst=vgpr(wave_id), src0=hex(lsuStride), src1=vgpr(wave_id), \
+        module.add(VMovB32(dst=vgpr(tmpVgpr), src=hex(lsuStride)))
+        module.add(VMulLOU32(dst=vgpr(wave_id), src0=vgpr(tmpVgpr), src1=vgpr(wave_id), \
           comment="LSU offset: lsuoffset = wave_id*lsuStride(%u)" % (lsuStride)))
         module.add(VAddU32(dst=vgpr(qReg), src0=vgpr(wave_id), src1=vgpr(qReg), \
           comment="LSU Offset: offset += lsuoffset" ))
@@ -9160,7 +9163,10 @@ class KernelWriterAssembly(KernelWriter):
 
             # Need refactor, the pattern < glvw in fp8 is not the same as the original.
             # Thus the offset calculation here does not match global read.
-            if tP["glvw"] <= 2:
+            if tP["bpeGR"] == 4 and tP["bpeDS"] == 2:
+              # float to fp16/bf16, keep idx in the lower idx.
+              g2lIdx = int((i * blockWidth) * metadataScalar) * 2
+            elif tP["glvw"] <= 2:
               # In Metadata use metadataScalar to group # of i
               g2lIdx = (i * blockWidth) * metadataScalar
               if isBpeInputLarger:
@@ -9218,6 +9224,29 @@ class KernelWriterAssembly(KernelWriter):
                   if kernel["ExpertSchedulingMode"] > 0:
                     localWriteCVTCode.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
 
+            #comment = "Reg -> L %u_%u_%u_%u"%(para, sPara, perp, sPerp)
+            isHigh16Bits = False
+            isCvtHighBits = False
+            datatype = kernel["ProblemType"]["DataType%s"%tc] if kernel["ConvertAfterDS"] else kernel["ProblemType"]["DataType"]
+            if (datatype.isHalf() or datatype.isBFloat16()) and not tP["isM"]:
+              if s%2==1:
+                isHigh16Bits = True
+              if (blockWidth == 0.5) and (instHi % 2 == 1):
+                isHigh16Bits = True
+              if kernel["ProblemType"]["DataType%s"%tc].isAnyFloat8():
+                if g2lIdx%2 == 1:
+                  isCvtHighBits = True
+            #       |  hi16  |  hi16  |        |        |
+            #       |  hi8   |        |   hi8  |        |
+            #############################################
+            # VGPR: |---w4---|---w3---|---w2---|---w1---| -> b8_d16: get w1 / _b8_d16_hi: get w3
+            # LSHR: |--------|---w4---|--------|---w2---| -> b8_d16: get w2 / _b8_d16_hi: get w4
+            elif datatype.isInt8() or datatype.is8bitFloat() or tP["isM"]:
+              isHigh16Bits = (s % 4) > 1 # 2,3
+              # TODO
+              # if tP["glvw"]==1 and instructionCnt%2==1:
+              #   isHigh16Bits = True
+
             paramList = []
             numsOfRegister = []
             globalBlockWidth = tP["globalReadInstruction"].totalWidth
@@ -9226,7 +9255,13 @@ class KernelWriterAssembly(KernelWriter):
 #            print("destVgprPrefix = ", destVgprPrefix, ", blockWidth = ", blockWidth)
             for _ in range(0, numBlocks):
               # FIXME: In the future all registers should pass from global read instead of recalculate them
-              if globalBlockWidth == blockWidth and tP["glvw"] == 1:
+              if globalBlockWidth == 1 and blockWidth == 0.5 and tP["glvw"] == 1:
+                if isHigh16Bits:
+                  paramList.append(vgpr(destVgprPrefix + "+%u"%(g2lIdx + 1)))
+                else:
+                  paramList.append(vgpr(destVgprPrefix + "+%u"%(g2lIdx)))
+                numsOfRegister.append(blockWidth)
+              elif globalBlockWidth == blockWidth and tP["glvw"] == 1:
 #                print("destVgprPrefix = ", destVgprPrefix)
 #                print("tc = ", tc, ", i", i)
 #                print(self.vgprs.globalReadRegisters[tc][i])
@@ -9272,32 +9307,7 @@ class KernelWriterAssembly(KernelWriter):
 
             #print "offset", offset
 
-            #comment = "Reg -> L %u_%u_%u_%u"%(para, sPara, perp, sPerp)
-            isHigh16Bits = False
-            isCvtHighBits = False
-            datatype = kernel["ProblemType"]["DataType%s"%tc] if kernel["ConvertAfterDS"] else kernel["ProblemType"]["DataType"]
-            if (datatype.isHalf() or datatype.isBFloat16()) and not tP["isM"]:
-              if s%2==1:
-                isHigh16Bits = True
-              if (blockWidth == 0.5) and (instHi % 2 == 1):
-                isHigh16Bits = True
-              if kernel["ProblemType"]["DataType%s"%tc].isAnyFloat8():
-                if g2lIdx%2 == 1:
-                  isCvtHighBits = True
-
-
-            #       |  hi16  |  hi16  |        |        |
-            #       |  hi8   |        |   hi8  |        |
-            #############################################
-            # VGPR: |---w4---|---w3---|---w2---|---w1---| -> b8_d16: get w1 / _b8_d16_hi: get w3
-            # LSHR: |--------|---w4---|--------|---w2---| -> b8_d16: get w2 / _b8_d16_hi: get w4
-            elif datatype.isInt8() or datatype.is8bitFloat() or tP["isM"]:
-              isHigh16Bits = (s % 4) > 1 # 2,3
-              # TODO
-              # if tP["glvw"]==1 and instructionCnt%2==1:
-              #   isHigh16Bits = True
-
-              # Need cvt
+            # Need cvt
             if tP["bpeDS"] != tP["bpeGR"]:
               assert numBlocks == 1
               if (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isHalf()):
@@ -9534,6 +9544,20 @@ class KernelWriterAssembly(KernelWriter):
                     elif blockWidth == 0.5:
                       localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
                   self.vgprPool.checkIn(vgprTmp)
+              elif (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isBFloat16()):
+                newBlockWidth = (tP["bpeGR"] / tP["bpe"]) * blockWidth
+                if tP["glvw"] == 1:
+                  # use the same VGPR
+                  localWriteCVTCode.add(VCvtPkF32toBF16(dst=paramList[0], src0=paramList[0], src1=paramList[0], comment="convert one fp32 to bf16 to the same VGPR"))
+                elif newBlockWidth == 1:
+                  new_src = deepcopy(paramList[0])
+                  if isHigh16Bits:
+                    new_src.regName.addOffset(1)
+                  localWriteCVTCode.add(VCvtPkF32toBF16(dst=paramList[0], src0=new_src, src1=new_src, comment="convert one fp32 to bf16 idx=%d"%g2lIdx))
+                else:
+                  for vi in range(0, int(newBlockWidth)):
+                    if vi%2 == 0:
+                      localWriteCVTCode.add(VCvtPkF32toBF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), src1=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi+1)), comment="convert/pack fp32 to bf16"))
               else:
                 printExit("Unsupported combination DataType%s (%s) -> DataType (%s)"%(tc, kernel["ProblemType"]["DataType%s"%tc].toChar(), kernel["ProblemType"]["DataType"].toChar()))
 
@@ -12267,7 +12291,7 @@ class KernelWriterAssembly(KernelWriter):
         raise RuntimeError("chooseGlobalRead: offset too large for global_load %u"%(offset))
 
       modifier = GLOBALModifiers(offset=offset)
-      
+
       if bpl==8:
         return GlobalLoadTR8B64(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
       elif bpl==16:
