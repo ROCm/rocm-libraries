@@ -182,14 +182,17 @@ void simpleGemmTuningSplitKExt(hipblasLtHandle_t  handle,
     }
     else
     {
-        ws_ptr = d_workspace;
+        ws_ptr         = d_workspace;
+        workspace_size = max_workspace_size;
     }
 
+    gemm.setMaxWorkspaceBytes(workspace_size);
     CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[validIdx[0]].algo, tunings[0], ws_ptr));
     CHECK_HIPBLASLT_ERROR(gemm.run(stream));
 
     // Make sure to initialize every time when algo changes
     // If tuning is given, the API will not return success if the solution cannot accept an user tuning parameter.
+    gemm.setMaxWorkspaceBytes(workspace_size);
     CHECK_HIPBLASLT_ERROR(
         gemm.initialize(heuristicResult[validIdxTuning[0]].algo, tunings[1], ws_ptr));
     CHECK_HIPBLASLT_ERROR(gemm.run(stream));

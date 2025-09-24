@@ -5333,9 +5333,9 @@ void rocsparse_host<T, I, J, A, B, C>::csrddmm(rocsparse_operation  transA,
             T sum = static_cast<T>(0);
             for(J k = 0; k < K; ++k)
             {
-                sum = std::fma(x[incx * k], y[incy * k], sum);
+                sum += x[incx * k] * y[incy * k];
             }
-            csr_val_C[at] = std::fma(b, csr_val_C[at], a * sum);
+            csr_val_C[at] = b * csr_val_C[at] + a * sum;
         }
     }
 }
