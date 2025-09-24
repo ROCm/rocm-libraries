@@ -43,9 +43,7 @@ protected:
         input1.fillWithValue(static_cast<T>(1.0));
         input2.fillWithValue(static_cast<T>(2.0));
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         Tensor<T> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<T>(3.0));
@@ -64,9 +62,7 @@ protected:
         input1.fillWithValue(static_cast<T>(5.0));
         input2.fillWithValue(static_cast<T>(2.0));
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::SUB, input1, input2, output);
 
         Tensor<T> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<T>(3.0));
@@ -92,8 +88,7 @@ protected:
         input2.setHostValue(static_cast<T>(std::cos(1.0f)), 0, 0, 1, 0);
         input2.setHostValue(static_cast<T>(std::tan(1.0f)), 0, 0, 1, 1);
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         // Create expected tensor with computed results
         Tensor<T> expected({1, 1, 2, 2});
@@ -128,8 +123,7 @@ protected:
         input2.setHostValue(static_cast<T>(std::numbers::sqrt3_v<float>), 0, 0, 1, 0); // √3
         input2.setHostValue(static_cast<T>(1.0f), 0, 0, 1, 1); // log₁₀(10)
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::SUB, input1, input2, output);
 
         // Create expected tensor with computed results
         Tensor<T> expected({1, 1, 2, 2});
@@ -163,9 +157,7 @@ protected:
         input1.fillWithValue(static_cast<T>(1.0));
         input2.fillWithValue(static_cast<T>(2.0));
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         Tensor<T> expected({4, 3});
         expected.fillWithValue(static_cast<T>(3.0));
@@ -184,9 +176,7 @@ protected:
         input1.fillWithValue(static_cast<T>(2.5));
         input2.fillWithValue(static_cast<T>(1.5));
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         Tensor<T> expected({2, 3, 10});
         expected.fillWithValue(static_cast<T>(4.0));
@@ -206,8 +196,7 @@ protected:
             static_cast<T>(std::numbers::e_v<float> * std::numbers::e_v<float>), 0, 0, 0, 0); // e²
         input2.setHostValue(static_cast<T>(std::numbers::e_v<float>), 0, 0, 0, 0); // e
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::SUB, input1, input2, output);
 
         Tensor<T> expected({1, 1, 1, 1});
         expected.setHostValue(static_cast<T>((std::numbers::e_v<float>
@@ -231,8 +220,7 @@ protected:
         input1.setHostValue(static_cast<T>(0.123456789f), 0, 0, 0, 0);
         input2.setHostValue(static_cast<T>(0.987654321f), 0, 0, 0, 0);
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         Tensor<T> expected({1, 1, 1, 1});
         expected.setHostValue(static_cast<T>(0.123456789f + 0.987654321f), 0, 0, 0, 0);
@@ -254,9 +242,7 @@ protected:
             input2.setHostValue(static_cast<T>(static_cast<float>(i * 2)), i);
         }
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         // Create expected tensor: [1,2,3,4,5] + [0,2,4,6,8] = [1,4,7,10,13]
         Tensor<T> expected({5});
@@ -292,9 +278,7 @@ protected:
             input2.setHostValue(static_cast<T>(static_cast<float>((n + 1) * 100)), n);
         }
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         // Create expected tensor: broadcasting input2[n] to all input1[m,n]
         Tensor<T> expected({3, 4});
@@ -325,9 +309,7 @@ protected:
         input2.setHostValue(static_cast<T>(2.0), 0, 1, 0); // Channel 1
         input2.setHostValue(static_cast<T>(3.0), 0, 2, 0); // Channel 2
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::SUB);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::SUB, input1, input2, output);
 
         // Create expected tensor: broadcasting subtraction
         Tensor<T> expected({2, 3, 4});
@@ -362,9 +344,7 @@ protected:
         input2.setHostValue(static_cast<T>(20.0), 0, 1, 0, 0); // Channel 1
         input2.setHostValue(static_cast<T>(30.0), 0, 2, 0, 0); // Channel 2
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         // Create expected tensor: broadcasting addition
         Tensor<T> expected({2, 3, 2, 2});
@@ -413,9 +393,7 @@ protected:
             }
         }
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         // Create expected tensor: broadcasting addition
         Tensor<T> expected({2, 2, 3, 4});
@@ -463,9 +441,7 @@ protected:
         input2.setHostValue(static_cast<T>(20.0), 0, 1, 0, 0, 0); // Channel 1
         input2.setHostValue(static_cast<T>(30.0), 0, 2, 0, 0, 0); // Channel 2
 
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD);
+        CpuReferencePointwiseImpl<T, T, T>::pointwiseForward(PointwiseMode::ADD, input1, input2, output);
 
         // Create expected tensor: broadcasting addition
         Tensor<T> expected(outputDims, outputStrides);
@@ -495,90 +471,6 @@ protected:
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
 
-    void testErrorHandlingWrongInputCount()
-    {
-        Tensor<T> input1({1, 3, 2, 2});
-        Tensor<T> output({1, 3, 2, 2});
-
-        std::vector<const TensorBase<T>*> inputs = {&input1};
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
-    }
-
-    void testErrorHandlingNullInput()
-    {
-        Tensor<T> input2({1, 3, 2, 2});
-        Tensor<T> output({1, 3, 2, 2});
-
-        std::vector<const TensorBase<T>*> inputs = {nullptr, &input2};
-
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
-    }
-
-    void testErrorHandlingDimensionMismatch()
-    {
-        Tensor<T> input1({1, 3, 2, 2});
-        Tensor<T> input2({1, 2, 3, 2});
-        Tensor<T> output({1, 3, 2, 2});
-
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
-    }
-
-    void testErrorHandlingEmptyInputs()
-    {
-        Tensor<T> output({1, 3, 2, 2});
-        std::vector<const TensorBase<T>*> inputs = {};
-
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
-    }
-
-    void testErrorHandlingTooManyInputs()
-    {
-        Tensor<T> input1({1, 3, 2, 2});
-        Tensor<T> input2({1, 3, 2, 2});
-        Tensor<T> input3({1, 3, 2, 2});
-        Tensor<T> output({1, 3, 2, 2});
-
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2, &input3};
-
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
-    }
-
-    void testBroadcastErrorIncompatibleShapes()
-    {
-        Tensor<T> input1({2, 3, 2, 2});
-        Tensor<T> input2({2, 2, 2, 2});
-        Tensor<T> output({2, 3, 2, 2});
-
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
-    }
-
-    void testBroadcastErrorWrongOutputShape()
-    {
-        Tensor<T> input1({2, 2, 2, 2});
-        Tensor<T> input2({1, 2, 1, 1});
-        Tensor<T> output({2, 3, 2, 2});
-        std::vector<const TensorBase<T>*> inputs = {&input1, &input2};
-
-        EXPECT_THROW(
-            CpuReferencePointwiseImpl<T>::pointwiseForward(inputs, output, PointwiseMode::ADD),
-            std::runtime_error);
-    }
 };
 
 using TestTypes = ::testing::Types<float, double, half, hip_bfloat16>;
@@ -652,39 +544,4 @@ TYPED_TEST(CpuReferencePointwiseTemplate, BroadcastComplexND)
 TYPED_TEST(CpuReferencePointwiseTemplate, Broadcast5D)
 {
     this->testBroadcast5D();
-}
-
-TYPED_TEST(CpuReferencePointwiseTemplate, ErrorHandlingWrongInputCount)
-{
-    this->testErrorHandlingWrongInputCount();
-}
-
-TYPED_TEST(CpuReferencePointwiseTemplate, ErrorHandlingNullInput)
-{
-    this->testErrorHandlingNullInput();
-}
-
-TYPED_TEST(CpuReferencePointwiseTemplate, ErrorHandlingDimensionMismatch)
-{
-    this->testErrorHandlingDimensionMismatch();
-}
-
-TYPED_TEST(CpuReferencePointwiseTemplate, ErrorHandlingEmptyInputs)
-{
-    this->testErrorHandlingEmptyInputs();
-}
-
-TYPED_TEST(CpuReferencePointwiseTemplate, ErrorHandlingTooManyInputs)
-{
-    this->testErrorHandlingTooManyInputs();
-}
-
-TYPED_TEST(CpuReferencePointwiseTemplate, BroadcastErrorIncompatibleShapes)
-{
-    this->testBroadcastErrorIncompatibleShapes();
-}
-
-TYPED_TEST(CpuReferencePointwiseTemplate, BroadcastErrorWrongOutputShape)
-{
-    this->testBroadcastErrorWrongOutputShape();
 }

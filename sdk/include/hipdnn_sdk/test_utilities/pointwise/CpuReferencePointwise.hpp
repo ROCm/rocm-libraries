@@ -11,26 +11,27 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
-template <class DataType, class DeviceExecutor = CpuDeviceExecutor<DataType>>
+template <class OutputType, class DeviceExecutor, class... InputTypes>
 class ReferencePointwiseImpl
 {
 public:
     static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
     {
-        return ReferencePointwiseBase<DataType, DeviceExecutor>::isApplicable(node);
+        return ReferencePointwiseBase<OutputType, DeviceExecutor, InputTypes...>::isApplicable(node);
     }
 
-    static void pointwiseForward(const std::vector<const TensorBase<DataType>*>& inputs,
-                                 TensorBase<DataType>& output,
-                                 hipdnn_sdk::data_objects::PointwiseMode operation)
+    template<typename... Tensors>
+    static void pointwiseForward(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                Tensors&&... tensors_and_output)
     {
-        ReferencePointwiseBase<DataType, DeviceExecutor>::pointwiseForward(
-            inputs, output, operation);
+        ReferencePointwiseBase<OutputType, DeviceExecutor, InputTypes...>::pointwiseForward(
+            operation, std::forward<Tensors>(tensors_and_output)...);
     }
 };
 
-template <class DataType>
-using CpuReferencePointwiseImpl = ReferencePointwiseImpl<DataType, CpuDeviceExecutor<DataType>>;
+// Generic N-ary type alias for CPU operations
+template <class OutputType, class... InputTypes>
+using CpuReferencePointwiseImpl = ReferencePointwiseImpl<OutputType, CpuDeviceExecutor<OutputType, InputTypes...>, InputTypes...>;
 
 } // namespace test_utilities
 } // namespace hipdnn_sdk

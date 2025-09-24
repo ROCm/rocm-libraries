@@ -16,7 +16,7 @@ namespace test_utilities
 
 using namespace hipdnn_sdk::utilities;
 
-template <class DataType, class DeviceExecutor>
+template <class OutputType, class DeviceExecutor, class... InputTypes>
 class ReferencePointwiseBase
 {
 public:
@@ -44,34 +44,36 @@ public:
         return true;
     }
 
-    static void pointwiseForward(const std::vector<const TensorBase<DataType>*>& inputs,
-                                 TensorBase<DataType>& output,
-                                 hipdnn_sdk::data_objects::PointwiseMode operation)
+    // Variadic template interface for unary, binary, and ternary operations
+    template<typename... Tensors>
+    static void pointwiseForward(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                Tensors&&... tensors_and_output)
     {
-        if(inputs.empty())
-        {
-            throw std::runtime_error("Pointwise operation requires at least one input tensor.");
-        }
-
+        static_assert(sizeof...(Tensors) >= 2, "Need at least one input and one output tensor");
+        static_assert(sizeof...(Tensors) == 3, "Currently only binary operations are supported");
+        
+        auto args = std::forward_as_tuple(tensors_and_output...);
+        
         DeviceExecutor policy;
-
+        
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::ADD:
-            policy.executeBinaryBroadcast(inputs, output, pointwise::Add{});
+            policy.executeBinaryBroadcast(std::get<0>(args), std::get<1>(args), std::get<2>(args), pointwise::Add{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SUB:
-            policy.executeBinaryBroadcast(inputs, output, pointwise::Subtract{});
+            policy.executeBinaryBroadcast(std::get<0>(args), std::get<1>(args), std::get<2>(args), pointwise::Subtract{});
             break;
         default:
             throw std::runtime_error("Unsupported pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
         }
 
-        policy.markOutputModified(output);
+        policy.markOutputModified(std::get<2>(args));
     }
 
 private:
+
     static bool canExecuteOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
                                     const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
     {

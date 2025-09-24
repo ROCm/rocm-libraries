@@ -15,31 +15,18 @@ namespace test_utilities
 
 using namespace hipdnn_sdk::utilities;
 
-template <class DataType>
+template <class OutputType, class... InputTypes>
 class CpuDeviceExecutor
 {
 public:
-    template <typename Op>
-    void executeBinaryBroadcast(const std::vector<const TensorBase<DataType>*>& inputs,
-                                TensorBase<DataType>& output,
-                                Op op)
+    // Binary operation with explicit two inputs
+    template <typename Op, typename Input1Type, typename Input2Type>
+    void executeBinaryBroadcast(const TensorBase<Input1Type>& input1,
+                               const TensorBase<Input2Type>& input2,
+                               TensorBase<OutputType>& output,
+                               Op op)
     {
-        if(inputs.size() != 2)
-        {
-            throw std::runtime_error("Binary operation requires exactly 2 input tensors.");
-        }
-
-        for(size_t i = 0; i < inputs.size(); ++i)
-        {
-            if(inputs[i] == nullptr)
-            {
-                throw std::runtime_error("Input tensor " + std::to_string(i) + " is null.");
-            }
-        }
-
-        const auto& input1 = *inputs[0];
-        const auto& input2 = *inputs[1];
-
+        // Get input shapes
         std::vector<std::vector<int64_t>> input_shapes = {input1.dims(), input2.dims()};
 
         auto broadcast_shape = computeBroadcastShape(input_shapes);
@@ -50,20 +37,25 @@ public:
         }
 
         auto func = [&](const std::vector<int64_t>& indices) {
-            auto input1_idx = getBroadcastableIndex(indices, input1.dims());
-            auto input2_idx = getBroadcastableIndex(indices, input2.dims());
+            // Get broadcasted indices for each input
+            auto input1_indices = getBroadcastableIndex(indices, input1.dims());
+            auto input2_indices = getBroadcastableIndex(indices, input2.dims());
 
-            auto input1Val = input1.getHostValue(input1_idx);
-            auto input2Val = input2.getHostValue(input2_idx);
+            // Get values from input tensors and apply operation
+            auto input1_value = input1.getHostValue(input1_indices);
+            auto input2_value = input2.getHostValue(input2_indices);
 
-            output.setHostValue(static_cast<DataType>(op(input1Val, input2Val)), indices);
+            // Apply operation and set output
+            auto result = op(input1_value, input2_value);
+            output.setHostValue(static_cast<OutputType>(result), indices);
         };
 
         auto parallelFunc = makeParallelTensorFunctor(func, broadcast_shape);
         parallelFunc();
     }
 
-    void markOutputModified(TensorBase<DataType>& output)
+
+    void markOutputModified(TensorBase<OutputType>& output)
     {
         output.memory().markHostModified();
     }
