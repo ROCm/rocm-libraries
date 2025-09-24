@@ -297,13 +297,20 @@ if(HIPSPARSELT_ENABLE_CLIENT)
     endif()
 endif()
 
-rocm_create_package(
-    NAME ${PROJECT_NAME}
-    DESCRIPTION "ROCm structured sparsity matrix multiplication marshalling library"
-    MAINTAINER "hipSPARSELt Maintainer <hipsparselt-maintainer@amd.com>"
-    LDCONFIG
-    LDCONFIG_DIR ${HIPSPARSELT_CONFIG_DIR}
-)
+if(ROCM_LIBS_SUPERBUILD OR NOT HIPSPARSELT_IS_SUBPROJECT)
+    # rocm_create_package makes decisions on what type of package to produce
+    # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
+    # a dev package.
+    set(BUILD_SHARED_LIBS ${HIPSPARSELT_BUILD_SHARED_LIBS})
+    set(HIPSPARSELT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
+    rocm_create_package(
+        NAME hipsparselt
+        DESCRIPTION "ROCm structured sparsity matrix multiplication marshalling library"
+        MAINTAINER "hipSPARSELt Maintainer <hipsparselt-maintainer@amd.com>"
+        LDCONFIG
+        LDCONFIG_DIR ${HIPSPARSELT_CONFIG_DIR}
+    )
+endif()
 
 # --- Coverage setup ---
 
