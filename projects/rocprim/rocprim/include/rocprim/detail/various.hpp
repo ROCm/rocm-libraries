@@ -583,6 +583,15 @@ public:
     }
 };
 
+// For each element 'i' in index sequence, do 'f(init + i * inc)'.
+template<typename F, auto init, auto inc, std::size_t... Is>
+constexpr void constexpr_for_impl(F&& f, std::index_sequence<Is...> /* sequence */)
+{
+    // Implement constexpr for via std::index_sequence because it compiles faster
+    // than recursive types.
+    (f(std::integral_constant<decltype(init), init + Is * inc>{}), ...);
+}
+
 /// Implements statically unrolled loop:
 /// `for (auto i = init; i < cond; i += inc) f(i);`
 template<auto init, auto cond, auto inc, class F>
@@ -591,8 +600,9 @@ constexpr void constexpr_for_lt(F&& f)
 {
     if constexpr(init < cond)
     {
-        f(std::integral_constant<decltype(init), init>());
-        constexpr_for_lt<init + inc, cond, inc>(f);
+        static_assert(inc > 0);
+        constexpr auto N = (cond - init + inc - 1) / inc;
+        constexpr_for_impl<F, init, inc>(std::forward<F>(f), std::make_index_sequence<N>{});
     }
 }
 
@@ -604,8 +614,9 @@ constexpr void constexpr_for_lte(F&& f)
 {
     if constexpr(init <= cond)
     {
-        f(std::integral_constant<decltype(init), init>());
-        constexpr_for_lte<init + inc, cond, inc>(f);
+        static_assert(inc > 0);
+        constexpr auto N = (cond - init + inc) / inc;
+        constexpr_for_impl<F, init, inc>(std::forward<F>(f), std::make_index_sequence<N>{});
     }
 }
 
@@ -617,8 +628,9 @@ constexpr void constexpr_for_gt(F&& f)
 {
     if constexpr(init > cond)
     {
-        f(std::integral_constant<decltype(init), init>());
-        constexpr_for_gt<init + inc, cond, inc>(f);
+        static_assert(inc < 0);
+        constexpr auto N = (cond - init + inc + 1) / inc;
+        constexpr_for_impl<F, init, inc>(std::forward<F>(f), std::make_index_sequence<N>{});
     }
 }
 
@@ -630,8 +642,9 @@ constexpr void constexpr_for_gte(F&& f)
 {
     if constexpr(init >= cond)
     {
-        f(std::integral_constant<decltype(init), init>());
-        constexpr_for_gte<init + inc, cond, inc>(f);
+        static_assert(inc < 0);
+        constexpr auto N = (cond - init + inc) / inc;
+        constexpr_for_impl<F, init, inc>(std::forward<F>(f), std::make_index_sequence<N>{});
     }
 }
 

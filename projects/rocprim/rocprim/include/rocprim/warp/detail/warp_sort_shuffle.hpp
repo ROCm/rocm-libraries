@@ -316,7 +316,7 @@ struct warp_shuffle_sort_impl
         // * sort: sorts any sequence into a monotonic sequence
         // E.g. tlev_sort: ensures all thread level items are sorted.
         //
-        // First we need to make sure that we have bitonic lane pairs. Only need to 
+        // First we need to make sure that we have bitonic lane pairs. Only need to
         // invoke thread-level algorithms if we have multiple items per thread.
         if constexpr(ItemsPerThread > 1)
         {
