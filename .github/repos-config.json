@@ -17,6 +17,14 @@
       "auto_subtree_push": true
     },
     {
+      "name": "origami",
+      "url": "ROCm/origami",
+      "branch": "develop",
+      "category": "shared",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false
+    },
+    {
       "name": "mxdatagenerator",
       "url": "ROCm/mxDataGenerator",
       "branch": "develop",
