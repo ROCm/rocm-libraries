@@ -28,7 +28,6 @@ import functools
 import json
 import os
 import subprocess
-
 from dataclasses import asdict, fields
 from hashlib import sha1
 from pathlib import Path

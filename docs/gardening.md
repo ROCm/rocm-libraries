@@ -95,6 +95,8 @@ Aug 12, 2025 | eidenyoshida | N/A
 Aug 19, 2025 | stanleytsang-amd | N/A
 Aug 26, 2025 | rahulc-gh | N/A
 Sep 02, 2025 | paveltc | N/A
+Sep 09, 2025 | adickin-amd | N/A
+Sep 16, 2025 | araravik-psd | N/A
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 

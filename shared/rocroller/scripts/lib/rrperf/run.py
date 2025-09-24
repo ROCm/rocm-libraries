@@ -27,19 +27,17 @@
 
 import argparse
 import datetime
+import importlib.util
 import os
 import subprocess
-import importlib.util
-
 from dataclasses import fields
 from itertools import chain
 from pathlib import Path
 from typing import Dict, Tuple
 
 import pandas as pd
-import yaml
-
 import rrperf
+import yaml
 
 
 def submit_directory(suite: str, wrkdir: Path, ptsdir: Path) -> None:
@@ -139,7 +137,7 @@ def generate_missing_attr_value(run, attr):
             return (wgm_dim, wgm_value)
         case _:
             raise RuntimeError(
-                f"Cannot handle attribuite missing in previous rrperf version: {attr}"
+                f"Cannot handle attribute missing in previous rrperf version: {attr}"
             )
 
 
