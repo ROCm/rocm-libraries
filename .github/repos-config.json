@@ -22,7 +22,7 @@
       "branch": "develop",
       "category": "shared",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false
     },
     {
       "name": "mxdatagenerator",
