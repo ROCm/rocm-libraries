@@ -21,8 +21,8 @@ After it is installed, hipSOLVER can be used like any other library with a C API
 in the user code, which means the shared library becomes a link-time and run-time dependency for the user application. The
 user application code can be ported with no changes to any system with hipSOLVER installed, regardless of the backend library.
 
-For more details on how to use the API methods, see the client code samples on the
-`hipSOLVER GitHub <https://github.com/ROCm/hipSOLVER/tree/develop/clients/samples>`_ or
+For more details on how to use the API methods, see the client code samples in the
+`rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsolver/clients/samples>`_ or
 the documentation for the corresponding backend libraries.
 
 .. _porting:
