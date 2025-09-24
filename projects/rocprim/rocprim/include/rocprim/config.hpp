@@ -146,12 +146,17 @@
     #define ROCPRIM_MAX_ATOMIC_SIZE 16
 #endif
 
+#if defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
+    #define ROCPRIM_SPIRV_CONSTEXPR
+#else
+    #define ROCPRIM_SPIRV_CONSTEXPR constexpr
+#endif
+
 // DPP is supported only after Volcanic Islands (GFX8+)
 // Only defined when support is present, in contrast to ROCPRIM_DETAIL_USE_DPP, which should be
 // always defined
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) \
-    && (!defined(__GFX6__) && !defined(__GFX7__))          \
-    && !(defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1)
+    && (!defined(__GFX6__) && !defined(__GFX7__))
     #define ROCPRIM_DETAIL_HAS_DPP 1
 #endif
 
@@ -160,14 +165,6 @@
     #define ROCPRIM_DETAIL_USE_DPP 1
 #else
     #define ROCPRIM_DETAIL_USE_DPP 0
-#endif
-
-#if defined(ROCPRIM_DETAIL_HAS_DPP) && (defined(__GFX8__) || defined(__GFX9__))
-    #define ROCPRIM_DETAIL_HAS_DPP_BROADCAST 1
-#endif
-
-#if defined(ROCPRIM_DETAIL_HAS_DPP) && (defined(__GFX8__) || defined(__GFX9__))
-    #define ROCPRIM_DETAIL_HAS_DPP_WF 1
 #endif
 
 #if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS) && !defined(ROCPRIM_TARGET_SPIRV)
@@ -273,6 +270,25 @@
     #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH \
         ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated-declarations")
     #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP ROCPRIM_CLANG_SUPPRESS_WARNING_POP
+#endif
+
+#if __has_builtin(__builtin_amdgcn_is_invocable)
+    #define ROCPRIM_HAS_DPP() __builtin_amdgcn_is_invocable(__builtin_amdgcn_mov_dpp)
+    #define ROCPRIM_HAS_PERMLANE() __builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane16)
+#elif defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
+    #define ROCPRIM_HAS_DPP() false
+    #define ROCPRIM_HAS_PERMLANE() false
+#else
+    #if defined(ROCPRIM_DETAIL_HAS_DPP) && ROCPRIM_DETAIL_HAS_DPP == 1
+        #define ROCPRIM_HAS_DPP() true
+    #else
+        #define ROCPRIM_HAS_DPP() false
+    #endif
+    #if defined(__GFX8__) || defined(__GFX9__)
+        #define ROCPRIM_HAS_PERMLANE() false
+    #else
+        #define ROCPRIM_HAS_PERMLANE() true
+    #endif
 #endif
 
 #endif // ROCPRIM_CONFIG_HPP_
