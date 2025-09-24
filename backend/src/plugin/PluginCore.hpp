@@ -234,7 +234,7 @@ private:
                 const auto libraryPath = lib.libraryPath();
 
                 // Shared library ensures an injective, weakly canonical mapping to a path
-                if(_loadedPluginFiles.contains(libraryPath))
+                if(_loadedPluginFiles.find(libraryPath) != _loadedPluginFiles.end())
                 {
                     return;
                 }

@@ -69,8 +69,8 @@ TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
     auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
     EXPECT_EQ(applicable.size(), 2);
-    EXPECT_TRUE(std::ranges::find(applicable, 1) != applicable.end());
-    EXPECT_TRUE(std::ranges::find(applicable, 2) != applicable.end());
+    EXPECT_TRUE(std::find(applicable.begin(), applicable.end(), 1) != applicable.end());
+    EXPECT_TRUE(std::find(applicable.begin(), applicable.end(), 2) != applicable.end());
 }
 
 TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)

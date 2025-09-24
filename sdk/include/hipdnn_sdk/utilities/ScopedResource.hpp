@@ -5,19 +5,23 @@
 
 // ScopedResource is a utility class that manages a resource with a custom destructor.
 
+#include <functional>
 #include <utility>
 
 namespace hipdnn_sdk::utilities
 {
 
-template <typename T, typename Destructor>
+template <typename T>
 class ScopedResource
 {
 public:
     ScopedResource() = default;
-    ScopedResource(T resource, Destructor destructor)
+
+    // Accept any callable type for destructor, convert to std::function
+    template <typename Callable>
+    ScopedResource(T resource, Callable&& destructor)
         : _resource(resource)
-        , _destructor(destructor)
+        , _destructor(std::forward<Callable>(destructor))
         , _empty(false)
     {
     }
@@ -34,18 +38,12 @@ public:
     ScopedResource(const ScopedResource&) = delete;
     ScopedResource& operator=(const ScopedResource&) = delete;
 
-    // Allow moving
     ScopedResource(ScopedResource&& other) noexcept
+        : _resource(std::move(other._resource))
+        , _destructor(std::move(other._destructor))
+        , _empty(other._empty)
     {
-        if(other._empty)
-        {
-            return;
-        }
-
-        _resource = std::move(other._resource);
-        _destructor = std::move(other._destructor);
         other._empty = true;
-        _empty = false;
     }
 
     ScopedResource& operator=(ScopedResource&& other) noexcept
@@ -80,7 +78,7 @@ public:
 
 private:
     T _resource;
-    Destructor _destructor;
+    std::function<void(T)> _destructor;
     bool _empty = true;
 };
 

@@ -64,7 +64,7 @@ inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
     // Create a mapping of stride order to dimension index
     std::vector<size_t> indices(numDims);
     std::iota(indices.begin(), indices.end(), 0);
-    std::ranges::sort(indices.begin(), indices.end(), [&strideOrder](size_t a, size_t b) {
+    std::sort(indices.begin(), indices.end(), [&strideOrder](size_t a, size_t b) {
         return strideOrder[a] < strideOrder[b];
     });
 
@@ -114,6 +114,30 @@ inline std::vector<int64_t> strideOrderNhwc(size_t numDims)
         strideOrder[i] = order++;
     }
     strideOrder[0] = order;
+
+    return strideOrder;
+}
+
+// Extracts stride order from existing strides
+// The stride order indicates the memory layout priority (lower values = higher priority)
+// For example, strides [8, 1, 4] would produce order [2, 0, 1]
+// This is the inverse operation of generateStrides
+inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strides)
+{
+    std::vector<int64_t> strideOrder(strides.size());
+    std::vector<size_t> indices(strides.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // Sort indices by their corresponding stride values (ascending)
+    std::sort(indices.begin(), indices.end(), [&strides](size_t a, size_t b) {
+        return strides[a] < strides[b];
+    });
+
+    // Assign order based on sorted indices
+    for(size_t i = 0; i < indices.size(); ++i)
+    {
+        strideOrder[indices[i]] = static_cast<int64_t>(i);
+    }
 
     return strideOrder;
 }

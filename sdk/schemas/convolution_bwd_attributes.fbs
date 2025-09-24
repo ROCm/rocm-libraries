@@ -5,11 +5,11 @@ include "convolution_common.fbs";
 
 namespace hipdnn_sdk.data_objects;
 
-table ConvolutionFwdAttributes {
+table ConvolutionBwdAttributes {
     // Input/Output tensor UIDs
-    x_tensor_uid: long;          // Input tensor
-    w_tensor_uid: long;          // Weights/filter tensor  
-    y_tensor_uid: long;          // Output tensor
+    dy_tensor_uid: long;         // Gradient of output tensor (DY)
+    w_tensor_uid: long;          // Weights/filter tensor
+    dx_tensor_uid: long;         // Gradient of input tensor (DX)
     
     // Convolution parameters (N-dimensional support)
     pre_padding: [long];         // Padding before each dimension

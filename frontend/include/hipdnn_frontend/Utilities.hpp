@@ -33,13 +33,13 @@ inline Error findCommonShape(const std::vector<std::vector<int64_t>>& inputShape
         return {ErrorCode::INVALID_VALUE, "Input shapes cannot be empty"};
     }
 
-    size_t dims = std::ranges::max_element(
-                      inputShapes.begin(),
-                      inputShapes.end(),
-                      [](const std::vector<int64_t>& a, const std::vector<int64_t>& b) {
-                          return a.size() < b.size();
-                      })
-                      ->size();
+    size_t dims
+        = std::max_element(inputShapes.begin(),
+                           inputShapes.end(),
+                           [](const std::vector<int64_t>& a, const std::vector<int64_t>& b) {
+                               return a.size() < b.size();
+                           })
+              ->size();
 
     commonShape.resize(dims, 1);
 

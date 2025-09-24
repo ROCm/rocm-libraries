@@ -148,8 +148,8 @@ TEST(TestBatchnormBackwardNode, GatherHipdnnTensorIds)
     std::unordered_set<int64_t> usedIds;
     node.gather_hipdnn_tensor_ids(usedIds);
 
-    EXPECT_TRUE(usedIds.contains(9));
-    EXPECT_TRUE(usedIds.contains(10));
+    EXPECT_TRUE(usedIds.find(9) != usedIds.end());
+    EXPECT_TRUE(usedIds.find(10) != usedIds.end());
 }
 
 TEST(TestBatchnormBackwardNode, PopulateHipdnnTensorIds)

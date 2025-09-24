@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
@@ -273,6 +274,32 @@ TEST_F(TestGraph, ConvolutionFwdNodeCreation)
 
     EXPECT_EQ(y->get_name(), "ConvolutionFpropNode::Y");
     EXPECT_TRUE(y->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ConvolutionDgradNodeCreation)
+{
+    Graph graph;
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    ConvDgradAttributes attributes;
+    attributes.set_name("ConvolutionDgradNode");
+    attributes.set_pre_padding({1, 1});
+    attributes.set_post_padding({1, 1});
+    attributes.set_stride({1, 1});
+    attributes.set_dilation({1, 1});
+
+    auto dx = graph.conv_dgrad(dy, w, attributes);
+
+    EXPECT_EQ(dx->get_name(), "ConvolutionDgradNode::DX");
+    EXPECT_TRUE(dx->get_is_virtual());
 
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
@@ -887,6 +914,78 @@ TEST_F(TestGraph, BuildAndSerializeConvolutionFwdGraph)
     EXPECT_EQ(deserializedConvolutionAttributes->x_tensor_uid, x->get_uid());
     EXPECT_EQ(deserializedConvolutionAttributes->w_tensor_uid, w->get_uid());
     EXPECT_EQ(deserializedConvolutionAttributes->y_tensor_uid, y->get_uid());
+    EXPECT_EQ(deserializedConvolutionAttributes->pre_padding, std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(deserializedConvolutionAttributes->post_padding, std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(deserializedConvolutionAttributes->stride, std::vector<int64_t>({1, 1}));
+    EXPECT_EQ(deserializedConvolutionAttributes->dilation, std::vector<int64_t>({1, 1}));
+}
+
+TEST_F(TestGraph, BuildAndSerializeConvolutionDgradGraph)
+{
+    Graph graph;
+
+    graph.set_name("SerializedConvolutionDgradGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_uid(1)
+        .set_name("DY")
+        .set_dim({1, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(2)
+        .set_name("W")
+        .set_dim({64, 3, 3, 3})
+        .set_stride({27, 9, 3, 1})
+        .set_data_type(DataType::FLOAT);
+
+    ConvDgradAttributes convolutionAttributes;
+    convolutionAttributes.set_name("ConvolutionDgradNode");
+    convolutionAttributes.set_pre_padding({1, 1});
+    convolutionAttributes.set_post_padding({1, 1});
+    convolutionAttributes.set_stride({1, 1});
+    convolutionAttributes.set_dilation({1, 1});
+
+    auto dx = graph.conv_dgrad(dy, w, convolutionAttributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto build_result = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(build_result.is_good()) << build_result.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedConvolutionDgradGraph");
+    EXPECT_EQ(deserializedGraph->compute_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_type, hipdnn_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_type, hipdnn_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 3);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    std::unordered_map<int64_t, hipdnn_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*dy, tensorLookup[dy->get_uid()]);
+    validateTensor(*w, tensorLookup[w->get_uid()]);
+    validateTensor(*dx, tensorLookup[dx->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "ConvolutionDgradNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes);
+    auto deserializedConvolutionAttributes
+        = deserializedGraph->nodes[0]->attributes.AsConvolutionBwdAttributes();
+    EXPECT_EQ(deserializedConvolutionAttributes->dy_tensor_uid, dy->get_uid());
+    EXPECT_EQ(deserializedConvolutionAttributes->w_tensor_uid, w->get_uid());
+    EXPECT_EQ(deserializedConvolutionAttributes->dx_tensor_uid, dx->get_uid());
     EXPECT_EQ(deserializedConvolutionAttributes->pre_padding, std::vector<int64_t>({1, 1}));
     EXPECT_EQ(deserializedConvolutionAttributes->post_padding, std::vector<int64_t>({1, 1}));
     EXPECT_EQ(deserializedConvolutionAttributes->stride, std::vector<int64_t>({1, 1}));
@@ -1590,7 +1689,7 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
             auto keys = static_cast<const int64_t*>(ptr);
             for(int i = 0; i < 4; i++)
             {
-                EXPECT_TRUE(variantPack.contains(keys[i]));
+                EXPECT_TRUE(variantPack.find(keys[i]) != variantPack.end());
             }
             return HIPDNN_STATUS_SUCCESS;
         }));

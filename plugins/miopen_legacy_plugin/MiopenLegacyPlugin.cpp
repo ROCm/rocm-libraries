@@ -95,7 +95,7 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
     return hipdnn_plugin::tryCatch([&, apiName = __func__]() {
         throwIfNull(callback);
         hipdnn::logging::initializeCallbackLogging(pluginName, callback);
-        LOG_API_SUCCESS(apiName, "");
+        LOG_API_SUCCESS(apiName, "", "");
     });
 }
 
@@ -199,7 +199,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle
         delete handle;
         handle = nullptr;
 
-        LOG_API_SUCCESS(apiName, "");
+        LOG_API_SUCCESS(apiName, "", "");
     });
 }
 
@@ -214,7 +214,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t hand
 
         handle->setStream(stream);
 
-        LOG_API_SUCCESS(apiName, "");
+        LOG_API_SUCCESS(apiName, "", "");
     });
 }
 
@@ -395,7 +395,7 @@ hipdnnPluginStatus_t
 
         delete executionContext;
 
-        LOG_API_SUCCESS(apiName, "destroyed executionContext");
+        LOG_API_SUCCESS(apiName, "destroyed executionContext", "");
     });
 }
 
@@ -421,7 +421,7 @@ hipdnnPluginStatus_t
 
         executionContext->plan().execute(*handle, deviceBuffers, numDeviceBuffers, workspace);
 
-        LOG_API_SUCCESS(apiName, "executed graph");
+        LOG_API_SUCCESS(apiName, "executed graph", "");
     });
 }
 

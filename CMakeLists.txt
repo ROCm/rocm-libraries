@@ -22,12 +22,7 @@ project(
     VERSION ${HIPDNN_VERSION}
     LANGUAGES CXX)
 
-# Set default install prefix after project() so ROCM_PATH is available
-if(NOT WIN32 AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
-endif()
-    
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 
 # Define standard install directories (replaces GNUInstallDirs)
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE PATH "Object code libraries")

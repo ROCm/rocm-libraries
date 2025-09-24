@@ -146,7 +146,7 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
     {
         auto handle = plugin->createHandle();
 
-        if(_handleToPlugin.contains(handle))
+        if(_handleToPlugin.find(handle) != _handleToPlugin.end())
         {
             throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Plugin handle already exists");
         }
@@ -221,7 +221,7 @@ std::vector<int64_t>
 
         for(const auto& id : ids)
         {
-            if(!_engineIdToHandle.contains(id))
+            if(_engineIdToHandle.find(id) == _engineIdToHandle.end())
             {
                 throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Unknown engine ID");
             }

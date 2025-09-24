@@ -141,8 +141,8 @@ TEST(TestPluginManager, LoadPluginsFromDirectory)
     {
         pluginNames.insert(p->name());
     }
-    EXPECT_TRUE(pluginNames.contains("Plugin1"));
-    EXPECT_TRUE(pluginNames.contains("Plugin2"));
+    EXPECT_TRUE(pluginNames.find("Plugin1") != pluginNames.end());
+    EXPECT_TRUE(pluginNames.find("Plugin2") != pluginNames.end());
 }
 
 TEST(TestPluginManager, LoadPluginsAbsolute)
@@ -183,8 +183,8 @@ TEST(TestPluginManager, LoadPluginsAdditiveAccumulates)
     {
         pluginNames.insert(p->name());
     }
-    EXPECT_TRUE(pluginNames.contains("Plugin1"));
-    EXPECT_TRUE(pluginNames.contains("Plugin2"));
+    EXPECT_TRUE(pluginNames.find("Plugin1") != pluginNames.end());
+    EXPECT_TRUE(pluginNames.find("Plugin2") != pluginNames.end());
 }
 
 TEST(TestPluginManager, LoadPluginsAbsoluteReplaces)
@@ -221,8 +221,8 @@ TEST(TestPluginManager, LoadPluginsAdditiveWithDefault)
     {
         pluginNames.insert(p->name());
     }
-    EXPECT_TRUE(pluginNames.contains("Plugin1"));
-    EXPECT_TRUE(pluginNames.contains("Plugin2"));
+    EXPECT_TRUE(pluginNames.find("Plugin1") != pluginNames.end());
+    EXPECT_TRUE(pluginNames.find("Plugin2") != pluginNames.end());
 }
 
 TEST(TestPluginManager, LoadPluginsCombinedFileAndDirectory)
@@ -247,8 +247,8 @@ TEST(TestPluginManager, LoadPluginsCombinedFileAndDirectory)
     {
         pluginNames.insert(p->name());
     }
-    EXPECT_TRUE(pluginNames.contains("Plugin1"));
-    EXPECT_TRUE(pluginNames.contains("Plugin2"));
+    EXPECT_TRUE(pluginNames.find("Plugin1") != pluginNames.end());
+    EXPECT_TRUE(pluginNames.find("Plugin2") != pluginNames.end());
 }
 
 TEST(TestPluginManager, LastError)

@@ -40,10 +40,9 @@ public:
                 auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
                 //todo, its optional so use scale if not provided
                 auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid());
-                BatchnormSignatureRegistryKey key{.inputDataType = xTensorAttr->data_type(),
-                                                  .scaleBiasDataType = scaleTensorAttr->data_type(),
-                                                  .meanVarianceDataType
-                                                  = meanTensorAttr->data_type()};
+                BatchnormSignatureRegistryKey key{xTensorAttr->data_type(),
+                                                  scaleTensorAttr->data_type(),
+                                                  meanTensorAttr->data_type()};
 
                 auto it = batchnormRegistry().find(key);
 

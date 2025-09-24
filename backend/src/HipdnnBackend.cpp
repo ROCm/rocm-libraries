@@ -19,10 +19,10 @@
 using namespace hipdnn_backend;
 
 #define LOG_API_ENTRY(format, ...) \
-    HIPDNN_LOG_INFO("API called: [{}] " format, __func__ __VA_OPT__(, ) __VA_ARGS__)
+    HIPDNN_LOG_INFO("API called: [{}] " format, __func__, __VA_ARGS__)
 
 #define LOG_API_SUCCESS(func_name, format, ...) \
-    HIPDNN_LOG_INFO("API success: [{}] " format, func_name __VA_OPT__(, ) __VA_ARGS__)
+    HIPDNN_LOG_INFO("API success: [{}] " format, func_name, __VA_ARGS__)
 
 namespace
 {
@@ -75,7 +75,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle)
 
         delete handle;
 
-        LOG_API_SUCCESS(apiName, "");
+        LOG_API_SUCCESS(apiName, "", "");
     });
 }
 
@@ -89,7 +89,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetStream(hipdnnHandle_t handle, hipS
 
         handle->setStream(streamId);
 
-        LOG_API_SUCCESS(apiName, "");
+        LOG_API_SUCCESS(apiName, "", "");
     });
 }
 
@@ -132,7 +132,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
 
         hipdnn_backend::DescriptorFactory::destroy(descriptor);
 
-        LOG_API_SUCCESS(apiName, "");
+        LOG_API_SUCCESS(apiName, "", "");
     });
 }
 
@@ -152,7 +152,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 
         handle->getPluginResourceManager()->executeOpGraph(executionPlan, variantPack);
 
-        LOG_API_SUCCESS(apiName, "");
+        LOG_API_SUCCESS(apiName, "", "");
     });
 }
 
@@ -165,7 +165,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
 
         descriptor->finalize();
 
-        LOG_API_SUCCESS(apiName, "");
+        LOG_API_SUCCESS(apiName, "", "");
     });
 }
 

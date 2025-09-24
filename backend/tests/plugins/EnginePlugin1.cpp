@@ -130,7 +130,7 @@ hipdnnEnginePluginExecutionContext_t
                            [[maybe_unused]] const hipdnnPluginConstData_t* engineConfig,
                            [[maybe_unused]] const hipdnnPluginConstData_t* opGraph)
 {
-    auto executionContext = new HipdnnEnginePluginExecutionContext(0);
+    auto executionContext = new HipdnnEnginePluginExecutionContext{0};
     return executionContext;
 }
 
