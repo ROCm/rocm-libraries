@@ -139,7 +139,7 @@
     #define ROCPRIM_TARGET_UNKNOWN 1
 #endif
 
-#ifdef ROCPRIM_TARGET_SPIRV
+#if defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
     #define ROCPRIM_AMDGCN_CONSTEXPR
 #else
     #define ROCPRIM_AMDGCN_CONSTEXPR constexpr
@@ -256,12 +256,6 @@
     #define ROCPRIM_MAX_ATOMIC_SIZE 8
 #else
     #define ROCPRIM_MAX_ATOMIC_SIZE 16
-#endif
-
-#if defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
-    #define ROCPRIM_SPIRV_CONSTEXPR
-#else
-    #define ROCPRIM_SPIRV_CONSTEXPR constexpr
 #endif
 
 // DPP is supported only after Volcanic Islands (GFX8+)
