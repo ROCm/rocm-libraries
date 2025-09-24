@@ -73,6 +73,8 @@ endif()
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
     
+    add_subdirectory(tests)
+
     if(ORIGAMI_ENABLE_PYTHON)
         find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
@@ -100,7 +102,19 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     endif()
 endif()
 
+
 rocm_install(TARGETS origami origami-headers)
+
+if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
+    rocm_install(TARGETS origami-tests
+        COMPONENT tests
+    )
+    
+    rocm_install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/origami_gtest.yaml"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT tests
+    )
+endif()
 
 rocm_export_targets(
     TARGETS roc::origami roc::origami-headers
@@ -139,4 +153,3 @@ if(ORIGAMI_STANDALONE)
         LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
     )
 endif()
-

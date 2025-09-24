@@ -1,31 +1,7 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * SPDX-License-Identifier: MIT
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-#include "Testing_analytical.hpp"
+#include "testing_origami.hpp"
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -97,7 +73,7 @@ std::string getExecutableDir() {
 #endif
 }
 
-// Parse Analytical_gtest.yaml to get the test data
+// Parse origami_gtest.yaml to get the test data
 std::vector<MyTestData> parseYamlManually(const std::string& filename)
 {
     std::string   YamlfullPath = getExecutableDir() + filename;
@@ -366,7 +342,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
 // Instantiate tests using manual parser
 INSTANTIATE_TEST_SUITE_P(AnalyticalYamlTests,
                          AnalyticalGtest,
-                         ::testing::ValuesIn(parseYamlManually("Analytical_gtest.yaml")),
+                         ::testing::ValuesIn(parseYamlManually("origami_gtest.yaml")),
                          [](const ::testing::TestParamInfo<MyTestData>& info) {
                              std::string name = info.param.name;
                              for(auto& c : name)
@@ -374,3 +350,4 @@ INSTANTIATE_TEST_SUITE_P(AnalyticalYamlTests,
                                      c = '_';
                              return name;
                          });
+
