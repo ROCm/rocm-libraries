@@ -374,10 +374,11 @@ void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
   const int A_col = transA == HIPBLAS_OP_N ? col : row;
 
   std::ofstream FILE(ADataFile);
-
+  
+  FILE << std::scientific << std::setprecision(6);
   for (int i = 0; i < A_row; i++) {
     for (int j = 0; j < A_col; j++)
-      FILE << std::left << std::setw(12) << static_cast<double>(A[j * lda + i]);
+      FILE  << std::setw(15) << std::right << static_cast<double>(A[j * lda + i]);
     FILE << std::endl;
   }
 
