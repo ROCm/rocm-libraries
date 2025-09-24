@@ -53,17 +53,12 @@ int main(int argc, char* argv[])
         std::cout << " " << argv[i];
     std::cout << std::endl;
 
-    rdm::DriverMaker driverMaker {nullptr};
-
     std::shared_ptr<Driver> drv;
     for(auto f : rdm::GetRegistry())
     {
         drv.reset(f(base_arg));
         if(drv != nullptr)
-        {
-            driverMaker = f;
             break;
-        }
     }
     if(drv == nullptr)
     {
@@ -71,69 +66,59 @@ int main(int argc, char* argv[])
         exit(0); // NOLINT (concurrency-mt-unsafe)
     }
 
-    int cumulative_rc = 0; // Do not stop running tests in case of errors.
-    const int cpu_solvers_count = drv->GetReferenceCPUSolversCount();
-
-    for (int i = 0; i < cpu_solvers_count; ++i)
+    drv->AddCmdLineArgs();
+    int rc = drv->ParseCmdLineArgs(argc, argv);
+    if(rc != 0)
     {
-        drv->SetReferenceCPUSolver(i);
+        std::cout << "ParseCmdLineArgs() FAILED, rc = " << rc << std::endl;
+        return rc;
+    }
+    drv->GetandSetData();
+    rc = drv->AllocateBuffersAndCopy();
+    if(rc != 0)
+    {
+        std::cout << "AllocateBuffersAndCopy() FAILED, rc = " << rc << std::endl;
+        return rc;
+    }
 
-        drv->AddCmdLineArgs();
-        int rc = drv->ParseCmdLineArgs(argc, argv);
+    if(drv->GetInputFlags().GetValueInt("time") == 1)
+    {
+        // Print system information for ROCmPerf analysis.
+        // The ROCmPerf is a performance analysis tool based on MIOpenDirver logs.
+        size_t major, minor, patch;
+        miopenGetVersion(&major, &minor, &patch);
+        RocmPerf::SysInfo sysInfo(major, minor, patch);
+        sysInfo.ShowSysInfo();
+    }
+
+    int fargval =
+        !(miopen::StartsWith(base_arg, "CBAInfer") || miopen::StartsWith(base_arg, "CAInfer"))
+            ? drv->GetInputFlags().GetValueInt("forw")
+            : 1;
+    bool bnFwdInVer   = (fargval == 2 && miopen::StartsWith(base_arg, "bnorm"));
+    bool verifyarg    = (drv->GetInputFlags().GetValueInt("verify") == 1);
+    int cumulative_rc = 0; // Do not stop running tests in case of errors.
+
+    if(fargval & 1 || fargval == 0 || bnFwdInVer)
+    {
+        rc = drv->RunForwardGPU();
+        cumulative_rc |= rc;
         if(rc != 0)
-        {
-            std::cout << "ParseCmdLineArgs() FAILED, rc = " << rc << std::endl;
-            return rc;
-        }
-        drv->GetandSetData();
-        rc = drv->AllocateBuffersAndCopy();
+            std::cout << "RunForwardGPU() FAILED, rc = "
+                      << "0x" << std::hex << rc << std::dec << std::endl;
+        if(verifyarg) // Verify even if Run() failed.
+            cumulative_rc |= drv->VerifyForward();
+    }
+
+    if(fargval != 1)
+    {
+        rc = drv->RunBackwardGPU();
+        cumulative_rc |= rc;
         if(rc != 0)
-        {
-            std::cout << "AllocateBuffersAndCopy() FAILED, rc = " << rc << std::endl;
-            return rc;
-        }
-
-        if(drv->GetInputFlags().GetValueInt("time") == 1)
-        {
-            // Print system information for ROCmPerf analysis.
-            // The ROCmPerf is a performance analysis tool based on MIOpenDirver logs.
-            size_t major, minor, patch;
-            miopenGetVersion(&major, &minor, &patch);
-            RocmPerf::SysInfo sysInfo(major, minor, patch);
-            sysInfo.ShowSysInfo();
-        }
-
-        int fargval =
-            !(miopen::StartsWith(base_arg, "CBAInfer") || miopen::StartsWith(base_arg, "CAInfer"))
-                ? drv->GetInputFlags().GetValueInt("forw")
-                : 1;
-        bool bnFwdInVer   = (fargval == 2 && miopen::StartsWith(base_arg, "bnorm"));
-        bool verifyarg    = (drv->GetInputFlags().GetValueInt("verify") == 1);
-        // int cumulative_rc = 0; // Do not stop running tests in case of errors.
-
-        if(fargval & 1 || fargval == 0 || bnFwdInVer)
-        {
-            rc = drv->RunForwardGPU();
-            cumulative_rc |= rc;
-            if(rc != 0)
-                std::cout << "RunForwardGPU() FAILED, rc = "
-                        << "0x" << std::hex << rc << std::dec << std::endl;
-            if(verifyarg) // Verify even if Run() failed.
-                cumulative_rc |= drv->VerifyForward();
-        }
-
-        if(fargval != 1)
-        {
-            rc = drv->RunBackwardGPU();
-            cumulative_rc |= rc;
-            if(rc != 0)
-                std::cout << "RunBackwardGPU() FAILED, rc = "
-                        << "0x" << std::hex << rc << std::dec << std::endl;
-            if(verifyarg) // Verify even if Run() failed.
-                cumulative_rc |= drv->VerifyBackward();
-        }
-
-        drv.reset(driverMaker(base_arg));
+            std::cout << "RunBackwardGPU() FAILED, rc = "
+                      << "0x" << std::hex << rc << std::dec << std::endl;
+        if(verifyarg) // Verify even if Run() failed.
+            cumulative_rc |= drv->VerifyBackward();
     }
 
     return cumulative_rc;

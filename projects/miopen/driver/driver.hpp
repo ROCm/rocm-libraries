@@ -544,10 +544,6 @@ public:
     virtual int RunBackwardGPU()                         = 0;
     virtual int VerifyBackward()                         = 0;
 
-    virtual int GetReferenceCPUSolversCount() { return 1; }
-
-    void SetReferenceCPUSolver(int solverId) { reference_cpu_solver_id = solverId; }
-
 protected:
     template <typename Tgpu>
     void InitDataType();
@@ -555,7 +551,6 @@ protected:
     GPUMem::Check GetGpuBufferCheck(const InputFlags& inflags) const;
     miopenHandle_t handle;
     miopenDataType_t data_type;
-    int reference_cpu_solver_id = 0;
 
 #if MIOPEN_BACKEND_OPENCL
     cl_command_queue q;

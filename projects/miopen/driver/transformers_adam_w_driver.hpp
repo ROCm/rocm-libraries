@@ -79,15 +79,13 @@ public:
     int RunForwardGPU() override;
     int RunForwardCPU();
     int RunForwardCPUUpdated();
-    int RunForwardCPUUpdatedMT();
+    int RunForwardCPU_MT();
 
     int RunBackwardGPU() override;
 
     Tref GetTolerance();
     int VerifyBackward() override;
     int VerifyForward() override;
-
-    int GetReferenceCPUSolversCount() override;
 
     ~TransformersAdamWDriver() override
     {
@@ -106,15 +104,6 @@ public:
     }
 
 private:
-    enum class ReferenceCPUSolver
-    {
-        Original = 0,
-        Updated,
-        UpdatedSingleThreaded,
-        ////////////////////////////
-        Count
-    };
-
     InputFlags inflags;
 
     int forw = 1;
@@ -148,6 +137,8 @@ private:
     std::vector<Tref> grad_host;
     std::vector<Tref> exp_avg_host;
     std::vector<Tref> exp_avg_sq_host;
+
+    std::vector<Tref> param_host_mt;
 
     float lr;
     float beta1;
@@ -252,9 +243,9 @@ std::vector<int> TransformersAdamWDriver<Tgpu, Tref, Tgrad>::GetInputTensorLengt
 template <typename Tgpu, typename Tref, typename Tgrad>
 int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::AllocateBuffersAndCopy()
 {
-    size_t param_sz = GetTensorSize(paramDesc);
+    const size_t param_sz   = GetTensorSize(paramDesc);
+    const uint32_t ctx      = 0;
 
-    uint32_t ctx   = 0;
     param_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, param_sz, sizeof(Tgpu)));
     grad_dev       = std::unique_ptr<GPUMem>(new GPUMem(ctx, param_sz, sizeof(Tgrad)));
     exp_avg_dev    = std::unique_ptr<GPUMem>(new GPUMem(ctx, param_sz, sizeof(Tgpu)));
@@ -275,19 +266,21 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::AllocateBuffersAndCopy()
     exp_avg_sq = std::vector<Tgpu>(param_sz, static_cast<Tgpu>(0));
 
     param_host      = std::vector<Tref>(param_sz, static_cast<Tref>(0));
+    param_host_mt   = std::vector<Tref>(param_sz, static_cast<Tref>(0));
     grad_host       = std::vector<Tref>(param_sz, static_cast<Tref>(0));
     exp_avg_host    = std::vector<Tref>(param_sz, static_cast<Tref>(0));
     exp_avg_sq_host = std::vector<Tref>(param_sz, static_cast<Tref>(0));
 
-    for(int i = 0; i < param_sz; i++)
+    for(size_t i = 0; i < param_sz; ++i)
     {
-        param[i]        = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
-        grad[i]         = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0.0), static_cast<Tgrad>(0.1));
-        exp_avg[i]      = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
-        exp_avg_sq[i]   = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
-        param_host[i]   = param[i];
-        exp_avg_host[i] = exp_avg[i];
-        exp_avg_sq_host[i] = exp_avg_sq[i];
+        param[i]            = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
+        grad[i]             = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0.0), static_cast<Tgrad>(0.1));
+        exp_avg[i]          = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
+        exp_avg_sq[i]       = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
+        param_host[i]       = param[i];
+        param_host_mt[i]    = param[i];
+        exp_avg_host[i]     = exp_avg[i];
+        exp_avg_sq_host[i]  = exp_avg_sq[i];
 
         if(is_amp)
         {
@@ -412,55 +405,6 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
     if(is_amp && found_inf)
         return miopenStatusSuccess;
 
-    auto params      = param_host.data();
-    auto grads       = grad_host.data();
-    auto exp_avgs    = exp_avg_host.data();
-    auto exp_avg_sqs = exp_avg_sq_host.data();
-    auto step        = iter;
-
-    size_t numel = miopen::deref(paramDesc).GetElementSize();
-    for(int i = 0; i < numel; i++)
-    {
-        Tref exp_avg_val    = exp_avgs[i];
-        Tref exp_avg_sq_val = exp_avg_sqs[i];
-
-        Tref param_val = params[i];
-        Tref grad_val  = grads[i];
-        if(is_amp)
-            grad_val /= grad_scale;
-
-        exp_avg_val    = exp_avg_val * beta1 + grad_val * (1 - beta1);
-        exp_avg_sq_val = exp_avg_sq_val * beta2 + grad_val * grad_val * (1 - beta2);
-
-        float denorm    = sqrt(exp_avg_sq_val) + eps;
-        float step_size = lr;
-
-        if(correct_bias)
-        {
-            float bias_correction1 = 1 - pow(beta1, step);
-            float bias_correction2 = 1 - pow(beta2, step);
-            step_size              = step_size * sqrt(bias_correction2) / bias_correction1;
-        }
-
-        param_val = param_val + exp_avg_val / denorm * -step_size;
-
-        if(weight_decay > 0.0)
-        {
-            param_val = param_val - param_val * (lr * weight_decay);
-        }
-
-        params[i] = param_val;
-    }
-
-    return miopenStatusSuccess;
-}
-
-template <typename Tgpu, typename Tref, typename Tgrad>
-int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdated()
-{
-    if(is_amp && found_inf)
-        return miopenStatusSuccess;
-
     const auto params      = param_host.data();
     const auto grads       = grad_host.data();
     const auto exp_avgs    = exp_avg_host.data();
@@ -472,6 +416,7 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdated()
     const float bias_correction1    = 1.0 - pow(beta1, step);
     const float bias_correction2    = 1.0 - pow(beta2, step);
     const float corrected_step_size = correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
+    const float step_size           = correct_bias ? corrected_step_size : lr;
     const float k                   = 1.0 - (lr * weight_decay);
     const float inv_grad_scale      = 1.0 / static_cast<float>(grad_scale);
     const float one_minus_beta1     = 1.0 - beta1;
@@ -490,8 +435,7 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdated()
         exp_avg_val    = exp_avg_val * beta1 + grad_val * one_minus_beta1;
         exp_avg_sq_val = exp_avg_sq_val * beta2 + grad_val * grad_val * one_minus_beta2;
 
-        const float denorm    = sqrt(exp_avg_sq_val) + eps;
-        const float step_size = correct_bias ? corrected_step_size : lr;
+        const float denorm = sqrt(exp_avg_sq_val) + eps;
 
         param_val -= exp_avg_val / denorm * step_size;
 
@@ -507,12 +451,12 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdated()
 }
 
 template <typename Tgpu, typename Tref, typename Tgrad>
-int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdatedMT()
+int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPU_MT()
 {
     if(is_amp && found_inf)
         return miopenStatusSuccess;
 
-    const auto params      = param_host.data();
+    const auto params      = param_host_mt.data();
     const auto grads       = grad_host.data();
     const auto exp_avgs    = exp_avg_host.data();
     const auto exp_avg_sqs = exp_avg_sq_host.data();
@@ -523,6 +467,7 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdatedMT()
     const float bias_correction1    = 1.0 - pow(beta1, step);
     const float bias_correction2    = 1.0 - pow(beta2, step);
     const float corrected_step_size = correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
+    const float step_size           = correct_bias ? corrected_step_size : lr;
     const float k                   = 1.0 - (lr * weight_decay);
     const float inv_grad_scale      = 1.0 / static_cast<float>(grad_scale);
     const float one_minus_beta1     = 1.0 - beta1;
@@ -540,8 +485,7 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPUUpdatedMT()
         exp_avg_val    = exp_avg_val * beta1 + grad_val * one_minus_beta1;
         exp_avg_sq_val = exp_avg_sq_val * beta2 + grad_val * grad_val * one_minus_beta2;
 
-        const float denorm    = sqrt(exp_avg_sq_val) + eps;
-        const float step_size = correct_bias ? corrected_step_size : lr;
+        const float denorm = sqrt(exp_avg_sq_val) + eps;
 
         param_val -= exp_avg_val / denorm * step_size;
 
@@ -587,42 +531,27 @@ Tref TransformersAdamWDriver<Tgpu, Tref, Tgrad>::GetTolerance()
 template <typename Tgpu, typename Tref, typename Tgrad>
 int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::VerifyForward()
 {
-    const char* pSolverName {nullptr};
+    RunForwardCPU();
+    RunForwardCPU_MT();
+    const Tref tolerance    = GetTolerance();
+    const auto error        = miopen::rms_range(param_host, param);
+    const auto error_mt     = miopen::rms_range(param_host_mt, param);
 
-    switch (static_cast<ReferenceCPUSolver>(reference_cpu_solver_id))
+    if(!std::isfinite(error) || error > tolerance)
     {
-        case ReferenceCPUSolver::Original: 
-            RunForwardCPU();
-            pSolverName = "CPU reference";
-            break;
-
-        case ReferenceCPUSolver::Updated: 
-            RunForwardCPUUpdated();
-            pSolverName = "Updated CPU reference";
-            break;
-
-        case ReferenceCPUSolver::UpdatedSingleThreaded: 
-            RunForwardCPUUpdatedMT();
-            pSolverName = "Updated Multithreaded CPU reference";
-            break;
-        
-        default:
-            break;
+        std::cout << "Forward Transformers Adam FAILED on single-threaded CPU reference: " << error << std::endl;
+        return EC_VerifyFwd;
     }
 
-    if (pSolverName != nullptr)
+    std::cout << "Forward Transformers Adam Verifies OK on single-threaded CPU reference" << std::endl;
+
+    if(!std::isfinite(error_mt) || error_mt > tolerance)
     {
-        const Tref tolerance = GetTolerance();
-        auto error           = miopen::rms_range(param_host, param);
-    
-        if(!std::isfinite(error) || error > tolerance)
-        {
-            std::cout << "Forward Transformers Adam FAILED: " << error << std::endl;
-            return EC_VerifyFwd;
-        }
-    
-        std::cout << "Forward Transformers Adam Verifies OK on " << pSolverName << std::endl;
+        std::cout << "Forward Transformers Adam FAILED on multi-threaded CPU reference: " << error_mt << std::endl;
+        return EC_VerifyFwd;
     }
+
+    std::cout << "Forward Transformers Adam Verifies OK on multi-threaded CPU reference" << std::endl;
 
     return miopenStatusSuccess;
 }
@@ -631,12 +560,6 @@ template <typename Tgpu, typename Tref, typename Tgrad>
 int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::VerifyBackward()
 {
     return miopenStatusSuccess;
-}
-
-template <typename Tgpu, typename Tref, typename Tgrad>
-int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::GetReferenceCPUSolversCount()
-{
-    return static_cast<int>(ReferenceCPUSolver::Count);
 }
 
 #endif // GUARD_MIOPEN_TRANSFORMERS_ADAM_W_DRIVER_HPP
