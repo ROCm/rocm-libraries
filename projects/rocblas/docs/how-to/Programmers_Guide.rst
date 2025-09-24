@@ -1546,7 +1546,7 @@ Where the far right values (``solution_index``) are the indices of the best perf
 These indices can be used directly in future GEMM calls but cannot be reused across library
 releases or different device architectures.
 
-See `example_user_driven_tuning.cpp <https://github.com/ROCm/rocBLAS/blob/develop/clients/samples/example_user_driven_tuning.cpp>`_ for
+See `example_user_driven_tuning.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/clients/samples/example_user_driven_tuning.cpp>`_ for
 sample code showing how to use kernels directly via their indices.
 
 If the output is stored in a file, you can use the results to override the default kernel selection
