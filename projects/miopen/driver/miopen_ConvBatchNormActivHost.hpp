@@ -322,6 +322,70 @@ void miopenActivationFwdHost(int neuron_type,
 
 template <typename Tgpu /* the data type used in GPU computations (usually half) */,
           typename Tref /* the data type used in CPU checkings (usually double) */>
+void miopenActivationFwdHost_mt(int neuron_type,
+                                Tref gamma,
+                                Tref beta,
+                                Tref alpha,
+                                size_t size,
+                                const Tref* bot_ptr,
+                                Tref* c_res)
+{
+
+    /*    std::vector<Tref> data(size, 0.);
+
+        for(size_t k   = 0; k < size; k++)
+            data.at(k) = bot_ptr[k];
+    */
+    std::function<Tref(Tref)> f;
+
+    switch(neuron_type)
+    {
+    case MIOPEN_NEURON_PASTHRU: //	x
+        f = [=](Tref x) { return x; };
+        break;
+    case MIOPEN_NEURON_LOGISTIC: //	1 / (1 + e^-x)	//Sigmoid
+        f = [=](Tref x) { return 1. / (1. + std::exp(Tref(-x))); };
+        break;
+    case MIOPEN_NEURON_TANH: //	beta * tanh(alpha * x)
+        f = [=](Tref x) { return beta * std::tanh(alpha * x); };
+        break;
+    case MIOPEN_NEURON_RELU: //	max(0, x)
+        f = [=](Tref x) { return (x > 0.) ? x : 0.; };
+        break;
+    case MIOPEN_NEURON_SOFTRELU: //	log(1 + e^x)   // bonomial normal log likelihood
+        f = [=](Tref x) {
+            return (x > 0.) ? (x + std::log1p(std::exp(-x))) : (std::log1p(std::exp(x)));
+        };
+        break;
+    case MIOPEN_NEURON_ABS: //	abs(x)
+        f = [=](Tref x) { return std::abs(x); };
+        break;
+    case MIOPEN_NEURON_POWER: // (alpha + beta * x) ^ gamma
+        f = [=](Tref x) {
+            Tref v = alpha + beta * x;
+            return v <= std::numeric_limits<Tref>::epsilon() ? 0. : pow(v, gamma);
+        };
+        break;
+    case MIOPEN_NEURON_CLIPPED_RELU: // min(alpha, max(0, x))
+        f = [=](Tref x) { return std::min(alpha, std::max(Tref(0.), x)); };
+        break;
+    case MIOPEN_NEURON_LEAKY_RELU: // alpha * x | x<=0; x | x>0
+        f = [=](Tref x) { return (x > 0) ? x : x * alpha; };
+        break;
+    case MIOPEN_NEURON_ELU: // alpah * (exp(x)-1) | x<=0; x | x>0
+        f = [=](Tref x) { return (x > 0) ? x : alpha * std::expm1(x); };
+        break;
+    case MIOPEN_NEURON_CLAMP: // max(alpha, min(beta, x)))
+        f = [=](Tref x) { return std::max(alpha, std::min(beta, x)); };
+        break;
+    default: printf("ERROR: unknown neuron type: %d\n", neuron_type); break;
+    }
+
+    par_ford(size)([&](size_t i) { c_res[i] = f(static_cast<Tref>(bot_ptr[i])); });
+}
+
+template <typename Tgpu /* the data type used in GPU computations (usually half) */,
+          typename Tref /* the data type used in CPU checkings (usually double) */>
 int miopenInferVerify(size_t size, const Tref* c_res, const Tgpu* top_ptr, Tref allowedEps)
 {
     int match = 1;

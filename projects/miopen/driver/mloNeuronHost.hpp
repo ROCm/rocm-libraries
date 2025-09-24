@@ -163,14 +163,14 @@ int mloNeuronForwardRunHostAndVerify(int neuron_type,
 
 template <typename Tgpu_ /* the data type used in GPU computations (usually half) */,
           typename Tcheck_ /* the data type used in CPU checkings (usually double) */>
-int mloNeuronForwardRunHostAndVerify2(int neuron_type,
-                                      Tcheck_ gamma,
-                                      Tcheck_ beta,
-                                      Tcheck_ alpha,
-                                      size_t size,
-                                      const Tgpu_* bot_ptr,
-                                      const Tgpu_* top_ptr,
-                                      Tcheck_ allowedEps)
+int mloNeuronForwardRunHostAndVerify_mt(int neuron_type,
+                                        Tcheck_ gamma,
+                                        Tcheck_ beta,
+                                        Tcheck_ alpha,
+                                        size_t size,
+                                        const Tgpu_* bot_ptr,
+                                        const Tgpu_* top_ptr,
+                                        Tcheck_ allowedEps)
 {
     Tcheck_* c_res = new Tcheck_[size];
     Tcheck_* data  = new Tcheck_[size];
@@ -362,16 +362,16 @@ int mloNeuronBackwardRunHostAndVerify(int neuron_type,
 
 template <typename Tgpu_ /* the data type used in GPU computations (usually half) */,
           typename Tcheck_ /* the data type used in CPU checkings (usually double) */>
-int mloNeuronBackwardRunHostAndVerify2(int neuron_type,
-                                       Tcheck_ gamma,
-                                       Tcheck_ beta,
-                                       Tcheck_ alpha,
-                                       size_t size,
-                                       const Tgpu_* bot_ptr,
-                                       const Tgpu_* top_ptr,
-                                       const Tgpu_* bot_df_ptr,
-                                       const Tgpu_* top_df_ptr,
-                                       Tcheck_ allowedEps)
+int mloNeuronBackwardRunHostAndVerify_mt(int neuron_type,
+                                         Tcheck_ gamma,
+                                         Tcheck_ beta,
+                                         Tcheck_ alpha,
+                                         size_t size,
+                                         const Tgpu_* bot_ptr,
+                                         const Tgpu_* top_ptr,
+                                         const Tgpu_* bot_df_ptr,
+                                         const Tgpu_* top_df_ptr,
+                                         Tcheck_ allowedEps)
 {
 
     Tcheck_* bot_cpu    = new Tcheck_[size];
