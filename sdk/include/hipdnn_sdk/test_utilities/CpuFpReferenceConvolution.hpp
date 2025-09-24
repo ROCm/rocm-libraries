@@ -144,7 +144,6 @@ public:
         const auto& outputDims = output.dims();
 
         int64_t nBatch = outputDims[0];
-        int64_t nOutputChannels = outputDims[1];
         int64_t outputHeight = outputDims[2];
         int64_t outputWidth = outputDims[3];
 
@@ -157,7 +156,8 @@ public:
         int64_t inputWidth = inputDims[3];
 
         // Calculate groups from input/weight channel relationship
-        int64_t nGroups = nOutputChannels / channelsPerGroup; // G
+        int64_t nInputChannels = inputDims[1];
+        int64_t nGroups = nInputChannels / channelsPerGroup; // G
         int64_t outputChannelsPerGroup = totalOutputChannels / nGroups; // K
 
         // // Extract convolution parameters
@@ -201,14 +201,8 @@ public:
                                         InputDataType v_out
                                             = output.getHostValue(nIdx, outputChannelIdx, ho, wo);
 
-                                        std::cout << "output: [" << nIdx << ", " << outputChannelIdx
-                                                  << ", " << ho << ", " << wo << "]\n";
-
                                         InputDataType v_wei
                                             = weight.getHostValue(outputChannelIdx, cIdx, y, x);
-
-                                        std::cout << "weight: [" << outputChannelIdx << ", " << cIdx
-                                                  << ", " << y << ", " << x << "]\n";
 
                                         v_acc += static_cast<AccumulatorType>(v_out)
                                                  * static_cast<AccumulatorType>(v_wei);
@@ -225,17 +219,10 @@ public:
                                gIdx * channelsPerGroup + cIdx,
                                hiIdx,
                                wiIdx);
-
-            std::cout << "input:  [" << nIdx << ", " << (gIdx * channelsPerGroup + cIdx) << ", "
-                      << hiIdx << ", " << wiIdx << "]\n\n";
         };
 
-        std::cout << "nGroups: " << nGroups << ", nBatch: " << nBatch
-                  << ", channelsPerGroup: " << channelsPerGroup << ", inputHeight: " << inputHeight
-                  << ", inputWidth: " << inputWidth << "\n\n";
-
         hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
-            convolutionFunc, nGroups, nBatch, outputChannelsPerGroup, inputHeight, inputWidth)(
+            convolutionFunc, nGroups, nBatch, channelsPerGroup, inputHeight, inputWidth)(
             std::thread::hardware_concurrency());
 
         input.memory().markHostModified();
