@@ -105,7 +105,7 @@ struct load_values_flagged
 
         const auto flag_segment_boundaries = [&]()
         {
-            if(Exclusive)
+            if constexpr(Exclusive)
             {
                 const key_type tile_successor
                     = global_block_id < number_of_blocks - 1

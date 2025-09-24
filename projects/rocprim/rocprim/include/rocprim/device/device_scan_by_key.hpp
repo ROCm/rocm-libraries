@@ -34,7 +34,6 @@
 #include "detail/device_scan_by_key.hpp"
 #include "detail/lookback_scan_state.hpp"
 #include "device_scan_by_key_config.hpp"
-#include "device_transform.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -203,6 +202,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                                    const bool            debug_synchronous)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+
     using config = wrapped_scan_by_key_config<Config, key_type, AccType>;
 
     detail::target_arch target_arch;
@@ -229,6 +229,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     const unsigned int limited_size
         = static_cast<unsigned int>(std::min<size_t>(size, aligned_size_limit));
     const bool use_limited_size = limited_size == aligned_size_limit;
+
     // Number of blocks in a single launch (or the only launch if it fits)
     const unsigned int number_of_blocks = ceiling_div(limited_size, items_per_block);
 
@@ -344,25 +345,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         with_scan_state(
             [&](const auto scan_state)
             {
-                // only when in-place scan is needed, we initialize the last_keys_of_each_block
-                if(last_keys_of_each_block_size_byte != 0 && i == 0)
-                {
-                    hipLaunchKernelGGL(init_device_scan_by_key_kernel,
-                                       dim3(init_grid_size),
-                                       dim3(block_size),
-                                       0,
-                                       stream,
-                                       scan_state,
-                                       scan_blocks,
-                                       number_of_blocks - 1,
-                                       i > 0 ? previous_last_value : nullptr,
-                                       keys,
-                                       last_keys_of_each_block,
-                                       last_keys_of_each_block_size_byte
-                                           / sizeof(decltype(*last_keys_of_each_block)),
-                                       items_per_block);
-                }
-                else
+                if constexpr(Exclusive)
                 {
                     hipLaunchKernelGGL(init_device_scan_by_key_kernel,
                                        dim3(init_grid_size),
@@ -373,6 +356,39 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                                        scan_blocks,
                                        number_of_blocks - 1,
                                        i > 0 ? previous_last_value : nullptr);
+                }
+                else
+                {
+                    // only when in-place scan is needed, we initialize the last_keys_of_each_block
+                    if(last_keys_of_each_block_size_byte != 0 && i == 0)
+                    {
+                        hipLaunchKernelGGL(init_device_scan_by_key_kernel,
+                                           dim3(init_grid_size),
+                                           dim3(block_size),
+                                           0,
+                                           stream,
+                                           scan_state,
+                                           scan_blocks,
+                                           number_of_blocks - 1,
+                                           i > 0 ? previous_last_value : nullptr,
+                                           keys,
+                                           last_keys_of_each_block,
+                                           last_keys_of_each_block_size_byte
+                                               / sizeof(decltype(*last_keys_of_each_block)),
+                                           items_per_block);
+                    }
+                    else
+                    {
+                        hipLaunchKernelGGL(init_device_scan_by_key_kernel,
+                                           dim3(init_grid_size),
+                                           dim3(block_size),
+                                           0,
+                                           stream,
+                                           scan_state,
+                                           scan_blocks,
+                                           number_of_blocks - 1,
+                                           i > 0 ? previous_last_value : nullptr);
+                    }
                 }
             });
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_device_scan_by_key_kernel",
