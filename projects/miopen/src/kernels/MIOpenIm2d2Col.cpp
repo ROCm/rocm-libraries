@@ -56,7 +56,7 @@
 typedef char data_t;
 #elif MIOPEN_USE_INT32
 typedef int data_t;
-#elif(MIOPEN_USE_FP16 || MIOPEN_USE_BFP16)
+#elif (MIOPEN_USE_FP16 || MIOPEN_USE_BFP16)
 // As the half type degrades the performance, use short instead of half in the
 // im2col, which has no match op. May change back to half when compile can
 // deliver equal performance as short
@@ -111,29 +111,27 @@ using index_t = long;
 using index_t = int;
 #endif
 
-
-
 extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
-                        data_t* im,
-                        const unsigned long im_offset,
-                        const int h,
-                        const int w,
-                        const int wei_h,
-                        const int wei_w,
-                        const int out_h,
-                        const int out_w,
-                        const int pad_h,
-                        const int pad_w,
-                        const int stride_h,
-                        const int stride_w,
-                        const int dilation_h,
-                        const int dilation_w,
-                        data_t* col,
-                        const int num_ch_per_wg,
-                        const int num_im_blks_x,
-                        const int num_im_blks,
-                        const int tile_sz_x,
-                        const int tile_sz_y)
+                                       data_t* im,
+                                       const unsigned long im_offset,
+                                       const int h,
+                                       const int w,
+                                       const int wei_h,
+                                       const int wei_w,
+                                       const int out_h,
+                                       const int out_w,
+                                       const int pad_h,
+                                       const int pad_w,
+                                       const int stride_h,
+                                       const int stride_w,
+                                       const int dilation_h,
+                                       const int dilation_w,
+                                       data_t* col,
+                                       const int num_ch_per_wg,
+                                       const int num_im_blks_x,
+                                       const int num_im_blks,
+                                       const int tile_sz_x,
+                                       const int tile_sz_y)
 {
     /// NUM_CH_PER_WG {1;4}
     /// THREADS_PER_CH {256; 64}
@@ -329,6 +327,3 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
     }
 #endif
 }
-
-
-
