@@ -178,10 +178,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return work;
     }
 
-    Function generate_lds_from_reg_output_pp_step_3_4_function()
+    Function generate_lds_from_reg_partial_pass_output_function()
     {
         std::string function_name
-            = "lds_from_reg_output_pp_step_3_4_length" + std::to_string(length) + "_device";
+            = "lds_from_reg_output_partial_pass_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
         f.templates = device_lds_reg_inout_templates();
@@ -229,10 +229,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return {R, lds_complex, stride_lds_pp, offset_lds_pp};
     }
 
-    Function generate_lds_to_reg_input_step_3_4_function()
+    Function generate_lds_to_reg_partial_pass_input_function()
     {
         std::string function_name
-            = "lds_to_reg_input_pp_step_3_4_length" + std::to_string(length) + "_device";
+            = "lds_to_reg_input_partial_pass_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
         f.templates = device_lds_reg_inout_templates();
@@ -508,10 +508,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return work;
     }
 
-    Function generate_lds_to_reg_input_pp_function()
+    Function generate_lds_to_reg_input_function()
     {
-        std::string function_name
-            = "lds_to_reg_input_pp_length" + std::to_string(length) + "_device";
+        std::string function_name = "lds_to_reg_input_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
         f.templates = device_lds_reg_inout_templates();
@@ -576,10 +575,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return work;
     }
 
-    Function generate_lds_from_reg_output_pp_function()
+    Function generate_lds_from_reg_output_function()
     {
         std::string function_name
-            = "lds_from_reg_output_pp_length" + std::to_string(length) + "_device";
+            = "lds_from_reg_output_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
         f.templates = device_lds_reg_inout_templates();
@@ -646,7 +645,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return f;
     }
 
-    StatementList perform_partial_pass_step_3_4()
+    StatementList generate_partial_pass_steps_3_4()
     {
         StatementList stmts;
 
@@ -661,7 +660,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         pre_post_lds_tmpl.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
 
         StatementList preLoad;
-        preLoad += Call{"lds_to_reg_input_pp_step_3_4_length" + std::to_string(length) + "_device",
+        preLoad += Call{"lds_to_reg_input_partial_pass_length" + std::to_string(length) + "_device",
                         pre_post_lds_tmpl,
                         pre_post_lds_args};
         stmts += preLoad;
@@ -685,7 +684,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         StatementList postStore;
         postStore
-            += Call{"lds_from_reg_output_pp_step_3_4_length" + std::to_string(length) + "_device",
+            += Call{"lds_from_reg_output_partial_pass_length" + std::to_string(length) + "_device",
                     pre_post_lds_tmpl,
                     pre_post_lds_args};
         stmts += postStore;
@@ -901,7 +900,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         body += loadlds;
 
-        body += perform_partial_pass_step_3_4();
+        body += generate_partial_pass_steps_3_4();
 
         body += LineBreak{};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
@@ -921,7 +920,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         auto pre_post_lds_args = device_lds_reg_inout_device_call_arguments();
         pre_post_lds_tmpl.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
         StatementList preLoad;
-        preLoad += Call{"lds_to_reg_input_pp_length" + std::to_string(length) + "_device",
+        preLoad += Call{"lds_to_reg_input_length" + std::to_string(length) + "_device",
                         pre_post_lds_tmpl,
                         pre_post_lds_args};
 
@@ -948,7 +947,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         body += LineBreak{};
         body += CommentLines{"call a post-store from registers to lds (if necessary)"};
         StatementList postStore;
-        postStore += Call{"lds_from_reg_output_pp_length" + std::to_string(length) + "_device",
+        postStore += Call{"lds_from_reg_output_length" + std::to_string(length) + "_device",
                           pre_post_lds_tmpl,
                           pre_post_lds_args};
 

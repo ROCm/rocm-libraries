@@ -558,7 +558,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return {scalar_type};
     }
 
-    StatementList perform_partial_pass_step_1_2()
+    StatementList generate_partial_pass_steps_1_2()
     {
         StatementList stmts;
 
@@ -754,7 +754,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                           pre_post_lds_args};
         body += postStore;
 
-        body += perform_partial_pass_step_1_2();
+        body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};
         StatementList storelds;

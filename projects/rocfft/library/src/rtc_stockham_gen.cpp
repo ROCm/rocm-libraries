@@ -370,14 +370,13 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         {
             auto kernel_pp = static_cast<StockhamPartialPassKernelCC*>(kernel.get());
 
-            lds2reg
-                = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_pp_function());
+            lds2reg = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_function());
             reg2lds
-                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_pp_function());
+                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
             lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_input_step_3_4_function());
+                kernel_pp->generate_lds_to_reg_partial_pass_input_function());
             reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_output_pp_step_3_4_function());
+                kernel_pp->generate_lds_from_reg_partial_pass_output_function());
             local_transpose_pp
                 = std::make_unique<Function>(kernel_pp->generate_local_transpose_pp_function());
             device = std::make_unique<Function>(kernel_pp->generate_device_function());
