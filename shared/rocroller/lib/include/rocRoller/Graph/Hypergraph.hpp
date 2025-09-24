@@ -413,7 +413,7 @@ namespace rocRoller
 
             std::map<int, Element> m_elements;
 
-            HypergraphIncidenceContainer m_incidences;
+            HypergraphIncidenceContainer m_incidence;
 
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;

@@ -29,45 +29,37 @@
 #include <map>
 #include <vector>
 
+#include <rocRoller/Serialization/Base_fwd.hpp>
 #include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller
 {
     namespace Graph
     {
-        struct HypergraphIncidence
-        {
-            int src;
-            int dst;
-            int order;
-        };
-
         class HypergraphIncidenceContainer
         {
         public:
-            HypergraphIncidenceContainer(std::vector<HypergraphIncidence> const& incidences = {});
-
             /**
-             * @brief Add incidences to container. Incidences indicate a connection between elements of a graph.
+             * @brief Add incident connections to container. These represent connection between elements of a graph.
              * 
              * @tparam T_Inputs Range
              * @tparam T_Outputs Range
-             * @param tag Graph tag of element to be connected by incidences
+             * @param tag Graph tag of element to be connected
              * @param inputs Graph indices of input elements to be connected
              * @param outputs Graph indices of output elements to be connected
              */
             template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-            void addIncidences(int tag, T_Inputs const& inputs, T_Outputs const& outputs);
+            void addIncidentConnections(int tag, T_Inputs const& inputs, T_Outputs const& outputs);
 
             /**
-             * @brief Gets the number of incidences in the container
+             * @brief Gets the number of incident connections in the container
              * 
-             * @return size_t Number of unique incidences
+             * @return size_t Number of unique connections
              */
             size_t size() const;
 
             /**
-             * @brief Purge incidences that refer to this tag
+             * @brief Purge incident connections that refer to this tag
              * 
              * @param tag Graph tag of element to be deleted
              */
@@ -105,25 +97,21 @@ namespace rocRoller
              */
             size_t getDstCount(int tag) const;
 
-            /**
-             * @brief Get all incidences in container, sorted by sources
-             * 
-             * @return vector<HypergraphIncidence> A series of HypergraphIncidence
-             */
-            std::vector<HypergraphIncidence> getAllIncidences() const;
-
             std::string toDOTSection(std::string const& prefix = "") const;
 
         private:
-            /**
-             * @brief All incidences, sorted by sources, then by edge order.
-             */
-            std::map<int, std::vector<int>> m_incidencesBySrc;
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
 
             /**
-             * @brief All incidences, sorted by destinations, then by edge order.
+             * @brief The incidence structure of the Hypergraph, sorted by sources, then by connection order.
              */
-            std::map<int, std::vector<int>> m_incidencesByDst;
+            std::map<int, std::vector<int>> m_incidenceBySrc;
+
+            /**
+             * @brief The incidence structure of the Hypergraph, sorted by destinations, then by connection order.
+             */
+            std::map<int, std::vector<int>> m_incidenceByDst;
         };
     }
 }

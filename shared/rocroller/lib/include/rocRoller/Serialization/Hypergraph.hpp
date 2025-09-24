@@ -39,25 +39,22 @@ namespace rocRoller
     namespace Serialization
     {
         template <typename IO>
-        struct MappingTraits<Graph::HypergraphIncidence, IO, EmptyContext>
+        struct MappingTraits<Graph::HypergraphIncidenceContainer, IO, EmptyContext>
         {
-            using iot              = IOTraits<IO>;
-            static const bool flow = true;
+            using iot = IOTraits<IO>;
 
-            static void mapping(IO& io, typename Graph::HypergraphIncidence& inc)
+            static void mapping(IO& io, Graph::HypergraphIncidenceContainer& incidence)
             {
-                iot::mapRequired(io, "src", inc.src);
-                iot::mapRequired(io, "dst", inc.dst);
-                iot::mapRequired(io, "edgeOrder", inc.order);
+                iot::mapRequired(io, "incidenceBySrc", incidence.m_incidenceBySrc);
+                iot::mapRequired(io, "incidenceByDst", incidence.m_incidenceByDst);
             }
 
-            static void mapping(IO& io, typename Graph::HypergraphIncidence& inc, EmptyContext&)
+            static void
+                mapping(IO& io, Graph::HypergraphIncidenceContainer& incidence, EmptyContext&)
             {
-                mapping(io, inc);
+                mapping(io, incidence);
             }
         };
-
-        ROCROLLER_SERIALIZE_VECTOR(false, Graph::HypergraphIncidence);
 
         template <CNamedVariant Var>
         struct ElementEntry
@@ -125,19 +122,7 @@ namespace rocRoller
                         graph.m_elements[entry.id] = entry.value;
                 }
 
-                std::vector<Graph::HypergraphIncidence> incidences;
-
-                if(iot::outputting(io))
-                {
-                    incidences = graph.m_incidences.getAllIncidences();
-                }
-
-                iot::mapRequired(io, "incidences", incidences);
-
-                if(!iot::outputting(io))
-                {
-                    graph.m_incidences = Graph::HypergraphIncidenceContainer(incidences);
-                }
+                iot::mapRequired(io, "incidence", graph.m_incidence);
             }
 
             static void mapping(IO& io, HG& graph, EmptyContext&)

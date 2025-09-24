@@ -33,27 +33,27 @@
 namespace rocRoller::Graph
 {
     template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
-    inline void HypergraphIncidenceContainer::addIncidences(int              tag,
-                                                            T_Inputs const&  inputs,
-                                                            T_Outputs const& outputs)
+    inline void HypergraphIncidenceContainer::addIncidentConnections(int              tag,
+                                                                     T_Inputs const&  inputs,
+                                                                     T_Outputs const& outputs)
     {
-        auto addIncidence = [this](int src, int dst) {
-            auto& dsts = this->m_incidencesBySrc[src];
+        auto addConnection = [this](int src, int dst) {
+            auto& dsts = this->m_incidenceBySrc[src];
             if(std::find(dsts.begin(), dsts.end(), dst) == dsts.end())
                 dsts.push_back(dst);
 
-            auto& srcs = this->m_incidencesByDst[dst];
+            auto& srcs = this->m_incidenceByDst[dst];
             if(std::find(srcs.begin(), srcs.end(), src) == srcs.end())
                 srcs.push_back(src);
         };
 
         for(auto input : inputs)
         {
-            addIncidence(input, tag);
+            addConnection(input, tag);
         }
         for(auto output : outputs)
         {
-            addIncidence(tag, output);
+            addConnection(tag, output);
         }
     }
 }

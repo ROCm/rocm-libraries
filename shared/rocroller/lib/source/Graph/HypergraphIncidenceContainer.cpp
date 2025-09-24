@@ -33,136 +33,71 @@
 
 namespace rocRoller::Graph
 {
-    HypergraphIncidenceContainer::HypergraphIncidenceContainer(
-        std::vector<HypergraphIncidence> const& incidences)
-    {
-        for(auto const& incidence : incidences)
-        {
-            if(!m_incidencesBySrc.contains(incidence.src))
-            {
-                int                              src = incidence.src;
-                std::vector<HypergraphIncidence> filtered;
-                std::ranges::copy_if(incidences,
-                                     std::back_inserter(filtered),
-                                     [src](auto const& i) { return i.src == src; });
-                std::ranges::sort(filtered, {}, &HypergraphIncidence::order);
-
-                m_incidencesBySrc[src] = std::vector<int>{};
-                m_incidencesBySrc[src].reserve(filtered.size());
-                std::transform(filtered.begin(),
-                               filtered.end(),
-                               std::back_inserter(m_incidencesBySrc[src]),
-                               [](auto const& i) { return i.dst; });
-            }
-
-            if(!m_incidencesByDst.contains(incidence.dst))
-            {
-                int                              dst = incidence.dst;
-                std::vector<HypergraphIncidence> filtered;
-                std::ranges::copy_if(incidences,
-                                     std::back_inserter(filtered),
-                                     [dst](auto const& i) { return i.dst == dst; });
-                std::ranges::sort(filtered, {}, &HypergraphIncidence::order);
-
-                m_incidencesByDst[dst] = std::vector<int>{};
-                m_incidencesByDst[dst].reserve(filtered.size());
-                std::transform(filtered.begin(),
-                               filtered.end(),
-                               std::back_inserter(m_incidencesByDst[dst]),
-                               [](auto const& i) { return i.src; });
-            }
-        }
-    }
-
     size_t HypergraphIncidenceContainer::size() const
     {
         return std::accumulate(
-            m_incidencesBySrc.begin(),
-            m_incidencesBySrc.end(),
-            0,
-            [](size_t sum, auto const& value) { return sum + value.second.size(); });
+            m_incidenceBySrc.begin(), m_incidenceBySrc.end(), 0, [](size_t sum, auto const& value) {
+                return sum + value.second.size();
+            });
     }
 
     void HypergraphIncidenceContainer::deleteTag(int tag)
     {
-        m_incidencesBySrc.erase(tag);
-        m_incidencesByDst.erase(tag);
+        m_incidenceBySrc.erase(tag);
+        m_incidenceByDst.erase(tag);
 
-        for(auto& connections : m_incidencesBySrc)
+        for(auto& connections : m_incidenceBySrc)
             std::erase(connections.second, tag);
 
-        for(auto& connections : m_incidencesByDst)
+        for(auto& connections : m_incidenceByDst)
             std::erase(connections.second, tag);
     }
 
     std::vector<int> HypergraphIncidenceContainer::getSrcs(int tag) const
     {
-        auto it = m_incidencesByDst.find(tag);
-        if(it != m_incidencesByDst.end())
+        auto it = m_incidenceByDst.find(tag);
+        if(it != m_incidenceByDst.end())
             return it->second;
         return {};
     }
 
     std::vector<int> HypergraphIncidenceContainer::getDsts(int tag) const
     {
-        auto it = m_incidencesBySrc.find(tag);
-        if(it != m_incidencesBySrc.end())
+        auto it = m_incidenceBySrc.find(tag);
+        if(it != m_incidenceBySrc.end())
             return it->second;
         return {};
     }
 
     size_t HypergraphIncidenceContainer::getSrcCount(int tag) const
     {
-        auto it = m_incidencesByDst.find(tag);
-        if(it != m_incidencesByDst.end())
+        auto it = m_incidenceByDst.find(tag);
+        if(it != m_incidenceByDst.end())
             return it->second.size();
         return 0;
     }
 
     size_t HypergraphIncidenceContainer::getDstCount(int tag) const
     {
-        auto it = m_incidencesBySrc.find(tag);
-        if(it != m_incidencesBySrc.end())
+        auto it = m_incidenceBySrc.find(tag);
+        if(it != m_incidenceBySrc.end())
             return it->second.size();
         return 0;
-    }
-
-    std::vector<HypergraphIncidence> HypergraphIncidenceContainer::getAllIncidences() const
-    {
-        std::vector<HypergraphIncidence> rv;
-        rv.reserve(this->size());
-        for(auto const& connection : m_incidencesBySrc)
-        {
-            auto const& dsts = connection.second;
-            for(auto it = dsts.begin(); it != dsts.end(); it++)
-            {
-                rv.push_back(HypergraphIncidence{
-                    .src   = connection.first,
-                    .dst   = *it,
-                    .order = static_cast<int>(std::distance(dsts.begin(), it))});
-            }
-        }
-
-        // Incidence ordering may be higher when assesed from other direction
-        for(auto& incidence : rv)
-        {
-            auto const& srcs = m_incidencesByDst.at(incidence.dst);
-            auto        it   = std::find(srcs.begin(), srcs.end(), incidence.src);
-            AssertFatal(it != srcs.end(), "Mismatched internal incendence storage");
-            incidence.order
-                = std::max(incidence.order, static_cast<int>(std::distance(srcs.begin(), it)));
-        }
-        return rv;
     }
 
     std::string HypergraphIncidenceContainer::toDOTSection(std::string const& prefix) const
     {
         std::ostringstream s;
-        for(auto const& incidence : getAllIncidences())
+
+        for(auto const& connections : m_incidenceBySrc)
         {
-            s << '"' << prefix << incidence.src << "\" -> \"" << prefix << incidence.dst << '"'
-              << std::endl;
+            int src = connections.first;
+            for(int dst : connections.second)
+            {
+                s << '"' << prefix << src << "\" -> \"" << prefix << dst << '"' << std::endl;
+            }
         }
+
         return s.str();
     }
 }

@@ -230,16 +230,16 @@ namespace rocRoller
 
             AssertFatal(isModificationAllowed(tag), "addElement is disallowed on this graph");
 
-            m_incidences.addIncidences(tag, inputs, outputs);
+            m_incidence.addIncidentConnections(tag, inputs, outputs);
 
             if constexpr(!Hyper)
             {
                 std::string errorMsg
-                    = "Graph is not a hypergraph but edge has more than one incidence";
+                    = "Graph is not a hypergraph but edge has more than one connection";
                 if(elementType == ElementType::Edge)
                 {
-                    AssertFatal(m_incidences.getSrcCount(tag) <= 1
-                                    && m_incidences.getDstCount(tag) <= 1,
+                    AssertFatal(m_incidence.getSrcCount(tag) <= 1
+                                    && m_incidence.getDstCount(tag) <= 1,
                                 errorMsg,
                                 ShowValue(tag));
                 }
@@ -247,13 +247,17 @@ namespace rocRoller
                 {
                     for(auto input : inputs)
                     {
-                        AssertFatal(
-                            m_incidences.getDstCount(input) <= 1, errorMsg, ShowValue(input));
+                        AssertFatal(m_incidence.getDstCount(input) <= 1,
+                                    errorMsg,
+                                    ShowValue(tag),
+                                    ShowValue(input));
                     }
                     for(auto output : outputs)
                     {
-                        AssertFatal(
-                            m_incidences.getSrcCount(output) <= 1, errorMsg, ShowValue(output));
+                        AssertFatal(m_incidence.getSrcCount(output) <= 1,
+                                    errorMsg,
+                                    ShowValue(tag),
+                                    ShowValue(output));
                     }
                 }
             }
@@ -266,7 +270,7 @@ namespace rocRoller
 
             clearCache(GraphModification::DeleteElement);
 
-            m_incidences.deleteTag(tag);
+            m_incidence.deleteTag(tag);
             m_elements.erase(tag);
         }
 
@@ -402,8 +406,8 @@ namespace rocRoller
         auto Hypergraph<Node, Edge, Hyper>::getLocation(int tag) const -> Location
         {
             return {.tag      = tag,
-                    .incoming = m_incidences.getSrcs(tag),
-                    .outgoing = m_incidences.getDsts(tag),
+                    .incoming = m_incidence.getSrcs(tag),
+                    .outgoing = m_incidence.getDsts(tag),
                     .element  = getElement(tag)};
         }
 
@@ -413,7 +417,7 @@ namespace rocRoller
             for(auto const& pair : m_elements)
             {
                 auto tag = pair.first;
-                if(m_incidences.getSrcCount(tag) == 0)
+                if(m_incidence.getSrcCount(tag) == 0)
                     co_yield tag;
             }
         }
@@ -424,7 +428,7 @@ namespace rocRoller
             for(auto const& pair : m_elements)
             {
                 auto tag = pair.first;
-                if(m_incidences.getDstCount(tag) == 0)
+                if(m_incidence.getDstCount(tag) == 0)
                     co_yield tag;
             }
         }
@@ -588,8 +592,8 @@ namespace rocRoller
             std::deque<std::pair<int, int>> toExplore;
             std::set<std::pair<int, int>>   noted;
 
-            for(auto connected : dir == Direction::Downstream ? m_incidences.getDsts(start)
-                                                              : m_incidences.getSrcs(start))
+            for(auto connected : dir == Direction::Downstream ? m_incidence.getDsts(start)
+                                                              : m_incidence.getSrcs(start))
             {
                 std::pair<int, int> candidate = {start, connected};
                 toExplore.push_back(candidate);
@@ -607,8 +611,8 @@ namespace rocRoller
                 visitedNodes.insert(node);
                 co_yield node;
 
-                for(auto connected : dir == Direction::Downstream ? m_incidences.getDsts(node)
-                                                                  : m_incidences.getSrcs(node))
+                for(auto connected : dir == Direction::Downstream ? m_incidence.getDsts(node)
+                                                                  : m_incidence.getSrcs(node))
                 {
                     std::pair<int, int> candidate = {node, connected};
                     if(!noted.contains(candidate))
@@ -772,11 +776,11 @@ namespace rocRoller
                         ShowValue(tag));
             if constexpr(Dir == Direction::Downstream)
             {
-                return m_incidences.getDsts(tag);
+                return m_incidence.getDsts(tag);
             }
             else
             {
-                return m_incidences.getSrcs(tag);
+                return m_incidence.getSrcs(tag);
             }
         }
 
@@ -835,7 +839,7 @@ namespace rocRoller
                 msg << "];" << std::endl;
             }
 
-            msg << m_incidences.toDOTSection(prefix);
+            msg << m_incidence.toDOTSection(prefix);
 
             // Enforce left-to-right ordering for elements connected to an edge.
             for(auto const& pair : m_elements)
@@ -1133,8 +1137,8 @@ namespace rocRoller
                         ShowValue(tail),
                         ShowValue(head));
 
-            auto dsts = m_incidences.getDsts(tail);
-            for(auto src : m_incidences.getSrcs(head))
+            auto dsts = m_incidence.getDsts(tail);
+            for(auto src : m_incidence.getSrcs(head))
             {
                 auto rv = std::find(dsts.begin(), dsts.end(), src);
                 if(rv != dsts.end())
