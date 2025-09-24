@@ -10,40 +10,52 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run rocprofv3 profiling ds instructions with different strides",
+        description="rocprofv3 profiling of ds instructions with various options",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument(
+    env_group = parser.add_argument_group('Options', 
+                                          'Environment variables that affect options for the test')
+
+    env_group.add_argument(
         "instr_widths",
         type=int,
         nargs="*",
         default=[1, 2, 4],
-        help="Instruction width values in dwords",
+        help="INSTR_WIDTH values in dwords (sets INSTR_WIDTH env var)",
     )
 
-    parser.add_argument(
+    env_group.add_argument(
         "-s",
         "--strides",
         type=int,
         nargs="+",
-        default=[2**i for i in range(0, 3)],
-        help="List of byte stride values to test",
+        default=[1, 2, 4],
+        help="BYTE_STRIDE values to test (sets BYTE_STRIDE env var)",
     )
 
-    parser.add_argument(
+    env_group.add_argument(
         "-w", "--write", action="store_true", help="Test write mode (sets WRITE=1)"
     )
 
-    parser.add_argument(
+    env_group.add_argument(
         "-r", "--read", action="store_true", help="Test read mode (sets WRITE=0)"
     )
 
     parser.add_argument(
+        "--build-dir",
+        type=str,
+        default="./",
+        help="Build directory path (sets ROCROLLER_BUILD_DIR env var, default: ./)",
+    )
+
+    # Sometimes no work is done on CU thus needs to be re-ran (for small workgroup counts)
+    # If the output is too short (i.e. only csv headers), repeat the run
+    parser.add_argument(
         "--char-limit",
         type=int,
         default=77,
-        help="Minimum character limit for output validation (default: 76)",
+        help="Minimum character limit for output validation (default: 77)",
     )
 
     parser.add_argument(
@@ -62,6 +74,7 @@ def main():
 
     args = parser.parse_args()
 
+    # Install ATT decoder if not present
     if not os.path.isfile("/opt/rocm-7.1.0/lib/librocprof-trace-decoder.so"):
         wget_cmd = [
             "wget",
@@ -76,7 +89,6 @@ def main():
         ]
         subprocess.run(dpkg_cmd, check=True)
 
-    # Determine which modes to test
     modes_to_test = []
     if args.write and args.read:
         modes_to_test = [("read", False), ("write", True)]
@@ -84,17 +96,10 @@ def main():
         modes_to_test = [("write", True)]
     elif args.read:
         modes_to_test = [("read", False)]
-    else:
-        # Default: test both modes
+    else: # default both
         modes_to_test = [("read", False), ("write", True)]
 
-    # Set static environment variables
-    os.environ["ROCROLLER_BUILD_DIR"] = "./"
-    os.environ["ROCROLLER_SAVE_ASSEMBLY"] = "1"
-
-    # Due to how rocprofv3 works, sometimes data is not recorded and thus needs to be re-ran
-    # If the output is too short (i.e. only csv headers), repeat the run
-    CHAR_LIMIT = args.char_limit
+    os.environ["ROCROLLER_BUILD_DIR"] = args.build_dir
 
     output_dir = "output"
 
@@ -190,7 +195,7 @@ def main():
                         print(f"Results saved to: {target_dir}")
 
                         # Check if output is long enough
-                        if output_len > CHAR_LIMIT:
+                        if output_len > args.char_limit:
                             break
 
                     except Exception as e:

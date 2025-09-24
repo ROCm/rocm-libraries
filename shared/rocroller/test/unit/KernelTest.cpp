@@ -487,7 +487,7 @@ amdhsa.kernels:
         const auto one  = std::make_shared<Expression::Expression>(1u);
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
-        const auto workgroupSize = 256u;
+        const auto workgroupSize = 64u;
         auto       workitemCount = Expression::literal(256u * workgroupSize); // 256 CU on MI350X
         k->setWorkgroupSize({workgroupSize, 1, 1});
         k->setWorkitemCount({workitemCount, one, one});
@@ -504,9 +504,13 @@ amdhsa.kernels:
         if(const char* env_p = std::getenv("INSTR_WIDTH"))
             instrDwords = atoi(env_p); // e.g. 1 for ds_read_b32
 
-        bool write; // else read
+        bool write = false;
         if(const char* env_p = std::getenv("WRITE"))
             write = atoi(env_p) == 1 ? true : false;
+
+        int ITERS = 16;
+        if(const char* env_p = std::getenv("ITERS"))
+            ITERS = atoi(env_p);
 
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops
@@ -548,6 +552,7 @@ amdhsa.kernels:
             // co_yield Instruction::Label(label);
 
             auto getSubset = [](size_t n, size_t m, size_t i) -> std::pair<size_t, size_t> {
+                // If run out of n, wrap around
                 size_t num_complete_chunks = n / m;
                 if(num_complete_chunks == 0)
                 {
@@ -558,7 +563,7 @@ amdhsa.kernels:
                 return {start, start + m};
             };
 
-            const int ITERS            = 16;
+            const int ITERS            = 128;
             const int ALREADY_FINISHED = ITERS - 3;
 
             // auto addrs = Register::Value::Placeholder(
