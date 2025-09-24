@@ -33,6 +33,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
   * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
 
+## rocPRIM 4.0.1 for ROCm 7.0.2
+
+### Resolved issues
+
+* Fixed compilation issue when using `rocprim::texture_cache_iterator`.
+* Fixed a HIP version check used to determine whether hipStreamLegacy is supported. This resolves runtime errors that occur when hipStreamLegacy is used in versions of ROCm later than 6.4.
+
 ## rocPRIM 4.0.0 for ROCm 7.0
 
 ### Added
