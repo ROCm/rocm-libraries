@@ -12,8 +12,7 @@ using namespace miopen_legacy_plugin;
 TEST(TestMiopenUtils, FindDeviceBufferReturnsCorrectBuffer)
 {
     std::vector<hipdnnPluginDeviceBuffer_t> buffers
-        = {{.uid = 42, .ptr = reinterpret_cast<void*>(0x1234)},
-           {.uid = 99, .ptr = reinterpret_cast<void*>(0x5678)}};
+        = {{42, reinterpret_cast<void*>(0x1234)}, {99, reinterpret_cast<void*>(0x5678)}};
 
     auto result = miopen_utils::findDeviceBuffer(99, buffers.data(), 2);
     EXPECT_EQ(result.uid, 99);
@@ -22,8 +21,7 @@ TEST(TestMiopenUtils, FindDeviceBufferReturnsCorrectBuffer)
 
 TEST(TestMiopenUtils, FindDeviceBufferThrowsIfNotFound)
 {
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers
-        = {{.uid = 1, .ptr = reinterpret_cast<void*>(0x1111)}};
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, reinterpret_cast<void*>(0x1111)}};
 
     EXPECT_THROW(
         miopen_utils::findDeviceBuffer(2, buffers.data(), static_cast<uint32_t>(buffers.size())),

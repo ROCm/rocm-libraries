@@ -219,8 +219,7 @@ hipdnnPluginConstData_t EngineConfigDescriptor::getSerializedEngineConfig() cons
         _engineConfigSerializedBuffer = builder.Release();
     }
 
-    return {.ptr = _engineConfigSerializedBuffer.data(),
-            .size = _engineConfigSerializedBuffer.size()};
+    return {_engineConfigSerializedBuffer.data(), _engineConfigSerializedBuffer.size()};
 }
 
 } // namespace hipdnn_backend

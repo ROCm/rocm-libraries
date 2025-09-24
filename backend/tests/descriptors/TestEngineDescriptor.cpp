@@ -110,8 +110,7 @@ private:
         engineDetailsBuilder.add_engine_id(engineId);
         builder.Finish(engineDetailsBuilder.Finish());
         _engineDetailsBuffer = builder.Release();
-        _serializedEngineDetails
-            = {.ptr = _engineDetailsBuffer.data(), .size = _engineDetailsBuffer.size()};
+        _serializedEngineDetails = {_engineDetailsBuffer.data(), _engineDetailsBuffer.size()};
     }
 
     static constexpr int64_t ENGINE_ID = 0;

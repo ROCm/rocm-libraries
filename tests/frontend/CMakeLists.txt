@@ -8,6 +8,7 @@ find_package(Threads REQUIRED)
 add_executable(public_hipdnn_frontend_tests 
     main.cpp
     IntegrationBatchnormForwardInference.cpp
+    IntegrationConvolutionBackwardData.cpp
     IntegrationConvForward.cpp
 )
 

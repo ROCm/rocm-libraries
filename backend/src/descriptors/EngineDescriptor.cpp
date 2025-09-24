@@ -28,7 +28,7 @@ void EngineDescriptor::finalize()
     auto pluginResourceManager = handle->getPluginResourceManager();
 
     auto engineIds = pluginResourceManager->getApplicableEngineIds(_graph.get());
-    if(std::ranges::find(engineIds, _engineId) == engineIds.end())
+    if(std::find(engineIds.begin(), engineIds.end(), _engineId) == engineIds.end())
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "EngineDescriptor::finalize() failed: Engine id is not in a valid "

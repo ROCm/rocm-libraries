@@ -55,7 +55,7 @@ extern "C" hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandl
 {
     return hipdnn_plugin::tryCatch([&]() {
         THROW_IF_NULL(handle);
-        *handle = new HipdnnEnginePluginHandle(nullptr);
+        *handle = new HipdnnEnginePluginHandle{nullptr};
     });
 }
 

@@ -13,9 +13,7 @@
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
-
-#include "test_plugins/TestPluginConstants.hpp"
+#include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -41,7 +39,7 @@ struct IntegrationTestCase
 
     friend std::ostream& operator<<(std::ostream& os, const IntegrationTestCase& tc)
     {
-        os << "ConvTestCase{" << "plugin_path: " << tc.pluginPath
+        os << "ConvolutionBackwardDataTestCase{" << "plugin_path: " << tc.pluginPath
            << ", description: " << tc.description << ", graph_name: " << tc.graphName
            << ", expected_failure: ";
 
@@ -72,37 +70,37 @@ struct IntegrationTestCase
 // Notes:
 //        - We are using fake test plugins to simulate different scenarios.
 //        - The tests will validate the graph creation, execution plan building, and execution through the full flow.
-//        - We are using a batchnorm graph since the graph doesn't really matter due to fake plugins.
-template <typename Data_type>
-class IntegrationConvolutionForward : public ::testing::TestWithParam<IntegrationTestCase>
+//        - We are using a convolution backward data graph to test the conv_dgrad operation.
+class IntegrationConvolutionBackwardDataFp32 : public ::testing::TestWithParam<IntegrationTestCase>
 {
 protected:
     // Simplified tensor bundle for frontend integration tests
-    struct SimpleConvolutionTensorBundle
+    template <typename Input_type>
+    struct SimpleConvolution2DTensorBundle
     {
-        SimpleConvolutionTensorBundle(const std::vector<int64_t>& xDims,
-                                      const std::vector<int64_t>& wDims,
-                                      const std::vector<int64_t>& yDims)
-            : xTensor(Tensor<Data_type>(xDims))
-            , wTensor(Tensor<Data_type>(wDims))
-            , yTensor(Tensor<Data_type>(yDims))
+        SimpleConvolution2DTensorBundle(const std::vector<int64_t>& inputDims,
+                                        const std::vector<int64_t>& filterDims,
+                                        const std::vector<int64_t>& outputDims)
+            : dyTensor(Tensor<Input_type>(outputDims))
+            , wTensor(Tensor<Input_type>(filterDims))
+            , dxTensor(Tensor<Input_type>(inputDims))
         {
             // Initialize with simple constant values
-            xTensor.fillWithValue(static_cast<Data_type>(1.0));
-            wTensor.fillWithValue(static_cast<Data_type>(1.0));
-            yTensor.fillWithValue(static_cast<Data_type>(0.0));
+            dyTensor.fillWithValue(static_cast<Input_type>(1.0f));
+            wTensor.fillWithValue(static_cast<Input_type>(1.0f));
+            dxTensor.fillWithValue(static_cast<Input_type>(0.0f));
         }
 
-        Tensor<Data_type> xTensor;
-        Tensor<Data_type> wTensor;
-        Tensor<Data_type> yTensor;
+        Tensor<Input_type> dyTensor; // Gradient of output
+        Tensor<Input_type> wTensor; // Weights/filter tensor
+        Tensor<Input_type> dxTensor; // Gradient of input (output)
     };
 
     struct ConvolutionTestTensors
     {
-        std::shared_ptr<TensorAttributes> x;
+        std::shared_ptr<TensorAttributes> dy;
         std::shared_ptr<TensorAttributes> w;
-        std::shared_ptr<TensorAttributes> y;
+        std::shared_ptr<TensorAttributes> dx;
     };
 
     void SetUp() override
@@ -124,13 +122,12 @@ protected:
         int deviceId = 0;
         EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
 
-        // Set up plugin path - load specific plugin by absolute path
+        // Load specific plugin
         const std::array<const char*, 1> paths = {pluginPath.c_str()};
         EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(
                       paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
 
-        // Create handle
         hipdnnHandle_t handle = nullptr;
         EXPECT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
@@ -138,13 +135,14 @@ protected:
     }
 
     static std::pair<std::shared_ptr<Graph>, ConvolutionTestTensors>
-        createConvTestGraphWithUids(const std::string& graphName,
-                                    const SimpleConvolutionTensorBundle& tensorBundle,
-                                    const std::vector<int64_t>& prePadding,
-                                    const std::vector<int64_t>& postPadding,
-                                    const std::vector<int64_t>& stride,
-                                    const std::vector<int64_t>& dilation,
-                                    bool useManualUids)
+        createConvolutionBackwardDataGraphWithUids(
+            const std::string& graphName,
+            const SimpleConvolution2DTensorBundle<float>& tensorBundle,
+            const std::vector<int64_t>& prePadding,
+            const std::vector<int64_t>& postPadding,
+            const std::vector<int64_t>& stride,
+            const std::vector<int64_t>& dilation,
+            bool useManualUids)
     {
         auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
         graph->set_name(graphName);
@@ -152,48 +150,50 @@ protected:
         int64_t uid = 1;
         ConvolutionTestTensors tensors;
 
-        auto xAttr
-            = makeTensorAttributes("X", getDataTypeEnumFromType<Data_type>(), tensorBundle.xTensor);
+        // dy tensor (gradient of output)
+        auto dyAttr = makeTensorAttributes("DY", DataType_t::FLOAT, tensorBundle.dyTensor);
         if(useManualUids)
         {
-            xAttr.set_uid(uid++);
+            dyAttr.set_uid(uid++);
         }
-        tensors.x = std::make_shared<TensorAttributes>(std::move(xAttr));
+        tensors.dy = std::make_shared<TensorAttributes>(std::move(dyAttr));
 
-        auto wAttr
-            = makeTensorAttributes("W", getDataTypeEnumFromType<Data_type>(), tensorBundle.wTensor);
+        // weights/filter tensor
+        auto wAttr = makeTensorAttributes("W", DataType_t::FLOAT, tensorBundle.wTensor);
         if(useManualUids)
         {
             wAttr.set_uid(uid++);
         }
         tensors.w = std::make_shared<TensorAttributes>(std::move(wAttr));
 
-        ConvFpropAttributes convAttrs;
-        convAttrs.set_name("convolution_forward");
+        ConvDgradAttributes convAttrs;
+        convAttrs.set_name("convolution_backward_data");
         convAttrs.set_pre_padding(prePadding);
         convAttrs.set_post_padding(postPadding);
         convAttrs.set_stride(stride);
         convAttrs.set_dilation(dilation);
+        convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
-        tensors.y = graph->conv_fprop(tensors.x, tensors.w, convAttrs);
+        // Create the convolution backward data operation
+        tensors.dx = graph->conv_dgrad(tensors.dy, tensors.w, convAttrs);
 
         if(useManualUids)
         {
-            tensors.y->set_uid(uid++);
+            tensors.dx->set_uid(uid++);
         }
-        tensors.y->set_output(true);
+        tensors.dx->set_data_type(DataType_t::FLOAT);
 
         return {graph, tensors};
     }
 
     static std::unordered_map<int64_t, void*>
         createVariantPack(const ConvolutionTestTensors& tensors,
-                          SimpleConvolutionTensorBundle& tensorBundle)
+                          SimpleConvolution2DTensorBundle<float>& tensorBundle)
     {
         std::unordered_map<int64_t, void*> variantPack;
-        variantPack[tensors.x->get_uid()] = tensorBundle.xTensor.memory().deviceData();
+        variantPack[tensors.dy->get_uid()] = tensorBundle.dyTensor.memory().deviceData();
         variantPack[tensors.w->get_uid()] = tensorBundle.wTensor.memory().deviceData();
-        variantPack[tensors.y->get_uid()] = tensorBundle.yTensor.memory().deviceData();
+        variantPack[tensors.dx->get_uid()] = tensorBundle.dxTensor.memory().deviceData();
 
         return variantPack;
     }
@@ -201,7 +201,7 @@ protected:
     static void runGraphPipeline(const std::shared_ptr<Graph>& graph,
                                  hipdnnHandle_t handle,
                                  const ConvolutionTestTensors& tensors,
-                                 SimpleConvolutionTensorBundle& tensorBundle,
+                                 SimpleConvolution2DTensorBundle<float>& tensorBundle,
                                  FailurePoint expectedFailure = FailurePoint::NONE)
     {
         auto result = graph->validate();
@@ -224,19 +224,13 @@ protected:
         result = graph->build_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        int64_t workspaceSize;
-        result = graph->get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        Workspace workspace(static_cast<size_t>(workspaceSize));
-
-        ASSERT_TRUE(tensors.x->has_uid());
+        ASSERT_TRUE(tensors.dy->has_uid());
         ASSERT_TRUE(tensors.w->has_uid());
-        ASSERT_TRUE(tensors.y->has_uid());
+        ASSERT_TRUE(tensors.dx->has_uid());
 
         auto variantPack = createVariantPack(tensors, tensorBundle);
 
-        result = graph->execute(handle, variantPack, workspace.get());
+        result = graph->execute(handle, variantPack, nullptr);
         if(expectedFailure == FailurePoint::EXECUTE)
         {
             ASSERT_NE(result.code, ErrorCode::OK) << "Execute should fail";
@@ -251,28 +245,31 @@ protected:
     {
         const auto& testCase = GetParam();
 
-        std::vector<int64_t> xDims = {2, 3, 14, 14}; // n, c, h, w
-        std::vector<int64_t> wDims = {3, 3, 3, 3}; // k, c, h, w
-        std::vector<int64_t> yDims = {2, 3, 12, 12}; // n, k, h, w
+        // Setup environment with specified plugin
+        _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
+
+        std::vector<int64_t> inputDims = {2, 3, 14, 14}; // DX dimensions
+        std::vector<int64_t> filterDims = {3, 3, 3, 3}; // W dimensions (K, C, R, S)
+        std::vector<int64_t> outputDims = {2, 3, 12, 12}; // DY dimensions
+
+        // Input: N=2, C=3, H=14, W=14
+        // Filter: K=3, C=3, R=3, S=3 (output channels = input channels for backward data)
+        // Output (DY): N=2, K=3, P=12, Q=12 (calculated based on conv params)
         std::vector<int64_t> prePadding = {0, 0};
         std::vector<int64_t> postPadding = {0, 0};
         std::vector<int64_t> stride = {1, 1};
         std::vector<int64_t> dilation = {1, 1};
 
-        // Setup environment with specified plugin
-        _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
+        SimpleConvolution2DTensorBundle<float> tensorBundle(inputDims, filterDims, outputDims);
 
-        // Create tensor bundle
-        SimpleConvolutionTensorBundle tensorBundle(xDims, wDims, yDims);
-
-        // Create graph and tensors using the unified function
-        auto [graph, tensors] = createConvTestGraphWithUids(testCase.graphName,
-                                                            tensorBundle,
-                                                            prePadding,
-                                                            postPadding,
-                                                            stride,
-                                                            dilation,
-                                                            testCase.useManualUids);
+        // Create graph and tensors with the convolution parameters
+        auto [graph, tensors] = createConvolutionBackwardDataGraphWithUids(testCase.graphName,
+                                                                           tensorBundle,
+                                                                           prePadding,
+                                                                           postPadding,
+                                                                           stride,
+                                                                           dilation,
+                                                                           testCase.useManualUids);
 
         runGraphPipeline(graph, _handle, tensors, tensorBundle, testCase.expectedFailure);
     }
@@ -283,40 +280,31 @@ private:
 
 } // namespace
 
-class IntegrationConvolutionForwardFp32 : public IntegrationConvolutionForward<float>
-{
-};
-
-TEST_P(IntegrationConvolutionForwardFp32, ExecutePluginPipeline)
-{
-    runTest();
-}
-
 INSTANTIATE_TEST_SUITE_P(
     ,
-    IntegrationConvolutionForwardFp32,
+    IntegrationConvolutionBackwardDataFp32,
     ::testing::Values(
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
                             "DefaultPluginWithManualUids",
-                            "DefaultPluginBatchnormTest",
+                            "DefaultPluginConvBackwardDataTest",
                             FailurePoint::NONE,
                             true},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
                             "DefaultPluginWithAutoUids",
-                            "DefaultPluginBatchnormTestAutoUID",
+                            "DefaultPluginConvBackwardDataTestAutoUID",
                             FailurePoint::NONE,
                             false},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testExecuteFailsPluginPath(),
                             "ExecuteFailsPlugin",
-                            "ExecuteFailsPluginBatchnormTest",
+                            "ExecuteFailsPluginConvBackwardDataTest",
                             FailurePoint::EXECUTE,
                             true},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testNoApplicableEnginesAPluginPath(),
                             "NoApplicableEnginesPlugin",
-                            "NoEnginesPluginBatchnormTest",
+                            "NoEnginesPluginConvBackwardDataTest",
                             FailurePoint::CREATE_EXECUTION_PLAN,
                             true}),
-    // Provide a custom name for each test instance
+    // Provide a custom name for each test instance (C++17 compatible)
     [](const ::testing::TestParamInfo<IntegrationTestCase>& info) {
         std::string name = info.param.description;
         std::transform(name.cbegin(), name.cend(), name.begin(), [](char c) {
@@ -324,3 +312,8 @@ INSTANTIATE_TEST_SUITE_P(
         });
         return name;
     });
+
+TEST_P(IntegrationConvolutionBackwardDataFp32, ExecutePluginPipeline)
+{
+    runTest();
+}

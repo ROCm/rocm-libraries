@@ -745,9 +745,9 @@ TEST(TestConvolutionNode, GatherHipdnnTensorIds)
     std::unordered_set<int64_t> usedIds;
     node.gather_hipdnn_tensor_ids(usedIds);
 
-    EXPECT_TRUE(usedIds.contains(1));
-    EXPECT_TRUE(usedIds.contains(2));
-    EXPECT_TRUE(usedIds.contains(3));
+    EXPECT_TRUE(usedIds.find(1) != usedIds.end());
+    EXPECT_TRUE(usedIds.find(2) != usedIds.end());
+    EXPECT_TRUE(usedIds.find(3) != usedIds.end());
 }
 
 TEST(TestConvolutionNode, PopulateHipdnnTensorIds)

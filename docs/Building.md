@@ -30,7 +30,7 @@
 |------------|---------|-------------|
 | ROCm | Matching TheRock (ROCm version 7.0+) | AMD GPU programming stack (see [TheRock releases](https://github.com/ROCm/TheRock/releases)) |
 | CMake | 3.25.2+ | Build system generator |
-| C++ Compiler | C++20 compatible | AMD Clang (included with ROCm/TheRock) |
+| C++ Compiler | C++17 compatible | hipDNN requires C++17 compatible AMD Clang (plugins using device code may require C++20)|
 | HIP | Matching TheRock | GPU programming interface (included with ROCm/TheRock) |
 | clang-format | 18.x | Code formatting tool |
 | clang-tidy | 20.x | Static analysis tool |

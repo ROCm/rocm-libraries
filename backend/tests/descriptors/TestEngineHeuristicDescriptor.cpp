@@ -112,7 +112,7 @@ protected:
         builder.Finish(engineDetailsBuilder.Finish());
         auto engineDetailsBuffer = builder.Release();
         hipdnnPluginConstData_t serializedEngineDetails
-            = {.ptr = engineDetailsBuffer.data(), .size = engineDetailsBuffer.size()};
+            = {engineDetailsBuffer.data(), engineDetailsBuffer.size()};
         _engineDetailBuffers.push_back(std::move(engineDetailsBuffer));
         return serializedEngineDetails;
     }

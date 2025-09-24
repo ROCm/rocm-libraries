@@ -3,6 +3,9 @@
 
 #pragma once
 
+// Workaround: Operator<< in hip_bfloat16 is missing the std::ostream type info without this include.
+#include <ostream>
+
 #include <hip/hip_bfloat16.h>
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <string>

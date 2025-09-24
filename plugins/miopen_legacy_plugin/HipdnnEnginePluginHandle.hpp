@@ -50,9 +50,10 @@ public:
     {
         HIPDNN_LOG_INFO("Removing detached buffer at address: {:p}", ptr);
 
-        if(_engineDetailsBuffers.contains(ptr))
+        auto it = _engineDetailsBuffers.find(ptr);
+        if(it != _engineDetailsBuffers.end())
         {
-            _engineDetailsBuffers.erase(ptr);
+            _engineDetailsBuffers.erase(it);
         }
         else
         {

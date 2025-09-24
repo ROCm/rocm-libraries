@@ -31,7 +31,7 @@ private:
         auto engineIds = plugin.getAllEngineIds();
         for(const auto id : engineIds)
         {
-            if(_engineIds.contains(id))
+            if(_engineIds.find(id) != _engineIds.end())
             {
                 throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
                                       "Engine ID " + std::to_string(id)

@@ -102,8 +102,8 @@ std::vector<int64_t> EnginePlugin::getAllEngineIds() const
                 HIPDNN_STATUS_PLUGIN_ERROR,
                 "Number of engines returned does not match expected count");
 
-    std::ranges::sort(engineIds);
-    if(std::ranges::adjacent_find(engineIds) != engineIds.end())
+    std::sort(engineIds.begin(), engineIds.end());
+    if(std::adjacent_find(engineIds.begin(), engineIds.end()) != engineIds.end())
     {
         throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Duplicate engine IDs found");
     }
@@ -167,15 +167,15 @@ std::vector<int64_t>
 
     engineIds.resize(numEngines);
 
-    std::ranges::sort(engineIds);
-    if(std::ranges::adjacent_find(engineIds) != engineIds.end())
+    std::sort(engineIds.begin(), engineIds.end());
+    if(std::adjacent_find(engineIds.begin(), engineIds.end()) != engineIds.end())
     {
         throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Duplicate engine IDs found");
     }
 
     for(const auto engineId : engineIds)
     {
-        if(std::ranges::find(_allEngineIds, engineId) == _allEngineIds.end())
+        if(std::find(_allEngineIds.begin(), _allEngineIds.end(), engineId) == _allEngineIds.end())
         {
             throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
                                   "Engine ID not found in the plugin's known IDs");

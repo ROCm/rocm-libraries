@@ -384,17 +384,17 @@ std::vector<Batchnorm2dTestCase> getBnBwdTestCases()
 {
     unsigned int seed = std::random_device{}();
 
-    return {
-        {.n = 1, .c = 3, .h = 14, .w = 14, .seed = seed},
+    return std::vector<Batchnorm2dTestCase>{
+        {1, 3, 14, 14, seed},
         // MIOpen segfaults for this case, re-enable when fix is released:
         // https://github.com/ROCm/rocm-libraries/pull/1197
-        // {.n = 1, .c = 256, .h = 1, .w = 1}, // Would produce near-zero variance in theory
-        {.n = 2, .c = 3, .h = 1, .w = 1, .seed = seed},
-        {.n = 32, .c = 1, .h = 14, .w = 14, .seed = seed},
-        {.n = 32, .c = 3, .h = 1, .w = 14, .seed = seed},
-        {.n = 32, .c = 3, .h = 14, .w = 1, .seed = seed},
-        {.n = 64, .c = 64, .h = 112, .w = 112, .seed = seed},
-        {.n = 64, .c = 512, .h = 14, .w = 14, .seed = seed},
+        // {1, 256, 1, 1, seed}, // Would produce near-zero variance in theory
+        {2, 3, 1, 1, seed},
+        {32, 1, 14, 14, seed},
+        {32, 3, 1, 14, seed},
+        {32, 3, 14, 1, seed},
+        {64, 64, 112, 112, seed},
+        {64, 512, 14, 14, seed},
     };
 }
 
@@ -402,9 +402,9 @@ std::vector<Batchnorm3dTestCase> getBnBwd3dTestCases()
 {
     unsigned int seed = std::random_device{}();
 
-    return {
-        {.n = 2, .c = 3, .d = 3, .h = 1, .w = 1, .seed = seed},
-        {.n = 16, .c = 3, .d = 8, .h = 14, .w = 14, .seed = seed},
+    return std::vector<Batchnorm3dTestCase>{
+        {2, 3, 3, 1, 1, seed},
+        {16, 3, 8, 14, 14, seed},
     };
 }
 
