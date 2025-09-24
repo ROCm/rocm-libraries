@@ -204,7 +204,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return f;
     }
 
-    StatementList load_lds_step_3_4_generator(
+    StatementList load_pp_step_3_4_lds_generator(
         unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
     {
         if(hr == 0)
@@ -241,7 +241,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         StatementList& body = f.body;
 
-        auto load_lds = std::mem_fn(&StockhamPartialPassKernelCC::load_lds_step_3_4_generator);
+        auto load_lds = std::mem_fn(&StockhamPartialPassKernelCC::load_pp_step_3_4_lds_generator);
         // first pass of load (partial-pass)
         unsigned int width  = factors_pp[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
