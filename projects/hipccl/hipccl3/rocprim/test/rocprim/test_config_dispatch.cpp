@@ -70,20 +70,23 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    const hipStream_t stream = 0;
+    // Test with both the default stream (0) and in hipStreamLegacy,
+    // since they take different code paths through rocprim::detail::get_device_from_stream.
+    for (const hipStream_t stream : {static_cast<hipStream_t>(hipStreamDefault), hipStreamLegacy})
+    {
+        target_arch host_arch;
+        HIP_CHECK(rocprim::detail::host_target_arch(stream, host_arch));
 
-    target_arch host_arch;
-    HIP_CHECK(rocprim::detail::host_target_arch(stream, host_arch));
+        common::device_ptr<target_arch> device_arch_ptr(1);
 
-    common::device_ptr<target_arch> device_arch_ptr(1);
+        hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, device_arch_ptr.get());
+        HIP_CHECK(hipGetLastError());
 
-    hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, device_arch_ptr.get());
-    HIP_CHECK(hipGetLastError());
+        const auto device_arch = device_arch_ptr.load_value_at(0);
 
-    const auto device_arch = device_arch_ptr.load_value_at(0);
-
-    ASSERT_NE(host_arch, target_arch::invalid);
-    ASSERT_EQ(host_arch, device_arch);
+        ASSERT_NE(host_arch, target_arch::invalid);
+        ASSERT_EQ(host_arch, device_arch);
+    }
 }
 
 TEST(RocprimConfigDispatchTests, ParseCommonArches)
