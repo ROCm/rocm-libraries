@@ -9,7 +9,7 @@ def runCI =
 {
     nodeDetails, jobName ->
 
-    def prj = new rocProject('hipFFT-internal', 'PreCheckin')
+    def prj = new rocProject('hipFFT', 'PreCheckin')
     // customize for project
     prj.libraryDependencies = ['rocRAND','rocFFT']
 
@@ -26,7 +26,5 @@ ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
     properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * 7')])]))
-    stage(urlJobName) {
-        runCI([ubuntu22:['any']], urlJobName)
-    }
+    runCI([ubuntu22:['any']], urlJobName)
 }

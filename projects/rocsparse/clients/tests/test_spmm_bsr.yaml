@@ -150,6 +150,24 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
 
+- name: spmm_bsr
+  category: quick
+  function: spmm_bsr
+  indextype: *i32
+  precision: *bfloat16_bfloat16_float32_float32_abct_precision
+  M: [43567]
+  N: [144]
+  K: [56478]
+  block_dim: [12]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bsr]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+
 ##############################
 # Precheckin
 ##############################

@@ -120,21 +120,22 @@ BEGIN_ROCPRIM_NAMESPACE
 /// //                2nd copy
 /// \endcode
 /// \endparblock
-template<class Config_ = default_config,
+template<class Config = default_config,
          class InputBufferItType,
          class OutputBufferItType,
          class BufferSizeItType>
-ROCPRIM_INLINE static hipError_t batch_copy(void*              temporary_storage,
-                                            size_t&            storage_size,
-                                            InputBufferItType  sources,
-                                            OutputBufferItType destinations,
-                                            BufferSizeItType   sizes,
-                                            uint32_t           num_copies,
-                                            hipStream_t        stream            = hipStreamDefault,
-                                            bool               debug_synchronous = false)
+ROCPRIM_INLINE
+static hipError_t batch_copy(void*              temporary_storage,
+                             size_t&            storage_size,
+                             InputBufferItType  sources,
+                             OutputBufferItType destinations,
+                             BufferSizeItType   sizes,
+                             uint32_t           num_copies,
+                             hipStream_t        stream            = hipStreamDefault,
+                             bool               debug_synchronous = false)
 {
     return detail::
-        batch_memcpy_func<Config_, InputBufferItType, OutputBufferItType, BufferSizeItType, false>(
+        batch_memcpy_func<Config, InputBufferItType, OutputBufferItType, BufferSizeItType, false>(
             temporary_storage,
             storage_size,
             sources,

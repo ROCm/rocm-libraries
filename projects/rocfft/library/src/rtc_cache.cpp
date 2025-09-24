@@ -593,15 +593,26 @@ std::vector<char> RTCCache::cached_compile(const std::string&          kernel_na
         {
             // not in the pending map, so add a future and launch the
             // work to look up the kernel in the cache or compile it.
-            pc = RTCCache::single->pending_compiles
-                     .emplace(key,
-                              std::async(std::launch::async,
-                                         cached_compile_impl,
-                                         kernel_name,
-                                         gpu_arch,
-                                         generate_src,
-                                         generator_sum))
+            auto compile = [=](std::promise<std::vector<char>> compile_promise) {
+                try
+                {
+                    compile_promise.set_value(
+                        cached_compile_impl(kernel_name, gpu_arch, generate_src, generator_sum));
+                }
+                catch(std::exception e)
+                {
+                    compile_promise.set_exception(std::current_exception());
+                }
+            };
+
+            std::promise<std::vector<char>> compile_promise;
+            pc = RTCCache::single->pending_compiles.emplace(key, compile_promise.get_future())
                      .first;
+            std::thread compile_thread(compile, std::move(compile_promise));
+            // we'll wait for the future so the thread can continue
+            // without being managed by this object
+            compile_thread.detach();
+
             cleanup.emplace(key);
         }
         result = pc->second;

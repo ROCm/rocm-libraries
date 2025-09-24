@@ -23,7 +23,7 @@
 #include "common_benchmark_header.hpp"
 
 // hipCUB API
-#include "hipcub/block/block_scan.hpp"
+#include <hipcub/block/block_scan.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;

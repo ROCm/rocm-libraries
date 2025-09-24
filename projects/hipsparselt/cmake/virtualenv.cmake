@@ -4,7 +4,7 @@ if("$ENV{Python_ROOT}" STREQUAL "" AND NOT Python_ROOT AND "$ENV{Python_ROOT_DIR
         find_program(PYENV_EXE pyenv)
         if(PYENV_EXE)
             execute_process(
-              COMMAND ${PYENV_EXE} version-file 
+              COMMAND ${PYENV_EXE} version-file
               OUTPUT_VARIABLE PYENV_ROOT
             )
             if(PYENV_ROOT)

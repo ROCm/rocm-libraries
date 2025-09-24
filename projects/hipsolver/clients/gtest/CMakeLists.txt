@@ -177,7 +177,7 @@ if(WIN32)
       ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/
     )
   endforeach()
-  if(DEFINED $ENV{rocblas_DIR})
+  if(DEFINED ENV{rocblas_DIR})
     add_custom_command(TARGET hipsolver-test
       POST_BUILD
       COMMAND ${CMAKE_COMMAND}

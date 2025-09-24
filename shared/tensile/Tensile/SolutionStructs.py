@@ -857,7 +857,7 @@ class ProblemType(Mapping):
         else:
           printExit("NO compute data type, or dest data type, or data type specified")
           self["DataType"] = DataType(0)
-    
+
     if "F32XdlMathOp" in config:
         self["F32XdlMathOp"] = DataType(config["F32XdlMathOp"])
     else:
@@ -1161,8 +1161,8 @@ class ProblemType(Mapping):
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name += "_M"
       name += self["F32XdlMathOp"].toChar()
-    
-    # Rounding mode: IEEE vs SR 
+
+    # Rounding mode: IEEE vs SR
     if self["StochasticRounding"]:  name += "_SR"
 
     return name
@@ -1764,7 +1764,7 @@ class Solution(collections.abc.Mapping):
     self._name = config["CustomKernelName"] if isCustomKernelConfig(config) else None
     self._state = state
     self.initHelperKernelObjects()
-    
+
   # these keys are copied from ProblemType to internal that may be overridden
   InternalKeys = ["UseSgprForGRO","VectorStore"]
 
@@ -2762,7 +2762,7 @@ class Solution(collections.abc.Mapping):
       padInterval = state["LdsBlockSizePerPad%s"%tc] // bpeAB
     else:
       if state["UnrollMajorLDS%s"%tc]:
-        padInterval = state["_DepthULds"] 
+        padInterval = state["_DepthULds"]
       else:
         padInterval = state["MacroTile%s"%tc]
     numElements = state["MacroTile%s"%tc] * state["_DepthULds"]
@@ -2954,13 +2954,13 @@ class Solution(collections.abc.Mapping):
         computeBytes = state["ProblemType"]["ComputeDataType"].numBytes()
         state["_GlobalAccumulation"] = 'PartialsBuffer'
         state["_WorkspaceSizePerElemC"] = computeBytes
-        
+
       if state["GlobalSplitU"] > 1:
         computeName  = state["ProblemType"]["ComputeDataType"].toName()
         computeBytes = state["ProblemType"]["ComputeDataType"].numBytes()
 
         if state["GlobalSplitUAlgorithm"] == 'SingleBuffer':
-          # For SingleBuffer algorithm, _GA and _WorkspaceSizePerElemC is updated only if the gemm function is HPA (excluding int8). 
+          # For SingleBuffer algorithm, _GA and _WorkspaceSizePerElemC is updated only if the gemm function is HPA (excluding int8).
           # The workspace is used to convert the final output from ComputeDataType to DestDataType.
           # If ComputeDataType and DestDataType are the same ,the _GA and _Workspace remain unchanged.
           # for HPA cases with ComputeDataType!=DestDataType : HHS/BBS (_GA should be singlebuffer for these types)
@@ -3034,7 +3034,7 @@ class Solution(collections.abc.Mapping):
 
       if state["StaggerU"] != 0:
         return False, "Preloading not compatible with StaggerU."
-      
+
       return True, ""
 
     pkaSupported, pkaMsg = supportsPreloadKernelArguments()
@@ -3956,7 +3956,7 @@ class Solution(collections.abc.Mapping):
        state["MIInputPerThread"] == 1 and state["SourceSwap"]:
       if state["DirectToVgprA"] and state["ProblemType"]["TLUA"] and state["VectorWidthB"] == state["LocalReadVectorWidth"]:
         wideLRVWBforTLUBallowed = True
-    
+
 
     # LocalReadVectorWidth check
     if state["EnableMatrixInstruction"]:
@@ -4252,7 +4252,7 @@ class Solution(collections.abc.Mapping):
       if not (state["ProblemType"]["DataType"].is8bitFloat()):
         reject(state, "StochasticRounding requires F8 types")
         return
-    
+
     #check not support cases and calculate lds resources
     if state["StoreRemapVectorWidth"]:
       if not state["BufferStore"]:
@@ -4940,7 +4940,7 @@ class Solution(collections.abc.Mapping):
     else:
       printExit('Parameter {key}={value} is new object type ({t})'.format(key=key, value=value, t=type(value)))
       return str(value)
-  
+
   ##########################
   # make class look like dict
   def keys(self):

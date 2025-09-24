@@ -33,9 +33,9 @@ from typing import Callable, Tuple
 PROFILE_ENV_VAR = "TENSILE_PROFILE"
 
 def profile(func: Callable) -> Callable:
-    """Profiling decorator. 
+    """Profiling decorator.
 
-    Add ``@profile`` to mark a function for profiling; set the environment variable 
+    Add ``@profile`` to mark a function for profiling; set the environment variable
     TENSILE_PROFILE=ON to enable profiling decorated functions.
     """
     if not envVariableIsSet(PROFILE_ENV_VAR):
@@ -65,7 +65,7 @@ def envVariableIsSet(varName: str) -> bool:
 def initProfileArtifacts(funcName: str) -> Tuple[Path, str]:
     """Initializes filenames and paths for profiling artifacts based on the current datetime
     Args:
-        funcName: The name of the function being profiled, nominally passed via func.__name__ 
+        funcName: The name of the function being profiled, nominally passed via func.__name__
     Returns:
         A tuple (path, filename) where the path is the artifact directory and filename is
         a .prof file with the profiling results.
@@ -76,6 +76,3 @@ def initProfileArtifacts(funcName: str) -> Tuple[Path, str]:
     path.mkdir(exist_ok=True)
     print(f"> Profiling report at: {str(path / filename)}")
     return path, filename
-
-
-

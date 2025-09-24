@@ -27,10 +27,12 @@
 #include "../iterator/zip_iterator.hpp"
 #include "../types/tuple.hpp"
 
+#include "config_types.hpp"
 #include "detail/device_transform.hpp"
 #include "device_transform_config.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <iostream>
 #include <iterator>
 #include <tuple>
@@ -44,21 +46,34 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<bool IsPointer,
-         class Config,
+template<class Config,
+         bool IsPointer,
          class ResultType,
-         class InputIterator,
-         class OutputIterator,
-         class UnaryFunction>
-ROCPRIM_KERNEL
-    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void transform_kernel(
-    InputIterator input, const size_t size, OutputIterator output, UnaryFunction transform_op)
+         class InputIt,
+         class OutputIt,
+         class UnaryOp>
+inline hipError_t launch_transform(detail::target_arch arch,
+                                   InputIt             in,
+                                   OutputIt            out,
+                                   size_t              n,
+                                   UnaryOp             op,
+                                   dim3                grid,
+                                   dim3                block,
+                                   size_t              shmem,
+                                   hipStream_t         stream)
 {
-    transform_kernel_impl<IsPointer,
-                          device_params<Config>().kernel_config.block_size,
-                          device_params<Config>().kernel_config.items_per_thread,
-                          device_params<Config>().load_type,
-                          ResultType>(input, size, output, transform_op);
+    auto kernel = [=](auto arch_config)
+    {
+        constexpr auto params = decltype(arch_config)::params;
+
+        detail::transform_kernel_impl<IsPointer,
+                                      params.kernel_config.block_size,
+                                      params.kernel_config.items_per_thread,
+                                      params.load_type,
+                                      ResultType>(in, n, out, op);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<bool IsPointer,
@@ -90,7 +105,7 @@ inline hipError_t transform_impl(InputIterator     input,
         return result;
     }
     const detail::transform_config_params params
-        = detail::dispatch_target_arch<config>(target_arch);
+        = detail::dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -125,12 +140,15 @@ inline hipError_t transform_impl(InputIterator     input,
             start = std::chrono::steady_clock::now();
         }
 
-        detail::transform_kernel<IsPointer, config, result_type>
-            <<<dim3(current_blocks), dim3(block_size), 0, stream>>>(input + offset,
-                                                                    current_size,
-                                                                    output + offset,
-                                                                    transform_op);
-
+        ROCPRIM_RETURN_ON_ERROR(launch_transform<config, IsPointer, result_type>(target_arch,
+                                                                                 input + offset,
+                                                                                 output + offset,
+                                                                                 current_size,
+                                                                                 transform_op,
+                                                                                 current_blocks,
+                                                                                 block_size,
+                                                                                 0,
+                                                                                 stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
     }
 
@@ -175,7 +193,7 @@ inline hipError_t transform_impl(InputIterator     input,
 ///
 /// // custom transform function
 /// auto transform_op =
-///     [] __device__ (int a) -> int
+///     [] (int a) -> int
 ///     {
 ///         return a + 5;
 ///     };
@@ -254,7 +272,7 @@ inline hipError_t transform(InputIterator     input,
 ///
 /// // custom transform function
 /// auto transform_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a + b;
 ///     };
@@ -330,7 +348,7 @@ inline hipError_t transform(InputIterator1    input1,
 ///
 /// // custom transform function
 /// auto transform_op =
-///     [] __device__ (int a, int b, int c) -> int
+///     [] (int a, int b, int c) -> int
 ///     {
 ///         return a + b + c;
 ///     };

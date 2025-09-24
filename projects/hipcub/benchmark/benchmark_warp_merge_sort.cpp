@@ -24,10 +24,10 @@
 
 #include "../test/hipcub/test_utils_sort_comparator.hpp"
 // HIP API
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/util_ptx.hpp"
-#include "hipcub/warp/warp_merge_sort.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/util_ptx.hpp>
+#include <hipcub/warp/warp_merge_sort.hpp>
 
 #include <type_traits>
 

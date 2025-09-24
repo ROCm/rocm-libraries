@@ -210,9 +210,11 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="sddmm_mixed">Mixed Precisions</caption>
-*  <tr><th>A / B                    <th>C                        <th>compute_type
-*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
-*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
+*  <tr><th>A / B                     <th>C                         <th>compute_type
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
 *  \note
@@ -260,135 +262,7 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  \par Example
 *  This example performs sampled dense-dense matrix product, \f$C := \alpha ( A \cdot B ) \circ spy(C) + \beta C\f$
 *  where \f$\circ\f$ is the hadamard product
-*  \code{.c}
-*    // rocSPARSE handle
-*    rocsparse_handle handle;
-*    rocsparse_create_handle(&handle);
-*
-*    float halpha = 1.0f;
-*    float hbeta = -1.0f;
-*
-*    // A, B, and C are mxk, kxn, and mxn
-*    int m = 4;
-*    int k = 3;
-*    int n = 2;
-*    int nnzC = 5;
-*
-*    //     2  3  -1
-*    // A = 0  2   1
-*    //     0  0   5
-*    //     0 -2 0.5
-*
-*    //      0  4
-*    // B =  1  0
-*    //     -2  0.5
-*
-*    //      1 0            1 0
-*    // C =  2 3   spy(C) = 1 1
-*    //      0 0            0 0
-*    //      4 5            1 1
-*
-*    std::vector<float> hA = {2.0f, 3.0f, -1.0f, 0.0, 2.0f, 1.0f, 0.0f, 0.0f, 5.0f, 0.0f, -2.0f, 0.5f};
-*    std::vector<float> hB = {0.0f, 4.0f, 1.0f, 0.0, -2.0f, 0.5f};
-*
-*    std::vector<int> hcsr_row_ptrC = {0, 1, 3, 3, 5};
-*    std::vector<int> hcsr_col_indC = {0, 0, 1, 0, 1};
-*    std::vector<float> hcsr_valC = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
-*
-*    float* dA = nullptr;
-*    float* dB = nullptr;
-*    hipMalloc((void**)&dA, sizeof(float) * m * k);
-*    hipMalloc((void**)&dB, sizeof(float) * k * n);
-*
-*    int* dcsr_row_ptrC = nullptr;
-*    int* dcsr_col_indC = nullptr;
-*    float* dcsr_valC = nullptr;
-*    hipMalloc((void**)&dcsr_row_ptrC, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsr_col_indC, sizeof(int) * nnzC);
-*    hipMalloc((void**)&dcsr_valC, sizeof(float) * nnzC);
-*
-*    hipMemcpy(dA, hA.data(), sizeof(float) * m * k, hipMemcpyHostToDevice);
-*    hipMemcpy(dB, hB.data(), sizeof(float) * k * n, hipMemcpyHostToDevice);
-*
-*    hipMemcpy(dcsr_row_ptrC, hcsr_row_ptrC.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_col_indC, hcsr_col_indC.data(), sizeof(int) * nnzC, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_valC, hcsr_valC.data(), sizeof(float) * nnzC, hipMemcpyHostToDevice);
-*
-*    rocsparse_dnmat_descr matA;
-*    rocsparse_create_dnmat_descr(&matA, m, k, k, dA, rocsparse_datatype_f32_r, rocsparse_order_row);
-*
-*    rocsparse_dnmat_descr matB;
-*    rocsparse_create_dnmat_descr(&matB, k, n, n, dB, rocsparse_datatype_f32_r, rocsparse_order_row);
-*
-*    rocsparse_spmat_descr matC;
-*    rocsparse_create_csr_descr(&matC,
-*                               m,
-*                               n,
-*                               nnzC,
-*                               dcsr_row_ptrC,
-*                               dcsr_col_indC,
-*                               dcsr_valC,
-*                               rocsparse_indextype_i32,
-*                               rocsparse_indextype_i32,
-*                               rocsparse_index_base_zero,
-*                               rocsparse_datatype_f32_r);
-*
-*    size_t buffer_size = 0;
-*    rocsparse_sddmm_buffer_size(handle,
-*                                rocsparse_operation_none,
-*                                rocsparse_operation_none,
-*                                &halpha,
-*                                matA,
-*                                matB,
-*                                &hbeta,
-*                                matC,
-*                                rocsparse_datatype_f32_r,
-*                                rocsparse_sddmm_alg_default,
-*                                &buffer_size);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**) &dbuffer, buffer_size);
-*
-*    rocsparse_sddmm_preprocess(handle,
-*                               rocsparse_operation_none,
-*                               rocsparse_operation_none,
-*                               &halpha,
-*                               matA,
-*                               matB,
-*                               &hbeta,
-*                               matC,
-*                               rocsparse_datatype_f32_r,
-*                               rocsparse_sddmm_alg_default,
-*                               dbuffer);
-*
-*    rocsparse_sddmm(handle,
-*                    rocsparse_operation_none,
-*                    rocsparse_operation_none,
-*                    &halpha,
-*                    matA,
-*                    matB,
-*                    &hbeta,
-*                    matC,
-*                    rocsparse_datatype_f32_r,
-*                    rocsparse_sddmm_alg_default,
-*                    dbuffer);
-*
-*    hipMemcpy(hcsr_row_ptrC.data(), dcsr_row_ptrC, sizeof(int) * (m + 1), hipMemcpyDeviceToHost);
-*    hipMemcpy(hcsr_col_indC.data(), dcsr_col_indC, sizeof(int) * nnzC, hipMemcpyDeviceToHost);
-*    hipMemcpy(hcsr_valC.data(), dcsr_valC, sizeof(float) * nnzC, hipMemcpyDeviceToHost);
-*
-*    rocsparse_destroy_dnmat_descr(matA);
-*    rocsparse_destroy_dnmat_descr(matB);
-*    rocsparse_destroy_spmat_descr(matC);
-*    rocsparse_destroy_handle(handle);
-*
-*    hipFree(dA);
-*    hipFree(dB);
-*    hipFree(dcsr_row_ptrC);
-*    hipFree(dcsr_col_indC);
-*    hipFree(dcsr_valC);
-*    hipFree(dbuffer);
-*  \endcode
+*  \snippet example_rocsparse_sddmm.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sddmm(rocsparse_handle            handle,

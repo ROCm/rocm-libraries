@@ -8,7 +8,7 @@ How to use rocThrust in a CMake project
 
 To use rocThrust in your own project, add the following lines to your CMakeLists file:
 
-.. code::  
+.. code::
 
     # On ROCm rocThrust requires rocPRIM
     find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
@@ -20,4 +20,3 @@ To use rocThrust in your own project, add the following lines to your CMakeLists
 
     # include rocThrust headers and roc::rocprim_hip target
     target_link_libraries(<your_target> roc::rocthrust)
-

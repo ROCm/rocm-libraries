@@ -110,11 +110,11 @@ def close_pool():
         mp_pool.join()
 
 
-def random_int(max=40):
+def random_int(min=0, max=40):
     def factory():
-        return int(random.uniform(0, max))
+        return int(random.uniform(min, max))
 
-    factory.is_variable = max > 0
+    factory.is_variable = (max - min) > 0
     return factory
 
 
@@ -153,13 +153,13 @@ class Weights:
         default_factory=random_int(max=500), metadata={"isCoefficient": False}
     )
     vmemQueueSize: int = field(
-        default_factory=random_int(max=20), metadata={"isCoefficient": False}
+        default_factory=random_int(min=1, max=6), metadata={"isCoefficient": False}
     )
     dsmemCycles: int = field(
         default_factory=random_int(max=100), metadata={"isCoefficient": False}
     )
     dsmemQueueSize: int = field(
-        default_factory=random_int(max=20), metadata={"isCoefficient": False}
+        default_factory=random_int(min=1, max=6), metadata={"isCoefficient": False}
     )
 
     vmQueueLen: int = field(

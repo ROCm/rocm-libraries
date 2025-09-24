@@ -48,6 +48,9 @@ def parse_args():
     parser.add_argument('-c', '--clients', required=False, default = False, dest='build_clients', action='store_true',
                         help='Build the library clients benchmark and gtest (optional, default: False. Generated binaries will be located at builddir/clients/staging)')
 
+    parser.add_argument(      '--clients-only', dest='clients_only', required=False, default=False, action='store_true',
+                        help='Skip building the library and only build the clients with a pre-built library.')
+
     parser.add_argument(      '--cmake-arg', dest='cmake_args', type=str, required=False, default="",
                         help='Forward the given arguments to CMake when configuring the build.')
 
@@ -92,6 +95,9 @@ def parse_args():
 
     parser.add_argument('-k', '--relwithdebinfo', required=False, default = False, action='store_true',
                         help='Build in Release with Debug Info (optional, default: False)')
+
+    parser.add_argument(      '--library-path', dest='library_dir_installed', type=str, required=False, default="",
+                        help='Specify path to a pre-built hipBLAS library when building with --clients-only flag. (optional, default: /opt/rocm/hipblas)')
 
     parser.add_argument('-n', '--no-solver', dest='build_solver', required=False, default=True, action='store_false',
                         help='Build hipLBAS library without rocSOLVER dependency')
@@ -286,6 +292,15 @@ def config_cmd():
     if args.skip_ld_conf_entry or args.relocatable:
         cmake_options.append( f"-DROCM_DISABLE_LDCONFIG=ON" )
 
+    if args.clients_only:
+        args.build_clients = True # Implied
+        if args.library_dir_installed:
+            library_dir = args.library_dir_installed
+        else:
+            library_dir = f"{rocm_path}"
+        cmake_lib_dir = cmake_path(library_dir)
+        cmake_options.append(f"-DSKIP_LIBRARY=ON -DHIPBLAS_LIBRARY_DIR={cmake_lib_dir}")
+
     if args.build_clients:
         cmake_build_dir = cmake_path(build_dir)
         cmake_options.append( f"-DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_DIR={cmake_build_dir} " )
@@ -339,7 +354,7 @@ def make_cmd():
         make_executable = f"make -j{nproc}"
         if args.verbose:
           make_options.append( "VERBOSE=1" )
-        if True: # args.install:
+        if not args.clients_only:
          make_options.append( "install" )
     cmd_opts = " ".join(make_options)
 

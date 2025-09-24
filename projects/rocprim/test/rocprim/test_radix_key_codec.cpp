@@ -339,7 +339,7 @@ void encode_then_decode_test(Key key, Decomposer decomposer)
     Key decoded_key = codec_t::decode(bit_key, decomposer);
     codec_t::decode_inplace(key, decomposer);
 
-    test_utils::assert_eq(decoded_key, key);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(decoded_key, key));
 }
 
 template<class Key, class Decomposer = ::rocprim::identity_decomposer>
@@ -367,7 +367,7 @@ void encode_then_extract_test(Key                key,
     const unsigned int inplace_bits
         = codec_t::extract_digit(key, start_bit, radix_bits, decomposer);
 
-    test_utils::assert_eq(bits, inplace_bits);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(bits, inplace_bits));
 }
 
 template<class Key, class Decomposer = ::rocprim::identity_decomposer>
@@ -398,7 +398,7 @@ void encode_then_extract_test_custom(Key                key,
     const unsigned int inplace_bits
         = codec_t::extract_digit(key, start_bit, radix_bits, decomposer);
 
-    test_utils::assert_eq(bits, inplace_bits);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(bits, inplace_bits));
 }
 
 template<class Key, class Decomposer = ::rocprim::identity_decomposer>

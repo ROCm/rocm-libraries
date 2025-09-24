@@ -33,6 +33,8 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
 
 #include "GPUContextFixture.hpp"
 
@@ -120,11 +122,14 @@ namespace PermLanesTest
         params->setManualWavefrontCount({4, 1});
         auto lowerTile             = std::make_shared<LowerTile>(params, context);
         kgraph                     = kgraph.transform(lowerTile);
-        auto addComputeIndex       = std::make_shared<AddComputeIndex>();
-        kgraph                     = kgraph.transform(addComputeIndex);
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
+        auto addComputeIndex       = std::make_shared<AddComputeIndex>();
+        kgraph                     = kgraph.transform(addComputeIndex);
         kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
+        if(context->kernelOptions()->removeSetCoordinate)
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context));
 
         context->schedule(k->preamble());
         context->schedule(k->prolog());
@@ -159,25 +164,50 @@ namespace PermLanesTest
                 result.data(), dResult.get(), result.size() * sizeof(uint8_t), hipMemcpyDefault),
             HasHipSuccess(0));
 
-        auto nWaves = 4;
-        auto factor = waveK / miK;
-        auto nLanes = 16;
-        for(int wave = 0; wave < nWaves; wave++)
-            for(int simdBlock = 0; simdBlock < miK; simdBlock++)
-                for(int simdIndex = 0; simdIndex < factor; simdIndex++)
-                    for(int lane = 0; lane < nLanes; lane++)
-                        for(int vgprBlock = 0; vgprBlock < factor; vgprBlock++)
-                            for(int vgprIndex = 0; vgprIndex < miK; vgprIndex++)
-                            {
-                                ASSERT_EQ(a[wave * waveK * nLanes * waveK
-                                            + simdBlock * factor * nLanes * waveK
-                                            + simdIndex * nLanes * waveK + lane * waveK
-                                            + vgprBlock * miK + vgprIndex],
-                                          result[wave * waveK * nLanes * waveK
-                                                 + vgprIndex * factor * nLanes * waveK
-                                                 + simdIndex * nLanes * waveK + lane * waveK
-                                                 + vgprBlock * miK + simdBlock]);
-                            }
+        int nWaves = 4;
+        int factor = waveK / miK;
+        int nLanes = 16;
+
+        // clang-format off
+        for(int wave      = 0;      wave < nWaves; wave++)
+        for(int simdBlock = 0; simdBlock < miK;    simdBlock++)
+        for(int simdIndex = 0; simdIndex < factor; simdIndex++)
+        for(int lane      = 0;      lane < nLanes; lane++)
+        for(int vgprBlock = 0; vgprBlock < factor; vgprBlock++)
+        for(int vgprIndex = 0; vgprIndex < miK;    vgprIndex++)
+        {
+            auto aIdx = wave * waveK * nLanes * waveK
+                        + simdBlock * factor * nLanes * waveK
+                        + simdIndex * nLanes * waveK
+                        + lane * waveK
+                        + vgprBlock * miK
+                        + vgprIndex;
+
+            auto resultIdx = wave * waveK * nLanes * waveK
+                             + vgprIndex * factor * nLanes * waveK
+                             + simdIndex * nLanes * waveK
+                             + lane * waveK
+                             + vgprBlock * miK
+                             + simdBlock;
+
+            ASSERT_EQ(a[aIdx], result[resultIdx]);
+        }
+        // clang-format on
+
+        std::vector<size_t> sizes = {static_cast<size_t>(miK),
+                                     static_cast<size_t>(factor),
+                                     static_cast<size_t>(nLanes),
+                                     static_cast<size_t>(factor),
+                                     static_cast<size_t>(miK),
+                                     static_cast<size_t>(nWaves)};
+
+        auto order = {4, 1, 2, 3, 0, 5};
+
+        TensorDescriptor src(DataType::E8M0, sizes);
+        auto dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 1, 2, 3, 0, 5});
+
+        auto a_reordered = shuffleDims(a, dst, src);
+        EXPECT_EQ(a_reordered, result);
     }
 
     TEST_F(PermLanesTest, PermLanesBlockScale16x4GPUTest)

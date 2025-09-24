@@ -68,6 +68,6 @@ namespace rocRoller
                                         Register::ValuePtr y,
                                         Expression::MultiplyAdd const&);
 
-        static const std::string Name;
+        inline static const std::string Name = "MultiplyAddGenerator";
     };
 }

@@ -10,7 +10,7 @@ functionality on the [ROCm platform][2].
 
 ### How to build documentation
 
-Please follow the instructions below to build the documentation.
+Follow the instructions below to build the documentation.
 
 ```
 cd docs
@@ -22,19 +22,38 @@ python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 
 ## Building rocSOLVER
 
-To download the rocSOLVER source code, clone this repository with the command:
+To download the rocSOLVER source code, use either a sparse checkout or a full clone of the rocm-libraries repository.
 
-    git clone https://github.com/ROCmSoftwarePlatform/rocSOLVER.git
+To limit your local checkout to only the rocSOLVER project, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
+
+```bash
+git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries
+git sparse-checkout init --cone
+git sparse-checkout set projects/rocsolver # add projects/rocblas projects/rocsparse to include dependencies
+git checkout develop # or use the branch you want to work with
+```
+
+To clone the entire rocm-libraries repository, use the following commands. This process takes more time,
+but is recommended if you want to work with a large number of libraries.
+
+```bash
+git clone https://github.com/ROCm/rocm-libraries.git
+```
 
 rocSOLVER requires rocBLAS as a companion GPU BLAS implementation. For
 more information about rocBLAS and how to install it, see the
 [rocBLAS documentation][4].
 
 After a standard installation of rocBLAS, the following commands will build
-rocSOLVER and install to `/opt/rocm`:
+rocSOLVER and install it to `/opt/rocm`:
 
-    cd rocSOLVER
-    ./install.sh -i
+```bash
+cd rocm-libraries/projects/rocsolver
+./install.sh -i
+```
 
 Once installed, rocSOLVER can be used just like any other library with a C API.
 The header file will need to be included in the user code, and both the rocBLAS

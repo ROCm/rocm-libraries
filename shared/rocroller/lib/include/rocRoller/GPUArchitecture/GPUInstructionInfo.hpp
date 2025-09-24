@@ -188,6 +188,21 @@ namespace rocRoller
 
     std::ostream& operator<<(std::ostream&, GPUWaitQueue::Value const& v);
 
+    enum class CoexecCategory : int
+    {
+        NotAnInstruction = 0,
+        Scalar,
+        VMEM,
+        VALU,
+        VALU_Trans,
+        XDL,
+        XDL_Scale,
+        LDS,
+        Count
+    };
+
+    std::string toString(CoexecCategory cat);
+
     class GPUInstructionInfo
     {
     public:
@@ -256,6 +271,8 @@ namespace rocRoller
         static bool isVPermlane(std::string const& inst);
         static bool isVDivScale(std::string const& inst);
         static bool isVDivFmas(std::string const& inst);
+
+        static CoexecCategory getCoexecCategory(std::string const& opCode);
         /** @} */
 
     private:

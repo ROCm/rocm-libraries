@@ -32,7 +32,8 @@ namespace rocsparse
     {
         csrmv_alg_rowsplit = 0,
         csrmv_alg_adaptive,
-        csrmv_alg_lrb
+        csrmv_alg_lrb,
+        csrmv_alg_nnzsplit
     } csrmv_alg;
 
     template <typename I, typename J, typename A>
@@ -58,6 +59,18 @@ namespace rocsparse
                                                           const I*                  csr_row_ptr,
                                                           const J*                  csr_col_ind,
                                                           rocsparse_csrmv_info*     p_csrmv_info);
+
+    template <typename I, typename J, typename A>
+    rocsparse_status csrmv_analysis_nnzsplit_template_dispatch(rocsparse_handle          handle,
+                                                               rocsparse_operation       trans,
+                                                               J                         m,
+                                                               J                         n,
+                                                               I                         nnz,
+                                                               const rocsparse_mat_descr descr,
+                                                               const A*                  csr_val,
+                                                               const I*              csr_row_ptr,
+                                                               const J*              csr_col_ind,
+                                                               rocsparse_csrmv_info* p_csrmv_info);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_template(rocsparse_handle          handle,
@@ -122,6 +135,23 @@ namespace rocsparse
                                                  const T*                  beta_device_host,
                                                  Y*                        y,
                                                  bool                      force_conj);
+
+    template <typename T, typename I, typename J, typename A, typename X, typename Y>
+    rocsparse_status csrmv_nnzsplit_template_dispatch(rocsparse_handle          handle,
+                                                      rocsparse_operation       trans,
+                                                      J                         m,
+                                                      J                         n,
+                                                      I                         nnz,
+                                                      const T*                  alpha_device_host,
+                                                      const rocsparse_mat_descr descr,
+                                                      const A*                  csr_val,
+                                                      const I*                  csr_row_ptr,
+                                                      const J*                  csr_col_ind,
+                                                      rocsparse_csrmv_info      csrmv_info,
+                                                      const X*                  x,
+                                                      const T*                  beta_device_host,
+                                                      Y*                        y,
+                                                      bool                      force_conj);
 
     template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_template(rocsparse_handle          handle,

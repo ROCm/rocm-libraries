@@ -55,6 +55,16 @@ MIOPEN_EXPORT bool FindEnforceDisable = false;
 
 } // namespace debug
 
+static_assert(FindEnforceAction::None == static_cast<FindEnforceAction>(miopenTuningPolicyNone));
+static_assert(FindEnforceAction::DbUpdate ==
+              static_cast<FindEnforceAction>(miopenTuningPolicyDbUpdate));
+static_assert(FindEnforceAction::Search ==
+              static_cast<FindEnforceAction>(miopenTuningPolicySearch));
+static_assert(FindEnforceAction::SearchDbUpdate ==
+              static_cast<FindEnforceAction>(miopenTuningPolicySearchDbUpdate));
+static_assert(FindEnforceAction::DbClean ==
+              static_cast<FindEnforceAction>(miopenTuningPolicyDbClean));
+
 namespace {
 
 const char* ToCString(const FindEnforceAction mode)
@@ -182,6 +192,8 @@ const char* ToCString(const FindMode::Values mode)
     case FindMode::Values::Hybrid: return "HYBRID";
     case FindMode::Values::DeprecatedFastHybrid: break;
     case FindMode::Values::DynamicHybrid: return "DYNAMIC_HYBRID";
+    case FindMode::Values::TrustVerify: return "TRUST_VERIFY";
+    case FindMode::Values::TrustVerifyFull: return "TRUST_VERIFY_FULL";
     case FindMode::Values::End_: break;
     }
     return "<Unknown>";
@@ -215,6 +227,14 @@ std::optional<FindMode::Values> GetFindModeValueImpl2(Variable variable)
     else if(str == "DYNAMIC_HYBRID")
     {
         return FindMode::Values::DynamicHybrid;
+    }
+    else if(str == "TRUST_VERIFY")
+    {
+        return FindMode::Values::TrustVerify;
+    }
+    else if(str == "TRUST_VERIFY_FULL")
+    {
+        return FindMode::Values::TrustVerifyFull;
     }
     else
     { // Nop. Fall down & try numerics.
@@ -263,6 +283,12 @@ static_assert(miopenConvolutionFindModeHybrid ==
               "API is not in sync with the implementation.");
 static_assert(miopenConvolutionFindModeDynamicHybrid ==
                   static_cast<miopenConvolutionFindMode_t>(FindMode::Values::DynamicHybrid),
+              "API is not in sync with the implementation.");
+static_assert(miopenConvolutionFindModeTrustVerify ==
+                  static_cast<miopenConvolutionFindMode_t>(FindMode::Values::TrustVerify),
+              "API is not in sync with the implementation.");
+static_assert(miopenConvolutionFindModeTrustVerifyFull ==
+                  static_cast<miopenConvolutionFindMode_t>(FindMode::Values::TrustVerifyFull),
               "API is not in sync with the implementation.");
 
 } // namespace miopen

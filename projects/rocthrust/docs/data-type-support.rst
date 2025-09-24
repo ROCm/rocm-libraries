@@ -21,4 +21,3 @@ rocThrust and Thrust both support the following fundamental types:
 
 
 Both rocThrust and Thrust also support ``half`` and ``bfloat16``. However, the host-side HIP implementations of these types are missing some functionality. Because of this, ``half`` and ``bfloat16`` should be used only as storage types to be passed between functions.
-
