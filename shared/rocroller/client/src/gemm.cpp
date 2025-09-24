@@ -1066,7 +1066,7 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         if(fail)
         {
-            std::cerr << "Invalid format for MI instruction." << std::endl;
+            std::cerr << "Invalid format for Matrix Instruction." << std::endl;
             std::cerr << std::endl;
             std::cerr << "The MI argument should be formatted like:" << std::endl;
             std::cerr << std::endl;
