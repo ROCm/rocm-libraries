@@ -4,24 +4,12 @@ Script to process CSV files in build/output/ and calculate median latency.
 """
 
 import os
-import csv
-import statistics
 import re
 import argparse
-from pathlib import Path
-
-
-def parse_directory_name(path):
-    """Parse directory name to extract operation, bit width, and stride for sorting."""
-    dirname = os.path.basename(os.path.dirname(path))
-    # Pattern: ds_(read|write)_b(32|64|128)_stride_(1|2|4|8|16|32)
-    match = re.match(r"ds_(read|write)_b(\d+)_stride_(\d+)", dirname)
-    if match:
-        op_type = match.group(1)
-        bit_width = int(match.group(2))
-        stride = int(match.group(3))
-        return (op_type, bit_width, stride)
-    return (dirname, 0, 0)  # Fallback for non-matching names
+import json
+import pandas as pd
+import numpy as np
+from tabulate import tabulate
 
 
 def find_csv_files(directory):
@@ -31,71 +19,123 @@ def find_csv_files(directory):
         for file in files:
             if file.startswith("stats_ui_output_agent_") and file.endswith(".csv"):
                 csv_files.append(os.path.join(root, file))
-
-    # Sort by operation type, then bit width (numerically), then stride
-    return sorted(csv_files, key=parse_directory_name)
+    return csv_files
 
 
 def extract_specific_lines(csv_file):
-    """Extract data from lines 3, 4, 5, and 6 of a CSV file."""
-    lines_data = []
-
+    """Extract instruction data from lines 3-6 of a CSV file."""
     try:
-        with open(csv_file, "r") as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-
-            # Skip header (row 0) and get rows 2, 3, 4, 5 (lines 3, 4, 5, 6)
-            for i in [2, 3, 4, 5]:
-                if i < len(rows):
-                    row = rows[i]
-                    if len(row) >= 5:
-                        # Extract Instruction (index 2) and Latency (index 4)
-                        instruction = row[2]
-                        latency = row[4]
-                        lines_data.append((instruction, latency))
-                    else:
-                        lines_data.append(("N/A", "N/A"))
-                else:
-                    lines_data.append(("N/A", "N/A"))
-
-        return lines_data
+        df = pd.read_csv(csv_file)
+        instructions = []
+        
+        # Get rows 2-5 (lines 3-6 in 1-based counting)
+        for i in range(2, 6):
+            if i < len(df):
+                instruction = df.iloc[i]['Instruction'] if 'Instruction' in df.columns else 'N/A'
+                instructions.append(str(instruction)[:40])  # Truncate to 40 chars
+            else:
+                instructions.append('N/A')
+        
+        return instructions
     except Exception as e:
         print(f"Error reading lines from {csv_file}: {e}")
-        return [("N/A", "N/A"), ("N/A", "N/A"), ("N/A", "N/A"), ("N/A", "N/A")]
+        return ['N/A'] * 4
 
 
-def calculate_average_latency(csv_file):
-    latencies = []
-    hitcounts = []
-
+def calculate_median_latency(csv_file):
+    """Calculate median latency from s_waitcnt instructions."""
     try:
-        with open(csv_file, "r") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if "s_waitcnt" not in row.get("Instruction", ""):
-                    continue
-                latency = int(row["Latency"])
-                hitcount = int(row["Hitcount"])
-                latencies.append(latency)
-                hitcounts.append(hitcount)
-
-        if latencies and hitcounts:
-            mode_latency = latencies[-1]
-            mode_hitcount = statistics.mode(hitcounts)
-            return mode_latency / mode_hitcount
-        else:
+        df = pd.read_csv(csv_file)
+        
+        # Filter for s_waitcnt instructions
+        if 'Instruction' not in df.columns or 'Latency' not in df.columns or 'Hitcount' not in df.columns:
             return None
+            
+        waitcnt_df = df[df['Instruction'].str.contains('s_waitcnt', na=False)]
+        
+        if waitcnt_df.empty:
+            return None
+        
+        # Get the last s_waitcnt instruction
+        last_row = waitcnt_df.iloc[-1]
+        latency = int(last_row['Latency'])
+        
+        # Calculate mode of hitcounts
+        hitcounts = waitcnt_df['Hitcount'].astype(int)
+        mode_hitcount = hitcounts.mode()[0] if not hitcounts.empty else 1
+        
+        return latency / mode_hitcount
 
     except Exception as e:
         print(f"Error processing {csv_file}: {e}")
         return None
 
 
+def load_env_vars(csv_file):
+    """Load environment variables from env_vars.json in the same directory as the CSV."""
+    dir_path = os.path.dirname(csv_file)
+    env_vars_path = os.path.join(dir_path, 'env_vars.json')
+    
+    if os.path.exists(env_vars_path):
+        try:
+            with open(env_vars_path, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error reading env_vars.json from {dir_path}: {e}")
+    
+    return {}
+
+
+def process_all_files(directory, show_instructions=False, show_env_vars=False):
+    """Process all CSV files and return results as a DataFrame."""
+    csv_files = find_csv_files(directory)
+    
+    if not csv_files:
+        print(f"No CSV files found in {directory}")
+        return None
+    
+    print(f"Found {len(csv_files)} CSV files to process\n")
+    
+    results = []
+    env_var_keys = []  # To track the order of env var keys
+    
+    for csv_file in csv_files:
+        dir_name = os.path.basename(os.path.dirname(csv_file))
+        
+        env_vars = load_env_vars(csv_file)
+        
+        if not env_var_keys and env_vars:
+            env_var_keys = list(env_vars.keys())
+        
+        result = {
+            'Directory': dir_name,
+            'Median Latency': calculate_median_latency(csv_file),
+            'Full Path': os.path.abspath(csv_file),
+            **{k: int(v) for k, v in env_vars.items()}
+        }
+        
+        if show_instructions:
+            instructions = extract_specific_lines(csv_file)
+            for i, instr in enumerate(instructions, 3):
+                result[f'Line {i} Instruction'] = instr
+        
+        for key, value in env_vars.items():
+            result[key] = int(value)
+        
+        results.append(result)
+    
+    df = pd.DataFrame(results)
+    
+    if env_var_keys:
+        df = df.sort_values(env_var_keys)
+    
+    return df
+
+
 def main():
     """Main function to process all CSV files."""
     parser = argparse.ArgumentParser(
-        description="Calculate mode latency from CSV files in a directory"
+        description="Calculate median latency from CSV files in a directory"
     )
     parser.add_argument(
         "directory",
@@ -104,74 +144,68 @@ def main():
         help="Directory to search for CSV files",
     )
     parser.add_argument(
-        "--hide-instrs",
-        "-H",
+        "-i", "--instructions",
         action="store_true",
-        help="Show the full path instead of instruction columns",
+        help="Show instruction columns",
+    )
+    parser.add_argument(
+        "-p", "--path",
+        action="store_true",
+        help="Show full path column",
+    )
+    parser.add_argument(
+        "-e", "--env-vars",
+        action="store_true",
+        help="Show environment variables from env_vars.json",
     )
     args = parser.parse_args()
 
-    output_dir = args.directory
-
-    if not os.path.exists(output_dir):
-        print(f"Directory {output_dir} not found!")
+    if not os.path.exists(args.directory):
+        print(f"Directory {args.directory} not found!")
         return
 
-    csv_files = find_csv_files(output_dir)
-
-    if not csv_files:
-        print(f"No CSV files found in {output_dir}")
+    # Process all files
+    df = process_all_files(args.directory, args.instructions, args.env_vars)
+    
+    if df is None or df.empty:
         return
-
-    print(f"Found {len(csv_files)} CSV files to process\n")
-
-    if args.hide_instrs:
-        separator_width = 120
-        print("-" * separator_width)
-        print(
-            f"{'Directory':<35} | {'Median Latency':>14} | {'Full Path':<65}"
-        )
-        print("-" * separator_width)
-    else:
-        separator_width = 235
-        print("-" * separator_width)
-        print(
-            f"{'Directory':<35} | {'Median Latency':>14} | {'Line 3 Instruction':>40} | {'Line 4 Instruction':>40} | {'Line 5 Instruction':>40} | {'Line 6 Instruction':>40} | {'':>3}"
-        )
-        print("-" * separator_width)
-
-    for csv_file in csv_files:
-        absolute_path = os.path.abspath(csv_file)
-        dir_name = os.path.basename(os.path.dirname(csv_file))
-        median_latency = calculate_average_latency(csv_file)
-
-        lines_data = extract_specific_lines(csv_file)
-
-        line_3_str = lines_data[0][0][:40] if lines_data[0][0] != "N/A" else "N/A"
-        line_4_str = lines_data[1][0][:40] if lines_data[1][0] != "N/A" else "N/A"
-        line_5_str = lines_data[2][0][:40] if lines_data[2][0] != "N/A" else "N/A"
-        line_6_str = lines_data[3][0][:40] if lines_data[3][0] != "N/A" else "N/A"
-
-        if args.hide_instrs:
-            if median_latency is not None:
-                print(
-                    f"{dir_name:<35} | {median_latency:>14.1f} | {absolute_path:<65}"
-                )
-            else:
-                print(
-                    f"{dir_name:<35} | {'N/A':>14} | {absolute_path:<65}"
-                )
-        else:
-            if median_latency is not None:
-                print(
-                    f"{dir_name:<35} | {median_latency:>14.1f} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {'...':>3}"
-                )
-            else:
-                print(
-                    f"{dir_name:<35} | {'N/A':>14} | {line_3_str:>40} | {line_4_str:>40} | {line_5_str:>40} | {line_6_str:>40} | {'...':>3}"
-                )
-
-    print("-" * separator_width)
+    
+    # Format median latency column
+    df['Median Latency'] = df['Median Latency'].apply(
+        lambda x: f"{x:.1f}" if pd.notna(x) else "N/A"
+    )
+    
+    # Select columns to display
+    display_columns = ['Directory', 'Median Latency']
+    
+    if args.instructions:
+        # Add instruction columns
+        instruction_cols = [col for col in df.columns if col.startswith('Line ')]
+        display_columns.extend(instruction_cols)
+    
+    if args.env_vars:
+        # Add all environment variable columns from env_vars.json
+        env_cols = ['WRITE', 'INSTR_WIDTH', 'BYTE_STRIDE', 'ITERS']
+        # Add any env columns that exist in the dataframe
+        for col in env_cols:
+            if col in df.columns:
+                display_columns.append(col)
+    
+    if args.path:
+        # Add path column at the end
+        display_columns.append('Full Path')
+    
+    # Display the table
+    table = tabulate(
+        df[display_columns], 
+        headers='keys', 
+        tablefmt='pipe',
+        showindex=False,
+        numalign='right',
+        stralign='left'
+    )
+    
+    print(table)
 
 
 if __name__ == "__main__":

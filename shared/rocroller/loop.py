@@ -24,8 +24,8 @@ class TestCombination:
     def to_env_vars(self) -> dict:
         """Convert this combination to environment variables"""
         return {
-            "INSTR_WIDTH": str(self.instr_width),
             "WRITE": "1" if self.write else "0",
+            "INSTR_WIDTH": str(self.instr_width),
             "BYTE_STRIDE": str(self.stride),
             "ITERS": str(self.iters)
         }
