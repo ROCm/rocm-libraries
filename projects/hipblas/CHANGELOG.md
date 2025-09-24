@@ -3,6 +3,12 @@
 Documentation for hipBLAS is available at
 [https://rocm.docs.amd.com/projects/hipBLAS/en/latest/](https://rocm.docs.amd.com/projects/hipBLAS/en/latest/).
 
+## hipBLAS 3.0.2 for ROCm 7.0.2
+
+### Added
+
+* Enabled gfx1150, gfx1151, gfx1200, and gfx1201.
+
 ## hipBLAS 3.0.0 for ROCm 7.0.0
 
 ### Added
