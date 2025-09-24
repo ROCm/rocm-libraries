@@ -127,12 +127,10 @@ namespace rocRoller
                 if(streamK)
                 {
                     rv << "_SK";
-                    if(streamKTwoTile)
-                    {
+                    if(streamKTwoTileDPFirst)
+                        rv << "2TDPFirst";
+                    else if(streamKTwoTile)
                         rv << "2T";
-                        if(streamKTwoTileDPFirst)
-                            rv << "DPFirst";
-                    }
                 }
 
                 return rv.str();

@@ -611,6 +611,50 @@ def streamk():
         )
 
 
+def streamk_TwoTileDPFirst():
+    common_overrides = dict(
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        prefetch=False,
+        streamK=True,
+        streamKTwoTileDPFirst=True,
+    )
+
+    yield mkGEMM(
+        SGEMM_3072x4096x4096,
+        **common_overrides,
+        types=TypeParameters(
+            SGEMM_3072x4096x4096["types"],
+            trans_A="N",
+            trans_B="T",
+        ),
+    )
+    yield mkGEMM(
+        HGEMM_7680x8448x8448,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        **common_overrides,
+        types=TypeParameters(
+            HGEMM_7680x8448x8448["types"],
+            trans_A="N",
+            trans_B="T",
+        ),
+    )
+    yield mkGEMM(
+        HGEMM_7680x8448x8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        **common_overrides,
+        types=TypeParameters(
+            HGEMM_7680x8448x8192["types"],
+            trans_A="N",
+            trans_B="T",
+        ),
+    )
+
+
 def scalar_is_zero():
     # TODO: Make streamK and ConstantPropagation transformation can be both applied
     sgemm = update_parameters(
