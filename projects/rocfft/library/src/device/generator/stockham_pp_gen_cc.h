@@ -474,40 +474,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return stmts;
     }
 
-    StatementList load_lds_pp_generator(unsigned int h,
-                                        unsigned int hr,
-                                        unsigned int width,
-                                        unsigned int dt,
-                                        Expression   guard,
-                                        Component    component)
-    {
-        if(hr == 0)
-            hr = h;
-        StatementList work;
-
-        for(unsigned int w = 0; w < width; ++w)
-        {
-            const auto tid = Parens{thread + dt + h * threads_per_transform};
-            const auto idx = offset_lds + (tid + w * (length / width) * max_factor_pp) * lstride;
-            work += Assign(l_offset, idx);
-
-            switch(component)
-            {
-            case Component::REAL:
-                work += Assign(R[hr * width + w].x(), lds_real[l_offset]);
-                break;
-            case Component::IMAG:
-                work += Assign(R[hr * width + w].y(), lds_real[l_offset]);
-                break;
-            case Component::BOTH:
-                work += Assign(R[hr * width + w], lds_complex[l_offset]);
-                break;
-            }
-        }
-
-        return work;
-    }
-
     StatementList load_lds_generator(unsigned int h,
                                      unsigned int hr,
                                      unsigned int width,
@@ -558,7 +524,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         body += Declaration{l_offset};
 
-        auto load_lds = std::mem_fn(&StockhamPartialPassKernelCC::load_lds_pp_generator);
+        auto load_lds = std::mem_fn(&StockhamPartialPassKernelCC::load_lds_generator);
         // first pass of load (full)
         unsigned int width  = factors[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
@@ -569,44 +535,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                          ThreadGuardMode::NO_GUARD);
 
         return f;
-    }
-
-    StatementList store_lds_pp_generator(unsigned int h,
-                                         unsigned int hr,
-                                         unsigned int width,
-                                         unsigned int dt,
-                                         Expression   guard,
-                                         Component    component,
-                                         unsigned int cumheight)
-    {
-        if(hr == 0)
-            hr = h;
-        StatementList work;
-
-        for(unsigned int w = 0; w < width; ++w)
-        {
-            const auto tid = thread + dt + h * threads_per_transform;
-            const auto idx = offset_lds
-                             + (Parens{tid / (max_factor_pp * cumheight)} * (width * cumheight)
-                                + tid % (max_factor_pp * cumheight) + w * max_factor_pp * cumheight)
-                                   * lstride;
-            work += Assign(l_offset, idx);
-
-            switch(component)
-            {
-            case Component::REAL:
-                work += Assign(lds_real[l_offset], R[hr * width + w].x());
-                break;
-            case Component::IMAG:
-                work += Assign(lds_real[l_offset], R[hr * width + w].y());
-                break;
-            case Component::BOTH:
-                work += Assign(lds_complex[l_offset], R[hr * width + w]);
-                break;
-            }
-        }
-
-        return work;
     }
 
     StatementList store_lds_generator(unsigned int h,
@@ -664,7 +592,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         body += Declaration{l_offset};
 
-        auto store_lds = std::mem_fn(&StockhamPartialPassKernelCC::store_lds_pp_generator);
+        auto store_lds = std::mem_fn(&StockhamPartialPassKernelCC::store_lds_generator);
         // last pass of store (full)
         unsigned int width     = factors.back();
         float        height    = static_cast<float>(length) / width / threads_per_transform;
@@ -879,7 +807,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                                 ThreadGuardMode::GUARD_BY_IF,
                                 false,
                                 max_factor_pp);
-                body += If{Not{lds_is_real}, lds2reg_full};
+                body += lds2reg_full;
 
                 auto apply_twiddle
                     = std::mem_fn(&StockhamPartialPassKernelCC::apply_twiddle_generator);
