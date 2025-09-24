@@ -1121,6 +1121,7 @@ namespace rocRoller::Client::GEMMClient::CLI
     }
 
     constexpr auto SolutionParameterArguments = std::make_tuple(
+        std::make_pair("--arch", &SolutionParameters::architecture),
         std::make_pair("--mac_m", &SolutionParameters::macM),
         std::make_pair("--mac_n", &SolutionParameters::macN),
         std::make_pair("--mac_k", &SolutionParameters::macK),
@@ -1194,7 +1195,13 @@ namespace rocRoller::Client::GEMMClient::CLI
                 value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
         };
 
-        // XXX arch?
+        // Architecture
+
+        if(app.get_option(SN(&SP::architecture))->count())
+        {
+            auto architectureName = app.get_option(SN(&SP::architecture))->as<std::string>();
+            solution.architecture = GPUArchitectureTarget::fromString(architectureName);
+        }
 
         // Workgroup tile size
 
