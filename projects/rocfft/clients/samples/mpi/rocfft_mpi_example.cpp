@@ -135,14 +135,14 @@ int main(int argc, char** argv)
         rocfft_field infield = nullptr;
         rocfft_field_create(&infield);
 
-        std::vector<size_t> inbrick_stride  = {1, length[1]};
+        std::vector<size_t> inbrick_stride  = {1, length[1], 0};
         const size_t        inbrick_length1 = length[1] / (size_t)mpi_size
                                        + ((size_t)mpi_rank < length[1] % (size_t)mpi_size ? 1 : 0);
         const size_t inbrick_lower1
             = mpi_rank * (length[1] / mpi_size) + std::min((size_t)mpi_rank, length[1] % mpi_size);
         const size_t        inbrick_upper1 = inbrick_lower1 + inbrick_length1;
-        std::vector<size_t> inbrick_lower  = {0, inbrick_lower1};
-        std::vector<size_t> inbrick_upper  = {length[0], inbrick_upper1};
+        std::vector<size_t> inbrick_lower  = {0, inbrick_lower1, 0};
+        std::vector<size_t> inbrick_upper  = {length[0], inbrick_upper1, 1};
 
         rocfft_brick inbrick = nullptr;
         rocfft_brick_create(&inbrick,
@@ -219,15 +219,15 @@ int main(int argc, char** argv)
     std::vector<void*>  gpu_out = {nullptr};
     std::vector<size_t> outbrick_lower;
     std::vector<size_t> outbrick_upper;
-    std::vector<size_t> outbrick_stride = {1, length[1]};
+    std::vector<size_t> outbrick_stride = {1, length[1], 0};
     {
         const size_t outbrick_length1 = length[1] / (size_t)mpi_size
                                         + ((size_t)mpi_rank < length[1] % (size_t)mpi_size ? 1 : 0);
         const size_t outbrick_lower1
             = mpi_rank * (length[1] / mpi_size) + std::min((size_t)mpi_rank, length[1] % mpi_size);
         const size_t outbrick_upper1 = outbrick_lower1 + outbrick_length1;
-        outbrick_lower               = {0, outbrick_lower1};
-        outbrick_upper               = {length[0], outbrick_upper1};
+        outbrick_lower               = {0, outbrick_lower1, 0};
+        outbrick_upper               = {length[0], outbrick_upper1, 1};
 
         const size_t memSize = length[0] * outbrick_length1 * sizeof(std::complex<double>);
         for(int irank = 0; irank < mpi_size; ++irank)
@@ -254,8 +254,8 @@ int main(int argc, char** argv)
         rocfft_field_create(&outfield);
 
         rocfft_brick outbrick = nullptr;
-        outbrick_lower        = {0, outbrick_lower1};
-        outbrick_upper        = {length[0], outbrick_lower1 + outbrick_length1};
+        outbrick_lower        = {0, outbrick_lower1, 0};
+        outbrick_upper        = {length[0], outbrick_lower1 + outbrick_length1, 1};
         rocfft_brick_create(&outbrick,
                             outbrick_lower.data(),
                             outbrick_upper.data(),
