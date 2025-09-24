@@ -213,8 +213,7 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
 
         // Create engine config descriptors for each engine ID
         auto outputArray = static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements);
-        for(size_t i = 0;
-            std::cmp_less(i, _engineIds.size()) && std::cmp_less(i, requestedElementCount);
+        for(size_t i = 0; i < _engineIds.size() && i < static_cast<size_t>(requestedElementCount);
             ++i)
         {
             auto config = HipdnnBackendDescriptor::unpackDescriptor<EngineConfigDescriptor>(

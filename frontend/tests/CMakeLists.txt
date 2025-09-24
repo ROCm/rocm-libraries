@@ -20,7 +20,9 @@ add_executable(hipdnn_frontend_tests
     TestBatchnormInferenceAttributes.cpp
     TestBatchnormInferenceNode.cpp
     TestBatchnormNode.cpp
+    TestConvolutionDgradAttributes.cpp
     TestConvolutionFwdAttributes.cpp
+    TestConvolutionDgradNode.cpp
     TestConvolutionNode.cpp
     TestError.cpp
     TestGraph.cpp

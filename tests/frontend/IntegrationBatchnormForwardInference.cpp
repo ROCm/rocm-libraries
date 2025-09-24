@@ -324,7 +324,9 @@ INSTANTIATE_TEST_SUITE_P(
     // Provide a custom name for each test instance
     [](const ::testing::TestParamInfo<IntegrationTestCase>& info) {
         std::string name = info.param.description;
-        std::ranges::replace_if(name, [](char c) { return !std::isalnum(c); }, '_');
+        std::transform(name.cbegin(), name.cend(), name.begin(), [](char c) {
+            return std::isalnum(c) ? c : '_';
+        });
         return name;
     });
 

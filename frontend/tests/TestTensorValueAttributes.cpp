@@ -1,24 +1,25 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cmath>
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <limits>
-#include <numbers>
 #include <vector>
 
 // using namespace hipdnn_frontend::graph;
 using namespace hipdnn_sdk::data_objects;
+
+constexpr float PI_FLOAT = 3.14159265358979323846f;
+constexpr double PI_DOUBLE = 3.14159265358979323846;
 
 TEST(TestTensorValueAttributes, SetGetClearFloat)
 {
     hipdnn_frontend::graph::TensorAttributes tensor;
     EXPECT_FALSE(tensor.get_pass_by_value());
 
-    constexpr float TEST_VALUE = std::numbers::pi_v<float>;
+    constexpr float TEST_VALUE = PI_FLOAT;
     tensor.set_value(TEST_VALUE);
     EXPECT_TRUE(tensor.get_pass_by_value());
 
@@ -50,7 +51,7 @@ TEST(TestTensorValueAttributes, PackUnpackFloatValue)
         .set_stride({1, 2})
         .set_dim({3, 4})
         .set_is_virtual(false)
-        .set_value(std::numbers::e_v<float>);
+        .set_value(PI_FLOAT);
 
     flatbuffers::FlatBufferBuilder builder;
     auto fbOffset = tensor.pack_attributes(builder);
@@ -69,7 +70,7 @@ TEST(TestTensorValueAttributes, PackUnpackFloatValue)
     EXPECT_EQ(fbTensor->value_type(), TensorValue::Float32Value);
     auto fval = fbTensor->value_as_Float32Value();
     ASSERT_NE(fval, nullptr);
-    EXPECT_FLOAT_EQ(fval->value(), std::numbers::e_v<float>);
+    EXPECT_FLOAT_EQ(fval->value(), PI_FLOAT);
 
     auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
     EXPECT_EQ(unpacked->uid, 7);
@@ -86,7 +87,7 @@ TEST(TestTensorValueAttributes, PackUnpackFloatValue)
     ASSERT_EQ(unpacked->value.type, TensorValue::Float32Value);
     auto* floatVal = unpacked->value.AsFloat32Value();
     ASSERT_NE(floatVal, nullptr);
-    EXPECT_FLOAT_EQ(floatVal->value(), std::numbers::e_v<float>);
+    EXPECT_FLOAT_EQ(floatVal->value(), PI_FLOAT);
 }
 
 TEST(TestTensorValueAttributes, PackUnpackHalfValue)
@@ -152,7 +153,7 @@ TEST(TestTensorValueAttributes, PackUnpackDoubleValue)
         .set_name("double_tensor")
         .set_data_type(hipdnn_frontend::DataType::DOUBLE)
         .set_is_virtual(false)
-        .set_value(std::numbers::pi_v<double>);
+        .set_value(PI_DOUBLE);
 
     flatbuffers::FlatBufferBuilder builder;
     auto fbOffset = tensor.pack_attributes(builder);
@@ -164,13 +165,13 @@ TEST(TestTensorValueAttributes, PackUnpackDoubleValue)
     EXPECT_EQ(fbTensor->value_type(), TensorValue::Float64Value);
     auto dval = fbTensor->value_as_Float64Value();
     ASSERT_NE(dval, nullptr);
-    EXPECT_DOUBLE_EQ(dval->value(), std::numbers::pi_v<double>);
+    EXPECT_DOUBLE_EQ(dval->value(), PI_DOUBLE);
 
     auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
     ASSERT_EQ(unpacked->value.type, TensorValue::Float64Value);
     auto* doubleVal = unpacked->value.AsFloat64Value();
     ASSERT_NE(doubleVal, nullptr);
-    EXPECT_DOUBLE_EQ(doubleVal->value(), std::numbers::pi_v<double>);
+    EXPECT_DOUBLE_EQ(doubleVal->value(), PI_DOUBLE);
 }
 
 TEST(TestTensorValueAttributes, PackUnpackEmptyValue)

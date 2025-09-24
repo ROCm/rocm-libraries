@@ -29,13 +29,15 @@ void copyWithCheck(const flatbuffers::Vector<int64_t>* src,
                                                        + " size must be equal to "
                                                        + std::string(expectedSizeName));
     }
-    if(!std::ranges::all_of(*src, [](int64_t v) { return v <= std::numeric_limits<int>::max(); }))
+    if(!std::all_of(src->begin(), src->end(), [](int64_t v) {
+           return v <= std::numeric_limits<int>::max();
+       }))
     {
         throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                    "MiopenConvDescriptor: " + std::string(name)
                                                        + " values must be less than INT_MAX");
     }
-    std::ranges::copy(*src, dst.begin());
+    std::copy(src->begin(), src->end(), dst.begin());
 }
 
 }
@@ -93,7 +95,7 @@ MiopenConvDescriptor::MiopenConvDescriptor(
             "MiopenConvDescriptor: pre_padding and post_padding sizes must be equal");
     }
 
-    if(!std::ranges::equal(*attrPrePadding, *attrPostPadding))
+    if(!std::equal(attrPrePadding->begin(), attrPrePadding->end(), attrPostPadding->begin()))
     {
         throw hipdnn_plugin::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

@@ -20,6 +20,11 @@ struct BatchnormSignatureRegistryKey
                && meanVarianceDataType == other.meanVarianceDataType;
     }
 
+    bool operator!=(const BatchnormSignatureRegistryKey& other) const
+    {
+        return !(*this == other);
+    }
+
     //fix these names
     hipdnn_sdk::data_objects::DataType inputDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;

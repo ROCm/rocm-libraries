@@ -129,12 +129,9 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
         = miopen_utils::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
 
     std::array<miopenTensorArgument_t, 3> tensors
-        = {miopenTensorArgument_t{
-               .id = miopenTensorConvolutionX, .descriptor = &xDesc, .buffer = xBuffer.ptr},
-           miopenTensorArgument_t{
-               .id = miopenTensorConvolutionW, .descriptor = &wDesc, .buffer = wBuffer.ptr},
-           miopenTensorArgument_t{
-               .id = miopenTensorConvolutionY, .descriptor = &yDesc, .buffer = yBuffer.ptr}};
+        = {miopenTensorArgument_t{miopenTensorConvolutionX, &xDesc, xBuffer.ptr},
+           miopenTensorArgument_t{miopenTensorConvolutionW, &wDesc, wBuffer.ptr},
+           miopenTensorArgument_t{miopenTensorConvolutionY, &yDesc, yBuffer.ptr}};
 
     size_t workspaceSize = 0;
     if(workspace != nullptr)

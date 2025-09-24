@@ -26,10 +26,10 @@ struct TensorLayout
     static const TensorLayout NDHWC;
 };
 
-inline const TensorLayout TensorLayout::NCHW{.name = "NCHW", .strideOrder = {3, 2, 1, 0}};
-inline const TensorLayout TensorLayout::NHWC{.name = "NHWC", .strideOrder = strideOrderNhwc(4)};
-inline const TensorLayout TensorLayout::NCDHW{.name = "NCDHW", .strideOrder = {4, 3, 2, 1, 0}};
-inline const TensorLayout TensorLayout::NDHWC{.name = "NDHWC", .strideOrder = strideOrderNhwc(5)};
+inline const TensorLayout TensorLayout::NCHW{"NCHW", {3, 2, 1, 0}};
+inline const TensorLayout TensorLayout::NHWC{"NHWC", strideOrderNhwc(4)};
+inline const TensorLayout TensorLayout::NCDHW{"NCDHW", {4, 3, 2, 1, 0}};
+inline const TensorLayout TensorLayout::NDHWC{"NDHWC", strideOrderNhwc(5)};
 
 inline std::ostream& operator<<(std::ostream& os, const TensorLayout& layout)
 {

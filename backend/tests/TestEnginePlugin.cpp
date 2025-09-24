@@ -15,8 +15,8 @@
 
 using namespace hipdnn_backend;
 
-template <typename T, typename Destructor>
-using ScopedResource = hipdnn_sdk::utilities::ScopedResource<T, Destructor>;
+template <typename T>
+using ScopedResource = hipdnn_sdk::utilities::ScopedResource<T>;
 class SimpleEnginePluginManager : public plugin::PluginManagerBase<plugin::EnginePlugin>
 {
 public:
@@ -57,7 +57,7 @@ TEST(TestGpuEnginePluginManager, LoadPluginsAndExecuteOpGraph)
 
     // TODO set a real op graph
     const std::array<uint8_t, 8> opGraphData = {0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00};
-    const hipdnnPluginConstData_t opGraph = {.ptr = opGraphData.data(), .size = opGraphData.size()};
+    const hipdnnPluginConstData_t opGraph = {opGraphData.data(), opGraphData.size()};
 
     // The number of elements in the input vector.
     const unsigned dataSize = 512;
@@ -108,7 +108,7 @@ TEST(TestGpuEnginePluginManager, LoadPluginsAndExecuteOpGraph)
 
             // Prepare the engine configuration
             // TODO set a real engine config based on the engine details
-            const hipdnnPluginConstData_t engineConfig = {.ptr = nullptr, .size = 0};
+            const hipdnnPluginConstData_t engineConfig = {nullptr, 0};
 
             // Create workspace for the operation
             auto workspaceSize = plugin->getWorkspaceSize(handle, &engineConfig, &opGraph);
@@ -131,7 +131,7 @@ TEST(TestGpuEnginePluginManager, LoadPluginsAndExecuteOpGraph)
             // Prepare device buffers structure
             const uint32_t numDeviceBuffers = 2;
             const std::array<hipdnnPluginDeviceBuffer_t, numDeviceBuffers> deviceBuffers
-                = {{{.uid = 0, .ptr = inDevData}, {.uid = 1, .ptr = outDevData}}};
+                = {{{0, inDevData}, {1, outDevData}}};
 
             // Execute the operation graph
             plugin->executeOpGraph(
@@ -143,7 +143,7 @@ TEST(TestGpuEnginePluginManager, LoadPluginsAndExecuteOpGraph)
 
             // Check the results
             ASSERT_EQ(
-                std::ranges::equal(
+                std::equal(
                     inHostData.begin(), inHostData.end(), outHostData.begin(), outHostData.end()),
                 true);
         }

@@ -77,15 +77,9 @@ public:
             return true; // No nodes means no unsupported attributes
         }
 
-        // NOLINTNEXTLINE(readability-use-anyofallof)
-        for(const auto node : *nodes)
-        {
-            if(!supportedAttributes.contains(node->attributes_type()))
-            {
-                return false;
-            }
-        }
-        return true;
+        return std::all_of(nodes->begin(), nodes->end(), [&](const auto node) {
+            return supportedAttributes.find(node->attributes_type()) != supportedAttributes.end();
+        });
     }
 
     const hipdnn_sdk::data_objects::Node& getNode(uint32_t index) const override

@@ -189,14 +189,14 @@ public:
     bool validate_dims_set_and_positive() const // NOLINT(readability-identifier-naming
     {
         auto isPositive = [](int64_t value) constexpr { return value > 0; };
-        return !_dim.empty() && std::ranges::all_of(_dim.begin(), _dim.end(), isPositive);
+        return !_dim.empty() && std::all_of(_dim.begin(), _dim.end(), isPositive);
     }
 
     bool validate_dims_and_strides_set_and_positive() const // NOLINT(readability-identifier-naming
     {
         auto isPositive = [](int64_t value) constexpr { return value > 0; };
         return validate_dims_set_and_positive() && _stride.size() == _dim.size()
-               && std::ranges::all_of(_stride.begin(), _stride.end(), isPositive);
+               && std::all_of(_stride.begin(), _stride.end(), isPositive);
     }
 
     flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>

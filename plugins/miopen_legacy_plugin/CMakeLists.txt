@@ -16,7 +16,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         VERSION ${MIOPEN_LEGACY_PLUGIN}
         LANGUAGES CXX)
         
-    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD 17)
 
     list(PREPEND HIPDNN_WARNING_COMPILE_OPTIONS
         -Werror                                  # Treat all warnings as errors

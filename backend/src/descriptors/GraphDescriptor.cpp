@@ -107,7 +107,7 @@ hipdnnPluginConstData_t GraphDescriptor::getSerializedGraph() const
         _graphSerializedBuffer = builder.Release();
     }
 
-    return {.ptr = _graphSerializedBuffer.data(), .size = _graphSerializedBuffer.size()};
+    return {_graphSerializedBuffer.data(), _graphSerializedBuffer.size()};
 }
 
 hipdnnBackendDescriptorType_t GraphDescriptor::getStaticType()

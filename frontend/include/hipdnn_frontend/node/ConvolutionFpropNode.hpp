@@ -337,21 +337,8 @@ public:
                 ErrorCode::ATTRIBUTE_NOT_SET,
                 "ConvolutionFpropNode: Stride dimension mismatch between input and output tensors");
 
-            // All validations passed - perform stride generation
-            std::vector<int64_t> strideOrder(xStrides.size());
-            std::vector<size_t> indices(xStrides.size());
-            std::iota(indices.begin(), indices.end(), 0);
-
-            // Sort indices by their corresponding stride values (ascending)
-            std::ranges::sort(indices.begin(), indices.end(), [&xStrides](size_t a, size_t b) {
-                return xStrides[a] < xStrides[b];
-            });
-
-            // Assign order based on sorted indices
-            for(size_t i = 0; i < indices.size(); ++i)
-            {
-                strideOrder[indices[i]] = static_cast<int64_t>(i);
-            }
+            // Extract stride order from input tensor and apply to output tensor
+            auto strideOrder = hipdnn_sdk::utilities::extractStrideOrder(xStrides);
 
             // Generate Y strides using the extracted stride order and Y dimensions
             auto yStrides = hipdnn_sdk::utilities::generateStrides(yDimsFinal, strideOrder);

@@ -14,15 +14,13 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
-constexpr std::array ALL_BATCHNORM_SIGNATURES
-    = {BatchnormSignatureRegistryKey{.inputDataType = hipdnn_sdk::data_objects::DataType::FLOAT,
-                                     .scaleBiasDataType = hipdnn_sdk::data_objects::DataType::FLOAT,
-                                     .meanVarianceDataType
-                                     = hipdnn_sdk::data_objects::DataType::FLOAT},
-       BatchnormSignatureRegistryKey{.inputDataType = hipdnn_sdk::data_objects::DataType::HALF,
-                                     .scaleBiasDataType = hipdnn_sdk::data_objects::DataType::HALF,
-                                     .meanVarianceDataType
-                                     = hipdnn_sdk::data_objects::DataType::HALF}};
+constexpr std::array<BatchnormSignatureRegistryKey, 2> ALL_BATCHNORM_SIGNATURES
+    = {{BatchnormSignatureRegistryKey{hipdnn_sdk::data_objects::DataType::FLOAT,
+                                      hipdnn_sdk::data_objects::DataType::FLOAT,
+                                      hipdnn_sdk::data_objects::DataType::FLOAT},
+        BatchnormSignatureRegistryKey{hipdnn_sdk::data_objects::DataType::HALF,
+                                      hipdnn_sdk::data_objects::DataType::HALF,
+                                      hipdnn_sdk::data_objects::DataType::HALF}}};
 
 inline std::unordered_map<BatchnormSignatureRegistryKey,
                           std::unique_ptr<IGenericBatchnormExecutor>,
@@ -54,7 +52,9 @@ template <std::size_t... Is>
 void registerBatchnormExecutors(std::index_sequence<Is...>)
 {
     ((batchnormRegistry()[ALL_BATCHNORM_SIGNATURES[Is]]
-      = std::make_unique<BatchnormExecutor<ALL_BATCHNORM_SIGNATURES[Is]>>()),
+      = std::make_unique<BatchnormExecutor<ALL_BATCHNORM_SIGNATURES[Is].inputDataType,
+                                           ALL_BATCHNORM_SIGNATURES[Is].scaleBiasDataType,
+                                           ALL_BATCHNORM_SIGNATURES[Is].meanVarianceDataType>>()),
      ...);
 }
 

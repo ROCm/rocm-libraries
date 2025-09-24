@@ -123,7 +123,7 @@ public:
             hipdnn_plugin::throwIfNull(getInstance());
 
             hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME, callback);
-            LOG_API_SUCCESS(apiName, "");
+            LOG_API_SUCCESS(apiName, "", "");
         });
     }
 
@@ -178,7 +178,7 @@ public:
             delete handle;
             handle = nullptr;
 
-            LOG_API_SUCCESS(apiName, "");
+            LOG_API_SUCCESS(apiName, "", "");
         });
     }
 
@@ -191,7 +191,7 @@ public:
         return hipdnn_plugin::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin::throwIfNull(handle);
 
-            LOG_API_SUCCESS(apiName, "");
+            LOG_API_SUCCESS(apiName, "", "");
         });
     }
 
@@ -386,7 +386,7 @@ public:
 
             delete executionContext;
 
-            LOG_API_SUCCESS(apiName, "destroyed executionContext");
+            LOG_API_SUCCESS(apiName, "destroyed executionContext", "");
         });
     }
 
@@ -420,7 +420,7 @@ public:
 
             getInstance()->executeGraph();
 
-            LOG_API_SUCCESS(apiName, "executed graph");
+            LOG_API_SUCCESS(apiName, "executed graph", "");
         });
     }
 

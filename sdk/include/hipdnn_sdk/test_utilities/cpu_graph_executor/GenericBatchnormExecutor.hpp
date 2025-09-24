@@ -32,14 +32,16 @@ public:
         = 0;
 };
 
-template <BatchnormSignatureRegistryKey Key>
+template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum>
 class BatchnormExecutor : public IGenericBatchnormExecutor
 {
-public:
-    using InputDataType = DataTypeToNative<Key.inputDataType>;
-    using ScaleBiasDataType = DataTypeToNative<Key.scaleBiasDataType>;
-    using MeanVarianceDataType = DataTypeToNative<Key.meanVarianceDataType>;
+    using InputDataType = DataTypeToNative<InputDataTypeEnum>;
+    using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
+    using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
 
+public:
     // bool isApplicable(const hipdnn_sdk::data_objects::Node& node) const override
     // {
     //     // Implementation to check if this executor can handle the given node

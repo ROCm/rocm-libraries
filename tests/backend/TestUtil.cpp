@@ -398,16 +398,18 @@ static bool isPluginLoadedByRelativePathInternal(const fs::path& fullPath, const
 
 bool isPluginLoaded(const std::vector<std::string>& loadedPlugins, const std::string& pluginName)
 {
-    return std::ranges::any_of(loadedPlugins, [&](const std::string& loadedPathStr) {
-        try
-        {
-            return fs::canonical(loadedPathStr) == fs::canonical(pluginName);
-        }
-        catch(const fs::filesystem_error&)
-        {
-            return false;
-        }
-    });
+    return std::any_of(
+        loadedPlugins.begin(), loadedPlugins.end(), [&](const std::string& loadedPathStr) {
+            try
+            {
+                return fs::canonical(fs::path(loadedPathStr))
+                       == fs::canonical(fs::path(pluginName));
+            }
+            catch(const fs::filesystem_error&)
+            {
+                return false;
+            }
+        });
 }
 
 bool isPluginLoadedByRelativePath(const std::vector<std::string>& loadedPlugins,
