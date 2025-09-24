@@ -126,6 +126,11 @@ int main(int argc, char** argv)
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("failed to create description");
 
+    // This example is unbatched, so the batch stride is not used
+    // for anything.  For batched examples, this would be
+    // distance in elements between consecutive batches.
+    const size_t batch_stride = 0;
+
     if(mpi_rank == 0)
     {
         std::cout << "input data decomposition:\n";
@@ -135,7 +140,7 @@ int main(int argc, char** argv)
         rocfft_field infield = nullptr;
         rocfft_field_create(&infield);
 
-        std::vector<size_t> inbrick_stride  = {1, length[1], 0};
+        std::vector<size_t> inbrick_stride  = {1, length[1], batch_stride};
         const size_t        inbrick_length1 = length[1] / (size_t)mpi_size
                                        + ((size_t)mpi_rank < length[1] % (size_t)mpi_size ? 1 : 0);
         const size_t inbrick_lower1
@@ -219,7 +224,7 @@ int main(int argc, char** argv)
     std::vector<void*>  gpu_out = {nullptr};
     std::vector<size_t> outbrick_lower;
     std::vector<size_t> outbrick_upper;
-    std::vector<size_t> outbrick_stride = {1, length[1], 0};
+    std::vector<size_t> outbrick_stride = {1, length[1], batch_stride};
     {
         const size_t outbrick_length1 = length[1] / (size_t)mpi_size
                                         + ((size_t)mpi_rank < length[1] % (size_t)mpi_size ? 1 : 0);
