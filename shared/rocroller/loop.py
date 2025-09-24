@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
 import os
-import sys
 import subprocess
 import shutil
 import glob
 import argparse
 import itertools
+import json
 from dataclasses import dataclass
 
 
@@ -15,6 +15,7 @@ class TestCombination:
     instr_width: int
     write: bool  # False for read
     stride: int
+    iters: int
     
     @property
     def mode_name(self) -> str:
@@ -25,11 +26,12 @@ class TestCombination:
         return {
             "INSTR_WIDTH": str(self.instr_width),
             "WRITE": "1" if self.write else "0",
-            "BYTE_STRIDE": str(self.stride)
+            "BYTE_STRIDE": str(self.stride),
+            "ITERS": str(self.iters)
         }
     
     def get_output_dir_name(self) -> str:
-        return f"ds_{self.mode_name}_b{self.instr_width * 32}_stride_{self.stride}"
+        return f"ds_{self.mode_name}_b{self.instr_width * 32}_stride_{self.stride}_iters_{self.iters}"
     
     def get_working_dir_name(self) -> str:
         return f"{self.get_output_dir_name()}_rocprof"
@@ -67,6 +69,15 @@ def main():
 
     env_group.add_argument(
         "-r", "--read", action="store_true", help="Test ds_read_*"
+    )
+
+    env_group.add_argument(
+        "-i",
+        "--iters",
+        type=int,
+        nargs="+",
+        default=range(4, 129),
+        help="ITERS values (number of iterations)",
     )
 
     # Sometimes no work is done on CU thus needs to be re-ran (for small workgroup counts)
@@ -127,12 +138,14 @@ def main():
     test_combinations = [TestCombination(*combo) for combo in itertools.product(
         args.instr_widths,  
         modes_to_test,      
-        args.strides        
+        args.strides,
+        args.iters  # Added ITERS to the product
     )]
     
     print(f"Instruction widths: {args.instr_widths}")
     print(f"Modes: {['write' if mode else 'read' for mode in modes_to_test]}")
     print(f"Strides: {args.strides}")
+    print(f"Iterations: {args.iters}")
     print(f"Total test combinations: {len(test_combinations)}")
 
     for i, test in enumerate(test_combinations, 1):
@@ -166,13 +179,16 @@ def main():
             try:
                 subprocess.run(rocprof_cmd, check=True)
 
-                # Adjust output csv file if multiple dispatches (e.g. have memcpy)
+                # Adjust output csv file if multiple dispatches (e.g. due to hipmemcpy)
                 csv_files = glob.glob(
                     f"{rocprof_working_dir}/stats_ui_output_agent_*_dispatch_1.csv"
                 )
                 if not csv_files:
                     print("No CSV output file found, retrying...")
                     continue
+
+                if len(csv_files) > 1:
+                    raise Exception("Multiple CSV files found", csv_files)
 
                 with open(csv_files[0], "r") as f:
                     output = f.read()
@@ -184,6 +200,10 @@ def main():
                 if os.path.exists(target_dir):
                     shutil.rmtree(target_dir)
                 shutil.move(rocprof_working_dir, target_dir)
+                
+                env_vars_file = os.path.join(target_dir, "env_vars.json")
+                with open(env_vars_file, "w") as f:
+                    json.dump(test.to_env_vars(), f, indent=2)
 
                 print(f"length: {output_len}")
                 print(f"Results for {test} saved in {target_dir}")

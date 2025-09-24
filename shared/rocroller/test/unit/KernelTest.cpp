@@ -563,7 +563,6 @@ amdhsa.kernels:
                 return {start, start + m};
             };
 
-            const int ITERS            = 128;
             const int ALREADY_FINISHED = ITERS - 3;
 
             // auto addrs = Register::Value::Placeholder(
