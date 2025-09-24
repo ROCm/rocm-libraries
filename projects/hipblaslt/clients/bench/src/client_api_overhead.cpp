@@ -502,6 +502,7 @@ void simpleGemmExt(hipblasLtHandle_t  handle,
         }
 
         // Make sure to initialize every time when algo changes
+        gemm.setMaxWorkspaceBytes(max_workspace_size);
         CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
         CHECK_HIPBLASLT_ERROR(gemm.run(stream));
     }
@@ -534,6 +535,7 @@ void simpleGemmExt(hipblasLtHandle_t  handle,
         algoIdx = hipblaslt_ext::getIndexFromAlgo(heuristicResult[0].algo);
 
         // Make sure to initialize every time when algo changes
+        gemm.setMaxWorkspaceBytes(max_workspace_size);
         CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
 
         start_ext_run = std::chrono::steady_clock::now();
@@ -645,6 +647,7 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
         }
 
         // Make sure to initialize every time when algo changes
+        gemm.setMaxWorkspaceBytes(workspace_size);
         CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace));
         CHECK_HIPBLASLT_ERROR(gemm.run(stream));
     }
@@ -697,6 +700,7 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
         }
 
         // Make sure to initialize every time when algo changes
+        gemm.setMaxWorkspaceBytes(workspace_size);
         CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace));
 
         start_ext_run = std::chrono::steady_clock::now();
@@ -810,6 +814,7 @@ void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
         }
 
         // Make sure to initialize every time when algo changes
+        gemm.setMaxWorkspaceBytes(max_workspace_size);
         CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
         CHECK_HIPBLASLT_ERROR(gemm.run(stream));
     }
@@ -864,6 +869,7 @@ void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
         }
 
         // Make sure to initialize every time when algo changes
+        gemm.setMaxWorkspaceBytes(max_workspace_size);
         CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
 
         start_ext_run = std::chrono::steady_clock::now();

@@ -248,6 +248,7 @@ void swizzleGemmEpilogueBiasVecExt(hipblasLtHandle_t  handle,
         return;
     }
 
+    gemm.setMaxWorkspaceBytes(max_workspace_size);
     CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResults[0].algo, d_workspace));
     CHECK_HIPBLASLT_ERROR(gemm.run(stream));
 

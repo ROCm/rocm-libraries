@@ -2880,6 +2880,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               const rocblaslt_matmul_algo& algo,
                               const Tuning*                tuning,
                               void*                        workspace,
+                              size_t                       workspaceSizeInBytes,
                               bool                         useUserArgs,
                               hipStream_t                  stream,
                               std::shared_ptr<void>        gemmData)
@@ -2944,6 +2945,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 
             data->inputs.ws = workspace;
 
+            // set workspace size from argument
+            data->inputs.workspaceSize = workspaceSizeInBytes;
+            data->problem.setWorkspaceSize(workspaceSizeInBytes);
+
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3004,6 +3009,19 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->inputs.grouped[i].ws = workspace;
             }
             data->inputs.ws = workspace;
+
+            // set workspace size from argument
+            data->problem.setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
+            data->problem.setWorkspaceSize(workspaceSizeInBytes);
+            for(int i = 0; i < data->inputs.grouped.size(); i++)
+            {
+                data->inputs.grouped[i].workspaceSize = workspaceSizeInBytes;
+            }
+            for(size_t i = 0; i < data->problem.gemms.size(); i++)
+            {
+                data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
+                data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
+            }
 
             data->useUserArgs = useUserArgs;
             if(useUserArgs)
@@ -4295,6 +4313,7 @@ std::atomic_bool& rocblaslt_internal_tensile_is_initialized()
                                                    const rocblaslt_matmul_algo& algo,                          \
                                                    const Tuning*                tuning,                        \
                                                    void*                        workspace,                     \
+                                                   size_t                       workspaceSizeInBytes,          \
                                                    bool                         useUserArgs,                   \
                                                    hipStream_t                  stream,                        \
                                                    std::shared_ptr<void>        gemmData);                     \

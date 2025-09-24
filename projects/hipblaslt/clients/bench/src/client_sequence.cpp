@@ -522,8 +522,11 @@ int main(int argc, char** argv)
         for(size_t gemmIdx = 0; gemmIdx < layer.size(); gemmIdx++)
         {
             if(layer[gemmIdx].type == Layer::TYPE::GEMM)
+            {
+                (*layer[gemmIdx].gemms)[b].setMaxWorkspaceBytes(layer[gemmIdx].ws_size);
                 CHECK_HIPBLASLT_ERROR((*layer[gemmIdx].gemms)[b].initialize(
                     heuristicResults[gemmIdx].algo, layer[gemmIdx].ws));
+            }
         }
 
     hipEvent_t event_gpu_time_start, event_gpu_time_end;

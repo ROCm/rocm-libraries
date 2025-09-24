@@ -621,6 +621,8 @@ int main(int argc, char* argv[])
     std::cout << "double precision max l-inf epsilon: " << max_linf_eps_double << std::endl;
     std::cout << "double precision max l2 epsilon:     " << max_l2_eps_double << std::endl;
 
+    hipfft_params::externally_managed_workareas.clear();
+
     return retval;
 }
 
