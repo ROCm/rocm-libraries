@@ -23,10 +23,9 @@
 #
 ################################################################################
 
-import rrperf.utils as utils
-
 import pytest
 import rrperf
+import rrperf.utils as utils
 
 
 @pytest.mark.slow
