@@ -1012,23 +1012,18 @@ constexpr size_t GiB = 1024 * MiB;
 class amdsmi
 {
 public:
-    amdsmi(std::string iteration_info_out)
-        : m_iteration_info_out(iteration_info_out), m_is_active(!iteration_info_out.empty())
+    amdsmi()
     {
-        if(!m_is_active)
-            return;
-
         amdsmi_init(AMDSMI_INIT_AMD_GPUS);
 
+        // These can't be turned into a member initializer list,
+        // because the amdsmi_init() above has to be called first.
         m_target  = get_target();
         m_context = get_context(m_target);
     }
 
     ~amdsmi()
     {
-        if(!m_is_active)
-            return;
-
         amdsmi_shut_down();
     }
 
@@ -1042,6 +1037,109 @@ public:
         std::optional<uint64_t> vram_used_bytes;
     };
 
+    std::string serialize_stats(const stats& stats) const
+    {
+        std::ostringstream ss;
+        ss << "{";
+
+        ss << "\"metrics\":" << serialize_metrics(stats.metrics);
+
+        ss << ",\"clocks\":{";
+        bool first = true;
+        for(const auto& kv : stats.clocks)
+        {
+            if(!first)
+                ss << ",";
+            ss << "\"" << kv.first << "\":" << serialize_optional(kv.second);
+            first = false;
+        }
+        ss << "}";
+
+        ss << ",\"vram_used_bytes\":" << serialize_optional(stats.vram_used_bytes);
+
+        ss << "}";
+        return ss.str();
+    }
+
+    std::string serialize_context() const
+    {
+        const auto& ctx = m_context;
+
+        std::ostringstream ss;
+        ss << "{";
+
+        ss << "\"product_name\":" << serialize_optional_string(ctx.product_name);
+        ss << ",\"amdsmi_version\":" << serialize_optional_string(ctx.amdsmi_version);
+
+        ss << ",\"amdsmi_metrics_version\":{";
+        ss << "\"format_revision\":" << std::to_string(ctx.amdsmi_metrics_version.format_revision);
+        ss << ",\"content_revision\":"
+           << std::to_string(ctx.amdsmi_metrics_version.content_revision);
+        ss << "}";
+
+        // Clocks min/max
+        ss << ",\"clocks\":{";
+        bool first = true;
+        for(const auto& kv : ctx.clocks)
+        {
+            if(!first)
+                ss << ",";
+            ss << "\"" << kv.first << "\":";
+            if(kv.second)
+                ss << "{"
+                   << "\"min_clk\":" << kv.second->first << ",\"max_clk\":" << kv.second->second
+                   << "}";
+            else
+                ss << "null";
+            first = false;
+        }
+        ss << "}";
+
+        // Power cap info
+        ss << ",\"power_cap\":" << serialize_optional(ctx.power_cap);
+        ss << ",\"power_cap_default\":" << serialize_optional(ctx.power_cap_default);
+        ss << ",\"power_cap_dpm\":" << serialize_optional(ctx.power_cap_dpm);
+
+        ss << ",\"energy_resolution\":" << serialize_optional(ctx.energy_resolution);
+
+        // VRAM vendor + total
+        ss << ",\"vram_vendor\":" << serialize_optional_string(ctx.vram_vendor);
+        ss << ",\"vram_total_bytes\":" << serialize_optional(ctx.vram_total_bytes);
+
+        // Stats
+        ss << ",\"stats\":" << serialize_stats(ctx.stats);
+
+        ss << "}";
+        return ss.str();
+    }
+
+    stats get_stats() const
+    {
+        stats stats{};
+
+        // Copy all GPU metrics
+        amdsmi_gpu_metrics_t metrics{};
+        if(amdsmi_get_gpu_metrics_info(m_target, &metrics) == AMDSMI_STATUS_SUCCESS)
+            stats.metrics = metrics;
+
+        // Clocks
+        for(auto clk : clk_types)
+        {
+            amdsmi_clk_info_t clk_info{};
+            if(amdsmi_get_clock_info(m_target, clk, &clk_info) == AMDSMI_STATUS_SUCCESS)
+                stats.clocks[clk_type_to_string(clk)] = clk_info.clk;
+        }
+
+        // Memory usage
+        uint64_t vram_used;
+        if(amdsmi_get_gpu_memory_usage(m_target, AMDSMI_MEM_TYPE_VRAM, &vram_used)
+           == AMDSMI_STATUS_SUCCESS)
+            stats.vram_used_bytes = vram_used;
+
+        return stats;
+    }
+
+private:
     struct context
     {
         std::optional<std::string> product_name;
@@ -1069,112 +1167,6 @@ public:
         stats stats;
     };
 
-    stats get_stats() const
-    {
-        if(!m_is_active)
-            return {};
-
-        stats it{};
-
-        // Copy all GPU metrics
-        amdsmi_gpu_metrics_t metrics{};
-        if(amdsmi_get_gpu_metrics_info(m_target, &metrics) == AMDSMI_STATUS_SUCCESS)
-            it.metrics = metrics;
-
-        // Clocks
-        for(auto clk : clk_types)
-        {
-            amdsmi_clk_info_t clk_info{};
-            if(amdsmi_get_clock_info(m_target, clk, &clk_info) == AMDSMI_STATUS_SUCCESS)
-                it.clocks[clk_type_to_string(clk)] = clk_info.clk;
-        }
-
-        // Memory usage
-        uint64_t vram_used;
-        if(amdsmi_get_gpu_memory_usage(m_target, AMDSMI_MEM_TYPE_VRAM, &vram_used)
-           == AMDSMI_STATUS_SUCCESS)
-            it.vram_used_bytes = vram_used;
-
-        return it;
-    }
-
-    void save_batch(const std::vector<double>& batch_times, const stats& stats)
-    {
-        m_batches.emplace_back((struct batch){batch_times, stats});
-    }
-
-    // TODO: This method should be removed once gbench isn't used anymore.
-    size_t get_batches_count() const
-    {
-        return m_batches.size();
-    }
-
-private:
-    struct batch
-    {
-        std::vector<double> batch_times;
-        stats               amdsmi_stats;
-    };
-
-public:
-    void output_iteration_info(const std::string& name) const
-    {
-        if(!m_is_active)
-            return;
-
-        // Try opening file
-        std::fstream outfile(m_iteration_info_out, std::ios::in | std::ios::out | std::ios::ate);
-        bool         new_file = false;
-
-        if(!outfile)
-        {
-            // File doesn’t exist, create it
-            outfile.open(m_iteration_info_out, std::ios::out | std::ios::trunc);
-            new_file = true;
-        }
-        else
-        {
-            // File exists, check size
-            outfile.seekp(0, std::ios::end);
-            auto end_pos = outfile.tellp();
-            if(end_pos == 0)
-            {
-                new_file = true;
-            }
-            else if(end_pos < 2)
-            {
-                std::cerr << "Malformed JSON file.\n";
-                std::exit(EXIT_FAILURE);
-            }
-            else
-            {
-                // Trim trailing "]}" so we can append new benchmarks
-                outfile.seekp(-2, std::ios::end);
-            }
-        }
-
-        if(new_file)
-        {
-            outfile << "{";
-            outfile << "\"context\":{";
-            outfile << "\"amdsmi\":" << serialize_context(m_context);
-            outfile << "},";
-            outfile << "\"benchmarks\":[";
-        }
-        else
-        {
-            outfile << ",";
-        }
-
-        // Append the serialized benchmark
-        outfile << serialize_benchmark(name);
-
-        // Close benchmarks array and JSON
-        outfile << "]}";
-        outfile.close();
-    }
-
-private:
     const std::vector<amdsmi_clk_type_t> clk_types = {
         AMDSMI_CLK_TYPE_SYS,
         AMDSMI_CLK_TYPE_DF,
@@ -1188,9 +1180,72 @@ private:
         AMDSMI_CLK_TYPE_DCLK1,
     };
 
+    amdsmi_processor_handle get_target() const
+    {
+        // Get HIP device
+        hipStream_t stream;
+        HIP_CHECK(hipStreamCreate(&stream));
+        int hip_dev;
+        HIP_CHECK(hipStreamGetDevice(stream, &hip_dev));
+        char hip_bus_id[64];
+        HIP_CHECK(hipDeviceGetPCIBusId(hip_bus_id, sizeof(hip_bus_id), hip_dev));
+
+        // Get all AMD SMI sockets
+        uint32_t socket_count;
+        amdsmi_get_socket_handles(&socket_count, nullptr);
+        std::vector<amdsmi_socket_handle> sockets(socket_count);
+        amdsmi_get_socket_handles(&socket_count, sockets.data());
+
+        // Get AMD SMI GPU device handle of the HIP device
+        amdsmi_processor_handle target = nullptr;
+        for(auto s : sockets)
+        {
+            uint32_t dev_count = 0;
+            amdsmi_get_processor_handles(s, &dev_count, nullptr);
+            std::vector<amdsmi_processor_handle> devs(dev_count);
+            amdsmi_get_processor_handles(s, &dev_count, devs.data());
+            for(auto h : devs)
+            {
+                processor_type_t type;
+                amdsmi_get_processor_type(h, &type);
+                if(type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
+                    continue;
+                if(get_amdsmi_pci_bus_id(h) == hip_bus_id)
+                {
+                    target = h;
+                    break;
+                }
+            }
+            if(target)
+                break;
+        }
+
+        if(!target)
+        {
+            std::cerr << "No matching GPU found for HIP device " << hip_dev << "\n";
+            exit(1);
+        }
+
+        return target;
+    }
+
+    std::string get_amdsmi_pci_bus_id(amdsmi_processor_handle h) const
+    {
+        uint64_t bdfid;
+        amdsmi_get_gpu_bdf_id(h, &bdfid);
+        uint32_t           domain   = (bdfid >> 32) & 0xffff;
+        uint32_t           bus      = (bdfid >> 8) & 0xff;
+        uint32_t           device   = (bdfid >> 3) & 0x1f;
+        uint32_t           function = bdfid & 0x7;
+        std::ostringstream oss;
+        oss << std::setfill('0') << std::hex << std::setw(4) << domain << ":" << std::setw(2) << bus
+            << ":" << std::setw(2) << device << "." << function;
+        return oss.str();
+    }
+
     context get_context(amdsmi_processor_handle target) const
     {
-        struct context ctx;
+        context ctx;
 
         amdsmi_board_info_t board_info;
         if(amdsmi_get_gpu_board_info(target, &board_info) == AMDSMI_STATUS_SUCCESS)
@@ -1261,140 +1316,6 @@ private:
         exit(1);
     }
 
-    std::string get_amdsmi_pci_bus_id(amdsmi_processor_handle h) const
-    {
-        uint64_t bdfid;
-        amdsmi_get_gpu_bdf_id(h, &bdfid);
-        uint32_t           domain   = (bdfid >> 32) & 0xffff;
-        uint32_t           bus      = (bdfid >> 8) & 0xff;
-        uint32_t           device   = (bdfid >> 3) & 0x1f;
-        uint32_t           function = bdfid & 0x7;
-        std::ostringstream oss;
-        oss << std::setfill('0') << std::hex << std::setw(4) << domain << ":" << std::setw(2) << bus
-            << ":" << std::setw(2) << device << "." << function;
-        return oss.str();
-    }
-
-    amdsmi_processor_handle get_target() const
-    {
-        // Get HIP device
-        hipStream_t stream;
-        HIP_CHECK(hipStreamCreate(&stream));
-        int hip_dev;
-        HIP_CHECK(hipStreamGetDevice(stream, &hip_dev));
-        char hip_bus_id[64];
-        HIP_CHECK(hipDeviceGetPCIBusId(hip_bus_id, sizeof(hip_bus_id), hip_dev));
-
-        // Get all AMD SMI sockets
-        uint32_t socket_count;
-        amdsmi_get_socket_handles(&socket_count, nullptr);
-        std::vector<amdsmi_socket_handle> sockets(socket_count);
-        amdsmi_get_socket_handles(&socket_count, sockets.data());
-
-        // Get AMD SMI GPU device handle of the HIP device
-        amdsmi_processor_handle target = nullptr;
-        for(auto s : sockets)
-        {
-            uint32_t dev_count = 0;
-            amdsmi_get_processor_handles(s, &dev_count, nullptr);
-            std::vector<amdsmi_processor_handle> devs(dev_count);
-            amdsmi_get_processor_handles(s, &dev_count, devs.data());
-            for(auto h : devs)
-            {
-                processor_type_t type;
-                amdsmi_get_processor_type(h, &type);
-                if(type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
-                    continue;
-                if(get_amdsmi_pci_bus_id(h) == hip_bus_id)
-                {
-                    target = h;
-                    break;
-                }
-            }
-            if(target)
-                break;
-        }
-
-        if(!target)
-        {
-            std::cerr << "No matching GPU found for HIP device " << hip_dev << "\n";
-            exit(1);
-        }
-
-        return target;
-    }
-
-    std::string serialize_benchmark(const std::string& name) const
-    {
-        std::ostringstream ss;
-        ss << "{";
-        ss << "\"name\":\"" << name << "\",";
-        ss << "\"batches\":[";
-        for(size_t i = 0; i < m_batches.size(); i++)
-        {
-            if(i != 0)
-                ss << ",";
-            ss << "{";
-            ss << "\"iterations_ms\":" << serialize_batch_times(m_batches[i].batch_times) << ",";
-            ss << "\"amdsmi_stats_after_iterations\":"
-               << serialize_stats(m_batches[i].amdsmi_stats);
-            ss << "}";
-        }
-        ss << "]";
-        ss << "}";
-        return ss.str();
-    }
-
-    std::string serialize_context(const context& ctx) const
-    {
-        std::ostringstream ss;
-        ss << "{";
-
-        ss << "\"product_name\":" << serialize_optional_string(ctx.product_name);
-        ss << ",\"amdsmi_version\":" << serialize_optional_string(ctx.amdsmi_version);
-
-        ss << ",\"amdsmi_metrics_version\":{";
-        ss << "\"format_revision\":" << std::to_string(ctx.amdsmi_metrics_version.format_revision);
-        ss << ",\"content_revision\":"
-           << std::to_string(ctx.amdsmi_metrics_version.content_revision);
-        ss << "}";
-
-        // Clocks min/max
-        ss << ",\"clocks\":{";
-        bool first = true;
-        for(const auto& kv : ctx.clocks)
-        {
-            if(!first)
-                ss << ",";
-            ss << "\"" << kv.first << "\":";
-            if(kv.second)
-                ss << "{"
-                   << "\"min_clk\":" << kv.second->first << ",\"max_clk\":" << kv.second->second
-                   << "}";
-            else
-                ss << "null";
-            first = false;
-        }
-        ss << "}";
-
-        // Power cap info
-        ss << ",\"power_cap\":" << serialize_optional(ctx.power_cap);
-        ss << ",\"power_cap_default\":" << serialize_optional(ctx.power_cap_default);
-        ss << ",\"power_cap_dpm\":" << serialize_optional(ctx.power_cap_dpm);
-
-        ss << ",\"energy_resolution\":" << serialize_optional(ctx.energy_resolution);
-
-        // VRAM vendor + total
-        ss << ",\"vram_vendor\":" << serialize_optional_string(ctx.vram_vendor);
-        ss << ",\"vram_total_bytes\":" << serialize_optional(ctx.vram_total_bytes);
-
-        // Stats
-        ss << ",\"stats\":" << serialize_stats(ctx.stats);
-
-        ss << "}";
-        return ss.str();
-    }
-
     std::string serialize_optional_string(const std::optional<std::string>& opt) const
     {
         return opt ? ("\"" + *opt + "\"") : "null";
@@ -1406,45 +1327,7 @@ private:
         return opt ? std::to_string(*opt) : "null";
     }
 
-    std::string serialize_batch_times(const std::vector<double>& batch_times) const
-    {
-        std::ostringstream ss;
-        ss << "[";
-        for(size_t i = 0; i < batch_times.size(); i++)
-        {
-            if(i != 0)
-                ss << ",";
-            ss << batch_times[i];
-        }
-        ss << "]";
-        return ss.str();
-    }
-
-    std::string serialize_stats(const stats& stats) const
-    {
-        std::ostringstream ss;
-        ss << "{";
-
-        ss << "\"metrics\":" << serialize_amdsmi_metrics(stats.metrics);
-
-        ss << ",\"clocks\":{";
-        bool first = true;
-        for(const auto& kv : stats.clocks)
-        {
-            if(!first)
-                ss << ",";
-            ss << "\"" << kv.first << "\":" << serialize_optional(kv.second);
-            first = false;
-        }
-        ss << "}";
-
-        ss << ",\"vram_used_bytes\":" << serialize_optional(stats.vram_used_bytes);
-
-        ss << "}";
-        return ss.str();
-    }
-
-    std::string serialize_amdsmi_metrics(const amdsmi_gpu_metrics_t& metrics) const
+    std::string serialize_metrics(const amdsmi_gpu_metrics_t& metrics) const
     {
         std::ostringstream ss;
         ss << "{";
@@ -1480,13 +1363,13 @@ private:
     #define ADD(field) add_field(#field, metrics.field)
     #define ADD_ARRAY(field) add_array(#field, metrics.field)
 
-        struct RevisionBlock
+        struct revision_block
         {
             int                   min_content_revision;
             std::function<void()> serialize;
         };
 
-        std::vector<RevisionBlock> blocks = {
+        std::vector<revision_block> blocks = {
             {0,
              [&]
              {
@@ -1605,14 +1488,168 @@ private:
         return ss.str();
     }
 
+    amdsmi_processor_handle m_target;
+    context                 m_context;
+};
+#endif
+
+class logger
+{
+public:
+    logger(std::string iteration_info_out)
+        : m_iteration_info_out(iteration_info_out), m_is_active(!iteration_info_out.empty())
+    {}
+
+#ifdef BENCHMARK_USE_AMDSMI
+    void record_amdsmi_stats()
+    {
+        if(!m_is_active)
+            return;
+
+        m_amdsmi_stats = m_amdsmi.get_stats();
+    }
+#endif
+
+    void save_batch_times(const std::vector<double> batch_times)
+    {
+        if(!m_is_active)
+            return;
+
+        struct batch batch = {};
+
+        batch.batch_times = batch_times;
+
+#ifdef BENCHMARK_USE_AMDSMI
+        batch.amdsmi_stats = m_amdsmi_stats;
+#endif
+
+        m_batches.emplace_back(batch);
+    }
+
+    // This function doesn't use a JSON library,
+    // since it just appends text onto the end of a JSON file.
+    // Seeking and writing to the end of a huge file is very fast.
+    void output_specialization_info(const std::string& name) const
+    {
+        if(!m_is_active)
+            return;
+
+        // Try opening file
+        std::fstream outfile(m_iteration_info_out, std::ios::in | std::ios::out | std::ios::ate);
+        bool         new_file = false;
+
+        if(!outfile)
+        {
+            // File doesn’t exist, create it
+            outfile.open(m_iteration_info_out, std::ios::out | std::ios::trunc);
+            new_file = true;
+        }
+        else
+        {
+            // File exists, check size
+            outfile.seekp(0, std::ios::end);
+            auto end_pos = outfile.tellp();
+            if(end_pos == 0)
+            {
+                new_file = true;
+            }
+            else if(end_pos < 2)
+            {
+                std::cerr << "Malformed JSON file.\n";
+                std::exit(EXIT_FAILURE);
+            }
+            else
+            {
+                // Trim trailing "]}" so we can append new benchmarks
+                outfile.seekp(-2, std::ios::end);
+            }
+        }
+
+        if(new_file)
+        {
+            outfile << "{";
+            outfile << "\"context\":{";
+
+#ifdef BENCHMARK_USE_AMDSMI
+            outfile << "\"amdsmi\":" << m_amdsmi.serialize_context();
+#endif
+
+            outfile << "},";
+            outfile << "\"benchmarks\":[";
+        }
+        else
+        {
+            outfile << ",";
+        }
+
+        // Append the serialized benchmark
+        outfile << serialize_benchmark(name);
+
+        // Close benchmarks array and JSON
+        outfile << "]}";
+        outfile.close();
+    }
+
+private:
+    struct batch
+    {
+        std::vector<double> batch_times;
+
+#ifdef BENCHMARK_USE_AMDSMI
+        amdsmi::stats amdsmi_stats;
+#endif
+    };
+
+    std::string serialize_benchmark(const std::string& name) const
+    {
+        std::ostringstream ss;
+        ss << "{";
+        ss << "\"name\":\"" << name << "\",";
+        ss << "\"batches\":[";
+        for(size_t i = 0; i < m_batches.size(); i++)
+        {
+            if(i != 0)
+                ss << ",";
+
+            ss << "{";
+            ss << "\"iterations_ms\":" << serialize_batch_times(m_batches[i].batch_times);
+
+#ifdef BENCHMARK_USE_AMDSMI
+            ss << ",\"amdsmi_stats_after_iterations\":"
+               << m_amdsmi.serialize_stats(m_batches[i].amdsmi_stats);
+#endif
+
+            ss << "}";
+        }
+        ss << "]";
+        ss << "}";
+        return ss.str();
+    }
+
+    std::string serialize_batch_times(const std::vector<double>& batch_times) const
+    {
+        std::ostringstream ss;
+        ss << "[";
+        for(size_t i = 0; i < batch_times.size(); i++)
+        {
+            if(i != 0)
+                ss << ",";
+            ss << batch_times[i];
+        }
+        ss << "]";
+        return ss.str();
+    }
+
     std::string m_iteration_info_out;
     bool        m_is_active;
 
-    amdsmi_processor_handle m_target = nullptr;
-    context                 m_context;
-    std::vector<batch>      m_batches;
+    std::vector<batch> m_batches;
+
+#ifdef BENCHMARK_USE_AMDSMI
+    amdsmi        m_amdsmi;
+    amdsmi::stats m_amdsmi_stats;
+#endif
 };
-#endif // class amdsmi
 
 class state
 {
@@ -1624,8 +1661,7 @@ public:
           benchmark::State&   gbench_state,
           size_t              warmup_iterations,
           bool                cold,
-          std::string         iteration_info_out,
-          int                 trials) // TODO: Remove this trials parameter once gbench is removed
+          std::string         iteration_info_out)
         : stream(stream)
         , bytes(bytes)
         , seed(seed)
@@ -1633,12 +1669,22 @@ public:
         , gbench_state(gbench_state)
         , m_warmup_iterations(warmup_iterations)
         , m_cold(cold)
-        , m_trials(trials)
         , m_events(batch_iterations * 2)
-#ifdef BENCHMARK_USE_AMDSMI
-        , m_amdsmi(iteration_info_out)
-#endif
-    {}
+        , m_logger(iteration_info_out)
+    {
+        for(auto& event : m_events)
+        {
+            HIP_CHECK(hipEventCreate(&event));
+        }
+    }
+
+    ~state()
+    {
+        for(const auto& event : m_events)
+        {
+            HIP_CHECK(hipEventDestroy(event));
+        }
+    }
 
     // Used to reset the input array of algorithms like device_merge_inplace.
     void run_before_every_iteration(std::function<void()> lambda)
@@ -1654,11 +1700,6 @@ public:
 
     void run(std::function<void()> kernel)
     {
-        for(auto& event : m_events)
-        {
-            HIP_CHECK(hipEventCreate(&event));
-        }
-
         // Warm-up
         for(size_t i = 0; i < m_warmup_iterations; ++i)
         {
@@ -1701,9 +1742,12 @@ public:
             HIP_CHECK(hipEventSynchronize(m_events[batch_iterations * 2 - 1]));
 
 #ifdef BENCHMARK_USE_AMDSMI
-            amdsmi::stats       stats = m_amdsmi.get_stats();
-            std::vector<double> batch_times;
+            // This is a *really* slow call, but you can increase batch_iterations
+            // if this ever dominates the benchmarking runtime.
+            m_logger.record_amdsmi_stats();
 #endif
+
+            std::vector<double> batch_times;
 
             // Accumulate the total elapsed time.
             double elapsed_ms = 0.0;
@@ -1712,33 +1756,21 @@ public:
                 float iteration_ms;
                 HIP_CHECK(hipEventElapsedTime(&iteration_ms, m_events[i * 2], m_events[i * 2 + 1]));
                 m_times.emplace_back(iteration_ms);
-                elapsed_ms += iteration_ms;
-
-#ifdef BENCHMARK_USE_AMDSMI
                 batch_times.emplace_back(iteration_ms);
-#endif
+                elapsed_ms += iteration_ms;
             }
 
             gbench_state.SetIterationTime(elapsed_ms / 1000);
 
-#ifdef BENCHMARK_USE_AMDSMI
-            m_amdsmi.save_batch(batch_times, stats);
+            m_logger.save_batch_times(batch_times);
 
             // TODO: When gbench is removed in the future, replace the gbench_state loop
             // with an infinite while-loop, and use this instead:
             // now = time.now()
             // elapsed = now - start
             // if elapsed > min_time {
-            //     std::string escaped_name = get_escaped_name(gbench_state.name());
-            //     amdsmi.output_iteration_info(escaped_name)
             //     break
             // }
-            if(m_amdsmi.get_batches_count() >= m_trials)
-            {
-                std::string escaped_name = get_escaped_name(gbench_state.name());
-                m_amdsmi.output_iteration_info(escaped_name);
-            }
-#endif
         }
 
         if(m_reset_total_gbench_iterations_every_run)
@@ -1746,11 +1778,6 @@ public:
             m_total_gbench_iterations = 0;
         }
         m_total_gbench_iterations += gbench_state.iterations();
-
-        for(const auto& event : m_events)
-        {
-            HIP_CHECK(hipEventDestroy(event));
-        }
     }
 
     void set_throughput(size_t actual_size, size_t type_size)
@@ -1768,6 +1795,9 @@ public:
         gbench_state.SetItemsProcessed(m_total_gbench_iterations * batch_iterations * actual_size);
 
         output_statistics();
+
+        std::string name = get_escaped_name(gbench_state.name());
+        m_logger.output_specialization_info(name);
     }
 
     // These are directly read by benchmarks.
@@ -1864,18 +1894,14 @@ private:
 
     size_t m_warmup_iterations;
     bool   m_cold;
-    int    m_trials;
 
     std::vector<hipEvent_t> m_events;
+    logger                  m_logger;
     std::function<void()>   m_run_before_every_iteration_lambda       = nullptr;
     size_t                  m_total_gbench_iterations                 = 0;
     bool                    m_reset_total_gbench_iterations_every_run = true;
     std::vector<double>     m_times;
     bool                    m_has_set_throughput = false;
-
-#ifdef BENCHMARK_USE_AMDSMI
-    class amdsmi m_amdsmi;
-#endif
 };
 
 struct autotune_interface
@@ -2151,8 +2177,7 @@ private:
                      gbench_state,
                      m_warmup_iterations,
                      m_cold,
-                     m_iteration_info_out,
-                     m_trials);
+                     m_iteration_info_out);
     }
 
     void apply_settings(benchmark::internal::Benchmark* b)
