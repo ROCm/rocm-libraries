@@ -10,17 +10,17 @@
 namespace hipdnn_sdk::test_utilities
 {
 
-struct BatchnormFwdInferenceSignatureKey
+struct BatchnormBwdSignatureKey
 {
     const hipdnn_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
+        = hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes;
     hipdnn_sdk::data_objects::DataType inputDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
 
-    constexpr BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType input,
-                                                hipdnn_sdk::data_objects::DataType scaleBias,
-                                                hipdnn_sdk::data_objects::DataType meanVariance)
+    constexpr BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType input,
+                                       hipdnn_sdk::data_objects::DataType scaleBias,
+                                       hipdnn_sdk::data_objects::DataType meanVariance)
         : inputDataType(input)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
@@ -35,12 +35,11 @@ struct BatchnormFwdInferenceSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 12);
     }
 
-    bool operator==(const BatchnormFwdInferenceSignatureKey& other) const noexcept
+    bool operator==(const BatchnormBwdSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && inputDataType == other.inputDataType
                && scaleBiasDataType == other.scaleBiasDataType
                && meanVarianceDataType == other.meanVarianceDataType;
     }
 };
-
 }

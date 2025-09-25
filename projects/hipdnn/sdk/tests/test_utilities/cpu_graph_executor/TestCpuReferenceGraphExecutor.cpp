@@ -22,9 +22,9 @@ class TestCpuReferenceGraphExecutor
 {
 private:
 public:
-    static flatbuffers::FlatBufferBuilder createValidBatchnormGraph(
-        std::vector<int64_t> strides = {1, 3, 224, 224},
-        std::vector<int64_t> dims = {1, 3, 224, 224},
+    static flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferenceGraph(
+        std::vector<int64_t> strides,
+        std::vector<int64_t> dims,
         bool hasOptionalAttributes = true,
         hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT,
         hipdnn_sdk::data_objects::DataType scaleBiasDataType = DataType::FLOAT,
@@ -138,12 +138,81 @@ public:
                                                          seed));
 
         auto batchnormBuilder
-            = TestCpuReferenceGraphExecutor::createValidBatchnormGraph(xTensor.strides(),
-                                                                       xTensor.dims(),
-                                                                       true,
-                                                                       inputDataType,
-                                                                       scaleBiasDataType,
-                                                                       meanVarianceDataType);
+            = TestCpuReferenceGraphExecutor::createValidBatchnormFwdInferenceGraph(
+                xTensor.strides(),
+                xTensor.dims(),
+                true,
+                inputDataType,
+                scaleBiasDataType,
+                meanVarianceDataType);
+
+        auto batchnormGraph = batchnormBuilder.GetBufferPointer();
+
+        std::unordered_map<int64_t, void*> variantPack;
+        for(const auto& deviceBuffer : deviceBuffers)
+        {
+            variantPack[deviceBuffer.uid] = deviceBuffer.ptr;
+        }
+
+        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
+            batchnormGraph, batchnormBuilder.GetSize(), variantPack);
+    }
+
+    template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
+    static void runBatchnormBwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
+                                    hipdnn_sdk::data_objects::DataType /*scaleBiasDataType*/,
+                                    hipdnn_sdk::data_objects::DataType /*meanVarianceDataType*/)
+    {
+        unsigned int seed = std::random_device{}();
+
+        std::vector<int64_t> dims = {1, 3, 14, 14};
+
+        std::vector<int64_t> derivedDims = {1, dims[1]};
+
+        std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
+
+        TensorLayout layout = TensorLayout::NCHW;
+
+        PinnedTensor<InputType> xTensor(dims, layout);
+        deviceBuffers.push_back(generateRandomHostBuffer(
+            xTensor, 1, static_cast<InputType>(-1.0f), static_cast<InputType>(1.0f), seed));
+
+        PinnedTensor<InputType> dyTensor(dims, layout);
+        deviceBuffers.push_back(generateRandomHostBuffer(
+            dyTensor, 2, static_cast<InputType>(-0.1f), static_cast<InputType>(0.1f), seed));
+
+        PinnedTensor<InputType> dxTensor(dims, layout);
+        deviceBuffers.push_back(generateEmptyHostBuffer(dxTensor, 3));
+
+        PinnedTensor<ScaleBiasType> scaleTensor(derivedDims);
+        deviceBuffers.push_back(generateRandomHostBuffer(scaleTensor,
+                                                         4,
+                                                         static_cast<ScaleBiasType>(-0.1f),
+                                                         static_cast<ScaleBiasType>(0.1f),
+                                                         seed));
+
+        PinnedTensor<ScaleBiasType> dscaleTensor(derivedDims);
+        deviceBuffers.push_back(generateEmptyHostBuffer(dscaleTensor, 5));
+
+        PinnedTensor<ScaleBiasType> dbiasTensor(derivedDims);
+        deviceBuffers.push_back(generateEmptyHostBuffer(dbiasTensor, 6));
+
+        PinnedTensor<MeanVarianceType> meanTensor(derivedDims);
+        deviceBuffers.push_back(generateRandomHostBuffer(meanTensor,
+                                                         7,
+                                                         static_cast<MeanVarianceType>(-0.1f),
+                                                         static_cast<MeanVarianceType>(0.1f),
+                                                         seed));
+
+        PinnedTensor<MeanVarianceType> invVarianceTensor(derivedDims);
+        deviceBuffers.push_back(generateRandomHostBuffer(invVarianceTensor,
+                                                         8,
+                                                         static_cast<MeanVarianceType>(1.9f),
+                                                         static_cast<MeanVarianceType>(2.0f),
+                                                         seed));
+
+        auto batchnormBuilder = hipdnn_sdk::test_utilities::createValidBatchnormBwdGraph(
+            dyTensor.strides(), dyTensor.dims(), true, inputDataType);
 
         auto batchnormGraph = batchnormBuilder.GetBufferPointer();
 
@@ -199,4 +268,10 @@ TEST(TestCpuReferenceGraphExecutor, SignaturesThatDontExist)
     EXPECT_THROW((TestCpuReferenceGraphExecutor::runBatchnormFwdTest<float, half, float>(
                      DataType::FLOAT, DataType::HALF, DataType::FLOAT)),
                  std::runtime_error);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<float, float, float>(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 }

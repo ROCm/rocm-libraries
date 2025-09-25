@@ -14,23 +14,23 @@ TEST(TestBatchnormFwdInferenceSignatureKey, EqualityOperator)
 {
     BatchnormFwdInferenceSignatureKey key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    EXPECT_TRUE(key1.equal(key2));
+    EXPECT_TRUE(key1 == key2);
 
     BatchnormFwdInferenceSignatureKey key3{DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key4{DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    EXPECT_TRUE(key3.equal(key4));
+    EXPECT_TRUE(key3 == key4);
 
     BatchnormFwdInferenceSignatureKey key5{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key6{DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    EXPECT_FALSE(key5.equal(key6));
+    EXPECT_FALSE(key5 == key6);
 
     BatchnormFwdInferenceSignatureKey key7{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key8{DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    EXPECT_FALSE(key7.equal(key8));
+    EXPECT_FALSE(key7 == key8);
 
     BatchnormFwdInferenceSignatureKey key9{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key10{DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE};
-    EXPECT_FALSE(key9.equal(key10));
+    EXPECT_FALSE(key9 == key10);
 }
 
 TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
@@ -56,7 +56,7 @@ TEST(TestBatchnormFwdInferenceSignatureKey, Copy)
     BatchnormFwdInferenceSignatureKey original{DataType::FLOAT, DataType::HALF, DataType::DOUBLE};
     BatchnormFwdInferenceSignatureKey copied{original};
 
-    EXPECT_TRUE(original.equal(copied));
+    EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.inputDataType, DataType::FLOAT);
     EXPECT_EQ(copied.scaleBiasDataType, DataType::HALF);
     EXPECT_EQ(copied.meanVarianceDataType, DataType::DOUBLE);

@@ -67,7 +67,7 @@ private:
         return planBuilder->buildNodePlan(graph, node);
     }
 
-    static Key buildSignatureKey(
+    static PlanRegistrySignatureKey buildSignatureKey(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap)
@@ -76,9 +76,9 @@ private:
         {
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
             return createBatchnormFwdInferenceSignatureKey(node, tensorMap);
-            break;
         case hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes:
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+            return createBatchnormBwdSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
         case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         default:
@@ -86,7 +86,7 @@ private:
         }
     }
 
-    static Key createBatchnormFwdInferenceSignatureKey(
+    static PlanRegistrySignatureKey createBatchnormFwdInferenceSignatureKey(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap)
@@ -109,6 +109,32 @@ private:
         }
 
         return BatchnormFwdInferenceSignatureKey(
+            xTensorAttr->data_type(), scaleTensorAttr->data_type(), meanTensorAttr->data_type());
+    }
+
+    static PlanRegistrySignatureKey createBatchnormBwdSignatureKey(
+        const hipdnn_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap)
+    {
+        const auto* nodeAttributes = node.attributes_as_BatchnormBackwardAttributes();
+        if(nodeAttributes == nullptr)
+        {
+            throw std::runtime_error(
+                "Node attributes could not be cast to BatchnormBackwardAttributes");
+        }
+
+        auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
+        auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
+        auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
+
+        if(xTensorAttr == nullptr || meanTensorAttr == nullptr || scaleTensorAttr == nullptr)
+        {
+            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
+                                     "failed to construct key");
+        }
+
+        return BatchnormBwdSignatureKey(
             xTensorAttr->data_type(), scaleTensorAttr->data_type(), meanTensorAttr->data_type());
     }
 
