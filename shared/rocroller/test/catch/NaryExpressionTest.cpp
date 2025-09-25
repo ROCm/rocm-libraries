@@ -44,50 +44,74 @@ using namespace rocRoller;
 
 namespace ExpressionTest
 {
-    template <Register::Type OperandARegisterType,
-              Register::Type OperandBRegisterType,
-              Register::Type ResultRegisterType,
-              DataType       OperandDataType,
+    template <Register::Type ResultRegisterType,
               DataType       ResultDataType,
-              PointerType    ResultPointerType>
+              PointerType    ResultPointerType,
+              int            OperandNumber = 2>
     struct ConcatenateExpressionKernel : public AssemblyTestKernel
     {
-        explicit ConcatenateExpressionKernel(ContextPtr context)
+        explicit ConcatenateExpressionKernel(ContextPtr                   context,
+                                             std::vector<DataType>&       operandDataTypes,
+                                             std::vector<Register::Type>& operandRegisterTypes)
             : AssemblyTestKernel(context)
+            , m_operandDataTypes(operandDataTypes)
+            , m_operandRegisterTypes(operandRegisterTypes)
         {
-            REQUIRE(DataTypeInfo::Get(OperandDataType).registerCount * 2
-                    == DataTypeInfo::Get(ResultDataType).registerCount);
+            REQUIRE(operandDataTypes.size() == OperandNumber);
+            REQUIRE(operandRegisterTypes.size() == OperandNumber);
+            auto operandTotalRegisters = 0;
+            for(int i = 0; i < OperandNumber; ++i)
+            {
+                operandTotalRegisters += DataTypeInfo::Get(operandDataTypes[i]).registerCount;
+            }
+            REQUIRE(operandTotalRegisters == DataTypeInfo::Get(ResultDataType).registerCount);
         }
 
         Generator<Instruction> codegen()
         {
-            Register::ValuePtr s_result;
-            Register::ValuePtr s_operandA;
-            Register::ValuePtr s_operandB;
+            Register::ValuePtr              s_result;
+            std::vector<Register::ValuePtr> s_operands(OperandNumber);
 
             co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("operandA", s_operandA);
-            co_yield m_context->argLoader()->getValue("operandB", s_operandB);
+            for(int i = 0; i < OperandNumber; ++i)
+            {
+                co_yield m_context->argLoader()->getValue("operand" + std::to_string(i),
+                                                          s_operands[i]);
+            }
 
-            auto result   = Register::Value::Placeholder(m_context,
+            auto                            result = Register::Value::Placeholder(m_context,
                                                        rocRoller::Register::Type::Vector,
                                                        {ResultDataType, PointerType::PointerGlobal},
                                                        1);
-            auto operandA = s_operandA->placeholder(OperandARegisterType, {});
-            auto operandB = s_operandB->placeholder(OperandBRegisterType, {});
+            std::vector<Register::ValuePtr> operands(OperandNumber);
+            for(int i = 0; i < OperandNumber; ++i)
+            {
+                operands[i] = s_operands[i]->placeholder(m_operandRegisterTypes[i], {});
+            }
 
             co_yield result->allocate();
-            co_yield operandA->allocate();
-            co_yield operandB->allocate();
+            for(int i = 0; i < OperandNumber; ++i)
+            {
+                co_yield operands[i]->allocate();
+            }
+
             co_yield m_context->copier()->copy(result, s_result);
-            co_yield m_context->copier()->copy(operandA, s_operandA);
-            co_yield m_context->copier()->copy(operandB, s_operandB);
+            for(int i = 0; i < OperandNumber; ++i)
+            {
+                co_yield m_context->copier()->copy(operands[i], s_operands[i]);
+            }
+
+            std::vector<Expression::ExpressionPtr> operands_expr(OperandNumber);
+            for(int i = 0; i < OperandNumber; ++i)
+            {
+                operands_expr[i] = operands[i]->expression();
+            }
 
             Register::ValuePtr v;
             co_yield Expression::generate(
                 v,
                 std::make_shared<Expression::Expression>(Expression::Concatenate{
-                    {{operandA->expression(), operandB->expression()}}, VariableType{ResultDataType,ResultPointerType}}),
+                    {operands_expr}, VariableType{ResultDataType, ResultPointerType}}),
                 m_context);
 
             REQUIRE(v->regType() == ResultRegisterType);
@@ -105,12 +129,12 @@ namespace ExpressionTest
             k->addArgument({.name          = "result",
                             .variableType  = {ResultDataType, PointerType::PointerGlobal},
                             .dataDirection = DataDirection::WriteOnly});
-            k->addArgument({.name          = "operandA",
-                            .variableType  = OperandDataType,
-                            .dataDirection = DataDirection::ReadOnly});
-            k->addArgument({.name          = "operandB",
-                            .variableType  = OperandDataType,
-                            .dataDirection = DataDirection::ReadOnly});
+            for(int i = 0; i < OperandNumber; ++i)
+            {
+                k->addArgument({.name          = "operand" + std::to_string(i),
+                                .variableType  = {m_operandDataTypes[i], PointerType::Value},
+                                .dataDirection = DataDirection::ReadOnly});
+            }
 
             m_context->schedule(k->preamble());
             m_context->schedule(k->prolog());
@@ -118,40 +142,44 @@ namespace ExpressionTest
             m_context->schedule(k->postamble());
             m_context->schedule(k->amdgpu_metadata());
         }
+
+    protected:
+        std::vector<DataType>       m_operandDataTypes;
+        std::vector<Register::Type> m_operandRegisterTypes;
     };
 
     TEST_CASE("Run concatenate expression kernel with scalars", "[expression][gpu]")
     {
-        auto          context        = TestContext::ForTestDevice();
-        std::uint32_t a              = 0xaaaaaaaaul;
-        std::uint32_t b              = 0xbbbbbbbbul;
-        std::uint64_t expectedResult = 0xbbbbbbbbaaaaaaaaull;
-        auto          result         = make_shared_device<uint64_t>();
+        auto                        context        = TestContext::ForTestDevice();
+        std::uint32_t               a              = 0xaaaaaaaaul;
+        std::uint32_t               b              = 0xbbbbbbbbul;
+        std::uint64_t               expectedResult = 0xbbbbbbbbaaaaaaaaull;
+        auto                        result         = make_shared_device<uint64_t>();
+        std::vector<DataType>       operandDataTypes{DataType::UInt32, DataType::UInt32};
+        std::vector<Register::Type> operandRegisterTypes{Register::Type::Scalar,
+                                                         Register::Type::Scalar};
         ConcatenateExpressionKernel<rocRoller::Register::Type::Scalar,
-                                    rocRoller::Register::Type::Scalar,
-                                    rocRoller::Register::Type::Scalar,
-                                    DataType::UInt32,
                                     DataType::UInt64,
                                     PointerType::Value>
-            kernel(context.get());
+            kernel(context.get(), operandDataTypes, operandRegisterTypes);
         kernel({}, result.get(), a, b);
         REQUIRE_THAT(result, HasDeviceScalarEqualTo(expectedResult));
     }
 
     TEST_CASE("Run concatenate expression kernel with vectors", "[expression][gpu]")
     {
-        auto          context        = TestContext::ForTestDevice();
-        std::uint32_t a              = 0xaaaaaaaaul;
-        std::uint32_t b              = 0xbbbbbbbbul;
-        std::uint64_t expectedResult = 0xbbbbbbbbaaaaaaaaull;
-        auto          result         = make_shared_device<uint64_t>();
+        auto                        context        = TestContext::ForTestDevice();
+        std::uint32_t               a              = 0xaaaaaaaaul;
+        std::uint32_t               b              = 0xbbbbbbbbul;
+        std::uint64_t               expectedResult = 0xbbbbbbbbaaaaaaaaull;
+        auto                        result         = make_shared_device<uint64_t>();
+        std::vector<DataType>       operandDataTypes{DataType::UInt32, DataType::UInt32};
+        std::vector<Register::Type> operandRegisterTypes{Register::Type::Vector,
+                                                         Register::Type::Vector};
         ConcatenateExpressionKernel<rocRoller::Register::Type::Vector,
-                                    rocRoller::Register::Type::Vector,
-                                    rocRoller::Register::Type::Vector,
-                                    DataType::UInt32,
                                     DataType::UInt64,
                                     PointerType::Value>
-            kernel(context.get());
+            kernel(context.get(), operandDataTypes, operandRegisterTypes);
         kernel({}, result.get(), a, b);
         REQUIRE_THAT(result, HasDeviceScalarEqualTo(expectedResult));
     }
@@ -159,18 +187,18 @@ namespace ExpressionTest
     TEST_CASE("Run concatenate expression kernel with mixed scalars and vectors",
               "[expression][gpu]")
     {
-        auto          context        = TestContext::ForTestDevice();
-        std::uint32_t a              = 0xaaaaaaaaul;
-        std::uint32_t b              = 0xbbbbbbbbul;
-        std::uint64_t expectedResult = 0xbbbbbbbbaaaaaaaaull;
-        auto          result         = make_shared_device<uint64_t>();
-        ConcatenateExpressionKernel<rocRoller::Register::Type::Scalar,
-                                    rocRoller::Register::Type::Vector,
-                                    rocRoller::Register::Type::Vector,
-                                    DataType::UInt32,
+        auto                        context        = TestContext::ForTestDevice();
+        std::uint32_t               a              = 0xaaaaaaaaul;
+        std::uint32_t               b              = 0xbbbbbbbbul;
+        std::uint64_t               expectedResult = 0xbbbbbbbbaaaaaaaaull;
+        auto                        result         = make_shared_device<uint64_t>();
+        std::vector<DataType>       operandDataTypes{DataType::UInt32, DataType::UInt32};
+        std::vector<Register::Type> operandRegisterTypes{Register::Type::Scalar,
+                                                         Register::Type::Vector};
+        ConcatenateExpressionKernel<rocRoller::Register::Type::Vector,
                                     DataType::UInt64,
                                     PointerType::Value>
-            kernel(context.get());
+            kernel(context.get(), operandDataTypes, operandRegisterTypes);
         kernel({}, result.get(), a, b);
         REQUIRE_THAT(result, HasDeviceScalarEqualTo(expectedResult));
     }
