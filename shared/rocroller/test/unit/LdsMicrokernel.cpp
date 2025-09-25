@@ -66,15 +66,6 @@ namespace rocRollerTest
         const auto one  = std::make_shared<Expression::Expression>(1u);
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
-        const auto workgroupSize = 64u;
-        auto       workitemCount = Expression::literal(256u * workgroupSize); // 256 CU on MI350X
-        k->setWorkgroupSize({workgroupSize, 1, 1});
-        k->setWorkitemCount({workitemCount, one, one});
-        k->setDynamicSharedMemBytes(zero);
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
         auto strideMultiplier = 1;
         if(const char* env_p = std::getenv("BYTE_STRIDE"))
             strideMultiplier = atoi(env_p); // adjust for bank conflict
@@ -90,6 +81,18 @@ namespace rocRollerTest
         int ITERS = 16;
         if(const char* env_p = std::getenv("ITERS"))
             ITERS = atoi(env_p);
+
+        auto workgroupSize = 64u;
+        if(const char* env_p = std::getenv("WORKGROUP_SIZE"))
+            workgroupSize = atoi(env_p);
+
+        auto workitemCount = Expression::literal(256u * workgroupSize); // 256 CU on MI350X
+        k->setWorkgroupSize({workgroupSize, 1, 1});
+        k->setWorkitemCount({workitemCount, one, one});
+        k->setDynamicSharedMemBytes(zero);
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
 
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops

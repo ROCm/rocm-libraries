@@ -15,6 +15,7 @@ class TestCombination:
     instr_width: int
     write: bool  # False for read
     stride: int
+    workgroup_size: int
     iters: int
     
     @property
@@ -27,11 +28,12 @@ class TestCombination:
             "WRITE": "1" if self.write else "0",
             "INSTR_WIDTH": str(self.instr_width),
             "BYTE_STRIDE": str(self.stride),
+            "WORKGROUP_SIZE": str(self.workgroup_size),
             "ITERS": str(self.iters)
         }
     
     def get_output_dir_name(self) -> str:
-        return f"ds_{self.mode_name}_b{self.instr_width * 32}_stride_{self.stride}_iters_{self.iters}"
+        return f"ds_{self.mode_name}_b{self.instr_width * 32}_stride_{self.stride}_wgs_{self.workgroup_size}_iters_{self.iters}"
     
     def get_working_dir_name(self) -> str:
         return f"{self.get_output_dir_name()}_rocprof"
@@ -76,8 +78,16 @@ def main():
         "--iters",
         type=int,
         nargs="+",
-        default=range(4, 129),
+        default=[16, 20],
         help="ITERS values (number of iterations)",
+    )
+
+    env_group.add_argument(
+        "--wgs",
+        type=int,
+        nargs="+",
+        default=[64],
+        help="WORKGROUP_SIZE values (e.g., --wgs 64 128 256)",
     )
 
     # Sometimes no work is done on CU thus needs to be re-ran (for small workgroup counts)
@@ -139,12 +149,14 @@ def main():
         args.instr_widths,  
         modes_to_test,      
         args.strides,
-        args.iters  # Added ITERS to the product
+        args.wgs,
+        args.iters
     )]
     
     print(f"Instruction widths: {args.instr_widths}")
     print(f"Modes: {['write' if mode else 'read' for mode in modes_to_test]}")
     print(f"Strides: {args.strides}")
+    print(f"Workgroup sizes: {args.wgs}")
     print(f"Iterations: {args.iters}")
     print(f"Total test combinations: {len(test_combinations)}")
 
