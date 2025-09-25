@@ -943,6 +943,7 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                                                      const void*                      buf,
                                                      size_t                           sizeInBytes)
 {
+    std::cout << matmulAttr << " " << rocblaslt_matmul_description_attributes_to_string(matmulAttr) << std::endl;
     // Check if matmulDesc is valid
     if(matmulDesc == nullptr)
     {
