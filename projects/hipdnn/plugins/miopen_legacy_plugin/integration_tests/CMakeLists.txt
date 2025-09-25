@@ -5,13 +5,7 @@ include(GoogleTest)
 find_package(Threads REQUIRED)
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    # For standalone build, check if we have the required packages
-    # hipdnn_frontend should already be found by parent CMakeLists.txt
-    # which brings in hipdnn_backend and hipdnn_sdk as well
-    if(NOT TARGET hipdnn_frontend OR NOT TARGET hipdnn_backend)
-        message(STATUS "Skipping MIOpen plugin integration tests (hipdnn_frontend or hipdnn_backend not found)")
-        return()
-    endif()
+    find_package(hipdnn_frontend CONFIG REQUIRED)
 endif()
 
 add_executable(miopen_plugin_integration_test

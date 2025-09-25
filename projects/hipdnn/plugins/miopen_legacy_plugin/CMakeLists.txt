@@ -67,9 +67,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     )
     
     find_package(hip REQUIRED)
-    
-    # Brings in all hipDNN deps
-    find_package(hipdnn_frontend CONFIG REQUIRED)
+    find_package(hipdnn_sdk CONFIG REQUIRED)
     
     # Setup testing dependencies for standalone build
     include(Dependencies)
