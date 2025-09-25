@@ -7,39 +7,50 @@
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/BaseSignatureKey.hpp>
+
+namespace hipdnn_sdk::test_utilities
 {
 
 struct BatchnormSignatureRegistryKey
 {
-    bool operator==(const BatchnormSignatureRegistryKey& other) const
-    {
-        return inputDataType == other.inputDataType && scaleBiasDataType == other.scaleBiasDataType
-               && meanVarianceDataType == other.meanVarianceDataType;
-    }
-
-    bool operator!=(const BatchnormSignatureRegistryKey& other) const
-    {
-        return !(*this == other);
-    }
-
-    //fix these names
+    hipdnn_sdk::data_objects::NodeAttributes nodeType;
     hipdnn_sdk::data_objects::DataType inputDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
-};
 
-struct BatchnormSignatureRegistryKeyHash
-{
-    std::size_t operator()(const BatchnormSignatureRegistryKey& k) const
+    constexpr BatchnormSignatureRegistryKey(hipdnn_sdk::data_objects::DataType input,
+                                            hipdnn_sdk::data_objects::DataType scaleBias,
+                                            hipdnn_sdk::data_objects::DataType meanVariance)
+        : nodeType(hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
+        , inputDataType(input)
+        , scaleBiasDataType(scaleBias)
+        , meanVarianceDataType(meanVariance)
     {
-        return std::hash<int>()(static_cast<int>(k.inputDataType))
-               ^ (std::hash<int>()(static_cast<int>(k.scaleBiasDataType)) << 1)
-               ^ (std::hash<int>()(static_cast<int>(k.meanVarianceDataType)) << 2);
+    }
+
+    constexpr std::size_t hash_self() const
+    {
+        return static_cast<std::size_t>(static_cast<int>(nodeType))
+               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 4)
+               ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 8)
+               ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 12);
+    }
+
+    constexpr bool equal(const BatchnormSignatureRegistryKey& other) const
+    {
+        return nodeType == other.nodeType && inputDataType == other.inputDataType
+               && scaleBiasDataType == other.scaleBiasDataType
+               && meanVarianceDataType == other.meanVarianceDataType;
     }
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+constexpr std::array<BatchnormSignatureRegistryKey, 2> ALL_SUPPORTED_BATCHNORM_SIGNATURES
+    = {BatchnormSignatureRegistryKey(hipdnn_sdk::data_objects::DataType::FLOAT,
+                                     hipdnn_sdk::data_objects::DataType::FLOAT,
+                                     hipdnn_sdk::data_objects::DataType::FLOAT),
+       BatchnormSignatureRegistryKey(hipdnn_sdk::data_objects::DataType::HALF,
+                                     hipdnn_sdk::data_objects::DataType::HALF,
+                                     hipdnn_sdk::data_objects::DataType::HALF)};
+
+}
