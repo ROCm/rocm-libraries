@@ -26,23 +26,31 @@ public:
     {
         using namespace hipdnn_sdk::data_objects;
 
-        return (node.attributes_type() == NodeAttributes::ConvolutionFwdAttributes
-                || node.attributes_type() == NodeAttributes::ConvolutionBwdAttributes);
+        bool validNode = (node.attributes_type() == NodeAttributes::ConvolutionFwdAttributes
+                          || node.attributes_type() == NodeAttributes::ConvolutionBwdAttributes);
+
+        if(node.attributes_type() == NodeAttributes::ConvolutionBwdAttributes)
+        {
+            auto convAttr = node.attributes_as_ConvolutionBwdAttributes();
+            validNode &= convAttr->conv_mode() == ConvMode::CROSS_CORRELATION;
+        }
+
+        return validNode;
     }
 
-    static void convFwdInference(const TensorBase<InputDataType>& input,
+    static void convFwdInference(const TensorBase<InputDataType>& gradInput,
                                  const TensorBase<InputDataType>& weight,
-                                 TensorBase<InputDataType>& output,
+                                 TensorBase<InputDataType>& gradOutput,
                                  const std::vector<int64_t>& strides,
                                  const std::vector<int64_t>& dilations,
                                  const std::vector<int64_t>& padding)
     {
-        validateInput(input, weight, output, strides, dilations, padding);
+        validateInput(gradInput, weight, gradOutput, strides, dilations, padding);
 
         // Extract dimensions - NCHW format for input/output, [G*K][C][Y][X] for weight (4D flattened)
-        const auto& inputDims = input.dims();
+        const auto& inputDims = gradInput.dims();
         const auto& weightDims = weight.dims();
-        const auto& outputDims = output.dims();
+        const auto& outputDims = gradOutput.dims();
 
         int64_t nBatch = inputDims[0];
         int64_t nInputChannels = inputDims[1];
@@ -94,7 +102,8 @@ public:
 
                         if(hi >= 0 && hi < inputHeight && wi >= 0 && wi < inputWidth)
                         {
-                            InputDataType inputVal = input.getHostValue(nIdx, inputChannel, hi, wi);
+                            InputDataType inputVal
+                                = gradInput.getHostValue(nIdx, inputChannel, hi, wi);
 
                             int64_t weightIdx = (gIdx * outputChannelsPerGroup) + kIdx;
                             InputDataType weightVal = weight.getHostValue(weightIdx, c, y, x);
@@ -107,7 +116,7 @@ public:
             }
 
             int64_t outputChannel = (gIdx * outputChannelsPerGroup) + kIdx;
-            output.setHostValue(
+            gradOutput.setHostValue(
                 static_cast<InputDataType>(accumulator), nIdx, outputChannel, hoIdx, woIdx);
         };
 
@@ -115,7 +124,7 @@ public:
             convolutionFunc, nGroups, nBatch, outputChannelsPerGroup, outputHeight, outputWidth)(
             std::thread::hardware_concurrency());
 
-        output.memory().markHostModified();
+        gradOutput.memory().markHostModified();
     }
 
     static void convBwdData(TensorBase<InputDataType>& input,
@@ -169,36 +178,32 @@ public:
             for(int64_t y = 0; y < kernelHeight; ++y)
             {
                 int64_t hTmp = hiIdx + padH - (y * dilationH);
+                auto ho = hTmp / strideH;
 
-                if(hTmp % strideH == 0)
+                if(hTmp % strideH != 0 || ho < 0 || ho >= outputHeight)
                 {
-                    auto ho = hTmp / strideH;
+                    continue;
+                }
 
-                    if(ho >= 0 && ho < outputHeight)
+                for(int64_t x = 0; x < kernelWidth; ++x)
+                {
+                    auto wTmp = wiIdx + padW - (x * dilationW);
+                    auto wo = wTmp / strideW;
+
+                    if(wTmp % strideW != 0 || wo < 0 || wo >= outputWidth)
                     {
-                        for(int64_t x = 0; x < kernelWidth; ++x)
-                        {
-                            auto wTmp = wiIdx + padW - (x * dilationW);
-                            if(wTmp % strideW == 0)
-                            {
-                                auto wo = wTmp / strideW;
-                                if(wo >= 0 && wo < outputWidth)
-                                {
-                                    for(int64_t k = 0; k < outputChannelsPerGroup; ++k)
-                                    {
-                                        auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + k;
-                                        InputDataType vOut
-                                            = output.getHostValue(nIdx, outputChannelIdx, ho, wo);
+                        continue;
+                    }
 
-                                        InputDataType vWei
-                                            = weight.getHostValue(outputChannelIdx, cIdx, y, x);
+                    for(int64_t k = 0; k < outputChannelsPerGroup; ++k)
+                    {
+                        auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + k;
+                        InputDataType vOut = output.getHostValue(nIdx, outputChannelIdx, ho, wo);
 
-                                        vAcc += static_cast<AccumulatorType>(vOut)
-                                                * static_cast<AccumulatorType>(vWei);
-                                    }
-                                }
-                            }
-                        }
+                        InputDataType vWei = weight.getHostValue(outputChannelIdx, cIdx, y, x);
+
+                        vAcc += static_cast<AccumulatorType>(vOut)
+                                * static_cast<AccumulatorType>(vWei);
                     }
                 }
             }
