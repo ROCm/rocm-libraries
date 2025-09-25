@@ -72,7 +72,7 @@ TEST_CASE("Matrix smaller than cache rotates correctly", "[RotatingBuffer]")
     }
 }
 
-TEST_CASE("Matrix larger than cache does not rotate", "[RotatingBuffer]")
+TEST_CASE("Matrix larger than cache gracefully falls back to single buffer", "[RotatingBuffer]")
 {
     std::vector<double> hostData(1024, 3.14);
     size_t              cacheBytes = 128; // smaller than one matrix
@@ -82,8 +82,13 @@ TEST_CASE("Matrix larger than cache does not rotate", "[RotatingBuffer]")
     auto span1 = buf.next();
     auto span2 = buf.next();
 
-    REQUIRE(span1.data() == span2.data()); // same base
+    // Both calls should return the same base (no rotation)
+    REQUIRE(span1.data() == span2.data());
     REQUIRE(span1.size() == hostData.size());
+
+    // All values should remain correct
+    for(double v : span1)
+        REQUIRE(v == 3.14);
 }
 
 TEST_CASE("Data integrity across rotations", "[RotatingBuffer]")
@@ -120,17 +125,16 @@ TEST_CASE("Modulo by zero throws FatalError", "[RotatingBuffer]")
     REQUIRE_THROWS_AS(RotatingBuffer<int>(hostData, badCacheBytes), FatalError);
 }
 
-TEST_CASE("Small cacheBytes falls back to single buffer", "[RotatingBuffer]")
+TEST_CASE("Small cacheBytes triggers graceful fallback to full buffer", "[RotatingBuffer]")
 {
     std::vector<int> hostData(8, 7);
-    // Give cacheBytes smaller than required (only 4 elements worth)
-    size_t cacheBytes = sizeof(int) * 4;
+    size_t           cacheBytes = sizeof(int) * 4; // too small for one full copy
 
-    // RotatingBuffer should gracefully fall back to a single buffer instance
     RotatingBuffer<int> buf(hostData, cacheBytes);
 
-    // Calling next() should NOT throw — it should still return all elements
     auto span = buf.next();
+
+    // Should fall back to full allocation
     REQUIRE(span.size() == hostData.size());
     REQUIRE(std::all_of(span.begin(), span.end(), [](int v) { return v == 7; }));
 }
