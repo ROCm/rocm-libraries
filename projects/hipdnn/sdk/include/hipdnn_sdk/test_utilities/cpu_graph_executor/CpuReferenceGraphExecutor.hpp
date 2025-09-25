@@ -1,13 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/ShallowTensor.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
@@ -31,6 +25,8 @@ public:
 
         std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
 
+        // todo future, we need to build the DAG and process it to produce a topological sequential order to execute nodes.
+        // this is currently incorrect but works for single node graphs.
         for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
         {
 
@@ -38,7 +34,7 @@ public:
             planExecutors.push_back(buildPlanForNode(graphWrap, node));
         }
 
-        //todo future, look through the graphs Tensor map and look for virtual tensors.
+        // todo future, look through the graphs Tensor map and look for virtual tensors.
         // for each virtual tensor, create a instace of MigratableMemory(or make a host only memory class).
         // Add each new memory instance to a copy of the variant pack.
         // its not worth doing this before we know we can handle the full graph as we dont want to alloc memory
@@ -88,7 +84,7 @@ private:
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }
-        }
+    }
 
     static Key createBatchnormFwdInferenceSignatureKey(
         const hipdnn_sdk::data_objects::Node& node,

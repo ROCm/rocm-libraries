@@ -81,8 +81,8 @@ private:
         if(!_initialized)
         {
             _initialized = true;
+            initializePlanBuilders();
         }
-        initializePlanBuilders();
     }
 
     void initializePlanBuilders()

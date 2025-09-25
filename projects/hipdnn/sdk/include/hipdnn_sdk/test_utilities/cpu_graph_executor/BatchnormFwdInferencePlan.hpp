@@ -24,11 +24,22 @@
         }                                           \
     } while(0)
 
+#define CHECK_TENSOR_TYPE(tensor_map, tensor_uid, datatype_enum) \
+    do                                                           \
+    {                                                            \
+        auto tensor = (tensor_map).at((tensor_uid));             \
+        if(tensor->data_type() != (datatype_enum))               \
+        {                                                        \
+            return false;                                        \
+        }                                                        \
+    } while(0)
+
 namespace hipdnn_sdk::test_utilities
 {
 
 struct BatchnormFwdInferenceParams
 {
+    BatchnormFwdInferenceParams() = default;
     BatchnormFwdInferenceParams(
         const hipdnn_sdk::data_objects::TensorAttributes& xAttributes,
         const hipdnn_sdk::data_objects::TensorAttributes& yAttributes,
@@ -126,6 +137,14 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->bias_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid());
+
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
+        CHECK_TENSOR_TYPE(
+            tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanVarianceDataTypeEnum);
 
         return true;
     }
