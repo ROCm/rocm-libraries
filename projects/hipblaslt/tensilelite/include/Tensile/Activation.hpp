@@ -64,7 +64,6 @@ namespace TensileLite
         Geluscaling,
         Silu,
         Swish,
-        Clamp,
         All,
         Hipblaslt_all,
         Exp, // Verification use only.

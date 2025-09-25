@@ -244,8 +244,6 @@ namespace hipblaslt_ext
             = RocblasltContractionProblem::ScalingFormat::None;
         RocblasltContractionProblem::ScalingFormat scaling_b_type
             = RocblasltContractionProblem::ScalingFormat::None;
-        float act0;
-        float act1;
     };
 
     GemmEpilogue::GemmEpilogue()
@@ -332,16 +330,6 @@ namespace hipblaslt_ext
         }
     }
 
-    void GemmEpilogue::setAct0(float act0)
-    {
-        pimpl->act0 = act0;
-    }
-
-    void GemmEpilogue::setAct1(float act1)
-    {
-        pimpl->act1 = act1;
-    }
-
     hipblasLtEpilogue_t GemmEpilogue::getMode() const
     {
         return pimpl->mode;
@@ -397,6 +385,7 @@ namespace hipblaslt_ext
         }
     }
 
+<<<<<<< HEAD
     float GemmEpilogue::getAct0()
     {
         return pimpl->act0;
@@ -407,6 +396,8 @@ namespace hipblaslt_ext
         return pimpl->act1;
     }
 
+=======
+>>>>>>> parent of 19a7fba810 ([hipBLASLt] add fused clamp (#481))
     class GemmTuning::GemmTuningImpl
     {
     public:

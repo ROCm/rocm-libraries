@@ -132,8 +132,6 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          void*                  amaxD,
                                                          void*                  workspace,
                                                          size_t                 workspaceSize,
-                                                         float                  act0,
-                                                         float                  act1,
                                                          hipStream_t            stream,
                                                          void*                  Synchronizer,
                                                          bool                   swizzleA,
@@ -199,8 +197,6 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , amaxD(amaxD)
     , workspace(workspace)
     , workspaceSize(workspaceSize)
-    , act0(act0)
-    , act1(act1)
     , stream(stream)
     , Synchronizer(Synchronizer)
     , swizzleA(swizzleA)
@@ -314,11 +310,6 @@ namespace
         case ROCBLASLT_EPILOGUE_SWISH_EXT:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
             return TensileLite::ActivationType::Silu;
-        case ROCBLASLT_EPILOGUE_CLAMP_EXT:
-        case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
-        case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
-        case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
-            return TensileLite::ActivationType::Clamp;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
         case ROCBLASLT_EPILOGUE_BGRADA:
@@ -356,7 +347,6 @@ namespace
         case ROCBLASLT_EPILOGUE_BGRADA:
         case ROCBLASLT_EPILOGUE_BGRADB:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
-        case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
             return true;
             break;
         default:
@@ -663,8 +653,6 @@ namespace
         case TensileLite::ActivationType::Silu:
         case TensileLite::ActivationType::Swish:
             return "swish";
-        case TensileLite::ActivationType::Clamp:
-            return "clamp";
         case TensileLite::ActivationType::None:
         default:
             return "none";
@@ -1881,8 +1869,8 @@ namespace
         // push 2 activation arguments
         std::visit(
             [&inputs, &prob](auto val) {
-                inputs.activationArgs.push_back((decltype(val))prob.act0);
-                inputs.activationArgs.push_back((decltype(val))prob.act1);
+                inputs.activationArgs.push_back(val);
+                inputs.activationArgs.push_back(val);
                 if(prob.k)
                     inputs.alpha = *(decltype(val)*)(prob.alpha);
                 else
@@ -1894,7 +1882,7 @@ namespace
         // convert alpha and beta to float if compute type is half
         if(prob.compute_type == rocblaslt_compute_f16)
         {
-            inputs.activationArgs = {prob.act0, prob.act1};
+            inputs.activationArgs = {0.0f, 0.0f};
             inputs.alpha          = static_cast<float>(std::get<hipblasLtHalf>(inputs.alpha));
             inputs.beta           = static_cast<float>(std::get<hipblasLtHalf>(inputs.beta));
         }

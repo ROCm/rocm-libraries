@@ -361,8 +361,6 @@ inline bool is_bias_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_BGRADA:
     case ROCBLASLT_EPILOGUE_BGRADB:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
-    case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
-    case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
         return true;
     default:
         return false;
@@ -385,10 +383,13 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+<<<<<<< HEAD
     case ROCBLASLT_EPILOGUE_CLAMP_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
+=======
+>>>>>>> parent of 19a7fba810 ([hipBLASLt] add fused clamp (#481))
         return true;
     case ROCBLASLT_EPILOGUE_DEFAULT:
     case ROCBLASLT_EPILOGUE_BIAS:
