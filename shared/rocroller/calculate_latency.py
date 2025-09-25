@@ -64,7 +64,6 @@ def get_metric(csv_file):
             latency = row['Latency'] / row['Hitcount']
             return (COLUMN_NAME, latency)
             
-
     except Exception as e:
         print(f"Error processing {csv_file}: {e}")
         return ret
@@ -111,7 +110,7 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
         result = {
             'Directory': dir_name,
             metric_name: metric_value,
-            'Full Path': os.path.abspath(csv_file),
+            'Path': os.path.relpath(csv_file),
             **{k: int(v) for k, v in env_vars.items()}
         }
         
@@ -134,7 +133,7 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
     metric_column = None
     if results:
         for key in results[0].keys():
-            if key not in ['Directory', 'Full Path'] and key not in env_var_keys and not key.startswith('Row '):
+            if key not in ['Directory', 'Path'] and key not in env_var_keys and not key.startswith('Row '):
                 metric_column = key
                 break
     
@@ -144,7 +143,7 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
     if show_env_vars:
         column_headers += env_var_keys
     if show_path:
-        column_headers.append('Full Path')
+        column_headers.append('Path')
     if show_instructions:
         column_headers += [f'Row {i}' for i in range(3, 7)]
     return df, list(column_headers)
