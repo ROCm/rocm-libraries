@@ -574,7 +574,7 @@ amdhsa.kernels:
             //         subset, ldsWithOffset->expression() + Expression::literal(i * 16), m_context);
             // }
 
-            // co_yield m_context->mem()->barrier({});
+            co_yield m_context->mem()->barrier({});
 
             for(int i = 0; i < ITERS; ++i)
             {
