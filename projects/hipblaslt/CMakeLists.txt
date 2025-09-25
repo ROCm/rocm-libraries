@@ -305,7 +305,15 @@ endif()
 
 if(HIPBLASLT_ENABLE_HOST)
     # work around code object stripping failure if using /usr/bin/strip
-    set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /opt/rocm/llvm/bin/llvm-strip") # need to generalize this
+    find_program(LLVM_STRIP 
+        NAMES llvm-strip
+        PATH_SUFFIXES lib/llvm/bin llvm/bin bin
+    )
+    if(LLVM_STRIP)
+        set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${LLVM_STRIP}")
+    else()
+        message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
+    endif()
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
     install(
