@@ -182,7 +182,7 @@ public:
 
             for(int64_t y = 0; y < kernelHeight; ++y)
             {
-                int64_t hTmp = hiIdx + padH - (y * dilationH);
+                auto hTmp = hiIdx + padH - (y * dilationH);
                 auto ho = hTmp / strideH;
 
                 if(hTmp % strideH != 0 || ho < 0 || ho >= outputHeight)
@@ -226,6 +226,100 @@ public:
             std::thread::hardware_concurrency());
 
         gradInput.memory().markHostModified();
+    }
+
+    static void convBwdWeight(const TensorBase<InputDataType>& input,
+                              TensorBase<InputDataType>& weight,
+                              const TensorBase<InputDataType>& gradOutput,
+                              const std::vector<int64_t>& strides,
+                              const std::vector<int64_t>& dilations,
+                              const std::vector<int64_t>& padding)
+    {
+        validateInput(input, weight, gradOutput, strides, dilations, padding);
+
+        // Extract dimensions - NCHW format for input/output, [G*K][C][Y][X] for weight (4D flattened)
+        const auto& inputDims = input.dims();
+        const auto& weightDims = weight.dims();
+        const auto& outputDims = gradOutput.dims();
+
+        int64_t nBatch = outputDims[0];
+        int64_t outputHeight = outputDims[2];
+        int64_t outputWidth = outputDims[3];
+
+        int64_t totalOutputChannels = weightDims[0]; // G * K (flattened)
+        int64_t channelsPerGroup = weightDims[1]; // C
+        int64_t kernelHeight = weightDims[2]; // Y
+        int64_t kernelWidth = weightDims[3]; // X
+
+        int64_t inputHeight = inputDims[2];
+        int64_t inputWidth = inputDims[3];
+
+        // Calculate groups from input/weight channel relationship
+        int64_t nInputChannels = inputDims[1];
+        int64_t nGroups = nInputChannels / channelsPerGroup; // G
+        int64_t outputChannelsPerGroup = totalOutputChannels / nGroups; // K
+
+        // Extract convolution parameters
+        int64_t strideH = strides[0];
+        int64_t strideW = strides[1];
+        int64_t dilationH = dilations[0];
+        int64_t dilationW = dilations[1];
+        int64_t padH = padding[0];
+        int64_t padW = padding[1];
+
+        auto convolutionFunc = [&](auto g, auto k, auto c, auto y, auto x) {
+            auto gIdx = static_cast<int64_t>(g);
+            auto kIdx = static_cast<int64_t>(k);
+            auto cIdx = static_cast<int64_t>(c);
+            auto yIdx = static_cast<int64_t>(y);
+            auto xIdx = static_cast<int64_t>(x);
+
+            AccumulatorType vAcc = 0;
+
+            for(int64_t n = 0; n < nBatch; ++n)
+            {
+                for(int64_t ho = 0; ho < outputHeight; ++ho)
+                {
+                    auto hi = (ho * strideH) + (yIdx * dilationH) - padH;
+
+                    for(int64_t wo = 0; wo < outputWidth; ++wo)
+                    {
+                        auto wi = (wo * strideW) + (xIdx * dilationW) - padW;
+
+                        if(hi < 0 || hi >= inputHeight || wi < 0 || wi >= inputWidth)
+                        {
+                            continue;
+                        }
+
+                        auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + kIdx;
+
+                        InputDataType vOut = gradOutput.getHostValue(n, outputChannelIdx, ho, wo);
+
+                        InputDataType vIn
+                            = input.getHostValue(n, (gIdx * channelsPerGroup) + cIdx, hi, wi);
+
+                        vAcc += static_cast<AccumulatorType>(vOut)
+                                * static_cast<AccumulatorType>(vIn);
+                    }
+                }
+            }
+
+            weight.setHostValue(static_cast<InputDataType>(vAcc),
+                                (gIdx * outputChannelsPerGroup) + kIdx,
+                                cIdx,
+                                yIdx,
+                                xIdx);
+        };
+
+        hipdnn_sdk::test_utilities::makeParallelTensorFunctor(convolutionFunc,
+                                                              nGroups,
+                                                              outputChannelsPerGroup,
+                                                              channelsPerGroup,
+                                                              kernelHeight,
+                                                              kernelWidth)(
+            std::thread::hardware_concurrency());
+
+        weight.memory().markHostModified();
     }
 
 private:

@@ -1112,3 +1112,147 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataPaddingZero)
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 1), 7.0f); // 3 + 4
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 2), 4.0f);
 }
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionWrwBasic)
+{
+    // Minimal sanity test for convBwdWeight using smallest possible tensor sizes
+    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
+    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
+    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
+    Tensor<float> inputTensor({1, 1, 2, 2});
+    Tensor<float> weightTensor({1, 1, 1, 1});
+    Tensor<float> gradOutputTensor({1, 1, 2, 2});
+
+    // Set input values: [1, 2; 3, 4]
+    inputTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    inputTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    inputTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    inputTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    // Set gradient output values: [0.5, 0.5; 0.5, 0.5]
+    gradOutputTensor.setHostValue(0.5f, 0, 0, 0, 0);
+    gradOutputTensor.setHostValue(0.5f, 0, 0, 0, 1);
+    gradOutputTensor.setHostValue(0.5f, 0, 0, 1, 0);
+    gradOutputTensor.setHostValue(0.5f, 0, 0, 1, 1);
+
+    // Initialize weight to zero
+    weightTensor.setHostValue(0.0f, 0, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdWeight(
+        inputTensor, weightTensor, gradOutputTensor, strides, dilations, padding);
+
+    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
+    EXPECT_FLOAT_EQ(weightTensor.getHostValue(0, 0, 0, 0), 5.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp16, ConvolutionWrwBasic)
+{
+    // Minimal sanity test for convBwdWeight using smallest possible tensor sizes
+    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
+    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
+    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
+    Tensor<half> inputTensor({1, 1, 2, 2});
+    Tensor<half> weightTensor({1, 1, 1, 1});
+    Tensor<half> gradOutputTensor({1, 1, 2, 2});
+
+    // Set input values: [1, 2; 3, 4]
+    inputTensor.setHostValue(1.0_h, 0, 0, 0, 0);
+    inputTensor.setHostValue(2.0_h, 0, 0, 0, 1);
+    inputTensor.setHostValue(3.0_h, 0, 0, 1, 0);
+    inputTensor.setHostValue(4.0_h, 0, 0, 1, 1);
+
+    // Set gradient output values: [0.5, 0.5; 0.5, 0.5]
+    gradOutputTensor.setHostValue(0.5_h, 0, 0, 0, 0);
+    gradOutputTensor.setHostValue(0.5_h, 0, 0, 0, 1);
+    gradOutputTensor.setHostValue(0.5_h, 0, 0, 1, 0);
+    gradOutputTensor.setHostValue(0.5_h, 0, 0, 1, 1);
+
+    // Initialize weight to zero
+    weightTensor.setHostValue(0.0_h, 0, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<half, float>::convBwdWeight(
+        inputTensor, weightTensor, gradOutputTensor, strides, dilations, padding);
+
+    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
+    EXPECT_FLOAT_EQ(weightTensor.getHostValue(0, 0, 0, 0), 5.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionWrwBasic)
+{
+    // Minimal sanity test for convBwdWeight using smallest possible tensor sizes
+    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
+    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
+    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
+    Tensor<hip_bfloat16> inputTensor({1, 1, 2, 2});
+    Tensor<hip_bfloat16> weightTensor({1, 1, 1, 1});
+    Tensor<hip_bfloat16> gradOutputTensor({1, 1, 2, 2});
+
+    // Set input values: [1, 2; 3, 4]
+    inputTensor.setHostValue(1.0_bf, 0, 0, 0, 0);
+    inputTensor.setHostValue(2.0_bf, 0, 0, 0, 1);
+    inputTensor.setHostValue(3.0_bf, 0, 0, 1, 0);
+    inputTensor.setHostValue(4.0_bf, 0, 0, 1, 1);
+
+    // Set gradient output values: [0.5, 0.5; 0.5, 0.5]
+    gradOutputTensor.setHostValue(0.5_bf, 0, 0, 0, 0);
+    gradOutputTensor.setHostValue(0.5_bf, 0, 0, 0, 1);
+    gradOutputTensor.setHostValue(0.5_bf, 0, 0, 1, 0);
+    gradOutputTensor.setHostValue(0.5_bf, 0, 0, 1, 1);
+
+    // Initialize weight to zero
+    weightTensor.setHostValue(0.0_bf, 0, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<hip_bfloat16, float>::convBwdWeight(
+        inputTensor, weightTensor, gradOutputTensor, strides, dilations, padding);
+
+    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
+    EXPECT_FLOAT_EQ(weightTensor.getHostValue(0, 0, 0, 0), 5.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionWrwBasic)
+{
+    // Minimal sanity test for convBwdWeight using smallest possible tensor sizes
+    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
+    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
+    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
+    Tensor<double> inputTensor({1, 1, 2, 2});
+    Tensor<double> weightTensor({1, 1, 1, 1});
+    Tensor<double> gradOutputTensor({1, 1, 2, 2});
+
+    // Set input values: [1, 2; 3, 4]
+    inputTensor.setHostValue(1.0, 0, 0, 0, 0);
+    inputTensor.setHostValue(2.0, 0, 0, 0, 1);
+    inputTensor.setHostValue(3.0, 0, 0, 1, 0);
+    inputTensor.setHostValue(4.0, 0, 0, 1, 1);
+
+    // Set gradient output values: [0.5, 0.5; 0.5, 0.5]
+    gradOutputTensor.setHostValue(0.5, 0, 0, 0, 0);
+    gradOutputTensor.setHostValue(0.5, 0, 0, 0, 1);
+    gradOutputTensor.setHostValue(0.5, 0, 0, 1, 0);
+    gradOutputTensor.setHostValue(0.5, 0, 0, 1, 1);
+
+    // Initialize weight to zero
+    weightTensor.setHostValue(0.0, 0, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<double, double>::convBwdWeight(
+        inputTensor, weightTensor, gradOutputTensor, strides, dilations, padding);
+
+    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
+    EXPECT_FLOAT_EQ(weightTensor.getHostValue(0, 0, 0, 0), 5.0);
+}
