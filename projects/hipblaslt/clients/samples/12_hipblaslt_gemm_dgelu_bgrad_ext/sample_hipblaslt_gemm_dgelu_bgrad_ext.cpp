@@ -144,12 +144,14 @@ void simpleGemmDgeluBgradExt(hipblasLtHandle_t   handle,
 
     // In this sample, the workspace is already allocated with max_workspace_size
     // If not, calculate the needed workspace_size and allocate d_workspace here
+    // Then initialize gemm with calculated d_workspace and workspace_size
     // uint64_t workspace_size = 0;
     // for(int i = 0; i < returnedAlgoCount; i++)
     //     workspace_size = max(workspace_size, heuristicResult[i].workspaceSize);
     // CHECK_HIP_ERRORhipMalloc(&d_workspace, workspace_size));
 
     // Make sure to initialize every time when algo changes
+    gemm.setMaxWorkspaceBytes(max_workspace_size);
     CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
     CHECK_HIPBLASLT_ERROR(gemm.run(stream));
     CHECK_HIP_ERROR(hipFree(d_aux_buffer));
