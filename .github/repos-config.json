@@ -175,6 +175,14 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true
+    },
+    {
+      "name": "hipdnn",
+      "url": "ROCm/hipDNN",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     }
   ]
 }
