@@ -42,6 +42,9 @@ coverage:
       hipFFT:
         flags: [hipFFT]
         target: 80%
+      rocFFT:
+        flags: [rocFFT]
+        target: 80%
       Tensile:
         flags: [Tensile]
         target: 80%
