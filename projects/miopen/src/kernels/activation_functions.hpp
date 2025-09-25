@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,7 @@
 // TODO: this should also be deprecated
 // There is a system in configurations.hpp
 #if MIOPEN_USE_FP16 == 1
-#define FP_TYPE half
+#define FP_TYPE _Float16
 #define FP_TYPE_PREC float
 #define EPSILON static_cast<FP_TYPE>(0.0001)
 #ifndef HALF_MAX
@@ -106,9 +106,9 @@
 #define FOUR 4
 #define EIGHT 8
 
-#define FP_TYPE2 PPCAT(FP_TYPE, TWO)
-#define FP_TYPE4 PPCAT(FP_TYPE, FOUR)
-#define FP_TYPE8 PPCAT(FP_TYPE, EIGHT)
+#define FP_TYPE2 miopen::mapped_vector_type<FP_TYPE, TWO>::type
+#define FP_TYPE4 miopen::mapped_vector_type<FP_TYPE, FOUR>::type
+#define FP_TYPE8 miopen::mapped_vector_type<FP_TYPE, EIGHT>::type
 #define FP_TYPE_PREC2 PPCAT(FP_TYPE_PREC, TWO)
 #define FP_TYPE_PREC4 PPCAT(FP_TYPE_PREC, FOUR)
 #define FP_TYPE_PREC8 PPCAT(FP_TYPE_PREC, EIGHT)
@@ -126,6 +126,9 @@
 #define MIOPEN_NEURON_TOTAL 10
 
 #define kBNLL_THRESHOLD static_cast<FP_TYPE>(50.0)
+
+#include "vector_types.hpp"
+#include "miopen_math.hpp"
 
 template <typename T, size_t N>
 __forceinline__ __device__ void ActivationFunction_PassThru(T (&__restrict__ res)[N],
@@ -163,7 +166,7 @@ __forceinline__ __device__ void ActivationFunction_Sigmoid(T (&__restrict__ res)
     for(uint i = 0; i < N; ++i)
     {
         // y = 1/(1 + exp(-x))
-        res[i] = static_cast<T>(1) / (static_cast<T>(1) + exp(-data[i]));
+        res[i] = static_cast<T>(1) / (static_cast<T>(1) + miopen::exp(-data[i]));
     }
 }
 
@@ -177,7 +180,7 @@ __forceinline__ __device__ void ActivationFunction_TanH(T (&__restrict__ res)[N]
     for(uint i = 0; i < N; ++i)
     {
         // y = beta * tanh(alpha * x)
-        res[i] = beta * tanh(alpha * data[i]);
+        res[i] = beta * miopen::tanh(alpha * data[i]);
     }
 }
 
@@ -190,7 +193,7 @@ __forceinline__ __device__ void ActivationFunction_Abs(T (&__restrict__ res)[N],
 {
     for(uint i = 0; i < N; ++i)
     {
-        res[i] = fabs(data[i]);
+        res[i] = miopen::fabs(data[i]);
     }
 }
 
@@ -216,7 +219,7 @@ __forceinline__ __device__ void ActivationFunction_Sqrt(T (&__restrict__ res)[N]
 {
     for(uint i = 0; i < N; ++i)
     {
-        res[i] = sqrt(data[i]);
+        res[i] = miopen::sqrt(data[i]);
     }
 }
 
@@ -244,7 +247,7 @@ __forceinline__ __device__ void ActivationFunction_Power(T (&__restrict__ res)[N
     {
         // y = (alpha + beta * x ) ^ gamma
         T arg  = alpha + data[i] * beta;
-        res[i] = arg <= static_cast<T>(EPSILON) ? static_cast<T>(0) : pow(arg, gamma);
+        res[i] = arg <= static_cast<T>(EPSILON) ? static_cast<T>(0) : miopen::pow(arg, gamma);
     }
 }
 
@@ -258,8 +261,8 @@ __forceinline__ __device__ void ActivationFunction_BNLL(T (&__restrict__ res)[N]
     for(uint i = 0; i < N; ++i)
     {
         //	y = log(1 + exp(x))
-        res[i] = (data[i] > 0) ? (data[i] + log(static_cast<T>(1) + exp(-data[i])))
-                               : log(static_cast<T>(1) + exp(data[i]));
+        res[i] = (data[i] > 0) ? (data[i] + miopen::log(static_cast<T>(1) + miopen::exp(-data[i])))
+                               : miopen::log(static_cast<T>(1) + miopen::exp(data[i]));
     }
 }
 
@@ -285,7 +288,7 @@ __forceinline__ __device__ void ActivationFunction_Clipped_ReLU(T (&__restrict__
 {
     for(uint i = 0; i < N; ++i)
     {
-        res[i] = fmin(static_cast<T>(alpha), fmax(static_cast<T>(data[i]), 0));
+        res[i] = miopen::fmin(static_cast<T>(alpha), miopen::fmax(static_cast<T>(data[i]), 0));
     }
 }
 
@@ -298,7 +301,7 @@ __forceinline__ __device__ void ActivationFunction_ELU(T (&__restrict__ res)[N],
 {
     for(uint i = 0; i < N; ++i)
     {
-        res[i] = (data[i] > 0) ? data[i] : (alpha * (exp(data[i]) - static_cast<T>(1)));
+        res[i] = (data[i] > 0) ? data[i] : (alpha * (miopen::exp(data[i]) - static_cast<T>(1)));
     }
 }
 
@@ -399,7 +402,7 @@ __forceinline__ __device__ void ActivationFunction_TanH_Diff(T (&__restrict__ bo
     {
         // dy/dx = alpha * (beta - y^2 / beta)
         T y         = top_data[i];
-        bot_diff[i] = fabs(beta) <= static_cast<T>(EPSILON)
+        bot_diff[i] = miopen::fabs(beta) <= static_cast<T>(EPSILON)
                           ? static_cast<T>(0)
                           : (top_diff[i] * alpha * (beta - y * y / beta));
     }
@@ -473,7 +476,7 @@ __forceinline__ __device__ void ActivationFunction_BNLL_Diff(T (&__restrict__ bo
     {
         // y = (log(1 + exp(x)))
         // dy/dx = 1/ (1 + exp(-x))
-        T expval    = exp(fmin(static_cast<T>(bot_data[i]), static_cast<T>(kBNLL_THRESHOLD)));
+        T expval = miopen::exp(fmin(static_cast<T>(bot_data[i]), static_cast<T>(kBNLL_THRESHOLD)));
         bot_diff[i] = top_diff[i] * expval / (expval + static_cast<T>(1));
     }
 }
