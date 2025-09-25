@@ -30,8 +30,8 @@ inline std::unordered_map<BatchnormSignatureRegistryKey,
     static std::unordered_map<BatchnormSignatureRegistryKey,
                               std::unique_ptr<IGenericBatchnormExecutor>,
                               BatchnormSignatureRegistryKeyHash>
-        registry;
-    return registry; //
+        s_registry;
+    return s_registry; //
 }
 
 /**
@@ -49,7 +49,7 @@ inline std::unordered_map<BatchnormSignatureRegistryKey,
  *       the registration for each index in the sequence
  */
 template <std::size_t... Is>
-void registerBatchnormExecutors(std::index_sequence<Is...>)
+void registerBatchnormExecutors([[maybe_unused]] std::index_sequence<Is...> sequence)
 {
     ((batchnormRegistry()[ALL_BATCHNORM_SIGNATURES[Is]]
       = std::make_unique<BatchnormExecutor<ALL_BATCHNORM_SIGNATURES[Is].inputDataType,
@@ -71,7 +71,7 @@ struct BatchnormRegistryInitializer
     }
 };
 
-inline BatchnormRegistryInitializer _batchnormRegistryInitializer;
+inline BatchnormRegistryInitializer batchnormRegistryInitializer;
 
 }
 }

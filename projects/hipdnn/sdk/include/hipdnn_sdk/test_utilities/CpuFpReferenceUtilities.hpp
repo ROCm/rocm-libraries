@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <numeric>
 #include <thread>
 #include <tuple>
@@ -29,9 +30,25 @@ struct JoinableThread : std::thread
     ~JoinableThread()
     {
         if(this->joinable())
+        {
             this->join();
+        }
     }
 };
+
+template <typename F, typename T, std::size_t... Is>
+static auto
+    callFuncUnpackArgsImpl(F f, T args, [[maybe_unused]] std::index_sequence<Is...> sequence)
+{
+    return f(std::get<Is>(args)...);
+}
+
+template <typename F, typename T>
+static auto callFuncUnpackArgs(F f, T args)
+{
+    constexpr std::size_t N = std::tuple_size<T>{};
+    return callFuncUnpackArgsImpl(f, args, std::make_index_sequence<N>{});
+}
 
 template <typename F>
 struct ParallelTensorFunctorDynamic
@@ -39,13 +56,12 @@ struct ParallelTensorFunctorDynamic
     F _func;
     std::vector<std::size_t> _lengths;
     std::vector<std::size_t> _strides;
-    std::size_t _totalElements;
+    std::size_t _totalElements{1};
 
     ParallelTensorFunctorDynamic(F f, const std::vector<int64_t>& dimensions)
         : _func(f)
         , _lengths(dimensions.begin(), dimensions.end())
         , _strides(dimensions.size())
-        , _totalElements(1)
     {
         if(_lengths.empty())
         {
@@ -53,11 +69,8 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        _strides.back() = 1;
-        for(std::size_t i = _lengths.size() - 1; i > 0; --i)
-        {
-            _strides[i - 1] = _strides[i] * _lengths[i];
-        }
+        auto generatedStrides = hipdnn_sdk::utilities::generateStrides(dimensions);
+        _strides.assign(generatedStrides.begin(), generatedStrides.end());
         _totalElements = _strides[0] * _lengths[0];
     }
 

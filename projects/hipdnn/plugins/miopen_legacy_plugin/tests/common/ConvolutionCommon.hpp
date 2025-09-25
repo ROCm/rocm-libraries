@@ -77,7 +77,7 @@ struct ConvTestCase
         for(size_t i = 0; i < spatialDims; ++i)
         {
             auto paddedInputSize = _xDims[2 + i] + _convPrePadding[i] + _convPostPadding[i];
-            auto effectiveKernelSize = _convDilation[i] * (_wDims[2 + i] - 1) + 1;
+            auto effectiveKernelSize = (_convDilation[i] * (_wDims[2 + i] - 1)) + 1;
             auto dimOut = ((paddedInputSize - effectiveKernelSize) / _convStride[i]) + 1;
             outputDims.push_back(dimOut);
         }

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <stdexcept>
 #include <vector>
@@ -15,128 +16,77 @@ namespace test_utilities
 
 using namespace hipdnn_sdk::utilities;
 
-template <class DataType>
+template <class OutputType, class... InputTypes>
 class CpuDeviceExecutor
 {
 public:
-    template <typename Op>
-    void executeBinaryBroadcast(const std::vector<const TensorBase<DataType>*>& inputs,
-                                TensorBase<DataType>& output,
+    template <typename Op, typename Input1Type, typename Input2Type>
+    void executeBinaryBroadcast(const TensorBase<Input1Type>& input1,
+                                const TensorBase<Input2Type>& input2,
+                                TensorBase<OutputType>& output,
                                 Op op)
     {
-        if(inputs.size() != 2)
+        const auto& input1Dims = input1.dims();
+        const auto& input2Dims = input2.dims();
+        const auto& outputDims = output.dims();
+
+        // Validate broadcast compatibility using existing utility function
+        if(!areDimensionsBroadcastCompatible(input1Dims, outputDims))
         {
-            throw std::runtime_error("Binary operation requires exactly 2 input tensors.");
+            throw std::runtime_error("Input1 dimensions are not broadcast compatible with output");
         }
 
-        for(size_t i = 0; i < inputs.size(); ++i)
+        if(!areDimensionsBroadcastCompatible(input2Dims, outputDims))
         {
-            if(inputs[i] == nullptr)
-            {
-                throw std::runtime_error("Input tensor " + std::to_string(i) + " is null.");
-            }
+            throw std::runtime_error("Input2 dimensions are not broadcast compatible with output");
         }
 
-        const auto& input1 = *inputs[0];
-        const auto& input2 = *inputs[1];
-
-        std::vector<std::vector<int64_t>> input_shapes = {input1.dims(), input2.dims()};
-
-        auto broadcast_shape = computeBroadcastShape(input_shapes);
-
-        if(output.dims() != broadcast_shape)
-        {
-            throw std::runtime_error("Output shape doesn't match computed broadcast shape");
-        }
+        // Use output dimensions as the broadcast shape
+        const auto& broadcastShape = outputDims;
 
         auto func = [&](const std::vector<int64_t>& indices) {
-            auto input1_idx = getBroadcastableIndex(indices, input1.dims());
-            auto input2_idx = getBroadcastableIndex(indices, input2.dims());
+            // Get broadcasted indices for each input
+            auto input1Indices = getBroadcastableIndex(indices, input1Dims);
+            auto input2Indices = getBroadcastableIndex(indices, input2Dims);
 
-            auto input1Val = input1.getHostValue(input1_idx);
-            auto input2Val = input2.getHostValue(input2_idx);
+            // Get values from input tensors and apply operation
+            auto input1Value = input1.getHostValue(input1Indices);
+            auto input2Value = input2.getHostValue(input2Indices);
 
-            output.setHostValue(static_cast<DataType>(op(input1Val, input2Val)), indices);
+            // Apply operation and set output
+            auto result = op(input1Value, input2Value);
+            output.setHostValue(static_cast<OutputType>(result), indices);
         };
 
-        auto parallelFunc = makeParallelTensorFunctor(func, broadcast_shape);
+        auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
 
-    void markOutputModified(TensorBase<DataType>& output)
+    void markOutputModified(TensorBase<OutputType>& output)
     {
         output.memory().markHostModified();
     }
 
 private:
-    static std::vector<int64_t>
-        computeBroadcastShape(const std::vector<std::vector<int64_t>>& input_shapes)
+    static std::vector<int64_t> getBroadcastableIndex(const std::vector<int64_t>& broadcastIndex,
+                                                      const std::vector<int64_t>& tensorDims)
     {
-        if(input_shapes.empty())
+        if(broadcastIndex.size() < tensorDims.size())
         {
-            throw std::runtime_error("Cannot compute broadcast shape for empty input shapes");
+            throw std::runtime_error("Broadcast index has fewer dimensions than tensor");
         }
 
-        size_t max_dims = 0;
-        for(const auto& shape : input_shapes)
+        std::vector<int64_t> broadcastedIndex(tensorDims.size());
+
+        size_t dimOffset = broadcastIndex.size() - tensorDims.size();
+
+        for(size_t i = 0; i < tensorDims.size(); ++i)
         {
-            max_dims = std::max(max_dims, shape.size());
+            size_t broadcastDimIdx = dimOffset + i;
+            broadcastedIndex[i] = (tensorDims[i] == 1) ? 0 : broadcastIndex[broadcastDimIdx];
         }
 
-        std::vector<int64_t> broadcast_shape(max_dims, 1);
-
-        for(size_t dim = 0; dim < max_dims; ++dim)
-        {
-            int64_t max_size = 1;
-
-            for(const auto& shape : input_shapes)
-            {
-                int64_t dim_size = 1;
-                if(dim < shape.size())
-                {
-                    size_t shape_dim_idx = shape.size() - 1 - dim;
-                    dim_size = shape[shape_dim_idx];
-                }
-
-                if(max_size == 1)
-                {
-                    max_size = dim_size;
-                }
-                else if(dim_size != 1 && dim_size != max_size)
-                {
-                    throw std::runtime_error("Cannot broadcast shapes: incompatible dimensions");
-                }
-                else if(dim_size > max_size)
-                {
-                    max_size = dim_size;
-                }
-            }
-
-            broadcast_shape[max_dims - 1 - dim] = max_size;
-        }
-
-        return broadcast_shape;
-    }
-
-    static std::vector<int64_t> getBroadcastableIndex(const std::vector<int64_t>& output_index,
-                                                      const std::vector<int64_t>& tensor_dims)
-    {
-        if(output_index.size() < tensor_dims.size())
-        {
-            throw std::runtime_error("Output index has fewer dimensions than tensor");
-        }
-
-        std::vector<int64_t> broadcasted_index(tensor_dims.size());
-
-        size_t dim_offset = output_index.size() - tensor_dims.size();
-
-        for(size_t i = 0; i < tensor_dims.size(); ++i)
-        {
-            size_t output_dim_idx = dim_offset + i;
-            broadcasted_index[i] = (tensor_dims[i] == 1) ? 0 : output_index[output_dim_idx];
-        }
-
-        return broadcasted_index;
+        return broadcastedIndex;
     }
 };
 
