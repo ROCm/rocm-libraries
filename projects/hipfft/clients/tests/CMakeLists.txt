@@ -312,4 +312,11 @@ if (BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_COV} show -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata -format=html -output-dir=coverage-report
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
+
+  add_custom_target(
+    export_coverage_report
+    COMMAND ${LLVM_COV} export -object ./library/src/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata --format=lcov > ./coverage-report/coverage.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
 endif()
