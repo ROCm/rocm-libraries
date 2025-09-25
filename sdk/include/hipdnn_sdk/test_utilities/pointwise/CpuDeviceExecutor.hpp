@@ -22,9 +22,9 @@ class CpuDeviceExecutor
 public:
     template <typename Op, typename Input1Type, typename Input2Type>
     void executeBinaryBroadcast(const TensorBase<Input1Type>& input1,
-                               const TensorBase<Input2Type>& input2,
-                               TensorBase<OutputType>& output,
-                               Op op)
+                                const TensorBase<Input2Type>& input2,
+                                TensorBase<OutputType>& output,
+                                Op op)
     {
         const auto& input1_dims = input1.dims();
         const auto& input2_dims = input2.dims();
@@ -61,7 +61,6 @@ public:
         auto parallelFunc = makeParallelTensorFunctor(func, broadcast_shape);
         parallelFunc();
     }
-
 
     void markOutputModified(TensorBase<OutputType>& output)
     {

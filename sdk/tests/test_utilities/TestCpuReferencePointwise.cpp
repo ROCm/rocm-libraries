@@ -5,8 +5,8 @@
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/test_utilities/TestConstants.hpp>
+#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
@@ -44,7 +44,8 @@ protected:
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_1));
         input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_2));
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
@@ -63,7 +64,8 @@ protected:
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_5));
         input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_2));
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::SUB, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::SUB, output, input1, input2);
 
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
@@ -89,12 +91,12 @@ protected:
         input2.setHostValue(static_cast<Input2Type>(std::cos(1.0f)), 0, 0, 1, 0);
         input2.setHostValue(static_cast<Input2Type>(std::tan(1.0f)), 0, 0, 1, 1);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor with computed results
         Tensor<OutputType> expected({1, 1, 2, 2});
-        expected.setHostValue(
-            static_cast<OutputType>(PI + LN_2), 0, 0, 0, 0); // π + ln(2)
+        expected.setHostValue(static_cast<OutputType>(PI + LN_2), 0, 0, 0, 0); // π + ln(2)
         expected.setHostValue(
             static_cast<OutputType>(E + std::sin(1.0f)), 0, 0, 0, 1); // e + sin(1)
         expected.setHostValue(
@@ -114,8 +116,7 @@ protected:
         Tensor<OutputType> output({1, 1, 2, 2});
 
         input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2 * PI), 0, 0, 0, 0); // 2π
-        input1.setHostValue(
-            static_cast<Input1Type>(E * E), 0, 0, 0, 1); // e²
+        input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 1); // e²
         input1.setHostValue(static_cast<Input1Type>(SQRT_5), 0, 0, 1, 0); // √5
         input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // Simple test value
 
@@ -124,24 +125,21 @@ protected:
         input2.setHostValue(static_cast<Input2Type>(SQRT_3), 0, 0, 1, 0); // √3
         input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // Simple test value
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::SUB, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::SUB, output, input1, input2);
 
         // Create expected tensor with computed results
         Tensor<OutputType> expected({1, 1, 2, 2});
-        expected.setHostValue(
-            static_cast<OutputType>((TEST_VALUE_2 * PI) - (PI / TEST_VALUE_2)),
-            0,
-            0,
-            0,
-            0); // 2π - π/2 = 3π/2
-        expected.setHostValue(static_cast<OutputType>((E * E) - E),
+        expected.setHostValue(static_cast<OutputType>((TEST_VALUE_2 * PI) - (PI / TEST_VALUE_2)),
                               0,
                               0,
                               0,
+                              0); // 2π - π/2 = 3π/2
+        expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
                               1); // e² - e
+        expected.setHostValue(static_cast<OutputType>(SQRT_5 - SQRT_3), 0, 0, 1, 0); // √5 - √3
         expected.setHostValue(
-            static_cast<OutputType>(SQRT_5 - SQRT_3), 0, 0, 1, 0); // √5 - √3
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
+            static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
 
         auto tolerance = getTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
@@ -157,7 +155,8 @@ protected:
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_1));
         input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_2));
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({4, 3});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
@@ -176,7 +175,8 @@ protected:
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2_5));
         input2.fillWithValue(static_cast<Input2Type>(TEST_VALUE_1_5));
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({2, 3, 10});
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_4));
@@ -192,17 +192,14 @@ protected:
         Tensor<Input2Type> input2({1, 1, 1, 1});
         Tensor<OutputType> output({1, 1, 1, 1});
 
-        input1.setHostValue(
-            static_cast<Input1Type>(E * E), 0, 0, 0, 0); // e²
+        input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 0); // e²
         input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 0); // e
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::SUB, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::SUB, output, input1, input2);
 
         Tensor<OutputType> expected({1, 1, 1, 1});
-        expected.setHostValue(static_cast<OutputType>((E * E) - E),
-                              0,
-                              0,
-                              0,
+        expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
                               0); // e² - e
 
         auto tolerance = getTolerance();
@@ -219,10 +216,12 @@ protected:
         input1.setHostValue(static_cast<Input1Type>(PRECISION_TEST_A), 0, 0, 0, 0);
         input2.setHostValue(static_cast<Input2Type>(PRECISION_TEST_B), 0, 0, 0, 0);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         Tensor<OutputType> expected({1, 1, 1, 1});
-        expected.setHostValue(static_cast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
+        expected.setHostValue(
+            static_cast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
         auto tolerance = getTolerance();
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
@@ -241,7 +240,8 @@ protected:
             input2.setHostValue(static_cast<Input2Type>(static_cast<float>(i * 2)), i);
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: [1,2,3,4,5] + [0,2,4,6,8] = [1,4,7,10,13]
         Tensor<OutputType> expected({5});
@@ -267,7 +267,8 @@ protected:
         {
             for(int n = 0; n < 4; ++n)
             {
-                input1.setHostValue(static_cast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
+                input1.setHostValue(
+                    static_cast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
             }
         }
 
@@ -277,7 +278,8 @@ protected:
             input2.setHostValue(static_cast<Input2Type>(static_cast<float>((n + 1) * 100)), n);
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: broadcasting input2[n] to all input1[m,n]
         Tensor<OutputType> expected({3, 4});
@@ -308,7 +310,8 @@ protected:
         input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 0, 1, 0); // Channel 1
         input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 0, 2, 0); // Channel 2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::SUB, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::SUB, output, input1, input2);
 
         // Create expected tensor: broadcasting subtraction
         Tensor<OutputType> expected({2, 3, 4});
@@ -333,7 +336,8 @@ protected:
     void testBroadcast3DImplicitLeading()
     {
         Tensor<Input1Type> input1({2, 3, 4}); // [2,3,4]
-        Tensor<Input2Type> input2({3, 1}); // [3,1] - broadcasts to [2,3,4] (implicit leading dimension)
+        Tensor<Input2Type> input2(
+            {3, 1}); // [3,1] - broadcasts to [2,3,4] (implicit leading dimension)
         Tensor<OutputType> output({2, 3, 4}); // Output: [2,3,4]
 
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_5));
@@ -342,7 +346,8 @@ protected:
         input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2), 1, 0); // Channel 1
         input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3), 2, 0); // Channel 2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::SUB, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::SUB, output, input1, input2);
 
         // Create expected tensor: broadcasting subtraction with implicit leading dimension
         Tensor<OutputType> expected({2, 3, 4});
@@ -373,11 +378,21 @@ protected:
 
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_1));
 
-        input2.setHostValue(static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10), 0, 1, 0, 0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10), 0, 2, 0, 0); // Channel 2
+        input2.setHostValue(
+            static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
+                            0,
+                            1,
+                            0,
+                            0); // Channel 1
+        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
+                            0,
+                            2,
+                            0,
+                            0); // Channel 2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: broadcasting addition
         Tensor<OutputType> expected({2, 3, 2, 2});
@@ -390,9 +405,11 @@ protected:
                     for(int w = 0; w < 2; ++w)
                     {
                         float input1Val = TEST_VALUE_1;
-                        auto input2Val
-                            = static_cast<float>((static_cast<float>(c) + 1.0f) * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
-                        expected.setHostValue(static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
+                        auto input2Val = static_cast<float>(
+                            (static_cast<float>(c) + 1.0f)
+                            * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
+                        expected.setHostValue(
+                            static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
                 }
             }
@@ -414,7 +431,8 @@ protected:
         {
             for(int h = 0; h < 3; ++h)
             {
-                input1.setHostValue(static_cast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
+                input1.setHostValue(
+                    static_cast<Input1Type>(static_cast<float>((n * 10) + h)), n, 0, h, 0);
             }
         }
 
@@ -422,11 +440,13 @@ protected:
         {
             for(int w = 0; w < 4; ++w)
             {
-                input2.setHostValue(static_cast<Input2Type>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
+                input2.setHostValue(
+                    static_cast<Input2Type>(static_cast<float>((c * 100) + w)), 0, c, 0, w);
             }
         }
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: broadcasting addition
         Tensor<OutputType> expected({2, 2, 3, 4});
@@ -442,7 +462,8 @@ protected:
                         auto input1Val = static_cast<float>((n * 10) + h);
                         // input2[0,c,0,w] broadcasts to input2[n,c,h,w]
                         auto input2Val = static_cast<float>((c * 100) + w);
-                        expected.setHostValue(static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
+                        expected.setHostValue(
+                            static_cast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
                 }
             }
@@ -470,11 +491,23 @@ protected:
         input1.fillWithValue(static_cast<Input1Type>(TEST_VALUE_2));
 
         // Set channel-specific values in input2
-        input2.setHostValue(static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0, 0); // Channel 0
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10), 0, 1, 0, 0, 0); // Channel 1
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10), 0, 2, 0, 0, 0); // Channel 2
+        input2.setHostValue(
+            static_cast<Input2Type>(BROADCAST_MULTIPLIER_10), 0, 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_2 * BROADCAST_MULTIPLIER_10),
+                            0,
+                            1,
+                            0,
+                            0,
+                            0); // Channel 1
+        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_3 * BROADCAST_MULTIPLIER_10),
+                            0,
+                            2,
+                            0,
+                            0,
+                            0); // Channel 2
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(PointwiseMode::ADD, output, input1, input2);
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseForward(
+            PointwiseMode::ADD, output, input1, input2);
 
         // Create expected tensor: broadcasting addition
         Tensor<OutputType> expected(outputDims, outputStrides);
@@ -490,7 +523,8 @@ protected:
                         {
                             auto input1Val = TEST_VALUE_2;
                             auto input2Val = static_cast<float>(
-                                (static_cast<float>(c) + 1.0f) * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
+                                (static_cast<float>(c) + 1.0f)
+                                * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                             expected.setHostValue(
                                 static_cast<OutputType>(input1Val + input2Val), n, c, d, h, w);
                         }
@@ -503,7 +537,6 @@ protected:
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected.memory(), output.memory()));
     }
-
 };
 
 using TestTypes = ::testing::Types<float, double, half, hip_bfloat16>;

@@ -5,11 +5,11 @@
 
 #include <algorithm>
 #include <array>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <numeric>
 #include <thread>
 #include <tuple>
 #include <vector>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_sdk
 {

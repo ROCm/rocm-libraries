@@ -17,13 +17,14 @@ class ReferencePointwiseImpl
 public:
     static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
     {
-        return ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::isApplicable(node);
+        return ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::isApplicable(
+            node);
     }
 
-    template<typename... Tensors>
+    template <typename... Tensors>
     static void pointwiseForward(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                TensorBase<OutputType>& output,
-                                Tensors&&... inputs)
+                                 TensorBase<OutputType>& output,
+                                 Tensors&&... inputs)
     {
         ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::pointwiseForward(
             operation, output, std::forward<Tensors>(inputs)...);
@@ -32,7 +33,10 @@ public:
 
 // Generic N-ary type alias for CPU operations
 template <class OutputType, class... InputTypes>
-using CpuReferencePointwiseImpl = ReferencePointwiseImpl<CpuDeviceExecutor<OutputType, InputTypes...>, OutputType, InputTypes...>;
+using CpuReferencePointwiseImpl
+    = ReferencePointwiseImpl<CpuDeviceExecutor<OutputType, InputTypes...>,
+                             OutputType,
+                             InputTypes...>;
 
 } // namespace test_utilities
 } // namespace hipdnn_sdk
