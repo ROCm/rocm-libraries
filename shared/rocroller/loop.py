@@ -86,21 +86,21 @@ def main():
         "--char-limit",
         type=int,
         default=77,
-        help="Minimum character limit for output validation (default: 77)",
+        help="Minimum character limit for output validation",
     )
 
     parser.add_argument(
         "--rocprof-path",
         type=str,
         default="/opt/rocm/bin/rocprofv3",
-        help="Path to rocprofv3 executable (default: /opt/rocm/bin/rocprofv3)",
+        help="Path to rocprofv3 executable",
     )
 
     parser.add_argument(
         "--exe-cmd",
         type=str,
-        default="./test/rocroller-tests --gtest_filter=*GPU_LoopLDSKernel*",
-        help="Executable command to profile (default: rocroller-tests with GPU_KernelTest filter)",
+        default="./test/rocroller-tests --gtest_filter=*GPU_LdsMicrokernel*",
+        help="Executable command to profile",
     )
 
     args = parser.parse_args()
