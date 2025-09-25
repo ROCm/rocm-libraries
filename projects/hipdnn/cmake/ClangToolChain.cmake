@@ -3,12 +3,13 @@
 
 # Platform-specific compiler configuration
 
-# This is where it looks for libs, includes, etc., and installs here.
-set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
-
 include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
 if(UNIX)
+    if(NOT DEFINED ROCM_PATH)
+        set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
+    endif()
+
     # Unix/Linux: Use ROCm LLVM Clang
     set(ROCM_LLVM_BIN_DIR ${ROCM_PATH}/llvm/bin)
     set(ROCM_LLVM_LIB_DIR ${ROCM_PATH}/llvm/lib)

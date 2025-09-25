@@ -7,11 +7,6 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING "Toolchain file")
 
-# Set install prefix to ROCM_PATH on Unix/Linux
-if(NOT WIN32)
-    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
-endif()
-
 set(HIPDNN_VERSION "0.0.1")
 
 if(NOT WIN32)
@@ -27,11 +22,12 @@ project(
     VERSION ${HIPDNN_VERSION}
     LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+if(NOT WIN32)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+endif()
 
-# Define standard install directories (replaces GNUInstallDirs)
-set(CMAKE_INSTALL_LIBDIR "lib" CACHE PATH "Object code libraries")
-set(CMAKE_INSTALL_INCLUDEDIR "include" CACHE PATH "C header files")
+set(CMAKE_CXX_STANDARD 17)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)

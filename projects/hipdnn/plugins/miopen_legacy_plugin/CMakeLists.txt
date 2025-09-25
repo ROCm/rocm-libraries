@@ -7,10 +7,9 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     
-    # Set ROCM_PATH with default value
     set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
     
-    if(EXISTS ${ROCM_PATH}/llvm/bin/clang++)
+    if(EXISTS ${ROCM_PATH}/llvm/bin)
         set(CMAKE_CXX_COMPILER ${ROCM_PATH}/llvm/bin/clang++)
         set(CMAKE_C_COMPILER ${ROCM_PATH}/llvm/bin/clang)
         message(STATUS "Using ROCm Clang compilers from ${ROCM_PATH}/llvm/bin")
@@ -71,15 +70,6 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     
     # Brings in all hipDNN deps
     find_package(hipdnn_frontend CONFIG REQUIRED)
-    
-    # If SDK didn't provide the plugin path variables, set defaults
-    if(NOT DEFINED HIPDNN_PLUGIN_ENGINE_SUBDIR OR "${HIPDNN_PLUGIN_ENGINE_SUBDIR}" STREQUAL "")
-        set(HIPDNN_PLUGIN_ENGINE_SUBDIR "hipdnn_plugins/engines" CACHE STRING "Subdirectory for hipDNN engine plugins")
-    endif()
-    
-    if(NOT DEFINED HIPDNN_INSTALL_PLUGIN_ENGINE_DIR OR "${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}" STREQUAL "")
-        set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Install directory for hipDNN engine plugins")
-    endif()
     
     # Setup testing dependencies for standalone build
     include(Dependencies)
@@ -142,7 +132,6 @@ set_target_properties(miopen_legacy_plugin PROPERTIES
     INSTALL_RPATH "${ROCM_PATH}/lib"
     INSTALL_RPATH_USE_LINK_PATH TRUE
     BUILD_WITH_INSTALL_RPATH TRUE
-    ENABLE_EXPORTS ON  # Enable symbol exports for proper dependency resolution
 )
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
@@ -155,9 +144,7 @@ if(NOT HIP_DNN_SKIP_TESTS)
     add_subdirectory(tests)
 endif()
 
-if(BUILD_PLUGIN_AS_DEPENDENCY AND NOT HIP_DNN_SKIP_TESTS)
-    add_subdirectory(integration_tests)
-elseif(NOT HIP_DNN_SKIP_TESTS AND hipdnn_frontend_FOUND)
+if(NOT HIP_DNN_SKIP_TESTS AND (BUILD_PLUGIN_AS_DEPENDENCY OR hipdnn_frontend_FOUND))
     add_subdirectory(integration_tests)
 endif()
 

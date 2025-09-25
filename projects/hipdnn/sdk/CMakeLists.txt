@@ -81,7 +81,6 @@ configure_package_config_file(
     PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_INSTALL_PLUGIN_ENGINE_DIR
 )
 
-# Export targets for build tree
 export(
     TARGETS hipdnn_sdk FlatBuffers spdlog_header_only nlohmann_json
     FILE "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkTargets.cmake"
@@ -100,12 +99,6 @@ install(
 install(EXPORT hipdnn_sdk_targets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
     FILE hipdnn_sdkTargets.cmake
-)
-
-# Install the generated config file
-install(FILES
-    "${CMAKE_BINARY_DIR}/lib/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
 )
 
 add_subdirectory(tests)
