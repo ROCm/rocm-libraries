@@ -58,9 +58,8 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     
     MakeExecutableRelocatable(miopen_legacy_plugin_tests "$ORIGIN/../lib/hipdnn_plugins/engines")
 else()
-    # For standalone build, set output directory to bin/ and RPATH to find the plugin
+    # For standalone build, set RPATH to find the plugin
     set_target_properties(miopen_legacy_plugin_tests PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
         INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/hipdnn_plugins/engines"
         BUILD_RPATH "${CMAKE_BINARY_DIR}/lib/hipdnn_plugins/engines"
         INSTALL_RPATH_USE_LINK_PATH TRUE

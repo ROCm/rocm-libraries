@@ -34,9 +34,8 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     
     add_integration_test_target(miopen_plugin_integration_test ${CMAKE_CURRENT_BINARY_DIR})
 else()
-    # For standalone build, set output directory to bin/ and RPATH to find installed libraries
+    # For standalone build, set RPATH to find installed libraries
     set_target_properties(miopen_plugin_integration_test PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
         INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
         BUILD_RPATH "${CMAKE_BINARY_DIR}/lib"
         INSTALL_RPATH_USE_LINK_PATH TRUE

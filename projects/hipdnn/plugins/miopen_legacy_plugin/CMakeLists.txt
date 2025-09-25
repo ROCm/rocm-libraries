@@ -27,6 +27,10 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         
     set(CMAKE_CXX_STANDARD 17)
     
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+    
     list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
     
     # Enable testing for standalone build
@@ -140,9 +144,6 @@ set(MIOPEN_LEGACY_PLUGIN_PATH ./hipdnn_plugins/engines/miopen_legacy_plugin CACH
 
 if(NOT HIP_DNN_SKIP_TESTS)
     add_subdirectory(tests)
-endif()
-
-if(NOT HIP_DNN_SKIP_TESTS AND (BUILD_PLUGIN_AS_DEPENDENCY OR hipdnn_frontend_FOUND))
     add_subdirectory(integration_tests)
 endif()
 
