@@ -31,7 +31,6 @@
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "random.hpp"
-#include <algorithm>
 #include <cfloat>
 #include <cstdlib>
 #include <memory>
@@ -45,8 +44,6 @@
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
                               miopenTensorDescriptor_t cosDesc,
-                              miopenTensorDescriptor_t sinDesc,
-                              miopenTensorDescriptor_t yDesc,
                               Tgpu* x,
                               Tgpu* cos,
                               Tgpu* sin,
@@ -80,10 +77,42 @@ int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloRoPEForwardRunHostPar(miopenTensorDescriptor_t xDesc,
+                              miopenTensorDescriptor_t cosDesc,
+                              Tgpu* x,
+                              Tgpu* cos,
+                              Tgpu* sin,
+                              Tcheck* yhost)
+{
+    auto x_dims   = miopen::deref(xDesc).GetLengths();
+    auto cos_dims = miopen::deref(cosDesc).GetLengths();
+    auto input_numel =
+        std::accumulate(x_dims.begin(), x_dims.end(), 1LL, std::multiplies<int64_t>());
+    auto rotary_numel =
+        std::accumulate(cos_dims.begin(), cos_dims.end(), 1LL, std::multiplies<int64_t>());
+
+    int32_t ret = 0;
+
+    par_for(input_numel, [&](std::size_t o) {
+        size_t freq_idx = o % rotary_numel;
+        Tcheck input    = static_cast<Tcheck>(x[o]);
+        Tcheck input_rotate_half =
+            (o % 2 == 0) ? static_cast<Tcheck>(-x[o + 1]) : static_cast<Tcheck>(x[o - 1]);
+
+        Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
+        Tcheck sin_val = static_cast<Tcheck>(sin[freq_idx]);
+
+        Tcheck val = (input * cos_val) + (input_rotate_half * sin_val);
+
+        yhost[o] = val;
+    });
+
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                miopenTensorDescriptor_t cosDesc,
-                               miopenTensorDescriptor_t sinDesc,
-                               miopenTensorDescriptor_t dxDesc,
                                Tgpu* dy,
                                Tgpu* cos,
                                Tgpu* sin,
@@ -114,6 +143,42 @@ int32_t mloRoPEBackwardRunHost(miopenTensorDescriptor_t dyDesc,
 
         dxhost[o] = val;
     }
+
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+int32_t mloRoPEBackwardRunHostPar(miopenTensorDescriptor_t dyDesc,
+                               miopenTensorDescriptor_t cosDesc,
+                               Tgpu* dy,
+                               Tgpu* cos,
+                               Tgpu* sin,
+                               Tcheck* dxhost)
+{
+    auto dy_dims = miopen::deref(dyDesc).GetLengths();
+    auto input_numel =
+        std::accumulate(dy_dims.begin(), dy_dims.end(), 1LL, std::multiplies<int64_t>());
+    auto cos_dims = miopen::deref(cosDesc).GetLengths();
+    auto rotary_numel =
+        std::accumulate(cos_dims.begin(), cos_dims.end(), 1LL, std::multiplies<int64_t>());
+
+    int32_t ret = 0;
+
+    par_for(input_numel, [&](std::size_t o) {
+        size_t freq_idx = o % rotary_numel;
+
+        Tcheck output_grad = static_cast<Tcheck>(dy[o]);
+        Tcheck output_grad_rotate_half =
+            (o % 2 == 0) ? static_cast<Tcheck>(dy[o + 1]) : static_cast<Tcheck>(-dy[o - 1]);
+
+        Tcheck cos_val = static_cast<Tcheck>(cos[freq_idx]);
+        Tcheck sin_val = (freq_idx % 2 == 0) ? static_cast<Tcheck>(sin[freq_idx + 1])
+                                             : static_cast<Tcheck>(sin[freq_idx - 1]);
+
+        Tcheck val = (output_grad * cos_val) + (output_grad_rotate_half * sin_val);
+
+        dxhost[o] = val;
+    });
 
     return ret;
 }
@@ -177,6 +242,7 @@ private:
     std::vector<Tgpu> sin;
     std::vector<Tgpu> y_dx;
     std::vector<Tref> y_dxhost;
+    std::vector<Tref> y_dxhost_par;
 };
 
 template <typename Tgpu, typename Tref>
@@ -253,6 +319,7 @@ int RoPEDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     sin      = std::vector<Tgpu>(sin_sz, Tgpu0val);
     y_dx     = std::vector<Tgpu>(y_dx_sz, Tgpu0val);
     y_dxhost = std::vector<Tref>(y_dx_sz, Tref0ref);
+    y_dxhost_par = std::vector<Tref>(y_dx_sz, Tref0ref);
 
     for(int i = 0; i < x_dy_sz; ++i)
     {
@@ -329,7 +396,20 @@ template <typename Tgpu, typename Tref>
 int RoPEDriver<Tgpu, Tref>::RunForwardCPU()
 {
     mloRoPEForwardRunHost<Tgpu, Tref>(
-        x_dyDesc, cosDesc, sinDesc, y_dxDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
+    mloRoPEForwardRunHostPar<Tgpu, Tref>(
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost_par.data());
+
+    auto error = miopen::rms_range(y_dxhost, y_dxhost_par);
+    const double tolerance = GetTolerance();
+    if(!std::isfinite(error) || error > tolerance)
+    {
+        std::cout << std::string("Forward RoPE FAILED: ") << error << std::endl;
+    }
+    else
+    {
+        printf("Forward RoPE Verifies serial and parallel (err=%f)\n", error);
+    }
 
     return miopenStatusSuccess;
 }
@@ -387,7 +467,20 @@ template <typename Tgpu, typename Tref>
 int RoPEDriver<Tgpu, Tref>::RunBackwardCPU()
 {
     mloRoPEBackwardRunHost<Tgpu, Tref>(
-        x_dyDesc, cosDesc, sinDesc, y_dxDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
+    mloRoPEBackwardRunHostPar<Tgpu, Tref>(
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost_par.data());
+
+    auto error = miopen::rms_range(y_dxhost, y_dxhost_par);
+    const double tolerance = GetTolerance();
+    if(!std::isfinite(error) || error > tolerance)
+    {
+        std::cout << std::string("Backward RoPE FAILED: ") << error << std::endl;
+    }
+    else
+    {
+        printf("Backward RoPE Verifies serial and parallel (err=%f)\n", error);
+    }
 
     return miopenStatusSuccess;
 }
