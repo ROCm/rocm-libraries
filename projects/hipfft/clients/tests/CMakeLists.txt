@@ -73,6 +73,7 @@ set( hipfft-test_source
   accuracy_test_2D.cpp
   accuracy_test_3D.cpp
   accuracy_test_callback.cpp
+  hipfftw_test.cpp
   multi_device_test.cpp
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
@@ -250,6 +251,11 @@ target_link_libraries( hipfft-test
   Threads::Threads
   )
 
+# hipfft-test will opens the hipfftw library but does not link to it
+if( TARGET hipfftw )
+  add_dependencies( hipfft-test hipfftw )
+endif()
+
 if (WIN32)
 
   # Ensure tests run with HIP DLLs and not anything the driver owns
@@ -301,8 +307,8 @@ if (BUILD_CODE_COVERAGE)
     coverage
     DEPENDS code_cov_tests
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipfft-coverage_*.profraw -o ./coverage-report/hipfft.profdata
-    COMMAND ${LLVM_COV} report -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata
-    COMMAND ${LLVM_COV} show -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} report -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata
+    COMMAND ${LLVM_COV} show -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata -format=html -output-dir=coverage-report
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
