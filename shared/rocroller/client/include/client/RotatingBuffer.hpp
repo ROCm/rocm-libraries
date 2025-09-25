@@ -76,26 +76,27 @@ public:
             return;
         }
 
-        // Ensure buffer can hold at least one copy
+        // Total size of one tensor copy
         size_t tensorBytes = m_numElems * sizeof(T);
+
         if(rotatingBufferSizeBytes < tensorBytes)
         {
-            Throw<FatalError>(
-                "RotatingBuffer: rotatingBufferSizeBytes too small to hold one tensor copy");
+            m_rotatingBufferElems = 0; // mark rotation disabled
+            m_buffer              = makeSharedDeviceUninitialized<T>(m_numElems);
+            HIP_CHECK(hipMemcpy(
+                m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
+            return;
         }
 
         // Align rotation buffer to multiples of tensor size
-        size_t alignedBytes = (rotatingBufferSizeBytes / tensorBytes) * tensorBytes;
-        if(alignedBytes < tensorBytes)
-        {
-            Throw<FatalError>("RotatingBuffer: adjusted rotation buffer too small after alignment");
-        }
+        size_t alignedBytes   = (rotatingBufferSizeBytes / tensorBytes) * tensorBytes;
         m_rotatingBufferElems = alignedBytes / sizeof(T);
 
-        // If no room for rotation, just allocate one copy
-        if(m_numElems >= m_rotatingBufferElems)
+        // If still no room for rotation, just allocate one copy
+        if(m_rotatingBufferElems < m_numElems)
         {
-            m_buffer = makeSharedDeviceUninitialized<T>(m_numElems);
+            m_rotatingBufferElems = 0; // mark rotation disabled
+            m_buffer              = makeSharedDeviceUninitialized<T>(m_numElems);
             HIP_CHECK(hipMemcpy(
                 m_buffer.get(), hostData.data(), m_numElems * sizeof(T), hipMemcpyHostToDevice));
         }
@@ -115,6 +116,7 @@ public:
 
     std::span<T> next()
     {
+        // No rotation case (either disabled or fell back to single buffer)
         if(m_rotatingBufferElems == 0)
         {
             m_currentOffset = 0;
@@ -124,16 +126,15 @@ public:
         if(m_numElems < m_rotatingBufferElems)
         {
             m_currentOffset = (m_currentOffset + m_numElems) % m_rotatingBufferElems;
+            //  if offset + size would overflow, just reset to base
+            if(m_currentOffset + m_numElems > m_rotatingBufferElems)
+            {
+                m_currentOffset = 0;
+            }
         }
         else
         {
-            m_currentOffset = 0; // always return base
-        }
-
-        // Enforce offset stays within buffer
-        if(m_currentOffset + m_numElems > m_rotatingBufferElems)
-        {
-            Throw<FatalError>("RotatingBuffer::next: computed offset out of bounds");
+            m_currentOffset = 0; // no rotation possible
         }
 
         return std::span<T>(m_buffer.get() + m_currentOffset, m_numElems);
