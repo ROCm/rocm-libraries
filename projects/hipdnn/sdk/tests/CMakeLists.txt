@@ -42,8 +42,9 @@ add_executable(hipdnn_sdk_tests
     test_utilities/TestScopedEnvironmentVariableSetter.cpp
     test_utilities/TestLoggingUtils.cpp
     test_utilities/TestFlatbufferDatatypeMapping.cpp
+    test_utilities/TestFlatbufferTensorAttributesUtils.cpp
     test_utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormSignatureRegistryKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormFwdInferenceSignatureKey.cpp
 )
 
 target_compile_definitions(hipdnn_sdk_tests PRIVATE

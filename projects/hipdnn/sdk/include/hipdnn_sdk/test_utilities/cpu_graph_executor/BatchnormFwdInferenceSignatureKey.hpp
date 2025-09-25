@@ -43,13 +43,4 @@ struct BatchnormFwdInferenceSignatureKey
     }
 };
 
-constexpr std::array<BatchnormFwdInferenceSignatureKey, 2>
-    ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES
-    = {BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
-                                         hipdnn_sdk::data_objects::DataType::FLOAT,
-                                         hipdnn_sdk::data_objects::DataType::FLOAT),
-       BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType::HALF,
-                                         hipdnn_sdk::data_objects::DataType::HALF,
-                                         hipdnn_sdk::data_objects::DataType::HALF)};
-
 }

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_sdk/utilities/ShallowTensor.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {

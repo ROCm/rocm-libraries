@@ -152,7 +152,7 @@ public:
             variantPack[deviceBuffer.uid] = deviceBuffer.ptr;
         }
 
-        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor::execute(
+        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             batchnormGraph, batchnormBuilder.GetSize(), variantPack);
     }
 
