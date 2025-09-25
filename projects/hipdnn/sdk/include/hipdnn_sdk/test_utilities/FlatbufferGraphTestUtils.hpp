@@ -33,8 +33,8 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 }
 
 inline flatbuffers::FlatBufferBuilder
-    createValidBatchnormInferenceGraph(std::vector<int64_t> strides = {1, 3, 224, 224},
-                                       std::vector<int64_t> dims = {1, 3, 224, 224},
+    createValidBatchnormInferenceGraph(const std::vector<int64_t>& strides = {1, 3, 224, 224},
+                                       const std::vector<int64_t>& dims = {1, 3, 224, 224},
                                        hipdnn_sdk::data_objects::DataType inputDataType
                                        = DataType::FLOAT)
 {
@@ -112,8 +112,8 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder
-    createValidBatchnormBwdGraph(std::vector<int64_t> strides = {1, 3, 224, 224},
-                                 std::vector<int64_t> dims = {1, 3, 224, 224},
+    createValidBatchnormBwdGraph(const std::vector<int64_t>& strides = {1, 3, 224, 224},
+                                 const std::vector<int64_t>& dims = {1, 3, 224, 224},
                                  bool hasOptionalAttributes = true,
                                  hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT)
 {
@@ -259,16 +259,16 @@ inline flatbuffers::FlatBufferBuilder createBatchnormGraph()
 }
 
 inline flatbuffers::FlatBufferBuilder
-    createValidConvFwdGraph(std::vector<int64_t> xDims = {4, 4, 4, 4},
-                            std::vector<int64_t> xStrides = {64, 16, 4, 1},
-                            std::vector<int64_t> wDims = {4, 4, 1, 1},
-                            std::vector<int64_t> wStrides = {4, 1, 1, 1},
-                            std::vector<int64_t> yDims = {4, 4, 4, 4},
-                            std::vector<int64_t> yStrides = {64, 16, 4, 1},
-                            std::vector<int64_t> convPrePadding = {0, 0},
-                            std::vector<int64_t> convPostPadding = {0, 0},
-                            std::vector<int64_t> convStrides = {1, 1},
-                            std::vector<int64_t> convDilation = {1, 1},
+    createValidConvFwdGraph(const std::vector<int64_t>& xDims = {4, 4, 4, 4},
+                            const std::vector<int64_t>& xStrides = {64, 16, 4, 1},
+                            const std::vector<int64_t>& wDims = {4, 4, 1, 1},
+                            const std::vector<int64_t>& wStrides = {4, 1, 1, 1},
+                            const std::vector<int64_t>& yDims = {4, 4, 4, 4},
+                            const std::vector<int64_t>& yStrides = {64, 16, 4, 1},
+                            const std::vector<int64_t>& convPrePadding = {0, 0},
+                            const std::vector<int64_t>& convPostPadding = {0, 0},
+                            const std::vector<int64_t>& convStrides = {1, 1},
+                            const std::vector<int64_t>& convDilation = {1, 1},
                             DataType dataType = DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;

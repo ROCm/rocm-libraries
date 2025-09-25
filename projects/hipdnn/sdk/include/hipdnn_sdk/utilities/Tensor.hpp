@@ -72,7 +72,7 @@ public:
     template <typename IndexType>
     int64_t getIndex(const std::vector<IndexType>& indices) const
     {
-        static_assert(std::is_integral<IndexType>::value, "Index type must be integral!");
+        static_assert(std::is_integral_v<IndexType>, "Index type must be integral!");
 
         if(indices.size() > strides().size())
         {

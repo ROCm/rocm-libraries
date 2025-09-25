@@ -31,8 +31,10 @@ public:
 
     ~Workspace()
     {
-        if(_ptr)
+        if(_ptr != nullptr)
+        {
             _allocator.deallocate(static_cast<char*>(_ptr), _size);
+        }
     }
 
     Workspace(Workspace&& other) noexcept
@@ -47,8 +49,10 @@ public:
     {
         if(this != &other)
         {
-            if(_ptr)
+            if(_ptr != nullptr)
+            {
                 _allocator.deallocate(static_cast<char*>(_ptr), _size);
+            }
 
             _ptr = other._ptr;
             _size = other._size;
