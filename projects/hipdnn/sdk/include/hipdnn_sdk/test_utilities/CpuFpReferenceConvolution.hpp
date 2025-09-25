@@ -141,7 +141,7 @@ public:
     {
         validateInput(gradInput, weight, gradOutput, strides, dilations, padding);
 
-        // // Extract dimensions - NCHW format for input/output, [G*K][C][Y][X] for weight (4D flattened)
+        // Extract dimensions - NCHW format for input/output, [G*K][C][Y][X] for weight (4D flattened)
         const auto& inputDims = gradInput.dims();
         const auto& weightDims = weight.dims();
         const auto& outputDims = gradOutput.dims();
@@ -163,7 +163,7 @@ public:
         int64_t nGroups = nInputChannels / channelsPerGroup; // G
         int64_t outputChannelsPerGroup = totalOutputChannels / nGroups; // K
 
-        // // Extract convolution parameters
+        // Extract convolution parameters
         int64_t strideH = strides[0];
         int64_t strideW = strides[1];
         int64_t dilationH = dilations[0];
