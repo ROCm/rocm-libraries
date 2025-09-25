@@ -120,8 +120,6 @@ struct pointer_detector<T, D, std::void_t<typename D::pointer>>
   using type = typename D::pointer;
 };
 
-}
-
 template <class Deleter>
 struct unique_ptr_deleter_sfinae
 {
@@ -150,6 +148,8 @@ struct unique_ptr_deleter_sfinae<Deleter&>
   using enable_rval_overload = thrust::detail::false_type;
 };
 
+}
+
 template <class T, class D = default_delete<T>>
 class unique_ptr
 {
@@ -162,7 +162,7 @@ private:
   pointer                            m_ptr;
   [[no_unique_address]] deleter_type m_deleter;
 
-  using DeleterSFINAE = unique_ptr_deleter_sfinae<D>;
+  using DeleterSFINAE = thrust::detail::unique_ptr_deleter_sfinae<D>;
 
   template <bool Dummy>
   using LValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::lval_ref_type;
