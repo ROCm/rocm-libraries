@@ -25,10 +25,10 @@ class TestCombination:
     def to_env_vars(self) -> dict:
         """Convert this combination to environment variables"""
         return {
+            "WORKGROUP_SIZE": str(self.workgroup_size),
             "WRITE": "1" if self.write else "0",
             "INSTR_WIDTH": str(self.instr_width),
             "BYTE_STRIDE": str(self.stride),
-            "WORKGROUP_SIZE": str(self.workgroup_size),
             "ITERS": str(self.iters)
         }
     

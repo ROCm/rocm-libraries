@@ -3,6 +3,7 @@
 Script to process CSV files in build/output/ and calculate median latency.
 """
 
+from abc import abstractmethod
 import os
 import re
 import argparse
@@ -41,33 +42,39 @@ def extract_specific_lines(csv_file):
         print(f"Error reading lines from {csv_file}: {e}")
         return ['N/A'] * 4
 
+class Metric:
+    @abstractmethod
+    def get_name():
+        raise NotImplementedError
+    @abstractmethod
+    def compute(df):
+        raise NotImplementedError    
 
-def get_metric(csv_file):
-    """Analyze CSV data and return a metric as (column_name, value) tuple."""
-    COLUMN_NAME = 'Latency'
-    ret = (COLUMN_NAME, None)
-    try:
-        df = pd.read_csv(csv_file)
-                    
+class FirstWaitcntLatency(Metric):
+    @staticmethod
+    def get_name():
+        return ('First Waitcnt Latency',)
+    
+    @staticmethod
+    def compute(df):
         filtered_df = df[df['Instruction'].str.contains('s_waitcnt', na=False)]
+        row = filtered_df.iloc[0]
+        latency = row['Latency'] / row['Hitcount']
+        return (latency,)
 
-        if True:
-            # Average latency
-            row = filtered_df.iloc[1:].copy()
-            row['Avg Latency'] = row['Latency'] / row['Hitcount']
-            # latency = row['Avg Latency'].mode().iloc[0]
-            latency = row['Avg Latency'].median()
-            return (COLUMN_NAME, latency)
-        else:
-            # First s_waitcnt
-            row = filtered_df.iloc[0]
-            latency = row['Latency'] / row['Hitcount']
-            return (COLUMN_NAME, latency)
-            
-    except Exception as e:
-        print(f"Error processing {csv_file}: {e}")
-        return ret
-
+class AverageNotFirstWaitcntLatency(Metric):
+    @staticmethod
+    def get_name():
+        return ('Median Latency', 's_waitcnt Count')
+    
+    @staticmethod
+    def compute(df):
+        filtered_df = df[df['Instruction'].str.contains('s_waitcnt', na=False)]
+        rows_copy = filtered_df.iloc[1:].copy()
+        rows_copy['Avg Latency'] = rows_copy['Latency'] / rows_copy['Hitcount']
+        latency = rows_copy['Avg Latency'].median()
+        count = len(rows_copy)
+        return (latency, count)
 
 def load_env_vars(csv_file):
     """Load environment variables from env_vars.json in the same directory as the CSV."""
@@ -96,6 +103,7 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
     
     results = []
     env_var_keys = []  # To track the order of env var keys
+    metrics: list[Metric] = [FirstWaitcntLatency, AverageNotFirstWaitcntLatency]
     
     for csv_file in csv_files:
         dir_name = os.path.basename(os.path.dirname(csv_file))
@@ -105,14 +113,17 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
         if not env_var_keys and env_vars:
             env_var_keys = list(env_vars.keys())
         
-        metric_name, metric_value = get_metric(csv_file)
-        
         result = {
             'Directory': dir_name,
-            metric_name: metric_value,
             'Path': os.path.relpath(csv_file),
             **{k: int(v) for k, v in env_vars.items()}
         }
+        
+        for metric in metrics:
+            col_names = metric.get_name()
+            values = metric.compute(pd.read_csv(csv_file))
+            for col_name, value in zip(col_names, values):
+                result[col_name] = value
         
         if show_instructions:
             lines = extract_specific_lines(csv_file)
@@ -128,18 +139,10 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
     
     if env_var_keys:
         df = df.sort_values(env_var_keys)
-    
-    # Get the metric column name from the first result
-    metric_column = None
-    if results:
-        for key in results[0].keys():
-            if key not in ['Directory', 'Path'] and key not in env_var_keys and not key.startswith('Row '):
-                metric_column = key
-                break
-    
+        
     column_headers = ['Directory']
-    if metric_column:
-        column_headers.append(metric_column)
+    for metric in metrics:
+        column_headers += list(metric.get_name())
     if show_env_vars:
         column_headers += env_var_keys
     if show_path:
