@@ -234,9 +234,9 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
     auto solution = ConvSolution{miopenStatusSuccess};
 
     auto kernel         = KernelInfo{};
-    kernel.kernel_file  = "MIOpenNeuron.cl";
+    kernel.kernel_file  = "MIOpenNeuronHIP.cpp";
     kernel.kernel_name  = "MIOpenNeuronFwd";
-    kernel.comp_options = compiler_options.GenerateFor(kbp::OpenCL{});
+    kernel.comp_options = compiler_options.GenerateFor(kbp::HIP{});
 
     kernel.l_wk.push_back(grp_tile0);
     kernel.l_wk.push_back(grp_tile1);

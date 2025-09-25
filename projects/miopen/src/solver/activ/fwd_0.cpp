@@ -139,7 +139,7 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
         kernel_info.g_wk.push_back(packed ? 1 : height);
         kernel_info.g_wk.push_back(1);
 
-        kernel_info.kernel_file = "MIOpenNeuron.cpp";
+        kernel_info.kernel_file = "MIOpenNeuronHIP.cpp";
         kernel_info.kernel_name = packed ? "MIOpenActiveFwdLite" : "MIOpenActiveFwd2DLite";
 
         result.construction_params.push_back(kernel_info);
