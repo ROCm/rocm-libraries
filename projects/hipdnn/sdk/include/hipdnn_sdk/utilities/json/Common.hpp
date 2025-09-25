@@ -7,14 +7,41 @@
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
 
-namespace std
+// When implicit conversions are defined, the explicit conversion function is disabled in the nlohmann json library.
+// This may be unintended behavior
+#ifdef JSON_USE_IMPLICIT_CONVERSIONS
+NLOHMANN_JSON_NAMESPACE_BEGIN
+namespace detail
+{
+template <typename BasicJsonType, typename T>
+void from_json(const BasicJsonType& j, std::optional<T>& opt)
+{
+    if(j.is_null())
+    {
+        opt = std::nullopt;
+    }
+    else
+    {
+        opt.emplace(j.template get<T>());
+    }
+}
+}
+NLOHMANN_JSON_NAMESPACE_END
+#endif
+
+namespace flatbuffers
 {
 template <class T>
 // NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& vectorList, vector<T> const& vec)
+void to_json(nlohmann::json& vectorList, const Vector<T>* vec)
 {
     vectorList = nlohmann::json::array();
-    for(auto v : vec)
+    if(vec == nullptr)
+    {
+        return;
+    }
+
+    for(auto v : *vec)
     {
         vectorList.push_back(v);
     }
@@ -22,36 +49,14 @@ void to_json(nlohmann::json& vectorList, vector<T> const& vec)
 
 template <class T>
 // NOLINTNEXTLINE(readability-identifier-naming)
-void from_json(const nlohmann::json& vecJson, vector<T>& vec)
-{
-    if(!vecJson.is_array())
-    {
-        throw std::runtime_error("from_json: Attempting to deserialize non-array into vector");
-    }
-    vec.reserve(vecJson.size());
-    for(const auto& v : vecJson)
-    {
-        vec.push_back(v.get<T>());
-    }
-}
-
-template <class T>
-// NOLINTNEXTLINE(readability-identifier-naming)
-void from_json(const nlohmann::json& entry, optional<T>& opt)
-{
-    opt = (entry.is_null()) ? std::nullopt : std::optional<T>{entry.get<T>()};
-}
-
-}
-
-namespace flatbuffers
-{
-template <class T>
-// NOLINTNEXTLINE(readability-identifier-naming)
-void to_json(nlohmann::json& vectorList, Vector<Offset<T>> const& vec)
+void to_json(nlohmann::json& vectorList, const Vector<Offset<T>>* vec)
 {
     vectorList = nlohmann::json::array();
-    for(auto v : vec)
+    if(vec == nullptr)
+    {
+        return;
+    }
+    for(auto v : *vec)
     {
         vectorList.push_back(*v);
     }
@@ -77,13 +82,6 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
 
 namespace hipdnn_sdk::json
 {
-
-template <class T, class Key>
-std::optional<T> optionalValue(nlohmann::json obj, Key&& key)
-{
-    auto it = obj.find(std::forward<Key>(key));
-    return (it != obj.end()) ? std::optional<T>(it->template get<T>()) : std::nullopt;
-}
 
 template <class T>
 auto to(flatbuffers::FlatBufferBuilder& builder, nlohmann::json const& entry);
