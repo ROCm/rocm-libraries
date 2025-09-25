@@ -48,7 +48,8 @@ namespace ExpressionTest
               Register::Type OperandBRegisterType,
               Register::Type ResultRegisterType,
               DataType       OperandDataType,
-              DataType       ResultDataType>
+              DataType       ResultDataType,
+              PointerType    ResultPointerType>
     struct ConcatenateExpressionKernel : public AssemblyTestKernel
     {
         explicit ConcatenateExpressionKernel(ContextPtr context)
@@ -86,7 +87,7 @@ namespace ExpressionTest
             co_yield Expression::generate(
                 v,
                 std::make_shared<Expression::Expression>(Expression::Concatenate{
-                    {{operandA->expression(), operandB->expression()}}, ResultDataType}),
+                    {{operandA->expression(), operandB->expression()}}, VariableType{ResultDataType,ResultPointerType}}),
                 m_context);
 
             REQUIRE(v->regType() == ResultRegisterType);
@@ -130,7 +131,8 @@ namespace ExpressionTest
                                     rocRoller::Register::Type::Scalar,
                                     rocRoller::Register::Type::Scalar,
                                     DataType::UInt32,
-                                    DataType::UInt64>
+                                    DataType::UInt64,
+                                    PointerType::Value>
             kernel(context.get());
         kernel({}, result.get(), a, b);
         REQUIRE_THAT(result, HasDeviceScalarEqualTo(expectedResult));
@@ -147,7 +149,8 @@ namespace ExpressionTest
                                     rocRoller::Register::Type::Vector,
                                     rocRoller::Register::Type::Vector,
                                     DataType::UInt32,
-                                    DataType::UInt64>
+                                    DataType::UInt64,
+                                    PointerType::Value>
             kernel(context.get());
         kernel({}, result.get(), a, b);
         REQUIRE_THAT(result, HasDeviceScalarEqualTo(expectedResult));
@@ -165,7 +168,8 @@ namespace ExpressionTest
                                     rocRoller::Register::Type::Vector,
                                     rocRoller::Register::Type::Vector,
                                     DataType::UInt32,
-                                    DataType::UInt64>
+                                    DataType::UInt64,
+                                    PointerType::Value>
             kernel(context.get());
         kernel({}, result.get(), a, b);
         REQUIRE_THAT(result, HasDeviceScalarEqualTo(expectedResult));
