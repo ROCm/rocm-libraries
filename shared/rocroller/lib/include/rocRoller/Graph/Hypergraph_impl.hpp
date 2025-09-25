@@ -234,12 +234,13 @@ namespace rocRoller
 
             if constexpr(!Hyper)
             {
-                std::string errorMsg
-                    = "Graph is not a hypergraph but edge has more than one connection";
+                // Enforce "calm" graph restriction of Edges requiring exactly one incoming Node and one outgoing Node
+                std::string errorMsg = "Graph is not a Hypergraph and Edge requires exactly one "
+                                       "incoming Node and one outgoing Node";
                 if(elementType == ElementType::Edge)
                 {
-                    AssertFatal(m_incidence.getSrcCount(tag) <= 1
-                                    && m_incidence.getDstCount(tag) <= 1,
+                    AssertFatal(m_incidence.getSrcCount(tag) == 1
+                                    && m_incidence.getDstCount(tag) == 1,
                                 errorMsg,
                                 ShowValue(tag));
                 }
@@ -247,18 +248,29 @@ namespace rocRoller
                 {
                     for(auto input : inputs)
                     {
-                        AssertFatal(m_incidence.getDstCount(input) <= 1,
+                        AssertFatal(m_incidence.getDstCount(input) == 1,
                                     errorMsg,
                                     ShowValue(tag),
                                     ShowValue(input));
                     }
                     for(auto output : outputs)
                     {
-                        AssertFatal(m_incidence.getSrcCount(output) <= 1,
+                        AssertFatal(m_incidence.getSrcCount(output) == 1,
                                     errorMsg,
                                     ShowValue(tag),
                                     ShowValue(output));
                     }
+                }
+            }
+            else
+            {
+                // Check if we accidentally added a dangling edge
+                if(elementType == ElementType::Edge)
+                {
+                    AssertFatal(m_incidence.getSrcCount(tag) >= 1
+                                    && m_incidence.getDstCount(tag) >= 1,
+                                "Hypergraph has dangling edge",
+                                ShowValue(tag));
                 }
             }
         }

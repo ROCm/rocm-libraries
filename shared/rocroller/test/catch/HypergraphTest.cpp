@@ -499,12 +499,62 @@ namespace HypergraphTest
         auto TestVGPR1   = g.addElement(TestVGPR{});
         auto TestForget1 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR1});
 
-        // Edges to Edges
-        CHECK_THROWS_AS(g.addElement(TestForget{}, {u0}, {TestSplit0}), FatalError);
-        CHECK_THROWS_AS(g.addElement(TestForget{}, {}, {TestSplit0}), FatalError);
+        SECTION("Edges to Edges not allowed")
+        {
+            CHECK_THROWS_AS(g.addElement(TestForget{}, {u0}, {TestSplit0}), FatalError);
+            CHECK_THROWS_AS(g.addElement(TestForget{}, {}, {TestSplit0}), FatalError);
+        }
 
-        // Nodes to nodes
-        CHECK_THROWS_AS(g.addElement(TestSubDimension{}, {u0}, {}), FatalError);
+        SECTION("Nodes to nodes not allowed")
+        {
+            CHECK_THROWS_AS(g.addElement(TestSubDimension{}, {u0}, {}), FatalError);
+        }
+
+        SECTION("Dangling edges not allowed")
+        {
+            CHECK_THROWS_AS(g.addElement(TestSplit{}, {u0}, {}), FatalError);
+            CHECK_THROWS_AS(g.addElement(TestSplit{}, {}, {sd0}), FatalError);
+        }
+    }
+
+    TEST_CASE("Bad calm graph setup", "[hypergraph][kernel-graph]")
+    {
+        myCalmGraph g;
+
+        auto u0  = g.addElement(TestUser{});
+        auto sd0 = g.addElement(TestSubDimension{});
+        auto sd1 = g.addElement(TestSubDimension{});
+        auto sd2 = g.addElement(TestSubDimension{});
+        auto sd3 = g.addElement(TestSubDimension{});
+
+        auto TestSplit0 = g.addElement(TestSplit{}, {u0}, {sd0});
+        auto TestSplit1 = g.addElement(TestSplit{}, {u0}, {sd1});
+
+        auto TestVGPR0   = g.addElement(TestVGPR{});
+        auto TestForget0 = g.addElement(TestForget{}, {sd0}, {TestVGPR0});
+
+        SECTION("Edges to Edges not allowed")
+        {
+            CHECK_THROWS_AS(g.addElement(TestForget{}, {u0}, {TestSplit0}), FatalError);
+            CHECK_THROWS_AS(g.addElement(TestForget{}, {}, {TestSplit0}), FatalError);
+        }
+
+        SECTION("Nodes to nodes not allowed")
+        {
+            CHECK_THROWS_AS(g.addElement(TestSubDimension{}, {u0}, {}), FatalError);
+        }
+
+        SECTION("Dangling edges not allowed")
+        {
+            CHECK_THROWS_AS(g.addElement(TestSplit{}, {u0}, {}), FatalError);
+            CHECK_THROWS_AS(g.addElement(TestSplit{}, {}, {sd0}), FatalError);
+        }
+
+        SECTION("Hyperedges not allowed in calm graphs")
+        {
+            CHECK_THROWS_AS(g.addElement(TestSplit{}, {u0}, {sd2, sd3}), FatalError);
+            CHECK_THROWS_AS(g.addElement(TestForget{}, {sd2, sd3}, {TestVGPR0}), FatalError);
+        }
     }
 
     TEST_CASE("Hypergraph sorting and visiting", "[hypergraph][kernel-graph]")
