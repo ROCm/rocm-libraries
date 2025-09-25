@@ -644,8 +644,6 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataChannels)
     CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
-    // Verify that all input channels receive gradients
-    // Each input channel should have non-zero gradients due to contributions from both output channels
     for(int ic = 0; ic < 4; ++ic)
     {
         for(int h = 0; h < 3; ++h)
@@ -654,19 +652,14 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataChannels)
             {
                 float gradValue = inputTensor.getHostValue(0, ic, h, w);
 
-                // For positions that receive contributions from the kernel, gradients should be non-zero
-                // Corner positions (0,0), (0,2), (2,0), (2,2) receive fewer contributions
-                // Center and edge positions receive more contributions
                 if((h == 0 && w == 0) || (h == 0 && w == 2) || (h == 2 && w == 0)
                    || (h == 2 && w == 2))
                 {
-                    // Corner positions should still have some gradient
                     EXPECT_NE(gradValue, 0.0f) << "Input channel " << ic << " at position (" << h
                                                << "," << w << ") should have non-zero gradient";
                 }
                 else
                 {
-                    // Non-corner positions should have larger gradients
                     EXPECT_GT(std::abs(gradValue), 0.0f)
                         << "Input channel " << ic << " at position (" << h << "," << w
                         << ") should have non-zero gradient";
@@ -675,33 +668,237 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataChannels)
         }
     }
 
-    // Test specific expected values for input channel 0, position (0,0)
-    // This position receives contribution from:
-    // - Output channel 0, position (0,0) with weight (0,0,0,0) = 1.0
-    // - Output channel 1, position (0,0) with weight (1,0,0,0) = 17.0
-    // Expected: 1.0 * 1.0 + 5.0 * 17.0 = 1.0 + 85.0 = 86.0
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 0), 86.0f);
-
-    // Test input channel 1, position (0,0)
-    // This position receives contribution from:
-    // - Output channel 0, position (0,0) with weight (0,1,0,0) = 5.0
-    // - Output channel 1, position (0,0) with weight (1,1,0,0) = 21.0
-    // Expected: 1.0 * 5.0 + 5.0 * 21.0 = 5.0 + 105.0 = 110.0
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 0), 110.0f);
-
-    // Test input channel 2, position (0,0)
-    // This position receives contribution from:
-    // - Output channel 0, position (0,0) with weight (0,2,0,0) = 9.0
-    // - Output channel 1, position (0,0) with weight (1,2,0,0) = 25.0
-    // Expected: 1.0 * 9.0 + 5.0 * 25.0 = 9.0 + 125.0 = 134.0
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 2, 0, 0), 134.0f);
-
-    // Test input channel 3, position (0,0)
-    // This position receives contribution from:
-    // - Output channel 0, position (0,0) with weight (0,3,0,0) = 13.0
-    // - Output channel 1, position (0,0) with weight (1,3,0,0) = 29.0
-    // Expected: 1.0 * 13.0 + 5.0 * 29.0 = 13.0 + 145.0 = 158.0
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 3, 0, 0), 158.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedChannels)
+{
+    // Test grouped convolution backward data with 2 groups
+    // Input: 1x4x2x2 (1 batch, 4 input channels, 2x2 spatial)
+    // Weight: 2x2x1x1 (2 total output channels, 2 input channels per group, 1x1 kernel)
+    // Output: 1x2x2x2 (1 batch, 2 output channels, 2x2 spatial)
+    // Groups: 2 (4 input channels / 2 channels per group)
+    Tensor<float> inputTensor({1, 4, 2, 2});
+    Tensor<float> weightTensor({2, 2, 1, 1});
+    Tensor<float> outputTensor({1, 2, 2, 2});
+
+    // Set gradient output values: different values for each output channel
+    // Output channel 0 (group 0): [1, 2; 3, 4]
+    outputTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    outputTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    outputTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    outputTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    // Output channel 1 (group 1): [5, 6; 7, 8]
+    outputTensor.setHostValue(5.0f, 0, 1, 0, 0);
+    outputTensor.setHostValue(6.0f, 0, 1, 0, 1);
+    outputTensor.setHostValue(7.0f, 0, 1, 1, 0);
+    outputTensor.setHostValue(8.0f, 0, 1, 1, 1);
+
+    // Set weight values: simple 1x1 kernels
+    // Group 0, output channel 0: input channels 0,1 -> weights [0.5, 1.0]
+    weightTensor.setHostValue(0.5f, 0, 0, 0, 0); // weight for input channel 0
+    weightTensor.setHostValue(1.0f, 0, 1, 0, 0); // weight for input channel 1
+
+    // Group 1, output channel 1: input channels 2,3 -> weights [1.5, 2.0]
+    weightTensor.setHostValue(1.5f, 1, 0, 0, 0); // weight for input channel 2
+    weightTensor.setHostValue(2.0f, 1, 1, 0, 0); // weight for input channel 3
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify grouped convolution: each group should only affect its corresponding input channels
+    // Group 0 (input channels 0,1) should be affected by output channel 0
+    // Input channel 0: gradOutput[0] * weight[0,0] = [1,2,3,4] * 0.5 = [0.5,1.0,1.5,2.0]
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 0), 0.5f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 1), 1.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 0), 1.5f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 1), 2.0f);
+
+    // Input channel 1: gradOutput[0] * weight[0,1] = [1,2,3,4] * 1.0 = [1.0,2.0,3.0,4.0]
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 0), 1.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 1), 2.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 1, 0), 3.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 1, 1), 4.0f);
+
+    // Group 1 (input channels 2,3) should be affected by output channel 1
+    // Input channel 2: gradOutput[1] * weight[1,0] = [5,6,7,8] * 1.5 = [7.5,9.0,10.5,12.0]
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 2, 0, 0), 7.5f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 2, 0, 1), 9.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 2, 1, 0), 10.5f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 2, 1, 1), 12.0f);
+
+    // Input channel 3: gradOutput[1] * weight[1,1] = [5,6,7,8] * 2.0 = [10.0,12.0,14.0,16.0]
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 3, 0, 0), 10.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 3, 0, 1), 12.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 3, 1, 0), 14.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 3, 1, 1), 16.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedBatches)
+{
+    // Test grouped convolution backward data with multiple batches (2 batches)
+    // Using smallest possible tensor size: 2x2x1x1 input, 2x1x1x1 weight, 2x2x1x1 output
+    // Input: 2x2x1x1 (2 batches, 2 input channels, 1x1 spatial)
+    // Weight: 2x1x1x1 (2 total output channels, 1 input channel per group, 1x1 kernel)
+    // Output: 2x2x1x1 (2 batches, 2 output channels, 1x1 spatial)
+    // Groups: 2 (2 input channels / 1 channel per group)
+    Tensor<float> inputTensor({2, 2, 1, 1});
+    Tensor<float> weightTensor({2, 1, 1, 1});
+    Tensor<float> outputTensor({2, 2, 1, 1});
+
+    // Set gradient output values for both batches
+    // Batch 0: output channels [1.0, 2.0]
+    outputTensor.setHostValue(1.0f, 0, 0, 0, 0); // batch 0, channel 0
+    outputTensor.setHostValue(2.0f, 0, 1, 0, 0); // batch 0, channel 1
+
+    // Batch 1: output channels [3.0, 4.0]
+    outputTensor.setHostValue(3.0f, 1, 0, 0, 0); // batch 1, channel 0
+    outputTensor.setHostValue(4.0f, 1, 1, 0, 0); // batch 1, channel 1
+
+    // Set weight values for grouped convolution
+    // Group 0: weight = 0.5 (for input channel 0 -> output channel 0)
+    weightTensor.setHostValue(0.5f, 0, 0, 0, 0);
+    // Group 1: weight = 1.5 (for input channel 1 -> output channel 1)
+    weightTensor.setHostValue(1.5f, 1, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify grouped convolution results for both batches
+    // Batch 0: input channel 0 = gradOutput[0,0] * weight[0] = 1.0 * 0.5 = 0.5
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 0), 0.5f);
+    // Batch 0: input channel 1 = gradOutput[0,1] * weight[1] = 2.0 * 1.5 = 3.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 0), 3.0f);
+
+    // Batch 1: input channel 0 = gradOutput[1,0] * weight[0] = 3.0 * 0.5 = 1.5
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(1, 0, 0, 0), 1.5f);
+    // Batch 1: input channel 1 = gradOutput[1,1] * weight[1] = 4.0 * 1.5 = 6.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(1, 1, 0, 0), 6.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedAsymmetricInput)
+{
+    // Test grouped convolution backward data with asymmetric input (smallest possible size)
+    // Input: 1x2x1x2 (1 batch, 2 input channels, 1x2 spatial - asymmetric)
+    // Weight: 2x1x1x1 (2 total output channels, 1 input channel per group, 1x1 kernel)
+    // Output: 1x2x1x2 (1 batch, 2 output channels, 1x2 spatial - asymmetric)
+    // Groups: 2 (2 input channels / 1 channel per group)
+    Tensor<float> inputTensor({1, 2, 1, 2});
+    Tensor<float> weightTensor({2, 1, 1, 1});
+    Tensor<float> outputTensor({1, 2, 1, 2});
+
+    // Set gradient output values for asymmetric spatial dimensions
+    // Output channel 0: [1.0, 2.0] (1x2 spatial)
+    outputTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    outputTensor.setHostValue(2.0f, 0, 0, 0, 1);
+
+    // Output channel 1: [3.0, 4.0] (1x2 spatial)
+    outputTensor.setHostValue(3.0f, 0, 1, 0, 0);
+    outputTensor.setHostValue(4.0f, 0, 1, 0, 1);
+
+    // Set weight values for grouped convolution
+    // Group 0: weight = 0.5 (for input channel 0 -> output channel 0)
+    weightTensor.setHostValue(0.5f, 0, 0, 0, 0);
+    // Group 1: weight = 1.5 (for input channel 1 -> output channel 1)
+    weightTensor.setHostValue(1.5f, 1, 0, 0, 0);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify grouped convolution results for asymmetric input
+    // Input channel 0: gradOutput[0] * weight[0] = [1.0, 2.0] * 0.5 = [0.5, 1.0]
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 0), 0.5f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 1), 1.0f);
+
+    // Input channel 1: gradOutput[1] * weight[1] = [3.0, 4.0] * 1.5 = [4.5, 6.0]
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 0), 4.5f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 1), 6.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedAsymmetricKernel)
+{
+    // Test grouped convolution backward data with asymmetric kernel (smallest possible size)
+    // Input: 1x2x2x3 (1 batch, 2 input channels, 2x3 spatial)
+    // Weight: 2x1x1x2 (2 total output channels, 1 input channel per group, 1x2 asymmetric kernel)
+    // Output: 1x2x2x2 (1 batch, 2 output channels, 2x2 spatial)
+    // Groups: 2 (2 input channels / 1 channel per group)
+    Tensor<float> inputTensor({1, 2, 2, 3});
+    Tensor<float> weightTensor({2, 1, 1, 2}); // Asymmetric kernel: 1x2
+    Tensor<float> outputTensor({1, 2, 2, 2});
+
+    // Set gradient output values for both output channels
+    // Output channel 0: [1.0, 2.0; 3.0, 4.0]
+    outputTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    outputTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    outputTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    outputTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    // Output channel 1: [5.0, 6.0; 7.0, 8.0]
+    outputTensor.setHostValue(5.0f, 0, 1, 0, 0);
+    outputTensor.setHostValue(6.0f, 0, 1, 0, 1);
+    outputTensor.setHostValue(7.0f, 0, 1, 1, 0);
+    outputTensor.setHostValue(8.0f, 0, 1, 1, 1);
+
+    // Set asymmetric weight values for grouped convolution
+    // Group 0: weight = [0.5, 1.0] (1x2 kernel for input channel 0 -> output channel 0)
+    weightTensor.setHostValue(0.5f, 0, 0, 0, 0);
+    weightTensor.setHostValue(1.0f, 0, 0, 0, 1);
+
+    // Group 1: weight = [1.5, 2.0] (1x2 kernel for input channel 1 -> output channel 1)
+    weightTensor.setHostValue(1.5f, 1, 0, 0, 0);
+    weightTensor.setHostValue(2.0f, 1, 0, 0, 1);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify grouped convolution results with asymmetric kernel
+    // Group 0 (input channel 0): gradOutput[0] convolved with weight[0]
+    // Position (0,0): gradOutput[0,0,0,0] * weight[0,0,0,0] = 1.0 * 0.5 = 0.5
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 0), 0.5f);
+    // Position (0,1): gradOutput[0,0,0,0] * weight[0,0,0,1] + gradOutput[0,0,0,1] * weight[0,0,0,0] = 1.0 * 1.0 + 2.0 * 0.5 = 2.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 1), 2.0f);
+    // Position (0,2): gradOutput[0,0,0,1] * weight[0,0,0,1] = 2.0 * 1.0 = 2.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 2), 2.0f);
+    // Position (1,0): gradOutput[0,0,1,0] * weight[0,0,0,0] = 3.0 * 0.5 = 1.5
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 0), 1.5f);
+    // Position (1,1): gradOutput[0,0,1,0] * weight[0,0,0,1] + gradOutput[0,0,1,1] * weight[0,0,0,0] = 3.0 * 1.0 + 4.0 * 0.5 = 5.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 1), 5.0f);
+    // Position (1,2): gradOutput[0,0,1,1] * weight[0,0,0,1] = 4.0 * 1.0 = 4.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 2), 4.0f);
+
+    // Group 1 (input channel 1): gradOutput[1] convolved with weight[1]
+    // Position (0,0): gradOutput[0,1,0,0] * weight[1,0,0,0] = 5.0 * 1.5 = 7.5
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 0), 7.5f);
+    // Position (0,1): gradOutput[0,1,0,0] * weight[1,0,0,1] + gradOutput[0,1,0,1] * weight[1,0,0,0] = 5.0 * 2.0 + 6.0 * 1.5 = 19.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 1), 19.0f);
+    // Position (0,2): gradOutput[0,1,0,1] * weight[1,0,0,1] = 6.0 * 2.0 = 12.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 0, 2), 12.0f);
+    // Position (1,0): gradOutput[0,1,1,0] * weight[1,0,0,0] = 7.0 * 1.5 = 10.5
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 1, 0), 10.5f);
+    // Position (1,1): gradOutput[0,1,1,0] * weight[1,0,0,1] + gradOutput[0,1,1,1] * weight[1,0,0,0] = 7.0 * 2.0 + 8.0 * 1.5 = 26.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 1, 1), 26.0f);
+    // Position (1,2): gradOutput[0,1,1,1] * weight[1,0,0,1] = 8.0 * 2.0 = 16.0
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 1, 1, 2), 16.0f);
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataStrides)

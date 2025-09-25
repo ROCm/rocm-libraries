@@ -35,22 +35,28 @@ public:
             validNode &= convAttr->conv_mode() == ConvMode::CROSS_CORRELATION;
         }
 
+        if(node.attributes_type() == NodeAttributes::ConvolutionFwdAttributes)
+        {
+            auto convAttr = node.attributes_as_ConvolutionFwdAttributes();
+            validNode &= convAttr->conv_mode() == ConvMode::CROSS_CORRELATION;
+        }
+
         return validNode;
     }
 
-    static void convFwdInference(const TensorBase<InputDataType>& gradInput,
+    static void convFwdInference(const TensorBase<InputDataType>& input,
                                  const TensorBase<InputDataType>& weight,
-                                 TensorBase<InputDataType>& gradOutput,
+                                 TensorBase<InputDataType>& output,
                                  const std::vector<int64_t>& strides,
                                  const std::vector<int64_t>& dilations,
                                  const std::vector<int64_t>& padding)
     {
-        validateInput(gradInput, weight, gradOutput, strides, dilations, padding);
+        validateInput(input, weight, output, strides, dilations, padding);
 
         // Extract dimensions - NCHW format for input/output, [G*K][C][Y][X] for weight (4D flattened)
-        const auto& inputDims = gradInput.dims();
+        const auto& inputDims = input.dims();
         const auto& weightDims = weight.dims();
-        const auto& outputDims = gradOutput.dims();
+        const auto& outputDims = output.dims();
 
         int64_t nBatch = inputDims[0];
         int64_t nInputChannels = inputDims[1];
@@ -102,8 +108,7 @@ public:
 
                         if(hi >= 0 && hi < inputHeight && wi >= 0 && wi < inputWidth)
                         {
-                            InputDataType inputVal
-                                = gradInput.getHostValue(nIdx, inputChannel, hi, wi);
+                            InputDataType inputVal = input.getHostValue(nIdx, inputChannel, hi, wi);
 
                             int64_t weightIdx = (gIdx * outputChannelsPerGroup) + kIdx;
                             InputDataType weightVal = weight.getHostValue(weightIdx, c, y, x);
@@ -116,7 +121,7 @@ public:
             }
 
             int64_t outputChannel = (gIdx * outputChannelsPerGroup) + kIdx;
-            gradOutput.setHostValue(
+            output.setHostValue(
                 static_cast<InputDataType>(accumulator), nIdx, outputChannel, hoIdx, woIdx);
         };
 
@@ -124,22 +129,22 @@ public:
             convolutionFunc, nGroups, nBatch, outputChannelsPerGroup, outputHeight, outputWidth)(
             std::thread::hardware_concurrency());
 
-        gradOutput.memory().markHostModified();
+        output.memory().markHostModified();
     }
 
-    static void convBwdData(TensorBase<InputDataType>& input,
+    static void convBwdData(TensorBase<InputDataType>& gradInput,
                             const TensorBase<InputDataType>& weight,
-                            const TensorBase<InputDataType>& output,
+                            const TensorBase<InputDataType>& gradOutput,
                             const std::vector<int64_t>& strides,
                             const std::vector<int64_t>& dilations,
                             const std::vector<int64_t>& padding)
     {
-        validateInput(input, weight, output, strides, dilations, padding);
+        validateInput(gradInput, weight, gradOutput, strides, dilations, padding);
 
         // // Extract dimensions - NCHW format for input/output, [G*K][C][Y][X] for weight (4D flattened)
-        const auto& inputDims = input.dims();
+        const auto& inputDims = gradInput.dims();
         const auto& weightDims = weight.dims();
-        const auto& outputDims = output.dims();
+        const auto& outputDims = gradOutput.dims();
 
         int64_t nBatch = outputDims[0];
         int64_t outputHeight = outputDims[2];
@@ -198,7 +203,8 @@ public:
                     for(int64_t k = 0; k < outputChannelsPerGroup; ++k)
                     {
                         auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + k;
-                        InputDataType vOut = output.getHostValue(nIdx, outputChannelIdx, ho, wo);
+                        InputDataType vOut
+                            = gradOutput.getHostValue(nIdx, outputChannelIdx, ho, wo);
 
                         InputDataType vWei = weight.getHostValue(outputChannelIdx, cIdx, y, x);
 
@@ -208,18 +214,18 @@ public:
                 }
             }
 
-            input.setHostValue(static_cast<InputDataType>(vAcc),
-                               nIdx,
-                               (gIdx * channelsPerGroup) + cIdx,
-                               hiIdx,
-                               wiIdx);
+            gradInput.setHostValue(static_cast<InputDataType>(vAcc),
+                                   nIdx,
+                                   (gIdx * channelsPerGroup) + cIdx,
+                                   hiIdx,
+                                   wiIdx);
         };
 
         hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
             convolutionFunc, nGroups, nBatch, channelsPerGroup, inputHeight, inputWidth)(
             std::thread::hardware_concurrency());
 
-        input.memory().markHostModified();
+        gradInput.memory().markHostModified();
     }
 
 private:
