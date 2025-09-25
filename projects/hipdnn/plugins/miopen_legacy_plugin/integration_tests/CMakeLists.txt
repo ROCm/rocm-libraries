@@ -1,17 +1,17 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    find_package(GTest CONFIG REQUIRED)
-endif()
-
 include(GoogleTest)
 find_package(Threads REQUIRED)
 
-
-if(HIP_DNN_SKIP_TESTS)
-    message(STATUS "Skipping MIOpen plugin integration tests.")
-    return()
+if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+    # For standalone build, check if we have the required packages
+    # hipdnn_frontend should already be found by parent CMakeLists.txt
+    # which brings in hipdnn_backend and hipdnn_sdk as well
+    if(NOT TARGET hipdnn_frontend OR NOT TARGET hipdnn_backend)
+        message(STATUS "Skipping MIOpen plugin integration tests (hipdnn_frontend or hipdnn_backend not found)")
+        return()
+    endif()
 endif()
 
 add_executable(miopen_plugin_integration_test
@@ -39,4 +39,12 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_plugin_integration_test)
     
     add_integration_test_target(miopen_plugin_integration_test ${CMAKE_CURRENT_BINARY_DIR})
+else()
+    # For standalone build, set output directory to bin/ and RPATH to find installed libraries
+    set_target_properties(miopen_plugin_integration_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/lib"
+        INSTALL_RPATH_USE_LINK_PATH TRUE
+    )
 endif()

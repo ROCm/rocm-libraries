@@ -7,6 +7,11 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING "Toolchain file")
 
+# Set install prefix to ROCM_PATH on Unix/Linux
+if(NOT WIN32)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+endif()
+
 set(HIPDNN_VERSION "0.0.1")
 
 if(NOT WIN32)

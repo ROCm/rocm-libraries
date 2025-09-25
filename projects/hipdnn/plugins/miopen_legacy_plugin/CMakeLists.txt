@@ -10,6 +10,12 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     # Set ROCM_PATH with default value
     set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
     
+    if(EXISTS ${ROCM_PATH}/llvm/bin/clang++)
+        set(CMAKE_CXX_COMPILER ${ROCM_PATH}/llvm/bin/clang++)
+        set(CMAKE_C_COMPILER ${ROCM_PATH}/llvm/bin/clang)
+        message(STATUS "Using ROCm Clang compilers from ${ROCM_PATH}/llvm/bin")
+    endif()
+    
     if(NOT WIN32)
         set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
     endif()
@@ -21,6 +27,15 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         LANGUAGES CXX)
         
     set(CMAKE_CXX_STANDARD 17)
+    
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+    
+    # Enable testing for standalone build
+    option(HIP_DNN_SKIP_TESTS "Skip building tests" OFF)
+    
+    if(NOT HIP_DNN_SKIP_TESTS)
+        enable_testing()
+    endif()
 
     list(PREPEND HIPDNN_WARNING_COMPILE_OPTIONS
         -Werror                                  # Treat all warnings as errors
@@ -54,12 +69,23 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     
     find_package(hip REQUIRED)
     
+    # Brings in all hipDNN deps
+    find_package(hipdnn_frontend CONFIG REQUIRED)
+    
+    # If SDK didn't provide the plugin path variables, set defaults
+    if(NOT DEFINED HIPDNN_PLUGIN_ENGINE_SUBDIR OR "${HIPDNN_PLUGIN_ENGINE_SUBDIR}" STREQUAL "")
+        set(HIPDNN_PLUGIN_ENGINE_SUBDIR "hipdnn_plugins/engines" CACHE STRING "Subdirectory for hipDNN engine plugins")
+    endif()
+    
+    if(NOT DEFINED HIPDNN_INSTALL_PLUGIN_ENGINE_DIR OR "${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}" STREQUAL "")
+        set(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR "lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}" CACHE STRING "Install directory for hipDNN engine plugins")
+    endif()
+    
+    # Setup testing dependencies for standalone build
+    include(Dependencies)
+    
 else()
     message(STATUS "Building miopen legacy plugin as a dependency")
-endif()
-
-if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    find_package(hipdnn_sdk CONFIG REQUIRED)
 endif()
 
 set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
@@ -125,8 +151,13 @@ endif()
 
 set(MIOPEN_LEGACY_PLUGIN_PATH ./hipdnn_plugins/engines/miopen_legacy_plugin CACHE INTERNAL "miopen legacy plugin dir" FORCE)
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
+if(NOT HIP_DNN_SKIP_TESTS)
     add_subdirectory(tests)
+endif()
+
+if(BUILD_PLUGIN_AS_DEPENDENCY AND NOT HIP_DNN_SKIP_TESTS)
+    add_subdirectory(integration_tests)
+elseif(NOT HIP_DNN_SKIP_TESTS AND hipdnn_frontend_FOUND)
     add_subdirectory(integration_tests)
 endif()
 
