@@ -28,7 +28,7 @@ TEST(TestFlatbufferTensorAttributesUtils, unpackTensorAttributes)
     EXPECT_EQ(unpacked.strides, strides);
 }
 
-TEST(TestFlatbufferTensorAttributesUtils, CreateShallowTensor)
+TEST(TestFlatbufferTensorAttributesUtils, createShallowTensor)
 {
     TensorAttributesT attr;
     attr.uid = 2;
@@ -38,7 +38,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateShallowTensor)
     attr.strides = {2, 1};
 
     std::array<float, 4> data = {1.0f, 2.0f, 3.0f, 4.0f};
-    auto tensor = CreateShallowTensor<float>(attr, data.data());
+    auto tensor = createShallowTensor<float>(attr, data.data());
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), attr.dims);

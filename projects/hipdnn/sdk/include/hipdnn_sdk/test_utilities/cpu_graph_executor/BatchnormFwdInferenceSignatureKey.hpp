@@ -12,7 +12,8 @@ namespace hipdnn_sdk::test_utilities
 
 struct BatchnormFwdInferenceSignatureKey
 {
-    hipdnn_sdk::data_objects::NodeAttributes nodeType;
+    const hipdnn_sdk::data_objects::NodeAttributes nodeType{
+        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes};
     hipdnn_sdk::data_objects::DataType inputDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
@@ -20,14 +21,13 @@ struct BatchnormFwdInferenceSignatureKey
     constexpr BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType input,
                                                 hipdnn_sdk::data_objects::DataType scaleBias,
                                                 hipdnn_sdk::data_objects::DataType meanVariance)
-        : nodeType(hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
-        , inputDataType(input)
+        : inputDataType(input)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
     {
     }
 
-    constexpr std::size_t hash_self() const
+    constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
                ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 4)

@@ -15,7 +15,7 @@ namespace hipdnn_sdk::test_utilities
 /*
  * For each new op we add to our Plan registry we need to update this variant key to support it.
  * This way, we can have a single registry for all operations which simplifies the graph executor.
- * Each key must have a hash_self() and equal() method to support hashing and equality comparison.
+ * Each key must have a hashSelf() and equal() method to support hashing and equality comparison.
  * 
  * Additionally for new new key: 
  * - we need to update the CpuReferenceGraphExecutor::buildSignatureKey to 
@@ -31,7 +31,7 @@ struct KeyHash
 {
     std::size_t operator()(Key const& k) const noexcept
     {
-        return std::visit([](auto const& x) { return x.hash_self(); }, k);
+        return std::visit([](auto const& x) { return x.hashSelf(); }, k);
     }
 };
 
@@ -40,7 +40,9 @@ struct KeyEqual
     bool operator()(Key const& a, Key const& b) const noexcept
     {
         if(a.index() != b.index())
+        {
             return false; // different concrete types
+        }
         return std::visit([](auto const& x, auto const& y) { return x.equal(y); }, a, b);
     }
 };
@@ -90,7 +92,8 @@ private:
     }
 
     template <std::size_t... Is>
-    void registerBatchnormFwdInferencePlanBuilders(std::index_sequence<Is...>)
+    void registerBatchnormFwdInferencePlanBuilders(
+        [[maybe_unused]] std::index_sequence<Is...> sequence)
     {
         ((_registry[ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES[Is]]
           = std::make_unique<BatchnormFwdInferencePlanBuilder<

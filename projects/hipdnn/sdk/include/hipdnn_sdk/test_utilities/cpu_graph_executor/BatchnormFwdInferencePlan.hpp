@@ -67,22 +67,22 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor = CreateShallowTensor<InputDataType>(
+        auto shallowXTensor = createShallowTensor<InputDataType>(
             _params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowYTensor = CreateShallowTensor<InputDataType>(
+        auto shallowYTensor = createShallowTensor<InputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        auto shallowScaleTensor = CreateShallowTensor<ScaleBiasDataType>(
+        auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        auto shallowBiasTensor = CreateShallowTensor<ScaleBiasDataType>(
+        auto shallowBiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.biasTensor, variantPack.at(_params.biasTensor.uid));
 
-        auto shallowMeanTensor = CreateShallowTensor<MeanVarianceDataType>(
+        auto shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
             _params.meanTensor, variantPack.at(_params.meanTensor.uid));
 
-        auto shallowInvVarianceTensor = CreateShallowTensor<MeanVarianceDataType>(
+        auto shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
             _params.invVarianceTensor, variantPack.at(_params.invVarianceTensor.uid));
 
         CpuFpReferenceBatchnormImpl<InputDataType, ScaleBiasDataType, MeanVarianceDataType>::
@@ -93,9 +93,6 @@ public:
                                   *shallowInvVarianceTensor,
                                   *shallowYTensor,
                                   _params.epsilon);
-
-        //todo remove
-        std::cout << "Executed Batchnorm Fwd Inference Plan" << std::endl;
     }
 
 private:

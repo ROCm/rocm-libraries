@@ -71,7 +71,7 @@ private:
         return planBuilder->buildNodePlan(graph, node);
     }
 
-    Key buildSignatureKey(
+    static Key buildSignatureKey(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap)

@@ -20,7 +20,7 @@ inline hipdnn_sdk::data_objects::TensorAttributesT
 
 template <typename T>
 inline std::unique_ptr<hipdnn_sdk::utilities::ShallowTensor<T>>
-    CreateShallowTensor(const hipdnn_sdk::data_objects::TensorAttributesT& tensorDetails, void* ptr)
+    createShallowTensor(const hipdnn_sdk::data_objects::TensorAttributesT& tensorDetails, void* ptr)
 {
     return std::make_unique<hipdnn_sdk::utilities::ShallowTensor<T>>(
         ptr, tensorDetails.dims, tensorDetails.strides);

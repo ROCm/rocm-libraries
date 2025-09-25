@@ -38,15 +38,15 @@ TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
     BatchnormFwdInferenceSignatureKey key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
-    EXPECT_EQ(key1.hash_self(), key2.hash_self());
+    EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
     BatchnormFwdInferenceSignatureKey key3{DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key4{DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     BatchnormFwdInferenceSignatureKey key5{DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
-    auto hash3 = key3.hash_self();
-    auto hash4 = key4.hash_self();
-    auto hash5 = key5.hash_self();
+    auto hash3 = key3.hashSelf();
+    auto hash4 = key4.hashSelf();
+    auto hash5 = key5.hashSelf();
 
     EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5);
 }
