@@ -40,8 +40,9 @@ namespace rocRoller
         {
         public:
             /**
-             * @brief Add incident connections to container. These represent connection between elements of a graph.
-             * 
+             * @brief Add incident connections to container. These represent connection between
+             * elements of a graph.
+             *
              * @tparam T_Inputs Range of graph tags
              * @tparam T_Outputs Range of graph tags
              * @param tag Graph tag of element to be connected
@@ -53,21 +54,21 @@ namespace rocRoller
 
             /**
              * @brief Gets the number of incident connections in the container
-             * 
+             *
              * @return size_t Number of unique connections
              */
             size_t size() const;
 
             /**
              * @brief Purge incident connections that refer to this tag
-             * 
+             *
              * @param tag Graph tag of element to be deleted
              */
             void deleteTag(int tag);
 
             /**
              * @brief Get all connected sources
-             * 
+             *
              * @param tag Graph tag of element to be queried
              * @return std::vector<int> a series of graph indices for incoming elements
              */
@@ -75,7 +76,7 @@ namespace rocRoller
 
             /**
              * @brief Get all connected destinations
-             * 
+             *
              * @param tag Graph tag of element to be queried
              * @return std::vector<int> a series of graph indices for outgoing elements
              */
@@ -83,7 +84,7 @@ namespace rocRoller
 
             /**
              * @brief Get a count of all connected sources to element at tag
-             * 
+             *
              * @param tag Graph tag of element to be queried
              * @return size_t Count of all connected sources
              */
@@ -91,7 +92,7 @@ namespace rocRoller
 
             /**
              * @brief Get a count of all connected destinations to element at tag
-             * 
+             *
              * @param tag Graph tag of element to be queried
              * @return size_t Count of all connected destinations
              */
@@ -104,18 +105,22 @@ namespace rocRoller
             friend struct rocRoller::Serialization::MappingTraits;
 
             /**
-             * @brief The incidence structure of the Hypergraph, sorted by sources, then by connection order.
-             * 
-             * NOTE: This structure does not preserve the order of sources connected to a destination element.
-             * This storage structure is duplicated to maintain that ordering and for quick lookup.
+             * @brief The incidence structure of the Hypergraph, sorted by sources, then by
+             * connection order.
+             *
+             * NOTE: This structure does not preserve the order of sources connected to a
+             * destination element. This storage structure is duplicated to maintain that ordering
+             * and for quick lookup.
              */
             std::map<int, std::vector<int>> m_incidenceBySrc;
 
             /**
-             * @brief The incidence structure of the Hypergraph, sorted by destinations, then by connection order.
-             * 
-             * NOTE: This structure does not preserve the order of destinations connected to a source element.
-             * This storage structure is duplicated to maintain that ordering and for quick lookup.
+             * @brief The incidence structure of the Hypergraph, sorted by destinations, then by
+             * connection order.
+             *
+             * NOTE: This structure does not preserve the order of destinations connected to a
+             * source element. This storage structure is duplicated to maintain that ordering and
+             * for quick lookup.
              */
             std::map<int, std::vector<int>> m_incidenceByDst;
         };

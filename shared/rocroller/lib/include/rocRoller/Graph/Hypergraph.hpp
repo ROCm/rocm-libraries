@@ -81,11 +81,12 @@ namespace rocRoller
 
         /**
          * @brief A directed Hypergraph.
-         * 
+         *
          * @tparam Node What objects represent the nodes in the graph? Typically a std::variant
          * @tparam Edge What objects represent the edges in the graph? Typically a std::variant
-         * @tparam Hyper A Hypergraph (true) is a graph where an edge can connect to any number of incoming and outgoing nodes.
-         * A "calm" graph (false) is an ordinary graph where an edge connects to at most one incoming node and at most one outgoing node.
+         * @tparam Hyper A Hypergraph (true) is a graph where an edge can connect to any number of
+         * incoming and outgoing nodes. A "calm" graph (false) is an ordinary graph where an edge
+         * connects to at most one incoming node and at most one outgoing node.
          */
         template <typename Node, typename Edge, bool Hyper = true>
         class Hypergraph
@@ -189,24 +190,26 @@ namespace rocRoller
             Generator<int> leaves() const;
 
             /**
-            * @brief Yields element tag that are the child nodes of a given element
-            */
+             * @brief Yields element tag that are the child nodes of a given element
+             */
             Generator<int> childNodes(int parent) const;
 
             /**
-            * @brief Yields element tag that are the parent nodes of a given element
-            */
+             * @brief Yields element tag that are the parent nodes of a given element
+             */
             Generator<int> parentNodes(int child) const;
 
             Generator<int> allElements() const;
 
             /**
-             * @brief Yields element tags connected in the specified direction to start, in depth-first order
+             * @brief Yields element tags connected in the specified direction to start, in
+             * depth-first order
              */
             Generator<int> depthFirstVisit(int start, Direction dir = Direction::Downstream) const;
 
             /**
-             * @brief Yields node tag connected in the specified direction to start, that satisfy the node selector.
+             * @brief Yields node tag connected in the specified direction to start, that satisfy
+             * the node selector.
              */
             template <std::predicate<int> Predicate>
             Generator<int> findNodes(int       start,
@@ -214,7 +217,8 @@ namespace rocRoller
                                      Direction dir = Direction::Downstream) const;
 
             /**
-             * @brief Yields node tag connected in the specified direction to start, that satisfy the node selector.
+             * @brief Yields node tag connected in the specified direction to start, that satisfy
+             * the node selector.
              */
             template <CForwardRangeOf<int> Range, std::predicate<int> Predicate>
             Generator<int> findNodes(Range const& starts,
@@ -228,14 +232,16 @@ namespace rocRoller
             Generator<int> findElements(Predicate nodeSelector) const;
 
             /**
-             * @brief Yields element tags connected in the specified direction to starts, in depth-first order
+             * @brief Yields element tags connected in the specified direction to starts, in
+             * depth-first order
              */
             template <CForwardRangeOf<int> Range>
             Generator<int> depthFirstVisit(Range const& starts,
                                            Direction    dir = Direction::Downstream) const;
 
             /**
-             * @brief Yields element tags connected in the specified direction to starts, in depth-first order.
+             * @brief Yields element tags connected in the specified direction to starts, in
+             * depth-first order.
              *
              * Will only visit through edges if the edgePredicate returns true.
              */
@@ -245,7 +251,8 @@ namespace rocRoller
                                            Direction    dir = Direction::Downstream) const;
 
             /**
-             * @brief Yields element tags connected in the specified direction to the start, in depth-first order.
+             * @brief Yields element tags connected in the specified direction to the start, in
+             * depth-first order.
              *
              * Will only visit through edges if the edgePredicate returns true.
              */
@@ -253,10 +260,11 @@ namespace rocRoller
             Generator<int> depthFirstVisit(int start, Predicate edgePredicate, Direction dir) const;
 
             /**
-             * @brief Yields element tags connected in the specified direction to start, in depth-first order.
+             * @brief Yields element tags connected in the specified direction to start, in
+             * depth-first order.
              *
-             * Will not yield any nodes in `visitedNodes`, and will insert nodes `visitedNodes` to track already
-             * visited nodes.
+             * Will not yield any nodes in `visitedNodes`, and will insert nodes `visitedNodes` to
+             * track already visited nodes.
              */
             template <Direction Dir>
             Generator<int> depthFirstVisit(int start, std::unordered_set<int>& visitedNodes) const;
@@ -267,15 +275,16 @@ namespace rocRoller
                                            std::unordered_set<int>& visitedNodes) const;
 
             /**
-             * @brief Yields element tags connected in the specified direction of start, in breadth-first order.
+             * @brief Yields element tags connected in the specified direction of start, in
+             * breadth-first order.
              */
             Generator<int> breadthFirstVisit(int       start,
                                              Direction dir = Direction::Downstream) const;
 
             /**
-            * @brief Yields element tag (both nodes and edges) that form the paths
-            * from the starts to the ends
-            */
+             * @brief Yields element tag (both nodes and edges) that form the paths
+             * from the starts to the ends
+             */
             template <Direction            Dir,
                       CForwardRangeOf<int> RangeStart,
                       CForwardRangeOf<int> RangeEnd,
@@ -286,9 +295,9 @@ namespace rocRoller
                                 std::map<int, bool>& visitedElements) const;
 
             /**
-            * @brief Yields element tag (both nodes and edges) that form the paths
-            * from the starts to the ends
-            */
+             * @brief Yields element tag (both nodes and edges) that form the paths
+             * from the starts to the ends
+             */
             template <Direction            Dir,
                       CForwardRangeOf<int> RangeStart,
                       CForwardRangeOf<int> RangeEnd,
@@ -297,21 +306,23 @@ namespace rocRoller
                 path(RangeStart const& starts, RangeEnd const& ends, Predicate edgeSelector) const;
 
             /**
-            * @brief Yields element tag (both nodes and edges) that form the paths
-            * from the starts to the ends
-            */
+             * @brief Yields element tag (both nodes and edges) that form the paths
+             * from the starts to the ends
+             */
             template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
             Generator<int> path(RangeStart const& starts, RangeEnd const& ends) const;
 
             /**
-            * @brief Yields element tags of immediately connecting elements in the direction specified
-            */
+             * @brief Yields element tags of immediately connecting elements in the direction
+             * specified
+             */
             template <Direction Dir>
             std::vector<int> getNeighbours(int const tag) const;
 
             /**
-            * @brief Yields element tags of immediately connecting elements in the direction specified
-            */
+             * @brief Yields element tags of immediately connecting elements in the direction
+             * specified
+             */
             std::vector<int> getNeighbours(int const tag, Direction Dir) const;
 
             /**
@@ -342,7 +353,7 @@ namespace rocRoller
 
             /**
              * @brief Yields all element tags that match the supplied element type
-             * 
+             *
              * @tparam T Type of element to filter by. Can be Node, Edge, or a subvariant of those.
              */
             template <typename T>
@@ -350,26 +361,27 @@ namespace rocRoller
                 Generator<int> getElements()
             const;
 
-             /**
-              * @brief Yields tags of all Nodes
-              * 
-              * @tparam T Subvariant of Node to filter by. Returns all Node tags by default.
-              */
+            /**
+             * @brief Yields tags of all Nodes
+             *
+             * @tparam T Subvariant of Node to filter by. Returns all Node tags by default.
+             */
             template <typename T = Node>
             requires(std::constructible_from<Node, T>) Generator<int> getNodes()
             const;
 
-             /**
-              * @brief Yields tags of all Edges
-              * 
-              * @tparam T Subvariant of Edge to filter by. Returns all Edge tags by default.
-              */
+            /**
+             * @brief Yields tags of all Edges
+             *
+             * @tparam T Subvariant of Edge to filter by. Returns all Edge tags by default.
+             */
             template <typename T = Edge>
             requires(std::constructible_from<Edge, T>) Generator<int> getEdges()
             const;
 
             /**
-             * @brief Yields tags of nodes immediately connected to `dst` through Edges of type T, in direction Dir.
+             * @brief Yields tags of nodes immediately connected to `dst` through Edges of type T,
+             * in direction Dir.
              */
             template <typename T, Direction Dir>
             requires(std::constructible_from<Edge, T>) Generator<int> getConnectedNodeIndices(
@@ -377,13 +389,15 @@ namespace rocRoller
             const;
 
             /**
-             * @brief Yields tags of nodes immediately connected to `dst` through Edges that satisfy the edgePredicate, in direction Dir.
+             * @brief Yields tags of nodes immediately connected to `dst` through Edges that satisfy
+             * the edgePredicate, in direction Dir.
              */
             template <Direction Dir, std::predicate<Edge const&> Predicate>
             Generator<int> getConnectedNodeIndices(int const dst, Predicate edgePredicate) const;
 
             /**
-             * @brief Yields tags of nodes that immediately preceed `dst` where the Edges are of type T.
+             * @brief Yields tags of nodes that immediately preceed `dst` where the Edges are of
+             * type T.
              */
             template <typename T>
             requires(std::constructible_from<Edge, T>) Generator<int> getInputNodeIndices(
@@ -391,7 +405,8 @@ namespace rocRoller
             const;
 
             /**
-             * @brief Yields tags of nodes that immediately preceed `dst` where the Edges satisfy the edgePredicate.
+             * @brief Yields tags of nodes that immediately preceed `dst` where the Edges satisfy
+             * the edgePredicate.
              */
             template <std::predicate<Edge const&> Predicate>
             Generator<int> getInputNodeIndices(int const dst, Predicate edgePredicate) const;
@@ -399,7 +414,8 @@ namespace rocRoller
             Generator<std::tuple<int, Edge>> getInputNodesAndEdges(int dst);
 
             /**
-             * @brief Yields tags of nodes that immediately follow `src` where the Edges are of type T.
+             * @brief Yields tags of nodes that immediately follow `src` where the Edges are of type
+             * T.
              */
             template <typename T>
             requires(std::constructible_from<Edge, T>) Generator<int> getOutputNodeIndices(
@@ -407,14 +423,15 @@ namespace rocRoller
             const;
 
             /**
-             * @brief Yields tags of nodes that immediately follow `src` where the Edges satisfy the edgePredicate.
+             * @brief Yields tags of nodes that immediately follow `src` where the Edges satisfy the
+             * edgePredicate.
              */
             template <std::predicate<Edge const&> Predicate>
             Generator<int> getOutputNodeIndices(int const src, Predicate edgePredicate) const;
 
             /**
-             * @brief Finds all downstream node tags that are connected to `candidates` via the specified Edge type.
-             * The set of original candidates is included in the returned set.
+             * @brief Finds all downstream node tags that are connected to `candidates` via the
+             * specified Edge type. The set of original candidates is included in the returned set.
              *
              * Note that this function recursively follows edges.
              *
@@ -428,7 +445,7 @@ namespace rocRoller
 
             /**
              * @brief Find an edge that connects two nodes, if one exists.
-             * 
+             *
              * @param tail Tag of Node that is downstream of Edge
              * @param head Tag of Node that is upstream of Edge
              * @return std::optional<int> Tag of connecting Edge, if one exists.
@@ -453,13 +470,13 @@ namespace rocRoller
 
             /**
              * @brief Map of Element tags and Elements
-             * 
+             *
              */
             std::map<int, Element> m_elements;
 
             /**
              * @brief Container holding the incident connections between Hypergraph Elements
-             * 
+             *
              */
             HypergraphIncidenceContainer m_incidence;
 
@@ -468,7 +485,7 @@ namespace rocRoller
 
             /**
              * @brief Gets a tag that hasn't been used in the Hypergraph for a new Element
-             * 
+             *
              * @return int Next available tag that can be used to store an Element
              */
             int nextAvailableTag() const;
@@ -487,7 +504,8 @@ namespace rocRoller
          * Yields nodes connected to start:
          *
          * - In direction `Dir`
-         * - Connected to `start` by edges satisfying `edgePredicate` and nodes satisfying `nodePredicate`
+         * - Connected to `start` by edges satisfying `edgePredicate` and nodes satisfying
+         * `nodePredicate`
          * - The nodes that are yielded must satisfy destNodePredicate.
          *
          * @param graph A graph
@@ -504,9 +522,10 @@ namespace rocRoller
                                       auto destNodePredicate);
 
         /**
-         * @brief A Hypergraph is a graph where an edge can connect to any number of incoming and outgoing nodes.
-         * A "calm" graph is an ordinary graph where an edge connects to exactly one incoming node and exactly one outgoing node.
-         * 
+         * @brief A Hypergraph is a graph where an edge can connect to any number of incoming and
+         * outgoing nodes. A "calm" graph is an ordinary graph where an edge connects to exactly one
+         * incoming node and exactly one outgoing node.
+         *
          * @tparam T The graph to test
          */
         template <typename T>

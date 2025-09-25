@@ -234,7 +234,8 @@ namespace rocRoller
 
             if constexpr(!Hyper)
             {
-                // Enforce "calm" graph restriction of Edges requiring exactly one incoming Node and one outgoing Node
+                // Enforce "calm" graph restriction of Edges requiring exactly one incoming Node and
+                // one outgoing Node
                 std::string errorMsg = "Graph is not a Hypergraph and Edge requires exactly one "
                                        "incoming Node and one outgoing Node";
                 if(elementType == ElementType::Edge)

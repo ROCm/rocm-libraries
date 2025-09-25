@@ -46,7 +46,8 @@ namespace HypergraphSerializationTest
 {
     using namespace rocRoller;
 
-    TEST_CASE("Hypergraph is ordered when deserialized", "[hypergraph][kernel-graph][serialization]")
+    TEST_CASE("Hypergraph is ordered when deserialized",
+              "[hypergraph][kernel-graph][serialization]")
     {
         // NOTE: ControlGraph Operations and Edges are used here for their serialization properties
         using pseudoControlGraph = Graph::Hypergraph<KernelGraph::ControlGraph::Operation,
