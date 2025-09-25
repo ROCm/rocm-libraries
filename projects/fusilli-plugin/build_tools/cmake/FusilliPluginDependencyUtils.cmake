@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#===----------------------------------------------------------------------===#
+#===------------------------------------------------------------------------===#
 #
 # Provides correctly configured dependencies for fusilli-plugin build.
 #
@@ -18,7 +18,7 @@
 #
 # Supported dependencies: GTest, hipdnn_frontend, Fusilli, IREERuntime
 #
-#===----------------------------------------------------------------------===#
+#===------------------------------------------------------------------------===#
 
 cmake_minimum_required(VERSION 3.25.2)
 

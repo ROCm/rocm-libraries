@@ -23,6 +23,10 @@ list(APPEND CMAKE_MODULE_PATH
 )
 include(FusilliPluginDependencyUtils)
 
+# Global constants
+set(FUSILLI_PLUGIN_NAME fusilli_plugin)
+set(FUSILLI_PLUGIN_ENGINE_ID 1001)
+
 # Options
 option(FUSILLI_PLUGIN_USE_LOCAL_FUSILLI "Use local Fusilli build from ../sharkfuser" ON)
 
@@ -33,3 +37,25 @@ fusilli_plugin_dependency(GTest GTEST_VERSION 1.16.0)
 fusilli_plugin_dependency(IREERuntime)
 fusilli_plugin_dependency(hipdnn_frontend HIP_DNN_HASH 8a49655a7cc73f1c766256a7ead3a987e830efe9)
 fusilli_plugin_dependency(Fusilli USE_LOCAL ${FUSILLI_PLUGIN_USE_LOCAL_FUSILLI})
+
+# Plugin definition
+add_library(${FUSILLI_PLUGIN_NAME} SHARED
+    src/fusilli_plugin.cpp
+    src/utils.h
+    src/hipdnn_engine_plugin_handle.h
+    src/hipdnn_engine_plugin_execution_context.h
+)
+target_compile_options(${FUSILLI_PLUGIN_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_link_libraries(${FUSILLI_PLUGIN_NAME} PRIVATE hipdnn_sdk hip::host fusilli::fusilli)
+target_compile_definitions(${FUSILLI_PLUGIN_NAME} PRIVATE
+  FUSILLI_PLUGIN_NAME="${FUSILLI_PLUGIN_NAME}"
+  FUSILLI_PLUGIN_ENGINE_ID=${FUSILLI_PLUGIN_ENGINE_ID}
+)
+set_target_properties(${FUSILLI_PLUGIN_NAME} PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+)
+
+# Tests
+enable_testing()
+add_subdirectory(test)
