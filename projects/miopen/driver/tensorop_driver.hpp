@@ -89,7 +89,6 @@ private:
     std::function<Tgpu(Tgpu, Tgpu)> TensorOpFn(miopenTensorOp_t op);
     int CheckTensor(std::vector<Tgpu>& cpu_res, std::vector<Tgpu>& gpu_res, double allowedEps);
     InputFlags inflags;
-    Timer timer;
 
     miopenTensorDescriptor_t aTensor;
     miopenTensorDescriptor_t bTensor;
@@ -453,11 +452,7 @@ int TensorOpDriver<Tgpu, Tref>::VerifyForward()
     double allowedEps = std::numeric_limits<Tgpu>::epsilon() * 80;
     int match         = 1;
 
-    timer.start();
     RunForwardCPU();
-    timer.stop();
-
-    printf("Tensor Op CPU singlethreaded time: %f\n", timer.gettime_ms());
 
     match = CheckTensor(
         (!is_set && !is_scale) ? c_verif : a_verif, (!is_set && !is_scale) ? c : a, allowedEps);
@@ -467,10 +462,7 @@ int TensorOpDriver<Tgpu, Tref>::VerifyForward()
 
     printf("Tensor Op verifies on CPU and GPU\n");
 
-    timer.start();
     RunForwardCPUMT();
-    timer.stop();
-    printf("Tensor Op CPU multithreaded time: %f\n", timer.gettime_ms());
 
     match = CheckTensor(
         (!is_set && !is_scale) ? c_mt_verif : a_mt_verif, (!is_set && !is_scale) ? c : a, allowedEps);
