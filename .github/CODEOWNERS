@@ -42,11 +42,11 @@
 /projects/hipblaslt/**/*.cmake                      @ROCm/rocm-math-lib-build-infra
 /projects/hipblaslt/**/CMakeLists.txt               @ROCm/rocm-math-lib-build-infra
 
-/projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
-/projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra
+/projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
+/projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 
-/projects/hipsparselt/**/*.cmake                    @ROCm/rocm-math-lib-build-infra
-/projects/hipsparselt/**/CMakeLists.txt             @ROCm/rocm-math-lib-build-infra
+/projects/hipsparselt/**/*.cmake                    @ROCm/rocm-math-lib-build-infra @ROCm/hipsparselt-reviewers
+/projects/hipsparselt/**/CMakeLists.txt             @ROCm/rocm-math-lib-build-infra @ROCm/hipsparselt-reviewers
 
 /shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
 /shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra

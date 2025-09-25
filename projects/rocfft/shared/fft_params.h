@@ -74,6 +74,31 @@ enum fft_precision
     fft_precision_double,
 };
 
+enum fft_io
+{
+    fft_io_in,
+    fft_io_out
+};
+
+static constexpr bool is_real(const fft_transform_type& dft_type)
+{
+    return dft_type == fft_transform_type_real_forward
+           || dft_type == fft_transform_type_real_inverse;
+}
+static constexpr bool is_complex(const fft_transform_type& dft_type)
+{
+    return !is_real(dft_type);
+}
+static constexpr bool is_fwd(const fft_transform_type& dft_type)
+{
+    return dft_type == fft_transform_type_real_forward
+           || dft_type == fft_transform_type_complex_forward;
+}
+static constexpr bool is_bwd(const fft_transform_type& dft_type)
+{
+    return !is_fwd(dft_type);
+}
+
 // Used for CLI11 parsing of precision enum
 static bool lexical_cast(const std::string& word, fft_precision& precision)
 {
@@ -818,13 +843,12 @@ public:
 
     bool is_inverse() const
     {
-        return transform_type == fft_transform_type_complex_inverse
-               || transform_type == fft_transform_type_real_inverse;
+        return is_bwd(transform_type);
     }
 
     bool is_forward() const
     {
-        return !is_inverse();
+        return is_fwd(transform_type);
     }
 
     // Convert to string for output.

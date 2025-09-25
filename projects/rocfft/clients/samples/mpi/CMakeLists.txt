@@ -97,6 +97,7 @@ foreach( sample ${sample_list} )
     PRIVATE
     hip::hiprand
     )
+    target_compile_definitions( ${sample} PRIVATE USE_HIPRAND )
   endif()
 
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} -Wno-cpp )

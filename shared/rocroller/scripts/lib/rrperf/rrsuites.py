@@ -23,12 +23,12 @@
 #
 ################################################################################
 
-from rrperf.problems import GEMMRun, CodeGenRun, TensileRun, TypeParameters
-from rrperf.utils import rocm_gfx
-
 import pathlib
 from itertools import product
 from typing import List
+
+from rrperf.problems import CodeGenRun, GEMMRun, TensileRun, TypeParameters
+from rrperf.utils import rocm_gfx
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
