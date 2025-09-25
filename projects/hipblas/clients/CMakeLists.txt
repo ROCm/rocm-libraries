@@ -32,6 +32,7 @@ function( get_lapack lapack_lib lapack_inc )
     set( lib "${LAPACK_LIBRARIES}" )
   endif()
   set( ${lapack_lib} ${lib} PARENT_SCOPE )
+  enable_language( Fortran )
 endfunction( )
 
 function( get_cblas cblas_libs cblas_inc )
@@ -92,7 +93,13 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
 endif()
 
 # This project may compile dependencies for clients
-project( hipblas-clients LANGUAGES CXX Fortran )
+if ( BUILD_FORTRAN_CLIENTS )
+  if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
+    set( CMAKE_Fortran_COMPILER  "gfortran" )
+  endif()
+  set( fortran_language "Fortran" )
+endif()
+project( hipblas-clients LANGUAGES CXX ${fortran_language} )
 
 # We use C++14 features, this will add compile option: -std=c++14
 set( CMAKE_CXX_STANDARD 17 )

@@ -22,11 +22,6 @@
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
-# Linking lapack library requires fortran flags
-if(BUILD_FORTRAN_CLIENTS OR NOT WIN32)
-    enable_language( Fortran )
-endif()
-
 set(hipblas_test_source
   hipblas_gtest_main.cpp
   hipblas_test.cpp
