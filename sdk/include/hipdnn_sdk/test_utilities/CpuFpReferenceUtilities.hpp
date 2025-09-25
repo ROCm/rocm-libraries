@@ -9,6 +9,7 @@
 #include <thread>
 #include <tuple>
 #include <vector>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_sdk
 {
@@ -53,11 +54,8 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        _strides.back() = 1;
-        for(std::size_t i = _lengths.size() - 1; i > 0; --i)
-        {
-            _strides[i - 1] = _strides[i] * _lengths[i];
-        }
+        auto generatedStrides = hipdnn_sdk::utilities::generateStrides(dimensions);
+        _strides.assign(generatedStrides.begin(), generatedStrides.end());
         _totalElements = _strides[0] * _lengths[0];
     }
 

@@ -16,7 +16,7 @@ namespace test_utilities
 
 using namespace hipdnn_sdk::utilities;
 
-template <class OutputType, class DeviceExecutor, class... InputTypes>
+template <class DeviceExecutor, class OutputType, class... InputTypes>
 class ReferencePointwiseBase
 {
 public:
@@ -35,8 +35,7 @@ public:
             return false;
         }
 
-        PointwiseMode operation = pointwise_attrs->operation();
-        if(!canExecuteOperation(operation, pointwise_attrs))
+        if(!canExecuteOperation(pointwise_attrs))
         {
             return false;
         }
@@ -44,38 +43,37 @@ public:
         return true;
     }
 
-    // Variadic template interface for unary, binary, and ternary operations
     template<typename... Tensors>
     static void pointwiseForward(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                Tensors&&... tensors_and_output)
+                                TensorBase<OutputType>& output,
+                                Tensors&&... inputs)
     {
-        static_assert(sizeof...(Tensors) >= 2, "Need at least one input and one output tensor");
-        static_assert(sizeof...(Tensors) == 3, "Currently only binary operations are supported");
+        static_assert(sizeof...(Tensors) >= 1, "Need at least one input tensor");
+        static_assert(sizeof...(Tensors) == 2, "Currently only binary operations are supported");
         
-        auto args = std::forward_as_tuple(tensors_and_output...);
+        auto input_args = std::forward_as_tuple(inputs...);
         
         DeviceExecutor policy;
         
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::ADD:
-            policy.executeBinaryBroadcast(std::get<0>(args), std::get<1>(args), std::get<2>(args), pointwise::Add{});
+            policy.executeBinaryBroadcast(std::get<0>(input_args), std::get<1>(input_args), output, pointwise::Add{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SUB:
-            policy.executeBinaryBroadcast(std::get<0>(args), std::get<1>(args), std::get<2>(args), pointwise::Subtract{});
+            policy.executeBinaryBroadcast(std::get<0>(input_args), std::get<1>(input_args), output, pointwise::Subtract{});
             break;
         default:
             throw std::runtime_error("Unsupported pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
         }
 
-        policy.markOutputModified(std::get<2>(args));
+        policy.markOutputModified(output);
     }
 
 private:
 
-    static bool canExecuteOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                    const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+    static bool canExecuteOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
     {
         using namespace hipdnn_sdk::data_objects;
 
@@ -89,12 +87,14 @@ private:
             return false;
         }
 
+        PointwiseMode operation = attrs->operation();
         switch(operation)
         {
         case PointwiseMode::ADD:
         case PointwiseMode::SUB:
             // Binary operations require second input
-            return (attrs->in_1_tensor_uid() != 0);
+            // Check if nullable field is set and has a non-zero value
+            return (attrs->in_1_tensor_uid() && *attrs->in_1_tensor_uid() != 0);
         default:
             // Any operation not in pointwiseForward is unsupported
             return false;
