@@ -30,9 +30,25 @@ struct JoinableThread : std::thread
     ~JoinableThread()
     {
         if(this->joinable())
+        {
             this->join();
+        }
     }
 };
+
+template <typename F, typename T, std::size_t... Is>
+static auto callFuncUnpackArgsImpl(F f, T args, std::index_sequence<Is...>)
+{
+    return f(std::get<Is>(args)...);
+}
+
+template <typename F, typename T>
+static auto callFuncUnpackArgs(F f, T args)
+{
+    constexpr std::size_t N = std::tuple_size<T>{};
+    return callFuncUnpackArgsImpl(f, args, std::make_index_sequence<N>{});
+}
+
 
 template <typename F>
 struct ParallelTensorFunctorDynamic
