@@ -14,7 +14,7 @@ class IGraphNodePlanExecutor
 public:
     virtual ~IGraphNodePlanExecutor() = default;
 
-    virtual void execute(std::unordered_map<int64_t, void*>& variantPack) = 0;
+    virtual void execute(const std::unordered_map<int64_t, void*>& variantPack) = 0;
 };
 
 }

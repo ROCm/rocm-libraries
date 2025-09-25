@@ -7,21 +7,19 @@
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 
-#include <hipdnn_sdk/test_utilities/cpu_graph_executor/BaseSignatureKey.hpp>
-
 namespace hipdnn_sdk::test_utilities
 {
 
-struct BatchnormSignatureRegistryKey
+struct BatchnormFwdInferenceSignatureKey
 {
     hipdnn_sdk::data_objects::NodeAttributes nodeType;
     hipdnn_sdk::data_objects::DataType inputDataType;
     hipdnn_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_sdk::data_objects::DataType meanVarianceDataType;
 
-    constexpr BatchnormSignatureRegistryKey(hipdnn_sdk::data_objects::DataType input,
-                                            hipdnn_sdk::data_objects::DataType scaleBias,
-                                            hipdnn_sdk::data_objects::DataType meanVariance)
+    constexpr BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType input,
+                                                hipdnn_sdk::data_objects::DataType scaleBias,
+                                                hipdnn_sdk::data_objects::DataType meanVariance)
         : nodeType(hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
         , inputDataType(input)
         , scaleBiasDataType(scaleBias)
@@ -37,7 +35,7 @@ struct BatchnormSignatureRegistryKey
                ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 12);
     }
 
-    constexpr bool equal(const BatchnormSignatureRegistryKey& other) const
+    constexpr bool equal(const BatchnormFwdInferenceSignatureKey& other) const
     {
         return nodeType == other.nodeType && inputDataType == other.inputDataType
                && scaleBiasDataType == other.scaleBiasDataType
@@ -45,12 +43,13 @@ struct BatchnormSignatureRegistryKey
     }
 };
 
-constexpr std::array<BatchnormSignatureRegistryKey, 2> ALL_SUPPORTED_BATCHNORM_SIGNATURES
-    = {BatchnormSignatureRegistryKey(hipdnn_sdk::data_objects::DataType::FLOAT,
-                                     hipdnn_sdk::data_objects::DataType::FLOAT,
-                                     hipdnn_sdk::data_objects::DataType::FLOAT),
-       BatchnormSignatureRegistryKey(hipdnn_sdk::data_objects::DataType::HALF,
-                                     hipdnn_sdk::data_objects::DataType::HALF,
-                                     hipdnn_sdk::data_objects::DataType::HALF)};
+constexpr std::array<BatchnormFwdInferenceSignatureKey, 2>
+    ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES
+    = {BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_sdk::data_objects::DataType::FLOAT,
+                                         hipdnn_sdk::data_objects::DataType::FLOAT),
+       BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType::HALF,
+                                         hipdnn_sdk::data_objects::DataType::HALF,
+                                         hipdnn_sdk::data_objects::DataType::HALF)};
 
 }

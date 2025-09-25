@@ -23,20 +23,30 @@ public:
     CpuReferenceGraphExecutor() = default;
     ~CpuReferenceGraphExecutor() = default;
 
-    static void
-        execute(void* graphBuffer, size_t size, std::unordered_map<int64_t, void*>& variantPack)
+    static void execute(void* graphBuffer,
+                        size_t size,
+                        const std::unordered_map<int64_t, void*>& variantPack)
     {
         auto graphWrap = hipdnn_plugin::GraphWrapper(graphBuffer, size);
 
+        std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
+
         for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
         {
-            //todo
-            //build up a list of planExecutors for each node in the graph
-            // if all suceed to create, run each node in sequence
 
             auto& node = graphWrap.getNode(i);
-            auto planExecutor = buildPlanForNode(graphWrap, node);
-            planExecutor->execute(variantPack);
+            planExecutors.push_back(buildPlanForNode(graphWrap, node));
+        }
+
+        //todo future, look through the graphs Tensor map and look for virtual tensors.
+        // for each virtual tensor, create a instace of MigratableMemory(or make a host only memory class).
+        // Add each new memory instance to a copy of the variant pack.
+        // its not worth doing this before we know we can handle the full graph as we dont want to alloc memory
+        // we dont need.
+
+        for(auto& executor : planExecutors)
+        {
+            executor->execute(variantPack);
         }
     }
 
@@ -73,7 +83,7 @@ public:
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid());
 
-        return BatchnormSignatureRegistryKey(
+        return BatchnormFwdInferenceSignatureKey(
             xTensorAttr->data_type(), scaleTensorAttr->data_type(), meanTensorAttr->data_type());
     }
 };

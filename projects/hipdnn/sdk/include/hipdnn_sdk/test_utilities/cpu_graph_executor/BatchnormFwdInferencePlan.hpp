@@ -65,7 +65,7 @@ public:
     {
     }
 
-    void execute(std::unordered_map<int64_t, void*>& variantPack) override
+    void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         auto shallowXTensor = CreateShallowTensor<InputDataType>(
             _params.xTensor, variantPack.at(_params.xTensor.uid));
@@ -94,6 +94,7 @@ public:
                                   *shallowYTensor,
                                   _params.epsilon);
 
+        //todo remove
         std::cout << "Executed Batchnorm Fwd Inference Plan" << std::endl;
     }
 

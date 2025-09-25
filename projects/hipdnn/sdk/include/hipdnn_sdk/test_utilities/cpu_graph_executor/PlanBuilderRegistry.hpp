@@ -13,7 +13,7 @@
 namespace hipdnn_sdk::test_utilities
 {
 
-using Key = std::variant<BatchnormSignatureRegistryKey /*, OtherKeyTypes...*/>;
+using Key = std::variant<BatchnormFwdInferenceSignatureKey /*, OtherKeyTypes...*/>;
 
 struct KeyHash
 {
@@ -45,18 +45,18 @@ inline std::unordered_map<Key, std::unique_ptr<IGraphNodePlanBuilder>, KeyHash, 
 template <std::size_t... Is>
 void registerBatchnormFwdInferencePlanBuilders(std::index_sequence<Is...>)
 {
-    ((planBuilderRegistry()[ALL_SUPPORTED_BATCHNORM_SIGNATURES[Is]]
+    ((planBuilderRegistry()[ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES[Is]]
       = std::make_unique<BatchnormFwdInferencePlanBuilder<
-          ALL_SUPPORTED_BATCHNORM_SIGNATURES[Is].inputDataType,
-          ALL_SUPPORTED_BATCHNORM_SIGNATURES[Is].scaleBiasDataType,
-          ALL_SUPPORTED_BATCHNORM_SIGNATURES[Is].meanVarianceDataType>>()),
+          ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES[Is].inputDataType,
+          ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES[Is].scaleBiasDataType,
+          ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES[Is].meanVarianceDataType>>()),
      ...);
 }
 
 inline void initializeBatchnormRegistry()
 {
     registerBatchnormFwdInferencePlanBuilders(
-        std::make_index_sequence<ALL_SUPPORTED_BATCHNORM_SIGNATURES.size()>{});
+        std::make_index_sequence<ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES.size()>{});
 }
 
 struct BatchnormRegistryInitializer

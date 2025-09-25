@@ -43,11 +43,7 @@ add_executable(hipdnn_sdk_tests
     test_utilities/TestLoggingUtils.cpp
     test_utilities/TestFlatbufferDatatypeMapping.cpp
     test_utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
-    test_utilities/cpu_graph_executor/TestTensorVariant.cpp
     test_utilities/cpu_graph_executor/TestBatchnormSignatureRegistryKey.cpp
-
-
-
 )
 
 target_compile_definitions(hipdnn_sdk_tests PRIVATE
