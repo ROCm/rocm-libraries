@@ -3356,7 +3356,7 @@ namespace KernelGraphTest
         };
 
         // For streamKTwoTile, the SK loop is first
-        params->streamK = {true, StreamKMode::TwoTile};
+        params->streamK = StreamKMode::TwoTile;
 
         auto kgraphTwoTile = kgraph.transform(std::make_shared<AddStreamK>(
             m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs)));
@@ -3369,7 +3369,7 @@ namespace KernelGraphTest
         m_context->kernel()->resetArguments();
 
         // For streamKTwoTileDPFirst, the DP loop is first
-        params->streamK = {true, StreamKMode::TwoTileDPFirst};
+        params->streamK = StreamKMode::TwoTileDPFirst;
 
         auto kgraphTwoTileDPFirst = kgraph.transform(std::make_shared<AddStreamK>(
             m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs)));

@@ -40,8 +40,8 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
-#include <rocRoller/StreamK_detail.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
@@ -223,7 +223,7 @@ namespace GEMMDriverTest
                 numWorkgroupX = M * N / gemm.macM / gemm.macN / 2;
                 numWorkgroupY = 1;
             }
-            else if(gemm.streamK.enabled)
+            else if(gemm.streamK)
             {
                 numWorkgroupX = gemm.numWGs;
                 numWorkgroupY = 1;
@@ -461,7 +461,7 @@ namespace GEMMDriverTest
                                       rocRoller::SCRATCH);
 
             Operations::OperationTag tagNumWGs;
-            if(gemm.streamK.enabled)
+            if(gemm.streamK)
             {
                 tagNumWGs      = command->allocateTag();
                 auto numWGsArg = command->allocateArgument(DataType::UInt32,
@@ -529,7 +529,7 @@ namespace GEMMDriverTest
                 params->loopOverOutputTilesIteratedTiles = 2;
             }
 
-            if(gemm.streamK.enabled)
+            if(gemm.streamK)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
 
@@ -678,7 +678,7 @@ namespace GEMMDriverTest
                 commandArgs.setArgument(tagScalarSeed, ArgumentType::Value, srCvtSeed.value());
 
             // Create scratch space
-            if(gemm.streamK.enabled)
+            if(gemm.streamK)
             {
                 commandArgs.setArgument(tagNumWGs, ArgumentType::Value, gemm.numWGs);
             }
@@ -1095,8 +1095,8 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK.enabled = true;
-        gemm.k               = gemm.macK * 8;
+        gemm.streamK = StreamKMode::Default;
+        gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
@@ -1111,7 +1111,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             basicGEMM<float>(gemm);
         }
     }
@@ -1134,8 +1134,8 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK.enabled = true;
-        gemm.k               = gemm.macK * 8;
+        gemm.streamK = StreamKMode::Default;
+        gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
@@ -1148,7 +1148,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             basicGEMM<float>(gemm);
         }
     }
@@ -1168,7 +1168,7 @@ namespace GEMMDriverTest
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
         gemm.storeLDSD = true;
-        gemm.streamK   = {true, StreamKMode::TwoTileDPFirst};
+        gemm.streamK   = StreamKMode::TwoTileDPFirst;
 
         basicGEMM<float>(gemm);
     }
@@ -1199,8 +1199,8 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK.enabled = true;
-        gemm.k               = gemm.macK * 8;
+        gemm.streamK = StreamKMode::Default;
+        gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
@@ -1209,7 +1209,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             for(auto loadLDSA : {false, true})
             {
                 gemm.loadLDSA = loadLDSA;
@@ -1252,12 +1252,12 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK.enabled = true;
-        gemm.k               = gemm.macK * 8;
+        gemm.streamK = StreamKMode::Default;
+        gemm.k       = gemm.macK * 8;
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamK.mode = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
             basicGEMM<Half>(gemm);
         }
     }

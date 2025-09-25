@@ -962,8 +962,7 @@ namespace rocRoller
             // way of looking at the DataFlow graph to figure out
             // where to stop.
             int dpTopLoop, dpAccumLoop;
-            if(params->streamK.mode == StreamKMode::TwoTile
-               or params->streamK.mode == StreamKMode::TwoTileDPFirst)
+            if(params->streamK.isTwoTileMode())
             {
                 // We disable duplication here so that the fix-up pass
                 // uses the correct registers.
@@ -1200,13 +1199,12 @@ namespace rocRoller
                 Sequence(), {sendInfo.assignSendBoolSGPR}, {sendInfo.preWaitZero});
             graph.control.addElement(Sequence(), {sendInfo.sendCond}, {receiveInfo.preWaitZero});
 
-            if(params->streamK.mode == StreamKMode::TwoTile
-               or params->streamK.mode == StreamKMode::TwoTileDPFirst)
+            if(params->streamK.isTwoTileMode())
             {
                 int scopeSK = graph.control.addElement(Scope());
                 int scopeDP = graph.control.addElement(Scope());
 
-                if(params->streamK.mode == StreamKMode::TwoTileDPFirst)
+                if(params->streamK == StreamKMode::TwoTileDPFirst)
                 {
                     scopeDP = replaceWith(graph, forTileSKOp, scopeDP, false);
                     graph.control.addElement(Sequence(), {scopeDP}, {scopeSK});
@@ -1364,8 +1362,7 @@ namespace rocRoller
                                                     : argInfo.numTileArgExprs[d];
                 }
 
-                if(params->streamK.mode == StreamKMode::TwoTile
-                   or params->streamK.mode == StreamKMode::TwoTileDPFirst)
+                if(params->streamK.isTwoTileMode())
                 {
                     numSKTilesArgExpr      = (numNonAccTiles % numWGs + numWGs) * numAccTiles;
                     numSKTilesPerWGArgExpr = (numSKTilesArgExpr + numWGs - one) / numWGs;
@@ -1387,8 +1384,7 @@ namespace rocRoller
             argInfo.numSKTilesPerWG = k->addArgument(
                 {"numSKTilesPerWG", numTilesDT, DataDirection::ReadOnly, numSKTilesPerWGArgExpr});
 
-            if(params->streamK.mode == StreamKMode::TwoTile
-               or params->streamK.mode == StreamKMode::TwoTileDPFirst)
+            if(params->streamK.isTwoTileMode())
             {
                 argInfo.numDPTiles = k->addArgument(
                     {"numDPTiles", numTilesDT, DataDirection::ReadOnly, numDPTilesArgExpr});

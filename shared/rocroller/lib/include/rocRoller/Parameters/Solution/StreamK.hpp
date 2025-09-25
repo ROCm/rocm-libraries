@@ -32,52 +32,46 @@ namespace rocRoller
 {
     enum class StreamKMode
     {
+        None,
         Default,
         TwoTile,
         TwoTileDPFirst,
+        Count,
     };
 
     struct StreamKConfig
     {
-        bool        enabled = false;
-        StreamKMode mode    = StreamKMode::Default;
+        StreamKMode mode = StreamKMode::None;
 
         auto operator<=>(const StreamKConfig&) const = default;
 
-        std::string toString() const
+        explicit operator bool() const
         {
-            std::string rv = "StreamK(";
-            if(enabled)
-            {
-                rv += "enabled, mode=";
-                switch(mode)
-                {
-                case StreamKMode::Default:
-                    rv += "Default";
-                    break;
-                case StreamKMode::TwoTile:
-                    rv += "TwoTile";
-                    break;
-                case StreamKMode::TwoTileDPFirst:
-                    rv += "TwoTileDPFirst";
-                    break;
-                }
-            }
-            else
-            {
-                rv += "disabled";
-            }
-            return rv + ")";
+            return mode == StreamKMode::Default or mode == StreamKMode::TwoTile
+                   or mode == StreamKMode::TwoTileDPFirst;
+        }
+
+        bool operator==(StreamKMode rhs) const
+        {
+            return mode == rhs;
+        }
+
+        StreamKConfig& operator=(StreamKMode newMode)
+        {
+            mode = newMode;
+            return *this;
+        }
+
+        bool isTwoTileMode() const
+        {
+            return mode == StreamKMode::TwoTile or mode == StreamKMode::TwoTileDPFirst;
         }
     };
 
-    inline std::ostream& operator<<(std::ostream& stream, StreamKConfig const& config)
-    {
-        return stream << config.toString();
-    }
+    std::string   toString(StreamKMode mode);
+    std::ostream& operator<<(std::ostream& stream, StreamKMode const& mode);
 
-    inline std::string toString(StreamKConfig const& config)
-    {
-        return config.toString();
-    }
-}
+    std::string   toString(StreamKConfig const& config);
+    std::ostream& operator<<(std::ostream& stream, StreamKConfig const& config);
+
+} // namespace rocRoller

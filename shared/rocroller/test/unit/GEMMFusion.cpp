@@ -107,7 +107,7 @@ namespace GEMMDriverTest
                 numWorkgroupX = M * N / gemm.macM / gemm.macN / 2;
                 numWorkgroupY = 1;
             }
-            else if(gemm.streamK.enabled)
+            else if(gemm.streamK)
             {
                 numWorkgroupX = gemm.numWGs;
                 numWorkgroupY = 1;
@@ -253,7 +253,7 @@ namespace GEMMDriverTest
                 params->loopOverOutputTilesIteratedTiles = 2;
             }
 
-            if(gemm.streamK.enabled)
+            if(gemm.streamK)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
 
@@ -325,7 +325,7 @@ namespace GEMMDriverTest
             commandArgs.setArgument(
                 tagScalarReluAlpha, ArgumentType::Value, static_cast<T>(reluAlpha));
             // Create scratch space
-            if(gemm.streamK.enabled)
+            if(gemm.streamK)
             {
                 commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numWGs);
             }

@@ -273,7 +273,7 @@ namespace rocRollerTest::Graphs
             = m_command->addOperation(rocRoller::Operations::Tensor(2, m_td, oneStridesN)); // D
         m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tagD, tagTensorD)); // D
 
-        if(m_problem.streamK.enabled)
+        if(m_problem.streamK)
         {
             m_tagNumWGs    = m_command->allocateTag();
             auto numWGsArg = m_command->allocateArgument(DataType::UInt32,
@@ -430,7 +430,7 @@ namespace rocRollerTest::Graphs
         params->transposeMemoryAccess.set(LayoutType::MATRIX_B, m_problem.transB == "T");
         // params->transposeMemoryAccess[LayoutType::None]     = false;
 
-        if(m_problem.streamK.enabled)
+        if(m_problem.streamK)
         {
             params->loopOverOutputTilesDimensions = {0, 1};
 

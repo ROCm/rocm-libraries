@@ -88,7 +88,7 @@ namespace rocRoller
                         streamKMode = StreamKMode::TwoTileDPFirst;
                     else if(solutionParams.streamKTwoTile)
                         streamKMode = StreamKMode::TwoTile;
-                    params->streamK = {true, streamKMode};
+                    params->streamK = streamKMode;
 
                     return params;
                 }

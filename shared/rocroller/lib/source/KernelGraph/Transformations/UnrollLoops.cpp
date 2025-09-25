@@ -635,7 +635,7 @@ namespace rocRoller
                 Log::debug("Not adding tail loop for {} because tail loops are disabled.", loop);
                 return std::nullopt;
             }
-            if(m_params->streamK.enabled)
+            if(m_params->streamK)
             {
                 Log::debug("Not adding tail loop for {} because streamK is enabled.", loop);
                 return std::nullopt;

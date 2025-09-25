@@ -34,7 +34,6 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ReplaceKernelArgs.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions_fwd.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/StreamK_detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor_impl.hpp"
 
@@ -280,6 +279,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Operations/TensorScalar_impl.hpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Parameters/Solution/StreamK.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Scheduling/CooperativeScheduler_fwd.hpp"
