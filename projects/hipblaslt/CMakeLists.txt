@@ -194,6 +194,11 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
             set(BUILD_CLIENTS OFF)
             set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
             set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            # Ensure rocroller uses the same compiler as the parent project
+            # NOTE: This is only required for the pinned commit and isn't present
+            # in the latest rocroller, therefor this should be removed once we bump
+            # the rocroller commit
+            set(ROCROLLER_ASSEMBLER_PATH ${CMAKE_CXX_COMPILER})
             include(FetchContent)
             FetchContent_Declare(
                 rocRoller
@@ -314,6 +319,7 @@ if(HIPBLASLT_ENABLE_HOST)
     else()
         message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
     endif()
+
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
     install(
