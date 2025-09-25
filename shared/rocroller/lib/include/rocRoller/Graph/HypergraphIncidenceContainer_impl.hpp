@@ -37,12 +37,15 @@ namespace rocRoller::Graph
                                                                      T_Inputs const&  inputs,
                                                                      T_Outputs const& outputs)
     {
+        // Adds incident connections to all internal incidence containers.
         auto addConnection = [this](int src, int dst) {
             auto& dsts = this->m_incidenceBySrc[src];
+            // Only add connection if it doesn't alreay exist
             if(std::find(dsts.begin(), dsts.end(), dst) == dsts.end())
                 dsts.push_back(dst);
 
             auto& srcs = this->m_incidenceByDst[dst];
+            // Only add connection if it doesn't alreay exist
             if(std::find(srcs.begin(), srcs.end(), src) == srcs.end())
                 srcs.push_back(src);
         };

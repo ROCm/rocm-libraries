@@ -42,11 +42,11 @@ namespace rocRoller
             /**
              * @brief Add incident connections to container. These represent connection between elements of a graph.
              * 
-             * @tparam T_Inputs Range
-             * @tparam T_Outputs Range
+             * @tparam T_Inputs Range of graph tags
+             * @tparam T_Outputs Range of graph tags
              * @param tag Graph tag of element to be connected
-             * @param inputs Graph indices of input elements to be connected
-             * @param outputs Graph indices of output elements to be connected
+             * @param inputs Graph tags of input elements to be connected upstream of `tag`
+             * @param outputs Graph indices of output elements to be connected downstream of `tag`
              */
             template <CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
             void addIncidentConnections(int tag, T_Inputs const& inputs, T_Outputs const& outputs);
@@ -105,11 +105,17 @@ namespace rocRoller
 
             /**
              * @brief The incidence structure of the Hypergraph, sorted by sources, then by connection order.
+             * 
+             * NOTE: This structure does not preserve the order of sources connected to a destination element.
+             * This storage structure is duplicated to maintain that ordering and for quick lookup.
              */
             std::map<int, std::vector<int>> m_incidenceBySrc;
 
             /**
              * @brief The incidence structure of the Hypergraph, sorted by destinations, then by connection order.
+             * 
+             * NOTE: This structure does not preserve the order of destinations connected to a source element.
+             * This storage structure is duplicated to maintain that ordering and for quick lookup.
              */
             std::map<int, std::vector<int>> m_incidenceByDst;
         };
