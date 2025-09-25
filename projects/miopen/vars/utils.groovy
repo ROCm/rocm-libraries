@@ -67,7 +67,7 @@ def cmake_build(Map conf=[:]){
     def compiler = conf.get("compiler","/opt/rocm/llvm/bin/clang++")
     def make_targets = conf.get("make_targets","check")
     def debug_flags = "-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored " + conf.get("extradebugflags", "")
-    def build_envs = "CTEST_PARALLEL_LEVEL=1 " + conf.get("build_env","")
+    def build_envs = "CTEST_PARALLEL_LEVEL=4 " + conf.get("build_env","")
     def prefixpath = conf.get("prefixpath","/opt/rocm")
     def build_type_debug = (conf.get("build_type",'release') == 'debug')
     def miopen_install_path = conf.get("miopen_install_path", "${env.WORKSPACE}/${env.REPO_DIR}/install")
@@ -218,19 +218,12 @@ def cmake_fin_build_cmd(prefixpath){
 def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
-
-    def dockerUrl = env.MIOPEN_PRIVATE_DOCKER_URL
-    if (dockerUrl.startsWith("https://")) {
-        dockerUrl = dockerUrl.substring(8)
-    }
-
-    def image = "${dockerUrl}/${env.MIOPEN_PRIVATE_DOCKER_IMAGE_PROJECT}"
+    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
     sh "cd ${env.WORKSPACE}/${env.REPO_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
-    sh "echo ${env.MIOPEN_ARTF_IMAGE_VERSION} >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
     echo "Docker tag hash: ${docker_hash}"
-    image = "${image}/miopen_ci:ci_${docker_hash}"
+    image = "${image}:ci_${docker_hash}"
     if(params.DOCKER_IMAGE_OVERRIDE && !params.DOCKER_IMAGE_OVERRIDE.empty)
     {
         echo "Overriding the base docker image with ${params.DOCKER_IMAGE_OVERRIDE}"
@@ -276,9 +269,7 @@ def getDockerImage(Map conf=[:])
     try{
         echo "Pulling down image: ${image}"
         dockerImage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
-            dockerImage.pull()
-        }
+        dockerImage.pull()
     }
     catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
         echo "The job was cancelled or aborted"
@@ -287,8 +278,8 @@ def getDockerImage(Map conf=[:])
     catch(Exception ex)
     {
         echo "Building image..."
-        dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile .")
-        withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+        dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.REPO_DIR}/.")
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
             dockerImage.push()
         }
     }
@@ -306,9 +297,7 @@ def getDockerImage(Map conf=[:])
         try{
             echo "Pulling down perf test image: ${image}"
             dockerImage = docker.image("${image}")
-            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
-                dockerImage.pull()
-            }
+            dockerImage.pull()
         }
         catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
             echo "The job was cancelled or aborted"
@@ -316,8 +305,8 @@ def getDockerImage(Map conf=[:])
         }
         catch(Exception ex)
         {
-            dockerImage = docker.build("${image}", "${dockerArgs}")
-            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.REPO_DIR}/.")
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 dockerImage.push()
             }
         }
