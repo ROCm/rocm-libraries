@@ -68,6 +68,7 @@ projects/
   hipblas-common/
   hipblaslt/
   hipcub/
+  hipdnn/
   hipfft/
   hiprand/
   hipsolver/

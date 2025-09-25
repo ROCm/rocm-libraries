@@ -143,7 +143,6 @@ namespace
             if(trsv_check_numerics_status != rocblas_status_success)
                 return trsv_check_numerics_status;
         }
-
         rocblas_status status
             = ROCBLAS_API(rocblas_internal_trsv_template)(handle,
                                                           uplo,
