@@ -21,9 +21,9 @@
 # SOFTWARE.
 
 if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-  find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_ROOT}")
+  find_package(ROCmCMakeBuildTools 0.7.3 CONFIG QUIET PATHS "${ROCM_ROOT}")
 endif()
-if(NOT ROCM_FOUND)
+if(NOT ROCmCMakeBuildTools_FOUND)
   message(STATUS "ROCm CMake not found. Fetching...")
   # We don't really want to consume the build and test targets of ROCm CMake.
   # CMake 3.18 allows omitting them, even though there's a CMakeLists.txt in source root.
@@ -39,9 +39,9 @@ if(NOT ROCM_FOUND)
     ${SOURCE_SUBDIR_ARG}
   )
   FetchContent_MakeAvailable(rocm-cmake)
-  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
+  find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 else()
-  find_package(ROCM 0.7.3 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
+  find_package(ROCmCMakeBuildTools 0.7.3 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
 endif()
 
 include(ROCMSetupVersion)

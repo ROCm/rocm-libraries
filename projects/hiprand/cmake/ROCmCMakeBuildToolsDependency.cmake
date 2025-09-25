@@ -21,8 +21,8 @@
 # SOFTWARE.
 
 # Find or download/install rocm-cmake project
-find_package(ROCM 0.7.3 QUIET CONFIG PATHS ${ROCM_PATH})
-if(NOT ROCM_FOUND)
+find_package(ROCmCMakeBuildTools 0.7.3 QUIET CONFIG PATHS ${ROCM_PATH})
+if(NOT ROCmCMakeBuildTools_FOUND)
     set(PROJECT_EXTERN_DIR "${CMAKE_CURRENT_BINARY_DIR}/deps")
     file( TO_NATIVE_PATH "${PROJECT_EXTERN_DIR}" PROJECT_EXTERN_DIR_NATIVE)
     set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
@@ -54,7 +54,7 @@ if(NOT ROCM_FOUND)
     if(rocm_cmake_unpack_error_code)
         message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/rocm-cmake-${rocm_cmake_tag}.zip failed")
     endif()
-    find_package(ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR})
+    find_package(ROCmCMakeBuildTools 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR})
 endif()
 
 include(ROCMSetupVersion)
