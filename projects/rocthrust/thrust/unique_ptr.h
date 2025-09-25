@@ -417,7 +417,7 @@ private:
   pointer m_ptr;
   [[no_unique_address]] deleter_type m_deleter;
 
-  using DeleterSFINAE = unique_ptr_deleter_sfinae<D>;
+  using DeleterSFINAE = thrust::detail::unique_ptr_deleter_sfinae<D>;
 
   template <bool Dummy>
   using LValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::lval_ref_type;
