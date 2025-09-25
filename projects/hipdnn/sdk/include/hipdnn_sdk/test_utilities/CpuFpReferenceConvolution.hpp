@@ -158,43 +158,43 @@ public:
         int64_t padW = padding[1];
 
         auto convolutionFunc = [&](auto g, auto n, auto c, auto hi, auto wi) {
-            int64_t gIdx = static_cast<int64_t>(g);
-            int64_t nIdx = static_cast<int64_t>(n);
-            int64_t cIdx = static_cast<int64_t>(c);
-            int64_t hiIdx = static_cast<int64_t>(hi);
-            int64_t wiIdx = static_cast<int64_t>(wi);
+            auto gIdx = static_cast<int64_t>(g);
+            auto nIdx = static_cast<int64_t>(n);
+            auto cIdx = static_cast<int64_t>(c);
+            auto hiIdx = static_cast<int64_t>(hi);
+            auto wiIdx = static_cast<int64_t>(wi);
 
-            AccumulatorType v_acc = 0;
+            AccumulatorType vAcc = 0;
 
             for(int64_t y = 0; y < kernelHeight; ++y)
             {
-                int64_t h_tmp = hiIdx + padH - (y * dilationH);
+                int64_t hTmp = hiIdx + padH - (y * dilationH);
 
-                if(h_tmp % strideH == 0)
+                if(hTmp % strideH == 0)
                 {
-                    auto ho = h_tmp / strideH;
+                    auto ho = hTmp / strideH;
 
                     if(ho >= 0 && ho < outputHeight)
                     {
                         for(int64_t x = 0; x < kernelWidth; ++x)
                         {
-                            auto w_tmp = wiIdx + padW - (x * dilationW);
-                            if(w_tmp % strideW == 0)
+                            auto wTmp = wiIdx + padW - (x * dilationW);
+                            if(wTmp % strideW == 0)
                             {
-                                auto wo = w_tmp / strideW;
+                                auto wo = wTmp / strideW;
                                 if(wo >= 0 && wo < outputWidth)
                                 {
                                     for(int64_t k = 0; k < outputChannelsPerGroup; ++k)
                                     {
-                                        auto outputChannelIdx = gIdx * outputChannelsPerGroup + k;
-                                        InputDataType v_out
+                                        auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + k;
+                                        InputDataType vOut
                                             = output.getHostValue(nIdx, outputChannelIdx, ho, wo);
 
-                                        InputDataType v_wei
+                                        InputDataType vWei
                                             = weight.getHostValue(outputChannelIdx, cIdx, y, x);
 
-                                        v_acc += static_cast<AccumulatorType>(v_out)
-                                                 * static_cast<AccumulatorType>(v_wei);
+                                        vAcc += static_cast<AccumulatorType>(vOut)
+                                                * static_cast<AccumulatorType>(vWei);
                                     }
                                 }
                             }
@@ -203,9 +203,9 @@ public:
                 }
             }
 
-            input.setHostValue(static_cast<InputDataType>(v_acc),
+            input.setHostValue(static_cast<InputDataType>(vAcc),
                                nIdx,
-                               gIdx * channelsPerGroup + cIdx,
+                               (gIdx * channelsPerGroup) + cIdx,
                                hiIdx,
                                wiIdx);
         };
