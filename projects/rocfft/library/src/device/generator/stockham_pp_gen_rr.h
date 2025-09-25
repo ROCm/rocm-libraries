@@ -118,6 +118,87 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return stmts;
     }
 
+    // Call generator as many times as needed.
+    // generator accepts h, hr, width, dt, guard_pred parameters
+    StatementList add_pp_work(
+        std::function<StatementList(
+            unsigned int, unsigned int, unsigned int, unsigned int, Expression)> generator,
+        unsigned int                                                             width,
+        double                                                                   height,
+        ThreadGuardMode                                                          guard,
+        bool                                                                     trans_dir = false,
+        const std::optional<unsigned int>& guard_factor = std::nullopt,
+        const std::optional<unsigned int>& work_length  = std::nullopt) const
+    {
+        StatementList stmts;
+        unsigned int  iheight = std::floor(height);
+        if(height > iheight && threads_per_transform_pp > length / width)
+            iheight += 1;
+
+        Expression guard_expr = Expression{Literal{"true"}};
+
+        const auto effective_length = work_length ? *work_length : length;
+        const auto thread_guard_cond
+            = (effective_length / width) * (guard_factor ? *guard_factor : 1);
+
+        // do thread gurad when guard_by_if or guard_by_arg
+        if(guard != ThreadGuardMode::NO_GUARD)
+        {
+            // using ">" : no need to test "if(thread < XXX)"" if it is always true
+            if((!trans_dir && threads_per_transform_pp > (effective_length / width))
+               || (trans_dir
+                   && workgroup_size / transforms_per_block_pp > (effective_length / width)))
+            {
+                if(writeGuard)
+                    guard_expr = Expression{write && (thread < thread_guard_cond)};
+                else
+                    guard_expr = Expression{thread < thread_guard_cond};
+            }
+            else
+            {
+                if(writeGuard)
+                    guard_expr = Expression{write};
+            }
+        }
+
+        StatementList work;
+        for(unsigned int h = 0; h < iheight; ++h)
+            work += generator(h, 0, width, 0, guard_expr);
+
+        // guard_expr is not a trivial value "true"
+        if(guard == ThreadGuardMode::GUARD_BY_IF && !std::holds_alternative<Literal>(guard_expr))
+        {
+            stmts += CommentLines{"more than enough threads, some do nothing"};
+            stmts += If{guard_expr, work};
+        }
+        else
+        {
+            stmts += work;
+        }
+
+        if(height > iheight && threads_per_transform_pp < effective_length / width)
+        {
+            stmts += CommentLines{"not enough threads, some threads do extra work"};
+            unsigned int dt = iheight * threads_per_transform_pp;
+
+            // always do thread gurad
+            if(writeGuard)
+                guard_expr = Expression{write && (thread + dt < thread_guard_cond)};
+            else
+                guard_expr = Expression{thread + dt < thread_guard_cond};
+
+            work = generator(0, iheight, width, dt, guard_expr);
+
+            // put in if only if guard_by_if
+            if(guard == ThreadGuardMode::GUARD_BY_IF)
+                stmts += If{guard_expr, work};
+            else
+                stmts += work;
+        }
+
+        return stmts;
+    }
+
     std::vector<unsigned int> launcher_lengths() override
     {
         return params.parent_length;
@@ -618,7 +699,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             = static_dim
                   ? ArgumentList{twiddles_pp, twiddles_off_dim, twiddles, lengths, stride, nbatch}
                   : ArgumentList{
-                        twiddles_pp, twiddles_off_dim, twiddles, dim, lengths, stride, nbatch};
+                      twiddles_pp, twiddles_off_dim, twiddles, dim, lengths, stride, nbatch};
         for(const auto& arg : get_callback_args().arguments)
             arguments.append(arg);
         arguments.append(buf);
