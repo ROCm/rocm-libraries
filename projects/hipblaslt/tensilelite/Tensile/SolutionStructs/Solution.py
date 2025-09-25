@@ -2396,10 +2396,12 @@ class Solution(collections.abc.Mapping):
     if state["DirectToLds"]:
 
       if (not state["DirectToVgprA"]) and Solution.isDirectToLdsDoable(state, 'A', isaInfoMap, printRejectionReason):
+        state['tailLoopOptA'] = False
         state["DirectToLdsA"] = True
         state["LocalWriteUseSgprA"] = True
 
       if (not state["DirectToVgprB"]) and Solution.isDirectToLdsDoable(state, 'B', isaInfoMap, printRejectionReason):
+        state['tailLoopOptB'] = False
         state["DirectToLdsB"] = True
         state["LocalWriteUseSgprB"] = True
 
