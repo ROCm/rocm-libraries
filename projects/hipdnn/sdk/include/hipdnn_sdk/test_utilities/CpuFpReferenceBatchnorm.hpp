@@ -26,14 +26,8 @@ public:
         using namespace hipdnn_sdk::data_objects;
 
         // Support both BatchNorm inference and backward
-        if(node.attributes_type() != NodeAttributes::BatchnormInferenceAttributes
-           && node.attributes_type() != NodeAttributes::BatchnormBackwardAttributes)
-        {
-            return false;
-        }
-
-        // Default to supporting the node
-        return true;
+        return (node.attributes_type() == NodeAttributes::BatchnormInferenceAttributes
+                || node.attributes_type() != NodeAttributes::BatchnormBackwardAttributes);
     }
 
     static void batchnormFwdInference(const TensorBase<InputDataType>& input,
@@ -155,7 +149,7 @@ public:
             if(prevRunningMean != nullptr && prevRunningVariance != nullptr
                && nextRunningMean != nullptr && nextRunningVariance != nullptr)
             {
-                constexpr MeanVarianceDataType one = static_cast<MeanVarianceDataType>(1.0f);
+                auto one = static_cast<MeanVarianceDataType>(1.0f);
                 auto currentMean = prevRunningMean->getHostValue(0, cidx);
                 auto newMean = (one - momentum) * currentMean + momentum * channelMean;
                 nextRunningMean->setHostValue(newMean, 0, cidx);
@@ -294,9 +288,9 @@ private:
     static void iterateChannelElements(const TensorBase<InputDataType>& tensor,
                                        int64_t channelIdx,
                                        int64_t elementsPerChannel,
-                                       std::function<void(const std::vector<int64_t>&)> func)
+                                       const std::function<void(const std::vector<int64_t>&)>& func)
     {
-        auto dims = tensor.dims();
+        const auto& dims = tensor.dims();
 
         if(dims.size() < 2)
         {
@@ -316,10 +310,12 @@ private:
             {
                 // Skip channel dimension
                 if(dim == 1)
+                {
                     continue;
+                }
 
                 // Cast to size_t to avoid warnings.
-                size_t index = static_cast<size_t>(dim);
+                auto index = static_cast<size_t>(dim);
                 indices[index]++;
 
                 // No carry needed

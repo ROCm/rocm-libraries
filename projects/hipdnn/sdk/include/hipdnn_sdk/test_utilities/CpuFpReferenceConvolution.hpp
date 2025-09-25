@@ -26,19 +26,8 @@ public:
     {
         using namespace hipdnn_sdk::data_objects;
 
-        // TODO: integrate with SDK
-        // if(node.mode() != NodeMode::CrossCorrelation)
-        // {
-        //     return false;
-        // }
-
-        // TODO: Add ConvolutionBwdDataAttributes check here
-        if(node.attributes_type() != NodeAttributes::ConvolutionFwdAttributes)
-        {
-            return false;
-        }
-
-        return true;
+        return (node.attributes_type() == NodeAttributes::ConvolutionFwdAttributes
+                || node.attributes_type() == NodeAttributes::ConvolutionBwdAttributes);
     }
 
     static void convFwdInference(const TensorBase<InputDataType>& input,
@@ -81,13 +70,13 @@ public:
         int64_t padW = padding[1];
 
         auto convolutionFunc = [&](auto g, auto n, auto k, auto ho, auto wo) {
-            AccumulatorType accumulator = static_cast<AccumulatorType>(0);
+            auto accumulator = static_cast<AccumulatorType>(0);
 
-            int64_t gIdx = static_cast<int64_t>(g);
-            int64_t nIdx = static_cast<int64_t>(n);
-            int64_t kIdx = static_cast<int64_t>(k);
-            int64_t hoIdx = static_cast<int64_t>(ho);
-            int64_t woIdx = static_cast<int64_t>(wo);
+            auto gIdx = static_cast<int64_t>(g);
+            auto nIdx = static_cast<int64_t>(n);
+            auto kIdx = static_cast<int64_t>(k);
+            auto hoIdx = static_cast<int64_t>(ho);
+            auto woIdx = static_cast<int64_t>(wo);
 
             int64_t baseInputChannel = gIdx * channelsPerGroup;
 
@@ -97,17 +86,17 @@ public:
 
                 for(int64_t y = 0; y < kernelHeight; ++y)
                 {
-                    int64_t hi = hoIdx * strideH + y * dilationH - padH;
+                    int64_t hi = (hoIdx * strideH) + (y * dilationH) - padH;
 
                     for(int64_t x = 0; x < kernelWidth; ++x)
                     {
-                        int64_t wi = woIdx * strideW + x * dilationW - padW;
+                        int64_t wi = (woIdx * strideW) + (x * dilationW) - padW;
 
                         if(hi >= 0 && hi < inputHeight && wi >= 0 && wi < inputWidth)
                         {
                             InputDataType inputVal = input.getHostValue(nIdx, inputChannel, hi, wi);
 
-                            int64_t weightIdx = gIdx * outputChannelsPerGroup + kIdx;
+                            int64_t weightIdx = (gIdx * outputChannelsPerGroup) + kIdx;
                             InputDataType weightVal = weight.getHostValue(weightIdx, c, y, x);
 
                             accumulator += static_cast<AccumulatorType>(inputVal)
@@ -117,7 +106,7 @@ public:
                 }
             }
 
-            int64_t outputChannel = gIdx * outputChannelsPerGroup + kIdx;
+            int64_t outputChannel = (gIdx * outputChannelsPerGroup) + kIdx;
             output.setHostValue(
                 static_cast<InputDataType>(accumulator), nIdx, outputChannel, hoIdx, woIdx);
         };

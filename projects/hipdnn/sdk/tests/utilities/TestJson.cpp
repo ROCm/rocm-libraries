@@ -104,7 +104,6 @@ void enumTestSuite(T value, const std::string& stringRep, const std::string& con
     EXPECT_EQ(value, jsonValue.get<T>()) << context;
     EXPECT_EQ(jsonValue.dump(), std::string{jsonStringRep}) << context;
     EXPECT_EQ(nlohmann::json(stringRep).get<T>(), value) << context;
-    std::cout << nlohmann::json{stringRep} << "\n";
 }
 
 TEST(TestJson, Enum)
