@@ -195,6 +195,12 @@ private:
   using EnableIfDeleterAssignable =
     typename std::enable_if<std::is_assignable<D&, E&&>::value>::type;
 
+  template <
+    bool Dummy,
+    class Deleter =
+      typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+  using EnableIfDeleterDefaultDelete = typename std::enable_if<std::is_same<Deleter, default_delete<T>>::value>::type;
+
 public:
   //==========================================================================
   // Constructors
@@ -287,6 +293,8 @@ public:
     return m_ptr;
   }
 
+  template <bool Dummy = true,
+            class      = EnableIfDeleterDefaultDelete<Dummy>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
   {
     return thrust::raw_pointer_cast(m_ptr);
