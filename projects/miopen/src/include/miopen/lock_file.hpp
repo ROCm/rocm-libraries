@@ -53,7 +53,7 @@ public:
     FSLockFile(){}
     FSLockFile(const fs::path& path_) : path(path_)
     {
-        link_path = path.string() + ".fslock";
+        lockfile_path = path.string() + ".fslock";
     }
 
     bool timed_lock(const boost::posix_time::ptime& abs_time)
@@ -63,14 +63,14 @@ public:
         while(!acquired && now < abs_time)
         {
             now = boost::posix_time::second_clock::universal_time();
-            try {
-                fs::create_symlink(path, link_path);
-                acquired = true;
-            }
-            catch(const fs::filesystem_error) {
+            acquired = fs::create_directory(lockfile_path);
+            if(!acquired) {
+                MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 if(now < abs_time)
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
             }
+            else
+                MIOPEN_LOG_I2("Lock < " << lockfile_path.string());
         }
         return acquired;
     }
@@ -80,37 +80,34 @@ public:
         bool acquired = false;
         while(!acquired)
         {
-            try {
-                fs::create_symlink(path, link_path);
-                acquired = true;
-            }
-            catch(const fs::filesystem_error) {
+            acquired = fs::create_directory(lockfile_path);
+            if(!acquired) {
+                MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 std::this_thread::sleep_for(std::chrono::microseconds(100));
             }
+            else
+                MIOPEN_LOG_I2("Lock < " << lockfile_path.string());
         }
     }
 
     bool try_lock()
     {
         bool acquired = false;
-        try {
-            fs::create_symlink(path, link_path);
-            acquired = true;
-        }
-        catch(const fs::filesystem_error) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
-        }
+        acquired = fs::create_directory(lockfile_path);
+        if(acquired)
+            MIOPEN_LOG_I2("Lock < " << lockfile_path.string());
         return acquired;
     }
 
     void unlock()
     {
-        fs::remove(link_path);
+        MIOPEN_LOG_I2("Unlock < " << lockfile_path.string());
+        fs::remove(lockfile_path);
     }
 
 private:
     fs::path path;
-    fs::path link_path;
+    fs::path lockfile_path;
 };
 
 MIOPEN_INTERNALS_EXPORT fs::path LockFilePath(const fs::path& filename_);
