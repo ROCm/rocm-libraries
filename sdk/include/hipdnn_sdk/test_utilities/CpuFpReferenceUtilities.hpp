@@ -31,12 +31,15 @@ struct JoinableThread : std::thread
     ~JoinableThread()
     {
         if(this->joinable())
+        {
             this->join();
+        }
     }
 };
 
 template <typename F, typename T, std::size_t... Is>
-static auto callFuncUnpackArgsImpl(F f, T args, std::index_sequence<Is...>)
+static auto
+    callFuncUnpackArgsImpl(F f, T args, [[maybe_unused]] std::index_sequence<Is...> sequence)
 {
     return f(std::get<Is>(args)...);
 }

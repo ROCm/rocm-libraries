@@ -63,13 +63,25 @@ public:
     GraphAttributes& fill_missing_properties(const GraphAttributes& other)
     {
         if(_computeType == DataType::NOT_SET)
+        {
             _computeType = other._computeType;
+        }
+
         if(_intermediateType == DataType::NOT_SET)
+        {
             _intermediateType = other._intermediateType;
+        }
+
         if(_ioType == DataType::NOT_SET)
+        {
             _ioType = other._ioType;
+        }
+
         if(_name.empty())
+        {
             _name = other._name;
+        }
+
         return *this;
     }
 
