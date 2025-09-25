@@ -48,23 +48,22 @@ def get_metric(csv_file):
     ret = (COLUMN_NAME, None)
     try:
         df = pd.read_csv(csv_file)
-        
-        # Filter for s_waitcnt instructions
-        if 'Instruction' not in df.columns or 'Latency' not in df.columns or 'Hitcount' not in df.columns:
-            return ret
+                    
+        filtered_df = df[df['Instruction'].str.contains('s_waitcnt', na=False)]
+
+        if True:
+            # Average latency
+            row = filtered_df.iloc[1:].copy()
+            row['Avg Latency'] = row['Latency'] / row['Hitcount']
+            # latency = row['Avg Latency'].mode().iloc[0]
+            latency = row['Avg Latency'].median()
+            return (COLUMN_NAME, latency)
+        else:
+            # First s_waitcnt
+            row = filtered_df.iloc[0]
+            latency = row['Latency'] / row['Hitcount']
+            return (COLUMN_NAME, latency)
             
-        waitcnt_df = df[df['Instruction'].str.contains('s_waitcnt', na=False)]
-        
-        if waitcnt_df.empty:
-            return ret
-        
-        # Get the first s_waitcnt instruction
-        first_row = waitcnt_df.iloc[0]
-        latency = int(first_row['Latency'])
-        hitcount = int(first_row['Hitcount'])
-        
-        # Return Latency / Hitcount
-        return (COLUMN_NAME, latency / hitcount)
 
     except Exception as e:
         print(f"Error processing {csv_file}: {e}")
