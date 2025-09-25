@@ -47,7 +47,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     wgmDispatchMask = writer.states.WGMDispatchMask
 
     # Add option to skip XCC reorder
-    if kernel["UseGeneralWGM"] > 0:
+    if kernel["SpaceFillingAlgo"] > 0:
       sgprTmp = writer.sgprPool.checkOut(1)
       module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr(sgprWGM), src1=hex(wgmDispatchMask), comment="Get XCC Reorder flag value"))
       module.add(SCmpEQU32(src0=sgpr(sgprTmp), src1=hex(wgmDispatchMask), comment="Check if general WGM is being requested"))
@@ -200,8 +200,8 @@ def DefaultWGM(writer, kernel, sgprWGM):
     return module
 
 
-def GeneralWGMWalk(writer, kernel, sgprWGM):
-    module = Module("remapGeneralWGMWalk")
+def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
+    module = Module("remapSpaceFillingCurveWalk")
 
     # TODO: Query arch specific values instead of hard code
     numTotalCU = 256
@@ -225,7 +225,7 @@ def GeneralWGMWalk(writer, kernel, sgprWGM):
     module.add(SMovB32(dst=sgpr(sgprNumTilesN), src=sgpr("NumWorkGroups1"), comment=""))
 
     # Apply XCC remap
-    useXCCRemap = kernel["UseGeneralWGM"] > 0
+    useXCCRemap = kernel["SpaceFillingAlgo"] > 0
 
     if useXCCRemap:
       tmpSgpr = []
@@ -300,7 +300,7 @@ def GeneralWGMWalk(writer, kernel, sgprWGM):
     module.add(SMovB32(dst=sgpr(sgprYOffset), src=0))
 
     # Use space-filling curve to generate new WG IDs
-    module.add(SpaceFillCurveNaive(writer, kernel, sgprWGM, sgprWGID, sgprNumTilesM, sgprNumTilesN, sgprXOffset, sgprYOffset))
+    module.add(SpaceFillCurveSimpleImpl(writer, kernel, sgprWGM, sgprWGID, sgprNumTilesM, sgprNumTilesN, sgprXOffset, sgprYOffset))
 
     writer.sgprPool.checkIn(sgprXOffset)
     writer.sgprPool.checkIn(sgprYOffset)
@@ -310,14 +310,13 @@ def GeneralWGMWalk(writer, kernel, sgprWGM):
 
     return module
 
-def SpaceFillCurveNaive(writer, kernel, sgprWGM, sgprWGID, sgprNumTilesM, sgprNumTilesN, sgprXOffset, sgprYOffset):
+def SpaceFillCurveSimpleImpl(writer, kernel, sgprWGM, sgprWGID, sgprNumTilesM, sgprNumTilesN, sgprXOffset, sgprYOffset):
 
     defaultBlkM = 8
     defaultBlkN = 4
 
     module = Module()
 
-    module.addComment0("General WGM  Walk Calculation")
     tmpSgprBlockM       = writer.sgprPool.checkOut(1)
     tmpSgprBlockN       = writer.sgprPool.checkOut(1)
     tmpSgprBlockSz      = writer.sgprPool.checkOut(1)
@@ -349,7 +348,7 @@ def SpaceFillCurveNaive(writer, kernel, sgprWGM, sgprWGID, sgprNumTilesM, sgprNu
     directionNewDir = []
     directionLabels = []
 
-    if kernel["UseGeneralWGM"] == 1 or kernel["UseGeneralWGM"] == 5:
+    if kernel["SpaceFillingAlgo"] == 1 or kernel["SpaceFillingAlgo"] == 5:
       directions = [
         "HilbertWalkNCC",
         "HilbertWalkN",
@@ -380,19 +379,19 @@ def SpaceFillCurveNaive(writer, kernel, sgprWGM, sgprWGID, sgprNumTilesM, sgprNu
         [directions[3], directions[6], directions[6], directions[1]], #WCC
         [directions[0], directions[7], directions[7], directions[2]], #W
       ]
-    elif kernel["UseGeneralWGM"] == 2:
+    elif kernel["SpaceFillingAlgo"] == 2:
       # Z-Walk
       directions = ["MortonZ"]
       directionBlocks = [
         [block0, block2, block1, block3],
       ]
-    elif kernel["UseGeneralWGM"] == 3:
+    elif kernel["SpaceFillingAlgo"] == 3:
       # ReverseN-Walk
       directions = ["MortonRN"]
       directionBlocks = [
         [block0, block1, block2, block3],
       ]
-    elif kernel["UseGeneralWGM"] == 4:
+    elif kernel["SpaceFillingAlgo"] == 4:
       # U-Walk
       directions = ["MortonU"]
       directionBlocks = [
@@ -425,8 +424,8 @@ def SpaceFillCurveNaive(writer, kernel, sgprWGM, sgprWGID, sgprNumTilesM, sgprNu
 
     # Begin SFC
 
-    labelStartWhile = Label(writer.labels.getUniqueNamePrefix("GeneralWGMWalkStartWhile"), comment="")
-    labelEndWhile = Label(writer.labels.getUniqueNamePrefix("GeneralWGMWalkEndWhile"), comment="")
+    labelStartWhile = Label(writer.labels.getUniqueNamePrefix("SpaceFillingCurveWalkStartWhile"), comment="")
+    labelEndWhile = Label(writer.labels.getUniqueNamePrefix("SpaceFillingCurveWalkEndWhile"), comment="")
 
     module.add(labelStartWhile)
     #module.addComment0("start while")

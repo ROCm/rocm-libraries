@@ -76,7 +76,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
-        - UseGeneralWGM: [0, 1, 2, 3, 4]
+        - SpaceFillingAlgo: [0, 1, 2, 3, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -111,7 +111,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
         - SourceSwap: [1]
-        - UseGeneralWGM: [0, 1, 2, 3, 4]
+        - SpaceFillingAlgo: [0, 1, 2, 3, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

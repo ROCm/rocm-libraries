@@ -79,7 +79,7 @@ from .Common import roundUp, log2, ceilDivide
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
-from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, GeneralWGMWalk
+from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
 
 from Tensile.KernelWriter import KernelWriter
 from Tensile.SolutionStructs.Naming import getKernelFileBase
@@ -1600,7 +1600,7 @@ class KernelWriterAssembly(KernelWriter):
         label_1d_2d_skip = Label(self.labels.getNameInc("skip_1d_2d_cvt"), "")
         wgmDispatchMask = self.states.WGMDispatchMask
         # Allow skipping convert to 2d indices if streamK
-        if kernel["GlobalSplitU"] == 0 and kernel["UseGeneralWGM"] > 0:
+        if kernel["GlobalSplitU"] == 0 and kernel["SpaceFillingAlgo"] > 0:
           sgprTmp = self.sgprPool.checkOut(1)
           module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr(sgprWGM), src1=hex(wgmDispatchMask), comment="Get XCC Reorder flag value"))
           module.add(SCmpEQU32(src0=sgpr(sgprTmp), src1=hex(wgmDispatchMask), comment=""))
@@ -2315,7 +2315,7 @@ class KernelWriterAssembly(KernelWriter):
     #print("Pool size after:", self.sgprPool.size())
 
     sgprWGM = "WGM"
-    if kernel["UseGeneralWGM"]: # and self.sgprPool.available() >= 15:
+    if kernel["SpaceFillingAlgo"]: # and self.sgprPool.available() >= 15:
 
       tmpSgpr = self.sgprPool.checkOut(1, preventOverflow=False)
 
@@ -2333,9 +2333,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(labelWGM)
       module.add(DefaultWGM(self, kernel, sgprWGM))
       module.add(SBranch(labelName=labelWGMAlgoEnd.getLabelName(), comment=""))
-      # Start of general WGM
+      # Start of space-filling WGM
       module.add(labelGWGM)
-      module.add(GeneralWGMWalk(self, kernel, sgprWGM))
+      module.add(SpaceFillingCurveWalk(self, kernel, sgprWGM))
 
 
 

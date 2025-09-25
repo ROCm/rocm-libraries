@@ -153,7 +153,7 @@ class StreamK(Component):
         module.add(scalarUInt32DivideAndRemainder(qReg="WorkGroup2", dReg=sTmp, divReg=sTmp+1, rReg=sTmp+2, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileID // nWG0*nWG1"))
 
         # Store tileID for use later in general WGM algo
-        if kernel["UseGeneralWGM"]:
+        if kernel["SpaceFillingAlgo"]:
             module.add(SNop(waitState=1, comment=""))
             module.add(SMovB32(dst=sgpr("StreamKTileID"), src=sgpr(sTmp+2), comment=""))
 
