@@ -30,7 +30,6 @@
 
 namespace rocRoller
 {
-
     std::string toString(StreamKMode mode)
     {
         switch(mode)
@@ -63,5 +62,4 @@ namespace rocRoller
     {
         return stream << toString(config);
     }
-
 } // namespace rocRoller

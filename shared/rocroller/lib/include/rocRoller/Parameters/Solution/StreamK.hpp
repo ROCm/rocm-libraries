@@ -30,7 +30,6 @@
 
 namespace rocRoller
 {
-
     enum class StreamKMode
     {
         None,
@@ -74,5 +73,4 @@ namespace rocRoller
 
     std::string   toString(StreamKConfig const& config);
     std::ostream& operator<<(std::ostream& stream, StreamKConfig const& config);
-
 } // namespace rocRoller
