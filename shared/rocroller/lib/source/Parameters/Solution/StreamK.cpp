@@ -37,8 +37,8 @@ namespace rocRoller
         {
         case StreamKMode::None:
             return "None";
-        case StreamKMode::Default:
-            return "Default";
+        case StreamKMode::Standard:
+            return "Standard";
         case StreamKMode::TwoTile:
             return "TwoTile";
         case StreamKMode::TwoTileDPFirst:

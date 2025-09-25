@@ -1095,7 +1095,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Default;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1111,7 +1111,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
         }
     }
@@ -1134,7 +1134,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Default;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1148,7 +1148,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
         }
     }
@@ -1199,7 +1199,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Default;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         // TODO: Does not work with unrolling K
@@ -1209,7 +1209,7 @@ namespace GEMMDriverTest
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             for(auto loadLDSA : {false, true})
             {
                 gemm.loadLDSA = loadLDSA;
@@ -1252,12 +1252,12 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Default;
+        gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
         for(auto twoTile : {true, false})
         {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<Half>(gemm);
         }
     }

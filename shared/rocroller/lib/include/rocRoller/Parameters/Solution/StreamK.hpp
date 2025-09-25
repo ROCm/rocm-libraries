@@ -30,10 +30,11 @@
 
 namespace rocRoller
 {
+
     enum class StreamKMode
     {
         None,
-        Default,
+        Standard,
         TwoTile,
         TwoTileDPFirst,
         Count,
@@ -47,7 +48,7 @@ namespace rocRoller
 
         explicit operator bool() const
         {
-            return mode == StreamKMode::Default or mode == StreamKMode::TwoTile
+            return mode == StreamKMode::Standard or mode == StreamKMode::TwoTile
                    or mode == StreamKMode::TwoTileDPFirst;
         }
 

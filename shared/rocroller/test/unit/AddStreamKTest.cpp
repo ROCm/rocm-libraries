@@ -230,7 +230,7 @@ namespace AddStreamKTest
 
         CommandParametersPtr params           = std::make_shared<CommandParameters>();
         params->loopOverOutputTilesDimensions = {0, 1};
-        params->streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Default;
+        params->streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
 
         auto addStreamK = std::make_shared<AddStreamK>(
             m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs));
@@ -435,7 +435,7 @@ namespace AddStreamKTest
 
         CommandParametersPtr params           = std::make_shared<CommandParameters>();
         params->loopOverOutputTilesDimensions = {0, 1};
-        params->streamK                       = StreamKMode::Default;
+        params->streamK                       = StreamKMode::Standard;
 
         auto addStreamK = std::make_shared<AddStreamK>(
             m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs));
