@@ -74,9 +74,6 @@ function(add_test_target test_src is_internal)
     set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
   endif()
   if(is_internal)
-    # Even when USE_SYSTEM_LIB=ON, we still need to include the path to
-    # library/src because most internal tests include header files in its
-    # subfolder library/src/rng
     target_include_directories(${test_name}
         PUBLIC
             $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src>
