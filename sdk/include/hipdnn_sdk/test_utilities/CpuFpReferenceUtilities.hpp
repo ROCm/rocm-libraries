@@ -37,7 +37,8 @@ struct JoinableThread : std::thread
 };
 
 template <typename F, typename T, std::size_t... Is>
-static auto callFuncUnpackArgsImpl(F f, T args, std::index_sequence<Is...>)
+static auto
+    callFuncUnpackArgsImpl(F f, T args, [[maybe_unused]] std::index_sequence<Is...> sequence)
 {
     return f(std::get<Is>(args)...);
 }
@@ -49,20 +50,18 @@ static auto callFuncUnpackArgs(F f, T args)
     return callFuncUnpackArgsImpl(f, args, std::make_index_sequence<N>{});
 }
 
-
 template <typename F>
 struct ParallelTensorFunctorDynamic
 {
     F _func;
     std::vector<std::size_t> _lengths;
     std::vector<std::size_t> _strides;
-    std::size_t _totalElements;
+    std::size_t _totalElements{1};
 
     ParallelTensorFunctorDynamic(F f, const std::vector<int64_t>& dimensions)
         : _func(f)
         , _lengths(dimensions.begin(), dimensions.end())
         , _strides(dimensions.size())
-        , _totalElements(1)
     {
         if(_lengths.empty())
         {

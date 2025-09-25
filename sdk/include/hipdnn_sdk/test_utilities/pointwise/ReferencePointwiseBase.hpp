@@ -29,13 +29,13 @@ public:
             return false;
         }
 
-        const auto* pointwise_attrs = node.attributes_as_PointwiseAttributes();
-        if(pointwise_attrs == nullptr)
+        const auto* pointwiseAttrs = node.attributes_as_PointwiseAttributes();
+        if(pointwiseAttrs == nullptr)
         {
             return false;
         }
 
-        if(!canExecuteOperation(pointwise_attrs))
+        if(!canExecuteOperation(pointwiseAttrs))
         {
             return false;
         }
@@ -51,7 +51,7 @@ public:
         static_assert(sizeof...(Tensors) >= 1, "Need at least one input tensor");
         static_assert(sizeof...(Tensors) == 2, "Currently only binary operations are supported");
 
-        auto input_args = std::forward_as_tuple(inputs...);
+        auto inputArgs = std::forward_as_tuple(inputs...);
 
         DeviceExecutor policy;
 
@@ -59,11 +59,11 @@ public:
         {
         case hipdnn_sdk::data_objects::PointwiseMode::ADD:
             policy.executeBinaryBroadcast(
-                std::get<0>(input_args), std::get<1>(input_args), output, pointwise::Add{});
+                std::get<0>(inputArgs), std::get<1>(inputArgs), output, pointwise::Add{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SUB:
             policy.executeBinaryBroadcast(
-                std::get<0>(input_args), std::get<1>(input_args), output, pointwise::Subtract{});
+                std::get<0>(inputArgs), std::get<1>(inputArgs), output, pointwise::Subtract{});
             break;
         default:
             throw std::runtime_error("Unsupported pointwise operation: "

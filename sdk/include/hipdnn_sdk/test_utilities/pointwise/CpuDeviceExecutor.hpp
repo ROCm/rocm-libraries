@@ -26,39 +26,39 @@ public:
                                 TensorBase<OutputType>& output,
                                 Op op)
     {
-        const auto& input1_dims = input1.dims();
-        const auto& input2_dims = input2.dims();
-        const auto& output_dims = output.dims();
+        const auto& input1Dims = input1.dims();
+        const auto& input2Dims = input2.dims();
+        const auto& outputDims = output.dims();
 
         // Validate broadcast compatibility using existing utility function
-        if(!areDimensionsBroadcastCompatible(input1_dims, output_dims))
+        if(!areDimensionsBroadcastCompatible(input1Dims, outputDims))
         {
             throw std::runtime_error("Input1 dimensions are not broadcast compatible with output");
         }
 
-        if(!areDimensionsBroadcastCompatible(input2_dims, output_dims))
+        if(!areDimensionsBroadcastCompatible(input2Dims, outputDims))
         {
             throw std::runtime_error("Input2 dimensions are not broadcast compatible with output");
         }
 
         // Use output dimensions as the broadcast shape
-        const auto& broadcast_shape = output_dims;
+        const auto& broadcastShape = outputDims;
 
         auto func = [&](const std::vector<int64_t>& indices) {
             // Get broadcasted indices for each input
-            auto input1_indices = getBroadcastableIndex(indices, input1_dims);
-            auto input2_indices = getBroadcastableIndex(indices, input2_dims);
+            auto input1Indices = getBroadcastableIndex(indices, input1Dims);
+            auto input2Indices = getBroadcastableIndex(indices, input2Dims);
 
             // Get values from input tensors and apply operation
-            auto input1_value = input1.getHostValue(input1_indices);
-            auto input2_value = input2.getHostValue(input2_indices);
+            auto input1Value = input1.getHostValue(input1Indices);
+            auto input2Value = input2.getHostValue(input2Indices);
 
             // Apply operation and set output
-            auto result = op(input1_value, input2_value);
+            auto result = op(input1Value, input2Value);
             output.setHostValue(static_cast<OutputType>(result), indices);
         };
 
-        auto parallelFunc = makeParallelTensorFunctor(func, broadcast_shape);
+        auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
 
@@ -68,25 +68,25 @@ public:
     }
 
 private:
-    static std::vector<int64_t> getBroadcastableIndex(const std::vector<int64_t>& broadcast_index,
-                                                      const std::vector<int64_t>& tensor_dims)
+    static std::vector<int64_t> getBroadcastableIndex(const std::vector<int64_t>& broadcastIndex,
+                                                      const std::vector<int64_t>& tensorDims)
     {
-        if(broadcast_index.size() < tensor_dims.size())
+        if(broadcastIndex.size() < tensorDims.size())
         {
             throw std::runtime_error("Broadcast index has fewer dimensions than tensor");
         }
 
-        std::vector<int64_t> broadcasted_index(tensor_dims.size());
+        std::vector<int64_t> broadcastedIndex(tensorDims.size());
 
-        size_t dim_offset = broadcast_index.size() - tensor_dims.size();
+        size_t dimOffset = broadcastIndex.size() - tensorDims.size();
 
-        for(size_t i = 0; i < tensor_dims.size(); ++i)
+        for(size_t i = 0; i < tensorDims.size(); ++i)
         {
-            size_t broadcast_dim_idx = dim_offset + i;
-            broadcasted_index[i] = (tensor_dims[i] == 1) ? 0 : broadcast_index[broadcast_dim_idx];
+            size_t broadcastDimIdx = dimOffset + i;
+            broadcastedIndex[i] = (tensorDims[i] == 1) ? 0 : broadcastIndex[broadcastDimIdx];
         }
 
-        return broadcasted_index;
+        return broadcastedIndex;
     }
 };
 
