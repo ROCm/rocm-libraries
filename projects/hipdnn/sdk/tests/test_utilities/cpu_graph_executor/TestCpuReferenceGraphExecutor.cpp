@@ -34,6 +34,8 @@ struct BatchnormTrainTensorBundle
         , biasTensor(derivedDims)
         , meanTensor(derivedDims)
         , invVarianceTensor(derivedDims)
+        , epsilonTensor({1})
+        //, momentumTensor({1})
         , yTensor(dims, layout)
     {
         xTensor.fillWithRandomValues(
@@ -50,6 +52,9 @@ struct BatchnormTrainTensorBundle
 
         invVarianceTensor.fillWithRandomValues(
             static_cast<MeanVarianceDataType>(1.9f), static_cast<MeanVarianceDataType>(2.0f), seed);
+
+        epsilonTensor.fillWithValue(static_cast<MeanVarianceDataType>(1e-5f));
+        //momentumTensor.fillWithValue(static_cast<MeanVarianceDataType>(0.1f));
     }
 
     std::unordered_map<int64_t, void*>
@@ -58,6 +63,7 @@ struct BatchnormTrainTensorBundle
                           const hipdnn_frontend::graph::TensorAttributes& biasTensorAttr,
                           const hipdnn_frontend::graph::TensorAttributes& meanTensorAttr,
                           const hipdnn_frontend::graph::TensorAttributes& invVarianceTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& epsilonTensorAttr,
                           const hipdnn_frontend::graph::TensorAttributes& yTensorAttr)
     {
         std::unordered_map<int64_t, void*> variantPack;
@@ -67,6 +73,8 @@ struct BatchnormTrainTensorBundle
         variantPack[biasTensorAttr.get_uid()] = biasTensor.memory().hostData();
         variantPack[meanTensorAttr.get_uid()] = meanTensor.memory().hostData();
         variantPack[invVarianceTensorAttr.get_uid()] = invVarianceTensor.memory().hostData();
+        variantPack[epsilonTensorAttr.get_uid()] = epsilonTensor.memory().hostData();
+        //variantPack[momentumTensorAttr.get_uid()] = momentumTensor.memory().hostData();
         variantPack[yTensorAttr.get_uid()] = yTensor.memory().hostData();
 
         return variantPack;
@@ -78,7 +86,9 @@ struct BatchnormTrainTensorBundle
     Tensor<ScaleBiasDataType> biasTensor;
     Tensor<MeanVarianceDataType> meanTensor;
     Tensor<MeanVarianceDataType> invVarianceTensor;
-    Tensor<MeanVarianceDataType> yTensor;
+    Tensor<MeanVarianceDataType> epsilonTensor;
+    //Tensor<MeanVarianceDataType> momentumTensor;
+    Tensor<InputDataType> yTensor;
 };
 
 class TestCpuReferenceGraphExecutor
@@ -318,8 +328,10 @@ public:
     template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
     static void runBatchnormTrainTest(hipdnn_sdk::data_objects::DataType inputDataType,
                                       hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-                                      hipdnn_sdk::data_objects::DataType meanVarianceDataType)
+                                      hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+                                      bool useOptionalTensors = false)
     {
+        std::ignore = useOptionalTensors;
         std::vector<int64_t> dims = {1, 3, 14, 14};
         BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType> graphTensorBundle(
             dims);
@@ -365,17 +377,17 @@ public:
             .set_dim({1})
             .set_stride({1});
 
-        auto momentumTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-        momentumTensor->set_uid(uid++)
-            .set_name("MomentumTensor")
-            .set_data_type(fromSdkType(meanVarianceDataType))
-            .set_dim({1})
-            .set_stride({1});
+        // auto momentumTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        // momentumTensor->set_uid(uid++)
+        //     .set_name("MomentumTensor")
+        //     .set_data_type(fromSdkType(meanVarianceDataType))
+        //     .set_dim({1})
+        //     .set_stride({1});
 
         hipdnn_frontend::graph::BatchnormAttributes bnAttrs;
         bnAttrs.set_name("batchnorm_fwd_train");
         bnAttrs.set_epsilon(epsilonTensor);
-        bnAttrs.set_momentum(momentumTensor);
+        //bnAttrs.set_momentum(momentumTensor);
 
         auto outputTensorsAttr
             = graph->batchnorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
@@ -425,6 +437,7 @@ public:
                                                                *biasTensorAttr,
                                                                *meanTensorAttr,
                                                                *invVarianceTensorAttr,
+                                                               *epsilonTensor,
                                                                *yTensorAttr);
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
