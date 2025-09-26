@@ -231,9 +231,11 @@ if(BUILD_CODE_COVERAGE)
   #
   # Run coverage analysis
   #
-  add_custom_target(coverage_analysis
+  add_custom_target(
+    coverage_analysis
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hiprand-coverage_%m.profraw" ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
@@ -255,31 +257,17 @@ if(BUILD_CODE_COVERAGE)
     PATHS /opt/rocm/llvm/bin
   )
 
-  add_custom_target(coverage_output
+  add_custom_target(
+    coverage
     DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
-    )
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hiprand-coverage_*.profraw -o ./coverage-report/hiprand.profdata
+    COMMAND ${LLVM_COV} report -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata
+    COMMAND ${LLVM_COV} show -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata -format=html -output-dir=coverage-report
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
 
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory ./hiprand --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" "'*/test/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    )
-
-  add_custom_target(coverage DEPENDS coverage_output)
-
-  #
-  # Coverage cleanup
-  #
   add_custom_target(coverage_cleanup
     COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+  )
 endif()
