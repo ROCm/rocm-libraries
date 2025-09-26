@@ -229,17 +229,17 @@ public:
     }
 
     static void convBwdWeight(const TensorBase<InputDataType>& input,
-                              TensorBase<InputDataType>& weight,
+                              TensorBase<InputDataType>& gradWeight,
                               const TensorBase<InputDataType>& gradOutput,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& padding)
     {
-        validateInput(input, weight, gradOutput, strides, dilations, padding);
+        validateInput(input, gradWeight, gradOutput, strides, dilations, padding);
 
         // Extract dimensions - NCHW format for input/output, [G*K][C][Y][X] for weight (4D flattened)
         const auto& inputDims = input.dims();
-        const auto& weightDims = weight.dims();
+        const auto& weightDims = gradWeight.dims();
         const auto& outputDims = gradOutput.dims();
 
         int64_t nBatch = outputDims[0];
@@ -304,11 +304,11 @@ public:
                 }
             }
 
-            weight.setHostValue(static_cast<InputDataType>(vAcc),
-                                (gIdx * outputChannelsPerGroup) + kIdx,
-                                cIdx,
-                                yIdx,
-                                xIdx);
+            gradWeight.setHostValue(static_cast<InputDataType>(vAcc),
+                                    (gIdx * outputChannelsPerGroup) + kIdx,
+                                    cIdx,
+                                    yIdx,
+                                    xIdx);
         };
 
         hipdnn_sdk::test_utilities::makeParallelTensorFunctor(convolutionFunc,
@@ -319,7 +319,7 @@ public:
                                                               kernelWidth)(
             std::thread::hardware_concurrency());
 
-        weight.memory().markHostModified();
+        gradWeight.memory().markHostModified();
     }
 
 private:
