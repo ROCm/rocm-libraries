@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
@@ -152,7 +153,7 @@ public:
             variantPack[deviceBuffer.uid] = deviceBuffer.ptr;
         }
 
-        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor::execute(
+        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
             batchnormGraph, batchnormBuilder.GetSize(), variantPack);
     }
 
