@@ -23,7 +23,6 @@
 
 // TODO: Once partial pass is fully configurable in kernel-generator.py:
 //      - Support transforms with factors_pp.size() > 1.
-//      - Revisit all usages of transforms_per_block_pp and threads_per_transform.
 //      - Different input/output strides.
 
 // Variation of StockhamKernelCC that implements the partial pass
@@ -53,7 +52,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         factors_pp    = params.pp_factors_curr;
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
-        transforms_per_block_pp = transforms_per_block;
+        transforms_per_block_unscaled = transforms_per_block;
 
         transforms_per_block *= max_factor_pp;
         workgroup_size *= max_factor_pp;
@@ -85,7 +84,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
     unsigned int num_blocks_per_batch;
 
-    unsigned int transforms_per_block_pp;
+    unsigned int transforms_per_block_unscaled;
     unsigned int max_factor_pp;
 
     unsigned int pp_factors_prod;
@@ -356,12 +355,12 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration{plength, 1};
         stmts += Declaration{remaining};
         stmts += Declaration{index_along_d};
-        stmts += Assign{num_of_tiles, (lengths[1] - 1) / transforms_per_block_pp + 1};
+        stmts += Assign{num_of_tiles, (lengths[1] - 1) / transforms_per_block_unscaled + 1};
         stmts += Assign{plength, num_of_tiles};
         stmts += Assign{tile_index, block_idx_pp % num_of_tiles};
 
         stmts += Assign{remaining, (block_idx_pp % num_blocks_per_batch) / num_of_tiles};
-        stmts += Assign{offset, tile_index * transforms_per_block_pp * stride[1]};
+        stmts += Assign{offset, tile_index * transforms_per_block_unscaled * stride[1]};
         stmts += For{d,
                      2,
                      d < dim,
@@ -376,26 +375,28 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Assign{batch, block_id / (plength / pp_factors_prod)};
 
         stmts += Assign{transform,
-                        tile_index * transforms_per_block_pp + thread_id / threads_per_transform};
+                        tile_index * transforms_per_block_unscaled
+                            + thread_id / threads_per_transform};
         stmts += Assign{stride_lds, (length + get_lds_padding())};
 
         stmts += MultiplyAssign(stride_lds, Literal{pp_factors_prod});
 
         stmts += Declaration{
             in_bound,
-            Ternary{
-                Parens((tile_index + 1) * transforms_per_block_pp > lengths[1]), "false", "true"}};
+            Ternary{Parens((tile_index + 1) * transforms_per_block_unscaled > lengths[1]),
+                    "false",
+                    "true"}};
 
-        stmts += Declaration{thread, thread_id / transforms_per_block_pp};
-        stmts += Declaration{tid_hor, thread_id % transforms_per_block_pp};
+        stmts += Declaration{thread, thread_id / transforms_per_block_unscaled};
+        stmts += Declaration{tid_hor, thread_id % transforms_per_block_unscaled};
 
-        stmts += Declaration{thread_lds, thread_id / transforms_per_block_pp};
-        stmts += Declaration{tid_hor_lds, thread_id % transforms_per_block_pp};
+        stmts += Declaration{thread_lds, thread_id / transforms_per_block_unscaled};
+        stmts += Declaration{tid_hor_lds, thread_id % transforms_per_block_unscaled};
 
         stmts += Declaration(tid_hor_pp,
-                             thread_id % transforms_per_block_pp
+                             thread_id % transforms_per_block_unscaled
                                  + lengths[1] * (thread % pp_factors_prod));
-        stmts += Declaration(thread_pp, thread_id / (transforms_per_block_pp * pp_factors_prod));
+        stmts += Declaration(thread_pp, thread_id / (transforms_per_block));
 
         stmts += Declaration(
             offset_pp,
@@ -404,13 +405,13 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
 
         stmts += Assign{transform,
-                        tile_index * transforms_per_block_pp
+                        tile_index * transforms_per_block_unscaled
                             + thread_id / (threads_per_transform * pp_factors_prod)};
 
         stmts += Assign{offset_lds,
                         Ternary{lds_linear,
-                                stride_lds * (transform % transforms_per_block_pp),
-                                thread_id % transforms_per_block_pp}};
+                                stride_lds * (transform % transforms_per_block_unscaled),
+                                thread_id % transforms_per_block_unscaled}};
 
         return stmts;
     }
@@ -419,7 +420,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     {
         StatementList stmts;
         StatementList tmp_stmts;
-        Expression    pred{tile_index * transforms_per_block_pp + tid_hor < lengths[1]};
+        Expression    pred{tile_index * transforms_per_block_unscaled + tid_hor < lengths[1]};
 
         if(!load_registers)
         {
@@ -527,7 +528,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     {
         StatementList stmts;
         StatementList tmp_stmts;
-        Expression    pred{tile_index * transforms_per_block_pp + tid_hor < lengths[1]};
+        Expression    pred{tile_index * transforms_per_block_unscaled + tid_hor < lengths[1]};
 
         auto stripmine_w = transforms_per_block;
         auto stripmine_h = workgroup_size / stripmine_w;
