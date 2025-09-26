@@ -165,6 +165,66 @@ protected:
         output.data = handle.Read<T>(output_dev, output.data.size());
     }
 
+    void RunTestUpd()
+    {
+        auto&& handle = get_handle();
+
+        cpu_cat_forward_upd<T>(inputs, ref_output, dim);
+        std::vector<miopen::TensorDescriptor*> inputDescs;
+        std::vector<ConstData_t> inputData;
+
+        std::transform(inputs.begin(),
+                       inputs.end(),
+                       std::back_inserter(inputDescs),
+                       [](auto& input) { return &input.desc; });
+        std::transform(inputs_dev.begin(),
+                       inputs_dev.end(),
+                       std::back_inserter(inputData),
+                       [](auto& input_dev) { return input_dev.get(); });
+
+        miopenStatus_t status = miopen::CatForward(handle,
+                                                   inputDescs.size(),
+                                                   inputDescs.data(),
+                                                   inputData.data(),
+                                                   output.desc,
+                                                   output_dev.get(),
+                                                   dim);
+
+        EXPECT_EQ(status, miopenStatusSuccess);
+
+        output.data = handle.Read<T>(output_dev, output.data.size());
+    }
+
+    void RunTestUpdSt()
+    {
+        auto&& handle = get_handle();
+
+        cpu_cat_forward_upd_st<T>(inputs, ref_output, dim);
+        std::vector<miopen::TensorDescriptor*> inputDescs;
+        std::vector<ConstData_t> inputData;
+
+        std::transform(inputs.begin(),
+                       inputs.end(),
+                       std::back_inserter(inputDescs),
+                       [](auto& input) { return &input.desc; });
+        std::transform(inputs_dev.begin(),
+                       inputs_dev.end(),
+                       std::back_inserter(inputData),
+                       [](auto& input_dev) { return input_dev.get(); });
+
+        miopenStatus_t status = miopen::CatForward(handle,
+                                                   inputDescs.size(),
+                                                   inputDescs.data(),
+                                                   inputData.data(),
+                                                   output.desc,
+                                                   output_dev.get(),
+                                                   dim);
+
+        EXPECT_EQ(status, miopenStatusSuccess);
+
+        output.data = handle.Read<T>(output_dev, output.data.size());
+    }
+
     void Verify()
     {
         auto error = miopen::rms_range(ref_output, output);

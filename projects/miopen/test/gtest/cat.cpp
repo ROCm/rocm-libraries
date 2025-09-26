@@ -40,4 +40,16 @@ TEST_P(GPU_Cat_FP32, CatTestFw)
     Verify();
 };
 
+TEST_P(GPU_Cat_FP32, CatTestUpdFw)
+{
+    RunTestUpd();
+    Verify();
+};
+
+TEST_P(GPU_Cat_FP32, CatTestUpdStFw)
+{
+    RunTestUpdSt();
+    Verify();
+};
+
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Cat_FP32, testing::ValuesIn(CatTestConfigs()));
