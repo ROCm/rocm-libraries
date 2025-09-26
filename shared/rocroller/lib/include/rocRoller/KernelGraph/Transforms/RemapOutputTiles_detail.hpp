@@ -35,8 +35,6 @@ namespace rocRoller
         {
             /**
              * @brief Workgroup count/size information.
-             *
-             *
              */
             struct TileSizeInfo
             {

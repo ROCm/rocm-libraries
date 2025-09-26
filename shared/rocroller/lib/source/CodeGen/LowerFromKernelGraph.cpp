@@ -248,18 +248,6 @@ namespace rocRoller
                         {
                             if(!inst.referencedArg().empty())
                             {
-                                auto arg = inst.referencedArg();
-                                //if(arg.find("numSKTilesPerWG") != std::string::npos)
-                                //{
-                                //    if(std::holds_alternative<ComputeIndex>(operation))
-                                //  Log::info("computeindex = {}", tag);
-                                //    //{
-                                //    //    std::ofstream ofs("control.dot");
-                                //    //    ofs << m_graph->control.toDOT();
-                                //    //}
-                                //    //exit(0);
-                                //    Log::info("numSKTilesPerWG = {}", inst.controlOps());
-                                //}
                                 allReferencedArgs.insert(inst.referencedArg());
                             }
                         }
@@ -297,15 +285,14 @@ namespace rocRoller
                                 auto arg = m_context->kernel()->findArgument(argName);
 
                                 msg += fmt::format(
-                                    "\n\t- Missed: {}: {}\n", argName, toString(arg.expression));
+                                    "\n\t- {}: {}\n", argName, toString(arg.expression));
                             }
 
                             AssertFatal(false,
                                         msg,
                                         ShowValue(expectedArgs),
                                         ShowValue(extraArgs),
-                                        ShowValue(allReferencedArgs),
-                                        //ShowValue(m_context->kernel()->arguments()),
+                                        ShowValue(m_context->kernel()->arguments()),
                                         ShowValue(operation));
                         }
 
