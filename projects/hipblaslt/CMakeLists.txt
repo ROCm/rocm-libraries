@@ -193,16 +193,11 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
             set(BUILD_TESTING OFF)
             set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
             set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-            # Ensure rocroller uses the same compiler as the parent project
-            # NOTE: This is only required for the pinned commit and isn't present
-            # in the latest rocroller, therefor this should be removed once we bump
-            # the rocroller commit
-            set(ROCROLLER_ASSEMBLER_PATH ${CMAKE_CXX_COMPILER})
             include(FetchContent)
             FetchContent_Declare(
                 rocRoller
                 GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-                GIT_TAG 0f37f58e1e50d7b8716243768ffe0bc0c94a4090
+                GIT_TAG 7ba790874d9bf3fd89d6287524cc91e552a72e3b
             )
             FetchContent_MakeAvailable(rocRoller)
         endblock()

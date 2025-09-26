@@ -449,7 +449,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
             "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
             ShowValue(dim));
 
-        params->workgroupMapping = {dim, nullptr};
+        params->workgroupMappingDim = dim;
     }
 
     if(gemm->workgroupRemapXCC)
