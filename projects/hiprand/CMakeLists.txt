@@ -239,10 +239,22 @@ if(BUILD_CODE_COVERAGE)
 
   add_dependencies(coverage_analysis hiprand)
 
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
   add_custom_target(coverage_output
     DEPENDS coverage_analysis
     COMMAND mkdir -p lcoverage
