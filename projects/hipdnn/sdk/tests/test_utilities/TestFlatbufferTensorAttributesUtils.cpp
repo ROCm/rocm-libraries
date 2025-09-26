@@ -9,7 +9,7 @@
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 
-TEST(TestFlatbufferTensorAttributesUtils, unpackTensorAttributes)
+TEST(TestFlatbufferTensorAttributesUtils, UnpackTensorAttributes)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<int64_t> dims = {1, 3, 224, 224};
@@ -28,7 +28,7 @@ TEST(TestFlatbufferTensorAttributesUtils, unpackTensorAttributes)
     EXPECT_EQ(unpacked.strides, strides);
 }
 
-TEST(TestFlatbufferTensorAttributesUtils, createShallowTensor)
+TEST(TestFlatbufferTensorAttributesUtils, CreateShallowTensor)
 {
     TensorAttributesT attr;
     attr.uid = 2;
