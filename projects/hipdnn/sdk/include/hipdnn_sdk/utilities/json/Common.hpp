@@ -7,6 +7,8 @@
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
 
+// NOLINTBEGIN(readability-identifier-naming)
+
 // When implicit conversions are defined, the explicit conversion function is disabled in the nlohmann json library.
 // This may be unintended behavior
 #ifdef JSON_USE_IMPLICIT_CONVERSIONS
@@ -63,6 +65,8 @@ void to_json(nlohmann::json& vectorList, const Vector<Offset<T>>* vec)
 }
 
 }
+
+// NOLINTEND(readability-identifier-naming)
 
 namespace hipdnn_sdk::data_objects
 {

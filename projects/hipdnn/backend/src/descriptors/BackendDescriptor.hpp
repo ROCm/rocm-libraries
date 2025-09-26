@@ -7,6 +7,8 @@
 #include "hipdnn_backend.h"
 #include <memory>
 
+// NOLINTBEGIN(portability-template-virtual-member-function)
+
 struct IBackendDescriptor
 {
     virtual ~IBackendDescriptor() = default;
@@ -28,11 +30,15 @@ struct IBackendDescriptor
     virtual hipdnnBackendDescriptorType_t getType() const = 0;
 };
 
+// NOLINTEND(portability-template-virtual-member-function)
+
 //NOLINTBEGIN(readability-identifier-naming)
 namespace hipdnn_backend
 {
 
 class MockDescriptorUtility;
+
+// NOLINTBEGIN(portability-template-virtual-member-function)
 
 template <typename T>
 class HipdnnBackendDescriptorImpl : public IBackendDescriptor
@@ -66,6 +72,9 @@ public:
         return T::getStaticType();
     }
 };
+
+// NOLINTEND(portability-template-virtual-member-function)
+
 }
 
 namespace
