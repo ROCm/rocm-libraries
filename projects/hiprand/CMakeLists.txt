@@ -156,9 +156,8 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage -lgcov)
+  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
 endif()
 
 # Set version variables
@@ -236,7 +235,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+  )
 
   add_dependencies(coverage_analysis hiprand)
 
