@@ -32,7 +32,7 @@ some project specific options. As such, users are advised to refer to the CMake 
 general usage questions. Below are usage examples to get started. For details on all configuration
 options see the options section.
 
-Full build of |project_name| 
+Full build of |project_name|
 -----------------------
 
    .. code-block:: cmake
@@ -67,7 +67,7 @@ Building device libraries
             -D GPU_TARGETS=gfx950
             -D HIPBLASLT_ENABLE_DEVICE=ON  \
             -D HIPBLASLT_ENABLE_HOST=OFF   \
-            -D HIPBLASLT_ENABLE_CLIENT=OFF 
+            -D HIPBLASLT_ENABLE_CLIENT=OFF
       # build
       cmake --build build --parallel 32
 

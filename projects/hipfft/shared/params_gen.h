@@ -36,6 +36,11 @@ const static std::vector<fft_precision> precision_range_sp_dp
 
 const static std::vector<fft_result_placement> place_range
     = {fft_placement_inplace, fft_placement_notinplace};
+const static std::vector<fft_transform_type> trans_type_range_full
+    = {fft_transform_type_complex_forward,
+       fft_transform_type_real_forward,
+       fft_transform_type_complex_inverse,
+       fft_transform_type_real_inverse};
 const static std::vector<fft_transform_type> trans_type_range
     = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 const static std::vector<fft_transform_type> trans_type_range_complex

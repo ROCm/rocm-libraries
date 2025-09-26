@@ -289,7 +289,7 @@ def extract_dtype(match):
             DataType += "N"
     else:
         DataType = DataTypeA
-    
+
     DestDataType = datatype_map(gdict.get('C_TYPE', '').strip())
     ComputeDataType = datatype_map(gdict.get('COMPUTE_TYPE', '').strip())
     TransposeA = trans_map(gdict.get('TRANS_A', '').strip())

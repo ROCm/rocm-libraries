@@ -9,7 +9,7 @@ import com.amd.project.*
 import com.amd.docker.*
 import java.nio.file.Path;
 
-def runCI = 
+def runCI =
 {
     nodeDetails, jobName->
 
@@ -48,29 +48,29 @@ def runCI =
     def packageCommand =
     {
         platform, project->
-        
+
         commonGroovy.runPackageCommand(platform, project)
     }
 
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
 }
 
-ci: { 
+ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
-    def propertyList = ["compute-rocm-dkms-no-npi":[pipelineTriggers([cron('0 1 * * 0')])], 
+    def propertyList = ["compute-rocm-dkms-no-npi":[pipelineTriggers([cron('0 1 * * 0')])],
                         "compute-rocm-dkms-no-npi-hipclang":[pipelineTriggers([cron('0 1 * * 0')])],
                         "rocm-docker":[]]
     propertyList = auxiliary.appendPropertyList(propertyList)
 
     Set standardJobNameSet = ["compute-rocm-dkms-no-npi", "compute-rocm-dkms-no-npi-hipclang", "rocm-docker"]
 
-    def jobNameList = ["compute-rocm-dkms-no-npi":([ubuntu18:['gfx900'],centos7:['gfx908'],sles15sp1:['gfx906']]), 
-                       "compute-rocm-dkms-no-npi-hipclang":([ubuntu18:['gfx900'],centos7:['gfx908'],sles15sp1:['gfx906']]), 
+    def jobNameList = ["compute-rocm-dkms-no-npi":([ubuntu18:['gfx900'],centos7:['gfx908'],sles15sp1:['gfx906']]),
+                       "compute-rocm-dkms-no-npi-hipclang":([ubuntu18:['gfx900'],centos7:['gfx908'],sles15sp1:['gfx906']]),
                        "rocm-docker":([ubuntu18:['gfx900'],centos7:['gfx908'],sles15sp1:['gfx906']])]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
-    propertyList.each 
+    propertyList.each
     {
         jobName, property->
         if (urlJobName == jobName)
@@ -78,7 +78,7 @@ ci: {
     }
 
     Set seenJobNames = []
-    jobNameList.each 
+    jobNameList.each
     {
         jobName, nodeDetails->
         seenJobNames.add(jobName)
@@ -90,6 +90,6 @@ ci: {
     if(!seenJobNames.contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * *')])]))
-        runCI([ubuntu18:['gfx906']], urlJobName)       
+        runCI([ubuntu18:['gfx906']], urlJobName)
     }
 }

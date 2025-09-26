@@ -127,16 +127,18 @@ __host__ __device__ inline T acc_sum8(T* v, uint8_t* p, int v_offset, int p_offs
                   v[v_offset + 3 * 4 + p[p_offset + 7]]);
 }
 
-template <typename T, bool InPlace, typename = void>
+template <typename T, bool InPlace>
 __host__ __device__ inline void prune_if(bool prune, T* a, T b)
 {
-    *a = prune ? static_cast<T>(0.0f) : b;
-}
-
-template <typename T, bool InPlace, std::enable_if_t<InPlace>>
-__host__ __device__ inline void prune_if(bool prune, T* a, T b)
-{
-    *a = prune ? static_cast<T>(0.0f) : a;
+    if constexpr(InPlace)
+    {
+        if(prune) 
+            *a = static_cast<T>(0.0f);
+    }
+    else
+    {
+        *a = prune ? static_cast<T>(0.0f) : b;
+    }
 }
 
 template <typename Ti, typename Tc, int SG0I, int SG1J, int TT0I, int TT1J, bool InPlace>

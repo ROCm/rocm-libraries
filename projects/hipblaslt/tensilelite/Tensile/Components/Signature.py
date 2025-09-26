@@ -208,15 +208,15 @@ class SignatureDefault(Signature):
         if kernel["StreamK"]:
             # StreamK args
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
             signature.addArg("TotalIters",                         SVK.SIG_VALUE, "u32")
             signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
-            userArgumentsInfo.gemmArgumentSize += 12
+            userArgumentsInfo.gemmArgumentSize += 20
             if kernel["StreamK"] >= 2: # Two-tile SK
                 signature.addArg("skGrid",                         SVK.SIG_VALUE, "u32")
                 signature.addArg("skTiles",                        SVK.SIG_VALUE, "u32")
-                signature.addArg("skExtraIters",                   SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.gemmArgumentSize += 12
-                # "dpTilesPerWG"
+                userArgumentsInfo.gemmArgumentSize += 8
 
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")

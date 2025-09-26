@@ -80,8 +80,6 @@ namespace rocsparse
                                  ? ((transB == rocsparse_operation_none) ? 1 : ldb)
                                  : ((transB == rocsparse_operation_none) ? ldb : 1);
 
-        __shared__ T s[NUM_COEFF][NTHREADS_PER_DOTPRODUCT];
-
         const I innz = hipBlockIdx_x * NUM_COEFF + local_coeff_index;
         if(innz >= nnz)
         {
@@ -107,25 +105,14 @@ namespace rocsparse
         T sum = static_cast<T>(0);
         for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
         {
-            sum += x[k * incx] * y[k * incy];
-        }
-        s[local_coeff_index][local_thread_index] = sum;
-        __syncthreads();
-
-#pragma unroll
-        for(int ipow2_ = 2; ipow2_ <= NTHREADS_PER_DOTPRODUCT; ipow2_ *= 2)
-        {
-            if(local_thread_index < NTHREADS_PER_DOTPRODUCT / ipow2_)
-            {
-                s[local_coeff_index][local_thread_index]
-                    += s[local_coeff_index][local_thread_index + NTHREADS_PER_DOTPRODUCT / ipow2_];
-            }
-            __syncthreads();
+            sum = rocsparse::fma<T>(x[k * incx], y[k * incy], sum);
         }
 
-        if(local_thread_index == 0)
+        sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+
+        if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)
         {
-            val[innz] = beta * val[innz] + alpha * s[local_coeff_index][0];
+            val[innz] = beta * val[innz] + alpha * sum;
         }
     }
 

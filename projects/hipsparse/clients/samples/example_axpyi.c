@@ -87,7 +87,7 @@ int main()
     // Copy result back to host
     HIP_CHECK(hipMemcpy(hy, dy, sizeof(double) * 9, hipMemcpyDeviceToHost));
 
-    // Clear hipSPARSE 
+    // Clear hipSPARSE
     HIPSPARSE_CHECK(hipsparseDestroy(handle));
 
     // Clear device memory

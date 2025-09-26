@@ -37,8 +37,8 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_gebsrmv multiplies the scalar \f$\alpha\f$ with a sparse
-*  \f$m \times n\f$ matrix, defined in GEBSR storage format, and the dense vector 
-*  \f$x\f$ and adds the result to the dense vector \f$y\f$ that is multiplied by 
+*  \f$m \times n\f$ matrix, defined in GEBSR storage format, and the dense vector
+*  \f$x\f$ and adds the result to the dense vector \f$y\f$ that is multiplied by
 *  the scalar \f$\beta\f$, such that
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,

@@ -58,18 +58,14 @@ def setupCI(urlJobName, jobNameList, buildCommand, runCI, label)
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(label + ' ' + jobName) {
-                runCI(nodeDetails, jobName, buildCommand, label)
-            }
+            runCI(nodeDetails, jobName, buildCommand, label)
     }
 
     // For url job names that are not listed by the jobNameList i.e. compute-rocm-dkms-no-npi-1901
     if(!jobNameList.keySet().contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * *')])]))
-        stage(label + ' ' + urlJobName) {
-            runCI(['ubuntu20-cuda11':['anycuda']], urlJobName, buildCommand, label)
-        }
+        runCI(['ubuntu20-cuda11':['anycuda']], urlJobName, buildCommand, label)
     }
 
 }

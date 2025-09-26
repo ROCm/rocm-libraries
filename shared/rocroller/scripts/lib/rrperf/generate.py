@@ -28,13 +28,11 @@
 import argparse
 import os
 import subprocess
-
 from itertools import chain
 from pathlib import Path
 from typing import Dict
 
 import rrperf
-
 from rrperf.utils import sjoin
 
 

@@ -58,4 +58,3 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 289, 768, 64, 192 ]
-

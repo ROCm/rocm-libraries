@@ -29,7 +29,7 @@
 #include <set>
 #include <vector>
 
-#include <Tensile/analytical/Utils.hpp>
+#include <origami/utils.hpp>
 
 namespace TensileLite
 {
@@ -46,8 +46,8 @@ namespace TensileLite
     struct ProblemPredictionLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
         std::unordered_map<int, std::shared_ptr<MySolution>>        solutionmap;
-        std::vector<TensileLite::analytical::TileTuple>             tile_list;
-        std::unordered_map<TensileLite::analytical::TileTuple, int> tile_map;
+        std::vector<origami::tile_tuple>             tile_list;
+        std::unordered_map<origami::tile_tuple, int> tile_map;
 
         static std::string Type()
         {
@@ -164,13 +164,16 @@ namespace TensileLite
                 = problem.b().elementBytes() * 8;
             size_t elementSizeC_bits
                 = problem.c().elementBytes() * 8;
-            const analytical::Hardware& analaytical_hardware = *(pAMDGPU->analyticalHardware);
-            int WGM
-                = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
-            analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
+            const origami::hardware_t& analaytical_hardware = *(pAMDGPU->analyticalHardware);
+            if(origami::hardware_t::is_debug_enabled())
+            {
+                analaytical_hardware.print();
+            }
+            int defaultWGM = std::ceil(std::sqrt(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
+            origami::data_type_t miDataType = static_cast<origami::data_type_t>(problem.computeInputType());
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
-                miDataType = analytical::DataType::XFloat32;
-            auto selected_tiles = analytical::select_best_macro_tile_size(
+                miDataType = origami::data_type_t::XFloat32;
+            auto selected_tiles = origami::select_best_macro_tile_size(
                 m,
                 n,
                 k,
@@ -183,11 +186,10 @@ namespace TensileLite
                 elementSizeB_bits,
                 elementSizeC_bits,
                 miDataType,
-                0, //mx_block_size -> MX Data types come from rocroller.
-                0.8,
-                debug,
+                0,   // mx_block_size -> MX Data types come from rocroller.
+                0.8, // L2 hit-rate (not used anymore -- should be removed)
                 false,
-                WGM);
+                defaultWGM);
             for(const auto& tile : selected_tiles)
             {
                 auto mapiter  = tile_map.find(std::make_tuple(std::get<1>(tile),
@@ -196,7 +198,11 @@ namespace TensileLite
                                                               std::get<4>(tile),
                                                               std::get<5>(tile),
                                                               std::get<6>(tile),
-                                                              std::get<7>(tile)));
+                                                              std::get<7>(tile),
+                                                              std::get<8>(tile),
+                                                              std::get<9>(tile),
+                                                              std::get<10>(tile)
+                                                            ));
                 auto smapiter = solutionmap.find(mapiter->second);
                 if(mapiter != tile_map.end() && smapiter != solutionmap.end())
                 {

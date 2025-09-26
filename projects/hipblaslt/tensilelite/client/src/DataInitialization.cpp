@@ -2491,6 +2491,10 @@ namespace TensileLite
                 int32_t rotatingNum
                     = min(maxRotatingBufferNum, ceil((float)m_rotatingBuffer / rotatingSize))
                       - 1; // Minus the original buffer.
+
+                // <= 0 means don't rotating
+                rotatingNum = max(0, rotatingNum);
+
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
                           << ". Rotating num: " << rotatingNum << std::endl;
@@ -2549,6 +2553,10 @@ namespace TensileLite
                 int32_t rotatingNum
                     = min(maxRotatingBufferNum, ceil((float)m_rotatingBuffer / rotatingSize))
                       - 1; // Minus the original buffer.
+
+                // <= 0 means don't rotating
+                rotatingNum = max(0, rotatingNum);
+
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
                           << ". Rotating num: " << rotatingNum << std::endl;

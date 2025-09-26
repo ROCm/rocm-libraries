@@ -51,7 +51,7 @@ extern "C" {
 *  @param[in]
 *  n            number of columns of the column-oriented dense matrix \p A.
 *  @param[in]
-*  descr        the descriptor of the column-oriented dense matrix \p A, the supported matrix type is 
+*  descr        the descriptor of the column-oriented dense matrix \p A, the supported matrix type is
 *               \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  A            column-oriented dense matrix of dimensions (\p ld, \p n)

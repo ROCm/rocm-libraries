@@ -88,9 +88,9 @@ if( BUILD_CLIENTS_SAMPLES )
 endif( )
 
 if( BUILD_CLIENTS_TESTS )
-  find_package( GTest 1.11.0 )
+  find_package( GTest QUIET )
   include( ExternalProject )
-  if( NOT GTEST_FOUND )
+  if( NOT GTest_FOUND )
     set( GTEST_INCLUDE_DIRS
       ${CMAKE_CURRENT_BINARY_DIR}/src/gtest/googletest/include
       )

@@ -16,7 +16,7 @@ subtrees:
     title: Installing on Windows
   - file: install/rocThrust-install-with-cmake
     title: Installing on Linux and Windows with CMake
-  
+
 
 - caption: How to
   entries:
@@ -24,6 +24,8 @@ subtrees:
     title: Add rocThrust to a CMake project
   - file: how-to/run-rocThrust-tests-on-multiple-gpus
     title: Run tests on multiple GPUs
+  - file: how-to/rocThrust-build-backends.rst
+    title: build on different backends
 
 - caption: API reference
   entries:
@@ -33,7 +35,6 @@ subtrees:
   - file: hipgraph-support
   - file: hip-execution-policies
   - file: cpp_api
-  - file: genindex
 
 - caption: About
   entries:

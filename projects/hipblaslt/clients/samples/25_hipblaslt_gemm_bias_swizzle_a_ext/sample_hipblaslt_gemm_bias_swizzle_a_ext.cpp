@@ -170,9 +170,9 @@ void swizzleGemmEpilogueBiasVecExt(hipblasLtHandle_t  handle,
                 matA, HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
             std::vector<hipblasLtHalf> src(m * k, 0);
             std::vector<hipblasLtHalf> dst(m * k, 0);
-            hipMemcpy(src.data(), d_a, m * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToHost);
+            CHECK_HIP_ERROR(hipMemcpy(src.data(), d_a, m * k * sizeof(hipblasLtHalf), hipMemcpyDeviceToHost));
             swizzleTensor(dst.data(), src.data(), m, k, true);
-            hipMemcpy(d_a, dst.data(), m * k * sizeof(hipblasLtHalf), hipMemcpyHostToDevice);
+            CHECK_HIP_ERROR(hipMemcpy(d_a, dst.data(), m * k * sizeof(hipblasLtHalf), hipMemcpyHostToDevice));
         }
     }
     else
@@ -248,6 +248,7 @@ void swizzleGemmEpilogueBiasVecExt(hipblasLtHandle_t  handle,
         return;
     }
 
+    gemm.setMaxWorkspaceBytes(max_workspace_size);
     CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResults[0].algo, d_workspace));
     CHECK_HIPBLASLT_ERROR(gemm.run(stream));
 

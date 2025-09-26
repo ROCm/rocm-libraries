@@ -175,28 +175,6 @@ void testing_trsv_batched(const Arguments& arg)
     double error_eps_multiplier    = ERROR_EPS_MULTIPLIER;
     double residual_eps_multiplier = RESIDUAL_EPS_MULTIPLIER;
     double eps                     = std::numeric_limits<real_t<T>>::epsilon();
-    if(!ROCBLAS_REALLOC_ON_DEMAND)
-    {
-        // Compute size
-        CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
-
-        CHECK_ALLOC_QUERY(rocblas_trsv_batched_fn(handle,
-                                                  uplo,
-                                                  transA,
-                                                  diag,
-                                                  N,
-                                                  dA.ptr_on_device(),
-                                                  lda,
-                                                  dx_or_b.ptr_on_device(),
-                                                  incx,
-                                                  batch_count));
-
-        size_t size;
-        CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
-
-        // Allocate memory
-        CHECK_ROCBLAS_ERROR(rocblas_set_device_memory_size(handle, size));
-    }
 
     if(arg.unit_check || arg.norm_check)
     {
