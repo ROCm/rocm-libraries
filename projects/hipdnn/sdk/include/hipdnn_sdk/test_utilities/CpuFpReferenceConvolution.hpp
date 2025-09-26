@@ -44,6 +44,7 @@ public:
         return validNode;
     }
 
+    // Backward compatibility
     static void convFwdInference(const TensorBase<InputDataType>& input,
                                  const TensorBase<InputDataType>& weight,
                                  TensorBase<InputDataType>& output,
@@ -51,7 +52,18 @@ public:
                                  const std::vector<int64_t>& dilations,
                                  const std::vector<int64_t>& padding)
     {
-        validateInput(input, weight, output, strides, dilations, padding);
+        convFwdInference(input, weight, output, strides, dilations, padding, padding);
+    }
+
+    static void convFwdInference(const TensorBase<InputDataType>& input,
+                                 const TensorBase<InputDataType>& weight,
+                                 TensorBase<InputDataType>& output,
+                                 const std::vector<int64_t>& strides,
+                                 const std::vector<int64_t>& dilations,
+                                 const std::vector<int64_t>& prePadding,
+                                 const std::vector<int64_t>& postPadding)
+    {
+        validateInput(input, weight, output, strides, dilations, prePadding, postPadding);
 
         // Extract dimensions - NC[spatial...] format for input/output, [G*K][C][spatial...] for weight
         const auto& inputDims = input.dims();
@@ -76,9 +88,9 @@ public:
             auto gIdx = indices[0]; // group index
             auto nIdx = indices[1]; // batch index
             auto kIdx = indices[2]; // output channel within group
-            
+
             std::vector<int64_t> outputSpatialIndices(indices.begin() + 3, indices.end());
-            
+
             auto accumulator = static_cast<AccumulatorType>(0);
             int64_t baseInputChannel = gIdx * channelsPerGroup;
 
@@ -87,60 +99,69 @@ public:
                 int64_t inputChannel = baseInputChannel + c;
 
                 // Iterate kernel spatial positions
-                iterateSpatialPositions(kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
-                    std::vector<int64_t> inputSpatialIndices(static_cast<size_t>(nSpatialDims));
-                    bool validPosition = true;
-                    
-                    for(int64_t dim = 0; dim < nSpatialDims; ++dim)
-                    {
-                        auto dimIdx = static_cast<size_t>(dim);
-                        inputSpatialIndices[dimIdx] = (outputSpatialIndices[dimIdx] * strides[dimIdx]) 
-                                                    + (kernelSpatialIndices[dimIdx] * dilations[dimIdx]) 
-                                                    - padding[dimIdx];
-                        
-                        if(inputSpatialIndices[dimIdx] < 0 || inputSpatialIndices[dimIdx] >= inputSpatialDims[dimIdx])
+                iterateSpatialPositions(
+                    kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
+                        std::vector<int64_t> inputSpatialIndices(static_cast<size_t>(nSpatialDims));
+                        bool validPosition = true;
+
+                        for(int64_t dim = 0; dim < nSpatialDims; ++dim)
                         {
-                            validPosition = false;
-                            break;
+                            auto dimIdx = static_cast<size_t>(dim);
+                            inputSpatialIndices[dimIdx]
+                                = (outputSpatialIndices[dimIdx] * strides[dimIdx])
+                                  + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
+                                  - prePadding[dimIdx];
+
+                            if(inputSpatialIndices[dimIdx] < 0
+                               || inputSpatialIndices[dimIdx] >= inputSpatialDims[dimIdx])
+                            {
+                                validPosition = false;
+                                break;
+                            }
                         }
-                    }
 
-                    if(validPosition)
-                    {
-                        std::vector<int64_t> inputFullIndices = {nIdx, inputChannel};
-                        inputFullIndices.insert(inputFullIndices.end(), inputSpatialIndices.begin(), inputSpatialIndices.end());
-                        
-                        int64_t weightIdx = (gIdx * outputChannelsPerGroup) + kIdx;
-                        std::vector<int64_t> weightFullIndices = {weightIdx, c};
-                        weightFullIndices.insert(weightFullIndices.end(), kernelSpatialIndices.begin(), kernelSpatialIndices.end());
-                        
-                        InputDataType inputVal = input.getHostValue(inputFullIndices);
-                        InputDataType weightVal = weight.getHostValue(weightFullIndices);
+                        if(validPosition)
+                        {
+                            std::vector<int64_t> inputFullIndices = {nIdx, inputChannel};
+                            inputFullIndices.insert(inputFullIndices.end(),
+                                                    inputSpatialIndices.begin(),
+                                                    inputSpatialIndices.end());
 
-                        accumulator += static_cast<AccumulatorType>(inputVal)
-                                       * static_cast<AccumulatorType>(weightVal);
-                    }
-                });
+                            int64_t weightIdx = (gIdx * outputChannelsPerGroup) + kIdx;
+                            std::vector<int64_t> weightFullIndices = {weightIdx, c};
+                            weightFullIndices.insert(weightFullIndices.end(),
+                                                     kernelSpatialIndices.begin(),
+                                                     kernelSpatialIndices.end());
+
+                            InputDataType inputVal = input.getHostValue(inputFullIndices);
+                            InputDataType weightVal = weight.getHostValue(weightFullIndices);
+
+                            accumulator += static_cast<AccumulatorType>(inputVal)
+                                           * static_cast<AccumulatorType>(weightVal);
+                        }
+                    });
             }
 
             int64_t outputChannel = (gIdx * outputChannelsPerGroup) + kIdx;
             std::vector<int64_t> outputFullIndices = {nIdx, outputChannel};
-            outputFullIndices.insert(outputFullIndices.end(), outputSpatialIndices.begin(), outputSpatialIndices.end());
-            
+            outputFullIndices.insert(
+                outputFullIndices.end(), outputSpatialIndices.begin(), outputSpatialIndices.end());
+
             output.setHostValue(static_cast<InputDataType>(accumulator), outputFullIndices);
         };
 
         // Build dimensions for parallel iteration
         std::vector<int64_t> parallelDims = {nGroups, nBatch, outputChannelsPerGroup};
         parallelDims.insert(parallelDims.end(), outputSpatialDims.begin(), outputSpatialDims.end());
-        
-        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
-            convolutionFunc, parallelDims);
+
+        auto parallelFunc
+            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         output.memory().markHostModified();
     }
 
+    // Backward compatibility
     static void convBwdData(TensorBase<InputDataType>& gradInput,
                             const TensorBase<InputDataType>& weight,
                             const TensorBase<InputDataType>& gradOutput,
@@ -148,7 +169,18 @@ public:
                             const std::vector<int64_t>& dilations,
                             const std::vector<int64_t>& padding)
     {
-        validateInput(gradInput, weight, gradOutput, strides, dilations, padding);
+        convBwdData(gradInput, weight, gradOutput, strides, dilations, padding, padding);
+    }
+
+    static void convBwdData(TensorBase<InputDataType>& gradInput,
+                            const TensorBase<InputDataType>& weight,
+                            const TensorBase<InputDataType>& gradOutput,
+                            const std::vector<int64_t>& strides,
+                            const std::vector<int64_t>& dilations,
+                            const std::vector<int64_t>& prePadding,
+                            const std::vector<int64_t>& postPadding)
+    {
+        validateInput(gradInput, weight, gradOutput, strides, dilations, prePadding, postPadding);
 
         // Extract dimensions - NC[spatial...] format for input/output, [G*K][C][spatial...] for weight
         const auto& inputDims = gradInput.dims();
@@ -173,67 +205,76 @@ public:
             auto gIdx = indices[0]; // group index
             auto nIdx = indices[1]; // batch index
             auto cIdx = indices[2]; // channel index within group
-            
+
             std::vector<int64_t> inputSpatialIndices(indices.begin() + 3, indices.end());
-            
+
             AccumulatorType vAcc = 0;
 
-            iterateSpatialPositions(kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
-                std::vector<int64_t> outputSpatialIndices(static_cast<size_t>(nSpatialDims));
-                bool validPosition = true;
-                
-                for(int64_t dim = 0; dim < nSpatialDims; ++dim)
-                {
-                    auto dimIdx = static_cast<size_t>(dim);
-                    int64_t tmp = inputSpatialIndices[dimIdx] + padding[dimIdx] - (kernelSpatialIndices[dimIdx] * dilations[dimIdx]);
-                    
-                    if(tmp % strides[dimIdx] != 0)
-                    {
-                        validPosition = false;
-                        break;
-                    }
-                    
-                    outputSpatialIndices[dimIdx] = tmp / strides[dimIdx];
-                    
-                    if(outputSpatialIndices[dimIdx] < 0 || outputSpatialIndices[dimIdx] >= outputSpatialDims[dimIdx])
-                    {
-                        validPosition = false;
-                        break;
-                    }
-                }
+            iterateSpatialPositions(
+                kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
+                    std::vector<int64_t> outputSpatialIndices(static_cast<size_t>(nSpatialDims));
+                    bool validPosition = true;
 
-                if(validPosition)
-                {
-                    for(int64_t k = 0; k < outputChannelsPerGroup; ++k)
+                    for(int64_t dim = 0; dim < nSpatialDims; ++dim)
                     {
-                        auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + k;
-                        
-                        std::vector<int64_t> gradOutputFullIndices = {nIdx, outputChannelIdx};
-                        gradOutputFullIndices.insert(gradOutputFullIndices.end(), outputSpatialIndices.begin(), outputSpatialIndices.end());
-                        
-                        std::vector<int64_t> weightFullIndices = {outputChannelIdx, cIdx};
-                        weightFullIndices.insert(weightFullIndices.end(), kernelSpatialIndices.begin(), kernelSpatialIndices.end());
-                        
-                        InputDataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
-                        InputDataType vWei = weight.getHostValue(weightFullIndices);
+                        auto dimIdx = static_cast<size_t>(dim);
+                        int64_t tmp = inputSpatialIndices[dimIdx] + prePadding[dimIdx]
+                                      - (kernelSpatialIndices[dimIdx] * dilations[dimIdx]);
 
-                        vAcc += static_cast<AccumulatorType>(vOut) * static_cast<AccumulatorType>(vWei);
+                        if(tmp % strides[dimIdx] != 0)
+                        {
+                            validPosition = false;
+                            break;
+                        }
+
+                        outputSpatialIndices[dimIdx] = tmp / strides[dimIdx];
+
+                        if(outputSpatialIndices[dimIdx] < 0
+                           || outputSpatialIndices[dimIdx] >= outputSpatialDims[dimIdx])
+                        {
+                            validPosition = false;
+                            break;
+                        }
                     }
-                }
-            });
+
+                    if(validPosition)
+                    {
+                        for(int64_t k = 0; k < outputChannelsPerGroup; ++k)
+                        {
+                            auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + k;
+
+                            std::vector<int64_t> gradOutputFullIndices = {nIdx, outputChannelIdx};
+                            gradOutputFullIndices.insert(gradOutputFullIndices.end(),
+                                                         outputSpatialIndices.begin(),
+                                                         outputSpatialIndices.end());
+
+                            std::vector<int64_t> weightFullIndices = {outputChannelIdx, cIdx};
+                            weightFullIndices.insert(weightFullIndices.end(),
+                                                     kernelSpatialIndices.begin(),
+                                                     kernelSpatialIndices.end());
+
+                            InputDataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
+                            InputDataType vWei = weight.getHostValue(weightFullIndices);
+
+                            vAcc += static_cast<AccumulatorType>(vOut)
+                                    * static_cast<AccumulatorType>(vWei);
+                        }
+                    }
+                });
 
             std::vector<int64_t> gradInputFullIndices = {nIdx, (gIdx * channelsPerGroup) + cIdx};
-            gradInputFullIndices.insert(gradInputFullIndices.end(), inputSpatialIndices.begin(), inputSpatialIndices.end());
-            
+            gradInputFullIndices.insert(
+                gradInputFullIndices.end(), inputSpatialIndices.begin(), inputSpatialIndices.end());
+
             gradInput.setHostValue(static_cast<InputDataType>(vAcc), gradInputFullIndices);
         };
 
         // Build dimensions for parallel iteration
         std::vector<int64_t> parallelDims = {nGroups, nBatch, channelsPerGroup};
         parallelDims.insert(parallelDims.end(), inputSpatialDims.begin(), inputSpatialDims.end());
-        
-        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
-            convolutionFunc, parallelDims);
+
+        auto parallelFunc
+            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         gradInput.memory().markHostModified();
@@ -245,45 +286,64 @@ private:
                               const TensorBase<InputDataType>& output,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
-                              const std::vector<int64_t>& padding)
+                              const std::vector<int64_t>& prePadding,
+                              const std::vector<int64_t>& postPadding)
     {
         // Input validation
         if(input.dims().size() < 3)
         {
-            throw std::invalid_argument("Input tensor must have at least 3 dimensions (N, C, spatial...)");
+            throw std::invalid_argument(
+                "Input tensor must have at least 3 dimensions (N, C, spatial...)");
         }
 
         if(output.dims().size() < 3)
         {
-            throw std::invalid_argument("Output tensor must have at least 3 dimensions (N, C, spatial...)");
+            throw std::invalid_argument(
+                "Output tensor must have at least 3 dimensions (N, C, spatial...)");
         }
 
         if(weight.dims().size() < 3)
         {
-            throw std::invalid_argument("Weight tensor must have at least 3 dimensions ([G*K], C, spatial...)");
+            throw std::invalid_argument(
+                "Weight tensor must have at least 3 dimensions ([G*K], C, spatial...)");
         }
 
         // Check that all tensors have same number of dimensions
-        if(input.dims().size() != output.dims().size() || input.dims().size() != weight.dims().size())
+        if(input.dims().size() != output.dims().size()
+           || input.dims().size() != weight.dims().size())
         {
-            throw std::invalid_argument("Input, output, and weight tensors must have the same number of dimensions");
+            throw std::invalid_argument(
+                "Input, output, and weight tensors must have the same number of dimensions");
         }
 
         int64_t nSpatialDims = static_cast<int64_t>(input.dims().size()) - 2;
 
         if(strides.size() != static_cast<size_t>(nSpatialDims))
         {
-            throw std::invalid_argument("Strides must have exactly " + std::to_string(nSpatialDims) + " elements for " + std::to_string(nSpatialDims) + "D spatial convolution");
+            throw std::invalid_argument("Strides must have exactly " + std::to_string(nSpatialDims)
+                                        + " elements for " + std::to_string(nSpatialDims)
+                                        + "D spatial convolution");
         }
 
         if(dilations.size() != static_cast<size_t>(nSpatialDims))
         {
-            throw std::invalid_argument("Dilations must have exactly " + std::to_string(nSpatialDims) + " elements for " + std::to_string(nSpatialDims) + "D spatial convolution");
+            throw std::invalid_argument("Dilations must have exactly "
+                                        + std::to_string(nSpatialDims) + " elements for "
+                                        + std::to_string(nSpatialDims) + "D spatial convolution");
         }
 
-        if(padding.size() != static_cast<size_t>(nSpatialDims))
+        if(prePadding.size() != static_cast<size_t>(nSpatialDims))
         {
-            throw std::invalid_argument("Padding must have exactly " + std::to_string(nSpatialDims) + " elements for " + std::to_string(nSpatialDims) + "D spatial convolution");
+            throw std::invalid_argument("PrePadding must have exactly "
+                                        + std::to_string(nSpatialDims) + " elements for "
+                                        + std::to_string(nSpatialDims) + "D spatial convolution");
+        }
+
+        if(postPadding.size() != static_cast<size_t>(nSpatialDims))
+        {
+            throw std::invalid_argument("PostPadding must have exactly "
+                                        + std::to_string(nSpatialDims) + " elements for "
+                                        + std::to_string(nSpatialDims) + "D spatial convolution");
         }
 
         for(int64_t i = 0; i < nSpatialDims; ++i)
@@ -299,16 +359,22 @@ private:
                 throw std::invalid_argument("Dilation values must be positive");
             }
 
-            if(padding[idx] < 0)
+            if(prePadding[idx] < 0)
             {
-                throw std::invalid_argument("Padding values must be non-negative");
+                throw std::invalid_argument("PrePadding values must be non-negative");
+            }
+
+            if(postPadding[idx] < 0)
+            {
+                throw std::invalid_argument("PostPadding values must be non-negative");
             }
         }
     }
 
     // Helper function to iterate over spatial positions
-    static void iterateSpatialPositions(const std::vector<int64_t>& spatialDims,
-                                        const std::function<void(const std::vector<int64_t>&)>& func)
+    static void
+        iterateSpatialPositions(const std::vector<int64_t>& spatialDims,
+                                const std::function<void(const std::vector<int64_t>&)>& func)
     {
         if(spatialDims.empty())
         {

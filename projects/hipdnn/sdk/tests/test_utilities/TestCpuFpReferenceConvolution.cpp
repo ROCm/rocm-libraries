@@ -1202,7 +1202,7 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3D)
             for(int w = 0; w < 2; ++w)
             {
                 EXPECT_GT(outputTensor.getHostValue(0, 0, d, h, w), 0.0f)
-                    << "Output at position (" << d << "," << h << "," << w 
+                    << "Output at position (" << d << "," << h << "," << w
                     << ") should be positive";
             }
         }
@@ -1295,7 +1295,7 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DGrouped)
     // Verify grouped convolution produces different outputs for each group
     float output0 = outputTensor.getHostValue(0, 0, 0, 0, 0);
     float output1 = outputTensor.getHostValue(0, 1, 0, 0, 0);
-    
+
     EXPECT_GT(output0, 0.0f) << "Group 0 output should be positive";
     EXPECT_GT(output1, 0.0f) << "Group 1 output should be positive";
     EXPECT_NE(output0, output1) << "Different groups should produce different outputs";
@@ -1468,8 +1468,8 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3D)
             for(int w = 0; w < 3; ++w)
             {
                 float grad = inputTensor.getHostValue(0, 0, d, h, w);
-                EXPECT_GE(grad, 0.0f) << "Gradient at (" << d << "," << h << "," << w 
-                                      << ") should be non-negative";
+                EXPECT_GE(grad, 0.0f)
+                    << "Gradient at (" << d << "," << h << "," << w << ") should be non-negative";
             }
         }
     }
@@ -1586,8 +1586,8 @@ TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionBwdData1D)
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
     // Expected gradients
-    EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 0, 0), 0.5);  // 1 * 0.5
-    EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 0, 1), 2.5);  // 1 * 1.5 + 2 * 0.5
-    EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 0, 2), 4.5);  // 2 * 1.5 + 3 * 0.5
-    EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 0, 3), 4.5);  // 3 * 1.5
+    EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 0, 0), 0.5); // 1 * 0.5
+    EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 0, 1), 2.5); // 1 * 1.5 + 2 * 0.5
+    EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 0, 2), 4.5); // 2 * 1.5 + 3 * 0.5
+    EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 0, 3), 4.5); // 3 * 1.5
 }

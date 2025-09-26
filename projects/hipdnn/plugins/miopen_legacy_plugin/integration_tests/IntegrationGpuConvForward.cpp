@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
@@ -218,10 +219,9 @@ TEST_P(IntegrationGpuConvFwdNchwFp32, Correctness)
     runConvTest(4e-6f, TensorLayout::NCHW);
 }
 
-// TODO: Enable 5D tests once the reference implementation for 5D is ready
-TEST_P(IntegrationGpuConvFwdNcdhwFp32, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdNcdhwFp32, Correctness)
 {
-    runConvTest(4e-6f, TensorLayout::NCDHW);
+    runConvTest(8e-6f, TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvFwdNchwBfp16, Correctness)
@@ -229,7 +229,7 @@ TEST_P(IntegrationGpuConvFwdNchwBfp16, Correctness)
     runConvTest(1e-2_bf, TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvFwdNcdhwBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdNcdhwBfp16, Correctness)
 {
     runConvTest(1e-2_bf, TensorLayout::NCDHW);
 }
@@ -239,7 +239,7 @@ TEST_P(IntegrationGpuConvFwdNchwFp16, Correctness)
     runConvTest(1e-2_h, TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvFwdNcdhwFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdNcdhwFp16, Correctness)
 {
     runConvTest(1e-2_h, TensorLayout::NCDHW);
 }
@@ -249,9 +249,9 @@ TEST_P(IntegrationGpuConvFwdNhwcFp32, Correctness)
     runConvTest(4e-6f, TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdNdhwcFp32, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdNdhwcFp32, Correctness)
 {
-    runConvTest(4e-6f, TensorLayout::NDHWC);
+    runConvTest(8e-6f, TensorLayout::NDHWC);
 }
 
 TEST_P(IntegrationGpuConvFwdNhwcBfp16, Correctness)
@@ -259,7 +259,7 @@ TEST_P(IntegrationGpuConvFwdNhwcBfp16, Correctness)
     runConvTest(1e-2_bf, TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdNdhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdNdhwcBfp16, Correctness)
 {
     runConvTest(1e-2_bf, TensorLayout::NDHWC);
 }
@@ -269,7 +269,7 @@ TEST_P(IntegrationGpuConvFwdNhwcFp16, Correctness)
     runConvTest(1e-3_h, TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdNdhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdNdhwcFp16, Correctness)
 {
     runConvTest(1e-3_h, TensorLayout::NDHWC);
 }
