@@ -234,6 +234,7 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(
     coverage_analysis
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hiprand-coverage_%m.profraw" ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -263,11 +264,6 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hiprand-coverage_*.profraw -o ./coverage-report/hiprand.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata -format=html -output-dir=coverage-report
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  )
-
-  add_custom_target(coverage_cleanup
-    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
