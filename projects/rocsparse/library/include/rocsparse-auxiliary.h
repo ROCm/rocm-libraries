@@ -1913,38 +1913,38 @@ rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
  *  \p rocsparse_sell_get gets the fields of the sparse sliced ELL matrix descriptor
  *
  *  @param[in]
- *  descr              the pointer to the sparse sliced ELL matrix descriptor.
+ *  descr                  the pointer to the sparse sliced ELL matrix descriptor.
  *  @param[out]
- *  rows               number of rows in the sliced ELL matrix.
+ *  rows                   number of rows in the sliced ELL matrix.
  *  @param[out]
- *  cols               number of columns in the sliced ELL matrix
+ *  cols                   number of columns in the sliced ELL matrix
  *  @param[out]
- *  nnz                number of non-zeros in the sliced ELL matix.
+ *  nnz                    number of non-zeros in the sliced ELL matix.
  *  @param[out]
- *  slice_size         slice size in the sliced ELL matrix.
+ *  slice_size             slice size in the sliced ELL matrix.
  *  @param[out]
- *  sell_colval_size   actual number of elements stored in the sliced ELL matrix.
+ *  sell_colval_size       actual number of elements stored in the sliced ELL matrix.
  *  @param[out]
- *  sell_slice_offsets slice offsets array in the sliced ELL matrix (must be array of length \p nslices + 1 
- *                     where \p nslices=(rows-1)/slice_size+1 ). 
+ *  sell_slice_offsets     slice offsets array in the sliced ELL matrix (must be array of length \p nslices + 1 
+ *                         where \p nslices=(rows-1)/slice_size+1 ). 
  *  @param[out]
- *  sell_col_ind       column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
+ *  sell_col_ind            column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
  *  @param[out]
- *  sell_val           values of the sliced ELL matrix (must be array of length \p sell_colval_size ).
+ *  sell_val                values of the sliced ELL matrix (must be array of length \p sell_colval_size ).
  *  @param[out]
- *  offsets_ptr_type   \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
+ *  sell_slice_offsets_type \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
  *  @param[out]
- *  col_ind_type       \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
+ *  sell_col_ind_type       \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
  *  @param[out]
- *  idx_base           \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
+ *  idx_base                \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
  *  @param[out]
- *  data_type          \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
- *                     \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c.
+ *  data_type               \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
+ *                          \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p sell_slice_offsets or \p sell_col_ind or \p sell_val is invalid.
  *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz or \p sell_colval_size or \p slice_size is invalid.
- *  \retval rocsparse_status_invalid_value if \p offsets_ptr_type or \p col_ind_type or \p idx_base or \p data_type is invalid.
+ *  \retval rocsparse_status_invalid_value if \p sell_slice_offsets_type or \p sell_col_ind_type or \p idx_base or \p data_type is invalid.
  */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -1957,8 +1957,8 @@ rocsparse_status rocsparse_sell_get(const rocsparse_spmat_descr descr,
                                     void**                      sell_slice_offsets,
                                     void**                      sell_col_ind,
                                     void**                      sell_val,
-                                    rocsparse_indextype*        offsets_ptr_type,
-                                    rocsparse_indextype*        col_ind_type,
+                                    rocsparse_indextype*        sell_slice_offsets_type,
+                                    rocsparse_indextype*        sell_col_ind_type,
                                     rocsparse_index_base*       idx_base,
                                     rocsparse_datatype*         data_type);
 
@@ -1972,8 +1972,8 @@ rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
                                           const void**                sell_slice_offsets,
                                           const void**                sell_col_ind,
                                           const void**                sell_val,
-                                          rocsparse_indextype*        offsets_ptr_type,
-                                          rocsparse_indextype*        col_ind_type,
+                                          rocsparse_indextype*        sell_slice_offsets_type,
+                                          rocsparse_indextype*        sell_col_ind_type,
                                           rocsparse_index_base*       idx_base,
                                           rocsparse_datatype*         data_type);
 /**@}*/

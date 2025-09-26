@@ -7642,11 +7642,6 @@ void host_csr_to_coo_aos(J                     M,
     }
 }
 
-
-
-
-
-
 template <typename I, typename J, typename T>
 void host_csr_to_csc(J                    M,
                      J                    N,
@@ -8677,10 +8672,6 @@ void host_prune_csr_to_csr_by_percentage(rocsparse_int                     M,
                              csr_base_C,
                              threshold);
 }
-
-
-
-
 
 template <typename I, typename J>
 void host_coo_to_csr(J M, I nnz, const J* coo_row_ind, I* csr_row_ptr, rocsparse_index_base base)

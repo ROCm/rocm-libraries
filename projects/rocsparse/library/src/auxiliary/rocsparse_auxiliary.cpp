@@ -2739,6 +2739,7 @@ try
     ROCSPARSE_CHECKARG_SIZE(2, cols);
     ROCSPARSE_CHECKARG_SIZE(3, nnz);
     ROCSPARSE_CHECKARG_SIZE(4, slice_size);
+    ROCSPARSE_CHECKARG(4, slice_size, (slice_size == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, sell_colval_size);
 
     ROCSPARSE_CHECKARG(3, nnz, (nnz > sell_colval_size), rocsparse_status_invalid_size);
@@ -2819,6 +2820,7 @@ try
     ROCSPARSE_CHECKARG_SIZE(2, cols);
     ROCSPARSE_CHECKARG_SIZE(3, nnz);
     ROCSPARSE_CHECKARG_SIZE(4, slice_size);
+    ROCSPARSE_CHECKARG(4, slice_size, (slice_size == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, sell_colval_size);
 
     ROCSPARSE_CHECKARG(3, nnz, (nnz > sell_colval_size), rocsparse_status_invalid_size);
@@ -3747,8 +3749,8 @@ rocsparse_status rocsparse_sell_get(const rocsparse_spmat_descr descr,
                                     void**                      sell_slice_offsets,
                                     void**                      sell_col_ind,
                                     void**                      sell_val,
-                                    rocsparse_indextype*        offsets_ptr_type,
-                                    rocsparse_indextype*        col_ind_type,
+                                    rocsparse_indextype*        sell_slice_offsets_type,
+                                    rocsparse_indextype*        sell_col_ind_type,
                                     rocsparse_index_base*       idx_base,
                                     rocsparse_datatype*         data_type)
 try
@@ -3765,8 +3767,8 @@ try
     ROCSPARSE_CHECKARG_POINTER(6, sell_slice_offsets);
     ROCSPARSE_CHECKARG_POINTER(7, sell_col_ind);
     ROCSPARSE_CHECKARG_POINTER(8, sell_val);
-    ROCSPARSE_CHECKARG_POINTER(9, offsets_ptr_type);
-    ROCSPARSE_CHECKARG_POINTER(10, col_ind_type);
+    ROCSPARSE_CHECKARG_POINTER(9, sell_slice_offsets_type);
+    ROCSPARSE_CHECKARG_POINTER(10, sell_col_ind_type);
     ROCSPARSE_CHECKARG_POINTER(11, idx_base);
     ROCSPARSE_CHECKARG_POINTER(12, data_type);
 
@@ -3780,10 +3782,10 @@ try
     *sell_col_ind       = descr->col_data;
     *sell_val           = descr->val_data;
 
-    *offsets_ptr_type = descr->row_type;
-    *col_ind_type     = descr->col_type;
-    *idx_base         = descr->idx_base;
-    *data_type        = descr->data_type;
+    *sell_slice_offsets_type = descr->row_type;
+    *sell_col_ind_type       = descr->col_type;
+    *idx_base                = descr->idx_base;
+    *data_type               = descr->data_type;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -3803,8 +3805,8 @@ rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
                                           const void**                sell_slice_offsets,
                                           const void**                sell_col_ind,
                                           const void**                sell_val,
-                                          rocsparse_indextype*        offsets_ptr_type,
-                                          rocsparse_indextype*        col_ind_type,
+                                          rocsparse_indextype*        sell_slice_offsets_type,
+                                          rocsparse_indextype*        sell_col_ind_type,
                                           rocsparse_index_base*       idx_base,
                                           rocsparse_datatype*         data_type)
 try
@@ -3821,8 +3823,8 @@ try
     ROCSPARSE_CHECKARG_POINTER(6, sell_slice_offsets);
     ROCSPARSE_CHECKARG_POINTER(7, sell_col_ind);
     ROCSPARSE_CHECKARG_POINTER(8, sell_val);
-    ROCSPARSE_CHECKARG_POINTER(9, offsets_ptr_type);
-    ROCSPARSE_CHECKARG_POINTER(10, col_ind_type);
+    ROCSPARSE_CHECKARG_POINTER(9, sell_slice_offsets_type);
+    ROCSPARSE_CHECKARG_POINTER(10, sell_col_ind_type);
     ROCSPARSE_CHECKARG_POINTER(11, idx_base);
     ROCSPARSE_CHECKARG_POINTER(12, data_type);
 
@@ -3836,10 +3838,10 @@ try
     *sell_col_ind       = descr->const_col_data;
     *sell_val           = descr->const_val_data;
 
-    *offsets_ptr_type = descr->row_type;
-    *col_ind_type     = descr->col_type;
-    *idx_base         = descr->idx_base;
-    *data_type        = descr->data_type;
+    *sell_slice_offsets_type = descr->row_type;
+    *sell_col_ind_type       = descr->col_type;
+    *idx_base                = descr->idx_base;
+    *data_type               = descr->data_type;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
