@@ -734,7 +734,8 @@ namespace rocRoller
                                bool                    twoTile,
                                ExpressionPtr           numWGs,
                                CommandParametersPtr    params,
-                               ContextPtr              context)
+                               ContextPtr              context,
+                               bool const              hasWorkgroupMapping)
             : m_dimensionIndices(dims)
             , m_topLoop(topLoop)
             , m_accumulatorLoop(accumulatorLoop)
@@ -742,6 +743,7 @@ namespace rocRoller
             , m_numWGs(numWGs)
             , m_params(params)
             , m_context(context)
+            , m_hasWorkgroupMapping(hasWorkgroupMapping)
         {
         }
 
@@ -756,8 +758,21 @@ namespace rocRoller
                                    LoopInfo const&        loopInfo,
                                    AccumulatorInfo const& accumInfo,
                                    ArgumentInfo const&    argInfo,
-                                   ExpressionPtr          numTotalTiles)
+                                   ExpressionPtr          numTotalTiles,
+                                   bool const             hasWorkgroupMapping)
         {
+
+            //    bool const hasWorkgroupMapping =
+            //  !filter([&](auto tag){
+            //        auto edge = graph.coordinates.getEdge<rocRoller::KernelGraph::CoordinateGraph::Edge>(tag);
+            //        if(std::holds_alternative<CoordinateTransformEdge>(edge))
+            //        {
+            //           return std::holds_alternative<PiecewiseAffineJoin>(
+            //              std::get<CoordinateTransformEdge>(edge));
+            //        }
+            //        return false;
+            //      }, graph.coordinates.getEdges()).to<std::vector>().empty();
+
             // Create forward/reverse tile-numbers for each dimension
             // and attach to all staged tile-number coordinates
             std::vector<int> tileNumbers;
@@ -766,14 +781,67 @@ namespace rocRoller
                 auto tileNumber = graph.coordinates.addElement(
                     MacroTileNumber(d, argInfo.numTiles[d], nullptr));
 
+                Log::info("New tile tag = {}", tileNumber);
+
+                AssertFatal(accumInfo.tileNumberCoords.contains(d));
+
                 for(auto tileNumTag : accumInfo.tileNumberCoords.at(d))
                 {
-                    if(forward
-                       && std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
-                        graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
-                    if(!forward
-                       && std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
-                        graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
+//<<<<<<< HEAD
+//                    if(forward
+//                       && std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
+//                        graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
+//                    if(!forward
+//                       && std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
+//                        graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
+//=======
+                    if(forward)
+                    {
+                        if(hasWorkgroupMapping)
+                        {
+                            auto edgeTag
+                                = graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag).front();
+                            auto maybePiecewiseAffineJoin
+                                = graph.coordinates.get<PiecewiseAffineJoin>(edgeTag);
+                            if(maybePiecewiseAffineJoin)
+                                graph.coordinates.addElement(
+                                    PassThrough(), {tileNumTag}, {tileNumber});
+                        }
+                        else if(std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
+                            graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
+                    }
+                    else
+                    {
+                        if(hasWorkgroupMapping)
+                        {
+                            auto edgeTag
+                                = graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag).front();
+                            auto maybePiecewiseAffineJoin
+                                = graph.coordinates.get<PiecewiseAffineJoin>(edgeTag);
+                            if(maybePiecewiseAffineJoin)
+                                graph.coordinates.addElement(
+                                    PassThrough(), {tileNumber}, {tileNumTag});
+                        }
+                        else if(std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
+                            graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
+                    }
+
+                    //if(forward && graph.upstream.contains(tileNumTag))
+                    //{
+                    //    graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
+                    //}
+
+                    //if(not forward && graph.downstream.contains(tileNumTag))
+                    //{
+                    //    graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
+                    //}
+
+                    //if(forward
+                    //   && empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
+                    //    graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
+                    //if(!forward && empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
+                    //    graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
+//>>>>>>> 0174f5a703 (WIP: separate workgroup connection transformation)
                 }
 
                 tileNumbers.push_back(tileNumber);
@@ -834,8 +902,11 @@ namespace rocRoller
         //
         // Matches are: tile->dim in m_dimensions.
         //
-        AccumulatorInfo stage(KernelGraph const& graph, LoopInfo const& loopInfo)
+        AccumulatorInfo stage(KernelGraph const& graph,
+                              LoopInfo const&    loopInfo,
+                              bool const         hasWorkgroupMapping)
         {
+            //Log::info("=====================stage================");
             AccumulatorInfo accumInfo;
 
             accumInfo.accumulatorCoord = getForLoopCoords(loopInfo.accumulatorLoopOp, graph).first;
@@ -872,27 +943,121 @@ namespace rocRoller
                 }
             }
 
-            // Find all dangling MacroTileNumber dimensions associated
-            // with the requested dimensions
-            for(auto dimension : loopInfo.dimensionIndices)
-            {
-                auto danglingTileNumberPredicate = [&](int tag) {
-                    auto maybeTileNumber = graph.coordinates.get<MacroTileNumber>(tag);
-                    if(!maybeTileNumber)
-                        return false;
-                    if(maybeTileNumber->dim != dimension)
-                        return false;
-                    if(std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tag))
-                       || std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
-                        return true;
-                    return false;
-                };
+//<<<<<<< HEAD
+//            // Find all dangling MacroTileNumber dimensions associated
+//            // with the requested dimensions
+//            for(auto dimension : loopInfo.dimensionIndices)
+//            {
+//                auto danglingTileNumberPredicate = [&](int tag) {
+//                    auto maybeTileNumber = graph.coordinates.get<MacroTileNumber>(tag);
+//                    if(!maybeTileNumber)
+//                        return false;
+//                    if(maybeTileNumber->dim != dimension)
+//                        return false;
+//                    if(std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tag))
+//                       || std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
+//                        return true;
+//                    return false;
+//                };
+//=======
+//            //    auto piecewiseAffineJoinEdges =
+//            //  filter([&](auto tag){
+//            //        auto edge = graph.coordinates.getEdge<rocRoller::KernelGraph::CoordinateGraph::Edge>(tag);
+//            //        if(std::holds_alternative<CoordinateTransformEdge>(edge))
+//            //        {
+//            //           return std::holds_alternative<PiecewiseAffineJoin>(
+//            //              std::get<CoordinateTransformEdge>(edge));
+//            //        }
+//            //        return false;
+//            //      }, graph.coordinates.getEdges()).to<std::vector>();
+//>>>>>>> 0174f5a703 (WIP: separate workgroup connection transformation)
 
-                accumInfo.tileNumberCoords[dimension]
-                    = graph.coordinates.findElements(danglingTileNumberPredicate)
-                          .to<std::unordered_set>();
+            //if(not piecewiseAffineJoinEdges.empty())
+            if(hasWorkgroupMapping)
+            {
+                //Log::info("Has piecewiseAffineJoinEdges  {}",  piecewiseAffineJoinEdges);
+
+                for(auto dimension : loopInfo.dimensionIndices)
+                    accumInfo.tileNumberCoords[dimension];
+
+                auto macroTileNumbers
+                    = graph.coordinates.getNodes<MacroTileNumber>().to<std::vector>();
+                for(auto const& macroTileNumber : macroTileNumbers)
+                {
+                    auto inputEdge = graph.coordinates.getNeighbours<GD::Upstream>(macroTileNumber).front();
+                    if(graph.coordinates.get<PiecewiseAffineJoin>(inputEdge).has_value())
+                    {
+                        auto mtn = graph.coordinates.get<MacroTileNumber>(macroTileNumber);
+                        accumInfo.tileNumberCoords[mtn->dim].insert(macroTileNumber);
+                        continue;
+                    }
+
+                    auto outputEdge
+                        = graph.coordinates.getNeighbours<GD::Downstream>(macroTileNumber).front();
+                    if(graph.coordinates.get<PiecewiseAffineJoin>(outputEdge).has_value())
+                    {
+                        auto mtn = graph.coordinates.get<MacroTileNumber>(macroTileNumber);
+                        accumInfo.tileNumberCoords[mtn->dim].insert(macroTileNumber);
+                    }
+                }
+
+                // workgroup Mapping
+                //for(auto const& edge: piecewiseAffineJoinEdges)
+                //{
+                //    auto input = *graph.coordinates.getNeighbours<GD::Upstream>(edge).take(1).only();
+                //    //Log::info("input = {}", input);
+                //    if(auto mtn = graph.coordinates.get<MacroTileNumber>(input); mtn)
+                //    {
+                //  auto iter = std::ranges::find(loopInfo.dimensionIndices, mtn->dim);
+                //  if(iter != loopInfo.dimensionIndices.end())
+                //      accumInfo.tileNumberCoords[mtn->dim].insert(input);
+
+                //  continue;
+                //    }
+                //
+                //    auto output = *graph.coordinates.getNeighbours<GD::Downstream>(edge).take(1).only();
+                //    //Log::info("output = {}", output);
+                //    if(auto mtn = graph.coordinates.get<MacroTileNumber>(output); mtn)
+                //    {
+                //  auto iter = std::ranges::find(loopInfo.dimensionIndices, mtn->dim);
+                //  if(iter != loopInfo.dimensionIndices.end())
+                //      accumInfo.tileNumberCoords[mtn->dim].insert(output);
+                //    }
+                //}
+
+                //Log::info("DONE Has piecewiseAffineJoinEdges {}", piecewiseAffineJoinEdges.size());
+            }
+            else
+            {
+                // Find all dangling MacroTileNumber dimensions associated
+                // with the requested dimensions
+                for(auto dimension : loopInfo.dimensionIndices)
+                {
+                    auto danglingTileNumberPredicate = [&](int tag) {
+                        auto maybeTileNumber = graph.coordinates.get<MacroTileNumber>(tag);
+                        if(!maybeTileNumber)
+                            return false;
+                        if(maybeTileNumber->dim != dimension)
+                            return false;
+
+                        //if(tag > 200)
+                        //    return true;
+
+                        if(std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tag))
+                           || std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
+                            return true;
+                        return false;
+                    };
+
+                    accumInfo.tileNumberCoords[dimension]
+                        = graph.coordinates.findElements(danglingTileNumberPredicate)
+                              .to<std::unordered_set>();
+
+                    Log::info("dangling {} = {}", dimension, accumInfo.tileNumberCoords[dimension]);
+                }
             }
 
+            //Log::info("=====================stage DONE================");
             return accumInfo;
         }
 
@@ -905,8 +1070,11 @@ namespace rocRoller
                     AccumulatorInfo const& accumInfo,
                     ArgumentInfo const&    argInfo,
                     CommandParametersPtr   params,
-                    ContextPtr             context)
+                    ContextPtr             context,
+                    bool const             hasWorkgroupMapping)
         {
+
+            //Log::info("======================commit=======");
             //
             // Find the epilogue operations; detach them.
             //
@@ -988,10 +1156,10 @@ namespace rocRoller
             //
             // Add forward/reverse tile-space coordinate transforms
             //
-            auto forwardInfo
-                = addTileSpaceCT(graph, true, loopInfo, accumInfo, argInfo, numTotalTiles);
-            auto reverseInfo
-                = addTileSpaceCT(graph, false, loopInfo, accumInfo, argInfo, numTotalTiles);
+            auto forwardInfo = addTileSpaceCT(
+                graph, true, loopInfo, accumInfo, argInfo, numTotalTiles, hasWorkgroupMapping);
+            auto reverseInfo = addTileSpaceCT(
+                graph, false, loopInfo, accumInfo, argInfo, numTotalTiles, hasWorkgroupMapping);
 
             //
             // Add local-tile and accumulator for-loop dimensions and iterators
@@ -1269,6 +1437,8 @@ namespace rocRoller
                                     AccumulatorInfo const& accumInfo,
                                     ContextPtr             context)
         {
+            //Log::info("setupArguments");
+
             ArgumentInfo argInfo;
 
             auto k = context->kernel();
@@ -1292,6 +1462,8 @@ namespace rocRoller
             // that info).
             for(auto dimension : loopInfo.dimensionIndices)
             {
+                AssertFatal(accumInfo.tileNumberCoords.contains(dimension));
+
                 for(auto tileNumberTag : accumInfo.tileNumberCoords.at(dimension))
                 {
                     if(!argInfo.numTileArgExprs[dimension])
@@ -1403,6 +1575,8 @@ namespace rocRoller
         {
             TIMER(t, "KernelGraph::AddStreamK");
 
+            Log::info("==========================AddStreamK===============");
+
             LoopInfo loopInfo;
 
             loopInfo.dimensionIndices = m_dimensionIndices;
@@ -1470,10 +1644,19 @@ namespace rocRoller
             }
 
             auto graph     = original;
-            auto accumInfo = stage(graph, loopInfo);
+            auto accumInfo = stage(graph, loopInfo, m_hasWorkgroupMapping);
             auto argInfo
                 = setupArguments(m_numWGs, m_twoTile, graph, loopInfo, accumInfo, m_context);
-            commit(graph, m_twoTile, loopInfo, accumInfo, argInfo, m_params, m_context);
+            commit(graph,
+                   m_twoTile,
+                   loopInfo,
+                   accumInfo,
+                   argInfo,
+                   m_params,
+                   m_context,
+                   m_hasWorkgroupMapping);
+
+            Log::info("==========================AddStreamK DONE===============");
 
             return graph;
         }

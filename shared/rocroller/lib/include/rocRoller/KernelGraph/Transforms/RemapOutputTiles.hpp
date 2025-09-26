@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2024-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,34 +25,40 @@
  *******************************************************************************/
 
 #pragma once
-#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace ConnectWorkgroupsDetail
+        /**
+         * @brief Connect unbound (leaf) MacroTileNumber coordinates
+         * to Workgroups.
+         *
+         * This transform searches for MacroTileNumber coordinates
+         * that are leafs (don't have outgoing/incoming edges), and
+         * attaches Workgroup coordinates to them.
+         */
+        class RemapOutputTiles : public GraphTransform
         {
-            /**
-             * @brief Remap Workgroup to be more cache friendly
-             * (consecutive workgroups land within the same XCC).
-             *
-             * Modifies the coordinate graph.
-             *
-             * Returns the newly added Workgroup dimension.
-             */
-            //    int remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& graph,
-            //                          int                                  workgroupTag,
-            //            uint                                 numXCC);
+        public:
+            RemapOutputTiles(ContextPtr                context,
+                             std::optional<int>        workgroupMappingDim,
+                             std::optional<int>        workgroupRemapXCC,
+                             Expression::ExpressionPtr workgroupMappingValue = nullptr);
 
-            /**
-             * @brief Connect dangling MacroTileNumber coordinate to
-             * matching Workgroup coordinates.
-             *
-             * Performs Workgroup Mapping (via workgroupMapping).
-             */
-            void connectWorkgroups(rocRoller::KernelGraph::KernelGraph& graph);
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "RemapOutputTiles";
+            }
 
-        }
+        private:
+            ContextPtr m_context;
+
+            std::optional<int>        m_workgroupMappingDim;
+            std::optional<int>        m_workgroupRemapXCC;
+            Expression::ExpressionPtr m_workgroupMappingValue;
+        };
     }
 }

@@ -85,7 +85,8 @@ namespace rocRoller
                        bool                      twoTile,
                        Expression::ExpressionPtr numWGs,
                        CommandParametersPtr      params,
-                       ContextPtr                context);
+                       ContextPtr                context,
+                       bool const                hasWorkgroupMapping = false);
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;
@@ -123,6 +124,8 @@ namespace rocRoller
              * 2. Is a literal (for testing)
              */
             Expression::ExpressionPtr m_numWGs;
+
+            bool m_hasWorkgroupMapping;
         };
     }
 }

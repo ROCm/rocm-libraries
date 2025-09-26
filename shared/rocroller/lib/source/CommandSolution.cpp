@@ -355,6 +355,31 @@ namespace rocRoller
         }
 
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
+
+        Expression::ExpressionPtr workgroupMappingValue = nullptr;
+        if(m_commandParameters->workgroupMappingDim.has_value())
+        {
+            Expression::ExpressionPtr size;
+
+            {
+                auto arguments = m_command->getArguments();
+                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
+                    return x->name() == rocRoller::WGM;
+                });
+                AssertFatal(it != arguments.cend(),
+                            "Can not find WGM Command argument required for workgroup mapping.");
+                size = std::make_shared<Expression::Expression>(*it);
+            }
+            Expression::enableDivideBy(size, m_context);
+
+            workgroupMappingValue = size;
+        }
+        transforms.push_back(std::make_shared<KernelGraph::RemapOutputTiles>(
+            m_context,
+            m_commandParameters->workgroupMappingDim,
+            m_commandParameters->workgroupRemapXCC,
+            workgroupMappingValue));
+
         if(m_commandParameters->streamK)
         {
             Expression::ExpressionPtr numWGsExpr;
@@ -375,7 +400,8 @@ namespace rocRoller
                 m_commandParameters->streamKTwoTile,
                 numWGsExpr,
                 m_commandParameters,
-                m_context));
+                m_context,
+                m_commandParameters->workgroupMappingDim.has_value()));
         }
         else if(!m_commandParameters->loopOverOutputTilesDimensions.empty())
         {
@@ -387,29 +413,8 @@ namespace rocRoller
                 m_context));
         }
 
-        Expression::ExpressionPtr workgroupMappingValue = nullptr;
-        if(m_commandParameters->workgroupMappingDim.has_value())
-        {
-            Expression::ExpressionPtr size;
+        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>());
 
-            {
-                auto arguments = m_command->getArguments();
-                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
-                    return x->name() == rocRoller::WGM;
-                });
-                AssertFatal(it != arguments.cend(),
-                            "Can not find WGM Command argument required for workgroup mapping.");
-                size = std::make_shared<Expression::Expression>(*it);
-            }
-            Expression::enableDivideBy(size, m_context);
-
-            workgroupMappingValue = size;
-        }
-        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(
-            m_context,
-            m_commandParameters->workgroupMappingDim,
-            m_commandParameters->workgroupRemapXCC,
-            workgroupMappingValue));
         transforms.push_back(
             std::make_shared<KernelGraph::UnrollLoops>(m_commandParameters, m_context));
         if(m_commandParameters->fuseLoops)

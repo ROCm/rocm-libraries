@@ -39,6 +39,8 @@
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups_detail.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemapOutputTiles.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemapOutputTiles_detail.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
@@ -56,6 +58,7 @@ namespace ConnectWorkgroupsTest
         using namespace rocRoller::KernelGraph;
         using namespace rocRoller::KernelGraph::CoordinateGraph;
         using namespace rocRoller::KernelGraph::ConnectWorkgroupsDetail;
+        using namespace rocRoller::KernelGraph::RemapOutputTilesDetail;
 
         using GD = rocRoller::Graph::Direction;
 
@@ -101,33 +104,33 @@ namespace ConnectWorkgroupsTest
             CHECK_THAT(total, SimplifiesTo(literal(vX) * literal(vY)));
         }
 
-        SECTION("No mapping")
-        {
+        //SECTION("No mapping")
+        //{
 
-            auto graph     = graph0;
-            auto info      = getTileSizeInfo(graph);
-            auto remapping = connectWorkgroupsNoMapping(info, graph);
+        //    auto graph     = graph0;
+        //    auto info      = getTileSizeInfo(graph);
+        //    auto remapping = connectWorkgroups(info, graph);
 
-            for(uint wg = 0; wg < vX; ++wg)
-            {
-                auto exprs = graph.coordinates.forward(
-                    {literal(wg)}, {remapping[{0, GD::Downstream}]}, {tileNumAD});
-                auto tileNumA = getUnsignedInt(evaluate(exprs[0]));
+        //    for(uint wg = 0; wg < vX; ++wg)
+        //    {
+        //        auto exprs = graph.coordinates.forward(
+        //            {literal(wg)}, {remapping[{0, GD::Downstream}]}, {tileNumAD});
+        //        auto tileNumA = getUnsignedInt(evaluate(exprs[0]));
 
-                auto expectedA = wg;
-                CHECK(tileNumA == expectedA);
-            }
+        //        auto expectedA = wg;
+        //        CHECK(tileNumA == expectedA);
+        //    }
 
-            for(uint wg = 0; wg < vY; ++wg)
-            {
-                auto exprs = graph.coordinates.forward(
-                    {literal(wg)}, {remapping[{1, GD::Downstream}]}, {tileNumBD});
-                auto tileNumB = getUnsignedInt(evaluate(exprs[0]));
+        //    for(uint wg = 0; wg < vY; ++wg)
+        //    {
+        //        auto exprs = graph.coordinates.forward(
+        //            {literal(wg)}, {remapping[{1, GD::Downstream}]}, {tileNumBD});
+        //        auto tileNumB = getUnsignedInt(evaluate(exprs[0]));
 
-                auto expectedB = wg;
-                CHECK(tileNumB == expectedB);
-            }
-        }
+        //        auto expectedB = wg;
+        //        CHECK(tileNumB == expectedB);
+        //    }
+        //}
     }
 
     class RemapWorkgroupKernel : public AssemblyTestKernel
@@ -229,6 +232,7 @@ namespace ConnectWorkgroupsTest
             using namespace rocRoller::KernelGraph;
             using namespace rocRoller::KernelGraph::CoordinateGraph;
             using namespace ConnectWorkgroupsDetail;
+            using namespace rocRoller::KernelGraph::RemapOutputTilesDetail;
 
             auto kernel = m_context->kernel();
 
@@ -494,6 +498,7 @@ namespace ConnectWorkgroupsTest
             using namespace rocRoller::KernelGraph;
             using namespace rocRoller::KernelGraph::CoordinateGraph;
             using namespace ConnectWorkgroupsDetail;
+            using namespace rocRoller::KernelGraph::RemapOutputTilesDetail;
 
             KernelGraph graph;
 

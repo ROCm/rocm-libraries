@@ -1024,7 +1024,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC_D123)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
@@ -1116,7 +1116,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK_A123)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1137,6 +1137,11 @@ namespace GEMMDriverTest
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
 
+        gemm.workgroupMappingDim   = 1;
+        gemm.workgroupMappingValue = 4;
+
+        gemm.workgroupRemapXCC = true;
+
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
         //gemm.prefetch         = true;
@@ -1153,7 +1158,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK_B123)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1181,6 +1186,11 @@ namespace GEMMDriverTest
 
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
+
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 2;
+
+        //gemm.workgroupRemapXCC     = true;
 
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
