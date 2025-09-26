@@ -87,6 +87,25 @@
 
 #endif // !THRUST_CPP_DIALECT
 
+// Constexpr feature macros:
+#if THRUST_CPP_DIALECT >= 2023
+#    define THRUST_CONSTEXPR_SINCE_CXX23 constexpr
+#else
+#    define THRUST_CONSTEXPR_SINCE_CXX23
+#endif
+
+#if THRUST_CPP_DIALECT >= 2020
+#    define THRUST_CONSTEXPR_SINCE_CXX20 constexpr
+#else
+#    define THRUST_CONSTEXPR_SINCE_CXX20
+#endif
+
+#if THRUST_CPP_DIALECT >= 2017
+#    define THRUST_CONSTEXPR_SINCE_CXX17 constexpr
+#else
+#    define THRUST_CONSTEXPR_SINCE_CXX17
+#endif
+
 // Define THRUST_COMPILER_DEPRECATION macro:
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
 #  define THRUST_COMP_DEPR_IMPL(msg) THRUST_PRAGMA(message(__FILE__ ":" THRUST_TO_STRING(__LINE__) ": warning: " #msg))

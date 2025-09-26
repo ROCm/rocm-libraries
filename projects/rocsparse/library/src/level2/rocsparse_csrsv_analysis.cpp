@@ -500,7 +500,6 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
         handle, m, startbit, endbit, &rocprim_size)));
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::radix_sort_pairs(
         handle, keys, vals, m, startbit, endbit, rocprim_size, rocprim_buffer));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
 
     if(vals.current() != row_map)
     {
