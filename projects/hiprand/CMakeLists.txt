@@ -155,11 +155,6 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
   add_link_options(-fuse-ld=lld)
 endif()
 
-if(BUILD_CODE_COVERAGE)
-  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
-endif()
-
 # Set version variables
 rocm_setup_version( VERSION "${hipRAND_VERSION}" )
 set ( hiprand_VERSION ${hipRAND_VERSION} )
@@ -226,3 +221,8 @@ rocm_create_package(
         LDCONFIG
         LDCONFIG_DIR ${HIPRAND_CONFIG_DIR}
 )
+
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
+endif()
