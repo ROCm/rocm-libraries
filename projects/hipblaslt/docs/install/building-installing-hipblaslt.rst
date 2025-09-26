@@ -113,7 +113,7 @@ Building the library manually
 Before building hipBLASLt manually, ensure the following dependencies are installed on your system:
 
 *  The `hipBLAS-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_ header files.
-*  The `ROC-tracer (ROC-TX) <https://github.com/ROCm/roctracer>`_ library (this is typically pre-installed).
+*  The `ROC-tracer (ROC-TX) <https://github.com/ROCm/rocm-systems/tree/develop/projects/roctracer>`_ library (this is typically pre-installed).
 
 Building hipBLASLt
 ^^^^^^^^^^^^^^^^^^^^

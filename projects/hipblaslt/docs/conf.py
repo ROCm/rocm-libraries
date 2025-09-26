@@ -10,7 +10,7 @@ import re
 from rocm_docs import ROCmDocs
 
 with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'.*\bproject\(hipblaslt\s+VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
+    match = re.search(r'.*\bHIPBLASLT_PROJECT_VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]

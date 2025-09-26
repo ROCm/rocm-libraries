@@ -51,6 +51,16 @@ private:
 };
 } // namespace detail
 
+/// \class transform_output_iterator
+/// \brief A random-access output (write-only) iterator adaptor for transforming assigned values.
+///
+/// \par Overview
+/// * A transform_output_iterator uses a functor of type \p UnaryFunction to transform a
+/// value written to it before writing it out to the underlying iterator.
+///
+/// \tparam OutputIterator type of the underlying random-access output iterator. Must be
+/// a random-access iterator.
+/// \tparam UnaryFunction type of the transform functor.
 template<class OutputIterator, class UnaryFunction>
 class transform_output_iterator
 {
@@ -75,6 +85,8 @@ public:
     /// The type of unary function used to transform input range.
     using unary_function = UnaryFunction;
 
+    /// A proxy type that is assignable which will transform the new value
+    /// and write it to the underlying iterator.
     using proxy_type = detail::transform_output_iterator_proxy<OutputIterator, unary_function>;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
