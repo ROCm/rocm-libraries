@@ -228,9 +228,6 @@ rocm_create_package(
 )
 
 if(BUILD_CODE_COVERAGE)
-  #
-  # Run coverage analysis
-  #
   add_custom_target(
     coverage_analysis
     DEPENDS hiprand
@@ -263,6 +260,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hiprand-coverage_*.profraw -o ./coverage-report/hiprand.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
