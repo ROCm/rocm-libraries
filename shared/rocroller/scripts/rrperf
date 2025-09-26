@@ -29,7 +29,6 @@
 import pathlib
 import sys
 
-
 repo_dir = pathlib.Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
 

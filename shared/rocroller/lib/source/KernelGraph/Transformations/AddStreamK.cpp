@@ -376,7 +376,7 @@ namespace rocRoller
                 auto maybeTileNumber = graph.coordinates.get<MacroTileNumber>(tag);
                 if(!maybeTileNumber)
                     return false;
-                if(!empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
+                if(!std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
                     return false;
                 if(maybeTileNumber->dim != 0)
                     return false;
@@ -769,9 +769,10 @@ namespace rocRoller
                 for(auto tileNumTag : accumInfo.tileNumberCoords.at(d))
                 {
                     if(forward
-                       && empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
+                       && std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
                         graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
-                    if(!forward && empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
+                    if(!forward
+                       && std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
                         graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
                 }
 
@@ -881,8 +882,8 @@ namespace rocRoller
                         return false;
                     if(maybeTileNumber->dim != dimension)
                         return false;
-                    if(empty(graph.coordinates.getNeighbours<GD::Upstream>(tag))
-                       || empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
+                    if(std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tag))
+                       || std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag)))
                         return true;
                     return false;
                 };
