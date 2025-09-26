@@ -162,11 +162,6 @@ struct CKArgs
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
         auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
-
-        // // Creat dummy workspace to pass the ck IsSupportedArgument check.
-        // int dummy_var = 1;
-        // conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &dummy_var);
-
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
@@ -378,7 +373,6 @@ bool ConvHipImplicitGemmGroupWrwWmma::IsApplicable(
     if(!(problem.IsLayoutNHWC() || problem.IsLayoutDefault()))
         return false;
     // needed because layout transpose kernel does not support non-packed tensors
-    // TODO - check if this is also the case for WMMA impl (this was copied from xdl solver)
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
     if(!ck_utility::is_wmma_capable(ctx.GetStream().GetDeviceName()))
