@@ -81,19 +81,16 @@ namespace rocRollerTest
         std::vector<int> nodes1 = control.childNodes(root[0]).to<std::vector>();
         EXPECT_EQ(2, nodes1.size());
 
-        std::vector<int> edges1
-            = control.getNeighbours<Graph::Direction::Downstream>(root[0]).to<std::vector>();
+        std::vector<int> edges1 = control.getNeighbours<Graph::Direction::Downstream>(root[0]);
         EXPECT_EQ(2, edges1.size());
 
         EXPECT_EQ(nodes1.size(), edges1.size());
 
-        std::vector<int> nodes2
-            = control.getNeighbours<Graph::Direction::Upstream>(edges1[0]).to<std::vector>();
+        std::vector<int> nodes2 = control.getNeighbours<Graph::Direction::Upstream>(edges1[0]);
         EXPECT_EQ(1, nodes2.size());
         EXPECT_EQ(nodes2[0], root[0]);
 
-        std::vector<int> nodes3
-            = control.getNeighbours<Graph::Direction::Upstream>(edges1[1]).to<std::vector>();
+        std::vector<int> nodes3 = control.getNeighbours<Graph::Direction::Upstream>(edges1[1]);
         EXPECT_EQ(1, nodes3.size());
         EXPECT_EQ(nodes3[0], root[0]);
 
@@ -114,16 +111,14 @@ namespace rocRollerTest
         auto inputs4 = control.getInputNodeIndices<ForLoopIncrement>(loadA_index).to<std::vector>();
         EXPECT_EQ(0, inputs4.size());
 
-        std::vector<int> edges2
-            = control.getNeighbours<Graph::Direction::Downstream>(loadA_index).to<std::vector>();
+        std::vector<int> edges2 = control.getNeighbours<Graph::Direction::Downstream>(loadA_index);
         EXPECT_EQ(1, edges2.size());
 
         std::vector<int> nodes5 = control.parentNodes(loadB_index).to<std::vector>();
         EXPECT_EQ(1, nodes5.size());
         EXPECT_EQ(nodes5[0], root[0]);
 
-        std::vector<int> edges3
-            = control.getNeighbours<Graph::Direction::Downstream>(loadB_index).to<std::vector>();
+        std::vector<int> edges3 = control.getNeighbours<Graph::Direction::Downstream>(loadB_index);
         EXPECT_EQ(2, edges3.size());
 
         std::vector<int> nodes6 = control.childNodes(loadA_index).to<std::vector>();
@@ -134,12 +129,10 @@ namespace rocRollerTest
         EXPECT_EQ(1, nodes7.size());
         EXPECT_EQ(nodes7[0], mul_index);
 
-        std::vector<int> edges4
-            = control.getNeighbours<Graph::Direction::Upstream>(storeC_index).to<std::vector>();
+        std::vector<int> edges4 = control.getNeighbours<Graph::Direction::Upstream>(storeC_index);
         EXPECT_EQ(1, edges4.size());
 
-        std::vector<int> nodes8
-            = control.getNeighbours<Graph::Direction::Upstream>(edges4[0]).to<std::vector>();
+        std::vector<int> nodes8 = control.getNeighbours<Graph::Direction::Upstream>(edges4[0]);
         EXPECT_EQ(1, nodes8.size());
         EXPECT_EQ(nodes8[0], mul_index);
 

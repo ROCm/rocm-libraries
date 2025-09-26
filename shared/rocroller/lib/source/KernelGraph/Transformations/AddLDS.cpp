@@ -70,15 +70,13 @@ namespace rocRoller
                            int                                                       newTag,
                            int                                                       oldTag)
         {
-            auto edgeTags = coordinates.getNeighbours<Dir>(oldTag).template to<std::vector>();
+            auto edgeTags = coordinates.getNeighbours<Dir>(oldTag);
             for(auto edgeTag : edgeTags)
             {
                 auto edge = coordinates.getElement(edgeTag);
 
-                auto upDirTags = coordinates.getNeighbours<Graph::opposite(Dir)>(edgeTag)
-                                     .template to<std::vector>();
-                auto downDirTags
-                    = coordinates.getNeighbours<Dir>(edgeTag).template to<std::vector>();
+                auto upDirTags   = coordinates.getNeighbours<Graph::opposite(Dir)>(edgeTag);
+                auto downDirTags = coordinates.getNeighbours<Dir>(edgeTag);
 
                 std::replace(upDirTags.begin(), upDirTags.end(), oldTag, newTag);
 

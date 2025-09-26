@@ -104,6 +104,8 @@ namespace origami
                                       size_t          M,
                                       size_t          N,
                                       size_t          K,
+                                      bool            transA,
+                                      bool            transB,                                      
                                       size_t          batch,
                                       size_t          MT_M,
                                       size_t          MT_N,
@@ -197,6 +199,8 @@ namespace origami
                                    size_t          N,
                                    size_t          K,
                                    size_t          batch,
+                                   bool            transA,
+                                   bool            transB,                                   
                                    size_t          MT_M,
                                    size_t          MT_N,
                                    size_t          MT_K,
@@ -206,5 +210,6 @@ namespace origami
                                    size_t          element_size_A,
                                    size_t          element_size_B,
                                    size_t          element_size_out,
+                                   data_type_t     mi_datatype,                                   
                                    int             WGM);
 } // namespace origami

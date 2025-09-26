@@ -499,7 +499,10 @@ namespace rocRoller
             else
                 AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4, ShowValue(numBytes));
             auto m0 = m_context->getM0();
-            AssertFatal(info.ldsWriteStride == m_workgroupSizeTotal * numBytes);
+            AssertFatal(info.ldsWriteStride == m_workgroupSizeTotal * numBytes,
+                        ShowValue(info.ldsWriteStride),
+                        ShowValue(m_workgroupSizeTotal),
+                        ShowValue(numBytes));
 
             if(setM0)
             {

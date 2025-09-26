@@ -390,7 +390,7 @@ class Solution(collections.abc.Mapping):
     if (aemB * bpeB) % 4 != 0 or not state["BufferLoad"]:
       state["NonDTLTailLoopB"] = True
 
-    if (state["ISA"] != (9, 4, 2)) or \
+    if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):
       state["tailLoopOptA"] = False
@@ -2396,10 +2396,12 @@ class Solution(collections.abc.Mapping):
     if state["DirectToLds"]:
 
       if (not state["DirectToVgprA"]) and Solution.isDirectToLdsDoable(state, 'A', isaInfoMap, printRejectionReason):
+        state['tailLoopOptA'] = False
         state["DirectToLdsA"] = True
         state["LocalWriteUseSgprA"] = True
 
       if (not state["DirectToVgprB"]) and Solution.isDirectToLdsDoable(state, 'B', isaInfoMap, printRejectionReason):
+        state['tailLoopOptB'] = False
         state["DirectToLdsB"] = True
         state["LocalWriteUseSgprB"] = True
 

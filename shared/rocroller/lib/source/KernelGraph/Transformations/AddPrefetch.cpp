@@ -1427,11 +1427,10 @@ namespace rocRoller
                     for(auto op :
                         k.control.depthFirstVisit(starts, onlyFollowSequenceEdges, GD::Downstream))
                     {
-                        auto outgoing
-                            = k.control.getNeighbours(op, GD::Downstream).to<std::unordered_set>();
+                        auto outgoing = k.control.getNeighbours(op, GD::Downstream);
                         for(auto tag : m_prefetchDelete[forLoop])
                         {
-                            outgoing.erase(tag);
+                            std::erase(outgoing, tag);
                         }
                         if(outgoing.empty())
                         {

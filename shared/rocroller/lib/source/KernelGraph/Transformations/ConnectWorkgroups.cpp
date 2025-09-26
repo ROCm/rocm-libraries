@@ -80,7 +80,7 @@ namespace rocRoller
                 auto tileNumTags = kgraph.coordinates.getNodes<MacroTileNumber>().to<std::vector>();
                 for(auto const& tileNumTag : tileNumTags)
                 {
-                    if(empty(kgraph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
+                    if(std::empty(kgraph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
                     {
                         // If we have no downstream neighbours, we
                         // will create a new workgroup below this, and
@@ -88,7 +88,7 @@ namespace rocRoller
                         auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
                         info.recordSize(tileNum.dim, tileNumTag, GD::Upstream, tileNum.size);
                     }
-                    if(empty(kgraph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
+                    if(std::empty(kgraph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
                     {
                         auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
                         info.recordSize(tileNum.dim, tileNumTag, GD::Downstream, tileNum.size);
@@ -332,9 +332,10 @@ namespace rocRoller
                 auto newWorkgroupTag = graph.coordinates.addElement(Workgroup(0, size));
 
                 // Upstream: newWorkgroupTag is added above workgroupTag
-                auto direction = empty(graph.coordinates.getNeighbours(workgroupTag, GD::Upstream))
-                                     ? GD::Upstream
-                                     : GD::Downstream;
+                auto direction
+                    = std::empty(graph.coordinates.getNeighbours(workgroupTag, GD::Upstream))
+                          ? GD::Upstream
+                          : GD::Downstream;
 
                 auto one           = Expression::literal(1u);
                 auto numXCCLiteral = Expression::literal(numXCC);

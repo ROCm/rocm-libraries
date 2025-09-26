@@ -58,6 +58,10 @@ namespace rocRoller
 
             if(!identical(orig, x))
             {
+                // auto comment = Instruction::Comment(
+                //     concatenate("FastArithmetic:", ShowValue(orig), ShowValue(x)));
+                // m_context->schedule(comment);
+
                 auto origResultType = resultType(orig);
                 AssertFatal(origResultType.varType == resultType(x).varType,
                             ShowValue(origResultType),
