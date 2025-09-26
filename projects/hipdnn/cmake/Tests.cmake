@@ -5,7 +5,7 @@ if(HIP_DNN_SKIP_TESTS)
     return()
 endif()
 
-hipdnn_add_dependency(GTest v1.16.0)
+hipdnn_add_dependency(GTest VERSION ${HIPDNN_GTEST_VERSION})
 include(GoogleTest)
 
 find_package(Python3 COMPONENTS Interpreter)
