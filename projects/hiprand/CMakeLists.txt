@@ -233,14 +233,13 @@ if(BUILD_CODE_COVERAGE)
   #
   add_custom_target(
     coverage_analysis
+    DEPENDS hiprand
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hiprand-coverage_%m.profraw" ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
-
-  add_dependencies(coverage_analysis hiprand)
 
   find_program(
     LLVM_PROFDATA
