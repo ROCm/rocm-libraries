@@ -125,7 +125,7 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
 
     const auto read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     const auto MAP_RD    = read_len / read_unit;
-    const auto READ_TYPE = (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string(read_unit);
+    const auto READ_TYPE = (read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit);
 
     auto compiler_options = KernelBuildParameters{
         {"LITE"},
@@ -149,7 +149,7 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
         auto kernel = KernelInfo{};
 
         kernel.comp_options = compiler_options.GenerateFor(kbp::OpenCL{});
-        kernel.kernel_file  = "MIOpenNeuron.cl";
+        kernel.kernel_file  = "MIOpenNeuron.cpp";
         kernel.kernel_name  = (packed) ? "MIOpenActiveBwdLite" : "MIOpenActiveBwd2DLite";
 
         kernel.l_wk.push_back(256);

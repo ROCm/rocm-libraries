@@ -476,7 +476,8 @@ __forceinline__ __device__ void ActivationFunction_BNLL_Diff(T (&__restrict__ bo
     {
         // y = (log(1 + exp(x)))
         // dy/dx = 1/ (1 + exp(-x))
-        T expval = miopen::exp(fmin(static_cast<T>(bot_data[i]), static_cast<T>(kBNLL_THRESHOLD)));
+        T expval =
+            miopen::exp(miopen::fmin(static_cast<T>(bot_data[i]), static_cast<T>(kBNLL_THRESHOLD)));
         bot_diff[i] = top_diff[i] * expval / (expval + static_cast<T>(1));
     }
 }

@@ -330,7 +330,7 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
     {
         auto kernel = KernelInfo{};
 
-        kernel.kernel_file = "MIOpenNeuron.cl";
+        kernel.kernel_file = "MIOpenNeuron.cpp";
         kernel.kernel_name = "MIOpenNeuronBwd";
 
         kernel.l_wk.push_back(grp_tile0);

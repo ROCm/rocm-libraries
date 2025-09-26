@@ -49,7 +49,8 @@ bool ActivFwdSolver1::IsApplicable(const ExecutionContext& context,
         return false;
 
     // Todo: probably fix "the rest" logic here
-    return !ActivFwdSolver0{}.IsApplicable(context, problem);
+    // return !ActivFwdSolver0{}.IsApplicable(context, problem);
+    return true; // Force fwd_1 for testing
 }
 
 ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
@@ -234,7 +235,7 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
     auto solution = ConvSolution{miopenStatusSuccess};
 
     auto kernel         = KernelInfo{};
-    kernel.kernel_file  = "MIOpenNeuronHIP.cpp";
+    kernel.kernel_file  = "MIOpenNeuron.cpp";
     kernel.kernel_name  = "MIOpenNeuronFwd";
     kernel.comp_options = compiler_options.GenerateFor(kbp::HIP{});
 
