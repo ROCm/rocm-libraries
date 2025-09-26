@@ -99,7 +99,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [5461]
   N: [4580]
-  slice_size: [3, 8]
+  slice_size: [1, 3, 8, 400]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
   baseA: [rocsparse_index_base_one]

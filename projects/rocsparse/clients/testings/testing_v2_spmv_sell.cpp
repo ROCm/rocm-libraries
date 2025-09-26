@@ -127,9 +127,6 @@ void testing_v2_spmv_sell(const Arguments& arg)
 
     matrix_factory.init_sell(hA, M, N, slice_size, base);
 
-    std::cout << "M: " << M << " N: " << N << " nnz: " << hA.nnz << " slice_size: " << slice_size
-              << " hA.sell_colval_size: " << hA.sell_colval_size << std::endl;
-
     // Allocate host memory for vectors
     host_vector<X> hx((trans == rocsparse_operation_none) ? N : M);
     host_vector<Y> hy((trans == rocsparse_operation_none) ? M : N);

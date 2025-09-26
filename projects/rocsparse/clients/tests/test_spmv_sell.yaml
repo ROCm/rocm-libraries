@@ -97,8 +97,8 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [3245]
-  N: [5473]
-  slice_size: [7, 8]
+  N: [0, 5473]
+  slice_size: [1, 7, 8, 150]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
   baseA: [rocsparse_index_base_one]
