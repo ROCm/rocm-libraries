@@ -791,7 +791,8 @@ namespace rocRoller
                                 graph.coordinates.addElement(
                                     PassThrough(), {tileNumTag}, {tileNumber});
                         }
-                        else if(std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
+                        else if(std::empty(
+                                    graph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
                             graph.coordinates.addElement(PassThrough(), {tileNumTag}, {tileNumber});
                     }
                     else
@@ -802,7 +803,8 @@ namespace rocRoller
                                 graph.coordinates.addElement(
                                     PassThrough(), {tileNumber}, {tileNumTag});
                         }
-                        else if(std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
+                        else if(std::empty(
+                                    graph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
                             graph.coordinates.addElement(PassThrough(), {tileNumber}, {tileNumTag});
                     }
                 }
@@ -904,7 +906,6 @@ namespace rocRoller
                     accumInfo.usesAccumulatorTile.insert(m.control);
                 }
             }
-
 
             if(hasWorkgroupMapping)
             {

@@ -294,9 +294,10 @@ namespace rocRoller
                 auto newWorkgroupTag = graph.coordinates.addElement(Workgroup(0, size));
 
                 // Upstream: newWorkgroupTag is added above workgroupTag
-                auto direction = std::empty(graph.coordinates.getNeighbours(workgroupTag, GD::Upstream))
-                                     ? GD::Upstream
-                                     : GD::Downstream;
+                auto direction
+                    = std::empty(graph.coordinates.getNeighbours(workgroupTag, GD::Upstream))
+                          ? GD::Upstream
+                          : GD::Downstream;
 
                 auto one           = Expression::literal(1u);
                 auto numXCCLiteral = Expression::literal(numXCC);
