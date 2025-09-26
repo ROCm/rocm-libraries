@@ -141,9 +141,8 @@ function( rocblas_library_settings lib_target_ )
   endif()
 
   if(BUILD_CODE_COVERAGE)
-    #target_compile_options(-fprofile-instr-generate -fcoverage-mapping)
-    target_compile_options( ${lib_target_} PRIVATE -fprofile-arcs -ftest-coverage )
-    target_link_libraries( ${lib_target_} PRIVATE --coverage -lgcov)
+    target_compile_options(${lib_target_} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${lib_target_} PRIVATE -fprofile-instr-generate)
   endif()
 
   rocm_set_soversion( ${lib_target_} ${rocblas_SOVERSION} )

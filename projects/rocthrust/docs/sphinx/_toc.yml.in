@@ -16,7 +16,7 @@ subtrees:
     title: Installing on Windows
   - file: install/rocThrust-install-with-cmake
     title: Installing on Linux and Windows with CMake
-  
+
 
 - caption: How to
   entries:
@@ -35,7 +35,6 @@ subtrees:
   - file: hipgraph-support
   - file: hip-execution-policies
   - file: cpp_api
-  - file: genindex
 
 - caption: About
   entries:

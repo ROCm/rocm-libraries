@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Script to clean up RST and other text files
 # By Lee Killough
 

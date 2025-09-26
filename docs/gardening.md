@@ -52,7 +52,7 @@ In scope:
 - Gardeners are responsible for ensuring develop (post-submit) checks remain green.
 - If a post-submit check is red, the gardeners should review the failing CI system and triage the issue.
 - No matter the issue, gardeners should notify the larger gardening team at least once per day about any post-submit failures.
-- If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue, 
+- If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue,
   verify whether existing PRs are facing the same problem, and notify the appropriate CI team, escalating the issue if required.
 - If the issue is related to a code change, the gardener should isolate the error message, and notify the
   appropriate component owners with a link to the log (reference the [CODEOWNERS](../.github/CODEOWNERS) file).
@@ -95,6 +95,8 @@ Aug 12, 2025 | eidenyoshida | N/A
 Aug 19, 2025 | stanleytsang-amd | N/A
 Aug 26, 2025 | rahulc-gh | N/A
 Sep 02, 2025 | paveltc | N/A
+Sep 09, 2025 | adickin-amd | N/A
+Sep 16, 2025 | araravik-psd | N/A
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 

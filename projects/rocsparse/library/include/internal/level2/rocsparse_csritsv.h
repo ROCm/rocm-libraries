@@ -35,9 +35,9 @@ extern "C" {
 /*! \ingroup level2_module
 *  \details
 *  \p rocsparse_csritsv_zero_pivot returns \ref rocsparse_status_zero_pivot, if either a
-*  structural or numerical zero has been found during 
-*  \ref rocsparse_scsritsv_solve "rocsparse_Xcsritsv_solve()" and/or 
-*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()", execution. The first zero pivot \f$j\f$ at 
+*  structural or numerical zero has been found during
+*  \ref rocsparse_scsritsv_solve "rocsparse_Xcsritsv_solve()" and/or
+*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()", execution. The first zero pivot \f$j\f$ at
 *  \f$A_{j,j}\f$ is stored in \p position, using same index base as the CSR matrix.
 *
 *  \p position can be in host or device memory. If no zero pivot has been found,
@@ -75,8 +75,8 @@ rocsparse_status rocsparse_csritsv_zero_pivot(rocsparse_handle          handle,
 /*! \ingroup level2_module
 *  \details
 *  \p rocsparse_csritsv_buffer_size returns the size of the temporary storage buffer that
-*  is required by \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()" and 
-*  \ref rocsparse_scsritsv_solve "rocsparse_Xcsritsv_solve()". The temporary storage buffer 
+*  is required by \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()" and
+*  \ref rocsparse_scsritsv_solve "rocsparse_Xcsritsv_solve()". The temporary storage buffer
 *  must be allocated by the user.
 *
 *  \note
@@ -103,7 +103,7 @@ rocsparse_status rocsparse_csritsv_zero_pivot(rocsparse_handle          handle,
 *  @param[out]
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
-*  buffer_size number of bytes of the temporary storage buffer required by 
+*  buffer_size number of bytes of the temporary storage buffer required by
 *              \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()" and
 *              \ref rocsparse_scsritsv_solve "rocsparse_Xcsritsv_solve()".
 *
@@ -170,8 +170,8 @@ rocsparse_status rocsparse_zcsritsv_buffer_size(rocsparse_handle                
 
 /*! \ingroup level2_module
 *  \details
-*  \p rocsparse_csritsv_analysis performs the analysis step for \ref rocsparse_scsritsv_solve "rocsparse_Xcsritsv_solve()". 
-*  It is expected that this function will be executed only once for a given matrix and particular operation type. The 
+*  \p rocsparse_csritsv_analysis performs the analysis step for \ref rocsparse_scsritsv_solve "rocsparse_Xcsritsv_solve()".
+*  It is expected that this function will be executed only once for a given matrix and particular operation type. The
 *  analysis meta data can be cleared by \ref rocsparse_csritsv_clear().
 *
 *   Selecting
@@ -289,11 +289,11 @@ rocsparse_status rocsparse_zcsritsv_analysis(rocsparse_handle                han
 /*! \ingroup level2_module
 *  \details
 *  \p rocsparse_csritsv_clear deallocates all memory that was allocated by
-*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". This is 
-*  especially useful, if memory is an issue and the analysis data is not 
-*  required for further computation, e.g. when switching to another sparse 
-*  matrix format. Calling \p rocsparse_csritsv_clear is optional. All allocated 
-*  resources will be cleared when the opaque \ref rocsparse_mat_info struct is 
+*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". This is
+*  especially useful, if memory is an issue and the analysis data is not
+*  required for further computation, e.g. when switching to another sparse
+*  matrix format. Calling \p rocsparse_csritsv_clear is optional. All allocated
+*  resources will be cleared when the opaque \ref rocsparse_mat_info struct is
 *  destroyed using \ref rocsparse_destroy_mat_info().
 *
 *  \note
@@ -360,10 +360,10 @@ rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
 *  with \f$\epsilon\f$ = \p host_tol.
 *
 *  \p rocsparse_csritsv_solve requires a user allocated temporary buffer. Its size is
-*  returned by rocsparse_scsritsv_buffer_size "rocsparse_Xcsritsv_buffer_size()". 
-*  Furthermore, analysis meta data is required. It can be obtained by 
-*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". \p rocsparse_csritsv_solve 
-*  reports the first zero pivot (either numerical or structural zero). 
+*  returned by rocsparse_scsritsv_buffer_size "rocsparse_Xcsritsv_buffer_size()".
+*  Furthermore, analysis meta data is required. It can be obtained by
+*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". \p rocsparse_csritsv_solve
+*  reports the first zero pivot (either numerical or structural zero).
 *  The zero pivot status can be checked calling \ref rocsparse_csritsv_zero_pivot(). If
 *  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be
 *  reported, even if \f$A_{j,j} = 0\f$ for some \f$j\f$.
@@ -655,10 +655,10 @@ ROCSPARSE_EXPORT rocsparse_status
 *  The parameter \p host_nfreeiter is used to control the frequence of the stopping criteria evaluation, thus potentially improving the performance of the algorithm with less norm calculation. Between each iteration of index \f$ k \f$, \p host_nfreeiter are performed without stopping criteria evaluation. Thus, if the convergence is obtained at index \f$ k \f$, that means \f$ (k + 1) \f$ \p host_nfreeiter \f$ + k \f$ iterations have been performed.
 *
 *  \p rocsparse_csritsv_solve_ex requires a user allocated temporary buffer. Its size is
-*  returned by \ref rocsparse_scsritsv_buffer_size "rocsparse_Xcsritsv_buffer_size()". 
-*  Furthermore, analysis meta data is required. It can be obtained by 
-*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". \p rocsparse_csritsv_solve_ex 
-*  reports the first zero pivot (either numerical or structural zero). The zero pivot status 
+*  returned by \ref rocsparse_scsritsv_buffer_size "rocsparse_Xcsritsv_buffer_size()".
+*  Furthermore, analysis meta data is required. It can be obtained by
+*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". \p rocsparse_csritsv_solve_ex
+*  reports the first zero pivot (either numerical or structural zero). The zero pivot status
 *  can be checked calling rocsparse_csritsv_zero_pivot(). If
 *  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be
 *  reported, even if \f$A_{j,j} = 0\f$ for some \f$j\f$.
