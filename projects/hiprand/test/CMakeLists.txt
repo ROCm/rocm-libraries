@@ -51,6 +51,44 @@ endfunction()
 # Get hipRAND tests source files
 file(GLOB hipRAND_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/test_hiprand*.cpp)
 
+if(BUILD_CODE_COVERAGE)
+  add_custom_target(
+    coverage_analysis
+    DEPENDS hiprand
+    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hiprand-coverage_%m.profraw" ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hiprand-coverage_*.profraw -o ./coverage-report/hiprand.profdata
+    COMMAND ${LLVM_COV} report -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata
+    COMMAND ${LLVM_COV} show -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/libhiprand.so -instr-profile=./coverage-report/hiprand.profdata -format=lcov > ./coverage-report/coverage.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+endif()
+
 # Build hipRAND tests
 foreach(test_src ${hipRAND_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
@@ -112,6 +150,10 @@ foreach(test_src ${hipRAND_TEST_SRCS})
       foreach( file_i ${third_party_dlls})
         add_custom_command( TARGET ${test_name} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${CMAKE_BINARY_DIR}/test )
       endforeach( file_i )
+    endif()
+
+    if (BUILD_CODE_COVERAGE)
+      add_dependencies(coverage_analysis ${test_name})
     endif()
 endforeach()
 
