@@ -913,17 +913,19 @@ namespace rocRoller
                 for(auto dimension : loopInfo.dimensionIndices)
                     accumInfo.tileNumberCoords[dimension];
 
-                for(auto const& macroTileNumber : graph.coordinates.getNodes<MacroTileNumber>())
+                for(auto const& macroTileNumberTag : graph.coordinates.getNodes<MacroTileNumber>())
                 {
                     bool const connectedWithPiecewiseAffineJoin
-                        = isConnectedWithPiecewiseAffineJoin<GD::Upstream>(graph, macroTileNumber)
+                        = isConnectedWithPiecewiseAffineJoin<GD::Upstream>(graph,
+                                                                           macroTileNumberTag)
                           or isConnectedWithPiecewiseAffineJoin<GD::Downstream>(graph,
-                                                                                macroTileNumber);
+                                                                                macroTileNumberTag);
 
                     if(connectedWithPiecewiseAffineJoin)
                     {
-                        auto const mtn = graph.coordinates.get<MacroTileNumber>(macroTileNumber);
-                        accumInfo.tileNumberCoords[mtn->dim].insert(macroTileNumber);
+                        auto const macroTileNumber
+                            = graph.coordinates.get<MacroTileNumber>(macroTileNumberTag);
+                        accumInfo.tileNumberCoords[macroTileNumber->dim].insert(macroTileNumberTag);
                     }
                 }
             }

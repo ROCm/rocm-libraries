@@ -85,7 +85,7 @@ namespace KernelGraphTest
         EXPECT_THROW(KernelGraph::UpdateParameters(params).apply(graph0), FatalError);
     }
 
-    TEST_F(KernelGraphUpdateParametersTest, SetWorkitemCount)
+    TEST_F(KernelGraphUpdateParametersTest, SetWorkitemCount_Z123)
     {
         using namespace rocRoller::KernelGraph;
 
@@ -119,16 +119,16 @@ namespace KernelGraphTest
         // Now apply SetWorkitemCount and try again
         kgraph = kgraph.transform(std::make_shared<SetWorkitemCount>(m_context));
 
-        CommandArgumentPtr tensorDsizeX;
+        CommandArgumentPtr tensorAsizeX;
         {
             auto arguments = command->getArguments();
             for(auto argument : arguments)
             {
-                if(argument->name() == "Tensor_4_size_0")
-                    tensorDsizeX = argument;
+                if(argument->name() == "Tensor_0_size_0")
+                    tensorAsizeX = argument;
             }
         }
-        ASSERT_NE(tensorDsizeX, nullptr) << "D size not found";
+        ASSERT_NE(tensorAsizeX, nullptr) << "A size not found";
 
         workitemCount = m_context->kernel()->workitemCount();
 
@@ -136,11 +136,15 @@ namespace KernelGraphTest
         auto workgroupSizeX = Expression::literal(128u);
 
         auto expected = Expression::convert(DataType::UInt32,
-                                            ((tensorDsizeX->expression() + workgroupSizeX) - one)
+                                            ((tensorAsizeX->expression() + workgroupSizeX) - one)
                                                 / workgroupSizeX)
                         * one;
 
+        for(auto& expr : workitemCount)
+            Log::info("expr = {}", toString(expr));
+
         EXPECT_TRUE(Expression::identical(expected, workitemCount[0]))
-            << expected << "/" << workitemCount[0] << std::endl;
+            << expected << "\n"
+            << workitemCount[0] << std::endl;
     }
 }

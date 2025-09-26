@@ -53,8 +53,10 @@ namespace rocRoller
                     {
                         // MacroTileNumber is dangling, connect it to a Workgroup
                         auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
+                        auto size
+                            = tileNum.size ? convert(DataType::UInt32, tileNum.size) : tileNum.size;
                         auto workgroupTag
-                            = kgraph.coordinates.addElement(Workgroup(tileNum.dim, tileNum.size));
+                            = kgraph.coordinates.addElement(Workgroup(tileNum.dim, size));
                         Log::debug(
                             "KernelGraph::ConnectWorkgroups: Adding PassThrough from tile {} "
                             "({}) to workgroup {}",
@@ -68,8 +70,11 @@ namespace rocRoller
                     if(std::empty(kgraph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
                     {
                         // MacroTileNumber is dangling, connect it to a Workgroup
-                        auto tileNum      = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
-                        auto workgroupTag = kgraph.coordinates.addElement(Workgroup(tileNum.dim));
+                        auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
+                        auto size
+                            = tileNum.size ? convert(DataType::UInt32, tileNum.size) : tileNum.size;
+                        auto workgroupTag
+                            = kgraph.coordinates.addElement(Workgroup(tileNum.dim, size));
                         Log::debug("KernelGraph::ConnectWorkgroups: Adding PassThrough from "
                                    "workgroup {} to tile {} ({})",
                                    workgroupTag,
