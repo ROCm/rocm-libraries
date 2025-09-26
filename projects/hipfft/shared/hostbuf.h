@@ -53,7 +53,6 @@ public:
         std::swap(owned, other.owned);
         std::swap(bsize, other.bsize);
         std::swap(bsize_track, other.bsize_track);
-        std::swap(is_pinned_memory, other.is_pinned_memory);
     }
     hostbuf_t& operator=(hostbuf_t&& other)
     {
@@ -61,7 +60,6 @@ public:
         std::swap(owned, other.owned);
         std::swap(bsize, other.bsize);
         std::swap(bsize_track, other.bsize_track);
-        std::swap(is_pinned_memory, other.is_pinned_memory);
         return *this;
     }
     hostbuf_t(const hostbuf_t&) = delete;
@@ -70,11 +68,10 @@ public:
     static hostbuf_t make_nonowned(T* p, size_t size_bytes = 0)
     {
         hostbuf_t ret;
-        ret.owned            = false;
-        ret.buf              = p;
-        ret.bsize            = size_bytes;
-        ret.bsize_track      = 0;
-        ret.is_pinned_memory = false; // irrelevant anyways if not owned
+        ret.owned       = false;
+        ret.buf         = p;
+        ret.bsize       = size_bytes;
+        ret.bsize_track = 0;
         return ret;
     }
 
@@ -83,7 +80,7 @@ public:
         free();
     }
 
-    void alloc(size_t size, bool make_it_pinned = false)
+    void alloc(size_t size)
     {
         free();
 
@@ -99,60 +96,43 @@ public:
             throw HOSTBUF_MEM_USAGE{msg.str()};
         }
 
-        if(make_it_pinned)
+        // we're aligning to multiples of 64 bytes, so round the
+        // allocation size up to the nearest 64 to keep ASAN happy
+        if(size % 64)
         {
-            if(hipHostMalloc(&buf, size) != hipSuccess)
-            {
-                buf   = nullptr;
-                bsize = 0;
-            }
+            size += 64 - size % 64;
+        }
+
+        // FFTW requires aligned allocations to use faster SIMD instructions.
+        // If enabling hugepages, align to 2 MiB. Otherwise, aligning to
+        // 64 bytes is enough for AVX instructions up to AVX512.
+#ifdef WIN32
+        buf = _aligned_malloc(size, 64);
+#else
+        // On Linux, ask for hugepages to reduce TLB pressure and
+        // improve performance.  Allocations need to be aligned to
+        // the hugepage size, and rounded up to the next whole
+        // hugepage.
+        static const size_t TWO_MiB = 2 * 1024 * 1024;
+        if(size >= TWO_MiB)
+        {
+            size_t rounded_size = DivRoundingUp(size, TWO_MiB) * TWO_MiB;
+            buf                 = aligned_alloc(TWO_MiB, rounded_size);
+            madvise(buf, rounded_size, MADV_HUGEPAGE);
         }
         else
-        {
-            // we're aligning to multiples of 64 bytes, so round the
-            // allocation size up to the nearest 64 to keep ASAN happy
-            if(size % 64)
-            {
-                size += 64 - size % 64;
-            }
-
-            // FFTW requires aligned allocations to use faster SIMD instructions.
-            // If enabling hugepages, align to 2 MiB. Otherwise, aligning to
-            // 64 bytes is enough for AVX instructions up to AVX512.
-#ifdef WIN32
-            buf = _aligned_malloc(size, 64);
-#else
-            // On Linux, ask for hugepages to reduce TLB pressure and
-            // improve performance.  Allocations need to be aligned to
-            // the hugepage size, and rounded up to the next whole
-            // hugepage.
-            static const size_t TWO_MiB = 2 * 1024 * 1024;
-            if(size >= TWO_MiB)
-            {
-                size_t rounded_size = DivRoundingUp(size, TWO_MiB) * TWO_MiB;
-                buf                 = aligned_alloc(TWO_MiB, rounded_size);
-                madvise(buf, rounded_size, MADV_HUGEPAGE);
-            }
-            else
-                buf = aligned_alloc(64, size);
+            buf = aligned_alloc(64, size);
 #endif
-        }
         if(!buf)
             throw std::bad_alloc();
 
-        is_pinned_memory = make_it_pinned;
-        bsize_track      = size;
+        bsize_track = size;
         total_used_mem += bsize_track;
     }
 
     size_t size() const
     {
         return bsize;
-    }
-
-    bool is_pinned() const
-    {
-        return is_pinned_memory;
     }
 
     void free()
@@ -162,18 +142,12 @@ public:
             if(owned)
             {
                 total_used_mem -= bsize_track;
-                if(is_pinned_memory)
-                {
-                    (void)hipHostFree(buf);
-                }
-                else
-                {
+
 #ifdef WIN32
-                    _aligned_free(buf);
+                _aligned_free(buf);
 #else
-                    std::free(buf);
+                std::free(buf);
 #endif
-                }
             }
             buf   = nullptr;
             bsize = bsize_track = 0;
@@ -195,10 +169,10 @@ public:
     }
 
     // Copy method
-    hostbuf_t copy(bool make_copy_pinned = false) const
+    hostbuf_t copy() const
     {
         hostbuf_t copy;
-        copy.alloc(bsize, make_copy_pinned);
+        copy.alloc(bsize);
         memcpy(copy.buf, buf, bsize);
         return copy;
     }
@@ -231,9 +205,8 @@ private:
     void* buf = nullptr;
     // whether this object owns the 'buf' pointer (and hence needs to
     // free it)
-    bool   owned            = true;
-    bool   is_pinned_memory = false;
-    size_t bsize            = 0;
+    bool   owned = true;
+    size_t bsize = 0;
 
     // Buffer size for tracking total memory usage.
     // When buffer is shrunk in place, bsize_track is not changed.

@@ -92,6 +92,6 @@ struct EnvironmentSetTemp
         else
             rocfft_setenv(var.c_str(), oldvalue.c_str());
     }
-    const std::string var;
-    std::string       oldvalue;
+    std::string var;
+    std::string oldvalue;
 };
