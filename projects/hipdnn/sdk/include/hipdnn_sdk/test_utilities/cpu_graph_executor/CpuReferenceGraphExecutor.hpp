@@ -6,9 +6,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 class CpuReferenceGraphExecutor
@@ -80,6 +78,7 @@ private:
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
             return createBatchnormBwdSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+            return createBatchnormTrainSignatureKey(node, tensorMap);
         case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
@@ -138,7 +137,32 @@ private:
             xTensorAttr->data_type(), scaleTensorAttr->data_type(), meanTensorAttr->data_type());
     }
 
+    static PlanRegistrySignatureKey createBatchnormTrainSignatureKey(
+        const hipdnn_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap)
+    {
+        const auto* nodeAttributes = node.attributes_as_BatchnormAttributes();
+        if(nodeAttributes == nullptr)
+        {
+            throw std::runtime_error("Node attributes could not be cast to BatchnormAttributes");
+        }
+
+        auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
+        auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
+        auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
+
+        if(xTensorAttr == nullptr || meanTensorAttr == nullptr || scaleTensorAttr == nullptr)
+        {
+            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
+                                     "failed to construct key");
+        }
+
+        return BatchnormTrainSignatureKey(
+            xTensorAttr->data_type(), scaleTensorAttr->data_type(), meanTensorAttr->data_type());
+    }
+
     PlanBuilderRegistry _planRegistry;
 };
-}
+
 }

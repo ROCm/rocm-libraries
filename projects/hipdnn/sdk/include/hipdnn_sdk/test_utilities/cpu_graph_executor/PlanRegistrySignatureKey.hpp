@@ -8,6 +8,7 @@
 
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormBwdSignatureKey.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferenceSignatureKey.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormTrainSignatureKey.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -25,8 +26,9 @@ namespace hipdnn_sdk::test_utilities
  * - A constexpr array of all supported signatures for the new op.
  * 
 */
-using PlanRegistrySignatureKey
-    = std::variant<BatchnormFwdInferenceSignatureKey, BatchnormBwdSignatureKey>;
+using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
+                                              BatchnormBwdSignatureKey,
+                                              BatchnormTrainSignatureKey>;
 
 struct PlanRegistrySignatureKeyHash
 {

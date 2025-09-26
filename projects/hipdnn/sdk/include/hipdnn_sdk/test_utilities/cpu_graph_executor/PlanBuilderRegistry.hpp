@@ -8,6 +8,7 @@
 
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormBwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormTrainPlan.hpp>
 
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanRegistrySignatureKey.hpp>
 
@@ -41,6 +42,18 @@ constexpr std::array<BatchnormBwdSignatureKey, 3> ALL_SUPPORTED_BATCHNORM_BWD_SI
                                 hipdnn_sdk::data_objects::DataType::BFLOAT16,
                                 hipdnn_sdk::data_objects::DataType::BFLOAT16)};
 
+constexpr std::array<BatchnormTrainSignatureKey, 1> ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES
+    = {BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT) /*,
+       BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType::HALF,
+                                  hipdnn_sdk::data_objects::DataType::HALF,
+                                  hipdnn_sdk::data_objects::DataType::HALF),
+       BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                  hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                  hipdnn_sdk::data_objects::DataType::BFLOAT16)
+           */ };
+
 class PlanBuilderRegistry
 {
 public:
@@ -73,6 +86,9 @@ private:
 
         registerBatchnormBwdPlanBuilders(
             std::make_index_sequence<ALL_SUPPORTED_BATCHNORM_BWD_SIGNATURES.size()>{});
+
+        registerBatchnormTrainPlanBuilders(
+            std::make_index_sequence<ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES.size()>{});
     }
 
     template <std::size_t... Is>
@@ -98,6 +114,17 @@ private:
          ...);
     }
 
+    template <std::size_t... Is>
+    void registerBatchnormTrainPlanBuilders([[maybe_unused]] std::index_sequence<Is...> sequence)
+    {
+        ((_registry[ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES[Is]]
+          = std::make_unique<BatchnormTrainPlanBuilder<
+              ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES[Is].inputDataType,
+              ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES[Is].scaleBiasDataType,
+              ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES[Is].meanVarianceDataType>>()),
+         ...);
+    }
+
     bool _initialized = false;
     std::unordered_map<PlanRegistrySignatureKey,
                        std::unique_ptr<IGraphNodePlanBuilder>,
@@ -105,5 +132,4 @@ private:
                        PlanRegistrySignatureKeyEqual>
         _registry;
 };
-
 }
