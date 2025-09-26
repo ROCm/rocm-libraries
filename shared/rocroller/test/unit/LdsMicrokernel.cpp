@@ -86,6 +86,10 @@ namespace rocRollerTest
         if(const char* env_p = std::getenv("WORKGROUP_SIZE"))
             workgroupSize = atoi(env_p);
 
+        bool barrier = true;
+        if(const char* env_p = std::getenv("BARRIER"))
+            barrier = atoi(env_p) == 1 ? true : false;
+
         auto workitemCount = Expression::literal(256u * workgroupSize); // 256 CU on MI350X
         k->setWorkgroupSize({workgroupSize, 1, 1});
         k->setWorkitemCount({workitemCount, one, one});
@@ -154,7 +158,10 @@ namespace rocRollerTest
             //         subset, ldsWithOffset->expression() + Expression::literal(i * 16), m_context);
             // }
 
-            co_yield m_context->mem()->barrier({});
+            if(barrier)
+            {
+                co_yield m_context->mem()->barrier({});
+            }
 
             for(int i = 0; i < ITERS; ++i)
             {

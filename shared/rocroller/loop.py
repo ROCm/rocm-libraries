@@ -17,6 +17,7 @@ class TestCombination:
     stride: int
     workgroup_size: int
     iters: int
+    barrier: bool
     
     @property
     def mode_name(self) -> str:
@@ -29,11 +30,13 @@ class TestCombination:
             "WRITE": "1" if self.write else "0",
             "INSTR_WIDTH": str(self.instr_width),
             "BYTE_STRIDE": str(self.stride),
-            "ITERS": str(self.iters)
+            "ITERS": str(self.iters),
+            "BARRIER": "1" if self.barrier else "0"
         }
     
     def get_output_dir_name(self) -> str:
-        return f"ds_{self.mode_name}_b{self.instr_width * 32}_stride_{self.stride}_wgs_{self.workgroup_size}_iters_{self.iters}"
+        barrier_str = "barrier_on" if self.barrier else "barrier_off"
+        return f"ds_{self.mode_name}_b{self.instr_width * 32}_stride_{self.stride}_wgs_{self.workgroup_size}_iters_{self.iters}_{barrier_str}"
     
     def get_working_dir_name(self) -> str:
         return f"{self.get_output_dir_name()}_rocprof"
@@ -90,6 +93,12 @@ def main():
         help="WORKGROUP_SIZE values (e.g., --wgs 64 128 256)",
     )
 
+    env_group.add_argument(
+        "--no-barrier",
+        action="store_true",
+        help="Test with barrier disabled (default: barrier enabled)",
+    )
+
     # Sometimes no work is done on CU thus needs to be re-ran (for small workgroup counts)
     # If the output is too short (i.e. only csv headers), repeat the run
     parser.add_argument(
@@ -140,6 +149,8 @@ def main():
     else: # default both
         modes_to_test = [False, True]
 
+    barrier_modes = [False] if args.no_barrier else [True]
+
     output_dir = "output"
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -150,7 +161,8 @@ def main():
         modes_to_test,      
         args.strides,
         args.wgs,
-        args.iters
+        args.iters,
+        barrier_modes
     )]
     
     print(f"Instruction widths: {args.instr_widths}")
@@ -158,6 +170,7 @@ def main():
     print(f"Strides: {args.strides}")
     print(f"Workgroup sizes: {args.wgs}")
     print(f"Iterations: {args.iters}")
+    print(f"Barrier: {'disabled' if args.no_barrier else 'enabled'}")
     print(f"Total test combinations: {len(test_combinations)}")
 
     for i, test in enumerate(test_combinations, 1):
