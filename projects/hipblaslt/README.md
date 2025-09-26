@@ -72,7 +72,7 @@ cmake -B build                                       \
       -S .                                           \
       -D CMAKE_BUILD_TYPE=Release                    \
       -D GPU_TARGETS=gfx950                          \
-      --prefix opt-rocm
+      --preset opt-rocm
 # build
 cmake --build build --parallel 32
 ```
@@ -83,7 +83,7 @@ cd projects/hipblaslt
 # configure
 cmake -B build \
       -S .     \
-      --prefix gemm-libs
+      --preset gemm-libs
 # build
 cmake --build build --parallel 32
 ```
