@@ -1,12 +1,13 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_free.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
-#include <thrust/for_each.h>
 #include <thrust/device_reference.h>
+#include <thrust/for_each.h>
 
 #include <compare>
 #include <functional>
@@ -28,52 +29,58 @@ struct default_delete<T, typename std::enable_if<!std::is_array<T>::value>::type
   template <class U>
   THRUST_HOST default_delete(
     const default_delete<U>&,
-    typename std::enable_if<std::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* =
-      nullptr) noexcept
+    typename std::enable_if<std::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* = nullptr) noexcept
   {}
 
-  THRUST_HOST
-  void operator()(pointer ptr) const noexcept
+  THRUST_HOST void operator()(pointer ptr) const noexcept
   {
     if (ptr.get() == nullptr)
+    {
       return;
-    
+    }
+
     // We use for_each_n to launch a kernel that executes the destructor on the device,
     // avoiding known issues with thrust::device_delete for user-defined types.
     if constexpr (!std::is_trivially_destructible<T>::value)
-      thrust::for_each_n(ptr, 1, [] __device__(T& x) { x.~T(); });
+    {
+      thrust::for_each_n(ptr, 1, [] __device__(T & x) {
+        x.~T();
+      });
+    }
     thrust::device_free(ptr);
   }
 };
 
 template <class T>
-struct default_delete<
-  T[],
-  typename std::enable_if<!std::is_trivially_destructible<T>::value>::type>
+struct default_delete<T[], typename std::enable_if<!std::is_trivially_destructible<T>::value>::type>
 {
   using pointer = thrust::device_ptr<T>;
 
-  THRUST_HOST
-  constexpr default_delete(size_t n = 0) noexcept : m_size(n) {};
+  THRUST_HOST constexpr default_delete(size_t n = 0) noexcept
+      : m_size(n){};
 
   template <class U>
   THRUST_HOST
   default_delete(const default_delete<U[]>& other,
-              typename std::enable_if<std::is_convertible<U (*)[], T (*)[]>::value>::type* =
-                nullptr) noexcept
+                 typename std::enable_if<std::is_convertible<U (*)[], T (*)[]>::value>::type* = nullptr) noexcept
       : m_size(other.size())
   {}
 
-  THRUST_HOST
-  void operator()(pointer ptr) const noexcept
+  THRUST_HOST void operator()(pointer ptr) const noexcept
   {
     if (ptr.get() == nullptr)
+    {
       return;
-      
+    }
+
     // We use for_each_n to launch a kernel that executes the destructor on the device,
     // avoiding known issues with thrust::device_delete for user-defined types.
     if (m_size)
-      thrust::for_each_n(ptr, m_size, [] __device__(T& x) { x.~T(); });
+    {
+      thrust::for_each_n(ptr, m_size, [] __device__(T & x) {
+        x.~T();
+      });
+    }
     thrust::device_free(ptr);
   }
 
@@ -96,8 +103,7 @@ struct default_delete<T[], typename std::enable_if<std::is_trivially_destructibl
   template <class U>
   THRUST_HOST default_delete(
     const default_delete<U>&,
-    typename std::enable_if<std::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* =
-      nullptr) noexcept
+    typename std::enable_if<std::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* = nullptr) noexcept
   {}
 
   THRUST_HOST void operator()(pointer ptr) const noexcept
@@ -149,7 +155,7 @@ struct unique_ptr_deleter_sfinae<Deleter&>
   using enable_rval_overload = thrust::detail::false_type;
 };
 
-}
+} // namespace detail
 
 template <class T, class D = default_delete<T>>
 class unique_ptr
@@ -160,7 +166,7 @@ public:
   using deleter_type = D;
 
 private:
-  pointer                            m_ptr;
+  pointer m_ptr;
   [[no_unique_address]] deleter_type m_deleter;
 
   using DeleterSFINAE = thrust::detail::unique_ptr_deleter_sfinae<D>;
@@ -174,27 +180,28 @@ private:
   template <bool Dummy>
   using BadRValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::bad_rval_ref_type;
 
-  template <bool Dummy,
-            class Deleter = typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
-  using EnableIfDeleterDefaultConstructible = typename std::enable_if< 
-    std::is_default_constructible<Deleter>::value && !std::is_pointer<Deleter>::value>::type;
+  template <
+    bool Dummy,
+    class Deleter =
+      typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+  using EnableIfDeleterDefaultConstructible =
+    typename std::enable_if<std::is_default_constructible<Deleter>::value && !std::is_pointer<Deleter>::value>::type;
 
   template <class ArgType>
   using EnableIfDeleterConstructible =
     typename std::enable_if<std::is_constructible<deleter_type, ArgType>::value>::type;
 
   template <class U, class E>
-  using EnableIfMoveConvertible = typename std::enable_if<
-      std::is_convertible<typename U::pointer, pointer>::value && !std::is_array<E>::value>::type;
+  using EnableIfMoveConvertible =
+    typename std::enable_if<std::is_convertible<typename U::pointer, pointer>::value && !std::is_array<E>::value>::type;
 
   template <class E>
-  using EnableIfDeleterConvertible = 
-    typename std::enable_if<(std::is_reference<D>::value && std::is_same<D, E>::value) 
-                                      || (!std::is_reference<D>::value && std::is_convertible<E, D>::value)>::type;
+  using EnableIfDeleterConvertible =
+    typename std::enable_if<(std::is_reference<D>::value && std::is_same<D, E>::value)
+                            || (!std::is_reference<D>::value && std::is_convertible<E, D>::value)>::type;
 
   template <class E>
-  using EnableIfDeleterAssignable =
-    typename std::enable_if<std::is_assignable<D&, E&&>::value>::type;
+  using EnableIfDeleterAssignable = typename std::enable_if<std::is_assignable<D&, E&&>::value>::type;
 
   template <
     bool Dummy,
@@ -230,15 +237,13 @@ public:
       , m_deleter(d)
   {}
 
-    template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer                p,
-                                                                GoodRValRefType<Dummy> d) noexcept
-        : m_ptr(p)
-        , m_deleter(std::move(d))
-    {
-      static_assert(!std::is_reference<deleter_type>::value,
-                  "rvalue deleter bound to reference");
-    }
+  template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer p, GoodRValRefType<Dummy> d) noexcept
+      : m_ptr(p)
+      , m_deleter(std::move(d))
+  {
+    static_assert(!std::is_reference<deleter_type>::value, "rvalue deleter bound to reference");
+  }
 
   template <bool Dummy = true, class = EnableIfDeleterConstructible<BadRValRefType<Dummy>>>
   unique_ptr(pointer p, BadRValRefType<Dummy> d) = delete;
@@ -278,13 +283,13 @@ public:
     return *this;
   }
 
-    //==========================================================================
-    // Destructor
-    //==========================================================================
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
-    {
-        reset();
-    }
+  //==========================================================================
+  // Destructor
+  //==========================================================================
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
+  {
+    reset();
+  }
 
   //==========================================================================
   // Observers
@@ -294,8 +299,7 @@ public:
     return m_ptr;
   }
 
-  template <bool Dummy = true,
-            class      = EnableIfDeleterDefaultDelete<Dummy>>
+  template <bool Dummy = true, class = EnableIfDeleterDefaultDelete<Dummy>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
   {
     return thrust::raw_pointer_cast(m_ptr);
@@ -374,8 +378,7 @@ inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T,
 // Comparison Operators
 //==============================================================================
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator==(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   // The initial `std::common_type` approach was considered to support comparisons
   // between related types (e.g., a base and derived class pointer). However,
@@ -392,16 +395,14 @@ operator==(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 
 #if THRUST_STD_VER <= 17
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator!=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return !(x == y);
 }
 #endif
 
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator<(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   // Similar to `operator==`, the `const void*` cast provides a robust,
   // standard-compliant way to establish a strict total ordering for any two
@@ -411,60 +412,53 @@ operator<(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 }
 
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator>(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return y < x;
 }
 
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator<=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return !(y < x);
 }
 
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator>=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   return !(x < y);
 }
 
 #if THRUST_STD_VER >= 20
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline auto operator<=> (const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+  THRUST_HOST inline auto operator<=> (const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   // TODO: once thrust::device_ptr supports three_way_comparison, we should be using that
-  return std::compare_three_way()(x.get_raw(), y.get_raw()); 
+  return std::compare_three_way()(x.get_raw(), y.get_raw());
 }
 #endif
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator==(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
 {
   return !x;
 }
 
 #if THRUST_STD_VER <= 17
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator==(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
 {
   return !y;
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator!=(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
 {
   return static_cast<bool>(x);
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
-operator!=(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
 {
   return static_cast<bool>(y);
 }
@@ -520,7 +514,7 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(std::nullptr_t, 
 
 #if THRUST_STD_VER >= 20
 template <class T, class D>
-THRUST_HOST inline auto operator<=> (const unique_ptr<T, D>& x, std::nullptr_t)
+  THRUST_HOST inline auto operator<=> (const unique_ptr<T, D>& x, std::nullptr_t)
 {
   // TODO: once thrust::device_ptr supports three_way_comparison, we should be using that
   return std::compare_three_way()(x.get_raw(), static_cast<T*>(nullptr));
@@ -530,10 +524,7 @@ THRUST_HOST inline auto operator<=> (const unique_ptr<T, D>& x, std::nullptr_t)
 //==============================================================================
 // Make unique
 //==============================================================================
-template <class T,
-          class... Args,
-          class = typename std::enable_if<
-              !std::is_array<T>::value>::type>
+template <class T, class... Args, class = typename std::enable_if<!std::is_array<T>::value>::type>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&... args)
 {
   thrust::device_ptr<T> p = thrust::device_malloc<T>(1);
