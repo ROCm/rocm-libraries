@@ -9451,7 +9451,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                     const std::vector<JTYPE>& csr_col_ind, \
                                                     std::vector<ITYPE>&       coo_ind,     \
                                                     rocsparse_index_base      base);
-                                                  
+
 #define INSTANTIATE_IT(ITYPE, TTYPE)                                          \
     template void host_gemvi<ITYPE, TTYPE>(ITYPE                M,            \
                                            ITYPE                N,            \
