@@ -21,15 +21,6 @@ template <class InputDataType,
 class CpuFpReferenceBatchnormImpl
 {
 public:
-    static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
-    {
-        using namespace hipdnn_sdk::data_objects;
-
-        // Support both BatchNorm inference and backward
-        return (node.attributes_type() == NodeAttributes::BatchnormInferenceAttributes
-                || node.attributes_type() != NodeAttributes::BatchnormBackwardAttributes);
-    }
-
     static void batchnormFwdInference(const TensorBase<InputDataType>& input,
                                       const TensorBase<ScaleBiasDataType>& scale,
                                       const TensorBase<ScaleBiasDataType>& bias,
