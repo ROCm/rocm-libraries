@@ -30,8 +30,6 @@
 
 namespace rocRoller
 {
-    RegisterComponent(ShiftLGenerator);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::ShiftL>>
         GetGenerator<Expression::ShiftL>(Register::ValuePtr dst,

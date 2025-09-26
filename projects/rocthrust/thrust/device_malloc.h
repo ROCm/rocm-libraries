@@ -90,8 +90,10 @@ inline thrust::device_ptr<void> device_malloc(const std::size_t n);
  *  \see device_ptr
  *  \see device_free
  */
+#ifndef THRUST_DOXYGEN_INVOKED
 template <typename T>
 inline thrust::device_ptr<T> device_malloc(const std::size_t n);
+#endif
 
 /*! \} // memory_management
  */

@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,10 @@
 if(NOT BUILD_WITH_LIB STREQUAL "CUDA")
   # hipFFT source
   set(hipfft_source src/amd_detail/hipfft.cpp)
+  set(hipfftw_source src/amd_detail/hipfftw.cpp)
 else()
   # hipFFT CUDA source
   set(hipfft_source src/nvidia_detail/hipfft.cpp)
+  # hipFFTW has no source code on nvidia, as we just link in cufftw
+  set(hipfftw_source "")
 endif()

@@ -33,7 +33,6 @@
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
-#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {

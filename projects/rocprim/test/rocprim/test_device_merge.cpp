@@ -557,7 +557,7 @@ void testMergeMismatchedIteratorTypes()
                                      keys_input1.size(),
                                      keys_input1.size(),
                                      rocprim::less<int>{},
-                                     hipStreamDefault,
+                                     stream,
                                      debug_synchronous));
 
     if(UseGraphs)

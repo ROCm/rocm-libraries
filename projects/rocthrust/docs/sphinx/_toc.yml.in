@@ -35,7 +35,6 @@ subtrees:
   - file: hipgraph-support
   - file: hip-execution-policies
   - file: cpp_api
-  - file: genindex
 
 - caption: About
   entries:

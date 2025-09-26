@@ -96,7 +96,7 @@ To build rocRoller natively on Ubuntu 22 (jammy):
 ```
 # As root, once:
 apt update
-apt install -y libboost-container1.74-dev libopenblas-dev ninja-build
+apt install -y libopenblas-dev ninja-build
 
 # As regular user:
 git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller

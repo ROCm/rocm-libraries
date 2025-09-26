@@ -718,7 +718,7 @@ inline void compare_round_trip_inverse(Tparams&              params,
         << params.str();
 
     EXPECT_TRUE(diff.l_2 / cpu_input_norm.l_2
-                < sqrt(log2(total_length)) * type_epsilon(params.precision))
+                <= sqrt(log2(total_length)) * type_epsilon(params.precision))
         << "L2 test failed. L2: " << diff.l_2
         << "\tnormalized L2: " << diff.l_2 / cpu_input_norm.l_2
         << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision)

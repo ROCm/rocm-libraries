@@ -38,9 +38,9 @@ import sys
 from pathlib import Path
 from typing import List
 
+import rrperf.args as args
 from rrperf import compare, git
 from rrperf import run as suite_run
-import rrperf.args as args
 
 
 def build_rocroller(

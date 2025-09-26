@@ -95,8 +95,7 @@ jobs:
         python .github/scripts/pr_detect_changed_subtrees.py \
           --repo "${{ github.repository }}" \
           --pr "${{ github.event.pull_request.number }}" \
-          --config ".github/repos-config.json" \
-          --require-auto-push
+          --config ".github/repos-config.json"
 
     - name: Cancel in-progress/not-started runs for current PR
       id: cancel-in-progress

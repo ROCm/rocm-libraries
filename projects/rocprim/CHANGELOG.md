@@ -11,6 +11,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added experimental support for SPIR-V, to use the correct tuned config for part of the appliable algorithms.
 * Added a new cmake option, `BUILD_OFFLOAD_COMPRESS`. When rocPRIM is build with this option enabled, the `--offload-compress` switch is passed to the compiler. This causes the compiler to compress the binary that it generates. Compression can be useful in cases where you are compiling for a large number of targets, since this often results in a large binary. Without compression, in some cases, the generated binary may become so large symbols are placed out of range, resulting in linking errors. The new `BUILD_OFFLOAD_COMPRESS` option is set to `ON` by default.
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
+* Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
 
 ### Changed
 
@@ -31,6 +32,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Fixed `device_select`, `device_merge`, and `device_merge_sort` not allocating the correct amount of virtual shared memory on the host.
 * Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
   * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
+
+## rocPRIM 4.0.1 for ROCm 7.0.2
+
+### Resolved issues
+
+* Fixed compilation issue when using `rocprim::texture_cache_iterator`.
+* Fixed a HIP version check used to determine whether hipStreamLegacy is supported. This resolves runtime errors that occur when hipStreamLegacy is used in versions of ROCm later than 6.4.
 
 ## rocPRIM 4.0.0 for ROCm 7.0
 

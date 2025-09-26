@@ -467,8 +467,8 @@ TEST(rocfft_UnitTest, workmem_null)
 }
 
 static const size_t RTC_PROBLEM_SIZE = 2304;
-// runtime compilation cache tests
-TEST(rocfft_UnitTest, rtc_cache)
+// runtime compilation cache tests main loop
+void rtc_cache_main()
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -620,6 +620,18 @@ TEST(rocfft_UnitTest, rtc_cache)
     build_plan();
     rocfft_cleanup();
     ASSERT_TRUE(fft_kernel_was_compiled());
+}
+
+// run the main body of rtc cache tests twice to uncover potential
+// problems with thread reuse between iterations
+TEST(rocfft_UnitTest, rtc_cache_iter_1)
+{
+    rtc_cache_main();
+}
+
+TEST(rocfft_UnitTest, rtc_cache_iter_2)
+{
+    rtc_cache_main();
 }
 
 // make sure cache API functions tolerate null pointers without crashing

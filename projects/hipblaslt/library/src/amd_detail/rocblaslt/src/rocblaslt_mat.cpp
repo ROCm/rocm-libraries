@@ -1495,11 +1495,12 @@ rocblaslt_status rocblaslt_makeArgument_cpp(rocblaslt_handle              handle
                                             const rocblaslt_matmul_algo&  algo,
                                             const rocblaslt::RocTuningV2* tuning,
                                             void*                         workspace,
+                                            size_t                        workspaceSizeInBytes,
                                             bool                          useUserArgs,
                                             hipStream_t                   stream,
                                             std::shared_ptr<void>         gemmData)
 {
-    return makeArgument(handle, gemmType, algo, tuning, workspace, useUserArgs, stream, gemmData);
+    return makeArgument(handle, gemmType, algo, tuning, workspace, workspaceSizeInBytes, useUserArgs, stream, gemmData);
 }
 
 std::string rocblaslt_get_kernel_name_from_data_cpp(rocblaslt_handle             handle,

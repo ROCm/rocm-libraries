@@ -798,6 +798,16 @@ namespace hipblaslt_ext
         return exception_to_hipblas_status();
     }
 
+    void GemmInstance::setMaxWorkspaceBytes(size_t workspaceBytes)
+    {
+        m_workspace_bytes = workspaceBytes;
+    }
+
+    const size_t GemmInstance::getMaxWorkspaceBytes() const
+    {
+        return m_workspace_bytes;
+    }
+
     hipblasStatus_t GemmInstance::initialize(const hipblasLtMatmulAlgo_t& algo,
                                              void*                        workspace,
                                              bool                         useUserArgs,
@@ -805,7 +815,7 @@ namespace hipblaslt_ext
     try
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtInitializeCpp");
-        if(m_gemm_count == 0)
+        if((m_gemm_count == 0) || (workspace == nullptr && m_workspace_bytes > 0))
         {
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -819,6 +829,7 @@ namespace hipblaslt_ext
                                                                     *rocalgo,
                                                                     tuning,
                                                                     workspace,
+                                                                    m_workspace_bytes,
                                                                     useUserArgs,
                                                                     stream,
                                                                     m_data));
@@ -838,7 +849,7 @@ namespace hipblaslt_ext
     try
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtInitializeTuningV2Cpp");
-        if(m_gemm_count == 0)
+        if((m_gemm_count == 0) || (workspace == nullptr && m_workspace_bytes > 0))
         {
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -852,6 +863,7 @@ namespace hipblaslt_ext
                                                                     *rocalgo,
                                                                     roctuning,
                                                                     workspace,
+                                                                    m_workspace_bytes,
                                                                     useUserArgs,
                                                                     stream,
                                                                     m_data));

@@ -35,6 +35,8 @@
 #endif
 
 static constexpr size_t ONE_GiB = 1 << 30;
+static constexpr size_t ONE_MiB = 1 << 20;
+static constexpr size_t ONE_KiB = 1 << 10;
 
 inline size_t bytes_to_GiB(const size_t bytes)
 {

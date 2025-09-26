@@ -174,8 +174,7 @@ namespace rocRoller
             if(info.loadLDS == -1)
                 return;
 
-            for(auto edge : graph.control.getNeighbours(info.global, Graph::Direction::Upstream)
-                                .to<std::vector>())
+            for(auto edge : graph.control.getNeighbours(info.global, Graph::Direction::Upstream))
                 graph.control.deleteElement(edge);
             graph.control.addElement(Body(), {forLoop}, {info.global});
         }
@@ -729,19 +728,16 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {info.loadBScale->global}, {forWaveTilesX});
 
             // Connect ops after contraction to forK, remove contraction and its incoming edges
-            auto tcOutgoingEdges
-                = graph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>();
+            auto tcOutgoingEdges = graph.control.getNeighbours<Graph::Direction::Downstream>(tag);
             for(auto const e : tcOutgoingEdges)
             {
                 auto elem = graph.control.getElement(e);
-                auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e)
-                               .to<std::vector>();
+                auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e);
                 graph.control.deleteElement(e);
                 graph.control.addElement(
                     Sequence(), std::vector<int>{forWaveTilesEpilogueYNOP}, dst);
             }
-            auto tcIncomingEdges
-                = graph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>();
+            auto tcIncomingEdges = graph.control.getNeighbours<Graph::Direction::Upstream>(tag);
             for(auto const e : tcIncomingEdges)
                 graph.control.deleteElement(e);
             graph.control.deleteElement(tag);
@@ -750,8 +746,7 @@ namespace rocRoller
             // Add siblings...
             for(auto const index : info.siblingLoads)
             {
-                for(auto e : graph.control.getNeighbours<Graph::Direction::Upstream>(index)
-                                 .to<std::vector>())
+                for(auto e : graph.control.getNeighbours<Graph::Direction::Upstream>(index))
                 {
                     graph.control.deleteElement(e);
                 }
@@ -764,8 +759,7 @@ namespace rocRoller
             for(auto const siblingTag : info.siblingOps)
             {
                 auto edgeTags
-                    = graph.control.getNeighbours<Graph::Direction::Downstream>(siblingTag)
-                          .to<std::vector>();
+                    = graph.control.getNeighbours<Graph::Direction::Downstream>(siblingTag);
                 for(auto edgeTag : edgeTags)
                 {
                     auto edge = graph.control.getElement(edgeTag);
@@ -838,8 +832,8 @@ namespace rocRoller
             ConstraintStatus retval;
             for(auto tag : graph.coordinates.getNodes<JammedWaveTileNumber>())
             {
-                auto noIncoming = empty(graph.coordinates.getNeighbours<GD::Upstream>(tag));
-                auto noOutgoing = empty(graph.coordinates.getNeighbours<GD::Downstream>(tag));
+                auto noIncoming = std::empty(graph.coordinates.getNeighbours<GD::Upstream>(tag));
+                auto noOutgoing = std::empty(graph.coordinates.getNeighbours<GD::Downstream>(tag));
                 if(noIncoming || noOutgoing)
                 {
                     retval.combine(false, concatenate("Dangling JammedWaveTileNumber: ", tag));

@@ -112,8 +112,8 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # Setup version
-rocm_setup_version(VERSION 4.0.1)
-set(hipsparse_SOVERSION 4.0.1)
+rocm_setup_version(VERSION 4.1.0)
+set(hipsparse_SOVERSION 4.1.0)
 
 # hipSPARSE library
 add_subdirectory(library)

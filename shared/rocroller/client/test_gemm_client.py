@@ -32,11 +32,11 @@ import functools
 import itertools
 import os
 import pathlib
-import pytest
 import subprocess
-import yaml
-
 from dataclasses import dataclass
+
+import pytest
+import yaml
 
 build = pathlib.Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
@@ -257,6 +257,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 types:
   trans_A: N
   trans_B: N
@@ -315,6 +316,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 matchMemoryAccess: true
 types:
   trans_A: N
@@ -372,6 +374,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 matchMemoryAccess: true
 types:
   trans_A: N

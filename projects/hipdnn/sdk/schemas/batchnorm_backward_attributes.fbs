@@ -1,0 +1,16 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_sdk.data_objects;
+
+table BatchnormBackwardAttributes {
+    dy_tensor_uid: long;
+    x_tensor_uid: long;
+    mean_tensor_uid: long = null;
+    inv_variance_tensor_uid: long = null;
+    scale_tensor_uid: long;
+    peer_stats_tensor_uid: [long];
+    dx_tensor_uid: long;
+    dscale_tensor_uid: long;
+    dbias_tensor_uid: long;
+}

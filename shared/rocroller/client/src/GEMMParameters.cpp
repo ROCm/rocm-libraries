@@ -167,6 +167,7 @@ namespace rocRoller
                 {
                     s << " BlockSize:" << x.scaleBlockSize;
                 }
+                s << std::endl;
                 return s;
             }
 

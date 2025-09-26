@@ -1,0 +1,58 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <gtest/gtest.h>
+#include <spdlog/spdlog.h>
+#include <sstream>
+
+#include <HipdnnStatus.h>
+#include <hipdnn_frontend/backend/BackendLoggingHelpers.hpp>
+
+TEST(TestBackendLoggingHelpers, ToStringAllStatusValues)
+{
+    EXPECT_STREQ(toString(HIPDNN_STATUS_SUCCESS), "HIPDNN_STATUS_SUCCESS");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_NOT_INITIALIZED), "HIPDNN_STATUS_NOT_INITIALIZED");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_BAD_PARAM), "HIPDNN_STATUS_BAD_PARAM");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_BAD_PARAM_NULL_POINTER),
+                 "HIPDNN_STATUS_BAD_PARAM_NULL_POINTER");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED),
+                 "HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND),
+                 "HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT),
+                 "HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_BAD_PARAM_STREAM_MISMATCH),
+                 "HIPDNN_STATUS_BAD_PARAM_STREAM_MISMATCH");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_NOT_SUPPORTED), "HIPDNN_STATUS_NOT_SUPPORTED");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_INTERNAL_ERROR), "HIPDNN_STATUS_INTERNAL_ERROR");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_ALLOC_FAILED), "HIPDNN_STATUS_ALLOC_FAILED");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED),
+                 "HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED),
+                 "HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_EXECUTION_FAILED), "HIPDNN_STATUS_EXECUTION_FAILED");
+    EXPECT_STREQ(toString(HIPDNN_STATUS_PLUGIN_ERROR), "HIPDNN_STATUS_PLUGIN_ERROR");
+    EXPECT_STREQ(toString(static_cast<hipdnnStatus_t>(-1)), "HIPDNN_STATUS_UNKNOWN");
+}
+
+TEST(TestBackendLoggingHelpers, OstreamOperator)
+{
+    std::ostringstream oss;
+    oss << HIPDNN_STATUS_SUCCESS;
+    EXPECT_EQ(oss.str(), "HIPDNN_STATUS_SUCCESS");
+
+    oss.str("");
+    oss << HIPDNN_STATUS_BAD_PARAM;
+    EXPECT_EQ(oss.str(), "HIPDNN_STATUS_BAD_PARAM");
+
+    oss.str("");
+    oss << static_cast<hipdnnStatus_t>(-1);
+    EXPECT_EQ(oss.str(), "HIPDNN_STATUS_UNKNOWN");
+}
+
+TEST(TestBackendLoggingHelpers, FmtFormatter)
+{
+    EXPECT_EQ(fmt::format("{}", HIPDNN_STATUS_SUCCESS), "HIPDNN_STATUS_SUCCESS");
+    EXPECT_EQ(fmt::format("{}", HIPDNN_STATUS_BAD_PARAM), "HIPDNN_STATUS_BAD_PARAM");
+    EXPECT_EQ(fmt::format("{}", static_cast<hipdnnStatus_t>(-1)), "HIPDNN_STATUS_UNKNOWN");
+}

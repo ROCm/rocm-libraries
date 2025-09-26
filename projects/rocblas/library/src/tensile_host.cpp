@@ -281,6 +281,22 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx1030;
         }
+        else if(deviceString.find("gfx1031") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1031;
+        }
+        else if(deviceString.find("gfx1032") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1032;
+        }
+        else if(deviceString.find("gfx1034") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1034;
+        }
+        else if(deviceString.find("gfx1035") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1035;
+        }
         else if(deviceString.find("gfx1100") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx1100;
@@ -296,6 +312,22 @@ namespace
         else if(deviceString.find("gfx1103") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx1103;
+        }
+        else if(deviceString.find("gfx1150") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1150;
+        }
+        else if(deviceString.find("gfx1151") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1151;
+        }
+        else if(deviceString.find("gfx1200") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1200;
+        }
+        else if(deviceString.find("gfx1201") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1201;
         }
         return Tensile::LazyLoadingInit::None;
     }

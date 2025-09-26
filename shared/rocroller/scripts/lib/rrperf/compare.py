@@ -39,10 +39,10 @@ from typing import Any, List
 import numpy as np
 import pandas as pd
 import rrperf
-import scipy.stats
-from rrperf.specs import MachineSpecs
-from rrperf.problems import GEMMResult
 import rrperf.args as args
+import scipy.stats
+from rrperf.problems import GEMMResult
+from rrperf.specs import MachineSpecs
 
 
 def priority_problems():

@@ -269,9 +269,10 @@ namespace rocRoller
                             filter(graph.control.isElemType<Sequence>(),
                                    graph.control.depthFirstVisit(child, GD::Downstream)))
                         {
-                            if(graph.control.getNeighbours<GD::Downstream>(descSeqOfChild)
-                                   .to<std::unordered_set>()
-                                   .contains(fusedLoopTag))
+                            auto neighbours
+                                = graph.control.getNeighbours<GD::Downstream>(descSeqOfChild);
+                            if(std::find(neighbours.begin(), neighbours.end(), fusedLoopTag)
+                               != neighbours.end())
                             {
                                 toDelete.insert(descSeqOfChild);
                             }

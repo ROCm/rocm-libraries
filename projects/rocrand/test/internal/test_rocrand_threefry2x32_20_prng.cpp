@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,6 +55,35 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_generator,
 INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_generator,
                                generator_prng_offset_tests,
                                threefry2x32_20_generator_prng_offset_tests_types);
+
+#ifdef CODE_COVERAGE_ENABLED
+#include "test_rocrand_host_prng.hpp"
+
+using rocrand_impl::host::threefry2x32_20_generator_host;
+using threefry2x32_20_generator_prng_host_tests_types
+    = ::testing::Types<generator_prng_host_tests_params<threefry2x32_20_generator_host<true>,
+                                                        ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+using threefry2x32_20_generator_prng_offset_host_tests_types
+    = ::testing::Types<generator_prng_offset_host_tests_params<unsigned int,
+                                                               threefry2x32_20_generator_host<true>,
+                                                               ROCRAND_ORDERING_PSEUDO_DEFAULT>,
+                       generator_prng_offset_host_tests_params<float,
+                                                               threefry2x32_20_generator_host<true>,
+                                                               ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_host_generator,
+                               generator_prng_host_tests,
+                               threefry2x32_20_generator_prng_host_tests_types);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_host_generator,
+                               generator_prng_continuity_host_tests,
+                               threefry2x32_20_generator_prng_host_tests_types);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_host_generator,
+                               generator_prng_offset_host_tests,
+                               threefry2x32_20_generator_prng_offset_host_tests_types);
+#endif //CODE_COVERAGE_ENABLED
 
 // threefry2x32_20-specific generator API tests
 INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x32_20_generator,

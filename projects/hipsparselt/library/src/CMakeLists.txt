@@ -25,7 +25,7 @@ set(hipsparselt_source_common  src/hipsparselt_ostream.cpp
 if(NOT BUILD_CUDA)
 
   # Set up Tensile Dependency
-  if( BUILD_WITH_TENSILE )
+  if( BUILD_WITH_TENSILE AND NOT BUILD_USE_LOCAL_TENSILE_HIPBLASLT_NEXT_CMAKE)
     # If we want to build a shared rocblas lib, force Tensile to build as a static lib to absorb into rocblas
     if( BUILD_SHARED_LIBS )
       set( ROCSPARSELT_SHARED_LIBS ON )

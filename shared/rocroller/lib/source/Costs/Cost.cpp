@@ -31,7 +31,7 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponentBase(Cost);
+        const std::string Cost::Basename = "Cost";
 
         std::string toString(CostFunction proc)
         {
@@ -47,6 +47,8 @@ namespace rocRoller
                 return "WaitCntNop";
             case CostFunction::LinearWeighted:
                 return "LinearWeighted";
+            case CostFunction::LinearWeightedSimple:
+                return "LinearWeightedSimple";
             case CostFunction::Count:
                 return "Count";
             }

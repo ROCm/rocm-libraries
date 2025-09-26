@@ -14,7 +14,7 @@ subtrees:
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/hipSOLVER/tree/develop/clients/samples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsolver/clients/samples
     title: Client samples
 
 - caption: Reference

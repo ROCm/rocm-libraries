@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,17 @@ INSTANTIATE_TYPED_TEST_SUITE_P(mtgp32_generator,
 //                                generator_prng_continuity_tests,
 //                                rocrand_mtgp32_generator_prng_tests_types);
 
+#ifdef CODE_COVERAGE_ENABLED
+#include "test_rocrand_host_prng.hpp"
+
+using rocrand_impl::host::mtgp32_generator_host;
+using mtgp32_generator_prng_host_tests_types = ::testing::Types<
+    generator_prng_host_tests_params<mtgp32_generator_host<true>, ROCRAND_ORDERING_PSEUDO_DEFAULT>>;
+
+INSTANTIATE_TYPED_TEST_SUITE_P(mtgp32_host_generator,
+                               generator_prng_host_tests,
+                               mtgp32_generator_prng_host_tests_types);
+#endif //CODE_COVERAGE_ENABLED
 TEST(AdditionalTests, rocrand_make_constant)
 {
     // test to make sure the copy is working and that all data is being coverted properly

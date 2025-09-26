@@ -1,0 +1,10 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_sdk.data_objects;
+
+enum ConvMode : byte { 
+    UNSET = 0,
+    CONVOLUTION = 1, 
+    CROSS_CORRELATION = 2 
+}

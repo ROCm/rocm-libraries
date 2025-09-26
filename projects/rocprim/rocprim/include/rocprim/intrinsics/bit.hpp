@@ -58,48 +58,53 @@ unsigned int bit_count(unsigned long long x)
 /// \brief Count trailing zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// least significant bit.
+/// least significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned int x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_ctz(x);
 }
 
 /// \brief Count trailing zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// least significant bit.
+/// least significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned long long x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_ctzll(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned int x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_clz(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned long x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_clzl(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned long long x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_clzll(x);
 }
 

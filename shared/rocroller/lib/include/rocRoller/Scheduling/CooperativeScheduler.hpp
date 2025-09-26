@@ -52,8 +52,8 @@ namespace rocRoller
 
             using Base = Scheduler;
 
-            static const std::string Basename;
-            static const std::string Name;
+            static const std::string        Basename;
+            inline static const std::string Name = "CooperativeScheduler";
 
             static bool Match(Argument arg);
 

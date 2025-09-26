@@ -23,18 +23,16 @@
 #
 ################################################################################
 
-import rrperf.optimize_weights as ow
-
 import argparse
 import dataclasses as dc
 import pathlib
-import pytest
-import yaml
-
-import time
 import random
-
+import time
 from types import SimpleNamespace as NS
+
+import pytest
+import rrperf.optimize_weights as ow
+import yaml
 
 
 @pytest.mark.slow

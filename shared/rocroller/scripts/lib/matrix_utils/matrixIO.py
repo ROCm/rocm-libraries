@@ -23,10 +23,11 @@
 #
 ################################################################################
 
-import matplotlib.pyplot as plt
-import numpy as np
-import msgpack
 import os
+
+import matplotlib.pyplot as plt
+import msgpack
+import numpy as np
 from PIL import Image
 
 
