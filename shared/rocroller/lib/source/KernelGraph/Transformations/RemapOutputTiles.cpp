@@ -136,7 +136,6 @@ namespace rocRoller
 
                     auto [_, parallel, perpendicular]
                         = workgroupMapping(info, graph, direction, dimension, size);
-                    //Log::info("parallel = {} , perpendicular = {}", parallel, perpendicular);
                     std::array<int, 2> tileNumTags = {parallel, perpendicular};
 
                     for(auto dim = 0; dim < numDims; ++dim)
@@ -145,8 +144,6 @@ namespace rocRoller
                         {
                             if(direction == GD::Upstream)
                             {
-                                //graph.upstream.insert(tileNumTags[dim]);
-
                                 Log::debug("KernelGraph::RemapOutputTiles: Adding PassThrough "
                                            "from tile {} to mapped-tile {} (size {})",
                                            tileNumTag,
@@ -157,8 +154,6 @@ namespace rocRoller
                             }
                             else
                             {
-                                //graph.downstream.insert(tileNumTags[dim]);
-
                                 Log::debug("KernelGraph::RemapOutputTiles: Adding PassThrough "
                                            "from mapped-tile {} (size {}) to tile {}",
                                            tileNumTags[dim],
@@ -216,10 +211,6 @@ namespace rocRoller
 
                 auto tailBlockNumber = graph.coordinates.addElement(Linear());
                 auto tailBlockIndex  = graph.coordinates.addElement(Linear(tailBlockSize, nullptr));
-
-                //auto parallel = graph.coordinates.addElement(Linear(parallelSize, nullptr));
-                //auto perpendicular
-                //    = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
 
                 auto parallel = graph.coordinates.addElement(
                     MacroTileNumber(dimension, parallelSize, nullptr));
@@ -378,13 +369,10 @@ namespace rocRoller
                             "XCC-aware workgroup remapping not available on: ",
                             arch.target().toString());
                 auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
-                //int cnt = 0;
                 for(auto workgroupTag : workgroupTags)
                 {
-                    //cnt ++;
                     remapWorkgroupXCC(kgraph, workgroupTag, m_workgroupRemapXCC.value());
                 }
-                //Log::info("cnt = {}", cnt);
             }
 
             return kgraph;
