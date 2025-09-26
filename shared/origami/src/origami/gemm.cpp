@@ -161,6 +161,20 @@ namespace origami
         return numerator / denominator;
     }
 
+    /**
+     * Computes Emulated arithmetic intensity for TF32 (assumes 3xBF16).
+     * 
+     */
+    double emulated_tf32_arithmetic_intensity(double m, double n, double k, double bytes_per_element)
+    {
+        // Numerator: 3.0 * 2.0 * m * n * k
+        // Denominator: (m*n + n*k + m*k) * bytes_per_element
+        double numerator   = 3.0 * 2.0 * m * n * k;
+        double denominator = (m * n + n * k + m * k) * bytes_per_element;
+
+        return numerator / denominator;
+    }
+
     // Compute cvt overhead in tf32 emulation
     static inline double compute_cvt_overhead(const hardware_t& hardware,
                                                 size_t          MT_M,
@@ -995,22 +1009,35 @@ namespace origami
                         && (hardware.arch == hardware_t::architecture_t::gfx950));
         if(tf32_emu && heuristics)
         {
+            double bytes_per_element = static_cast<double>(element_size_A) / 8.0;
+            double arith = emulated_tf32_arithmetic_intensity(M, N, K, bytes_per_element);
+            double compute_threshold = 1000; // threshold empirically determined.
+
             // The kernel for this is more optimized (Custom kernel NT)
             if((!transA && transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.6;
+                if (arith < compute_threshold)
+                    total_latency = total_latency * 0.6;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // The kernel for this is more optimized (Custom kernel NN)
             if((!transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.8;
+                if (arith < compute_threshold)
+                    total_latency = total_latency * 0.8;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // The kernel for this is more optimized (Custom kernel TN)
             if((transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.8;
+                if (arith < compute_threshold)
+                    total_latency = total_latency * 0.8;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // Bias large DU where K-dimension is large and M and N are small.
