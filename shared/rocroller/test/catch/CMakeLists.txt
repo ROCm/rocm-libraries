@@ -55,6 +55,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/GlobalLoadStoreTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HazardObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphSerializationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IdentifyParallelDimensionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InstructionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelArgumentsTest.cpp"
