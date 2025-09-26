@@ -45,19 +45,19 @@ struct BatchnormTrainParams
         , epsilon(epsilon)
         , momentum(momentum)
         , prevRunningMeanTensor(
-              prevRunningMeanAttributes == nullptr
+              prevRunningMeanAttributes != nullptr
                   ? std::make_optional(unpackTensorAttributes(*prevRunningMeanAttributes))
                   : std::nullopt)
         , prevRunningVarianceTensor(
-              prevRunningVarianceAttributes == nullptr
+              prevRunningVarianceAttributes != nullptr
                   ? std::make_optional(unpackTensorAttributes(*prevRunningVarianceAttributes))
                   : std::nullopt)
         , nextRunningMeanTensor(
-              nextRunningMeanAttributes == nullptr
+              nextRunningMeanAttributes != nullptr
                   ? std::make_optional(unpackTensorAttributes(*nextRunningMeanAttributes))
                   : std::nullopt)
         , nextRunningVarianceTensor(
-              nextRunningVarianceAttributes == nullptr
+              nextRunningVarianceAttributes != nullptr
                   ? std::make_optional(unpackTensorAttributes(*nextRunningVarianceAttributes))
                   : std::nullopt)
     {

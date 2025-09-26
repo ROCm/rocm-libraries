@@ -3,6 +3,10 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
@@ -17,6 +21,65 @@ using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
 using namespace ::testing;
+
+template <typename InputDataType, typename ScaleBiasDataType, typename MeanVarianceDataType>
+struct BatchnormTrainTensorBundle
+{
+    BatchnormTrainTensorBundle(const std::vector<int64_t>& dims,
+                               unsigned int seed = 1,
+                               const TensorLayout& layout = TensorLayout::NCHW)
+        : derivedDims(getDerivedShape(dims))
+        , xTensor(dims, layout)
+        , scaleTensor(derivedDims)
+        , biasTensor(derivedDims)
+        , meanTensor(derivedDims)
+        , invVarianceTensor(derivedDims)
+        , yTensor(dims, layout)
+    {
+        xTensor.fillWithRandomValues(
+            static_cast<InputDataType>(-1.0f), static_cast<InputDataType>(1.0f), seed);
+
+        scaleTensor.fillWithRandomValues(
+            static_cast<ScaleBiasDataType>(-0.1f), static_cast<ScaleBiasDataType>(0.1f), seed);
+        biasTensor.fillWithRandomValues(
+            static_cast<ScaleBiasDataType>(-0.1f), static_cast<ScaleBiasDataType>(0.1f), seed);
+
+        meanTensor.fillWithRandomValues(static_cast<MeanVarianceDataType>(-0.1f),
+                                        static_cast<MeanVarianceDataType>(0.1f),
+                                        seed);
+
+        invVarianceTensor.fillWithRandomValues(
+            static_cast<MeanVarianceDataType>(1.9f), static_cast<MeanVarianceDataType>(2.0f), seed);
+    }
+
+    std::unordered_map<int64_t, void*>
+        createVariantPack(const hipdnn_frontend::graph::TensorAttributes& xTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& scaleTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& biasTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& meanTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& invVarianceTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& yTensorAttr)
+    {
+        std::unordered_map<int64_t, void*> variantPack;
+
+        variantPack[xTensorAttr.get_uid()] = xTensor.memory().hostData();
+        variantPack[scaleTensorAttr.get_uid()] = scaleTensor.memory().hostData();
+        variantPack[biasTensorAttr.get_uid()] = biasTensor.memory().hostData();
+        variantPack[meanTensorAttr.get_uid()] = meanTensor.memory().hostData();
+        variantPack[invVarianceTensorAttr.get_uid()] = invVarianceTensor.memory().hostData();
+        variantPack[yTensorAttr.get_uid()] = yTensor.memory().hostData();
+
+        return variantPack;
+    }
+
+    std::vector<int64_t> derivedDims;
+    Tensor<InputDataType> xTensor;
+    Tensor<ScaleBiasDataType> scaleTensor;
+    Tensor<ScaleBiasDataType> biasTensor;
+    Tensor<MeanVarianceDataType> meanTensor;
+    Tensor<MeanVarianceDataType> invVarianceTensor;
+    Tensor<MeanVarianceDataType> yTensor;
+};
 
 class TestCpuReferenceGraphExecutor
 {
@@ -231,6 +294,143 @@ public:
             batchnormGraph, batchnormBuilder.GetSize(), variantPack);
     }
 
+    static hipdnn_frontend::DataType fromSdkType(const hipdnn_sdk::data_objects::DataType& type)
+    {
+        switch(type)
+        {
+        case hipdnn_sdk::data_objects::DataType::FLOAT:
+            return hipdnn_frontend::DataType::FLOAT;
+        case hipdnn_sdk::data_objects::DataType::HALF:
+            return hipdnn_frontend::DataType::HALF;
+        case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+            return hipdnn_frontend::DataType::BFLOAT16;
+        case hipdnn_sdk::data_objects::DataType::DOUBLE:
+            return hipdnn_frontend::DataType::DOUBLE;
+        case hipdnn_sdk::data_objects::DataType::UINT8:
+            return hipdnn_frontend::DataType::UINT8;
+        case hipdnn_sdk::data_objects::DataType::INT32:
+            return hipdnn_frontend::DataType::INT32;
+        default:
+            return hipdnn_frontend::DataType::NOT_SET;
+        }
+    }
+
+    template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
+    static void runBatchnormTrainTest(hipdnn_sdk::data_objects::DataType inputDataType,
+                                      hipdnn_sdk::data_objects::DataType scaleBiasDataType,
+                                      hipdnn_sdk::data_objects::DataType meanVarianceDataType)
+    {
+        std::vector<int64_t> dims = {1, 3, 14, 14};
+        BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType> graphTensorBundle(
+            dims);
+
+        auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+        graph->set_name("BatchnormTrainTest");
+
+        int64_t uid = 1;
+        auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
+            "X", fromSdkType(inputDataType), graphTensorBundle.xTensor);
+        xAttr.set_uid(uid++);
+        auto xTensorAttr
+            = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+
+        auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
+            "scale", fromSdkType(scaleBiasDataType), graphTensorBundle.scaleTensor);
+        scaleAttr.set_uid(uid++);
+        auto scaleTensorAttr
+            = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
+
+        auto biasAttr = hipdnn_frontend::graph::makeTensorAttributes(
+            "bias", fromSdkType(scaleBiasDataType), graphTensorBundle.biasTensor);
+        biasAttr.set_uid(uid++);
+        auto biasTensorAttr
+            = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
+
+        // auto meanAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        //     "mean", meanVarianceDataType, graphTensorBundle.meanTensor);
+        // meanAttr.set_uid(uid++);
+        // auto meanTensorAttr
+        //     = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(meanAttr));
+
+        // auto invVarianceAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        //     "inv_variance", meanVarianceDataType, graphTensorBundle.varianceTensor);
+        // invVarianceAttr.set_uid(uid++);
+        // auto invVarianceTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+        //     std::move(invVarianceAttr));
+
+        auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        epsilonTensor->set_uid(uid++)
+            .set_name("EpsilonTensor")
+            .set_data_type(fromSdkType(meanVarianceDataType))
+            .set_dim({1})
+            .set_stride({1});
+
+        auto momentumTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        momentumTensor->set_uid(uid++)
+            .set_name("MomentumTensor")
+            .set_data_type(fromSdkType(meanVarianceDataType))
+            .set_dim({1})
+            .set_stride({1});
+
+        hipdnn_frontend::graph::BatchnormAttributes bnAttrs;
+        bnAttrs.set_name("batchnorm_fwd_train");
+        bnAttrs.set_epsilon(epsilonTensor);
+        bnAttrs.set_momentum(momentumTensor);
+
+        auto outputTensorsAttr
+            = graph->batchnorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
+
+        auto& yTensorAttr = outputTensorsAttr[0];
+        if(!yTensorAttr->has_uid())
+        {
+            yTensorAttr->set_uid(uid++);
+        }
+        yTensorAttr->set_data_type(fromSdkType(inputDataType));
+
+        auto& meanTensorAttr = outputTensorsAttr[1];
+        if(!meanTensorAttr->has_uid())
+        {
+            meanTensorAttr->set_uid(uid++);
+        }
+        meanTensorAttr->set_data_type(fromSdkType(meanVarianceDataType));
+
+        auto& invVarianceTensorAttr = outputTensorsAttr[2];
+        if(!invVarianceTensorAttr->has_uid())
+        {
+            invVarianceTensorAttr->set_uid(uid++);
+        }
+        invVarianceTensorAttr->set_data_type(fromSdkType(meanVarianceDataType));
+
+        // auto& nextRunningMean = outputTensorsAttr[3];
+        // if(!nextRunningMean->has_uid())
+        // {
+        //     nextRunningMean->set_uid(uid++);
+        // }
+        // nextRunningMean->set_data_type(fromSdkType(meanVarianceDataType));
+
+        // auto& nextRunningVariance = outputTensorsAttr[4];
+        // if(!nextRunningVariance->has_uid())
+        // {
+        //     nextRunningVariance->set_uid(uid++);
+        // }
+        // nextRunningVariance->set_data_type(fromSdkType(meanVarianceDataType));
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+        auto variantPack = graphTensorBundle.createVariantPack(*xTensorAttr,
+                                                               *scaleTensorAttr,
+                                                               *biasTensorAttr,
+                                                               *meanTensorAttr,
+                                                               *invVarianceTensorAttr,
+                                                               *yTensorAttr);
+
+        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
+            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+    }
+
     template <typename T>
     static hipdnnPluginDeviceBuffer_t generateRandomHostBuffer(
         TensorBase<T>& tensor, int uid, T min, T max, unsigned int seed = 0)
@@ -298,3 +498,21 @@ TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllBFloat16)
     TestCpuReferenceGraphExecutor::runBatchnormBwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
         DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
 }
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<float, float, float>(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+
+// TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllHalfs)
+// {
+//     TestCpuReferenceGraphExecutor::runBatchnormTrainTest<half, half, half>(
+//         DataType::HALF, DataType::HALF, DataType::HALF);
+// }
+
+// TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllBFloat16)
+// {
+//     TestCpuReferenceGraphExecutor::runBatchnormTrainTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
+//         DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+// }

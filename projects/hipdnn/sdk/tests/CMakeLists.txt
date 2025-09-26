@@ -51,16 +51,13 @@ add_executable(hipdnn_sdk_tests
     test_utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
 )
 
-target_compile_definitions(hipdnn_sdk_tests PRIVATE
-    COMPONENT_NAME="hipdnn_sdk_tests"
-)
-
 target_compile_options(hipdnn_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(hipdnn_sdk_tests 
     GTest::gtest
     GTest::gmock
     Threads::Threads
     hipdnn_sdk
+    hipdnn_frontend
     hip::host
     spdlog_header_only
     ${CMAKE_DL_LIBS}
