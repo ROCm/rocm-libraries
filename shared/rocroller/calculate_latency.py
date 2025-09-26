@@ -44,7 +44,7 @@ def extract_specific_lines(csv_file):
 
 class Metric:
     @abstractmethod
-    def get_name():
+    def column_names():
         raise NotImplementedError
     @abstractmethod
     def compute(df):
@@ -52,7 +52,7 @@ class Metric:
 
 class FirstWaitcntLatency(Metric):
     @staticmethod
-    def get_name():
+    def column_names():
         return ('First Waitcnt Latency',)
     
     @staticmethod
@@ -64,8 +64,8 @@ class FirstWaitcntLatency(Metric):
 
 class AverageNotFirstWaitcntLatency(Metric):
     @staticmethod
-    def get_name():
-        return ('Median Latency', 's_waitcnt Count')
+    def column_names():
+        return ('Median s_waitcnt Latency', 's_waitcnt Count')
     
     @staticmethod
     def compute(df):
@@ -75,6 +75,19 @@ class AverageNotFirstWaitcntLatency(Metric):
         latency = rows_copy['Avg Latency'].median()
         count = len(rows_copy)
         return (latency, count)
+
+class MaxRearHalfDsLatency(Metric):
+    @staticmethod
+    def column_names():
+        return ('Max rear half ds_* Latency',)
+    
+    @staticmethod
+    def compute(df):
+        filtered_df = df[df['Instruction'].str.contains('ds_', na=False)]
+        filtered_df = filtered_df.iloc[len(filtered_df)//2:].copy()
+        filtered_df['Avg Latency'] = (filtered_df['Latency'] + filtered_df['Idle']) / filtered_df['Hitcount']
+        latency = filtered_df['Avg Latency'].max()
+        return (latency,)
 
 def load_env_vars(csv_file):
     """Load environment variables from env_vars.json in the same directory as the CSV."""
@@ -103,7 +116,7 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
     
     results = []
     env_var_keys = []  # To track the order of env var keys
-    metrics: list[Metric] = [FirstWaitcntLatency, AverageNotFirstWaitcntLatency]
+    metrics: list[Metric] = [FirstWaitcntLatency, MaxRearHalfDsLatency, AverageNotFirstWaitcntLatency]
     
     for csv_file in csv_files:
         dir_name = os.path.basename(os.path.dirname(csv_file))
@@ -120,7 +133,7 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
         }
         
         for metric in metrics:
-            col_names = metric.get_name()
+            col_names = metric.column_names()
             values = metric.compute(pd.read_csv(csv_file))
             for col_name, value in zip(col_names, values):
                 result[col_name] = value
@@ -142,7 +155,7 @@ def process_all_files(directory, show_instructions=False, show_path=False, show_
         
     column_headers = ['Directory']
     for metric in metrics:
-        column_headers += list(metric.get_name())
+        column_headers += list(metric.column_names())
     if show_env_vars:
         column_headers += env_var_keys
     if show_path:

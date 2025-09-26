@@ -61,7 +61,7 @@ def main():
         "--strides",
         type=int,
         nargs="+",
-        default=[1, 2, 4],
+        default=[1, 2, 4, 8],
         help="BYTE_STRIDE values",
     )
 
@@ -78,7 +78,7 @@ def main():
         "--iters",
         type=int,
         nargs="+",
-        default=[16, 20],
+        default=[16],
         help="ITERS values (number of iterations)",
     )
 
@@ -86,7 +86,7 @@ def main():
         "--wgs",
         type=int,
         nargs="+",
-        default=[64],
+        default=[40],
         help="WORKGROUP_SIZE values (e.g., --wgs 64 128 256)",
     )
 

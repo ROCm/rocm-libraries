@@ -96,7 +96,7 @@ namespace rocRollerTest
 
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops
-                = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
+                = 0; // Experiemented with looping for instruction cache, this only comes up if a ton of instructions are issued
             const auto alignment = instrDwords;
             const auto regCount  = 256 - 8; // leave a few
 
@@ -134,7 +134,7 @@ namespace rocRollerTest
             // co_yield Instruction::Label(label);
 
             auto getSubset = [](size_t n, size_t m, size_t i) -> std::pair<size_t, size_t> {
-                // If run out of n, wrap around
+                // If run out of registers, wrap around
                 size_t num_complete_chunks = n / m;
                 if(num_complete_chunks == 0)
                 {
@@ -144,8 +144,6 @@ namespace rocRollerTest
                 size_t start       = chunk_index * m;
                 return {start, start + m};
             };
-
-            const int ALREADY_FINISHED = ITERS - 3;
 
             // auto addrs = Register::Value::Placeholder(
             //     m_context, Register::Type::Vector, DataType::UInt32, 4);
@@ -175,8 +173,29 @@ namespace rocRollerTest
                 }
             }
 
-            for(int i = ITERS - 1 - ALREADY_FINISHED; i >= 0; --i)
+            // const std::map<std::tuple<bool, int>, std::tuple<int, int>> writeDwordsToWaitcnt = {
+            //     // ds_read_b128 -> (false, 4)
+            //     // ds_write_b64 -> (true, 2)
+            //     {{false, 1}, {9, 3}},
+            //     {{false, 2}, {9, 3}},
+            //     {{false, 4}, {10, 3}},
+            //     {{true, 1}, {4, 1}},
+            //     {{true, 2}, {3, 0}},
+            //     {{true, 4}, {1, 0}},
+            // };
+
+            // const auto [waitcnt_count, last_decrement]
+            //     = writeDwordsToWaitcnt.at({write, instrDwords});
+
+            const auto waitcnt_count  = 1;
+            const auto last_decrement = 0;
+
+            for(int i = waitcnt_count; i >= 0; --i)
             {
+                if(i == last_decrement + 1)
+                {
+                    i -= last_decrement;
+                }
                 co_yield Instruction::Wait(WaitCount::DSCnt(m_context->targetArchitecture(), i));
             }
             // co_yield Expression::generate(i, i->expression() - Expression::literal(1), m_context);
