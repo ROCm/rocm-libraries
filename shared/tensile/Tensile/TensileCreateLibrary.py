@@ -174,7 +174,7 @@ def prepAsm(
 
             assemblerFile.write(f"if %wave% == 32 ({cArgs32}) else ({cArgs64})\n")
             assemblerFile.write(f"{lArgs}\n")
-            assemblerFile.write("copy %f%.co ..\..\..\library\%f%_%h%.co\n")
+            assemblerFile.write("copy %f%.co ..\\..\\..\\library\\%f%_%h%.co\n")
     os.chmod(assemblerFileName, 0o777)
 
 

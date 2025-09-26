@@ -985,7 +985,7 @@ void check(hipStream_t                   stream,
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
             {
-                CHECK_SUCCESS(norm_check(norm_error, To));
+                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type));
             }
 
             if(arg.amaxD)
@@ -1018,7 +1018,7 @@ void check(hipStream_t                   stream,
                 hipblaslt_error += norm_error;
                 if(arg.norm_check_assert)
                 {
-                    CHECK_SUCCESS(norm_check(norm_error, Taux));
+                    CHECK_SUCCESS(norm_check(norm_error, Taux, arg.compute_type));
                 }
             }
             if(arg.gradient && arg.bias_vector)
@@ -1392,7 +1392,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         stride_e[i] = do_batched[i] ? arg.stride_e[i] : lde[i] * N[i];
 
         size_A[i]
-            = stride_a[i] == 0 ? lda[i] * A_col[i] * num_batches[i] : stride_a[i] * num_batches[i];
+            = stride_a[i] == 0 ? lda[i] * A_col[i] * num_batches[i]
+                               : lda[i] <= stride_a[i] ? stride_a[i] * num_batches[i] : lda[i] * A_col[i];
         // for (!do_swizzle_a) case, we can use size_dA and stride_da instead of size_A and stride_a
         size_dA[i]   = size_A[i];
         stride_da[i] = stride_a[i];
@@ -1416,7 +1417,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
         size_B[i]
-            = stride_b[i] == 0 ? ldb[i] * B_col[i] * num_batches[i] : stride_b[i] * num_batches[i];
+            = stride_b[i] == 0 ? ldb[i] * B_col[i] * num_batches[i]
+                               : ldb[i] <= stride_b[i] ? stride_b[i] * num_batches[i] : ldb[i] * B_col[i];
         // for (!do_swizzle_b) case, we can use size_dB and stride_db instead of size_B and stride_b
         size_dB[i]   = size_B[i];
         stride_db[i] = stride_b[i];
@@ -1439,12 +1441,13 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_dB[i] = num_batches[i] * stride_swizzle;
         }
         size_C[i]
-            = stride_c[i] == 0 ? ldc[i] * N[i] * num_batches[i] : stride_c[i] * num_batches[i];
+            = stride_c[i] == 0 ? ldc[i] * N[i] * num_batches[i]
+                               : ldc[i] <= stride_c[i] ? stride_c[i] * num_batches[i] : ldc[i] * N[i];
         size_D[i]
-            = stride_d[i] == 0 ? ldd[i] * N[i] * num_batches[i] : stride_d[i] * num_batches[i];
-
+            = stride_d[i] == 0 ? ldd[i] * N[i] * num_batches[i]
+                               : ldd[i] <= stride_d[i] ? stride_d[i] * num_batches[i] : ldd[i] * N[i];
         size_E[i] = arg.use_e ? (stride_e[i] == 0 ? lde[i] * N[i] * num_batches[i]
-                                                  : stride_e[i] * num_batches[i])
+                                                  : lde[i] <= stride_e[i] ? stride_e[i] * num_batches[i] : lde[i] * N[i])
                               : 0;
         if(arg.c_equal_d)
         {
@@ -3478,6 +3481,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 if(arg.use_ext)
                 {
+                    gemmVec[0].setMaxWorkspaceBytes(workspace_size);
                     CHECK_HIPBLASLT_ERROR(
                         gemmVec[0].initialize(heuristicResult[sol].algo,
                                               tuningVec[heuristicTuningIndex[sol]],
@@ -3511,6 +3515,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 //grouped gemm
                 if(arg.use_user_args)
                 {
+                    groupedGemmVec[0].setMaxWorkspaceBytes(workspace_size);
                     CHECK_HIPBLASLT_ERROR(
                         groupedGemmVec[0].initialize(heuristicResult[sol].algo,
                                                      tuningVec[heuristicTuningIndex[0]],
@@ -3526,6 +3531,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
+                    groupedGemmVec[0].setMaxWorkspaceBytes(workspace_size);
                     CHECK_HIPBLASLT_ERROR(
                         groupedGemmVec[0].initialize(heuristicResult[sol].algo,
                                                      tuningVec[heuristicTuningIndex[0]],
@@ -3655,10 +3661,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(arg.use_ext)
                 {
                     for(int32_t b = 0; b < block_count; b++)
+                    {
+                        gemmVec[b].setMaxWorkspaceBytes(workspace_size);
                         CHECK_HIPBLASLT_ERROR(
                             gemmVec[b].initialize(heuristicResult[sol].algo,
                                                   tuningVec[heuristicTuningIndex[sol]],
                                                   *dWorkspace));
+                    }
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -3810,6 +3819,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     //grouped gemm
                     for(int32_t b = 0; b < block_count; b++)
                     {
+                        groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
                             heuristicResult[sol].algo,
                             tuningVec[heuristicTuningIndex[sol]],
@@ -3871,12 +3881,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     //grouped gemm
                     for(int32_t b = 0; b < block_count; b++)
+                    {
+                        groupedGemmVec[b].setMaxWorkspaceBytes(workspace_size);
                         CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].initialize(
                             heuristicResult[sol].algo,
                             tuningVec[heuristicTuningIndex[sol]],
                             ((unsigned char*)(*dWorkspace) + b * workspace_size),
                             false,
                             stream));
+                    }
 
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(

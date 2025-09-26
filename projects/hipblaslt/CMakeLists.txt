@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24.4)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipblaslt VERSION 1.1.0 LANGUAGES CXX C ASM)
+project(hipblaslt LANGUAGES CXX C ASM)
 
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
     set(HIPBLASLT_IS_SUBPROJECT FALSE)
@@ -25,8 +25,26 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-rocm_setup_version(VERSION ${PROJECT_VERSION})
-set(hipblaslt_SOVERSION 1.1)
+set(HIPBLASLT_PROJECT_VERSION "1.1.0" CACHE STRING "Semantic version string.")
+
+set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
+string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
+list(GET VERSION_LIST 0 PROJECT_VERSION_MAJOR)
+list(GET VERSION_LIST 1 PROJECT_VERSION_MINOR)
+list(GET VERSION_LIST 2 PROJECT_VERSION_PATCH)
+list(LENGTH VERSION_LIST list_size)
+if(list_size EQUAL 4)
+    list(GET VERSION_LIST 3 PROJECT_VERSION_TWEAK)
+else()
+    rocm_get_git_commit_tag(PROJECT_VERSION_TWEAK)
+endif()
+
+set(hipblaslt_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
+set(hipblaslt_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
+set(hipblaslt_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
+set(hipblaslt_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
+
+set(hipblaslt_SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
@@ -176,6 +194,11 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
             set(BUILD_CLIENTS OFF)
             set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
             set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            # Ensure rocroller uses the same compiler as the parent project
+            # NOTE: This is only required for the pinned commit and isn't present
+            # in the latest rocroller, therefor this should be removed once we bump
+            # the rocroller commit
+            set(ROCROLLER_ASSEMBLER_PATH ${CMAKE_CXX_COMPILER})
             include(FetchContent)
             FetchContent_Declare(
                 rocRoller
@@ -221,7 +244,7 @@ if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_MSGPACK)
         target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})
     endif()
-    rocm_set_soversion(hipblaslt ${hipblaslt_SOVERSION})
+    rocm_set_soversion(hipblaslt "${hipblaslt_SOVERSION}")
     add_library(roc::hipblaslt ALIAS hipblaslt)
 
     target_link_libraries(hipblaslt
@@ -287,7 +310,16 @@ endif()
 
 if(HIPBLASLT_ENABLE_HOST)
     # work around code object stripping failure if using /usr/bin/strip
-    set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /opt/rocm/llvm/bin/llvm-strip") # need to generalize this
+    find_program(LLVM_STRIP 
+        NAMES llvm-strip
+        PATH_SUFFIXES lib/llvm/bin llvm/bin bin
+    )
+    if(LLVM_STRIP)
+        set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip ${LLVM_STRIP}")
+    else()
+        message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
+    endif()
+
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
     install(

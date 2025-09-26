@@ -61,6 +61,9 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
+// Constraints for the hipfftw tests
+size_t max_length_for_hipfftw_test;
+size_t max_io_gb_for_hipfftw_test;
 
 // Transform parameters for manual test:
 hipfft_params manual_params;
@@ -172,13 +175,10 @@ void precompile_test_kernels(const std::string& precompile_file)
                 continue;
 
             // only care about accuracy tests
-            if(name.find("vs_fftw/") != std::string::npos)
+            const auto pos = name.find("vs_fftw/");
+            if(pos != std::string::npos)
             {
-                // [possible TODO] move above check to nesting loop's scope as a
-                // check on the test suite's name (i.e., if it includes "accuracy_test").
-                // That would allow other (hypothetical) accuracy test instances than
-                // "vs_fftw/" to be considered as well...
-                name.erase(0, 8);
+                name.erase(0, pos + 8);
 
                 // change batch to 1, so we don't waste time creating
                 // multiple plans that differ only by batch
@@ -201,7 +201,7 @@ void precompile_test_kernels(const std::string& precompile_file)
     std::mt19937       dist(dev());
     std::shuffle(tokens.begin(), tokens.end(), dist);
     auto precompile_begin = std::chrono::steady_clock::now();
-    std::cout << "precompiling " << tokens.size() << " FFT plans...\n";
+    std::cout << "precompiling kernels for " << tokens.size() << " tokens...\n";
 
     for(auto&& t : tokens)
         tokenQueue.push(std::move(t));
@@ -224,6 +224,13 @@ void precompile_test_kernels(const std::string& precompile_file)
                     params.from_token(token);
                     params.validate();
                     params.create_plan();
+                    if(params.is_forward())
+                    {
+                        hipfft_params inverse_params;
+                        inverse_params.inverse_from_forward(params);
+                        inverse_params.validate();
+                        inverse_params.create_plan();
+                    }
                 }
                 catch(fft_params::work_buffer_alloc_failure&)
                 {
@@ -302,6 +309,16 @@ int main(int argc, char* argv[])
                    "Probability multiplier for running individual callback transforms")
         ->default_val(0.1)
         ->check(CLI::NonNegativeNumber);
+    app.add_option("--max_hipfftw_test_len",
+                   max_length_for_hipfftw_test,
+                   "Maximum length to be considered in hipfftw tests")
+        ->default_val(8192)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--max_io_gb_for_hipfftw_test",
+                   max_io_gb_for_hipfftw_test,
+                   "Maximum size of I/O to be considered in hipfftw tests in GiB")
+        ->default_val(1) /* 1 GiB */
+        ->check(CLI::PositiveNumber);
 
     app.add_option("--fftw_compare", fftw_compare, "Compare to FFTW in accuracy tests")
         ->default_val(true);
@@ -620,6 +637,8 @@ int main(int argc, char* argv[])
     std::cout << "single precision max l2 epsilon:     " << max_l2_eps_single << std::endl;
     std::cout << "double precision max l-inf epsilon: " << max_linf_eps_double << std::endl;
     std::cout << "double precision max l2 epsilon:     " << max_l2_eps_double << std::endl;
+
+    hipfft_params::externally_managed_workareas.clear();
 
     return retval;
 }

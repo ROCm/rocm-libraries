@@ -10,6 +10,10 @@ Documentation for rocRAND is available at
 * Updated error handling for several rocRAND unit tests to accomodate the new hipGetLastError behaviour that was introduced in ROCm 7.0.
 As of ROCm 7.0, the internal error state is cleared on each call to `hipGetLastError` rather than on every HIP API call.
 
+### Changed
+
+* Changed the `USE_DEVICE_DISPATCH` flag so it can turn device dispatch off by setting it to zero. Device dispatch should be turned off when building for SPIRV.
+
 ## rocRAND 4.0.0 for ROCm 7.0
 
 ### Added
