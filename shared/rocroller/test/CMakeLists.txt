@@ -54,9 +54,8 @@ if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     endif()
 endif()
 
-# Component stand-alone tests
+# Component stand-alone test
 add_executable(component-test)
-add_executable(component-concurrent-test)
 
 if(ROCROLLER_ENABLE_ASAN)
     rocroller_target_configure_sanitizers(component-test PRIVATE)

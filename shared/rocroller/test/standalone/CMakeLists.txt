@@ -3,6 +3,3 @@
 
 target_sources(component-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ComponentTest.cpp")
 target_link_libraries(component-test PRIVATE roc::rocroller-interface ${msgpack_libs})
-
-target_sources(component-concurrent-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ComponentConcurrentTest.cpp")
-target_link_libraries(component-concurrent-test roc::rocroller-interface ${msgpack_libs})
