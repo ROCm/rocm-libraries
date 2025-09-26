@@ -32,8 +32,8 @@
 #include "rocsparse_cscmv.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_ellmv.hpp"
-#include "rocsparse_sellmv.hpp"
 #include "rocsparse_enum_utils.hpp"
+#include "rocsparse_sellmv.hpp"
 #include "rocsparse_spmv.hpp"
 
 template <>
@@ -778,27 +778,27 @@ namespace rocsparse
             case rocsparse_spmv_stage_compute:
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmv(handle,
-                                                            trans,
-                                                            mat->rows,
-                                                            mat->cols,
-                                                            mat->nnz,
-                                                            mat->slice_size,
-                                                            mat->sell_colval_size,
-                                                            alpha_type,
-                                                            alpha,
-                                                            mat->descr,
-                                                            mat->data_type,
-                                                            mat->const_val_data,
-                                                            mat->row_type,
-                                                            mat->const_row_data,
-                                                            mat->col_type,
-                                                            mat->const_col_data,
-                                                            x->data_type,
-                                                            x->const_values,
-                                                            beta_type,
-                                                            beta,
-                                                            y->data_type,
-                                                            y->values)));
+                                                             trans,
+                                                             mat->rows,
+                                                             mat->cols,
+                                                             mat->nnz,
+                                                             mat->slice_size,
+                                                             mat->sell_colval_size,
+                                                             alpha_type,
+                                                             alpha,
+                                                             mat->descr,
+                                                             mat->data_type,
+                                                             mat->const_val_data,
+                                                             mat->row_type,
+                                                             mat->const_row_data,
+                                                             mat->col_type,
+                                                             mat->const_col_data,
+                                                             x->data_type,
+                                                             x->const_values,
+                                                             beta_type,
+                                                             beta,
+                                                             y->data_type,
+                                                             y->values)));
                 return rocsparse_status_success;
             }
             }

@@ -2461,7 +2461,7 @@ void host_sellmv(rocsparse_operation  trans,
                 if(col >= 0)
                 {
                     sums[local_row] = std::fma(
-                        static_cast<T>(sell_val[j]),  static_cast<T>(x[col]), sums[local_row]);
+                        static_cast<T>(sell_val[j]), static_cast<T>(x[col]), sums[local_row]);
                 }
             }
 
@@ -2473,8 +2473,8 @@ void host_sellmv(rocsparse_operation  trans,
                 {
                     if(beta != static_cast<T>(0))
                     {
-                        y[row] = std::fma(static_cast<T>(beta), 
-                                          static_cast<T>(y[row]), 
+                        y[row] = std::fma(static_cast<T>(beta),
+                                          static_cast<T>(y[row]),
                                           static_cast<T>(alpha * sums[local_row]));
                     }
                     else
@@ -8320,7 +8320,7 @@ void host_csr_to_sell(J                     M,
                 I start = csr_row_ptr[row] - csr_base;
                 I end   = csr_row_ptr[row + 1] - csr_base;
 
-                max_row_length_in_slice 
+                max_row_length_in_slice
                     = std::max(max_row_length_in_slice, static_cast<J>(end - start));
             }
         }
@@ -9448,7 +9448,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                 ITYPE                     nnz,             \
                                                 const std::vector<ITYPE>& csr_row_ptr,     \
                                                 std::vector<JTYPE>&       coo_row_ind,     \
-                                                rocsparse_index_base      base);           \
+                                                rocsparse_index_base      base);                \
     template void host_coo_to_csr<ITYPE, JTYPE>(JTYPE                M,                    \
                                                 ITYPE                NNZ,                  \
                                                 const JTYPE*         coo_row_ind,          \
@@ -9767,7 +9767,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                              YTYPE*                y,                  \
                              rocsparse_index_base  base,               \
                              rocsparse_matrix_type matrix_type,        \
-                             rocsparse_spmv_alg    algo);              \
+                             rocsparse_spmv_alg    algo);                 \
     template void host_csrmv(rocsparse_operation   trans,              \
                              JTYPE                 M,                  \
                              JTYPE                 N,                  \
