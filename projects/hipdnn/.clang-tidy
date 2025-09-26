@@ -28,7 +28,7 @@ HeaderFileExtensions: ['h','hpp']
 
 # This regex is a inclusion filter for the files to be checked. Its a Posix regex and
 # does not seem to support negative lookahead.  
-HeaderFilterRegex: '*'
+HeaderFilterRegex: '.'
 ExcludeHeaderFilterRegex: '^(.*data_objects.*)$'
 
 CheckOptions:
