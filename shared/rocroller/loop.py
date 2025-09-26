@@ -122,6 +122,14 @@ def main():
         help="Executable command to profile",
     )
 
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=str,
+        default="output/",
+        help="Output directory for test results (default: output/)",
+    )
+
     args = parser.parse_args()
 
     # Install ATT decoder if not present
@@ -151,7 +159,7 @@ def main():
 
     barrier_modes = [False] if args.no_barrier else [True]
 
-    output_dir = "output"
+    output_dir = args.output_dir
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
