@@ -44,19 +44,17 @@ namespace rocRoller
             std::map<std::pair<int, rocRoller::Graph::Direction>, int>
                 connectWorkgroups(KernelGraph& kgraph)
             {
-                std::map<std::pair<int, rocRoller::Graph::Direction>, int> rv;
-
                 auto tileNumTags = kgraph.coordinates.getNodes<MacroTileNumber>().to<std::vector>();
+
+                std::map<std::pair<int, rocRoller::Graph::Direction>, int> rv;
                 for(auto const& tileNumTag : tileNumTags)
                 {
                     if(std::empty(kgraph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
                     {
                         // MacroTileNumber is dangling, connect it to a Workgroup
                         auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
-                        auto size
-                            = tileNum.size ? convert(DataType::UInt32, tileNum.size) : tileNum.size;
                         auto workgroupTag
-                            = kgraph.coordinates.addElement(Workgroup(tileNum.dim, size));
+                            = kgraph.coordinates.addElement(Workgroup(tileNum.dim, tileNum.size));
                         Log::debug(
                             "KernelGraph::ConnectWorkgroups: Adding PassThrough from tile {} "
                             "({}) to workgroup {}",
@@ -71,10 +69,8 @@ namespace rocRoller
                     {
                         // MacroTileNumber is dangling, connect it to a Workgroup
                         auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
-                        auto size
-                            = tileNum.size ? convert(DataType::UInt32, tileNum.size) : tileNum.size;
                         auto workgroupTag
-                            = kgraph.coordinates.addElement(Workgroup(tileNum.dim, size));
+                            = kgraph.coordinates.addElement(Workgroup(tileNum.dim, tileNum.size));
                         Log::debug("KernelGraph::ConnectWorkgroups: Adding PassThrough from "
                                    "workgroup {} to tile {} ({})",
                                    workgroupTag,

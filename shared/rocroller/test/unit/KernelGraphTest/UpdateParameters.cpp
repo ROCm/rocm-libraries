@@ -135,13 +135,8 @@ namespace KernelGraphTest
         auto one            = Expression::literal(1u);
         auto workgroupSizeX = Expression::literal(128u);
 
-        auto expected = Expression::convert(DataType::UInt32,
-                                            ((tensorAsizeX->expression() + workgroupSizeX) - one)
-                                                / workgroupSizeX)
-                        * one;
-
-        for(auto& expr : workitemCount)
-            Log::info("expr = {}", toString(expr));
+        auto expected
+            = (((tensorAsizeX->expression() + workgroupSizeX) - one) / workgroupSizeX) * one;
 
         EXPECT_TRUE(Expression::identical(expected, workitemCount[0]))
             << expected << "\n"
