@@ -18,23 +18,28 @@ namespace hipdnn_sdk::test_utilities
  * Eventually we may wish to centalize all the supported signature arrays for all ops in another file
  * once we have a significant number of ops supported.
 */
-constexpr std::array<BatchnormFwdInferenceSignatureKey, 2>
+constexpr std::array<BatchnormFwdInferenceSignatureKey, 3>
     ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES
     = {BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
                                          hipdnn_sdk::data_objects::DataType::FLOAT,
                                          hipdnn_sdk::data_objects::DataType::FLOAT),
        BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType::HALF,
                                          hipdnn_sdk::data_objects::DataType::HALF,
-                                         hipdnn_sdk::data_objects::DataType::HALF)};
+                                         hipdnn_sdk::data_objects::DataType::HALF),
+       BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                         hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                         hipdnn_sdk::data_objects::DataType::BFLOAT16)};
 
-constexpr std::array<BatchnormBwdSignatureKey, 1> ALL_SUPPORTED_BATCHNORM_BWD_SIGNATURES = {
-    BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_sdk::data_objects::DataType::FLOAT) /*,
+constexpr std::array<BatchnormBwdSignatureKey, 3> ALL_SUPPORTED_BATCHNORM_BWD_SIGNATURES
+    = {BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
+                                hipdnn_sdk::data_objects::DataType::FLOAT,
+                                hipdnn_sdk::data_objects::DataType::FLOAT),
        BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType::HALF,
-                                hipdnn_sdk::data_objects::DataType::HALF, // half is causing static cast errors in the ref impl...
-                                hipdnn_sdk::data_objects::DataType::HALF)*/
-};
+                                hipdnn_sdk::data_objects::DataType::HALF,
+                                hipdnn_sdk::data_objects::DataType::HALF),
+       BatchnormBwdSignatureKey(hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                hipdnn_sdk::data_objects::DataType::BFLOAT16)};
 
 class PlanBuilderRegistry
 {

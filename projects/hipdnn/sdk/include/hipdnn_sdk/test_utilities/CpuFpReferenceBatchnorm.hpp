@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <numeric>
 #include <vector>
 
@@ -44,9 +45,12 @@ public:
         std::for_each(channels.begin(), channels.end(), [&](int64_t cidx) {
             auto mean = estimatedMean.getHostValue(0, cidx);
             auto variance = estimatedVariance.getHostValue(0, cidx);
+
+            //There is some extra casting in here to deal with double -> float implicit casts.
             MeanVarianceDataType invVariance
                 = static_cast<MeanVarianceDataType>(1.0f)
-                  / sqrtInternal(variance + static_cast<MeanVarianceDataType>(epsilon));
+                  / sqrtInternal(variance
+                                 + static_cast<MeanVarianceDataType>(static_cast<float>(epsilon)));
 
             // process the batch per channel
             iterateChannelElements(
@@ -195,7 +199,8 @@ public:
 
         auto nChannels = x.dims().at(1);
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
-        auto nhwF = static_cast<MeanVarianceDataType>(elementsPerChannel);
+        //Cant cast directly from int64 to half or bloat16 so cast to float first.
+        auto nhwF = static_cast<MeanVarianceDataType>(static_cast<float>(elementsPerChannel));
 
         std::vector<int64_t> channels(static_cast<size_t>(nChannels));
         std::iota(channels.begin(), channels.end(), 0);
@@ -206,8 +211,8 @@ public:
             auto channelScale = scale.getHostValue(0, cidx);
 
             // Calculate dot product for (x - mean) * channelInvVariance * dy and ∑ dy for this channel
-            MeanVarianceDataType dotProduct = 0;
-            MeanVarianceDataType sumDy = 0;
+            auto dotProduct = static_cast<MeanVarianceDataType>(0.0);
+            auto sumDy = static_cast<MeanVarianceDataType>(0.0);
 
             iterateChannelElements(
                 x, cidx, elementsPerChannel, [&](const std::vector<int64_t>& indices) {
@@ -215,8 +220,9 @@ public:
                     auto dyVal = static_cast<MeanVarianceDataType>(dy.getHostValue(indices));
 
                     MeanVarianceDataType xHat = (xVal - channelMean) * channelInvVariance;
-                    dotProduct += xHat * dyVal;
-                    sumDy += dyVal;
+                    // for half no += operator exists
+                    dotProduct = dotProduct + (xHat * dyVal);
+                    sumDy = sumDy + dyVal;
                 });
 
             // Per channel:
@@ -273,6 +279,11 @@ private:
     static float sqrtInternal(float value)
     {
         return sqrtf(value);
+    }
+
+    static hip_bfloat16 sqrtInternal(hip_bfloat16 value)
+    {
+        return static_cast<hip_bfloat16>(sqrtf(static_cast<float>(value)));
     }
 
     // Utility method to iterate over all elements for a specific channel in an N-dimensional tensor

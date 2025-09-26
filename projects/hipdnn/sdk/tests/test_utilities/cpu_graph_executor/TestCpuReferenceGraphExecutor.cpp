@@ -160,8 +160,8 @@ public:
 
     template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
     static void runBatchnormBwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
-                                    hipdnn_sdk::data_objects::DataType /*scaleBiasDataType*/,
-                                    hipdnn_sdk::data_objects::DataType /*meanVarianceDataType*/)
+                                    hipdnn_sdk::data_objects::DataType scaleBiasDataType,
+                                    hipdnn_sdk::data_objects::DataType meanVarianceDataType)
     {
         unsigned int seed = std::random_device{}();
 
@@ -211,8 +211,13 @@ public:
                                                          static_cast<MeanVarianceType>(2.0f),
                                                          seed));
 
-        auto batchnormBuilder = hipdnn_sdk::test_utilities::createValidBatchnormBwdGraph(
-            dyTensor.strides(), dyTensor.dims(), true, inputDataType);
+        auto batchnormBuilder
+            = hipdnn_sdk::test_utilities::createValidBatchnormBwdGraph(dyTensor.strides(),
+                                                                       dyTensor.dims(),
+                                                                       true,
+                                                                       inputDataType,
+                                                                       scaleBiasDataType,
+                                                                       meanVarianceDataType);
 
         auto batchnormGraph = batchnormBuilder.GetBufferPointer();
 
@@ -259,6 +264,12 @@ TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllHalfs)
         DataType::HALF, DataType::HALF, DataType::HALF);
 }
 
+TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllBFloats)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormFwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
 TEST(TestCpuReferenceGraphExecutor, SignaturesThatDontExist)
 {
     EXPECT_THROW((TestCpuReferenceGraphExecutor::runBatchnormFwdTest<float, half, half>(
@@ -274,4 +285,16 @@ TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllFloats)
 {
     TestCpuReferenceGraphExecutor::runBatchnormBwdTest<float, float, float>(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<half, half, half>(
+        DataType::HALF, DataType::HALF, DataType::HALF);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
 }
