@@ -40,7 +40,9 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 7afbe45f7eaa4f2e9abcb9cd7f1c4042a2d7b638 # 2025-09-24 commit
+          # TODO: remove after testing
+          ref: users/geomin12/ignore-patches
+          # ref: 7afbe45f7eaa4f2e9abcb9cd7f1c4042a2d7b638 # 2025-09-24 commit
 
       - name: Install python deps
         run: |
@@ -70,7 +72,9 @@ jobs:
 
       - name: Patch rocm-libraries
         run: |
-          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+          python3 TheRock/build_tools/github_actions/ignore_patches.py \
+            --patch-dir ./TheRock/patches/amd-mainline/rocm-libraries/ \
+            --ignore-patches 0009-Use-workgroupMappingDim-in-rocroller_host
 
       - name: Configure Projects
         env:
