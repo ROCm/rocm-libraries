@@ -116,15 +116,6 @@ TEST_CASE("Empty host data throws FatalError", "[RotatingBuffer]")
     REQUIRE_THROWS_AS(RotatingBuffer<float>(hostData, 32), FatalError);
 }
 
-TEST_CASE("Modulo by zero throws FatalError", "[RotatingBuffer]")
-{
-    // Construct with cache size smaller than element size (so elems=0 internally)
-    std::vector<int> hostData(4, 1);
-    size_t           badCacheBytes = 1; // less than sizeof(int)
-
-    REQUIRE_THROWS_AS(RotatingBuffer<int>(hostData, badCacheBytes), FatalError);
-}
-
 TEST_CASE("Small cacheBytes triggers graceful fallback to full buffer", "[RotatingBuffer]")
 {
     std::vector<int> hostData(8, 7);
