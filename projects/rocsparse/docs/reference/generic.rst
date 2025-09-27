@@ -61,6 +61,11 @@ rocsparse_spsv()
 
 .. doxygenfunction:: rocsparse_spsv
 
+rocsparse_sptrsv_buffer_size()
+------------------------------
+
+.. doxygenfunction:: rocsparse_sptrsv_buffer_size
+
 rocsparse_sptrsv()
 ------------------
 
@@ -70,6 +75,11 @@ rocsparse_spsm()
 ----------------
 
 .. doxygenfunction:: rocsparse_spsm
+
+rocsparse_sptrsm_buffer_size()
+------------------------------
+
+.. doxygenfunction:: rocsparse_sptrsm_buffer_size
 
 rocsparse_sptrsm()
 ------------------

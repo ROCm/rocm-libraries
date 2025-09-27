@@ -86,8 +86,8 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *    op(A) = \left\{
 *    \begin{array}{ll}
 *        A,   & \text{if op == rocsparse_operation_none} \\
-*        A^T, & \text{if op == rocsparse_operation_transpose}
-*        A^H, & \text{if op == rocsparse_operation_conjugate_transpose}
+*        A^T, & \text{if op == rocsparse_operation_transpose} \\
+*        A^H, & \text{if op == rocsparse_operation_conjugate_transpose} \\
 *    \end{array}
 *    \right.
 *  \f]

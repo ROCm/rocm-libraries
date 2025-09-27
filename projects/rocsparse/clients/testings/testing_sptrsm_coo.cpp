@@ -26,6 +26,9 @@
 template <typename I, typename T>
 void testing_sptrsm_coo_bad_arg(const Arguments& arg)
 {
+  //
+  // Bad args of sptrsm is already tested in testing_sptrsm_csr_bad_arg
+  //
 }
 
 template <typename I, typename T>
