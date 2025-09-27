@@ -739,15 +739,15 @@ INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, ATYPE, TTYPE)                                                     \
+#define INSTANTIATE(I, A, T)                                                                 \
     template rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,             \
                                                         I                m,                  \
                                                         I                n,                  \
                                                         int64_t          ld,                 \
                                                         int64_t          batch_count,        \
                                                         int64_t          stride,             \
-                                                        const TTYPE*     scalar_device_host, \
-                                                        ATYPE*           array,              \
+                                                        const T*         scalar_device_host, \
+                                                        A*               array,              \
                                                         rocsparse_order  order);
 
 INSTANTIATE(int32_t, _Float16, _Float16);

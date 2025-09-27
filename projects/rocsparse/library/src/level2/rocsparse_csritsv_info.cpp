@@ -60,7 +60,7 @@ _rocsparse_csritsv_info::~_rocsparse_csritsv_info()
         // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
         // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
         // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-        RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+        WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
         WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->ptr_end));
         this->ptr_end = nullptr;
