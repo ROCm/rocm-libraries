@@ -279,10 +279,16 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
         this->csritsv_info = nullptr;
     }
 
+    // Due to the changes in the hipFree introduced in HIP 7.0
+    // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+    // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+    // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+    // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+
     //
     // TRM_INFO data are automatically destroyed.
     //
-
     if(this->csrmv_info != nullptr)
     {
         delete this->csrmv_info;
