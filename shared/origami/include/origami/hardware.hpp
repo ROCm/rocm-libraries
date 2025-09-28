@@ -308,9 +308,9 @@ namespace origami
             }
         };
 
-        static const std::unordered_map<architecture_t, architecture_constants> ARCH_CONSTANT_MAP;
+        inline static const std::unordered_map<architecture_t, architecture_constants> ARCH_CONSTANT_MAP;
 
-        static const std::unordered_map<architecture_t,
+        inline static const std::unordered_map<architecture_t,
                                         std::unordered_map<matrix_instruction, size_t>>
             INSTRUCTION_MAP;
 
