@@ -95,10 +95,9 @@ void rocsparse_clients::sptrsv_compute(rocsparse_handle       handle,
 template <typename I, typename T>
 void testing_sptrsv_coo_bad_arg(const Arguments& arg)
 {
-  //
-  // Bad args of sptrsm is already tested in testing_sptrsv_csr_bad_arg
-  //
-
+    //
+    // Bad args of sptrsm is already tested in testing_sptrsv_csr_bad_arg
+    //
 }
 
 template <typename I, typename T>
