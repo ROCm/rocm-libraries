@@ -148,7 +148,7 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
     {
         auto kernel = KernelInfo{};
 
-        kernel.comp_options = compiler_options.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = compiler_options.GenerateFor(kbp::HIP{});
         kernel.kernel_file  = "MIOpenNeuron.cpp";
         kernel.kernel_name  = (packed) ? "MIOpenActiveBwdLite" : "MIOpenActiveBwd2DLite";
 

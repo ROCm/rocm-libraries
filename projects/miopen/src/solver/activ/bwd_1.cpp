@@ -341,7 +341,7 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
         kernel.g_wk.push_back(1);
         kernel.g_wk.push_back(1);
 
-        kernel.comp_options = compiler_options.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = compiler_options.GenerateFor(kbp::HIP{});
 
         solution.construction_params.emplace_back(std::move(kernel));
     }
