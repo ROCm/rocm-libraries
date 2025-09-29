@@ -84,11 +84,13 @@ public:
         int64_t nGroups = nInputChannels / channelsPerGroup;
         int64_t outputChannelsPerGroup = totalOutputChannels / nGroups;
 
+        // This lambda computes a single element of the output tensor
         auto convolutionFunc = [&](const std::vector<int64_t>& indices) {
             auto gIdx = indices[0]; // group index
             auto nIdx = indices[1]; // batch index
             auto kIdx = indices[2]; // output channel within group
 
+            // Add 3 because [gIdx, nIdx, cIdx] are the first 3 elements
             std::vector<int64_t> outputSpatialIndices(indices.begin() + 3, indices.end());
 
             auto accumulator = static_cast<AccumulatorType>(0);
@@ -104,6 +106,7 @@ public:
                         std::vector<int64_t> inputSpatialIndices(static_cast<size_t>(nSpatialDims));
                         bool validPosition = true;
 
+                        // For each spatial dimension, calculate the corresponding input index
                         for(int64_t dim = 0; dim < nSpatialDims; ++dim)
                         {
                             auto dimIdx = static_cast<size_t>(dim);
@@ -112,6 +115,12 @@ public:
                                   + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
                                   - prePadding[dimIdx];
 
+                            // In either case, this position does not exist in the logical input tensor.
+                            // 1.  (output_idx * stride) + (kernel_idx * dilation) - prePadding < 0
+                            //  => (output_idx * stride) + (kernel_idx * dilation) < prePadding
+                            // 2.  (output_idx * stride) + (kernel_idx * dilation) - prePadding >= input_dim
+                            //  => (output_idx * stride) + (kernel_idx * dilation) >= input_dim + prePadding
+                            // It is implicit in Case 2 that the position could be in the postPadding region.
                             if(inputSpatialIndices[dimIdx] < 0
                                || inputSpatialIndices[dimIdx] >= inputSpatialDims[dimIdx])
                             {
@@ -122,9 +131,14 @@ public:
 
                         if(validPosition)
                         {
+                            // Input dims: [n, inputChannel, ...]
+                            // Thus, we index via global input channel index.
                             auto inputFullIndices
                                 = buildTensorIndices(nIdx, inputChannel, inputSpatialIndices);
 
+                            // Weight dims: [outputChannels,
+                            // inputChannels/groupCount, ...] Thus, we index via flattened output channel index and
+                            // group-offset input channel index (c).
                             int64_t weightIdx = (gIdx * outputChannelsPerGroup) + kIdx;
                             auto weightFullIndices
                                 = buildTensorIndices(weightIdx, c, kernelSpatialIndices);
@@ -195,26 +209,33 @@ public:
         int64_t nGroups = nInputChannels / channelsPerGroup; // G
         int64_t outputChannelsPerGroup = totalOutputChannels / nGroups; // K
 
+        // This lambda computes a single element of the input gradient tensor (dx)
         auto convolutionFunc = [&](const std::vector<int64_t>& indices) {
             auto gIdx = indices[0]; // group index
             auto nIdx = indices[1]; // batch index
             auto cIdx = indices[2]; // channel index within group
 
+            // Add 3 because [gIdx, nIdx, cIdx] are the first 3 elements
             std::vector<int64_t> inputSpatialIndices(indices.begin() + 3, indices.end());
 
             AccumulatorType vAcc = 0;
 
+            // Iterate over each spatial position of the kernel for contributing output gradients
             iterateSpatialPositions(
                 kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
                     std::vector<int64_t> outputSpatialIndices(static_cast<size_t>(nSpatialDims));
                     bool validPosition = true;
 
+                    // For each spatial dimension, calculate the corresponding output gradient index
                     for(int64_t dim = 0; dim < nSpatialDims; ++dim)
                     {
                         auto dimIdx = static_cast<size_t>(dim);
                         int64_t tmp = inputSpatialIndices[dimIdx] + prePadding[dimIdx]
                                       - (kernelSpatialIndices[dimIdx] * dilations[dimIdx]);
 
+                        // Check if the current input position could have contributed to an output element. If the
+                        // remainder is non-zero, this combination is not aligned with the stride, so it's not a valid
+                        // mapping from the forward pass.
                         if(tmp % strides[dimIdx] != 0)
                         {
                             validPosition = false;
@@ -223,7 +244,12 @@ public:
 
                         outputSpatialIndices[dimIdx] = tmp / strides[dimIdx];
 
-                        if(outputSpatialIndices[dimIdx] < 0
+                        // Check if position does not exist in the logical output tensor.
+                        // 1.  (input_idx + prePadding - (kernel_idx * dilation)) / stride < 0
+                        //  => numerator < 0 => sampling from a location before the output tensor
+                        // 2.  (input_idx + prePadding - (kernel_idx * dilation)) / stride >= output_dim
+                        //  => input_idx + prePadding >= (output_dim * stride) + (kernel_idx * dilation) => beyond the output tensor
+                        if(outputSpatialIndices[dimIdx] <
                            || outputSpatialIndices[dimIdx] >= outputSpatialDims[dimIdx])
                         {
                             validPosition = false;
@@ -233,6 +259,7 @@ public:
 
                     if(validPosition)
                     {
+                        // Iterate over each output channel in the group, as they all contribute to the input gradient
                         for(int64_t k = 0; k < outputChannelsPerGroup; ++k)
                         {
                             auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + k;
@@ -390,6 +417,7 @@ private:
 
         std::vector<int64_t> indices(spatialDims.size(), 0);
 
+        // Iterate over each unique spatial position
         for(int64_t iter = 0; iter < totalElements; ++iter)
         {
             func(indices);
