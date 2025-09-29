@@ -755,7 +755,7 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-std::string rocfft_bench_command(const rocfft_plan plan)
+std::string rocfft_bench_command(const rocfft_plan& plan)
 {
     rocfft_params params;
 
