@@ -374,14 +374,14 @@ namespace MemoryTracerTest
         SECTION("Read")
         {
             instr.memoryOp    = MemoryOpLDS{LdsDirection::Read};
-            const auto cycles = LDSBankModel::getClockCount(instr, gfx);
+            const auto cycles = LDSBankModel::getInstructionDataCycles(instr, gfx);
             CHECK(cycles == baseCycles);
         }
 
         SECTION("Write")
         {
             instr.memoryOp    = MemoryOpLDS{LdsDirection::Write};
-            const auto cycles = LDSBankModel::getClockCount(instr, gfx);
+            const auto cycles = LDSBankModel::getInstructionDataCycles(instr, gfx);
             CHECK(cycles == baseCycles);
         }
     }

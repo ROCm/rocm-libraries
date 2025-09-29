@@ -145,19 +145,19 @@ namespace rocRoller::KernelGraph::MemoryTracer
         OperationsAnalysis doOperationsAnalysis(GPUArchitectureGFX gfx) const;
 
         /**
-         * @brief Calculate the clock count for an LDS instruction
+         * @brief Calculate the data movement cycles for an LDS instruction
          * 
          * This function encapsulates all the logic for determining how many clock cycles
-         * an LDS instruction will take, including:
-         * - Dividing base addresses into thread groups based on architecture limits
+         * the data movement portion of an LDS instruction will take, including:
+         * - Dividing base addresses into thread groups based on architecture
          * - Maximizing threads without conflicts within groups
          * - Resolving bank conflicts to determine actual cycles
-         * - Adding address transfer overhead for writes
          * 
          * @param instr The LDS instruction
          * @param gfx The GPU architecture
          */
-        static uint getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
+        static uint getInstructionDataCycles(const RuntimeLDSInstruction& instr,
+                                             GPUArchitectureGFX           gfx);
 
         /**
          * @brief Get the number of cycles to issue an instruction

@@ -317,7 +317,8 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return cycles;
     }
 
-    uint LDSBankModel::getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx)
+    uint LDSBankModel::getInstructionDataCycles(const RuntimeLDSInstruction& instr,
+                                                GPUArchitectureGFX           gfx)
     {
         AssertFatal(rocRoller::toString(gfx).starts_with("gfx9"),
                     "Unsupported GPU architecture: {}",
@@ -452,12 +453,13 @@ namespace rocRoller::KernelGraph::MemoryTracer
             }
         }
 
-        const auto instructionTotalClocks = LDSBankModel::getClockCount(instr, gfx);
+        const auto instructionTotalClocks = LDSBankModel::getInstructionDataCycles(instr, gfx);
 
-        AssertFatal(cycles == instructionTotalClocks,
-                    "Cycle count mismatch between stringify and getClockCount, {} and {}",
-                    cycles,
-                    instructionTotalClocks);
+        AssertFatal(
+            cycles == instructionTotalClocks,
+            "Cycle count mismatch between stringify and getInstructionDataCycles, {} and {}",
+            cycles,
+            instructionTotalClocks);
 
         ss << fmt::format("    Instruction cycles: {}\n", instructionTotalClocks);
 
