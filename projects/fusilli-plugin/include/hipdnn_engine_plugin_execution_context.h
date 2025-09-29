@@ -24,6 +24,16 @@
 #ifndef FUSILLI_PLUGIN_SRC_HIPDNN_ENGINE_PLUGIN_EXECUTION_CONTEXT_H
 #define FUSILLI_PLUGIN_SRC_HIPDNN_ENGINE_PLUGIN_EXECUTION_CONTEXT_H
 
-struct HipdnnEnginePluginExecutionContext {};
+#include <fusilli.h>
+
+struct HipdnnEnginePluginExecutionContext {
+  // Fusilli graph.
+  fusilli::Graph graph;
+
+  // Map from hipDNN tensor UID to fusilli::TensorAttrs for graph boundary
+  // tensors (inputs and outputs).
+  std::unordered_map<int64_t, std::shared_ptr<fusilli::TensorAttr>>
+      uidToFusilliTensorAttr;
+};
 
 #endif // FUSILLI_PLUGIN_SRC_HIPDNN_ENGINE_PLUGIN_EXECUTION_CONTEXT_H

@@ -9,7 +9,6 @@ find_package(Threads REQUIRED)
 
 # Integration tests
 add_executable(fusilli_plugin_integration_tests
-    # main.cpp
     test_basic_integration.cpp
 )
 target_compile_options(fusilli_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
