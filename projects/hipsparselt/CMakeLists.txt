@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.25.2)
-project(hipsparselt VERSION 0.2.4 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.6 LANGUAGES CXX)
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
