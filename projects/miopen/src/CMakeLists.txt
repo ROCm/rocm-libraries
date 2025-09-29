@@ -585,7 +585,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenIm2d2Col.cpp
         kernels/MIOpenIm3d2Col.cpp
         kernels/MIOpenCol2Im2d.cpp
-        kernels/MIOpenCol2Im3d.cl
+        kernels/MIOpenCol2Im3d.cpp
         kernels/MIOpenConvBwdWrWS2.cl
         kernels/MIOpenGroupConvBwdWrWS2.cl
         kernels/MIOpenConvBwdWrW_LxG_P53.cl

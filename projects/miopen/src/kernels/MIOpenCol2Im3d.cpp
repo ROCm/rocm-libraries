@@ -37,88 +37,88 @@
 #error "MIOPEN_USE_64BIT_INDEX must be defined"
 #endif
 
-__kernel void Col2Im3dU(global _FLOAT* col,
-                        const uint col_d,
-                        const uint col_h,
-                        const uint col_w,
-                        const uint wei_d,
-                        const uint wei_h,
-                        const uint wei_w,
-                        const uint pad_d,
-                        const uint pad_h,
-                        const uint pad_w,
-                        const uint stride_d,
-                        const uint stride_h,
-                        const uint stride_w,
-                        const uint dilation_d,
-                        const uint dilation_h,
-                        const uint dilation_w,
-                        const uint depth,
-                        const uint height,
-                        const uint width,
-                        global _FLOAT* im,
+extern "C" __global__ void Col2Im3dU(FLOAT* col,
+                        const unsigned int col_d,
+                        const unsigned int col_h,
+                        const unsigned int col_w,
+                        const unsigned int wei_d,
+                        const unsigned int wei_h,
+                        const unsigned int wei_w,
+                        const unsigned int pad_d,
+                        const unsigned int pad_h,
+                        const unsigned int pad_w,
+                        const unsigned int stride_d,
+                        const unsigned int stride_h,
+                        const unsigned int stride_w,
+                        const unsigned int dilation_d,
+                        const unsigned int dilation_h,
+                        const unsigned int dilation_w,
+                        const unsigned int depth,
+                        const unsigned int height,
+                        const unsigned int width,
+                        FLOAT* im,
                         const unsigned long im_offset)
 {
-    global _FLOAT* im_off = im + im_offset;
-    uint gid              = (uint)get_global_id(0);
+    FLOAT* im_off = im + im_offset;
+    unsigned int gid              = blockIdx.x * blockDim.x + threadIdx.x;;
 
-    uint im_ch = gid / (width * height * depth);
-    uint itmp  = gid % (width * height * depth);
-    uint im_d  = itmp / (width * height);
+    unsigned int im_ch = gid / (width * height * depth);
+    unsigned int itmp  = gid % (width * height * depth);
+    unsigned int im_d  = itmp / (width * height);
     itmp       = itmp % (width * height);
-    uint im_h  = itmp / width;
-    uint im_w  = itmp % width;
+    unsigned int im_h  = itmp / width;
+    unsigned int im_w  = itmp % width;
 
     im_d += pad_d;
     im_h += pad_h;
     im_w += pad_w;
 
-    uint start_d = (im_d < dilation_d * (wei_d - 1) + 1)
+    unsigned int start_d = (im_d < dilation_d * (wei_d - 1) + 1)
                        ? 0
                        : (im_d - (dilation_d * (wei_d - 1) + 1)) / stride_d + 1;
-    uint end_d   = min(col_d, im_d / stride_d + 1);
+    unsigned int end_d   = min(col_d, im_d / stride_d + 1);
 
-    uint start_h = (im_h < dilation_h * (wei_h - 1) + 1)
+    unsigned int start_h = (im_h < dilation_h * (wei_h - 1) + 1)
                        ? 0
                        : (im_h - (dilation_h * (wei_h - 1) + 1)) / stride_h + 1;
-    uint end_h   = min(col_h, im_h / stride_h + 1);
+    unsigned int end_h   = min(col_h, im_h / stride_h + 1);
 
-    uint start_w = (im_w < dilation_w * (wei_w - 1) + 1)
+    unsigned int start_w = (im_w < dilation_w * (wei_w - 1) + 1)
                        ? 0
                        : (im_w - (dilation_w * (wei_w - 1) + 1)) / stride_w + 1;
-    uint end_w   = min(col_w, im_w / stride_w + 1);
+    unsigned int end_w   = min(col_w, im_w / stride_w + 1);
 
 #if MIOPEN_USE_64BIT_INDEX
     ulong ch_offset = (ulong)im_ch * col_d * col_w * col_h * wei_d * wei_w * wei_h;
 #else
-    uint ch_offset = im_ch * col_d * col_w * col_h * wei_d * wei_w * wei_h;
+    unsigned int ch_offset = im_ch * col_d * col_w * col_h * wei_d * wei_w * wei_h;
 #endif
 
     col += ch_offset;
 
-    _FLOAT_ACCUM tmp = (_FLOAT_ACCUM)0;
+    FLOAT_ACCUM tmp = (FLOAT_ACCUM)0;
 
-    for(uint cz = start_d; cz < end_d; cz++)
+    for(unsigned int cz = start_d; cz < end_d; cz++)
     {
-        for(uint cy = start_h; cy < end_h; cy++)
+        for(unsigned int cy = start_h; cy < end_h; cy++)
         {
-            for(uint cx = start_w; cx < end_w; cx++)
+            for(unsigned int cx = start_w; cx < end_w; cx++)
             {
                 if((im_d - cz * stride_d) % dilation_d == 0 &&
                    (im_h - cy * stride_h) % dilation_h == 0 &&
                    (im_w - cx * stride_w) % dilation_w == 0)
                 {
-                    uint z = (im_d - cz * stride_d) / dilation_d;
-                    uint y = (im_h - cy * stride_h) / dilation_h;
-                    uint x = (im_w - cx * stride_w) / dilation_w;
+                    unsigned int z = (im_d - cz * stride_d) / dilation_d;
+                    unsigned int y = (im_h - cy * stride_h) / dilation_h;
+                    unsigned int x = (im_w - cx * stride_w) / dilation_w;
 
 #if MIOPEN_USE_64BIT_INDEX
-                    ulong col_off =
-                        ((((((ulong)z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h + cy) *
+                    unsigned long col_off =
+                        ((((((unsigned long)z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h + cy) *
                             col_w +
                         cx;
 #else
-                    uint col_off =
+                    unsigned int col_off =
                         (((((z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h + cy) * col_w + cx;
 #endif
 
