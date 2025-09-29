@@ -302,10 +302,10 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     using namespace DGen;
 
     DataGeneratorOptions opt;
-    opt.min          = min_val;
-    opt.max          = max_val;
+    opt.min          = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
+    opt.max          = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ?  .5 : max_val);
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    opt.pattern      = initMethod == "Bounded" ? Bounded : Trigonometric;
+    opt.pattern      = initMethod == "trig_float" ? Trigonometric : Bounded;
 
     const uint32_t seed = 1713573849;
 
