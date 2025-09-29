@@ -91,6 +91,57 @@ int miopenBNSpatialFwdInferHost(miopenTensorDescriptor_t& inputTensor,
 }
 
 template <typename Tgpu, typename Tref>
+int miopenBNSpatialFwdInferHost_mt(miopenTensorDescriptor_t& inputTensor,
+                                   const Tref* in_ptr,
+                                   Tref* out_ptr,
+                                   const Tgpu* scale_ptr,
+                                   const Tgpu* bias_ptr,
+                                   double epsilon,
+                                   const Tgpu* estimatedMean,
+                                   const Tgpu* estimatedVariance)
+{
+    int nIn, cIn, hIn, wIn;
+    miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
+
+    int n_batchs = nIn;
+    int channels = cIn;
+    int height   = hIn;
+    int width    = wIn;
+
+    unsigned int in_nstride = channels * height * width;
+    unsigned int in_cstride = height * width;
+
+    int ret = 0;
+
+    par_for(channels, 1, [&](int cidx) {
+        double mean       = estimatedMean[cidx];
+        double variance   = estimatedVariance[cidx];
+        double invertVar  = 1.0 / sqrt(variance + epsilon);
+        uint32_t adjIndex = 0;
+        uint32_t index    = 0;
+        double elemStd    = 0.0;
+        double inhat      = 0.0;
+        // process the batch per channel
+        for(int row = 0; row < height; row++)
+        { // via rows
+            for(int column = 0; column < width; column++)
+            { // via columns
+                adjIndex = in_cstride * cidx + width * row + column;
+                for(int bidx = 0; bidx < n_batchs; bidx++)
+                { // via mini_batch
+                    index          = in_nstride * bidx + adjIndex;
+                    elemStd        = in_ptr[index] - mean;
+                    inhat          = elemStd * invertVar;
+                    out_ptr[index] = scale_ptr[cidx] * inhat + bias_ptr[cidx];
+                } // end for (n)
+            }
+        }
+    });
+
+    return (ret);
+}
+
+template <typename Tgpu, typename Tref>
 int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
                                  const Tref* in_ptr,
                                  Tref* out_ptr,
@@ -145,6 +196,62 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
             }     // for (column)
         }
     }
+    return (ret);
+}
+
+template <typename Tgpu, typename Tref>
+int miopenBNPerActivFwdInferHost_mt(miopenTensorDescriptor_t& inputTensor,
+                                    const Tref* in_ptr,
+                                    Tref* out_ptr,
+                                    const Tgpu* scale_ptr,
+                                    const Tgpu* bias_ptr,
+                                    double epsilon,
+                                    const Tgpu* estimatedMean,
+                                    const Tgpu* estimatedVariance)
+{ // use running mean and variance
+    int nIn, cIn, hIn, wIn;
+    miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
+
+    int n_batchs = nIn;
+    int channels = cIn;
+    int height   = hIn;
+    int width    = wIn;
+
+    unsigned int in_nstride = channels * height * width;
+    unsigned int in_cstride = height * width;
+
+    int ret = 0;
+    par_for(channels, 1, [&](size_t cidx) {
+        uint32_t adjIndex = 0;
+        double mean       = 0.0;
+        double variance   = 0.0;
+        double elemInvVar = 0.0;
+        uint32_t index    = 0.0;
+        double elemStd    = 0.0;
+        double inhat      = 0.0;
+
+        for(int row = 0; row < height; row++)
+        { // via rows
+            for(int column = 0; column < width; column++)
+            { // via columns
+                adjIndex   = in_cstride * cidx + width * row + column;
+                mean       = estimatedMean[adjIndex];
+                variance   = estimatedVariance[adjIndex];
+                elemInvVar = 1.0 / double(sqrt(variance + epsilon));
+                for(int bidx = 0; bidx < n_batchs; bidx++)
+                { // via mini_batch
+                    index = in_nstride * bidx + adjIndex;
+                    // per (x-dims) channel load a block of data into LDS
+                    elemStd = in_ptr[index] - mean; // (x_i - mean)
+                    inhat   = elemStd * elemInvVar;
+                    // #5 Gamma and Beta adjust
+                    // y_i = gamma*x_hat + beta
+                    out_ptr[index] = (scale_ptr[adjIndex] * inhat) + bias_ptr[adjIndex];
+                } // end for(n_batchs)
+            }     // for (column)
+        }
+    });
+
     return (ret);
 }
 
