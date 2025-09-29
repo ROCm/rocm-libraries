@@ -532,10 +532,8 @@ def streamk_sweep():
             for mac_m in [64, 128]:
                 for mac_n in [64, 128, 256]:
                     for mac_k in [16, 32, 64]:
-                        if (
-                            twoTile
-                            or twoTileDPFirst
-                            and mac_m * mac_n * mac_k >= (64 * 256 * 64)
+                        if (twoTile or twoTileDPFirst) and mac_m * mac_n * mac_k >= (
+                            64 * 256 * 64
                         ):
                             # currently these run out of VGPRs.
                             pass
