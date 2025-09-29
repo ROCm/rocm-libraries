@@ -37,7 +37,7 @@ endif()
 
 # --- Build options and validation ---
 
-option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
 cmake_dependent_option(
