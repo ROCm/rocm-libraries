@@ -310,6 +310,8 @@ if (BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipfft-coverage_*.profraw -o ./coverage-report/hipfft.profdata
     COMMAND ${LLVM_COV} report -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata
     COMMAND ${LLVM_COV} show -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/libhipfftw.so -object ./library/libhipfft.so -instr-profile=./coverage-report/hipfft.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
+
 endif()
