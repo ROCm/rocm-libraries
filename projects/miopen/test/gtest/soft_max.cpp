@@ -52,6 +52,31 @@ struct TestCase
     miopenSoftmaxMode_t mode;
 };
 
+std::string PrintToString(const TestCase& test_case)
+{
+    std::stringstream ss;
+    ss << "{in_dim = {";
+    for(auto i = 0; i + 1 < test_case.in_dim.size(); ++i)
+    {
+        ss << test_case.in_dim[i] << ", ";
+    }
+    if(test_case.in_dim.size() > 0)
+    {
+        ss << test_case.in_dim[test_case.in_dim.size() - 1];
+    }
+    ss << "}, scale = {";
+    for(auto i = 0; i + 1 < test_case.scale.size(); ++i)
+    {
+        ss << test_case.scale[i] << ", ";
+    }
+    if(test_case.scale.size() > 0)
+    {
+        ss << test_case.scale[test_case.scale.size() - 1];
+    }
+    ss << "}, algo = " << test_case.algo << ", mode = " << test_case.mode << "}";
+    return ss.str();
+}
+
 template <typename T>
 void AddTestCasesForDifferentScales(std::vector<TestCase>& test_cases,
                                     const std::vector<size_t>& in_dim,
