@@ -249,6 +249,7 @@ endif( )
 target_link_libraries( hipfft-test
   PRIVATE
   Threads::Threads
+  ${CMAKE_DL_LIBS}
   )
 
 # hipfft-test will opens the hipfftw library but does not link to it
