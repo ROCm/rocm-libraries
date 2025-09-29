@@ -605,14 +605,14 @@ TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllFloats)
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, true);
 }
 
-// TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllHalfs)
-// {
-//     TestCpuReferenceGraphExecutor::runBatchnormTrainTest<half, half, half>(
-//         DataType::HALF, DataType::HALF, DataType::HALF);
-// }
+TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<half, half, half>(
+        DataType::HALF, DataType::HALF, DataType::HALF);
+}
 
-// TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllBFloat16)
-// {
-//     TestCpuReferenceGraphExecutor::runBatchnormTrainTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
-//         DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
-// }
+TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}

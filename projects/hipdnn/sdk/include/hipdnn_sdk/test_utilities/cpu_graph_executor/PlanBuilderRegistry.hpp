@@ -42,17 +42,16 @@ constexpr std::array<BatchnormBwdSignatureKey, 3> ALL_SUPPORTED_BATCHNORM_BWD_SI
                                 hipdnn_sdk::data_objects::DataType::BFLOAT16,
                                 hipdnn_sdk::data_objects::DataType::BFLOAT16)};
 
-constexpr std::array<BatchnormTrainSignatureKey, 1> ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES
+constexpr std::array<BatchnormTrainSignatureKey, 3> ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES
     = {BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
                                   hipdnn_sdk::data_objects::DataType::FLOAT,
-                                  hipdnn_sdk::data_objects::DataType::FLOAT) /*,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT),
        BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType::HALF,
                                   hipdnn_sdk::data_objects::DataType::HALF,
                                   hipdnn_sdk::data_objects::DataType::HALF),
        BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType::BFLOAT16,
                                   hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                                  hipdnn_sdk::data_objects::DataType::BFLOAT16)
-           */ };
+                                  hipdnn_sdk::data_objects::DataType::BFLOAT16)};
 
 class PlanBuilderRegistry
 {

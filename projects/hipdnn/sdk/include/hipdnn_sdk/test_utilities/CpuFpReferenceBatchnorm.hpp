@@ -92,24 +92,25 @@ public:
         auto nChannels = x.dims().at(1);
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
 
-        auto nhw = static_cast<MeanVarianceDataType>(elementsPerChannel);
+        auto nhw = static_cast<MeanVarianceDataType>(static_cast<float>(elementsPerChannel));
 
         std::vector<int64_t> channels(static_cast<size_t>(nChannels));
         std::iota(channels.begin(), channels.end(), 0);
 
         std::for_each(channels.begin(), channels.end(), [&](int64_t cidx) {
-            MeanVarianceDataType meanAccum = 0.0;
-            MeanVarianceDataType varianceAccum = 0.0;
+            auto meanAccum = static_cast<MeanVarianceDataType>(0.0);
+            auto varianceAccum = static_cast<MeanVarianceDataType>(0.0);
 
             // Calculate mean and variance for this channel
             iterateChannelElements(
                 x, cidx, elementsPerChannel, [&](const std::vector<int64_t>& indices) {
                     auto inVal = x.getHostValue(indices);
-                    meanAccum += inVal;
-                    varianceAccum += inVal * inVal;
+                    // for half no += operator exists
+                    meanAccum = meanAccum + inVal;
+                    varianceAccum = varianceAccum + inVal * inVal;
                 });
 
-            MeanVarianceDataType channelMean = meanAccum /= nhw;
+            MeanVarianceDataType channelMean = meanAccum = meanAccum / nhw;
             MeanVarianceDataType channelVariance
                 = (varianceAccum / nhw) - (channelMean * channelMean);
 
@@ -151,8 +152,9 @@ public:
 
                 auto currentVar = prevRunningVariance->getHostValue(0, cidx);
                 // Apply Bessel's correction for unbiased variance estimate
-                auto adjustedVariance
-                    = (nhw == one) ? channelVariance : (nhw / (nhw - one)) * channelVariance;
+                auto adjustedVariance = (nhw == one) ? channelVariance
+                                                     : static_cast<MeanVarianceDataType>(
+                                                           (nhw / (nhw - one)) * channelVariance);
                 auto newVar = (one - momentum) * currentVar + momentum * adjustedVariance;
                 nextRunningVariance->setHostValue(newVar, 0, cidx);
             }
