@@ -9665,7 +9665,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                        std::vector<TTYPE>&       ell_val,          \
                                                        JTYPE&                    ell_width,        \
                                                        rocsparse_index_base      csr_base,         \
-                                                       rocsparse_index_base      ell_base);           \
+                                                       rocsparse_index_base      ell_base);             \
     template void host_csr_to_sell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,               \
                                                         JTYPE                     sell_slice_size, \
                                                         const std::vector<ITYPE>& csr_row_ptr,     \

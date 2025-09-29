@@ -50,8 +50,8 @@ struct sell_matrix
     array_t<J>             ind{};
     array_t<T>             val{};
 
-    sell_matrix() {};
-    ~sell_matrix() {};
+    sell_matrix(){};
+    ~sell_matrix(){};
 
     sell_matrix(
         J m_, J n_, I nnz_, J sell_slice_size_, I sell_colval_size_, rocsparse_index_base base_)
@@ -63,15 +63,11 @@ struct sell_matrix
         , base(base_)
         , ptr(((m - 1) / sell_slice_size + 1) + 1)
         , ind(sell_colval_size)
-        , val(sell_colval_size) {};
+        , val(sell_colval_size){};
 
     explicit sell_matrix(const sell_matrix<MODE, T, I, J>& that_, bool transfer = true)
-        : sell_matrix<MODE, T, I, J>(that_.m,
-                                     that_.n,
-                                     that_.nnz,
-                                     that_.sell_slice_size,
-                                     that_.sell_colval_size,
-                                     that_.base)
+        : sell_matrix<MODE, T, I, J>(
+            that_.m, that_.n, that_.nnz, that_.sell_slice_size, that_.sell_colval_size, that_.base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -83,12 +79,8 @@ struct sell_matrix
 
     template <memory_mode::value_t THAT_MODE>
     explicit sell_matrix(const sell_matrix<THAT_MODE, T, I, J>& that_, bool transfer = true)
-        : sell_matrix<MODE, T, I, J>(that_.m,
-                                     that_.n,
-                                     that_.nnz,
-                                     that_.sell_slice_size,
-                                     that_.sell_colval_size,
-                                     that_.base)
+        : sell_matrix<MODE, T, I, J>(
+            that_.m, that_.n, that_.nnz, that_.sell_slice_size, that_.sell_colval_size, that_.base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
