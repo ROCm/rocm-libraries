@@ -89,12 +89,6 @@ extern "C" {
 *  </table>
 *
 *  <table>
-*  <caption id="spmv_sell_algorithms">Sliced ELL Algorithms</caption>
-*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmv_alg_sell</td>   <td>Yes</td>        <td>No</td>       <td></td>
-*  </table>
-*
-*  <table>
 *  <caption id="spmv_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithm                 <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmv_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
