@@ -85,7 +85,7 @@ namespace KernelGraphTest
         EXPECT_THROW(KernelGraph::UpdateParameters(params).apply(graph0), FatalError);
     }
 
-    TEST_F(KernelGraphUpdateParametersTest, SetWorkitemCount_Z123)
+    TEST_F(KernelGraphUpdateParametersTest, SetWorkitemCount)
     {
         using namespace rocRoller::KernelGraph;
 

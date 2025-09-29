@@ -1024,7 +1024,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC_D123)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
@@ -1116,7 +1116,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK_A123)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1137,11 +1137,6 @@ namespace GEMMDriverTest
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
 
-        gemm.workgroupMappingDim   = 1;
-        gemm.workgroupMappingValue = 4;
-
-        gemm.workgroupRemapXCC = true;
-
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
         //gemm.prefetch         = true;
@@ -1158,7 +1153,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK_B123)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1186,11 +1181,6 @@ namespace GEMMDriverTest
 
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
-
-        gemm.workgroupMappingDim   = 0;
-        gemm.workgroupMappingValue = 2;
-
-        //gemm.workgroupRemapXCC     = true;
 
         // TODO: Does not work with unrolling K
         //gemm.unrollK          = 2;
@@ -1249,6 +1239,46 @@ namespace GEMMDriverTest
         {
             gemm.streamKTwoTile = twoTile;
             basicGEMM<Half>(gemm);
+        }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
+    {
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
+        {
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamKWorkgroupMapping test";
+        }
+
+        GEMMProblem gemm;
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.numWGs = deviceProperties.multiProcessorCount;
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
+
+        gemm.streamK = true;
+        gemm.k       = gemm.macK * 8;
+
+        for(auto workgroupMappingDim : {0, 1})
+        {
+            for(auto workgroupMappingValue : {1, 2, 6})
+            {
+                for(auto workgroupRemapXCC : {true, false})
+                {
+                    for(auto twoTile : {true, false})
+                    {
+                        gemm.workgroupMappingDim   = workgroupMappingDim;
+                        gemm.workgroupMappingValue = workgroupMappingValue;
+                        gemm.workgroupRemapXCC     = workgroupRemapXCC;
+                        gemm.streamKTwoTile        = twoTile;
+                        basicGEMM<float>(gemm);
+                    }
+                }
+            }
         }
     }
 

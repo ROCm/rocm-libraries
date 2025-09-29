@@ -32,13 +32,11 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Connect unbound (leaf) MacroTileNumber coordinates
-         * to Workgroups.
-         *
-         * This transform searches for MacroTileNumber coordinates
-         * that are leafs (don't have outgoing/incoming edges), and
-         * attaches Workgroup coordinates to them.
-         */
+     * @brief Perform workgroup mapping by connecting dangling
+     * MacroTileNumber dimensions with workgroup using
+     * PiecewiseAffineJoin edges.
+     *
+     */
         class RemapOutputTiles : public GraphTransform
         {
         public:
