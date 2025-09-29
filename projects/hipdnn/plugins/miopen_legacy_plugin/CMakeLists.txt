@@ -1,13 +1,22 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     message(STATUS "Building miopen legacy plugin standalone")
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     
+    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to ROCm installation")
+    
+    if(EXISTS ${ROCM_PATH}/llvm/bin)
+        set(CMAKE_CXX_COMPILER ${ROCM_PATH}/llvm/bin/clang++)
+        set(CMAKE_C_COMPILER ${ROCM_PATH}/llvm/bin/clang)
+        message(STATUS "Using ROCm Clang compilers from ${ROCM_PATH}/llvm/bin")
+    endif()
+    
     if(NOT WIN32)
-        set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
+        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
     endif()
 
     set(MIOPEN_LEGACY_PLUGIN "0.0.1")
@@ -17,6 +26,19 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         LANGUAGES CXX)
         
     set(CMAKE_CXX_STANDARD 17)
+    
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+    
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+    
+    # Enable testing for standalone build
+    option(HIP_DNN_SKIP_TESTS "Skip building tests" OFF)
+    
+    if(NOT HIP_DNN_SKIP_TESTS)
+        enable_testing()
+    endif()
 
     list(PREPEND HIPDNN_WARNING_COMPILE_OPTIONS
         -Werror                                  # Treat all warnings as errors
@@ -46,16 +68,23 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         ${ROCM_PATH}/llvm
         ${ROCM_PATH}
         ${ROCM_PATH}/hip
-        /opt/rocm/llvm
-        /opt/rocm
-        /opt/rocm/hip 
     )
     
     find_package(hip REQUIRED)
     find_package(hipdnn_sdk CONFIG REQUIRED)
+    
+    # Setup testing dependencies for standalone build
+    include(Dependencies)
+    
 else()
     message(STATUS "Building miopen legacy plugin as a dependency")
 endif()
+
+set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
+
+message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
+message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
+file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 find_package(miopen CONFIG REQUIRED)
 
@@ -82,9 +111,13 @@ target_include_directories(miopen_legacy_plugin_private
 )
 target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_sdk)
 target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(miopen_legacy_plugin_private PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
 
-clang_tidy_check(miopen_legacy_plugin_private)
-
+if(BUILD_PLUGIN_AS_DEPENDENCY)
+    clang_tidy_check(miopen_legacy_plugin_private)
+endif()
 
 add_library(miopen_legacy_plugin SHARED
     MiopenLegacyPlugin.cpp
@@ -95,17 +128,24 @@ target_compile_definitions(miopen_legacy_plugin PRIVATE
 target_link_libraries(miopen_legacy_plugin PRIVATE miopen_legacy_plugin_private)
 target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL") # Hide symbols from linked static libs
 target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-set_target_properties(miopen_legacy_plugin PROPERTIES 
+set_target_properties(miopen_legacy_plugin PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    BUILD_WITH_INSTALL_RPATH TRUE
 )
 
-clang_tidy_check(miopen_legacy_plugin)
+if(BUILD_PLUGIN_AS_DEPENDENCY)
+    clang_tidy_check(miopen_legacy_plugin)
+endif()
 
 set(MIOPEN_LEGACY_PLUGIN_PATH ./hipdnn_plugins/engines/miopen_legacy_plugin CACHE INTERNAL "miopen legacy plugin dir" FORCE)
 
-add_subdirectory(tests)
-add_subdirectory(integration_tests)
+if(NOT HIP_DNN_SKIP_TESTS)
+    add_subdirectory(tests)
+    add_subdirectory(integration_tests)
+endif()
 
 install(
     TARGETS miopen_legacy_plugin

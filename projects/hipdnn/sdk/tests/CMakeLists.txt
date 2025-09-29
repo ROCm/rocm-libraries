@@ -38,15 +38,15 @@ add_executable(hipdnn_sdk_tests
     test_utilities/TestCpuFpReferenceUtilities.cpp
     test_utilities/TestCpuFpReferenceValidation.cpp
     test_utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
+    test_utilities/TestCpuReferencePointwise.cpp
     test_utilities/TestTempDirectory.cpp
     test_utilities/TestScopedEnvironmentVariableSetter.cpp
     test_utilities/TestLoggingUtils.cpp
     test_utilities/TestFlatbufferDatatypeMapping.cpp
+    test_utilities/TestFlatbufferTensorAttributesUtils.cpp
     test_utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
-    test_utilities/cpu_graph_executor/TestTensorVariant.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormSignatureRegistryKey.cpp
-
-
+    test_utilities/cpu_graph_executor/TestBatchnormFwdInferenceSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
 
 )
 
@@ -57,6 +57,7 @@ target_compile_definitions(hipdnn_sdk_tests PRIVATE
 target_compile_options(hipdnn_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(hipdnn_sdk_tests 
     GTest::gtest
+    GTest::gmock
     Threads::Threads
     hipdnn_sdk
     hip::host

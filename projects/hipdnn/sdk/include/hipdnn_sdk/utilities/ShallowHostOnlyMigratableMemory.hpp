@@ -76,7 +76,7 @@ public:
         return MemoryLocation::HOST;
     }
 
-    void resize(size_t) override
+    void resize([[maybe_unused]] size_t size) override
     {
         throwNotSupported();
     }

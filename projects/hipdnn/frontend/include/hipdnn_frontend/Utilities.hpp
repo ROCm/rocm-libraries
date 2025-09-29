@@ -84,10 +84,10 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
         return -1;
     }
 
-    static bool loggingInitialized = false;
-    static bool loggingEnabled = hipdnn_sdk::logging::isLoggingEnabled();
+    static bool s_loggingInitialized = false;
+    static bool s_loggingEnabled = hipdnn_sdk::logging::isLoggingEnabled();
 
-    if(loggingInitialized || !loggingEnabled)
+    if(s_loggingInitialized || !s_loggingEnabled)
     {
         return 0;
     }
@@ -98,7 +98,7 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
     return -1;
 #endif
 
-    loggingInitialized = true;
+    s_loggingInitialized = true;
     HIPDNN_LOG_INFO("Frontend logging initialized via callback.");
 
     return 0;
