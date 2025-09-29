@@ -2721,7 +2721,7 @@ rocsparse_status rocsparse_create_sell_descr(rocsparse_spmat_descr* descr,
                                              int64_t                rows,
                                              int64_t                cols,
                                              int64_t                nnz,
-                                             int64_t                slice_size,
+                                             int64_t                sell_slice_size,
                                              int64_t                sell_colval_size,
                                              void*                  sell_slice_offsets,
                                              void*                  sell_col_ind,
@@ -2738,12 +2738,12 @@ try
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
     ROCSPARSE_CHECKARG_SIZE(3, nnz);
-    ROCSPARSE_CHECKARG_SIZE(4, slice_size);
-    ROCSPARSE_CHECKARG(4, slice_size, (slice_size == 0), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG_SIZE(4, sell_slice_size);
+    ROCSPARSE_CHECKARG(4, sell_slice_size, (sell_slice_size == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, sell_colval_size);
 
     ROCSPARSE_CHECKARG(3, nnz, (nnz > sell_colval_size), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG(4, slice_size, (slice_size > rows), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(4, sell_slice_size, (sell_slice_size > rows), rocsparse_status_invalid_size);
 
     ROCSPARSE_CHECKARG_ARRAY(6, rows, sell_slice_offsets);
     ROCSPARSE_CHECKARG_ARRAY(7, sell_colval_size, sell_col_ind);
@@ -2761,7 +2761,7 @@ try
     (*descr)->cols = cols;
     (*descr)->nnz  = nnz;
 
-    (*descr)->slice_size       = slice_size;
+    (*descr)->sell_slice_size  = sell_slice_size;
     (*descr)->sell_colval_size = sell_colval_size;
 
     (*descr)->row_data = sell_slice_offsets;
@@ -2802,7 +2802,7 @@ rocsparse_status rocsparse_create_const_sell_descr(rocsparse_const_spmat_descr* 
                                                    int64_t                      rows,
                                                    int64_t                      cols,
                                                    int64_t                      nnz,
-                                                   int64_t                      slice_size,
+                                                   int64_t                      sell_slice_size,
                                                    int64_t                      sell_colval_size,
                                                    const void*                  sell_slice_offsets,
                                                    const void*                  sell_col_ind,
@@ -2819,14 +2819,14 @@ try
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
     ROCSPARSE_CHECKARG_SIZE(3, nnz);
-    ROCSPARSE_CHECKARG_SIZE(4, slice_size);
-    ROCSPARSE_CHECKARG(4, slice_size, (slice_size == 0), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG_SIZE(4, sell_slice_size);
+    ROCSPARSE_CHECKARG(4, sell_slice_size, (sell_slice_size == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, sell_colval_size);
 
     ROCSPARSE_CHECKARG(3, nnz, (nnz > sell_colval_size), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG(4, slice_size, (slice_size > rows), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(4, sell_slice_size, (sell_slice_size > rows), rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, (rows / slice_size + 1), sell_slice_offsets);
+    ROCSPARSE_CHECKARG_ARRAY(6, (rows / sell_slice_size + 1), sell_slice_offsets);
     ROCSPARSE_CHECKARG_ARRAY(7, sell_colval_size, sell_col_ind);
     ROCSPARSE_CHECKARG_ARRAY(8, sell_colval_size, sell_val);
 
@@ -2843,7 +2843,7 @@ try
     new_descr->cols = cols;
     new_descr->nnz  = nnz;
 
-    new_descr->slice_size       = slice_size;
+    new_descr->sell_slice_size  = sell_slice_size;
     new_descr->sell_colval_size = sell_colval_size;
 
     new_descr->row_data = nullptr;
@@ -3744,7 +3744,7 @@ rocsparse_status rocsparse_sell_get(const rocsparse_spmat_descr descr,
                                     int64_t*                    rows,
                                     int64_t*                    cols,
                                     int64_t*                    nnz,
-                                    int64_t*                    slice_size,
+                                    int64_t*                    sell_slice_size,
                                     int64_t*                    sell_colval_size,
                                     void**                      sell_slice_offsets,
                                     void**                      sell_col_ind,
@@ -3762,7 +3762,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
-    ROCSPARSE_CHECKARG_POINTER(4, slice_size);
+    ROCSPARSE_CHECKARG_POINTER(4, sell_slice_size);
     ROCSPARSE_CHECKARG_POINTER(5, sell_colval_size);
     ROCSPARSE_CHECKARG_POINTER(6, sell_slice_offsets);
     ROCSPARSE_CHECKARG_POINTER(7, sell_col_ind);
@@ -3775,7 +3775,7 @@ try
     *rows             = descr->rows;
     *cols             = descr->cols;
     *nnz              = descr->nnz;
-    *slice_size       = descr->slice_size;
+    *sell_slice_size  = descr->sell_slice_size;
     *sell_colval_size = descr->sell_colval_size;
 
     *sell_slice_offsets = descr->row_data;
@@ -3800,7 +3800,7 @@ rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
                                           int64_t*                    rows,
                                           int64_t*                    cols,
                                           int64_t*                    nnz,
-                                          int64_t*                    slice_size,
+                                          int64_t*                    sell_slice_size,
                                           int64_t*                    sell_colval_size,
                                           const void**                sell_slice_offsets,
                                           const void**                sell_col_ind,
@@ -3818,7 +3818,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, rows);
     ROCSPARSE_CHECKARG_POINTER(2, cols);
     ROCSPARSE_CHECKARG_POINTER(3, nnz);
-    ROCSPARSE_CHECKARG_POINTER(4, slice_size);
+    ROCSPARSE_CHECKARG_POINTER(4, sell_slice_size);
     ROCSPARSE_CHECKARG_POINTER(5, sell_colval_size);
     ROCSPARSE_CHECKARG_POINTER(6, sell_slice_offsets);
     ROCSPARSE_CHECKARG_POINTER(7, sell_col_ind);
@@ -3831,7 +3831,7 @@ try
     *rows             = descr->rows;
     *cols             = descr->cols;
     *nnz              = descr->nnz;
-    *slice_size       = descr->slice_size;
+    *sell_slice_size  = descr->sell_slice_size;
     *sell_colval_size = descr->sell_colval_size;
 
     *sell_slice_offsets = descr->const_row_data;

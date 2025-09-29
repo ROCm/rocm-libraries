@@ -2429,7 +2429,7 @@ void host_sellmv(rocsparse_operation  trans,
                  J                    M,
                  J                    N,
                  I                    nnz,
-                 J                    slice_size,
+                 J                    sell_slice_size,
                  I                    sell_colval_size,
                  T                    alpha,
                  const I*             sell_slice_offsets,
@@ -2444,7 +2444,7 @@ void host_sellmv(rocsparse_operation  trans,
 
     bool conj = (trans == rocsparse_operation_conjugate_transpose);
 
-    J nslices = (M - 1) / slice_size + 1;
+    J nslices = (M - 1) / sell_slice_size + 1;
 
     if(trans == rocsparse_operation_none)
     {
@@ -2453,10 +2453,10 @@ void host_sellmv(rocsparse_operation  trans,
             I slice_start = sell_slice_offsets[slice] - base;
             I slice_end   = sell_slice_offsets[slice + 1] - base;
 
-            std::vector<T> sums(slice_size, 0);
+            std::vector<T> sums(sell_slice_size, 0);
             for(I j = slice_start; j < slice_end; j++)
             {
-                J local_row = j % slice_size;
+                J local_row = j % sell_slice_size;
                 J col       = sell_col_ind[j] - base;
                 if(col >= 0)
                 {
@@ -2465,9 +2465,9 @@ void host_sellmv(rocsparse_operation  trans,
                 }
             }
 
-            for(J local_row = 0; local_row < slice_size; local_row++)
+            for(J local_row = 0; local_row < sell_slice_size; local_row++)
             {
-                J row = slice_size * slice + local_row;
+                J row = sell_slice_size * slice + local_row;
 
                 if(row < M)
                 {
@@ -2501,7 +2501,7 @@ void host_sellmv(rocsparse_operation  trans,
 
             for(I j = slice_start; j < slice_end; j++)
             {
-                J row = slice_size * slice + j % slice_size;
+                J row = sell_slice_size * slice + j % sell_slice_size;
                 J col = sell_col_ind[j] - base;
                 A val = conj_val(sell_val[j], conj);
                 if(col >= 0)
@@ -8282,7 +8282,7 @@ void host_csr_to_ell(J                     M,
 
 template <typename I, typename J, typename T>
 void host_csr_to_sell(J                     M,
-                      J                     slice_size,
+                      J                     sell_slice_size,
                       const std::vector<I>& csr_row_ptr,
                       const std::vector<J>& csr_col_ind,
                       const std::vector<T>& csr_val,
@@ -8295,7 +8295,7 @@ void host_csr_to_sell(J                     M,
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-    J nslices = (M - 1) / slice_size + 1;
+    J nslices = (M - 1) / sell_slice_size + 1;
 
     sell_slice_offsets.resize(nslices + 1, 0);
     sell_slice_offsets[0] = sell_base;
@@ -8306,9 +8306,9 @@ void host_csr_to_sell(J                     M,
     for(I slice = 0; slice < nslices; slice++)
     {
         J max_row_length_in_slice = 0;
-        for(J s = 0; s < slice_size; s++)
+        for(J s = 0; s < sell_slice_size; s++)
         {
-            J row = slice_size * slice + s;
+            J row = sell_slice_size * slice + s;
 
             if(row < M)
             {
@@ -8320,7 +8320,7 @@ void host_csr_to_sell(J                     M,
             }
         }
 
-        sell_colval_size += slice_size * max_row_length_in_slice;
+        sell_colval_size += sell_slice_size * max_row_length_in_slice;
 
         sell_slice_offsets[slice + 1] += sell_colval_size + sell_base;
     }
@@ -8339,9 +8339,9 @@ void host_csr_to_sell(J                     M,
     {
         I slice_start = sell_slice_offsets[slice] - sell_base;
 
-        for(J s = 0; s < slice_size; s++)
+        for(J s = 0; s < sell_slice_size; s++)
         {
-            J row = slice_size * slice + s;
+            J row = sell_slice_size * slice + s;
 
             if(row < M)
             {
@@ -8353,8 +8353,8 @@ void host_csr_to_sell(J                     M,
                     J col = csr_col_ind[j] - csr_base;
                     T val = csr_val[j];
 
-                    sell_col_ind[slice_start + slice_size * (j - start) + s] = col + sell_base;
-                    sell_val[slice_start + slice_size * (j - start) + s]     = val;
+                    sell_col_ind[slice_start + sell_slice_size * (j - start) + s] = col + sell_base;
+                    sell_val[slice_start + sell_slice_size * (j - start) + s]     = val;
                 }
             }
         }
@@ -9656,26 +9656,26 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                     rocsparse_index_base base_C,             \
                                                     rocsparse_index_base base_D);
 
-#define INSTANTIATE_IJT_2(ITYPE, JTYPE, TTYPE)                                                   \
-    template void host_csr_to_ell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,              \
-                                                       const std::vector<ITYPE>& csr_row_ptr,    \
-                                                       const std::vector<JTYPE>& csr_col_ind,    \
-                                                       const std::vector<TTYPE>& csr_val,        \
-                                                       std::vector<JTYPE>&       ell_col_ind,    \
-                                                       std::vector<TTYPE>&       ell_val,        \
-                                                       JTYPE&                    ell_width,      \
-                                                       rocsparse_index_base      csr_base,       \
+#define INSTANTIATE_IJT_2(ITYPE, JTYPE, TTYPE)                                                     \
+    template void host_csr_to_ell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,                \
+                                                       const std::vector<ITYPE>& csr_row_ptr,      \
+                                                       const std::vector<JTYPE>& csr_col_ind,      \
+                                                       const std::vector<TTYPE>& csr_val,          \
+                                                       std::vector<JTYPE>&       ell_col_ind,      \
+                                                       std::vector<TTYPE>&       ell_val,          \
+                                                       JTYPE&                    ell_width,        \
+                                                       rocsparse_index_base      csr_base,         \
                                                        rocsparse_index_base      ell_base);           \
-    template void host_csr_to_sell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,             \
-                                                        JTYPE                     slice_size,    \
-                                                        const std::vector<ITYPE>& csr_row_ptr,   \
-                                                        const std::vector<JTYPE>& csr_col_ind,   \
-                                                        const std::vector<TTYPE>& csr_val,       \
-                                                        std::vector<ITYPE>&  sell_slice_offsets, \
-                                                        std::vector<JTYPE>&  sell_col_ind,       \
-                                                        std::vector<TTYPE>&  sell_val,           \
-                                                        ITYPE&               sell_colval_size,   \
-                                                        rocsparse_index_base csr_base,           \
+    template void host_csr_to_sell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,               \
+                                                        JTYPE                     sell_slice_size, \
+                                                        const std::vector<ITYPE>& csr_row_ptr,     \
+                                                        const std::vector<JTYPE>& csr_col_ind,     \
+                                                        const std::vector<TTYPE>& csr_val,         \
+                                                        std::vector<ITYPE>&  sell_slice_offsets,   \
+                                                        std::vector<JTYPE>&  sell_col_ind,         \
+                                                        std::vector<TTYPE>&  sell_val,             \
+                                                        ITYPE&               sell_colval_size,     \
+                                                        rocsparse_index_base csr_base,             \
                                                         rocsparse_index_base ell_base);
 
 #define INSTANTIATE_IXYT(ITYPE, XTYPE, YTYPE, TTYPE)                                  \
@@ -9778,7 +9778,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                               JTYPE                M,                  \
                               JTYPE                N,                  \
                               ITYPE                nnz,                \
-                              JTYPE                slice_size,         \
+                              JTYPE                sell_slice_size,    \
                               ITYPE                sell_colval_size,   \
                               TTYPE                alpha,              \
                               const ITYPE*         sell_slice_offsets, \

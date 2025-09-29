@@ -495,7 +495,7 @@ Arguments:
   - col_block_dimA: rocsparse_int
   - row_block_dimB: rocsparse_int
   - col_block_dimB: rocsparse_int
-  - slice_size: rocsparse_int
+  - sell_slice_size: rocsparse_int
   - dimx: rocsparse_int
   - dimy: rocsparse_int
   - dimz: rocsparse_int
@@ -643,7 +643,7 @@ Defaults:
   col_block_dimA: 2
   row_block_dimB: 2
   col_block_dimB: 2
-  slice_size: 2
+  sell_slice_size: 2
   dimx: 1
   dimy: 1
   dimz: 1

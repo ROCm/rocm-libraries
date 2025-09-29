@@ -43,7 +43,7 @@ namespace rocsparse
     void sellmvn_kernel(J m,
                         J n,
                         I nnz,
-                        J slice_size,
+                        J sell_slice_size,
                         I sell_colval_size,
                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                         const I* __restrict__ sell_slice_offsets,
@@ -62,7 +62,7 @@ namespace rocsparse
             rocsparse::sellmvn_device<THREADS_PER_ROW>(m,
                                                        n,
                                                        nnz,
-                                                       slice_size,
+                                                       sell_slice_size,
                                                        sell_colval_size,
                                                        alpha,
                                                        sell_slice_offsets,
@@ -86,7 +86,7 @@ namespace rocsparse
     void sellmvn_large_slice_kernel(J m,
                                     J n,
                                     I nnz,
-                                    J slice_size,
+                                    J sell_slice_size,
                                     I sell_colval_size,
                                     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                     const I* __restrict__ sell_slice_offsets,
@@ -105,7 +105,7 @@ namespace rocsparse
             rocsparse::sellmvn_large_slice_device<BLOCKSIZE>(m,
                                                              n,
                                                              nnz,
-                                                             slice_size,
+                                                             sell_slice_size,
                                                              sell_colval_size,
                                                              alpha,
                                                              sell_slice_offsets,
@@ -130,7 +130,7 @@ namespace rocsparse
                         J                   m,
                         J                   n,
                         I                   nnz,
-                        J                   slice_size,
+                        J                   sell_slice_size,
                         I                   sell_colval_size,
                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                         const I* __restrict__ sell_slice_offsets,
@@ -148,7 +148,7 @@ namespace rocsparse
                                                        m,
                                                        n,
                                                        nnz,
-                                                       slice_size,
+                                                       sell_slice_size,
                                                        sell_colval_size,
                                                        alpha,
                                                        sell_slice_offsets,
@@ -172,7 +172,7 @@ namespace rocsparse
                                     J                   m,
                                     J                   n,
                                     I                   nnz,
-                                    J                   slice_size,
+                                    J                   sell_slice_size,
                                     I                   sell_colval_size,
                                     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                     const I* __restrict__ sell_slice_offsets,
@@ -190,7 +190,7 @@ namespace rocsparse
                                                              m,
                                                              n,
                                                              nnz,
-                                                             slice_size,
+                                                             sell_slice_size,
                                                              sell_colval_size,
                                                              alpha,
                                                              sell_slice_offsets,
@@ -208,7 +208,7 @@ namespace rocsparse
                                      J                         m,
                                      J                         n,
                                      I                         nnz,
-                                     J                         slice_size,
+                                     J                         sell_slice_size,
                                      I                         sell_colval_size,
                                      const T*                  alpha_device_host,
                                      const rocsparse_mat_descr descr,
@@ -224,25 +224,25 @@ namespace rocsparse
         // Stream
         hipStream_t stream = handle->stream;
 
-        const I nslices = (m - 1) / slice_size + 1;
+        const I nslices = (m - 1) / sell_slice_size + 1;
 
         const int32_t blocks_x = std::sqrt(nslices);
         const int32_t blocks_y = (nslices - 1) / blocks_x + 1;
 
         if(trans == rocsparse_operation_none)
         {
-            if(slice_size <= 128)
+            if(sell_slice_size <= 128)
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::sellmvn_kernel<8>),
                     dim3(blocks_x, blocks_y, 1),
-                    dim3(slice_size, 8),
-                    slice_size * 8 * sizeof(T),
+                    dim3(sell_slice_size, 8),
+                    sell_slice_size * 8 * sizeof(T),
                     stream,
                     m,
                     n,
                     nnz,
-                    slice_size,
+                    sell_slice_size,
                     sell_colval_size,
                     ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     sell_slice_offsets,
@@ -265,7 +265,7 @@ namespace rocsparse
                     m,
                     n,
                     nnz,
-                    slice_size,
+                    sell_slice_size,
                     sell_colval_size,
                     ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     sell_slice_offsets,
@@ -283,19 +283,19 @@ namespace rocsparse
             // Scale y with beta
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, n, beta_device_host, y));
 
-            if(slice_size <= 128)
+            if(sell_slice_size <= 128)
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::sellmvt_kernel<8>),
                     dim3(blocks_x, blocks_y, 1),
-                    dim3(slice_size, 8),
+                    dim3(sell_slice_size, 8),
                     0,
                     stream,
                     trans,
                     m,
                     n,
                     nnz,
-                    slice_size,
+                    sell_slice_size,
                     sell_colval_size,
                     ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     sell_slice_offsets,
@@ -318,7 +318,7 @@ namespace rocsparse
                     m,
                     n,
                     nnz,
-                    slice_size,
+                    sell_slice_size,
                     sell_colval_size,
                     ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     sell_slice_offsets,
@@ -341,7 +341,7 @@ rocsparse_status rocsparse::sellmv_template(rocsparse_handle          handle, //
                                             int64_t                   m_, //2
                                             int64_t                   n_, //3
                                             int64_t                   nnz_, //4
-                                            int64_t                   slice_size_, //5
+                                            int64_t                   sell_slice_size_, //5
                                             int64_t                   sell_colval_size_, //6
                                             const void*               alpha_device_host_, //7
                                             const rocsparse_mat_descr descr, //8
@@ -357,7 +357,7 @@ rocsparse_status rocsparse::sellmv_template(rocsparse_handle          handle, //
     const J  m                  = static_cast<J>(m_);
     const J  n                  = static_cast<J>(n_);
     const I  nnz                = static_cast<I>(nnz_);
-    const J  slice_size         = static_cast<J>(slice_size_);
+    const J  sell_slice_size    = static_cast<J>(sell_slice_size_);
     const I  sell_colval_size   = static_cast<I>(sell_colval_size_);
     const T* alpha_device_host  = reinterpret_cast<const T*>(alpha_device_host_);
     const A* sell_val           = reinterpret_cast<const A*>(sell_val_);
@@ -387,7 +387,7 @@ rocsparse_status rocsparse::sellmv_template(rocsparse_handle          handle, //
     ROCSPARSE_CHECKARG_SIZE(2, m);
     ROCSPARSE_CHECKARG_SIZE(3, n);
     ROCSPARSE_CHECKARG_SIZE(4, nnz);
-    ROCSPARSE_CHECKARG_SIZE(5, slice_size);
+    ROCSPARSE_CHECKARG_SIZE(5, sell_slice_size);
     ROCSPARSE_CHECKARG_SIZE(6, sell_colval_size);
 
     // Quick return if possible
@@ -425,7 +425,7 @@ rocsparse_status rocsparse::sellmv_template(rocsparse_handle          handle, //
     ROCSPARSE_CHECKARG_POINTER(12, x);
     ROCSPARSE_CHECKARG_POINTER(14, y);
 
-    if(slice_size == 1)
+    if(sell_slice_size == 1)
     {
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::csrmv_template<T, I, J, A, X, Y>(handle,
@@ -454,7 +454,7 @@ rocsparse_status rocsparse::sellmv_template(rocsparse_handle          handle, //
                                                          m,
                                                          n,
                                                          nnz,
-                                                         slice_size,
+                                                         sell_slice_size,
                                                          sell_colval_size,
                                                          alpha_device_host,
                                                          descr,
@@ -474,7 +474,7 @@ rocsparse_status rocsparse::sellmv_template(rocsparse_handle          handle, //
         int64_t                   m,                                        \
         int64_t                   n,                                        \
         int64_t                   nnz,                                      \
-        int64_t                   slice_size,                               \
+        int64_t                   sell_slice_size,                          \
         int64_t                   sell_colval_size,                         \
         const void*               alpha,                                    \
         const rocsparse_mat_descr descr,                                    \
@@ -506,7 +506,7 @@ INSTANTIATE(rocsparse_double_complex, int64_t, int64_t);
         int64_t                   m,                                        \
         int64_t                   n,                                        \
         int64_t                   nnz,                                      \
-        int64_t                   slice_size,                               \
+        int64_t                   sell_slice_size,                          \
         int64_t                   sell_colval_size,                         \
         const void*               alpha,                                    \
         const rocsparse_mat_descr descr,                                    \

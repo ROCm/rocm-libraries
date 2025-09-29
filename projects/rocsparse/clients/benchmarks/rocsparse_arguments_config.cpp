@@ -42,7 +42,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->col_block_dimA  = static_cast<rocsparse_int>(0);
         this->row_block_dimB  = static_cast<rocsparse_int>(0);
         this->col_block_dimB  = static_cast<rocsparse_int>(0);
-        this->slice_size      = static_cast<rocsparse_int>(1);
+        this->sell_slice_size = static_cast<rocsparse_int>(1);
         this->dimx            = static_cast<rocsparse_int>(0);
         this->dimy            = static_cast<rocsparse_int>(0);
         this->dimz            = static_cast<rocsparse_int>(0);
@@ -190,8 +190,8 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      "General BSR col block dimension (default: 2)")
 
     ("slicesize",
-     value<rocsparse_int>(&this->slice_size)->default_value(2),
-     "General BSR col block dimension (default: 2)")
+     value<rocsparse_int>(&this->sell_slice_size)->default_value(2),
+     "Sliced ELL format slice size (default: 2)")
 
     ("mtx",
      value<std::string>(&this->b_matrixmarket)->default_value(""), "read from matrix "
@@ -781,7 +781,7 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
         return -1;
     }
 
-    if(this->slice_size < 1)
+    if(this->sell_slice_size < 1)
     {
         std::cerr << "Invalid value for --slicesize. Must be > 0" << std::endl;
         return -1;

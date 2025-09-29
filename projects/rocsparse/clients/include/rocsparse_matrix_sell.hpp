@@ -42,7 +42,7 @@ struct sell_matrix
     J                      m{};
     J                      n{};
     I                      nnz{};
-    J                      slice_size{};
+    J                      sell_slice_size{};
     I                      sell_colval_size{};
     rocsparse_index_base   base{};
     rocsparse_storage_mode storage_mode{rocsparse_storage_mode_sorted};
@@ -50,23 +50,28 @@ struct sell_matrix
     array_t<J>             ind{};
     array_t<T>             val{};
 
-    sell_matrix(){};
-    ~sell_matrix(){};
+    sell_matrix() {};
+    ~sell_matrix() {};
 
-    sell_matrix(J m_, J n_, I nnz_, J slice_size_, I sell_colval_size_, rocsparse_index_base base_)
+    sell_matrix(
+        J m_, J n_, I nnz_, J sell_slice_size_, I sell_colval_size_, rocsparse_index_base base_)
         : m(m_)
         , n(n_)
         , nnz(nnz_)
-        , slice_size(slice_size_)
+        , sell_slice_size(sell_slice_size_)
         , sell_colval_size(sell_colval_size_)
         , base(base_)
-        , ptr(((m - 1) / slice_size + 1) + 1)
+        , ptr(((m - 1) / sell_slice_size + 1) + 1)
         , ind(sell_colval_size)
-        , val(sell_colval_size){};
+        , val(sell_colval_size) {};
 
     explicit sell_matrix(const sell_matrix<MODE, T, I, J>& that_, bool transfer = true)
-        : sell_matrix<MODE, T, I, J>(
-            that_.m, that_.n, that_.nnz, that_.slice_size, that_.sell_colval_size, that_.base)
+        : sell_matrix<MODE, T, I, J>(that_.m,
+                                     that_.n,
+                                     that_.nnz,
+                                     that_.sell_slice_size,
+                                     that_.sell_colval_size,
+                                     that_.base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -78,8 +83,12 @@ struct sell_matrix
 
     template <memory_mode::value_t THAT_MODE>
     explicit sell_matrix(const sell_matrix<THAT_MODE, T, I, J>& that_, bool transfer = true)
-        : sell_matrix<MODE, T, I, J>(
-            that_.m, that_.n, that_.nnz, that_.slice_size, that_.sell_colval_size, that_.base)
+        : sell_matrix<MODE, T, I, J>(that_.m,
+                                     that_.n,
+                                     that_.nnz,
+                                     that_.sell_slice_size,
+                                     that_.sell_colval_size,
+                                     that_.base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -95,7 +104,7 @@ struct sell_matrix
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         CHECK_HIP_THROW_ERROR((this->m == that.m && this->n == that.n && this->nnz == that.nnz
-                               && this->slice_size == that.slice_size
+                               && this->sell_slice_size == that.sell_slice_size
                                && this->sell_colval_size == that.sell_colval_size
                                && this->base == that.base)
                                   ? hipSuccess
@@ -106,7 +115,8 @@ struct sell_matrix
         this->val.transfer_from(that.val);
     };
 
-    void define(J m_, J n_, I nnz_, J slice_size_, I sell_colval_size_, rocsparse_index_base base_)
+    void define(
+        J m_, J n_, I nnz_, J sell_slice_size_, I sell_colval_size_, rocsparse_index_base base_)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -125,9 +135,9 @@ struct sell_matrix
             this->nnz = nnz_;
         }
 
-        if(slice_size_ != this->slice_size)
+        if(sell_slice_size_ != this->sell_slice_size)
         {
-            this->slice_size = slice_size_;
+            this->sell_slice_size = sell_slice_size_;
         }
 
         if(sell_colval_size_ != this->sell_colval_size)
@@ -140,7 +150,7 @@ struct sell_matrix
             this->base = base_;
         }
 
-        J nslices = ((m - 1) / slice_size + 1);
+        J nslices = ((m - 1) / sell_slice_size + 1);
 
         this->ptr.resize(nslices + 1);
         this->ind.resize(this->sell_colval_size);
@@ -173,7 +183,7 @@ struct sell_matrix
                 unit_check_scalar(this->m, that_.m);
                 unit_check_scalar(this->n, that_.n);
                 unit_check_scalar(this->nnz, that_.nnz);
-                unit_check_scalar(this->slice_size, that_.slice_size);
+                unit_check_scalar(this->sell_slice_size, that_.sell_slice_size);
                 unit_check_scalar(this->sell_colval_size, that_.sell_colval_size);
                 unit_check_enum(this->base, that_.base);
 
@@ -203,7 +213,7 @@ struct sell_matrix
         std::cout << " m     : " << this->m << std::endl;
         std::cout << " n     : " << this->n << std::endl;
         std::cout << " nnz   : " << this->nnz << std::endl;
-        std::cout << " slice_size : " << this->slice_size << std::endl;
+        std::cout << " sell_slice_size : " << this->sell_slice_size << std::endl;
         std::cout << " sell_colval_size : " << this->sell_colval_size << std::endl;
         std::cout << " base  : " << this->base << std::endl;
     }

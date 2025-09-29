@@ -34,7 +34,7 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
     rocsparse_direction         local_ell_block_dir    = rocsparse_direction_row;
     int64_t                     local_ell_block_dim    = safe_size;
     int64_t                     local_ell_cols         = safe_size;
-    int64_t                     local_slice_size       = safe_size;
+    int64_t                     local_sell_slice_size  = safe_size;
     int64_t                     local_sell_colval_size = safe_size;
     rocsparse_index_base        local_base             = rocsparse_index_base_zero;
     rocsparse_format            local_format           = rocsparse_format_csr;
@@ -51,7 +51,7 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         rocsparse_direction          ell_block_dir    = local_ell_block_dir;
         int64_t                      ell_block_dim    = local_ell_block_dim;
         int64_t                      ell_cols         = local_ell_cols;
-        int64_t                      slice_size       = local_slice_size;
+        int64_t                      sell_slice_size  = local_sell_slice_size;
         int64_t                      sell_colval_size = local_sell_colval_size;
         rocsparse_index_base         idx_base         = local_base;
 
@@ -137,13 +137,13 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         void* sell_col_ind       = (void*)0x4;
         void* sell_val           = (void*)0x4;
 
-#define PARAMS_CREATE_SELL                                                                  \
-    descr, rows, cols, nnz, slice_size, sell_colval_size, sell_slice_offsets, sell_col_ind, \
+#define PARAMS_CREATE_SELL                                                                       \
+    descr, rows, cols, nnz, sell_slice_size, sell_colval_size, sell_slice_offsets, sell_col_ind, \
         sell_val, sell_slice_offsets_type, sell_col_ind_type, idx_base, data_type
         bad_arg_analysis(rocsparse_create_const_sell_descr, PARAMS_CREATE_SELL);
 #undef PARAMS_CREATE_SELL
 
-        // slice_size = 0
+        // sell_slice_size = 0
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_sell_descr(descr,
                                                                   rows,
                                                                   cols,
@@ -159,7 +159,7 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
                                                                   data_type),
                                 rocsparse_status_invalid_size);
 
-        // slice_size > rows
+        // sell_slice_size > rows
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_sell_descr(descr,
                                                                   rows,
                                                                   cols,
@@ -180,7 +180,7 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
                                                                   rows,
                                                                   cols,
                                                                   (sell_colval_size + 1),
-                                                                  slice_size,
+                                                                  sell_slice_size,
                                                                   sell_colval_size,
                                                                   sell_slice_offsets,
                                                                   sell_col_ind,
@@ -401,7 +401,7 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         rocsparse_direction*  ell_block_dir    = &local_ell_block_dir;
         int64_t*              ell_block_dim    = &local_ell_block_dim;
         int64_t*              ell_cols         = &local_ell_cols;
-        int64_t*              slice_size       = &local_slice_size;
+        int64_t*              sell_slice_size  = &local_sell_slice_size;
         int64_t*              sell_colval_size = &local_sell_colval_size;
         rocsparse_index_base* idx_base         = &local_base;
         rocsparse_format*     format           = &local_format;
@@ -573,7 +573,7 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
                                                                       local_rows,
                                                                       local_cols,
                                                                       local_nnz,
-                                                                      local_slice_size,
+                                                                      local_sell_slice_size,
                                                                       local_sell_colval_size,
                                                                       (const void*)0x4,
                                                                       (const void*)0x4,
@@ -585,8 +585,8 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
                                     rocsparse_status_success);
             rocsparse_const_spmat_descr descr = local_descr;
 
-#define PARAMS_GET_SELL                                                                     \
-    descr, rows, cols, nnz, slice_size, sell_colval_size, sell_slice_offsets, sell_col_ind, \
+#define PARAMS_GET_SELL                                                                          \
+    descr, rows, cols, nnz, sell_slice_size, sell_colval_size, sell_slice_offsets, sell_col_ind, \
         sell_val, sell_slice_offsets_type, sell_col_ind_type, idx_base, data_type
             bad_arg_analysis(rocsparse_const_sell_get, PARAMS_GET_SELL);
 #undef PARAMS_GET_SELL

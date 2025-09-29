@@ -298,7 +298,7 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
         int64_t              m;
         int64_t              n;
         int64_t              nnz;
-        int64_t              slice_size;
+        int64_t              sell_slice_size;
         int64_t              sell_colval_size;
         const void*          ptr;
         const void*          ind;
@@ -311,7 +311,7 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
                                                            &m,
                                                            &n,
                                                            &nnz,
-                                                           &slice_size,
+                                                           &sell_slice_size,
                                                            &sell_colval_size,
                                                            &ptr,
                                                            &ind,
@@ -324,7 +324,7 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
         out << "- m                : " << m << std::endl;
         out << "- n                : " << n << std::endl;
         out << "- nnz              : " << nnz << std::endl;
-        out << "- slice_size       : " << slice_size << std::endl;
+        out << "- sell_slice_size  : " << sell_slice_size << std::endl;
         out << "- sell_colval_size : " << sell_colval_size << std::endl;
         out << "- ptr_type  : " << rocsparse::enum_utils::to_string(ptr_type) << std::endl;
         out << "- ind_type  : " << rocsparse::enum_utils::to_string(ind_type) << std::endl;

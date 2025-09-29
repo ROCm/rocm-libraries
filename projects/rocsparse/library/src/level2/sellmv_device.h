@@ -39,7 +39,7 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void sellmvn_device(J m,
                                              J n,
                                              I nnz,
-                                             J slice_size,
+                                             J sell_slice_size,
                                              I sell_colval_size,
                                              T alpha,
                                              const I* __restrict__ sell_slice_offsets,
@@ -50,24 +50,24 @@ namespace rocsparse
                                              Y* __restrict__ y,
                                              rocsparse_index_base idx_base)
     {
-        const uint32_t tidx = hipThreadIdx_x; // 0....slice_size
+        const uint32_t tidx = hipThreadIdx_x; // 0....sell_slice_size
         const uint32_t tidy = hipThreadIdx_y; // 0....THREADS_PER_ROW
 
-        const uint32_t idx = slice_size * tidy + tidx;
+        const uint32_t idx = sell_slice_size * tidy + tidx;
 
         extern __shared__ char shared_memory[]; // THREADS_PER_ROW == hipBlockDim_y
         T*                     shared = (T*)shared_memory;
 
         const uint32_t sliceid = hipGridDim_x * hipBlockIdx_y + hipBlockIdx_x;
 
-        const J row = slice_size * sliceid + tidx;
+        const J row = sell_slice_size * sliceid + tidx;
 
         const I start = (row < m) ? sell_slice_offsets[sliceid] - idx_base : 0;
         const I end   = (row < m) ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
 
         T sum = static_cast<T>(0);
 
-        for(I j = start + idx; j < end; j += (slice_size * THREADS_PER_ROW))
+        for(I j = start + idx; j < end; j += (sell_slice_size * THREADS_PER_ROW))
         {
             const J col = sell_col_ind[j] - idx_base;
 
@@ -85,7 +85,7 @@ namespace rocsparse
             {
                 if(tidy < level && tidy + level < THREADS_PER_ROW)
                 {
-                    shared[idx] = shared[idx] + shared[idx + slice_size * level];
+                    shared[idx] = shared[idx] + shared[idx + sell_slice_size * level];
                 }
                 __syncthreads();
             }
@@ -114,7 +114,7 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void sellmvn_large_slice_device(J m,
                                                          J n,
                                                          I nnz,
-                                                         J slice_size,
+                                                         J sell_slice_size,
                                                          I sell_colval_size,
                                                          T alpha,
                                                          const I* __restrict__ sell_slice_offsets,
@@ -128,23 +128,22 @@ namespace rocsparse
         const uint32_t tid     = hipThreadIdx_x;
         const uint32_t sliceid = hipBlockIdx_x;
 
-        const J iter = (slice_size - 1) / BLOCKSIZE + 1;
+        const J iter = (sell_slice_size - 1) / BLOCKSIZE + 1;
 
         for(J p = 0; p < iter; p++)
         {
             const J local_row = (BLOCKSIZE * p + tid);
 
-            const J row = slice_size * sliceid + (BLOCKSIZE * p + tid);
+            const J row = sell_slice_size * sliceid + (BLOCKSIZE * p + tid);
 
-            const I start
-                = (row < m && local_row < slice_size) ? sell_slice_offsets[sliceid] - idx_base : 0;
-            const I end = (row < m && local_row < slice_size)
-                              ? sell_slice_offsets[sliceid + 1] - idx_base
-                              : 0;
+            const bool row_in_range = (row < m && local_row < sell_slice_size);
+
+            const I start = row_in_range ? sell_slice_offsets[sliceid] - idx_base : 0;
+            const I end   = row_in_range ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
 
             T sum = static_cast<T>(0);
 
-            for(I j = start + local_row; j < end; j += slice_size)
+            for(I j = start + local_row; j < end; j += sell_slice_size)
             {
                 const J col = sell_col_ind[j] - idx_base;
 
@@ -154,7 +153,7 @@ namespace rocsparse
                 }
             }
 
-            if(row < m && local_row < slice_size)
+            if(row_in_range)
             {
                 if(beta == static_cast<T>(0))
                 {
@@ -180,7 +179,7 @@ namespace rocsparse
                                              J                   m,
                                              J                   n,
                                              I                   nnz,
-                                             J                   slice_size,
+                                             J                   sell_slice_size,
                                              I                   sell_colval_size,
                                              T                   alpha,
                                              const I* __restrict__ sell_slice_offsets,
@@ -190,21 +189,21 @@ namespace rocsparse
                                              Y* __restrict__ y,
                                              rocsparse_index_base idx_base)
     {
-        const uint32_t tidx = hipThreadIdx_x; // 0....slice_size
+        const uint32_t tidx = hipThreadIdx_x; // 0....sell_slice_size
         const uint32_t tidy = hipThreadIdx_y; // 0....THREADS_PER_ROW
 
-        const uint32_t idx = slice_size * tidy + tidx;
+        const uint32_t idx = sell_slice_size * tidy + tidx;
 
         const uint32_t sliceid = hipGridDim_x * hipBlockIdx_y + hipBlockIdx_x;
 
-        const J row = slice_size * sliceid + tidx;
+        const J row = sell_slice_size * sliceid + tidx;
 
         const I start = (row < m) ? sell_slice_offsets[sliceid] - idx_base : 0;
         const I end   = (row < m) ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
 
         T row_val = alpha * x[row];
 
-        for(I j = start + idx; j < end; j += (slice_size * THREADS_PER_ROW))
+        for(I j = start + idx; j < end; j += (sell_slice_size * THREADS_PER_ROW))
         {
             const J col = sell_col_ind[j] - idx_base;
 
@@ -234,7 +233,7 @@ namespace rocsparse
                                                          J                   m,
                                                          J                   n,
                                                          I                   nnz,
-                                                         J                   slice_size,
+                                                         J                   sell_slice_size,
                                                          I                   sell_colval_size,
                                                          T                   alpha,
                                                          const I* __restrict__ sell_slice_offsets,
@@ -247,22 +246,22 @@ namespace rocsparse
         const uint32_t tid     = hipThreadIdx_x;
         const uint32_t sliceid = hipBlockIdx_x;
 
-        const J iter = (slice_size - 1) / BLOCKSIZE + 1;
+        const J iter = (sell_slice_size - 1) / BLOCKSIZE + 1;
 
         for(J p = 0; p < iter; p++)
         {
             const J local_row = (BLOCKSIZE * p + tid);
 
-            const J row = slice_size * sliceid + (BLOCKSIZE * p + tid);
+            const J row = sell_slice_size * sliceid + (BLOCKSIZE * p + tid);
 
-            const bool row_in_range = (row < m && local_row < slice_size);
+            const bool row_in_range = (row < m && local_row < sell_slice_size);
 
             const I start = row_in_range ? sell_slice_offsets[sliceid] - idx_base : 0;
             const I end   = row_in_range ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
 
             T row_val = row_in_range ? alpha * x[row] : static_cast<T>(0);
 
-            for(I j = start + local_row; j < end; j += slice_size)
+            for(I j = start + local_row; j < end; j += sell_slice_size)
             {
                 const J col = sell_col_ind[j] - idx_base;
 

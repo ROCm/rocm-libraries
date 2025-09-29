@@ -782,7 +782,7 @@ namespace rocsparse
                                                              mat->rows,
                                                              mat->cols,
                                                              mat->nnz,
-                                                             mat->slice_size,
+                                                             mat->sell_slice_size,
                                                              mat->sell_colval_size,
                                                              alpha_type,
                                                              alpha,

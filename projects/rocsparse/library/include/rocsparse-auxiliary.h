@@ -1244,11 +1244,11 @@ rocsparse_status rocsparse_create_const_bell_descr(rocsparse_const_spmat_descr* 
  *  @param[in]
  *  nnz                     number of non-zeros in the sliced ELL matrix.
  *  @param[in]
- *  slice_size              slice size in the sliced ELL matrix.
+ *  sell_slice_size         slice size in the sliced ELL matrix.
  *  @param[in]
  *  sell_colval_size        size of the column and value arrays in the sliced ELL matrix.
  *  @param[in]
- *  sell_slice_offsets      slice offsets into column and value arrays (must be array of length \p nslices+1 where \p nslice=m/slice_size ).
+ *  sell_slice_offsets      slice offsets into column and value arrays (must be array of length \p nslices+1 where \p nslice=m/sell_slice_size ).
  *  @param[in]
  *  sell_col_ind            column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
  *  @param[in]
@@ -1265,7 +1265,7 @@ rocsparse_status rocsparse_create_const_bell_descr(rocsparse_const_spmat_descr* 
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p sell_slice_offsets or \p sell_col_ind or \p sell_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz pr \p slice_size or \p sell_colval_size is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz pr \p sell_slice_size or \p sell_colval_size is invalid.
  *  \retval rocsparse_status_invalid_value if \p idx_type or \p idx_base or \p data_type is invalid.
  */
 /**@{*/
@@ -1274,7 +1274,7 @@ rocsparse_status rocsparse_create_sell_descr(rocsparse_spmat_descr* descr,
                                              int64_t                rows,
                                              int64_t                cols,
                                              int64_t                nnz,
-                                             int64_t                slice_size,
+                                             int64_t                sell_slice_size,
                                              int64_t                sell_colval_size,
                                              void*                  sell_slice_offsets,
                                              void*                  sell_col_ind,
@@ -1289,7 +1289,7 @@ rocsparse_status rocsparse_create_const_sell_descr(rocsparse_const_spmat_descr* 
                                                    int64_t                      rows,
                                                    int64_t                      cols,
                                                    int64_t                      nnz,
-                                                   int64_t                      slice_size,
+                                                   int64_t                      sell_slice_size,
                                                    int64_t                      sell_colval_size,
                                                    const void*                  sell_slice_offsets,
                                                    const void*                  sell_col_ind,
@@ -1921,12 +1921,12 @@ rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
  *  @param[out]
  *  nnz                    number of non-zeros in the sliced ELL matix.
  *  @param[out]
- *  slice_size             slice size in the sliced ELL matrix.
+ *  sell_slice_size        slice size in the sliced ELL matrix.
  *  @param[out]
  *  sell_colval_size       actual number of elements stored in the sliced ELL matrix.
  *  @param[out]
  *  sell_slice_offsets     slice offsets array in the sliced ELL matrix (must be array of length \p nslices + 1 
- *                         where \p nslices=(rows-1)/slice_size+1 ). 
+ *                         where \p nslices=(rows-1)/sell_slice_size+1 ). 
  *  @param[out]
  *  sell_col_ind            column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
  *  @param[out]
@@ -1943,7 +1943,7 @@ rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p sell_slice_offsets or \p sell_col_ind or \p sell_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz or \p sell_colval_size or \p slice_size is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows or \p cols or \p nnz or \p sell_colval_size or \p sell_slice_size is invalid.
  *  \retval rocsparse_status_invalid_value if \p sell_slice_offsets_type or \p sell_col_ind_type or \p idx_base or \p data_type is invalid.
  */
 /**@{*/
@@ -1952,7 +1952,7 @@ rocsparse_status rocsparse_sell_get(const rocsparse_spmat_descr descr,
                                     int64_t*                    rows,
                                     int64_t*                    cols,
                                     int64_t*                    nnz,
-                                    int64_t*                    slice_size,
+                                    int64_t*                    sell_slice_size,
                                     int64_t*                    sell_colval_size,
                                     void**                      sell_slice_offsets,
                                     void**                      sell_col_ind,
@@ -1967,7 +1967,7 @@ rocsparse_status rocsparse_const_sell_get(rocsparse_const_spmat_descr descr,
                                           int64_t*                    rows,
                                           int64_t*                    cols,
                                           int64_t*                    nnz,
-                                          int64_t*                    slice_size,
+                                          int64_t*                    sell_slice_size,
                                           int64_t*                    sell_colval_size,
                                           const void**                sell_slice_offsets,
                                           const void**                sell_col_ind,

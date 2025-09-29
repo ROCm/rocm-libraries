@@ -30,7 +30,7 @@ void testing_spmv_sell_bad_arg(const Arguments& arg)
     const J m                = 20;
     const J n                = 20;
     const J nnz              = 100;
-    const J slice_size       = 2;
+    const J sell_slice_size  = 2;
     const J sell_colval_size = 120;
     const T local_alpha      = static_cast<T>(6);
     const T local_beta       = static_cast<T>(2);
@@ -58,7 +58,7 @@ void testing_spmv_sell_bad_arg(const Arguments& arg)
     rocsparse_local_spmat local_mat(m,
                                     n,
                                     nnz,
-                                    slice_size,
+                                    sell_slice_size,
                                     sell_colval_size,
                                     (void*)0x4,
                                     (void*)0x4,
@@ -113,12 +113,12 @@ void testing_spmv_sell_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 void testing_spmv_sell(const Arguments& arg)
 {
-    J                    M          = arg.M;
-    J                    N          = arg.N;
-    J                    slice_size = arg.slice_size;
-    rocsparse_operation  trans      = arg.transA;
-    rocsparse_index_base base       = arg.baseA;
-    rocsparse_spmv_alg   alg        = arg.spmv_alg;
+    J                    M               = arg.M;
+    J                    N               = arg.N;
+    J                    sell_slice_size = arg.sell_slice_size;
+    rocsparse_operation  trans           = arg.transA;
+    rocsparse_index_base base            = arg.baseA;
+    rocsparse_spmv_alg   alg             = arg.spmv_alg;
 
     host_scalar<T> h_alpha(arg.get_alpha<T>());
     host_scalar<T> h_beta(arg.get_beta<T>());
@@ -142,7 +142,7 @@ void testing_spmv_sell(const Arguments& arg)
     // Allocate host memory for matrix
     host_sell_matrix<A, I, J> hA;
 
-    matrix_factory.init_sell(hA, M, N, slice_size, base);
+    matrix_factory.init_sell(hA, M, N, sell_slice_size, base);
 
     // Allocate host memory for vectors
     host_vector<X> hx((trans == rocsparse_operation_none) ? N : M);
@@ -166,7 +166,7 @@ void testing_spmv_sell(const Arguments& arg)
     rocsparse_local_spmat mat_A(dA.m,
                                 dA.n,
                                 dA.nnz,
-                                slice_size,
+                                sell_slice_size,
                                 dA.sell_colval_size,
                                 dA.ptr,
                                 dA.ind,
@@ -217,7 +217,7 @@ void testing_spmv_sell(const Arguments& arg)
                                       hA.m,
                                       hA.n,
                                       hA.nnz,
-                                      slice_size,
+                                      sell_slice_size,
                                       hA.sell_colval_size,
                                       *h_alpha,
                                       hA.ptr,
@@ -296,7 +296,7 @@ void testing_spmv_sell(const Arguments& arg)
 
         double gflop_count = spmv_gflop_count(dA.m, dA.nnz, *h_beta != static_cast<T>(0));
         double gbyte_count = sellmv_gbyte_count<A, X, Y, I, J>(
-            dA.m, dA.n, dA.nnz, slice_size, dA.sell_colval_size, *h_beta != static_cast<T>(0));
+            dA.m, dA.n, dA.nnz, sell_slice_size, dA.sell_colval_size, *h_beta != static_cast<T>(0));
 
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);

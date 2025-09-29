@@ -398,7 +398,7 @@ namespace rocsparse
         const bool                analysed         = mat->analysed;
         const int64_t             block_dim        = mat->block_dim;
         const int64_t             ell_width        = mat->ell_width;
-        const int64_t             slice_size       = mat->slice_size;
+        const int64_t             sell_slice_size  = mat->sell_slice_size;
         const int64_t             sell_colval_size = mat->sell_colval_size;
         const rocsparse_direction block_dir        = mat->block_dir;
 
@@ -775,7 +775,7 @@ namespace rocsparse
                                                              rows,
                                                              cols,
                                                              nnz,
-                                                             slice_size,
+                                                             sell_slice_size,
                                                              sell_colval_size,
                                                              compute_datatype,
                                                              local_alpha,
