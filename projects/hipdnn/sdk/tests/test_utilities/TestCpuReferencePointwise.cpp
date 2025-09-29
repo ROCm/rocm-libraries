@@ -16,23 +16,43 @@ using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::data_objects;
 
 template <typename Input1Type, typename Input2Type = Input1Type, typename OutputType = Input1Type>
-class CpuReferencePointwiseTemplate : public ::testing::Test
+class CpuReferencePointwiseFixture : public ::testing::Test
 {
 protected:
+    // Helper function to get tolerance for any floating-point type
+    template <typename T>
+    constexpr float getToleranceForType() const
+    {
+        if constexpr(std::is_same_v<T, half>)
+        {
+            return TOLERANCE_HALF;
+        }
+        else if constexpr(std::is_same_v<T, hip_bfloat16>)
+        {
+            return TOLERANCE_BFLOAT16;
+        }
+        else if constexpr(std::is_same_v<T, double>)
+        {
+            return static_cast<float>(TOLERANCE_DOUBLE);
+        }
+        else // float and other types
+        {
+            return TOLERANCE_FLOAT;
+        }
+    }
+
+    // Mixed-type aware tolerance calculation
+    // Uses the most lenient (largest) tolerance among all involved types
     OutputType getTolerance() const
     {
-        if constexpr(std::is_same_v<OutputType, half>)
-        {
-            return static_cast<OutputType>(TOLERANCE_HALF);
-        }
-        else if constexpr(std::is_same_v<OutputType, hip_bfloat16>)
-        {
-            return static_cast<OutputType>(TOLERANCE_BFLOAT16);
-        }
-        else
-        {
-            return static_cast<OutputType>(TOLERANCE_FLOAT);
-        }
+        float input1Tolerance = getToleranceForType<Input1Type>();
+        float input2Tolerance = getToleranceForType<Input2Type>();
+        float outputTolerance = getToleranceForType<OutputType>();
+
+        // Use the most lenient tolerance to account for mixed-type precision limitations
+        float maxTolerance = std::max({input1Tolerance, input2Tolerance, outputTolerance});
+
+        return static_cast<OutputType>(maxTolerance);
     }
 
     // ======================= BINARY OPERATIONS =======================
@@ -1064,290 +1084,300 @@ protected:
 
 using TestTypes = ::testing::Types<float, double, half, hip_bfloat16>;
 // Empty third argument required for C++17 compatibility with TYPED_TEST_SUITE macro
-TYPED_TEST_SUITE(CpuReferencePointwiseTemplate, TestTypes, );
+TYPED_TEST_SUITE(CpuReferencePointwiseFixture, TestTypes, );
 
 // Binary operation tests
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryAddOperation)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddOperation)
 {
     this->testBinaryAddOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinarySubtractOperation)
+TYPED_TEST(CpuReferencePointwiseFixture, BinarySubtractOperation)
 {
     this->testBinarySubtractOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryAddOperationSanityValidation)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddOperationSanityValidation)
 {
     this->testBinaryAddOperationSanityValidation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinarySubtractOperationSanityValidation)
+TYPED_TEST(CpuReferencePointwiseFixture, BinarySubtractOperationSanityValidation)
 {
     this->testBinarySubtractOperationSanityValidation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinarySingleElementTensors)
+TYPED_TEST(CpuReferencePointwiseFixture, BinarySingleElementTensors)
 {
     this->testBinarySingleElementTensors();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryNumericalPrecision)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryNumericalPrecision)
 {
     this->testBinaryNumericalPrecision();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryElementwise1D)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryElementwise1D)
 {
     this->testElementwise1D();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryBroadcast2Dx1D)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast2Dx1D)
 {
     this->testBroadcast2Dx1D();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryBroadcast3D)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast3D)
 {
     this->testBroadcast3D();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryBroadcast3DImplicitLeading)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast3DImplicitLeading)
 {
     this->testBroadcast3DImplicitLeading();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryBroadcast4Dx4D)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast4Dx4D)
 {
     this->testBroadcast4Dx4D();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryBroadcastComplexND)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcastComplexND)
 {
     this->testBroadcastComplexND();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, BinaryBroadcast5D)
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast5D)
 {
     this->testBroadcast5D();
 }
 
 // Unary operation tests
-TYPED_TEST(CpuReferencePointwiseTemplate, UnaryReluForward)
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryReluForward)
 {
     this->testReluForwardOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnaryReluBackward)
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryReluBackward)
 {
     this->testReluBackwardOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnaryParameterizedReluForward)
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryParameterizedReluForward)
 {
     this->testParameterizedReluForwardOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnaryParameterizedReluBackward)
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryParameterizedReluBackward)
 {
     this->testParameterizedReluBackwardOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnarySigmoidForward)
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySigmoidForward)
 {
     this->testSigmoidForwardOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnarySigmoidBackward)
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySigmoidBackward)
 {
     this->testSigmoidBackwardOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnaryTanhForward)
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryTanhForward)
 {
     this->testTanhForwardOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnaryTanhBackward)
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryTanhBackward)
 {
     this->testTanhBackwardOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnaryAbsoluteValue)
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryAbsoluteValue)
 {
     this->testAbsoluteValueOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnaryNegation)
+TYPED_TEST(CpuReferencePointwiseFixture, UnaryNegation)
 {
     this->testNegationOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, Unary1DOperation)
+TYPED_TEST(CpuReferencePointwiseFixture, Unary1DOperation)
 {
     this->testUnary1DOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, Unary2DOperation)
+TYPED_TEST(CpuReferencePointwiseFixture, Unary2DOperation)
 {
     this->testUnary2DOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, Unary3DOperation)
+TYPED_TEST(CpuReferencePointwiseFixture, Unary3DOperation)
 {
     this->testUnary3DOperation();
 }
 
-TYPED_TEST(CpuReferencePointwiseTemplate, UnarySingleElementTensor)
+TYPED_TEST(CpuReferencePointwiseFixture, UnarySingleElementTensor)
 {
     this->testUnarySingleElementTensor();
 }
 
 // Mixed-type binary test instantiations
-using TestPointwiseMixed1 = CpuReferencePointwiseTemplate<float, half, hip_bfloat16>;
-using TestPointwiseMixed2 = CpuReferencePointwiseTemplate<half, float, hip_bfloat16>;
-using TestPointwiseMixed3 = CpuReferencePointwiseTemplate<float, float, half>;
-using TestPointwiseMixed4 = CpuReferencePointwiseTemplate<hip_bfloat16, float, half>;
-using TestPointwiseMixed5 = CpuReferencePointwiseTemplate<hip_bfloat16, half, float>;
-using TestPointwiseMixed6 = CpuReferencePointwiseTemplate<float, hip_bfloat16, half>;
-using TestPointwiseMixed7 = CpuReferencePointwiseTemplate<half, hip_bfloat16, float>;
+using TestCpuReferencePointwiseBinaryMixed1Bfp16
+    = CpuReferencePointwiseFixture<float, half, hip_bfloat16>;
+using TestCpuReferencePointwiseBinaryMixed2Bfp16
+    = CpuReferencePointwiseFixture<half, float, hip_bfloat16>;
+using TestCpuReferencePointwiseBinaryMixed1Fp16 = CpuReferencePointwiseFixture<float, float, half>;
+using TestCpuReferencePointwiseBinaryMixed2Fp16
+    = CpuReferencePointwiseFixture<hip_bfloat16, float, half>;
+using TestCpuReferencePointwiseBinaryMixed1Fp32
+    = CpuReferencePointwiseFixture<hip_bfloat16, half, float>;
+using TestCpuReferencePointwiseBinaryMixed3Fp16
+    = CpuReferencePointwiseFixture<float, hip_bfloat16, half>;
+using TestCpuReferencePointwiseBinaryMixed2Fp32
+    = CpuReferencePointwiseFixture<half, hip_bfloat16, float>;
 
 // Test a sample of mixed-type binary operations
-TEST_F(TestPointwiseMixed1, BinaryMixedTypeAddOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeAddOperation)
 {
     this->testBinaryAddOperation();
 }
 
-TEST_F(TestPointwiseMixed1, BinaryMixedTypeSubtractOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
 }
 
-TEST_F(TestPointwiseMixed2, BinaryMixedTypeAddOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeAddOperation)
 {
     this->testBinaryAddOperation();
 }
 
-TEST_F(TestPointwiseMixed2, BinaryMixedTypeSubtractOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
 }
 
-TEST_F(TestPointwiseMixed3, BinaryMixedTypeAddOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeAddOperation)
 {
     this->testBinaryAddOperation();
 }
 
-TEST_F(TestPointwiseMixed3, BinaryMixedTypeSubtractOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
 }
 
-TEST_F(TestPointwiseMixed4, BinaryMixedTypeAddOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeAddOperation)
 {
     this->testBinaryAddOperation();
 }
 
-TEST_F(TestPointwiseMixed4, BinaryMixedTypeSubtractOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
 }
 
-TEST_F(TestPointwiseMixed5, BinaryMixedTypeAddOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeAddOperation)
 {
     this->testBinaryAddOperation();
 }
 
-TEST_F(TestPointwiseMixed5, BinaryMixedTypeSubtractOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
 }
 
-TEST_F(TestPointwiseMixed6, BinaryMixedTypeAddOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeAddOperation)
 {
     this->testBinaryAddOperation();
 }
 
-TEST_F(TestPointwiseMixed6, BinaryMixedTypeSubtractOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
 }
 
-TEST_F(TestPointwiseMixed7, BinaryMixedTypeAddOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeAddOperation)
 {
     this->testBinaryAddOperation();
 }
 
-TEST_F(TestPointwiseMixed7, BinaryMixedTypeSubtractOperation)
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
 }
 
 // Mixed-type unary test instantiations
-using TestPointwiseUnaryMixed1 = CpuReferencePointwiseTemplate<float, half>;
-using TestPointwiseUnaryMixed2 = CpuReferencePointwiseTemplate<half, float>;
-using TestPointwiseUnaryMixed3 = CpuReferencePointwiseTemplate<float, hip_bfloat16>;
-using TestPointwiseUnaryMixed4 = CpuReferencePointwiseTemplate<hip_bfloat16, float>;
-using TestPointwiseUnaryMixed5 = CpuReferencePointwiseTemplate<half, hip_bfloat16>;
-using TestPointwiseUnaryMixed6 = CpuReferencePointwiseTemplate<hip_bfloat16, half>;
+using TestCpuReferencePointwiseUnaryMixedFp16 = CpuReferencePointwiseFixture<float, float, half>;
+using TestCpuReferencePointwiseUnaryMixed1Fp32 = CpuReferencePointwiseFixture<half, half, float>;
+using TestCpuReferencePointwiseUnaryMixed1Bfp16
+    = CpuReferencePointwiseFixture<float, float, hip_bfloat16>;
+using TestCpuReferencePointwiseUnaryMixed2Fp32
+    = CpuReferencePointwiseFixture<hip_bfloat16, hip_bfloat16, float>;
+using TestCpuReferencePointwiseUnaryMixed2Bfp16
+    = CpuReferencePointwiseFixture<half, half, hip_bfloat16>;
+using TestCpuReferencePointwiseUnaryMixed2Fp16
+    = CpuReferencePointwiseFixture<hip_bfloat16, hip_bfloat16, half>;
 
 // Test a sample of mixed-type unary operations
-TEST_F(TestPointwiseUnaryMixed1, UnaryMixedTypeReluForward)
+TEST_F(TestCpuReferencePointwiseUnaryMixedFp16, UnaryMixedTypeReluForward)
 {
     this->testReluForwardOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed1, UnaryMixedTypeSigmoidForward)
+TEST_F(TestCpuReferencePointwiseUnaryMixedFp16, UnaryMixedTypeSigmoidForward)
 {
     this->testSigmoidForwardOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed2, UnaryMixedTypeAbsoluteValue)
+TEST_F(TestCpuReferencePointwiseUnaryMixed1Fp32, UnaryMixedTypeAbsoluteValue)
 {
     this->testAbsoluteValueOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed2, UnaryMixedTypeNegation)
+TEST_F(TestCpuReferencePointwiseUnaryMixed1Fp32, UnaryMixedTypeNegation)
 {
     this->testNegationOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed3, UnaryMixedTypeTanhForward)
+TEST_F(TestCpuReferencePointwiseUnaryMixed1Bfp16, UnaryMixedTypeTanhForward)
 {
     this->testTanhForwardOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed3, UnaryMixedTypeReluBackward)
+TEST_F(TestCpuReferencePointwiseUnaryMixed1Bfp16, UnaryMixedTypeReluBackward)
 {
     this->testReluBackwardOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed4, UnaryMixedTypeParameterizedRelu)
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeParameterizedRelu)
 {
     this->testParameterizedReluForwardOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed4, UnaryMixedTypeSigmoidBackward)
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeSigmoidBackward)
 {
     this->testSigmoidBackwardOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed5, UnaryMixedTypeTanhBackward)
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Bfp16, UnaryMixedTypeTanhBackward)
 {
     this->testTanhBackwardOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed5, UnaryMixedTypeAbsoluteValue)
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Bfp16, UnaryMixedTypeAbsoluteValue)
 {
     this->testAbsoluteValueOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed6, UnaryMixedTypeReluForward)
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeReluForward)
 {
     this->testReluForwardOperation();
 }
 
-TEST_F(TestPointwiseUnaryMixed6, UnaryMixedTypeParameterizedReluBackward)
+TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeParameterizedReluBackward)
 {
     this->testParameterizedReluBackwardOperation();
 }
