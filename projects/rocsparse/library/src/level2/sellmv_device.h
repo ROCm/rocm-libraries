@@ -36,18 +36,18 @@ namespace rocsparse
               typename X,
               typename Y,
               typename T>
-    ROCSPARSE_DEVICE_ILF void sellmvn_device(J                    m,
-                                             J                    n,
-                                             I                    nnz,
-                                             J                    slice_size,
-                                             I                    sell_colval_size,
-                                             T                    alpha,
-                                             const I*             sell_slice_offsets,
-                                             const J*             sell_col_ind,
-                                             const A*             sell_val,
-                                             const X*             x,
-                                             T                    beta,
-                                             Y*                   y,
+    ROCSPARSE_DEVICE_ILF void sellmvn_device(J m,
+                                             J n,
+                                             I nnz,
+                                             J slice_size,
+                                             I sell_colval_size,
+                                             T alpha,
+                                             const I* __restrict__ sell_slice_offsets,
+                                             const J* __restrict__ sell_col_ind,
+                                             const A* __restrict__ sell_val,
+                                             const X* __restrict__ x,
+                                             T beta,
+                                             Y* __restrict__ y,
                                              rocsparse_index_base idx_base)
     {
         const uint32_t tidx = hipThreadIdx_x; // 0....slice_size
@@ -80,30 +80,15 @@ namespace rocsparse
         shared[idx] = sum;
         __syncthreads();
 
-        if(THREADS_PER_ROW > 4)
-        {
-            if(tidy < 4 && tidy + 4 < THREADS_PER_ROW)
+        for(int32_t level = 4; level > 0; level /= 2)
+            if(tidy < level && tidy + level < THREADS_PER_ROW)
             {
-                shared[idx] = shared[idx] + shared[idx + slice_size * 4];
+                if(tidy < level && tidy + level < THREADS_PER_ROW)
+                {
+                    shared[idx] = shared[idx] + shared[idx + slice_size * level];
+                }
+                __syncthreads();
             }
-            __syncthreads();
-        }
-        if(THREADS_PER_ROW > 2)
-        {
-            if(tidy < 2 && tidy + 2 < THREADS_PER_ROW)
-            {
-                shared[idx] = shared[idx] + shared[idx + slice_size * 2];
-            }
-            __syncthreads();
-        }
-        if(THREADS_PER_ROW > 1)
-        {
-            if(tidy < 1 && tidy + 1 < THREADS_PER_ROW)
-            {
-                shared[idx] = shared[idx] + shared[idx + slice_size * 1];
-            }
-            __syncthreads();
-        }
 
         if(row < m && tidy == 0)
         {
@@ -126,18 +111,18 @@ namespace rocsparse
               typename X,
               typename Y,
               typename T>
-    ROCSPARSE_DEVICE_ILF void sellmvn_large_slice_device(J                    m,
-                                                         J                    n,
-                                                         I                    nnz,
-                                                         J                    slice_size,
-                                                         I                    sell_colval_size,
-                                                         T                    alpha,
-                                                         const I*             sell_slice_offsets,
-                                                         const J*             sell_col_ind,
-                                                         const A*             sell_val,
-                                                         const X*             x,
-                                                         T                    beta,
-                                                         Y*                   y,
+    ROCSPARSE_DEVICE_ILF void sellmvn_large_slice_device(J m,
+                                                         J n,
+                                                         I nnz,
+                                                         J slice_size,
+                                                         I sell_colval_size,
+                                                         T alpha,
+                                                         const I* __restrict__ sell_slice_offsets,
+                                                         const J* __restrict__ sell_col_ind,
+                                                         const A* __restrict__ sell_val,
+                                                         const X* __restrict__ x,
+                                                         T beta,
+                                                         Y* __restrict__ y,
                                                          rocsparse_index_base idx_base)
     {
         const uint32_t tid     = hipThreadIdx_x;
@@ -191,18 +176,18 @@ namespace rocsparse
               typename X,
               typename Y,
               typename T>
-    ROCSPARSE_DEVICE_ILF void sellmvt_device(rocsparse_operation  trans,
-                                             J                    m,
-                                             J                    n,
-                                             I                    nnz,
-                                             J                    slice_size,
-                                             I                    sell_colval_size,
-                                             T                    alpha,
-                                             const I*             sell_slice_offsets,
-                                             const J*             sell_col_ind,
-                                             const A*             sell_val,
-                                             const X*             x,
-                                             Y*                   y,
+    ROCSPARSE_DEVICE_ILF void sellmvt_device(rocsparse_operation trans,
+                                             J                   m,
+                                             J                   n,
+                                             I                   nnz,
+                                             J                   slice_size,
+                                             I                   sell_colval_size,
+                                             T                   alpha,
+                                             const I* __restrict__ sell_slice_offsets,
+                                             const J* __restrict__ sell_col_ind,
+                                             const A* __restrict__ sell_val,
+                                             const X* __restrict__ x,
+                                             Y* __restrict__ y,
                                              rocsparse_index_base idx_base)
     {
         const uint32_t tidx = hipThreadIdx_x; // 0....slice_size
@@ -245,18 +230,18 @@ namespace rocsparse
               typename X,
               typename Y,
               typename T>
-    ROCSPARSE_DEVICE_ILF void sellmvt_large_slice_device(rocsparse_operation  trans,
-                                                         J                    m,
-                                                         J                    n,
-                                                         I                    nnz,
-                                                         J                    slice_size,
-                                                         I                    sell_colval_size,
-                                                         T                    alpha,
-                                                         const I*             sell_slice_offsets,
-                                                         const J*             sell_col_ind,
-                                                         const A*             sell_val,
-                                                         const X*             x,
-                                                         Y*                   y,
+    ROCSPARSE_DEVICE_ILF void sellmvt_large_slice_device(rocsparse_operation trans,
+                                                         J                   m,
+                                                         J                   n,
+                                                         I                   nnz,
+                                                         J                   slice_size,
+                                                         I                   sell_colval_size,
+                                                         T                   alpha,
+                                                         const I* __restrict__ sell_slice_offsets,
+                                                         const J* __restrict__ sell_col_ind,
+                                                         const A* __restrict__ sell_val,
+                                                         const X* __restrict__ x,
+                                                         Y* __restrict__ y,
                                                          rocsparse_index_base idx_base)
     {
         const uint32_t tid     = hipThreadIdx_x;
@@ -270,13 +255,12 @@ namespace rocsparse
 
             const J row = slice_size * sliceid + (BLOCKSIZE * p + tid);
 
-            const I start
-                = (row < m && local_row < slice_size) ? sell_slice_offsets[sliceid] - idx_base : 0;
-            const I end = (row < m && local_row < slice_size)
-                              ? sell_slice_offsets[sliceid + 1] - idx_base
-                              : 0;
+            const bool row_in_range = (row < m && local_row < slice_size);
 
-            T row_val = (row < m && local_row < slice_size) ? alpha * x[row] : static_cast<T>(0);
+            const I start = row_in_range ? sell_slice_offsets[sliceid] - idx_base : 0;
+            const I end   = row_in_range ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
+
+            T row_val = row_in_range ? alpha * x[row] : static_cast<T>(0);
 
             for(I j = start + local_row; j < end; j += slice_size)
             {
