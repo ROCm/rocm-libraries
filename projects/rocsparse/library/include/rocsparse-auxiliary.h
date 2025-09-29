@@ -1233,7 +1233,7 @@ rocsparse_status rocsparse_create_const_bell_descr(rocsparse_const_spmat_descr* 
  *  \p rocsparse_create_sell_descr creates a sparse slice ELL matrix descriptor. It should be
  *  destroyed at the end using \p rocsparse_destroy_spmat_descr.
  *
- *  Currently the only routine that supports the Sliced ELL format is \ref rocsparse_spmv.
+ *  Currently the only routine that supports the sliced ELL format is \ref rocsparse_spmv.
  *
  *  @param[out]
  *  descr                   the pointer to the sparse sliced ELL matrix descriptor.
