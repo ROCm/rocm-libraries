@@ -525,7 +525,7 @@ def tensile_sgemm_guidepost():
 
 
 def streamk_sweep():
-    for twoTile, twoTileDPFirst in {(True, False), (False, True), (False, False)}:
+    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
         for base in [HGEMM_7680x8448x8448]:
             # Currently these run out of LDS everywhere except gfx950.
             # + [SGEMM_3072x4096x4096]
@@ -568,7 +568,7 @@ def streamk():
         streamK=True,
     )
 
-    for twoTile, twoTileDPFirst in {(True, False), (False, True), (False, False)}:
+    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
         # SGEMM
         yield mkGEMM(
             SGEMM_3072x4096x4096,
