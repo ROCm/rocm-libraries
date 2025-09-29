@@ -783,7 +783,7 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
 
     if(this->slice_size < 1)
     {
-        std::cerr << "Invalid value for --slicesize" << std::endl;
+        std::cerr << "Invalid value for --slicesize. Must be > 0" << std::endl;
         return -1;
     }
 
