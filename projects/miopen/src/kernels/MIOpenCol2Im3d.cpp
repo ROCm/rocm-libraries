@@ -38,34 +38,35 @@
 #endif
 
 extern "C" __global__ void Col2Im3dU(FLOAT* col,
-                        const unsigned int col_d,
-                        const unsigned int col_h,
-                        const unsigned int col_w,
-                        const unsigned int wei_d,
-                        const unsigned int wei_h,
-                        const unsigned int wei_w,
-                        const unsigned int pad_d,
-                        const unsigned int pad_h,
-                        const unsigned int pad_w,
-                        const unsigned int stride_d,
-                        const unsigned int stride_h,
-                        const unsigned int stride_w,
-                        const unsigned int dilation_d,
-                        const unsigned int dilation_h,
-                        const unsigned int dilation_w,
-                        const unsigned int depth,
-                        const unsigned int height,
-                        const unsigned int width,
-                        FLOAT* im,
-                        const unsigned long im_offset)
+                                     const unsigned int col_d,
+                                     const unsigned int col_h,
+                                     const unsigned int col_w,
+                                     const unsigned int wei_d,
+                                     const unsigned int wei_h,
+                                     const unsigned int wei_w,
+                                     const unsigned int pad_d,
+                                     const unsigned int pad_h,
+                                     const unsigned int pad_w,
+                                     const unsigned int stride_d,
+                                     const unsigned int stride_h,
+                                     const unsigned int stride_w,
+                                     const unsigned int dilation_d,
+                                     const unsigned int dilation_h,
+                                     const unsigned int dilation_w,
+                                     const unsigned int depth,
+                                     const unsigned int height,
+                                     const unsigned int width,
+                                     FLOAT* im,
+                                     const unsigned long im_offset)
 {
-    FLOAT* im_off = im + im_offset;
-    unsigned int gid              = blockIdx.x * blockDim.x + threadIdx.x;;
+    FLOAT* im_off    = im + im_offset;
+    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    ;
 
     unsigned int im_ch = gid / (width * height * depth);
     unsigned int itmp  = gid % (width * height * depth);
     unsigned int im_d  = itmp / (width * height);
-    itmp       = itmp % (width * height);
+    itmp               = itmp % (width * height);
     unsigned int im_h  = itmp / width;
     unsigned int im_w  = itmp % width;
 
@@ -74,18 +75,18 @@ extern "C" __global__ void Col2Im3dU(FLOAT* col,
     im_w += pad_w;
 
     unsigned int start_d = (im_d < dilation_d * (wei_d - 1) + 1)
-                       ? 0
-                       : (im_d - (dilation_d * (wei_d - 1) + 1)) / stride_d + 1;
+                               ? 0
+                               : (im_d - (dilation_d * (wei_d - 1) + 1)) / stride_d + 1;
     unsigned int end_d   = min(col_d, im_d / stride_d + 1);
 
     unsigned int start_h = (im_h < dilation_h * (wei_h - 1) + 1)
-                       ? 0
-                       : (im_h - (dilation_h * (wei_h - 1) + 1)) / stride_h + 1;
+                               ? 0
+                               : (im_h - (dilation_h * (wei_h - 1) + 1)) / stride_h + 1;
     unsigned int end_h   = min(col_h, im_h / stride_h + 1);
 
     unsigned int start_w = (im_w < dilation_w * (wei_w - 1) + 1)
-                       ? 0
-                       : (im_w - (dilation_w * (wei_w - 1) + 1)) / stride_w + 1;
+                               ? 0
+                               : (im_w - (dilation_w * (wei_w - 1) + 1)) / stride_w + 1;
     unsigned int end_w   = min(col_w, im_w / stride_w + 1);
 
 #if MIOPEN_USE_64BIT_INDEX
@@ -114,7 +115,8 @@ extern "C" __global__ void Col2Im3dU(FLOAT* col,
 
 #if MIOPEN_USE_64BIT_INDEX
                     unsigned long col_off =
-                        ((((((unsigned long)z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h + cy) *
+                        ((((((unsigned long)z * wei_h) + y) * wei_w + x) * col_d + cz) * col_h +
+                         cy) *
                             col_w +
                         cx;
 #else
