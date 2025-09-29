@@ -122,16 +122,12 @@ public:
 
                         if(validPosition)
                         {
-                            std::vector<int64_t> inputFullIndices = {nIdx, inputChannel};
-                            inputFullIndices.insert(inputFullIndices.end(),
-                                                    inputSpatialIndices.begin(),
-                                                    inputSpatialIndices.end());
+                            auto inputFullIndices
+                                = buildTensorIndices(nIdx, inputChannel, inputSpatialIndices);
 
                             int64_t weightIdx = (gIdx * outputChannelsPerGroup) + kIdx;
-                            std::vector<int64_t> weightFullIndices = {weightIdx, c};
-                            weightFullIndices.insert(weightFullIndices.end(),
-                                                     kernelSpatialIndices.begin(),
-                                                     kernelSpatialIndices.end());
+                            auto weightFullIndices
+                                = buildTensorIndices(weightIdx, c, kernelSpatialIndices);
 
                             InputDataType inputVal = input.getHostValue(inputFullIndices);
                             InputDataType weightVal = weight.getHostValue(weightFullIndices);
@@ -143,9 +139,7 @@ public:
             }
 
             int64_t outputChannel = (gIdx * outputChannelsPerGroup) + kIdx;
-            std::vector<int64_t> outputFullIndices = {nIdx, outputChannel};
-            outputFullIndices.insert(
-                outputFullIndices.end(), outputSpatialIndices.begin(), outputSpatialIndices.end());
+            auto outputFullIndices = buildTensorIndices(nIdx, outputChannel, outputSpatialIndices);
 
             output.setHostValue(static_cast<InputDataType>(accumulator), outputFullIndices);
         };
@@ -243,15 +237,13 @@ public:
                         {
                             auto outputChannelIdx = (gIdx * outputChannelsPerGroup) + k;
 
-                            std::vector<int64_t> gradOutputFullIndices = {nIdx, outputChannelIdx};
-                            gradOutputFullIndices.insert(gradOutputFullIndices.end(),
-                                                         outputSpatialIndices.begin(),
-                                                         outputSpatialIndices.end());
+                            auto gradOutputFullIndices
+                                = buildTensorIndices(nIdx, outputChannelIdx, outputSpatialIndices);
 
-                            std::vector<int64_t> weightFullIndices = {outputChannelIdx, cIdx};
-                            weightFullIndices.insert(weightFullIndices.end(),
-                                                     kernelSpatialIndices.begin(),
-                                                     kernelSpatialIndices.end());
+                            auto weightBatchIdx = outputChannelIdx;
+                            auto weightChannelIdx = cIdx;
+                            auto weightFullIndices = buildTensorIndices(
+                                weightBatchIdx, weightChannelIdx, kernelSpatialIndices);
 
                             InputDataType vOut = gradOutput.getHostValue(gradOutputFullIndices);
                             InputDataType vWei = weight.getHostValue(weightFullIndices);
@@ -262,9 +254,9 @@ public:
                     }
                 });
 
-            std::vector<int64_t> gradInputFullIndices = {nIdx, (gIdx * channelsPerGroup) + cIdx};
-            gradInputFullIndices.insert(
-                gradInputFullIndices.end(), inputSpatialIndices.begin(), inputSpatialIndices.end());
+            int64_t inputChannelIdx = (gIdx * channelsPerGroup) + cIdx;
+            auto gradInputFullIndices
+                = buildTensorIndices(nIdx, inputChannelIdx, inputSpatialIndices);
 
             gradInput.setHostValue(static_cast<InputDataType>(vAcc), gradInputFullIndices);
         };
@@ -281,6 +273,15 @@ public:
     }
 
 private:
+    static std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
+                                                   int64_t channelIdx,
+                                                   const std::vector<int64_t>& spatialIndices)
+    {
+        std::vector<int64_t> fullIndices = {batchIdx, channelIdx};
+        fullIndices.insert(fullIndices.end(), spatialIndices.begin(), spatialIndices.end());
+        return fullIndices;
+    }
+
     static void validateInput(const TensorBase<InputDataType>& input,
                               const TensorBase<InputDataType>& weight,
                               const TensorBase<InputDataType>& output,
