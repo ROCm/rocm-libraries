@@ -9,7 +9,6 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
