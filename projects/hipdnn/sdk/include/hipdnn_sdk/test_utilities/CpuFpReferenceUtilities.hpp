@@ -6,15 +6,23 @@
 #include <algorithm>
 #include <array>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <numeric>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 namespace hipdnn_sdk
 {
 namespace test_utilities
 {
+
+// Type trait to validate tensor types (arithmetic types + half + hip_bfloat16)
+template <typename T>
+constexpr bool IS_VALID_TENSOR_TYPE_V = std::
+    disjunction_v<std::is_arithmetic<T>, std::is_same<T, half>, std::is_same<T, hip_bfloat16>>;
 
 struct JoinableThread : std::thread
 {

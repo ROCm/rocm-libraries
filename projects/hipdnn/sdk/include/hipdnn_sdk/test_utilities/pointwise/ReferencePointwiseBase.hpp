@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/PointwiseOperationFunctors.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
@@ -43,101 +44,136 @@ public:
         return true;
     }
 
-    template <typename... Args>
+    // Unary operations
+    template <typename InputType>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
-                                 Args&&... args)
+                                 const TensorBase<InputType>& input)
     {
-        static_assert(sizeof...(Args) >= 1, "Need at least one input tensor");
+        executeUnaryOperation(operation, output, input);
+    }
 
-        auto inputArgs = std::forward_as_tuple(args...);
+    template <typename InputType, typename ParamType>
+    static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                 TensorBase<OutputType>& output,
+                                 const TensorBase<InputType>& input,
+                                 const ParamType lowerClip,
+                                 const ParamType upperClip,
+                                 const ParamType lowerSlope)
+    {
+        static_assert(IS_VALID_TENSOR_TYPE_V<ParamType>,
+                      "ParamType must be a valid tensor type for scalar parameters");
+        executeParameterizedUnaryOperation(
+            operation, output, input, lowerClip, upperClip, lowerSlope);
+    }
+
+    // Binary operations
+    template <typename Input1Type, typename Input2Type>
+    static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                 TensorBase<OutputType>& output,
+                                 const TensorBase<Input1Type>& input1,
+                                 const TensorBase<Input2Type>& input2)
+    {
+        executeBinaryOperation(operation, output, input1, input2);
+    }
+
+private:
+    template <typename InputType>
+    static void executeUnaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                      TensorBase<OutputType>& output,
+                                      const TensorBase<InputType>& input)
+    {
         DeviceExecutor policy;
 
         switch(operation)
         {
-        case hipdnn_sdk::data_objects::PointwiseMode::ADD:
-            if constexpr(sizeof...(Args) == 2)
-            {
-                policy.executeBinaryBroadcast(
-                    std::get<0>(inputArgs), std::get<1>(inputArgs), output, pointwise::Add{});
-            }
-            else
-            {
-                throw std::runtime_error("Binary operations require exactly 2 input tensors");
-            }
-            break;
-        case hipdnn_sdk::data_objects::PointwiseMode::SUB:
-            if constexpr(sizeof...(Args) == 2)
-            {
-                policy.executeBinaryBroadcast(
-                    std::get<0>(inputArgs), std::get<1>(inputArgs), output, pointwise::Subtract{});
-            }
-            else
-            {
-                throw std::runtime_error("Binary operations require exactly 2 input tensors");
-            }
-            break;
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
-            if constexpr(sizeof...(Args) == 4)
-            {
-                policy.executeUnary(std::get<0>(inputArgs),
-                                    output,
-                                    pointwise::ReluForward{std::get<1>(inputArgs),
-                                                           std::get<2>(inputArgs),
-                                                           std::get<3>(inputArgs)});
-            }
-            else
-            {
-                policy.executeUnary(std::get<0>(inputArgs), output, pointwise::ReluForward{});
-            }
+            policy.executeUnary(input, output, pointwise::ReluForward{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
-            if constexpr(sizeof...(Args) == 4)
-            {
-                policy.executeUnary(std::get<0>(inputArgs),
-                                    output,
-                                    pointwise::ParameterizedReluBackward{std::get<1>(inputArgs),
-                                                                         std::get<2>(inputArgs),
-                                                                         std::get<3>(inputArgs)});
-            }
-            else if constexpr(sizeof...(Args) == 1)
-            {
-                policy.executeUnary(std::get<0>(inputArgs), output, pointwise::ReluBackward{});
-            }
-            else
-            {
-                throw std::runtime_error(
-                    "RELU_BWD requires either 1 input tensor (default parameters) or 4 arguments "
-                    "(input + lowerClip + upperClip + lowerSlope)");
-            }
+            policy.executeUnary(input, output, pointwise::ReluBackward{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
-            policy.executeUnary(std::get<0>(inputArgs), output, pointwise::SigmoidForward{});
+            policy.executeUnary(input, output, pointwise::SigmoidForward{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
-            policy.executeUnary(std::get<0>(inputArgs), output, pointwise::SigmoidBackward{});
+            policy.executeUnary(input, output, pointwise::SigmoidBackward{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD:
-            policy.executeUnary(std::get<0>(inputArgs), output, pointwise::TanhForward{});
+            policy.executeUnary(input, output, pointwise::TanhForward{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD:
-            policy.executeUnary(std::get<0>(inputArgs), output, pointwise::TanhBackward{});
+            policy.executeUnary(input, output, pointwise::TanhBackward{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::ABS:
-            policy.executeUnary(std::get<0>(inputArgs), output, pointwise::AbsoluteValue{});
+            policy.executeUnary(input, output, pointwise::AbsoluteValue{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::NEG:
-            policy.executeUnary(std::get<0>(inputArgs), output, pointwise::Negation{});
+            policy.executeUnary(input, output, pointwise::Negation{});
             break;
         default:
-            throw std::runtime_error("Unsupported pointwise operation: "
+            throw std::runtime_error("Unsupported unary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
         }
 
         policy.markOutputModified(output);
     }
 
-private:
+    template <typename InputType, typename ParamType>
+    static void
+        executeParameterizedUnaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                           TensorBase<OutputType>& output,
+                                           const TensorBase<InputType>& input,
+                                           const ParamType lowerClip,
+                                           const ParamType upperClip,
+                                           const ParamType lowerSlope)
+    {
+        DeviceExecutor policy;
+
+        switch(operation)
+        {
+        case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
+            policy.executeUnary(
+                input, output, pointwise::ReluForward{lowerClip, upperClip, lowerSlope});
+            break;
+        case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
+            policy.executeUnary(
+                input,
+                output,
+                pointwise::ParameterizedReluBackward{lowerClip, upperClip, lowerSlope});
+            break;
+        default:
+            throw std::runtime_error("Unsupported parameterized pointwise operation: "
+                                     + std::to_string(static_cast<int>(operation)));
+        }
+
+        policy.markOutputModified(output);
+    }
+
+    template <typename Input1Type, typename Input2Type>
+    static void executeBinaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
+                                       TensorBase<OutputType>& output,
+                                       const TensorBase<Input1Type>& input1,
+                                       const TensorBase<Input2Type>& input2)
+    {
+        DeviceExecutor policy;
+
+        switch(operation)
+        {
+        case hipdnn_sdk::data_objects::PointwiseMode::ADD:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Add{});
+            break;
+        case hipdnn_sdk::data_objects::PointwiseMode::SUB:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Subtract{});
+            break;
+        default:
+            throw std::runtime_error("Unsupported binary pointwise operation: "
+                                     + std::to_string(static_cast<int>(operation)));
+        }
+
+        policy.markOutputModified(output);
+    }
+
     static bool canExecuteOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
     {
         using namespace hipdnn_sdk::data_objects;

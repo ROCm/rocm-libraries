@@ -21,13 +21,13 @@ public:
             node);
     }
 
-    template <typename... Tensors>
+    template <typename... Args>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
                                  TensorBase<OutputType>& output,
-                                 Tensors&&... inputs)
+                                 Args&&... args)
     {
         ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::pointwiseCompute(
-            operation, output, std::forward<Tensors>(inputs)...);
+            operation, output, std::forward<Args>(args)...);
     }
 };
 
