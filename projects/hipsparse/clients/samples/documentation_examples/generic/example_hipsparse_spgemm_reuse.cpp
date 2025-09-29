@@ -278,7 +278,15 @@ int main(int argc, char* argv[])
                                                  HIPSPARSE_SPGEMM_DEFAULT,
                                                  spgemmDesc));
 
-    // Copy results back to host if required using hipsparseCsrGet...
+    // Copy results back to host if required
+    std::vector<int>   hcsrRowPtrC(m + 1);
+    std::vector<int>   hcsrColIndC(nnzC);
+    std::vector<float> hcsrValC(nnzC);
+    HIP_CHECK(
+        hipMemcpy(hcsrRowPtrC.data(), dcsrRowPtrC, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(hcsrColIndC.data(), dcsrColIndC, sizeof(int) * nnzC, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hcsrValC.data(), dcsrValC, sizeof(float) * nnzC, hipMemcpyDeviceToHost));
 
     // Update dcsrValA, dcsrValB with new values
     for(size_t i = 0; i < hcsrValA.size(); i++)
@@ -306,7 +314,12 @@ int main(int argc, char* argv[])
                                                  HIPSPARSE_SPGEMM_DEFAULT,
                                                  spgemmDesc));
 
-    // Copy results back to host if required using hipsparseCsrGet...
+    // Copy results back to host if required
+    HIP_CHECK(
+        hipMemcpy(hcsrRowPtrC.data(), dcsrRowPtrC, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(hcsrColIndC.data(), dcsrColIndC, sizeof(int) * nnzC, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hcsrValC.data(), dcsrValC, sizeof(float) * nnzC, hipMemcpyDeviceToHost));
 
     // Destroy matrix descriptors and handles
     HIPSPARSE_CHECK(hipsparseSpGEMM_destroyDescr(spgemmDesc));

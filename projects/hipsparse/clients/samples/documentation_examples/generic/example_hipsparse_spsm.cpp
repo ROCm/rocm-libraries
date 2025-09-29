@@ -124,10 +124,10 @@ int main(int argc, char* argv[])
                                        dataType));
 
     // Create dense matrix B
-    HIPSPARSE_CHECK(hipsparseCreateDnMat(&matB, m, n, m, dB, dataType, HIPSPARSE_ORDER_COLUMN));
+    HIPSPARSE_CHECK(hipsparseCreateDnMat(&matB, m, n, m, dB, dataType, HIPSPARSE_ORDER_COL));
 
     // Create dense matrix C
-    HIPSPARSE_CHECK(hipsparseCreateDnMat(&matC, m, n, m, dC, dataType, HIPSPARSE_ORDER_COLUMN));
+    HIPSPARSE_CHECK(hipsparseCreateDnMat(&matC, m, n, m, dC, dataType, HIPSPARSE_ORDER_COL));
 
     hipsparseSpSMDescr_t descr;
     HIPSPARSE_CHECK(hipsparseSpSM_createDescr(&descr));
