@@ -398,7 +398,8 @@ namespace origami
                                                      MT_K,
                                                      element_size,
                                                      static_cast<int>(candidate_wgm),
-                                                     1 /* splittingFactor */);
+                                                     1 /* splittingFactor */,
+                                                    false);
 
                 valid_results.emplace_back(current_hit, candidate_wgm);
             }

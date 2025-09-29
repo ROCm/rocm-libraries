@@ -87,7 +87,8 @@ namespace origami
                                size_t          MT_K,
                                size_t          element_size,
                                int             WGM,
-                               size_t          splittingFactor);
+                               size_t          splittingFactor,
+                              bool debug);
 
         // Estimates the mall hit-rate
         double estimate_mall_hit(const hardware_t& hardware,
@@ -98,6 +99,7 @@ namespace origami
                                  size_t          MT_M,
                                  size_t          MT_N,
                                  size_t          MT_K,
+                                 size_t element_size,
                                  int             WGM,
                                  size_t          numActiveCUs,
                                  size_t          splittingFactor);
