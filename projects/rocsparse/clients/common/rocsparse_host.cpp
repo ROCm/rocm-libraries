@@ -2444,7 +2444,7 @@ void host_sellmv(rocsparse_operation  trans,
 
     bool conj = (trans == rocsparse_operation_conjugate_transpose);
 
-    J nslices = (M - 1) / sell_slice_size + 1;
+    const J nslices = (M - 1) / sell_slice_size + 1;
 
     if(trans == rocsparse_operation_none)
     {
