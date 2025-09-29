@@ -36,7 +36,6 @@ struct BatchnormTrainTensorBundle
         , meanTensor(derivedDims)
         , invVarianceTensor(derivedDims)
         , epsilonTensor({1})
-        //, momentumTensor({1})
         , yTensor(dims, layout)
     {
         xTensor.fillWithRandomValues(
