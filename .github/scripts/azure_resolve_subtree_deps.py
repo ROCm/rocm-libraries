@@ -69,6 +69,7 @@ def main(argv=None) -> None:
     # Mathlib build+test dependency tree as defined in Azure CI and TheRock
     math_dependencies = {
         "shared/tensile": {},
+        "shared/origami": {},
         "projects/rocrand": {},
         "projects/hiprand": {"projects/rocrand"},
         "projects/rocfft": {"projects/hiprand"},
