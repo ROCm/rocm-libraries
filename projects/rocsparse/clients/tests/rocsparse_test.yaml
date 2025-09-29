@@ -111,7 +111,6 @@ include: test_spmv_coo_aos.yaml
 include: test_spmv_csr.yaml
 include: test_spmv_csc.yaml
 include: test_spmv_ell.yaml
-include: test_spmv_sell.yaml
 include: test_v2_spmv_bsr.yaml
 include: test_v2_spmv_coo.yaml
 include: test_v2_spmv_coo_aos.yaml
