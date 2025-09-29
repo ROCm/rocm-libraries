@@ -373,9 +373,8 @@ private:
     }
 
     // Helper function to iterate over spatial positions
-    static void
-        iterateSpatialPositions(const std::vector<int64_t>& spatialDims,
-                                const std::function<void(const std::vector<int64_t>&)>& func)
+    template <typename F>
+    static void iterateSpatialPositions(const std::vector<int64_t>& spatialDims, F&& func)
     {
         if(spatialDims.empty())
         {

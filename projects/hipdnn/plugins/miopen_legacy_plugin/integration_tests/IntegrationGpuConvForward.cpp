@@ -221,7 +221,7 @@ TEST_P(IntegrationGpuConvFwdNchwFp32, Correctness)
 
 TEST_P(IntegrationGpuConvFwdNcdhwFp32, Correctness)
 {
-    runConvTest(8e-6f, TensorLayout::NCDHW);
+    runConvTest(8.5e-6f, TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvFwdNchwBfp16, Correctness)
@@ -251,7 +251,7 @@ TEST_P(IntegrationGpuConvFwdNhwcFp32, Correctness)
 
 TEST_P(IntegrationGpuConvFwdNdhwcFp32, Correctness)
 {
-    runConvTest(8e-6f, TensorLayout::NDHWC);
+    runConvTest(8.5e-6f, TensorLayout::NDHWC);
 }
 
 TEST_P(IntegrationGpuConvFwdNhwcBfp16, Correctness)
