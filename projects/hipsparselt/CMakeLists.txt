@@ -146,6 +146,7 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
     # Builds tensilelite::tensilelite-host target
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+    set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
     set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
     set(HIPBLASLT_LIBLOGIC_PATH
         "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
