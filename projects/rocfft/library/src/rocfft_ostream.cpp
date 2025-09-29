@@ -400,6 +400,18 @@ rocfft_ostream::worker::~worker()
     // Tell worker thread to exit, by sending it an empty string
     send({});
 
+    // drain the queue to ensure that outstanding std::promises
+    // aren't broken when all of these tasks are torn down
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        while(!queue.empty())
+        {
+            task_t task = std::move(queue.front());
+            queue.pop();
+            task.set_value();
+        }
+    }
+
     // Close the FILE
     if(file)
         fclose(file);

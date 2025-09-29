@@ -109,6 +109,9 @@ namespace rocRoller
                                 ShowValue(dimensionWorkitem.dim),
                                 ShowValue(kernelWorkitemIndexes.size()));
                     auto expr = kernelWorkitemIndexes.at(dimensionWorkitem.dim);
+                    if(context)
+                        context->registerTagManager()->addExpression(
+                            tag, kernelWorkitemIndexes.at(dimensionWorkitem.dim), {});
                     setCoordinate(tag, expr);
                 }
             }

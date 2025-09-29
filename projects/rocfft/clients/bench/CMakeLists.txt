@@ -105,6 +105,7 @@ foreach( bench ${bench_list})
     PRIVATE
     hip::hiprand
     )
+    target_compile_definitions( ${bench} PRIVATE USE_HIPRAND )
   endif()
 
   # We need to include both rocfft.h and rocfft-export.h
