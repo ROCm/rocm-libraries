@@ -73,7 +73,7 @@ protected:
     }
 };
 
-TEST_F(TestBatchnormFwdPlan, executePlan)
+TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     double epsilon = 1e-3;
     std::vector<int64_t> dims = {6, 3, 32, 32};
