@@ -76,13 +76,13 @@ int32_t mloSoftMarginLossForwardRunHost(miopenTensorDescriptor_t inputDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
-int32_t mloSoftMarginLossForwardRunHost2(miopenTensorDescriptor_t inputDesc,
-                                         miopenTensorDescriptor_t targetDesc,
-                                         miopenTensorDescriptor_t outputDesc,
-                                         Tgpu* input,
-                                         Tgpu* target,
-                                         Tcheck* outputhost,
-                                         miopenLossReductionMode_t reduction_mode)
+int32_t mloSoftMarginLossForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
+                                           miopenTensorDescriptor_t targetDesc,
+                                           miopenTensorDescriptor_t outputDesc,
+                                           Tgpu* input,
+                                           Tgpu* target,
+                                           Tcheck* outputhost,
+                                           miopenLossReductionMode_t reduction_mode)
 {
     auto input_numel = miopen::deref(inputDesc).GetElementSize();
     auto i_tv        = miopen::get_inner_expanded_tv<5>(miopen::deref(inputDesc));
@@ -209,6 +209,7 @@ private:
     std::vector<Tgpu> target;
     std::vector<Tgpu> out;
     std::vector<Tref> outhost;
+    std::vector<Tref> outhost_mt;
     std::vector<Tgpu> dO;
     std::vector<Tgpu> dI;
     std::vector<Tref> dIhost;
@@ -391,8 +392,9 @@ int SoftMarginLossDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             workspace_dev = nullptr;
         else
             workspace_dev = std::make_unique<GPUMem>(ctx, ws_sizeInBytes, sizeof(std::byte));
-        out     = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
-        outhost = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+        out        = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
+        outhost    = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+        outhost_mt = std::vector<Tref>(out_sz, static_cast<Tref>(0));
         if(out_dev->ToGPU(GetStream(), out.data()) != 0)
         {
             std::cerr << "Error copying (out) to GPU, size: " << out_dev->GetSize() << std::endl;
@@ -483,13 +485,23 @@ int SoftMarginLossDriver<Tgpu, Tref>::RunForwardGPU()
 template <typename Tgpu, typename Tref>
 int SoftMarginLossDriver<Tgpu, Tref>::RunForwardCPU()
 {
-    return mloSoftMarginLossForwardRunHost(inputDesc,
-                                           targetDesc,
-                                           outputDesc,
-                                           in.data(),
-                                           target.data(),
-                                           outhost.data(),
-                                           reduction_mode);
+    int32_t s = mloSoftMarginLossForwardRunHost(inputDesc,
+                                                targetDesc,
+                                                outputDesc,
+                                                in.data(),
+                                                target.data(),
+                                                outhost.data(),
+                                                reduction_mode);
+
+    int32_t s_mt = mloSoftMarginLossForwardRunHost_mt(inputDesc,
+                                                      targetDesc,
+                                                      outputDesc,
+                                                      in.data(),
+                                                      target.data(),
+                                                      outhost_mt.data(),
+                                                      reduction_mode);
+
+    return s;
 }
 
 template <typename Tgpu, typename Tref>
@@ -579,13 +591,27 @@ int SoftMarginLossDriver<Tgpu, Tref>::VerifyForward()
     auto error           = miopen::rms_range(outhost, out);
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward SoftMarginLoss FAILED: " << error << " > " << tolerance << std::endl;
+        std::cout << "Single-threaded forward SoftMarginLoss FAILED: " << error << " > "
+                  << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Forward SoftMarginLoss Verifies OK on CPU reference (" << error << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Single-threaded forward SoftMarginLoss Verifies OK on CPU reference ("
+                  << error << " < " << tolerance << ')' << std::endl;
+    }
+
+    auto error_mt = miopen::rms_range(outhost_mt, out);
+    if(!std::isfinite(error_mt) || error_mt > tolerance)
+    {
+        std::cout << "Multi-threaded forward SoftMarginLoss FAILED: " << error_mt << " > "
+                  << tolerance << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded forward SoftMarginLoss Verifies OK on CPU reference ("
+                  << error_mt << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;

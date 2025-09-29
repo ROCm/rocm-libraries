@@ -95,17 +95,17 @@ int32_t mloMultiMarginLossForwardRunHost(const miopenTensorDescriptor_t iDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
-int32_t mloMultiMarginLossForwardRunHost2(const miopenTensorDescriptor_t iDesc,
-                                          const miopenTensorDescriptor_t tDesc,
-                                          const miopenTensorDescriptor_t wDesc,
-                                          const miopenTensorDescriptor_t oDesc,
-                                          const long p,
-                                          const float margin,
-                                          const miopenLossReductionMode_t reduction_mode,
-                                          const Tgpu* input,
-                                          const uint64_t* target,
-                                          const Tgpu* weight,
-                                          Tcheck* ref_output)
+int32_t mloMultiMarginLossForwardRunHost_mt(const miopenTensorDescriptor_t iDesc,
+                                            const miopenTensorDescriptor_t tDesc,
+                                            const miopenTensorDescriptor_t wDesc,
+                                            const miopenTensorDescriptor_t oDesc,
+                                            const long p,
+                                            const float margin,
+                                            const miopenLossReductionMode_t reduction_mode,
+                                            const Tgpu* input,
+                                            const uint64_t* target,
+                                            const Tgpu* weight,
+                                            Tcheck* ref_output)
 {
     auto I_tv = miopen::get_inner_expanded_tv<2>(miopen::deref(iDesc));
     auto T_tv = miopen::get_inner_expanded_tv<1>(miopen::deref(tDesc));
@@ -215,6 +215,7 @@ private:
     std::vector<Tgpu> W;
     std::vector<Tgpu> O;
     std::vector<Tref> Ohost;
+    std::vector<Tref> Ohost_mt;
 
     long p;
     float margin;
@@ -394,9 +395,10 @@ int MultiMarginLossDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             return miopenStatusAllocFailed;
         }
 
-        o_dev = std::make_unique<GPUMem>(ctx, o_sz, sizeof(Tgpu));
-        O     = std::vector<Tgpu>(o_sz, static_cast<Tgpu>(0));
-        Ohost = std::vector<Tref>(o_sz, static_cast<Tref>(0));
+        o_dev    = std::make_unique<GPUMem>(ctx, o_sz, sizeof(Tgpu));
+        O        = std::vector<Tgpu>(o_sz, static_cast<Tgpu>(0));
+        Ohost    = std::vector<Tref>(o_sz, static_cast<Tref>(0));
+        Ohost_mt = std::vector<Tref>(o_sz, static_cast<Tref>(0));
         if(o_dev->ToGPU(GetStream(), O.data()) != 0)
         {
             std::cerr << "Error copying (out) to GPU, size: " << o_dev->GetSize() << std::endl;
@@ -476,8 +478,7 @@ int MultiMarginLossDriver<Tgpu, Tref>::RunForwardGPU()
 template <typename Tgpu, typename Tref>
 int MultiMarginLossDriver<Tgpu, Tref>::RunForwardCPU()
 {
-    auto start                                    = std::chrono::steady_clock::now();
-    int32_t s                                     = mloMultiMarginLossForwardRunHost(iDesc,
+    int32_t s = mloMultiMarginLossForwardRunHost(iDesc,
                                                  tDesc,
                                                  wDesc,
                                                  oDesc,
@@ -488,29 +489,18 @@ int MultiMarginLossDriver<Tgpu, Tref>::RunForwardCPU()
                                                  T.data(),
                                                  W.data(),
                                                  Ohost.data());
-    auto end                                      = std::chrono::steady_clock::now();
-    std::chrono::duration<float, std::milli> diff = end - start;
 
-    auto start1                                    = std::chrono::steady_clock::now();
-    int32_t s1                                     = mloMultiMarginLossForwardRunHost2(iDesc,
-                                                   tDesc,
-                                                   wDesc,
-                                                   oDesc,
-                                                   p,
-                                                   margin,
-                                                   reduction_mode,
-                                                   I.data(),
-                                                   T.data(),
-                                                   W.data(),
-                                                   Ohost.data());
-    auto end1                                      = std::chrono::steady_clock::now();
-    std::chrono::duration<float, std::milli> diff1 = end1 - start1;
-
-    std::cout << "FWD OLD TIME: " << diff << std::endl << "FWD NEW TIME: " << diff1 << std::endl;
-
-    std::ofstream f("multimarginloss.txt", std::ios::app);
-    f << diff.count() << "\t" << diff1.count() << std::endl;
-    f.close();
+    int32_t s_mt = mloMultiMarginLossForwardRunHost_mt(iDesc,
+                                                       tDesc,
+                                                       wDesc,
+                                                       oDesc,
+                                                       p,
+                                                       margin,
+                                                       reduction_mode,
+                                                       I.data(),
+                                                       T.data(),
+                                                       W.data(),
+                                                       Ohost_mt.data());
 
     return s;
 }
@@ -538,13 +528,27 @@ int MultiMarginLossDriver<Tgpu, Tref>::VerifyForward()
     auto error           = miopen::rms_range(Ohost, O);
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward MultiMarginLoss FAILED: " << error << " > " << tolerance << std::endl;
+        std::cout << "Single-threaded forward MultiMarginLoss FAILED: " << error << " > "
+                  << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Forward MultiMarginLoss Verifies OK on CPU reference (" << error << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Single-threaded forward MultiMarginLoss Verifies OK on CPU reference ("
+                  << error << " < " << tolerance << ')' << std::endl;
+    }
+
+    auto error_mt = miopen::rms_range(Ohost_mt, O);
+    if(!std::isfinite(error_mt) || error_mt > tolerance)
+    {
+        std::cout << "Multi-threaded forward MultiMarginLoss FAILED: " << error_mt << " > "
+                  << tolerance << std::endl;
+        return EC_VerifyFwd;
+    }
+    else
+    {
+        std::cout << "Multi-threaded forward MultiMarginLoss Verifies OK on CPU reference ("
+                  << error_mt << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
