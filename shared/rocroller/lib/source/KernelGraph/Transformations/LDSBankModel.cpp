@@ -340,6 +340,14 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return cycles;
     }
 
+    uint LDSBankModel::getInstructionCycles(const RuntimeLDSInstruction& instr,
+                                            GPUArchitectureGFX           gfx)
+    {
+        uint issueCycles = getInstructionIssueCycles(instr.memoryOp, instr.dwords);
+        uint dataCycles  = getInstructionDataCycles(instr, gfx);
+        return std::max(issueCycles, dataCycles);
+    }
+
     OperationsAnalysis LDSBankModel::doOperationsAnalysis(GPUArchitectureGFX gfx) const
     {
         OperationsAnalysis detailed;

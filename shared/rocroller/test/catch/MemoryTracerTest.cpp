@@ -413,4 +413,58 @@ namespace MemoryTracerTest
             }
         }
     }
+
+    TEST_CASE("LDS model get instruction cycles", "[lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        const auto gfx = GPUArchitectureGFX::GFX942;
+
+        // n-way bank conflict: n threads access the same bank
+        auto generateAddresses = [](uint dwords, uint conflictWays) -> std::vector<uint32_t> {
+            std::vector<uint32_t> addresses;
+            const uint            waveSize = 64;
+
+            for(uint thread = 0; thread < waveSize; ++thread)
+            {
+                addresses.push_back(thread * dwords * 4 * conflictWays);
+            }
+
+            return addresses;
+        };
+
+        for(auto direction : {LdsDirection::Read, LdsDirection::Write})
+        {
+            for(uint dwords : {1, 2, 4})
+            {
+                for(uint conflictWays : {1, 2, 4, 8})
+                {
+                    CAPTURE(dwords, direction, conflictWays);
+
+                    RuntimeLDSInstruction instr;
+                    instr.memoryOp      = MemoryOpLDS{direction};
+                    instr.dwords        = dwords;
+                    instr.baseAddresses = generateAddresses(dwords, conflictWays);
+
+                    uint issueCycles
+                        = LDSBankModel::getInstructionIssueCycles(instr.memoryOp, instr.dwords);
+                    uint dataCycles     = LDSBankModel::getInstructionDataCycles(instr, gfx);
+                    uint expectedCycles = std::max(issueCycles, dataCycles);
+
+                    uint actualCycles = LDSBankModel::getInstructionCycles(instr, gfx);
+                    CHECK(actualCycles == expectedCycles);
+
+                    std::cout << fmt::format("Dwords: {}, Direction: {}, ConflictWays: {}, "
+                                             "IssueCycles: {}, DataCycles: {}, TotalCycles: {}\n",
+                                             dwords,
+                                             (direction == LdsDirection::Read ? "Read" : "Write"),
+                                             conflictWays,
+                                             issueCycles,
+                                             dataCycles,
+                                             actualCycles);
+                }
+            }
+        }
+    }
 }

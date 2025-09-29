@@ -173,6 +173,22 @@ namespace rocRoller::KernelGraph::MemoryTracer
         static uint getInstructionIssueCycles(const MemoryOpLDS& memoryOp, uint dwords);
 
         /**
+         * @brief Get the total number of cycles for an LDS instruction
+         * 
+         * This function returns the maximum of:
+         * - Instruction issue cycles (address transfer + data transfer for writes)
+         * - Data movement cycles (bank conflict resolution)
+         * 
+         * The actual instruction execution time is limited by whichever component takes longer.
+         * 
+         * @param instr The LDS instruction with memory operation details and addresses
+         * @param gfx The GPU architecture
+         * @return Total number of cycles for the instruction
+         */
+        static uint getInstructionCycles(const RuntimeLDSInstruction& instr,
+                                         GPUArchitectureGFX           gfx);
+
+        /**
          * @brief Get the number of LDS banks for a given GPU architecture
          */
         static uint getNumLDSBanks(GPUArchitectureGFX gfx);
