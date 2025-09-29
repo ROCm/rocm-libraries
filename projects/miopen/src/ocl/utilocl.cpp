@@ -431,7 +431,7 @@ float Col2Im2dGPU(const Handle& handle,
                   uint32_t im_offset,
                   miopenDataType_t type)
 {
-    std::string program_name = "MIOpenCol2Im2d.cl";
+    std::string program_name = "MIOpenCol2Im2d.cpp";
     std::string kernel_name  = "Col2Im2dU";
 
     // clang-format off
