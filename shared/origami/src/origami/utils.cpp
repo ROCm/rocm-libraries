@@ -340,7 +340,7 @@ namespace origami
             size_t                     N,
             size_t                     K,
             size_t                     batch,
-            hardware_t&                hardware,
+            const hardware_t&          hardware,
             size_t                     MT_M,
             size_t                     MT_N,
             size_t                     MT_K,

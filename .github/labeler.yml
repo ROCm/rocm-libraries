@@ -19,6 +19,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'
 
+"project: hipdnn":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipdnn/**/*'
+
 "project: hipfft":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipfft/**/*'
@@ -75,14 +79,14 @@
 "project: rocthrust":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocthrust/**/*'
-  
-"project: hipdnn":
-- changed-files:
-  - any-glob-to-any-file: 'projects/hipdnn/**/*'
 
 "shared: mxdatagenerator":
 - changed-files:
   - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
+
+"shared: origami":
+- changed-files:
+  - any-glob-to-any-file: 'shared/origami/**/*'
 
 "shared: rocroller":
 - changed-files:
@@ -91,10 +95,6 @@
 "shared: tensile":
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
-
-"shared: origami":
-- changed-files:
-  - any-glob-to-any-file: 'shared/origami/**/*'
 
 documentation:
 - changed-files:
