@@ -125,9 +125,18 @@ public:
                 static_cast<InputDataType>(accumulator), nIdx, outputChannel, hoIdx, woIdx);
         };
 
-        hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
-            convolutionFunc, nGroups, nBatch, outputChannelsPerGroup, outputHeight, outputWidth)(
-            std::thread::hardware_concurrency());
+        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
+            [&](const std::vector<int64_t>& indices) {
+                auto g = indices[0]; // group index
+                auto n = indices[1]; // batch index
+                auto k = indices[2]; // output channel within group
+                auto ho = indices[3]; // output height
+                auto wo = indices[4]; // output width
+                convolutionFunc(g, n, k, ho, wo);
+            },
+            std::vector<int64_t>{
+                nGroups, nBatch, outputChannelsPerGroup, outputHeight, outputWidth});
+        parallelFunc(std::thread::hardware_concurrency());
 
         output.memory().markHostModified();
     }
@@ -221,9 +230,17 @@ public:
                                    wiIdx);
         };
 
-        hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
-            convolutionFunc, nGroups, nBatch, channelsPerGroup, inputHeight, inputWidth)(
-            std::thread::hardware_concurrency());
+        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
+            [&](const std::vector<int64_t>& indices) {
+                auto g = indices[0]; // group index
+                auto n = indices[1]; // batch index
+                auto c = indices[2]; // channel index
+                auto hi = indices[3]; // input height
+                auto wi = indices[4]; // input width
+                convolutionFunc(g, n, c, hi, wi);
+            },
+            std::vector<int64_t>{nGroups, nBatch, channelsPerGroup, inputHeight, inputWidth});
+        parallelFunc(std::thread::hardware_concurrency());
 
         gradInput.memory().markHostModified();
     }

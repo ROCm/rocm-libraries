@@ -3,15 +3,17 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
+# hipDNN dependency versions to use
+set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
+set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
+set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
+set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
+
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING "Toolchain file")
 
 set(HIPDNN_VERSION "0.0.1")
-
-if(NOT WIN32)
-    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
-endif()
 
 if(NOT WIN32)
     if(CMAKE_GENERATOR STREQUAL "Ninja")
@@ -25,6 +27,11 @@ project(
     hipDNN
     VERSION ${HIPDNN_VERSION}
     LANGUAGES CXX)
+
+if(NOT WIN32)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -52,7 +59,6 @@ list(
     CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake
     ${ROCM_PATH}/lib/cmake/hip
-    /opt/rocm/lib/cmake/hip
     ${HIP_DIR}/cmake
 )
 
@@ -64,9 +70,6 @@ list(
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
     ${ROCM_PATH}/hip
-    /opt/rocm/llvm
-    /opt/rocm
-    /opt/rocm/hip 
 )
 
 include(cmake/Dependencies.cmake)
