@@ -502,7 +502,7 @@ int MultiMarginLossDriver<Tgpu, Tref>::RunForwardCPU()
                                                        W.data(),
                                                        Ohost_mt.data());
 
-    return s;
+    return s || s_mt;
 }
 
 template <typename Tgpu, typename Tref>

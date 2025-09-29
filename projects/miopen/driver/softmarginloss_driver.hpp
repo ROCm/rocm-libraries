@@ -501,7 +501,7 @@ int SoftMarginLossDriver<Tgpu, Tref>::RunForwardCPU()
                                                       outhost_mt.data(),
                                                       reduction_mode);
 
-    return s;
+    return s || s_mt;
 }
 
 template <typename Tgpu, typename Tref>
