@@ -466,7 +466,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
     }
     do
     {
-        bool flag = NextCKSplitkValue<1, 128>(split_k);
+        bool flag = NextTwoPower<1, 128>(split_k);
         if(!flag)
         {
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
