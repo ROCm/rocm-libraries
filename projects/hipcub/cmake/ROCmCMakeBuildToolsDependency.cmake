@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,8 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   include(FetchContent)
   FetchContent_Declare(
     rocm-cmake
-    URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/refs/tags/rocm-5.2.0.tar.gz
+    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
+    GIT_TAG        rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
   FetchContent_MakeAvailable(rocm-cmake)
