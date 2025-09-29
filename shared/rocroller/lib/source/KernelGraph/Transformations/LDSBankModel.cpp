@@ -326,12 +326,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
         const auto threadGroupBankMappings = computeThreadGroupBankMappings(instr, gfx);
         uint       cycles = calculateTotalCyclesFromBankMappings(threadGroupBankMappings);
 
-        // Add address transfer overhead for write due to shared addr and data bus
-        if(instr.memoryOp.direction == LdsDirection::Write)
-        {
-            cycles += 4;
-        }
-
         return cycles;
     }
 
@@ -456,12 +450,6 @@ namespace rocRoller::KernelGraph::MemoryTracer
                 cycles += groupCycles;
                 i++;
             }
-        }
-
-        // Add address transfer overhead only for Store operations
-        if(instr.memoryOp.direction == LdsDirection::Write)
-        {
-            cycles += 4;
         }
 
         const auto instructionTotalClocks = LDSBankModel::getClockCount(instr, gfx);

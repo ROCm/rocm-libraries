@@ -382,7 +382,7 @@ namespace MemoryTracerTest
         {
             instr.memoryOp    = MemoryOpLDS{LdsDirection::Write};
             const auto cycles = LDSBankModel::getClockCount(instr, gfx);
-            CHECK(cycles == baseCycles + 4); // +4 for write operations
+            CHECK(cycles == baseCycles);
         }
     }
 
