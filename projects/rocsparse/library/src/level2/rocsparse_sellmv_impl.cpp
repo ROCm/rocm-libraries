@@ -224,10 +224,10 @@ namespace rocsparse
         // Stream
         hipStream_t stream = handle->stream;
 
-        I nslices = (m - 1) / slice_size + 1;
+        const I nslices = (m - 1) / slice_size + 1;
 
-        int blocks_x = std::sqrt(nslices);
-        int blocks_y = (nslices - 1) / blocks_x + 1;
+        const int32_t blocks_x = std::sqrt(nslices);
+        const int32_t blocks_y = (nslices - 1) / blocks_x + 1;
 
         if(trans == rocsparse_operation_none)
         {
