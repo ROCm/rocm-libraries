@@ -176,6 +176,31 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS1) syevx_sort_eigs(const rocblas_int n
     __syncthreads();
 }
 
+template <int DIM>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM) sort_ifail(const rocblas_int n,
+                                                        rocblas_int* ifailIn,
+                                                        const rocblas_stride strideIfailIn,
+                                                        rocblas_int* ifailOut,
+                                                        const rocblas_stride strideIfailOut,
+                                                        rocblas_int* infoA,
+                                                        rocblas_int* isplit_map)
+{
+    // batch instance id
+    int bid = hipBlockIdx_y;
+    int tid = hipThreadIdx_x;
+
+    auto const info = infoA[bid];
+    auto const map = isplit_map + (bid * n);
+
+    auto const src = ifailIn + (bid * strideIfailIn);
+    auto const dst = ifailOut + (bid * strideIfailOut);
+
+    for(int k = tid; k < info; k += DIM)
+    {
+        dst[k] = map[src[k]];
+    }
+}
+
 /** Argument checking **/
 template <typename T, typename S>
 rocblas_status rocsolver_syevx_heevx_argCheck(rocblas_handle handle,
@@ -271,7 +296,7 @@ void rocsolver_syevx_heevx_getMemorySize(const rocblas_evect evect,
     }
 
     size_t unused;
-    size_t a1 = 0, a2 = 0, a3 = 0, a4 = 0;
+    size_t a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0;
     size_t b1 = 0, b2 = 0, b3 = 0, b4 = 0;
     size_t c1 = 0, c2 = 0, c3 = 0;
 
@@ -291,10 +316,13 @@ void rocsolver_syevx_heevx_getMemorySize(const rocblas_evect evect,
 
         // extra requirements for computing the eigenvectors (stein)
         rocsolver_stein_getMemorySize<T, S>(n, batch_count, &a4, &b4);
+
+        // extra requirements for sorting eigenvectors
+        a5 = sizeof(T) * (n * n) * batch_count;
     }
 
     // get max values
-    *size_work1 = std::max({a1, a2, a3, a4});
+    *size_work1 = std::max({a1, a2, a3, a4, a5});
     *size_work2 = std::max({b1, b2, b3, b4});
     *size_work3 = std::max({c1, c2, c3});
 
@@ -408,10 +436,17 @@ rocblas_status rocsolver_syevx_heevx_template(rocblas_handle handle,
             (T*)work2, (T*)work3, (T**)nsplit_workArr);
 
         // sort eigenvalues and eigenvectors
-        dim3 grid(1, batch_count, 1);
-        dim3 threads(BS1, 1, 1);
-        ROCSOLVER_LAUNCH_KERNEL(syevx_sort_eigs<T>, grid, threads, 0, stream, n, nev, W, strideW, Z,
-                                shiftZ, ldz, strideZ, ifail, strideF, info, isplit_map);
+        run_eigen_sort<512, T>(handle, n, batch_count, D, n, W, 0, strideW, (T*)work1, 0, n, n * n,
+                               Z, shiftZ, ldz, strideZ, nev, isplit_map);
+
+        // sort ifail
+        if(ifail)
+        {
+            ROCSOLVER_LAUNCH_KERNEL(eigen_sort_copyD<512>, dim3(1, batch_count), dim3(512), 0,
+                                    stream, n, ifail, strideF, iblock, n);
+            ROCSOLVER_LAUNCH_KERNEL(sort_ifail<512>, dim3(1, batch_count), dim3(512), 0, stream, n,
+                                    iblock, n, ifail, strideF, info, isplit_map);
+        }
     }
 
     return rocblas_status_success;

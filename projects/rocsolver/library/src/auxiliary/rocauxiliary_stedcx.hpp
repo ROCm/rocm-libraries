@@ -28,6 +28,7 @@
 #pragma once
 
 #include "auxiliary/rocauxiliary_stebz.hpp"
+#include "auxiliary/rocauxiliary_stedc.hpp"
 #include "auxiliary/rocauxiliary_stein.hpp"
 #include "auxiliary/rocauxiliary_steqr.hpp"
 #include "lapack_device_functions.hpp"
@@ -1672,10 +1673,10 @@ void rocsolver_stedcx_getMemorySize(const rocblas_evect evect,
         return;
     }
 
-    size_t s1, s2;
+    size_t s1, s2, unused;
 
     // requirements for solver of small independent blocks
-    rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, size_work_steqr);
+    rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, size_work_steqr, &unused);
     s1 = sizeof(S) * (4 * n + 2) * batch_count;
 
     // extra requirements for original eigenvectors of small independent blocks
@@ -1909,8 +1910,8 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
                                     work_stack, 0, ldt, strideT, batch_count, workArr);
 
     // sort eigenvalues and eigenvectors
-    ROCSOLVER_LAUNCH_KERNEL((stedcx_sort<T>), dim3(1, 1, batch_count), dim3(BS1), 0, stream, n, W,
-                            strideW, C, shiftC, ldc, strideC, batch_count, splits, nev);
+    run_eigen_sort<STEDC_BDIM, T>(handle, n, batch_count, tmpz, n, W, 0, strideW, (T*)tempgemm, 0,
+                                  n, n * n, C, shiftC, ldc, strideC, nev);
 
     return rocblas_status_success;
 }

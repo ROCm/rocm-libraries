@@ -684,7 +684,8 @@ ROCSOLVER_KERNEL void steqr_kernel(const rocblas_int n,
                                    const rocblas_int max_iters,
                                    const S eps,
                                    const S ssfmin,
-                                   const S ssfmax)
+                                   const S ssfmax,
+                                   const bool ordered = true)
 {
     // select bacth instance
     rocblas_int tid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -699,19 +700,21 @@ ROCSOLVER_KERNEL void steqr_kernel(const rocblas_int n,
     rocblas_int* info = iinfo + bid;
 
     // execute
-    run_steqr(tid, tid_inc, n, D, E, C, ldc, info, work, max_iters, eps, ssfmin, ssfmax);
+    run_steqr(tid, tid_inc, n, D, E, C, ldc, info, work, max_iters, eps, ssfmin, ssfmax, ordered);
 }
 
 template <typename T, typename S>
 void rocsolver_steqr_getMemorySize(const rocblas_evect evect,
                                    const rocblas_int n,
                                    const rocblas_int batch_count,
-                                   size_t* size_work_stack)
+                                   size_t* size_work_stack,
+                                   size_t* size_tempc)
 {
+    *size_work_stack = 0;
+    *size_tempc = 0;
     // if quick return no workspace needed
     if(n == 0 || !batch_count)
     {
-        *size_work_stack = 0;
         return;
     }
 
@@ -719,7 +722,10 @@ void rocsolver_steqr_getMemorySize(const rocblas_evect evect,
     if(evect == rocblas_evect_none)
         *size_work_stack = sizeof(rocblas_int) * (2 * 32) * batch_count;
     else
+    {
         *size_work_stack = sizeof(S) * (2 * n) * batch_count;
+        *size_tempc = sizeof(T) * (n * n) * batch_count;
+    }
 }
 
 template <typename T, typename S>
@@ -772,7 +778,8 @@ rocblas_status rocsolver_steqr_template(rocblas_handle handle,
                                         const rocblas_stride strideC,
                                         rocblas_int* info,
                                         const rocblas_int batch_count,
-                                        void* work_stack)
+                                        void* work_stack,
+                                        T* tempc)
 {
     ROCSOLVER_ENTER("steqr", "evect:", evect, "n:", n, "shiftD:", shiftD, "shiftE:", shiftE,
                     "shiftC:", shiftC, "ldc:", ldc, "bc:", batch_count);
@@ -832,8 +839,12 @@ rocblas_status rocsolver_steqr_template(rocblas_handle handle,
             const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
             ROCSOLVER_LAUNCH_KERNEL((steqr_kernel<T>), dim3(1, batch_count), dim3(props->warpSize),
-                                    0, stream, n, D + shiftD, strideD, E + shiftE, strideE, C, shiftC,
-                                    ldc, strideC, info, (S*)work_stack, 30 * n, eps, ssfmin, ssfmax);
+                                    0, stream, n, D + shiftD, strideD, E + shiftE, strideE, C,
+                                    shiftC, ldc, strideC, info, (S*)work_stack, 30 * n, eps, ssfmin,
+                                    ssfmax, false);
+
+            run_eigen_sort<512, T>(handle, n, batch_count, (S*)work_stack, n, D, shiftD, strideD,
+                                   tempc, 0, n, n * n, C, shiftC, ldc, strideC);
         }
     }
 

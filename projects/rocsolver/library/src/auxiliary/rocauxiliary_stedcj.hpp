@@ -29,6 +29,7 @@
 
 #include <algorithm>
 
+#include "auxiliary/rocauxiliary_stedc.hpp"
 #include "lapack/roclapack_syevj_heevj.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
@@ -1465,60 +1466,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCJ_BDIM)
     }
 }
 
-/** STEDCJ_SORT sorts computed eigenvalues and eigenvectors in increasing order **/
-template <typename T, typename S, typename U>
-ROCSOLVER_KERNEL void __launch_bounds__(BS1) stedcj_sort(const rocblas_int n,
-                                                         S* DD,
-                                                         const rocblas_stride strideD,
-                                                         U CC,
-                                                         const rocblas_int shiftC,
-                                                         const rocblas_int ldc,
-                                                         const rocblas_stride strideC,
-                                                         const rocblas_int batch_count,
-                                                         rocblas_int* work,
-                                                         rocblas_int* nev = nullptr)
-{
-    // -----------------------------------
-    // use z-grid dimension as batch index
-    // -----------------------------------
-    rocblas_int bid_start = hipBlockIdx_z;
-    rocblas_int bid_inc = hipGridDim_z;
-
-    int tid = hipThreadIdx_x;
-
-    rocblas_int* const map = work + bid_start * ((int64_t)n);
-
-    for(auto bid = bid_start; bid < batch_count; bid += bid_inc)
-    {
-        // ---------------------------------------------
-        // select batch instance to work with
-        // (avoiding arithmetics with possible nullptrs)
-        // ---------------------------------------------
-        T* C = nullptr;
-        if(CC)
-            C = load_ptr_batch<T>(CC, bid, shiftC, strideC);
-        S* D = DD + (bid * strideD);
-        rocblas_int nn;
-        if(nev)
-            nn = nev[bid];
-        else
-            nn = n;
-
-        bool constexpr use_shell_sort = true;
-
-        __syncthreads();
-
-        if(use_shell_sort)
-            shell_sort(nn, D, map);
-        else
-            selection_sort(nn, D, map);
-        __syncthreads();
-
-        permute_swap(n, C, ldc, map, nn);
-        __syncthreads();
-    }
-}
-
 /******************* Host functions *********************************************/
 /*******************************************************************************/
 
@@ -1746,8 +1693,8 @@ rocblas_status rocsolver_stedcj_template(rocblas_handle handle,
                                     static_cast<S*>(work_stack), 0, ldt, strideT, batch_count,
                                     workArr);
 
-    ROCSOLVER_LAUNCH_KERNEL((stedcj_sort<T>), dim3(1, 1, batch_count), dim3(BS1), 0, stream, n, D,
-                            strideD, C, shiftC, ldc, strideC, batch_count, splits_map);
+    run_eigen_sort<STEDC_BDIM, T>(handle, n, batch_count, tmpz, n, D, 0, strideD, (T*)tempgemm, 0,
+                                  n, n * n, C, shiftC, ldc, strideC);
 
     return rocblas_status_success;
 }

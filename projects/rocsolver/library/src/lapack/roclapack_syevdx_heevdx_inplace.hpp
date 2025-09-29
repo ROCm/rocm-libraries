@@ -165,6 +165,7 @@ void rocsolver_syevdx_heevdx_inplace_getMemorySize(const rocblas_evect evect,
 
             // extra space to store A
             *size_work4 = std::max(*size_work4, sizeof(T) * n * n * batch_count);
+            *size_work5 = std::max(*size_work5, sizeof(S) * n * batch_count);
         }
 
         // size of arrays for temporary submatrix indices
@@ -303,11 +304,8 @@ rocblas_status rocsolver_syevdx_heevdx_inplace_template(rocblas_handle handle,
                 (T*)work2, (T*)work3, (T**)nsplit_workArr);
 
             // sort eigenvalues and eigenvectors
-            dim3 grid(1, batch_count, 1);
-            dim3 threads(BS1, 1, 1);
-            ROCSOLVER_LAUNCH_KERNEL(syevx_sort_eigs<T>, grid, threads, 0, stream, n, d_nev, W,
-                                    strideW, A, shiftA, lda, strideA, work6_ifail, strideF, info,
-                                    isplit_map);
+            run_eigen_sort<STEDC_BDIM, T>(handle, n, batch_count, (S*)work5, n, W, 0, strideW,
+                                          (T*)work4, 0, n, n * n, A, shiftA, lda, strideA, d_nev);
         }
     }
     else

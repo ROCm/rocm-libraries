@@ -2155,9 +2155,11 @@ void rocsolver_syevj_heevj_getMemorySize(const rocblas_evect evect,
     // size of temporary workspace for copying A
     *size_Acpy = sizeof(T) * n * n * batch_count;
 
+    // size of temporary workspace for sorting eigenvalues/vectors
+    *size_J = sizeof(S) * n * batch_count;
+
     if(n <= SYEVJ_BLOCKED_SWITCH)
     {
-        *size_J = 0;
         *size_norms = 0;
         *size_top = 0;
         *size_bottom = 0;
@@ -2173,11 +2175,11 @@ void rocsolver_syevj_heevj_getMemorySize(const rocblas_evect evect,
     // size of temporary workspace to store the block rotation matrices
     if(half_blocks == 1 && evect == rocblas_evect_none)
     {
-        *size_J = sizeof(T) * blocks * nb_max * nb_max * batch_count;
+        *size_J = std::max(*size_J, sizeof(T) * blocks * nb_max * nb_max * batch_count);
     }
     else
     {
-        *size_J = sizeof(T) * half_blocks * 4 * nb_max * nb_max * batch_count;
+        *size_J = std::max(*size_J, sizeof(T) * half_blocks * 4 * nb_max * nb_max * batch_count);
     }
 
     // size of temporary workspace to store the full matrix norm
@@ -2297,6 +2299,14 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
     rocblas_int even_n = n + n % 2;
     rocblas_int half_n = even_n / 2;
 
+    // sort inside kernel if no vectors
+    rocblas_esort esort_val = (esort == rocblas_esort_ascending && evect == rocblas_evect_none)
+        ? rocblas_esort_ascending
+        : rocblas_esort_none;
+    rocblas_esort esort_vec = (esort == rocblas_esort_ascending && evect != rocblas_evect_none)
+        ? rocblas_esort_ascending
+        : rocblas_esort_none;
+
     if(n <= SYEVJ_BLOCKED_SWITCH)
     {
         // *** USE SINGLE SMALL-SIZE KERNEL ***
@@ -2308,7 +2318,7 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
         dim3 threads(ddx * ddy, 1, 1);
         size_t lmemsize = (sizeof(S) + sizeof(T)) * ddx + 2 * sizeof(rocblas_int) * half_n;
 
-        ROCSOLVER_LAUNCH_KERNEL(syevj_small_kernel<T>, grid, threads, lmemsize, stream, esort,
+        ROCSOLVER_LAUNCH_KERNEL(syevj_small_kernel<T>, grid, threads, lmemsize, stream, esort_val,
                                 evect, uplo, n, A, shiftA, lda, strideA, atol, eps, residual,
                                 max_sweeps, n_sweeps, W, strideW, info, Acpy);
     }
@@ -2566,9 +2576,15 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
         }
 
         // set outputs and sort eigenvalues & vectors
-        ROCSOLVER_LAUNCH_KERNEL(syevj_finalize<T>, grid, threads, 0, stream, esort, evect, n, A,
+        ROCSOLVER_LAUNCH_KERNEL(syevj_finalize<T>, grid, threads, 0, stream, esort_val, evect, n, A,
                                 shiftA, lda, strideA, residual, max_sweeps, n_sweeps, W, strideW,
                                 info, Acpy, completed);
+    }
+
+    if(esort_vec)
+    {
+        run_eigen_sort<512, T>(handle, n, batch_count, (S*)J, n, W, 0, strideW, Acpy, 0, n, n * n,
+                               A, shiftA, lda, strideA);
     }
 
     return rocblas_status_success;

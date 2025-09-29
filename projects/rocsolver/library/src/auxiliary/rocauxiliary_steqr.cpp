@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -62,23 +62,25 @@ rocblas_status rocsolver_steqr_impl(rocblas_handle handle,
 
     // memory workspace sizes:
     // size for lasrt stack/steqr workspace
-    size_t size_work_stack;
-    rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, &size_work_stack);
+    size_t size_work_stack, size_tempc;
+    rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, &size_work_stack, &size_tempc);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work_stack);
+        return rocblas_set_optimal_device_memory_size(handle, size_work_stack, size_tempc);
 
     // memory workspace allocation
-    void* work_stack;
-    rocblas_device_malloc mem(handle, size_work_stack);
+    void *work_stack, *tempc;
+    rocblas_device_malloc mem(handle, size_work_stack, size_tempc);
     if(!mem)
         return rocblas_status_memory_error;
 
     work_stack = mem[0];
+    tempc = mem[1];
 
     // execution
     return rocsolver_steqr_template<T>(handle, evect, n, D, shiftD, strideD, E, shiftE, strideE, C,
-                                       shiftC, ldc, strideC, info, batch_count, work_stack);
+                                       shiftC, ldc, strideC, info, batch_count, work_stack,
+                                       (T*)tempc);
 }
 
 ROCSOLVER_END_NAMESPACE

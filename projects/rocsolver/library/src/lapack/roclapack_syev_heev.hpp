@@ -70,7 +70,7 @@ void rocsolver_syev_heev_getMemorySize(const rocblas_evect evect,
     size_t unused;
     size_t w1 = 0, w2 = 0, w3 = 0;
     size_t a1 = 0, a2 = 0;
-    size_t t1 = 0, t2 = 0;
+    size_t t1 = 0, t2 = 0, t3 = 0;
 
     // requirements for tridiagonalization (sytrd/hetrd)
     rocsolver_sytrd_hetrd_getMemorySize<BATCHED, T>(n, batch_count, size_scalars, &w1, &a1, &t1,
@@ -83,7 +83,7 @@ void rocsolver_syev_heev_getMemorySize(const rocblas_evect evect,
                                                         &t2, &unused);
 
         // extra requirements for computing eigenvalues and vectors (steqr)
-        rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, &w3);
+        rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, &w3, &t3);
     }
     else
     {
@@ -94,7 +94,7 @@ void rocsolver_syev_heev_getMemorySize(const rocblas_evect evect,
     // get max values
     *size_work_stack = std::max({w1, w2, w3});
     *size_Abyx_norms_tmptr = std::max(a1, a2);
-    *size_tmptau_trfact = std::max(t1, t2);
+    *size_tmptau_trfact = std::max({t1, t2, t3});
 
     // size of array for temporary householder scalars
     *size_tau = sizeof(T) * n * batch_count;
@@ -206,7 +206,7 @@ rocblas_status rocsolver_syev_heev_template(rocblas_handle handle,
 
         // compute eigenvalues and eigenvectors
         rocsolver_steqr_template<T>(handle, evect, n, D, 0, strideD, E, 0, strideE, A, shiftA, lda,
-                                    strideA, info, batch_count, work_stack);
+                                    strideA, info, batch_count, work_stack, tmptau_trfact);
     }
 
     return rocblas_status_success;

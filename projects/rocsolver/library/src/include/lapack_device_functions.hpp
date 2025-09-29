@@ -3071,4 +3071,252 @@ void local_gemm(rocblas_handle handle,
                             strideA, temp);
 }
 
+template <int DIM, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM) eigen_sort_copyD(const rocblas_int n,
+                                                              S* DDin,
+                                                              const rocblas_stride strideDin,
+                                                              S* DDout,
+                                                              const rocblas_stride strideDout)
+{
+    // batch instance id
+    rocblas_int bid = hipBlockIdx_y;
+
+    S* Din = DDin + bid * strideDin;
+    S* Dout = DDout + bid * strideDout;
+
+    int tid = hipThreadIdx_x;
+
+    constexpr int regs = 16;
+    const int chunk_width = regs * hipBlockDim_x;
+    const int n_chunks = (n - 1) / chunk_width + 1;
+    S bval[regs];
+
+    for(int chunk = 0; chunk < n_chunks; chunk++)
+    {
+        for(int i = 0; i < regs; i++)
+        {
+            int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
+            if(x < n)
+                bval[i] = Din[x];
+        }
+        for(int i = 0; i < regs; i++)
+        {
+            int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
+            if(x < n)
+                Dout[x] = bval[i];
+        }
+    }
+}
+
+template <int DIM, typename T, typename U1, typename U2>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM) eigen_sort_copyC(const rocblas_int n,
+                                                              U1 CCin,
+                                                              const rocblas_int shiftCin,
+                                                              const rocblas_int ldcin,
+                                                              const rocblas_stride strideCin,
+                                                              U2 CCout,
+                                                              const rocblas_int shiftCout,
+                                                              const rocblas_int ldcout,
+                                                              const rocblas_stride strideCout)
+{
+    // batch instance id
+    rocblas_int bid = hipBlockIdx_y;
+    // group id
+    rocblas_int gid = hipBlockIdx_x;
+
+    T* Cin = load_ptr_batch<T>(CCin, bid, shiftCin, strideCin);
+    T* Cout = load_ptr_batch<T>(CCout, bid, shiftCout, strideCout);
+
+    T* src = Cin + ldcin * gid;
+    T* dst = Cout + ldcout * gid;
+
+    constexpr int regs = 16;
+    const int chunk_width = regs * hipBlockDim_x;
+    const int n_chunks = (n - 1) / chunk_width + 1;
+    T bval[regs];
+
+    for(int chunk = 0; chunk < n_chunks; chunk++)
+    {
+        for(int i = 0; i < regs; i++)
+        {
+            int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
+            if(x < n)
+                bval[i] = src[x];
+        }
+        for(int i = 0; i < regs; i++)
+        {
+            int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
+            if(x < n)
+                dst[x] = bval[i];
+        }
+    }
+}
+
+/** EIGEN_SORT sorts computed eigenvalues and eigenvectors in increasing order **/
+template <int DIM, typename T, typename S, typename U1, typename U2>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM) eigen_sort(const rocblas_int n,
+                                                        S* DDin,
+                                                        const rocblas_stride strideDin,
+                                                        S* DDout,
+                                                        const rocblas_stride strideDout,
+                                                        U1 CCin,
+                                                        const rocblas_int shiftCin,
+                                                        const rocblas_int ldcin,
+                                                        const rocblas_stride strideCin,
+                                                        U2 CCout,
+                                                        const rocblas_int shiftCout,
+                                                        const rocblas_int ldcout,
+                                                        const rocblas_stride strideCout,
+                                                        rocblas_int* nev = nullptr,
+                                                        rocblas_int* mmap = nullptr
+
+)
+{
+    // batch instance id
+    rocblas_int bid = hipBlockIdx_y;
+    // group id
+    rocblas_int gid = hipBlockIdx_x;
+
+    S* Din = DDin + bid * strideDin;
+    S* Dout = DDout + bid * strideDout;
+
+    int tid = hipThreadIdx_x;
+
+    const rocblas_int nn = (nev) ? nev[bid] : n;
+    auto const map = (mmap) ? mmap + (bid * n) : (rocblas_int*)nullptr;
+
+    if(gid >= nn)
+        return;
+
+    S d = Din[gid];
+
+    constexpr int regs = 16;
+    const int chunk_width = regs * hipBlockDim_x;
+    const int n_chunks = (nn - 1) / chunk_width + 1;
+    T bvalT[regs];
+    S* bvalS = reinterpret_cast<S*>(bvalT);
+
+    int nan = 0;
+    int lt = 0;
+    int eq = 0;
+
+    for(int chunk = 0; chunk < n_chunks; chunk++)
+    {
+        for(int i = 0; i < regs; i++)
+        {
+            int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
+            if(x < nn)
+            {
+                bvalS[i] = Din[x];
+            }
+        }
+        for(int i = 0; i < regs; i++)
+        {
+            int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
+            if(x < nn)
+            {
+                nan += std::isnan(bvalS[i]);
+                // lt - how many values are less then the current
+                // eq - how many values are equal to the current
+                lt += (bvalS[i] < d);
+                eq += (bvalS[i] == d && x < gid);
+            }
+        }
+    }
+
+    int pos = lt + eq;
+    // reduction
+    __shared__ int lpos[DIM];
+    lpos[hipThreadIdx_x] = pos;
+    for(int r = hipBlockDim_x / 2; r > 0; r /= 2)
+    {
+        __syncthreads();
+        if(hipThreadIdx_x < r)
+        {
+            pos += lpos[hipThreadIdx_x + r];
+            lpos[hipThreadIdx_x] = pos;
+        }
+    }
+    __syncthreads();
+    pos = lpos[0];
+
+    if(hipThreadIdx_x == 0)
+    {
+        Dout[pos] = d;
+
+        if(map)
+        {
+            map[gid] = pos;
+        }
+    }
+
+    // The NAN fp value is unordered, so it is possible that with computed
+    // new positions it would be silently overwriten with non NAN value.
+    // Make sure we propagate NAN. It is likely to have more NANs in the output
+    // than in the input, but the following computations are doomed anyway.
+    if(nan)
+    {
+        Dout[gid] = NAN;
+    }
+
+    T* Cin = load_ptr_batch<T>(CCin, bid, shiftCin, strideCin);
+    T* Cout = load_ptr_batch<T>(CCout, bid, shiftCout, strideCout);
+
+    T* src = Cin + ldcin * gid;
+    T* dst = Cout + ldcout * pos;
+
+    for(int chunk = 0; chunk < n_chunks; chunk++)
+    {
+        for(int i = 0; i < regs; i++)
+        {
+            int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
+            if(x < n)
+                bvalT[i] = src[x];
+        }
+        for(int i = 0; i < regs; i++)
+        {
+            int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
+            if(x < n)
+                dst[x] = bvalT[i];
+        }
+    }
+}
+
+/** EIGEN_SORT sorts computed eigenvalues and eigenvectors in increasing order **/
+template <int DIM, typename T, typename S, typename U1, typename U2>
+void run_eigen_sort(rocblas_handle handle,
+                    const rocblas_int n,
+                    const rocblas_int batch_count,
+                    S* tempD,
+                    const rocblas_stride strideTempD,
+                    S* D,
+                    const rocblas_int shiftD,
+                    const rocblas_stride strideD,
+                    U1 tempC,
+                    const rocblas_int shiftTempC,
+                    const rocblas_int ldtempc,
+                    const rocblas_stride strideTempC,
+                    U2 C,
+                    const rocblas_int shiftC,
+                    const rocblas_int ldc,
+                    const rocblas_stride strideC,
+                    rocblas_int* nev = nullptr,
+                    rocblas_int* map = nullptr
+
+)
+{
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    ROCSOLVER_LAUNCH_KERNEL(eigen_sort_copyD<DIM>, dim3(1, batch_count), dim3(DIM), 0, stream, n,
+                            D + shiftD, strideD, tempD, strideTempD);
+
+    ROCSOLVER_LAUNCH_KERNEL((eigen_sort_copyC<DIM, T>), dim3(n, batch_count), dim3(DIM), 0, stream,
+                            n, C, shiftC, ldc, strideC, tempC, shiftTempC, ldtempc, strideTempC);
+
+    ROCSOLVER_LAUNCH_KERNEL((eigen_sort<DIM, T>), dim3(n, batch_count), dim3(DIM), 0, stream, n,
+                            tempD, strideTempD, D + shiftD, strideD, tempC, shiftTempC, ldtempc,
+                            strideTempC, C, shiftC, ldc, strideC, nev, map);
+}
+
 ROCSOLVER_END_NAMESPACE
