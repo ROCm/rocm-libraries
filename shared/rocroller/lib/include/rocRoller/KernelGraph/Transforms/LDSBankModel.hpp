@@ -160,6 +160,19 @@ namespace rocRoller::KernelGraph::MemoryTracer
         static uint getClockCount(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
 
         /**
+         * @brief Get the number of cycles to issue an instruction
+         * 
+         * This function calculates the basic instruction issue cycles:
+         * - 4 cycles for address transfer
+         * - 4 cycles for each data dword element (writes only)
+         * 
+         * @param memoryOp The memory operation (read or write)
+         * @param dwords Number of dwords being accessed (1 for b32, 2 for b64, 3 for b96, 4 for b128)
+         * @return Number of cycles to issue the instruction
+         */
+        static uint getInstructionIssueCycles(const MemoryOpLDS& memoryOp, uint dwords);
+
+        /**
          * @brief Get the number of LDS banks for a given GPU architecture
          */
         static uint getNumLDSBanks(GPUArchitectureGFX gfx);

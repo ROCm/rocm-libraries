@@ -335,6 +335,16 @@ namespace rocRoller::KernelGraph::MemoryTracer
         return cycles;
     }
 
+    uint LDSBankModel::getInstructionIssueCycles(const MemoryOpLDS& memoryOp, uint dwords)
+    {
+        uint cycles = 4;
+        if(memoryOp.direction == LdsDirection::Write)
+        {
+            cycles += 4 * dwords;
+        }
+        return cycles;
+    }
+
     OperationsAnalysis LDSBankModel::doOperationsAnalysis(GPUArchitectureGFX gfx) const
     {
         OperationsAnalysis detailed;

@@ -385,4 +385,32 @@ namespace MemoryTracerTest
             CHECK(cycles == baseCycles + 4); // +4 for write operations
         }
     }
+
+    TEST_CASE("LDS model get instruction issue cycles", "[lds-bank-model]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph::MemoryTracer;
+
+        SECTION("Read operations")
+        {
+            auto ldsRead = MemoryOpLDS{LdsDirection::Read};
+
+            // For reads, always 4 cycles (address transfer only)
+            for(uint dwords = 1; dwords <= 4; ++dwords)
+            {
+                CHECK(LDSBankModel::getInstructionIssueCycles(ldsRead, dwords) == 4);
+            }
+        }
+
+        SECTION("Write operations")
+        {
+            auto ldsWrite = MemoryOpLDS{LdsDirection::Write};
+
+            // For writes, 4 cycles (address) + 4 cycles per dword (data)
+            for(uint dwords = 1; dwords <= 4; ++dwords)
+            {
+                CHECK(LDSBankModel::getInstructionIssueCycles(ldsWrite, dwords) == 4 + 4 * dwords);
+            }
+        }
+    }
 }
