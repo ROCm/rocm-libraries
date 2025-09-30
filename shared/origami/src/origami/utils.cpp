@@ -135,7 +135,6 @@ namespace origami
                                  size_t            WGM,
                                  size_t            biggest_allowable_split)
     {
-
         // compute how many 32×32 tiles are needed in each dim,
         // then multiply to get total grid size:
         size_t grid = ((M + MT_M - 1) / MT_M) * ((N + MT_N - 1) / MT_N) * batch;
@@ -168,8 +167,9 @@ namespace origami
                                                    mx_block_size,
                                                    WGM,
                                                    0,
-                                                   split,
-                                                   debug);
+                                                   0,
+                                                   0,
+                                                   split);
 
             if(latency < best_latency)
             {
@@ -228,31 +228,29 @@ namespace origami
 
             if(check_lds_capacity(hardware, MT_M, MT_N, MT_K, element_size_A))
             {
-                double Total_latency
-                    = compute_total_latency(hardware,
-                                            M,
-                                            N,
-                                            K,
-                                            batch,
-                                            transA,
-                                            transB,
-                                            MT_M,
-                                            MT_N,
-                                            MT_K,
-                                            MI_M,
-                                            MI_N,
-                                            MI_K,
-                                            element_size_A,
-                                            element_size_B,
-                                            element_size_out,
-                                            mi_datatype,
-                                            mx_block_size,
-                                            WGM,
-                                            non_temporal_a,
-                                            non_temporal_b,
-                                            occupancy,
-                                            0, // split will be picked automatically
-                                            debug);
+                double Total_latency = compute_total_latency(hardware,
+                                                             M,
+                                                             N,
+                                                             K,
+                                                             batch,
+                                                             transA,
+                                                             transB,
+                                                             MT_M,
+                                                             MT_N,
+                                                             MT_K,
+                                                             MI_M,
+                                                             MI_N,
+                                                             MI_K,
+                                                             element_size_A,
+                                                             element_size_B,
+                                                             element_size_out,
+                                                             mi_datatype,
+                                                             mx_block_size,
+                                                             WGM,
+                                                             non_temporal_a,
+                                                             non_temporal_b,
+                                                             occupancy,
+                                                             0);
 
                 valid_results.emplace_back(Total_latency,
                                            MT_M,
@@ -517,8 +515,9 @@ namespace origami
                                                              mx_block_size,
                                                              WGM,
                                                              0,
-                                                             split,
-                                                             debug);
+                                                             0,
+                                                             0,
+                                                             split);
 
                 results.push_back(
                     std::make_tuple(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K));

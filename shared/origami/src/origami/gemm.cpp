@@ -756,8 +756,8 @@ namespace origami
             MT_K_rounded_128bytes = MT_K;
         }
 
-        size_t Ld_A_value  = compute_A_loads(MT_M_rounded_128bytes, MT_K_rounded_128bytes, debug);
-        size_t Ld_B_value  = compute_B_loads(MT_N_rounded_128bytes, MT_K_rounded_128bytes, debug);
+        size_t Ld_A_value  = compute_A_loads(MT_M_rounded_128bytes, MT_K_rounded_128bytes);
+        size_t Ld_B_value  = compute_B_loads(MT_N_rounded_128bytes, MT_K_rounded_128bytes);
         size_t Ld_CU_bytes = (Ld_A_value * safe_ceil_div(element_size_A, 8)) // A Bytes
                              + (Ld_B_value * safe_ceil_div(element_size_B, 8)); // B Bytes
 
