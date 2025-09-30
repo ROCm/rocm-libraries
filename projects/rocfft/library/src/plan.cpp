@@ -2168,11 +2168,11 @@ struct ConnectedRanks
     // Get the root parent of a rank
     int get_root(int rank)
     {
-        // If rank is its own parent, that's the root
-        if(parent[rank] == rank)
-            return rank;
+        // If rank is its own parent, that's the root.
         // Otherwise, follow the links until we get to the root
-        return parent[rank] = get_root(parent[rank]);
+        if(parent[rank] != rank)
+            parent[rank] = get_root(parent[rank]);
+        return parent[rank];
     }
 
     // Add a connection between rankA and rankB
