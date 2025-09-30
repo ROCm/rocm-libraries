@@ -111,6 +111,24 @@ constexpr float getEpsilon<hip_bfloat16>()
     return 1e-2f;
 }
 
+template <typename T>
+constexpr float getEpsilonConv()
+{
+    return 1e-5f;
+}
+
+template <>
+constexpr float getEpsilonConv<half>()
+{
+    return 15e-4f;
+}
+
+template <>
+constexpr float getEpsilonConv<hip_bfloat16>()
+{
+    return 1e-2f;
+}
+
 template <typename F>
 void run(F&& f)
 {

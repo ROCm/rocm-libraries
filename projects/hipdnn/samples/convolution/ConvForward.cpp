@@ -108,7 +108,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_sdk::test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::
             convFwdInference(xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto epsilon = getEpsilon<InputType>();
+        auto epsilon = getEpsilonConv<InputType>();
 
         auto yValidator = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<InputType>(
             static_cast<InputType>(epsilon), static_cast<InputType>(epsilon));
