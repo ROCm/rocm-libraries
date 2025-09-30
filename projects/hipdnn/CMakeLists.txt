@@ -134,6 +134,8 @@ if(HIP_DNN_BUILD_PLUGINS)
     add_subdirectory(plugins)
 endif()
 
+add_subdirectory(samples)
+
 # keep this after all build folder have been added so they have a chance to register their tests
 # using append_test_to_check_target
 
