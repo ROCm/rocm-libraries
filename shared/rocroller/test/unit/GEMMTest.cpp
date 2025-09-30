@@ -906,7 +906,7 @@ namespace GEMMDriverTest
     // Params are: A & B type, LDS A, LDS B, LDS D, StreamK two-tile, beta is zero
     class GEMMStreamKTestGPU
         : public BaseGEMMContextFixture<
-              std::tuple<rocRoller::DataType, bool, bool, bool, rocRoller::StreamKMode, bool>>
+              std::tuple<rocRoller::DataType, int, bool, bool, bool, rocRoller::StreamKMode, bool>>
     {
     };
 
@@ -1095,7 +1095,15 @@ namespace GEMMDriverTest
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
 
-        auto [typeAB, loadLDSA, loadLDSB, storeLDSD, mode, betaZero] = std::get<1>(GetParam());
+        auto [typeAB, unrollK, loadLDSA, loadLDSB, storeLDSD, mode, betaZero]
+            = std::get<1>(GetParam());
+
+        if(typeAB == DataType::Float && loadLDSA && loadLDSB && storeLDSD
+           && (mode != StreamKMode::Standard))
+        {
+	    // We run out of LDS in this case
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        }
 
         GEMMProblem gemm;
 
@@ -1117,14 +1125,15 @@ namespace GEMMDriverTest
         gemm.streamK = mode;
         gemm.k       = gemm.macK * 8;
 
-        // TODO: Does not work with unrolling K
-        //gemm.unrollK          = 2;
-        //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
-
         gemm.loadLDSA  = loadLDSA;
         gemm.loadLDSB  = loadLDSB;
         gemm.storeLDSD = storeLDSD;
+        gemm.unrollK   = unrollK;
+
+        gemm.transA = "T";
+        gemm.transB = "N";
+
+        // XX prefetching
 
         if(betaZero)
             gemm.beta = 0;
@@ -3890,6 +3899,7 @@ namespace GEMMDriverTest
             ::testing::Combine(
                 ::testing::Values(rocRoller::DataType::Float,
                                   rocRoller::DataType::Half), // typeAB
+                ::testing::Values(1, 2), // UnrollK
                 ::testing::Values(true, false), // loadLDSA
                 ::testing::Values(true, false), // loadLDSB
                 ::testing::Values(true, false), // storeLDSD
