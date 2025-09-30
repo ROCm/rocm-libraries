@@ -9,7 +9,8 @@ find_package(Threads REQUIRED)
 
 # Integration tests
 add_executable(fusilli_plugin_integration_tests
-    test_basic_integration.cpp
+    test_convfprop.cpp
+    test_basic.cpp
 )
 target_compile_options(fusilli_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(fusilli_plugin_integration_tests PRIVATE

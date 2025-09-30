@@ -27,7 +27,7 @@
 #include "fusilli/support/logging.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 
-// Convert from hipDNN DataType to fusilli DataType
+// Convert from hipDNN DataType to fusilli DataType.
 inline fusilli::ErrorOr<fusilli::DataType>
 hipDnnDataTypeToFusilliDataType(hipdnn_sdk::data_objects::DataType hipdnnType) {
   switch (hipdnnType) {
