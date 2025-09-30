@@ -81,7 +81,8 @@ public:
                                         + std::to_string(strides().size()) + ")");
         }
 
-        return std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0});
+        return throwIfOutOfBounds(
+            std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
     template <typename... Args>
@@ -89,8 +90,6 @@ public:
     {
         int64_t index = getIndex(indices...);
         const auto* data = memory().hostData();
-
-        throwIfOutOfBounds(index);
         return data[index];
     }
 
@@ -99,8 +98,6 @@ public:
     {
         int64_t index = getIndex(indices);
         const auto* data = memory().hostData();
-
-        throwIfOutOfBounds(index);
         return data[index];
     }
 
@@ -109,8 +106,6 @@ public:
     {
         int64_t index = getIndex(indices...);
         auto* data = memory().hostData();
-
-        throwIfOutOfBounds(index);
         data[index] = value;
     }
 
@@ -119,8 +114,6 @@ public:
     {
         int64_t index = getIndex(indices);
         auto* data = memory().hostData();
-
-        throwIfOutOfBounds(index);
         data[index] = value;
     }
 
@@ -157,7 +150,7 @@ protected:
             std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()));
     }
 
-    void throwIfOutOfBounds(int64_t index) const
+    int64_t throwIfOutOfBounds(int64_t index) const
     {
 #ifndef NDEBUG
         if(static_cast<size_t>(index) >= memory().count())
@@ -167,6 +160,7 @@ protected:
                                     + std::to_string(memory().count()) + " elements");
         }
 #endif
+        return index;
     }
 };
 

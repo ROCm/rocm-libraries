@@ -52,7 +52,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     initTensorValues(params.dscaleTensor, DataType::FLOAT, planTensorBundle.dscaleTensor, 7);
     initTensorValues(params.dbiasTensor, DataType::FLOAT, planTensorBundle.dbiasTensor, 8);
 
-    BatchnormBwdPlan<float, float, float> patient(std::move(params));
+    BatchnormBwdPlan<float, float, float> bwdPlan(std::move(params));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = planTensorBundle.dyTensor.memory().hostData();
@@ -74,7 +74,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
         directTensorBundle.dscaleTensor,
         directTensorBundle.dbiasTensor);
 
-    patient.execute(variantPack);
+    bwdPlan.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(static_cast<float>(1e-3),
                                                            static_cast<float>(1e-3));
@@ -100,9 +100,9 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    BatchnormBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+    BatchnormBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> bwdPlanBuilder;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    auto builtPlan = bwdPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     bool result = dynamic_cast<BatchnormBwdPlan<float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
