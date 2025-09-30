@@ -220,17 +220,25 @@ struct BatchnormBwdTensorBundle
             static_cast<MeanVarianceType>(1.9f), static_cast<MeanVarianceType>(2.0f), seed);
     }
 
-    std::unordered_map<int64_t, void*> createVariantPack()
+    std::unordered_map<int64_t, void*>
+        createVariantPack(const hipdnn_frontend::graph::TensorAttributes& xTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& dyTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& scaleTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& meanTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& invVarianceAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& dxTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& dScaleTensorAttr,
+                          const hipdnn_frontend::graph::TensorAttributes& dBiasTensorAttr)
     {
         std::unordered_map<int64_t, void*> variantPack;
-        variantPack[1] = xTensor.memory().hostData();
-        variantPack[2] = dyTensor.memory().hostData();
-        variantPack[3] = dxTensor.memory().hostData();
-        variantPack[4] = scaleTensor.memory().hostData();
-        variantPack[5] = dscaleTensor.memory().hostData();
-        variantPack[6] = dbiasTensor.memory().hostData();
-        variantPack[7] = meanTensor.memory().hostData();
-        variantPack[8] = invVarianceTensor.memory().hostData();
+        variantPack[xTensorAttr.get_uid()] = xTensor.memory().hostData();
+        variantPack[dyTensorAttr.get_uid()] = dyTensor.memory().hostData();
+        variantPack[scaleTensorAttr.get_uid()] = scaleTensor.memory().hostData();
+        variantPack[meanTensorAttr.get_uid()] = meanTensor.memory().hostData();
+        variantPack[invVarianceAttr.get_uid()] = invVarianceTensor.memory().hostData();
+        variantPack[dxTensorAttr.get_uid()] = dxTensor.memory().hostData();
+        variantPack[dScaleTensorAttr.get_uid()] = dscaleTensor.memory().hostData();
+        variantPack[dBiasTensorAttr.get_uid()] = dbiasTensor.memory().hostData();
         return variantPack;
     }
 
