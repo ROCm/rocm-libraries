@@ -2186,7 +2186,10 @@ struct ConnectedRanks
             parent[rootA] = parent[rootB];
     }
 
-    // Get the set of ranks that's connected to a specified rank
+    // Get the set of ranks that's connected to a specified rank.
+    // MPI requires that the ranks in a sub-communicator be listed in
+    // the same order on all ranks in that sub-communicator, so a
+    // std::set helps ensure this ordering.
     std::set<int> get_connected(int rank)
     {
         // Compress the paths in the parent array so that each rank
@@ -2397,7 +2400,9 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
             }
         }
 
-        // create a subcommunicator with this subset
+        // create a subcommunicator with this subset - preserve order
+        // enforced by the std::set so that all ranks see the same
+        // ordering
         std::vector<int> comm_ranks_vec;
         std::copy(comm_ranks.begin(), comm_ranks.end(), std::back_inserter(comm_ranks_vec));
         subcomm = make_subcommunicator(mpi_comm, comm_ranks_vec);
