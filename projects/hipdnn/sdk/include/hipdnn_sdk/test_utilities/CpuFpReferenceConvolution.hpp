@@ -45,7 +45,8 @@ public:
         return validNode;
     }
 
-    // Backward compatibility
+    // Temporarily comment
+    // [[deprecated("Use convFwdInference overload that takes both prePadding and postPadding.")]]
     static void convFwdInference(const TensorBase<InputDataType>& input,
                                  const TensorBase<InputDataType>& weight,
                                  TensorBase<InputDataType>& output,
@@ -170,17 +171,15 @@ public:
         output.memory().markHostModified();
     }
 
-    // Backward compatibility
+    // [[deprecated("Use convBwdData overload that takes both prePadding and postPadding.")]]
     static void convBwdData(TensorBase<InputDataType>& gradInput,
                             const TensorBase<InputDataType>& weight,
                             const TensorBase<InputDataType>& gradOutput,
                             const std::vector<int64_t>& strides,
                             const std::vector<int64_t>& dilations,
-                            const std::vector<int64_t>& prePadding)
+                            const std::vector<int64_t>& padding)
     {
-        // verify implicit post padding is valid
-
-        convBwdData(gradInput, weight, gradOutput, strides, dilations, prePadding, prePadding);
+        convBwdData(gradInput, weight, gradOutput, strides, dilations, padding, padding);
     }
 
     static void convBwdData(TensorBase<InputDataType>& gradInput,
@@ -368,6 +367,10 @@ private:
                                         + std::to_string(nSpatialDims) + "D spatial convolution");
         }
 
+        const auto& inputDims = input.dims();
+        const auto& weightDims = weight.dims();
+        const auto& outputDims = output.dims();
+
         for(int64_t i = 0; i < nSpatialDims; ++i)
         {
             auto idx = static_cast<size_t>(i);
@@ -389,6 +392,26 @@ private:
             if(postPadding[idx] < 0)
             {
                 throw std::invalid_argument("PostPadding values must be non-negative");
+            }
+
+            // Validate that output dimensions are correct given the padding
+            // Some of this validation could probably be consolidated into the sdk and removed from frontend nodes
+            int64_t inputDim = inputDims[idx + 2];
+            int64_t kernelDim = weightDims[idx + 2];
+            int64_t outputDim = outputDims[idx + 2];
+
+            int64_t kernelSize = (dilations[idx] * (kernelDim - 1)) + 1;
+            int64_t expectedOutputDim
+                = ((inputDim + prePadding[idx] + postPadding[idx] - kernelSize)
+                   / strides[idx])
+                  + 1;
+
+            if(expectedOutputDim != outputDim)
+            {
+                throw std::invalid_argument(
+                    "Output dimension " + std::to_string(outputDim) + " at spatial dimension "
+                    + std::to_string(i) + " does not match expected dimension "
+                    + std::to_string(expectedOutputDim) + " given the input parameters.");
             }
         }
     }
