@@ -220,7 +220,7 @@ namespace rocRoller
             };
 
             auto offsetRegisterType = Register::Type::Vector;
-            if(ci.isDirect2LDS)
+            if(ci.isStorePartOfGlobalToLDS)
                 offsetRegisterType = Register::Type::Scalar;
 
             auto indexExpr = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
@@ -243,7 +243,7 @@ namespace rocRoller
 
             auto expr = toBytes(indexExpr) + paddingBytes;
 
-            if(ci.isDirect2LDS)
+            if(ci.isStorePartOfGlobalToLDS)
             {
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
             }

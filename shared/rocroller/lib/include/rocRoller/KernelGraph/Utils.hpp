@@ -172,11 +172,13 @@ namespace rocRoller
          * For stores, the target is the destination (User or LDS) of
          * the store.
          *
-         * For load direct-to-lds, the target is the source (User) and destination (LDS) of
-         * the operation.
+         * For Global to LDS ops (e.g buffer to lds), target is User for the
+         * load from global part and LDS for the store into LDS part.
          */
-        std::pair<int, Graph::Direction>
-            getOperationTarget(int tag, KernelGraph const& kgraph, bool isDirect2LDS = false);
+        std::pair<int, Graph::Direction> getOperationTarget(int                tag,
+                                                            KernelGraph const& kgraph,
+                                                            bool isStorePartOfGlobalToLDSOp
+                                                            = false);
 
         /**
          * Returns the true coordinate that should be the target of a
@@ -448,7 +450,7 @@ namespace rocRoller
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
                                 ContextPtr                       context,
-                                bool                             isDirect2LDS = false);
+                                bool                             isGlobalToLDS = false);
 
         /**
          * @brief Store version of addLoadThreadTileCT.
@@ -461,7 +463,7 @@ namespace rocRoller
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
                                   bool                               useSwappedAccess,
-                                  bool                               isDirect2LDS = false);
+                                  bool                               isGlobalToLDS = false);
 
         /**
          * @brief Store version of addLoadMacroTileCT.
@@ -555,7 +557,7 @@ namespace rocRoller
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
                                  bool                               useSwappedAccess,
-                                 bool                               isDirect2LDS = false);
+                                 bool                               isGlobalToLDS = false);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.
@@ -678,7 +680,7 @@ namespace rocRoller
         */
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
-                                                     bool               isDirect2LDS = false);
+                                                     bool isStorePartOfGlobalToLDSOp = false);
 
         /**
         * @brief Get the first and last nodes from a set of nodes that are totally ordered
@@ -708,6 +710,71 @@ namespace rocRoller
         */
         template <typename EdgeType>
         void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
+
+        /**
+         * @brief Returns a vector of all tags of operations of type DstOpType
+         * that are connected to the same MacroTile as the given srcOpTag of
+         * an operation of type SrcOpType.
+         *
+         * Currently SrcOpType and DstOpType can only exclusively either be
+         * LoadTiled or StoreLDSTile
+         */
+        template <ControlGraph::COperation SrcOpType, ControlGraph::COperation DstOpType>
+        requires(
+            (std::is_same_v<
+                 SrcOpType,
+                 ControlGraph::LoadTiled> && std::is_same_v<DstOpType, ControlGraph::StoreLDSTile>)
+            || (std::is_same_v<
+                    SrcOpType,
+                    ControlGraph::
+                        StoreLDSTile> && std::is_same_v<DstOpType, ControlGraph::LoadTiled>))
+            std::vector<int> getAssociatedOps(KernelGraph const& kgraph, int srcOpTag)
+        {
+            using namespace ControlGraph;
+            using namespace CoordinateGraph;
+
+            const auto element = kgraph.control.getElement(srcOpTag);
+            AssertFatal(std::holds_alternative<Operation>(element),
+                        concatenate("Expected Operation but got Edge", ShowValue(srcOpTag)));
+
+            const auto op = std::get<Operation>(element);
+            AssertFatal(std::holds_alternative<SrcOpType>(op),
+                        fmt::format("Expected {} but got {}", typeName<SrcOpType>(), toString(op)));
+
+            auto macroTileTag = kgraph.mapper.get<MacroTile>(srcOpTag);
+
+            std::vector<int> rv{};
+
+            for(auto conn : kgraph.mapper.getCoordinateConnections(macroTileTag))
+            {
+                const auto dstOpTag = conn.control;
+                const auto element  = kgraph.control.getElement(dstOpTag);
+                AssertFatal(std::holds_alternative<Operation>(element),
+                            concatenate("Expected Operation but got Edge", ShowValue(dstOpTag)));
+
+                const auto op = std::get<Operation>(element);
+                if(std::holds_alternative<DstOpType>(op))
+                {
+                    rv.push_back(dstOpTag);
+                }
+            }
+            return rv;
+        }
+
+        /**
+         * @brief Replaces LoadTiled associated with tag @loadTiledTag with
+         * a Global To LDS op associated with tag @globalToLDSTag. Also moves
+         * all connections from both LoadTiled and StoreLDSTile to Global To LDS op.
+         */
+        void replaceLoadTiledWithGlobalToLDSOp(KernelGraph& kgraph,
+                                               int          loadTiledTag,
+                                               int          storeLDSTileTag,
+                                               int          globalToLDSTag);
+
+        /**
+        * @brief Return true for operations that read from global to store into LDS and false otherwise.
+        */
+        bool isGlobalToLDSOp(KernelGraph const& graph, int op);
     }
 }
 
