@@ -127,8 +127,8 @@ void query_version(char* version)
     }
 
     snprintf(version,
-             256,
-             "v%d.%d.%d-%.64s",
+             512,
+             "v%d.%d.%d-%.256s",
              hipsparse_ver / 100000,
              hipsparse_ver / 100 % 1000,
              hipsparse_ver % 100,
