@@ -317,7 +317,15 @@ private:
         double threshold = 80;
         if(CONV_DIR == Direction::Forward)
         {
-            threshold *= std::numeric_limits<T>::epsilon();
+            if constexpr(std::is_same_v<T, float>)
+            {
+                // float use tf32 compute which share same mantissa bits
+                threshold *= std::numeric_limits<half>::epsilon();
+            }
+            else
+            {
+                threshold *= std::numeric_limits<T>::epsilon();
+            }
         }
         else
         {
