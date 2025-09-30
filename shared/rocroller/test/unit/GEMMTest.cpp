@@ -1216,7 +1216,9 @@ namespace GEMMDriverTest
         gemm.tailLoops = true;
         gemm.unrollK   = 4;
         gemm.macK      = 8;
-        for(auto k : {8, 16, 24, 32, 40, 48, 56, 64})
+
+        int largeK = 18 * gemm.unrollK * gemm.macK + gemm.macK * 2;
+        for(auto k : {8, 16, 24, 32, 40, 48, 56, 64, largeK})
         {
             gemm.k = k;
             basicGEMM<float>(gemm);
