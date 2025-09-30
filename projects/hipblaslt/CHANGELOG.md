@@ -10,9 +10,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Support ReLU/Clamp activation functions with auxiliary output for f16/bf16 data types to capture intermediate results (enabled by ``HIPBLASLT_EPILOGUE_RELU_AUX``, ``HIPBLASLT_EPILOGUE_RELU_AUX_BIAS``, ``HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT``, and ``HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT``)
 * Support SS_BSS datatype (``HIPBLAS_COMPUTE_32F_FAST_16BF``) for gfx950 only
 * Added the CPP extension APIs ``setMaxWorkspaceBytes`` and ``getMaxWorkspaceBytes``
-* Added the log print for Grouped Gemm
+* Added the log print (`HIPBLASLT_LOG_MASK=32`) for Grouped Gemm
 * Supported swizzleA by hipblaslt-ext cpp API
-* Completed the support of `--api_method` mix and cpp with `--swizzleA` for hipblaslt-bench
 * Support ldd and ldc in MSKB
 * Support hipblaslt extop for gfx11xx/gfx12xx
 
