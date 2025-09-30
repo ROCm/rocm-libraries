@@ -479,8 +479,25 @@ int ActivationDriver<Tgpu, Tref>::VerifyForward()
                                                          out.data(),
                                                          static_cast<Tref>(allowedEps));
 
+    int match_mt = 1;
+    match_mt     = mloNeuronForwardRunHostAndVerify_mt<Tgpu, Tref>(v_mode,
+                                                               static_cast<Tref>(v_Gamma),
+                                                               static_cast<Tref>(v_Beta),
+                                                               static_cast<Tref>(v_Alpha),
+                                                               in.size(),
+                                                               in.data(),
+                                                               out.data(),
+                                                               static_cast<Tref>(allowedEps));
+
     if(match)
-        printf("Forward Activation Verifies on CPU and GPU\n");
+    {
+        std::cout << "Single-threaded forward Activation Verifies on CPU and GPU" << std::endl;
+    }
+
+    if(match_mt)
+    {
+        std::cout << "Multi-threaded forward Activation Verifies on CPU and GPU" << std::endl;
+    }
     return miopenStatusSuccess;
 }
 
@@ -514,8 +531,27 @@ int ActivationDriver<Tgpu, Tref>::VerifyBackward()
                                                           din.data(),
                                                           dout.data(),
                                                           static_cast<Tref>(allowedEps));
+
+    int match_mt = 1;
+    match_mt     = mloNeuronBackwardRunHostAndVerify_mt<Tgpu, Tref>(v_mode,
+                                                                static_cast<Tref>(v_Gamma),
+                                                                static_cast<Tref>(v_Beta),
+                                                                static_cast<Tref>(v_Alpha),
+                                                                dinhost.size(),
+                                                                in.data(),
+                                                                out.data(),
+                                                                din.data(),
+                                                                dout.data(),
+                                                                static_cast<Tref>(allowedEps));
+
     if(match)
-        printf("Backward Activation Verifies on CPU and GPU\n");
+    {
+        std::cout << "Single-threaded backward Activation Verifies on CPU and GPU" << std::endl;
+    }
+    if(match_mt)
+    {
+        std::cout << "Multi-threaded backward Activation Verifies on CPU and GPU" << std::endl;
+    }
     return miopenStatusSuccess;
 }
 

@@ -250,6 +250,7 @@ private:
     std::vector<Tref> bn_res_host;
     std::vector<Tref> bn_res_host_mt;
     std::vector<Tref> out_host;
+    std::vector<Tref> activ_host_mt;
     std::vector<Tgpu> scale;
     std::vector<Tgpu> bias;
     std::vector<Tref> bias_host;
@@ -853,6 +854,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     wei_host      = std::vector<Tref>(wei_sz, static_cast<Tref>(0));
     conv_res_host = std::vector<Tref>(out_sz, static_cast<Tref>(0));
     out_host      = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+    activ_host_mt = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
     // Data initialization
     for(int i = 0; i < in_sz; i++)
@@ -1158,6 +1160,22 @@ void CBAInferFusionDriver<Tgpu, Tref>::runCPUActivFwdInference()
                                         (!useBatchNorm) ? conv_res_host.data() : bn_res_host.data(),
                                         out_host.data());
 
+    miopenActivationFwdHost_mt<Tgpu, Tref>(activ_mode,
+                                           activ_gamma,
+                                           activ_beta,
+                                           activ_alpha,
+                                           out.size(),
+                                           (!useBatchNorm) ? conv_res_host.data()
+                                                           : bn_res_host.data(),
+                                           activ_host_mt.data());
+
+    if(miopen::rms_range(out_host, activ_host_mt) != static_cast<double>(0))
+    {
+        std::cout << "Error: Results of single-threaded and multi-threaded activation functions do "
+                     "not match."
+                  << std::endl;
+    }
+
     return;
 }
 
@@ -1417,9 +1435,10 @@ void CBAInferFusionDriver<Tgpu, Tref>::runCPUBNFwdInference()
 
     if(miopen::rms_range(bn_res_host, bn_res_host_mt) != static_cast<double>(0))
     {
-        std::cout << "Error: Results from single-threaded and multi-threaded BN Infer functions "
-                     "are different"
-                  << std::endl;
+        std::cout
+            << "Error: Results of single-threaded and multi-threaded BN forward infer functions do "
+               "not match."
+            << std::endl;
     }
 
     // C+N mode so we are done
