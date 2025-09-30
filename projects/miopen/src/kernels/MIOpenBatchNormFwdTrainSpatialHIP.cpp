@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-// NOTE: These included headers should be standalone, they shouldn't relay on each other,
+// NOTE: These included headers should be standalone, they shouldn't rely on each other,
 // otherwise the dependencies will be pretty messed up.
 // TODO: actually these headers are not that independent due to the Macros that being used
 // currently. we should remove as more macros as we can.
@@ -182,7 +182,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 // Note: hip compiler has a bug, it throws compiler warning for comparing unsigned
                 // int with 0 value, when rem is 0. but when rem is 0, this code block should not be
-                // compiler due to we use if constexpr above.
+                // compiled due to the if constexpr used above.
                 if(static_cast<int>(lid) < static_cast<int>(rem))
                 {
                     unsigned int remkey = lid + less;
@@ -208,10 +208,10 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         __syncthreads();
 
         constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
         __shared__ FpAccumType lcl_data_x[lcl_data_size];
         __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgnc)
+        if constexpr(mio_bn_config::use_amdgcn)
         {
             miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),

@@ -198,10 +198,10 @@ struct proto_config
 
     static constexpr auto input_type_strategy = MiopenConfig::input_type_strategy;
     using fp_type                             = typename std::conditional<
-        input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
-        _Float16,
-        typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
-            type>::type;
+                                    input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
+                                    _Float16,
+                                    typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
+                                        type>::type;
     using fp_prec_type  = float;
     using fp_accum_type = float;
     static constexpr double epsilon =
@@ -230,7 +230,7 @@ struct proto_config
     static constexpr int variant      = Variant;
     static constexpr auto target_arch = Architecture::value;
 #ifdef __AMDGCN__
-    static constexpr bool use_amdgnc =
+    static constexpr bool use_amdgcn =
         MiopenConfig::use_amdgnc &&
         !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x ||
           target_arch == architecture::gfx120x || target_arch == architecture::gfx115x) &&
