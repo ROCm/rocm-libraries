@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <numeric>
 #include <vector>
@@ -14,6 +15,7 @@ namespace test_utilities
 {
 
 using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_sdk::test_utilities;
 
 template <class InputDataType,
           class ScaleBiasDataType,
@@ -36,7 +38,10 @@ public:
         }
 
         auto nChannels = input.dims().at(1);
-        int64_t elementsPerChannel = calculateElementsPerChannel(input.dims());
+
+        // Build dimensions for iteration: [batch, spatial...]
+        std::vector<int64_t> batchAndSpatial = {input.dims()[0]};
+        batchAndSpatial.insert(batchAndSpatial.end(), input.dims().begin() + 2, input.dims().end());
 
         std::vector<int64_t> channels(static_cast<size_t>(nChannels));
         std::iota(channels.begin(), channels.end(), 0);
@@ -49,16 +54,19 @@ public:
                   / sqrtInternal(variance + static_cast<MeanVarianceDataType>(epsilon));
 
             // process the batch per channel
-            iterateChannelElements(
-                input, cidx, elementsPerChannel, [&](const std::vector<int64_t>& indices) {
-                    auto inVal = static_cast<MeanVarianceDataType>(input.getHostValue(indices));
+            iterateAlongDimensions(
+                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
+                    auto fullIndices
+                        = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+
+                    auto inVal = static_cast<MeanVarianceDataType>(input.getHostValue(fullIndices));
                     MeanVarianceDataType elemStd = inVal - mean;
                     MeanVarianceDataType inhat = elemStd * invVariance;
                     output.setHostValue(
                         static_cast<InputDataType>(
                             (scale.getHostValue(0, cidx) * static_cast<ScaleBiasDataType>(inhat))
                             + bias.getHostValue(0, cidx)),
-                        indices);
+                        fullIndices);
                 });
         });
 
@@ -90,6 +98,10 @@ public:
 
         auto nhw = static_cast<MeanVarianceDataType>(elementsPerChannel);
 
+        // Build dimensions for iteration: [batch, spatial...]
+        std::vector<int64_t> batchAndSpatial = {x.dims()[0]};
+        batchAndSpatial.insert(batchAndSpatial.end(), x.dims().begin() + 2, x.dims().end());
+
         std::vector<int64_t> channels(static_cast<size_t>(nChannels));
         std::iota(channels.begin(), channels.end(), 0);
 
@@ -98,9 +110,11 @@ public:
             MeanVarianceDataType varianceAccum = 0.0;
 
             // Calculate mean and variance for this channel
-            iterateChannelElements(
-                x, cidx, elementsPerChannel, [&](const std::vector<int64_t>& indices) {
-                    auto inVal = x.getHostValue(indices);
+            iterateAlongDimensions(
+                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
+                    auto fullIndices
+                        = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+                    auto inVal = x.getHostValue(fullIndices);
                     meanAccum += inVal;
                     varianceAccum += inVal * inVal;
                 });
@@ -113,16 +127,18 @@ public:
                 = static_cast<MeanVarianceDataType>(1.0) / sqrtInternal(channelVariance + epsilon);
 
             // Apply normalization with scale and bias
-            iterateChannelElements(
-                x, cidx, elementsPerChannel, [&](const std::vector<int64_t>& indices) {
-                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(indices));
+            iterateAlongDimensions(
+                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
+                    auto fullIndices
+                        = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(fullIndices));
                     auto xHat = (xVal - channelMean) * invVar;
 
                     y.setHostValue(
                         static_cast<InputDataType>(scale.getHostValue(0, cidx)
                                                        * static_cast<ScaleBiasDataType>(xHat)
                                                    + bias.getHostValue(0, cidx)),
-                        indices);
+                        fullIndices);
                 });
 
             // Save mean and inverse variance for backward pass if provided
@@ -200,6 +216,10 @@ public:
         std::vector<int64_t> channels(static_cast<size_t>(nChannels));
         std::iota(channels.begin(), channels.end(), 0);
 
+        // Include batch dimension with spatial dimensions for iteration
+        std::vector<int64_t> batchAndSpatial = {x.dims()[0]}; // batch dimension
+        batchAndSpatial.insert(batchAndSpatial.end(), x.dims().begin() + 2, x.dims().end());
+
         std::for_each(channels.begin(), channels.end(), [&](int64_t cidx) {
             auto channelMean = mean.getHostValue(0, cidx);
             auto channelInvVariance = invVariance.getHostValue(0, cidx); // 1 / sqrt(var + eps)
@@ -209,10 +229,12 @@ public:
             MeanVarianceDataType dotProduct = 0;
             MeanVarianceDataType sumDy = 0;
 
-            iterateChannelElements(
-                x, cidx, elementsPerChannel, [&](const std::vector<int64_t>& indices) {
-                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(indices));
-                    auto dyVal = static_cast<MeanVarianceDataType>(dy.getHostValue(indices));
+            iterateAlongDimensions(
+                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
+                    auto fullIndices
+                        = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(fullIndices));
+                    auto dyVal = static_cast<MeanVarianceDataType>(dy.getHostValue(fullIndices));
 
                     MeanVarianceDataType xHat = (xVal - channelMean) * channelInvVariance;
                     dotProduct += xHat * dyVal;
@@ -232,15 +254,18 @@ public:
             MeanVarianceDataType scalarCoef
                 = static_cast<MeanVarianceDataType>(channelScale) * channelInvVariance;
 
-            iterateChannelElements(
-                x, cidx, elementsPerChannel, [&](const std::vector<int64_t>& indices) {
-                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(indices));
-                    auto dyVal = static_cast<MeanVarianceDataType>(dy.getHostValue(indices));
+            iterateAlongDimensions(
+                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
+                    auto fullIndices
+                        = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+
+                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(fullIndices));
+                    auto dyVal = static_cast<MeanVarianceDataType>(dy.getHostValue(fullIndices));
 
                     MeanVarianceDataType xHat = (xVal - channelMean) * channelInvVariance;
                     MeanVarianceDataType dxVal = (dyVal - meanDy - xHat * meanDyXhat) * scalarCoef;
 
-                    dx.setHostValue(static_cast<InputDataType>(dxVal), indices);
+                    dx.setHostValue(static_cast<InputDataType>(dxVal), fullIndices);
                 });
         });
 
@@ -273,52 +298,6 @@ private:
     static float sqrtInternal(float value)
     {
         return sqrtf(value);
-    }
-
-    // Utility method to iterate over all elements for a specific channel in an N-dimensional tensor
-    static void iterateChannelElements(const TensorBase<InputDataType>& tensor,
-                                       int64_t channelIdx,
-                                       int64_t elementsPerChannel,
-                                       const std::function<void(const std::vector<int64_t>&)>& func)
-    {
-        const auto& dims = tensor.dims();
-
-        if(dims.size() < 2)
-        {
-            throw std::runtime_error("iterateChannelElements requires at least 2 dims.");
-        }
-
-        std::vector<int64_t> indices(dims.size(), 0);
-        indices[1] = channelIdx;
-
-        for(int64_t iter = 0; iter < elementsPerChannel; ++iter)
-        {
-            func(indices);
-
-            // Since we iterate from end -> start, we need to use a signed int instead of size_t
-            // Otherwise you will get an overflow.
-            for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
-            {
-                // Skip channel dimension
-                if(dim == 1)
-                {
-                    continue;
-                }
-
-                // Cast to size_t to avoid warnings.
-                auto index = static_cast<size_t>(dim);
-                indices[index]++;
-
-                // No carry needed
-                if(indices[index] < dims[index])
-                {
-                    break;
-                }
-
-                // Reset and carry inc to next dimension
-                indices[index] = 0;
-            }
-        }
     }
 };
 

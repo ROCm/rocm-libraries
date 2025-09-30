@@ -1264,9 +1264,11 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DGrouped)
     // Fill input channels with distinct values
     for(int c = 0; c < 4; ++c)
     {
+        // f(0) = 10, f(1) = 20, ..., f(3) = 40 for channel 0
         auto baseValue = static_cast<float>((c + 1) * 10);
         for(int i = 0; i < 8; ++i)
         {
+            // g(f(0), 0) = 10, g(f(0), 1) = 11, ..., g(f(0), 7) = 17
             inputTensor.memory().hostData()[(c * 8) + i] = baseValue + static_cast<float>(i);
         }
     }
@@ -1294,8 +1296,11 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DGrouped)
     float output0 = outputTensor.getHostValue(0, 0, 0, 0, 0);
     float output1 = outputTensor.getHostValue(0, 1, 0, 0, 0);
 
-    EXPECT_GT(output0, 0.0f) << "Group 0 output should be positive";
-    EXPECT_GT(output1, 0.0f) << "Group 1 output should be positive";
+    // 0.1 * (sum(i for i in range(10, 18)) + sum(i for i in range(20, 28))) = 29.6
+    EXPECT_EQ(output0, 29.6f) << "Group 0 output should be 29.6";
+
+    // 0.2 * (sum(i for i in range(30, 38)) + sum(i for i in range(40, 48))) = 123.2
+    EXPECT_GT(output1, 123.2f) << "Group 1 output should be 123.2";
     EXPECT_NE(output0, output1) << "Different groups should produce different outputs";
 }
 

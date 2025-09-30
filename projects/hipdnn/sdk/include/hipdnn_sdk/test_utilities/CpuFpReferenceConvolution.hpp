@@ -16,6 +16,7 @@ namespace test_utilities
 {
 
 using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_sdk::test_utilities;
 
 template <class InputDataType, class AccumulatorType>
 class CpuFpReferenceConvolutionImpl
@@ -101,7 +102,7 @@ public:
                 int64_t inputChannel = baseInputChannel + c;
 
                 // Iterate kernel spatial positions
-                iterateSpatialPositions(
+                iterateAlongDimensions(
                     kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
                         std::vector<int64_t> inputSpatialIndices(static_cast<size_t>(nSpatialDims));
                         bool validPosition = true;
@@ -175,9 +176,11 @@ public:
                             const TensorBase<InputDataType>& gradOutput,
                             const std::vector<int64_t>& strides,
                             const std::vector<int64_t>& dilations,
-                            const std::vector<int64_t>& padding)
+                            const std::vector<int64_t>& prePadding)
     {
-        convBwdData(gradInput, weight, gradOutput, strides, dilations, padding, padding);
+        // verify implicit post padding is valid
+
+        convBwdData(gradInput, weight, gradOutput, strides, dilations, prePadding, prePadding);
     }
 
     static void convBwdData(TensorBase<InputDataType>& gradInput,
@@ -221,7 +224,7 @@ public:
             AccumulatorType vAcc = 0;
 
             // Iterate over each spatial position of the kernel for contributing output gradients
-            iterateSpatialPositions(
+            iterateAlongDimensions(
                 kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
                     std::vector<int64_t> outputSpatialIndices(static_cast<size_t>(nSpatialDims));
                     bool validPosition = true;
@@ -249,7 +252,7 @@ public:
                         //  => numerator < 0 => sampling from a location before the output tensor
                         // 2.  (input_idx + prePadding - (kernel_idx * dilation)) / stride >= output_dim
                         //  => input_idx + prePadding >= (output_dim * stride) + (kernel_idx * dilation) => beyond the output tensor
-                        if(outputSpatialIndices[dimIdx] <
+                        if(outputSpatialIndices[dimIdx] < 0
                            || outputSpatialIndices[dimIdx] >= outputSpatialDims[dimIdx])
                         {
                             validPosition = false;
@@ -300,15 +303,6 @@ public:
     }
 
 private:
-    static std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
-                                                   int64_t channelIdx,
-                                                   const std::vector<int64_t>& spatialIndices)
-    {
-        std::vector<int64_t> fullIndices = {batchIdx, channelIdx};
-        fullIndices.insert(fullIndices.end(), spatialIndices.begin(), spatialIndices.end());
-        return fullIndices;
-    }
-
     static void validateInput(const TensorBase<InputDataType>& input,
                               const TensorBase<InputDataType>& weight,
                               const TensorBase<InputDataType>& output,
@@ -395,44 +389,6 @@ private:
             if(postPadding[idx] < 0)
             {
                 throw std::invalid_argument("PostPadding values must be non-negative");
-            }
-        }
-    }
-
-    // Helper function to iterate over spatial positions
-    template <typename F>
-    static void iterateSpatialPositions(const std::vector<int64_t>& spatialDims, F&& func)
-    {
-        if(spatialDims.empty())
-        {
-            func({});
-            return;
-        }
-
-        int64_t totalElements = 1;
-        for(auto dim : spatialDims)
-        {
-            totalElements *= dim;
-        }
-
-        std::vector<int64_t> indices(spatialDims.size(), 0);
-
-        // Iterate over each unique spatial position
-        for(int64_t iter = 0; iter < totalElements; ++iter)
-        {
-            func(indices);
-
-            for(int dim = static_cast<int>(spatialDims.size()) - 1; dim >= 0; --dim)
-            {
-                auto dimIdx = static_cast<size_t>(dim);
-                indices[dimIdx]++;
-
-                if(indices[dimIdx] < spatialDims[dimIdx])
-                {
-                    break;
-                }
-
-                indices[dimIdx] = 0;
             }
         }
     }
