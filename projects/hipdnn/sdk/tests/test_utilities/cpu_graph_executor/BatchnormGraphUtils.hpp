@@ -12,6 +12,9 @@ using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
 
+namespace hipdnn_sdk_test_utils
+{
+
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
@@ -299,4 +302,5 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                                                       *dBiasTensorAttr);
 
     return std::make_tuple(graph, variantPack);
+}
 }

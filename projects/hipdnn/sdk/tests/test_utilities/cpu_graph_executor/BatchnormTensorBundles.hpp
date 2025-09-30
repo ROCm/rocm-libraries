@@ -11,6 +11,9 @@
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::data_objects;
 
+namespace hipdnn_sdk_test_utils
+{
+
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
 struct BatchnormFwdTensorBundle
 {
@@ -252,3 +255,5 @@ struct BatchnormBwdTensorBundle
     Tensor<MeanVarianceType> meanTensor;
     Tensor<MeanVarianceType> invVarianceTensor;
 };
+
+}

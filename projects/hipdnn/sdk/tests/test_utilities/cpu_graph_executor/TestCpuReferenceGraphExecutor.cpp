@@ -23,6 +23,7 @@ using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
 using namespace ::testing;
+using namespace hipdnn_sdk_test_utils;
 
 class TestCpuReferenceGraphExecutor
 {
