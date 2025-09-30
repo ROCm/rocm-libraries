@@ -413,7 +413,6 @@ int LRNDriver<Tgpu, Tref>::RunBackwardGPU()
 template <typename Tgpu, typename Tref>
 int LRNDriver<Tgpu, Tref>::VerifyForward()
 {
-
     int nInStride, cInStride, hInStride, wInStride;
     miopenGet4dTensorDescriptorStrides(inputTensor, &nInStride, &cInStride, &hInStride, &wInStride);
 
@@ -435,11 +434,11 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
 
     miopenGetLRNDescriptor(lrnDesc, &v_mode, &v_lrnN, &v_lrnAlpha, &v_lrnBeta, &v_lrnK);
 
-    Tref alphaoverarea =
+    const Tref alphaoverarea =
         (v_mode == miopenLRNCrossChannel) ? v_lrnAlpha / v_lrnN : v_lrnAlpha / (v_lrnN * v_lrnN);
 
-    int pre_pad = (v_lrnN - 1) / 2;
-    int pad     = v_lrnN - pre_pad - 1;
+    const int pre_pad = (v_lrnN - 1) / 2;
+    const int pad     = v_lrnN - pre_pad - 1;
 
     mloLRNForwardRunHost<Tgpu, Tref>(do_backward,
                                      v_mode,
@@ -469,8 +468,8 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
                                      scalehost.data(),
                                      outhost.data());
 
-    auto error           = miopen::rms_range(outhost, out);
-    const Tref tolerance = 1.5e-4; // 1e-6;
+    const auto error        = miopen::rms_range(outhost, out);
+    const Tref tolerance    = 1.5e-4; // 1e-6;
 
     if(!std::isfinite(error) || error > tolerance)
     {
@@ -478,7 +477,46 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
     }
     else
     {
-        printf("Forward LRN Verifies on CPU and GPU (err=%f)\n", error);
+        printf("Forward LRN Verifies OK on CPU and GPU (err=%f)\n", error);
+    }
+
+    mloLRNForwardRunHost_upd<Tgpu, Tref>(do_backward,
+                                        v_mode,
+                                        pad,
+                                        v_lrnN,
+                                        alphaoverarea,
+                                        v_lrnAlpha,
+                                        v_lrnBeta,
+                                        v_lrnK,
+                                        nIn,        // batch_sz,
+                                        cOut,       // n_outputs,
+                                        cIn,        // n_inputs,
+                                        hIn,        // bot_height,
+                                        wIn,        // bot_width,
+                                        hInStride,  // bot_stride,
+                                        cInStride,  // bot_channel_stride,
+                                        nInStride,  // bot_batch_stride,
+                                        hOut,       // top_height,
+                                        wOut,       // top_width,
+                                        hOutStride, // top_v_stride,
+                                        cOutStride, // top_v_channel_stride,
+                                        nOutStride, // top_v_batch_stride,
+                                        hOutStride, // scale_v_stride,
+                                        cOutStride, // scale_v_channel_stride,
+                                        nOutStride, // scale_v_batch_stride,
+                                        in.data(),
+                                        scalehost.data(),
+                                        outhost.data());
+
+    const auto error_upd = miopen::rms_range(outhost, out);
+
+    if(!std::isfinite(error_upd) || error_upd > tolerance)
+    {
+        std::cout << "Forward updated LRN FAILED: " << error_upd << std::endl;
+    }
+    else
+    {
+        printf("Forward updated LRN Verifies OK on CPU and GPU (err=%f)\n", error_upd);
     }
 
     return 0;
@@ -494,7 +532,6 @@ int LRNDriver<Tgpu, Tref>::RunBackwardCPU()
 template <typename Tgpu, typename Tref>
 int LRNDriver<Tgpu, Tref>::VerifyBackward()
 {
-
     int nInStride, cInStride, hInStride, wInStride;
     miopenGet4dTensorDescriptorStrides(inputTensor, &nInStride, &cInStride, &hInStride, &wInStride);
     int nIn, cIn, hIn, wIn;
@@ -524,11 +561,11 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
 
     miopenGetLRNDescriptor(lrnDesc, &v_mode, &v_lrnN, &v_lrnAlpha, &v_lrnBeta, &v_lrnK);
 
-    Tref alphaoverarea =
+    const Tref alphaoverarea =
         (v_mode == miopenLRNCrossChannel) ? v_lrnAlpha / v_lrnN : v_lrnAlpha / (v_lrnN * v_lrnN);
 
-    int pre_pad = (v_lrnN - 1) / 2;
-    int pad     = v_lrnN - pre_pad - 1;
+    const int pre_pad = (v_lrnN - 1) / 2;
+    const int pad     = v_lrnN - pre_pad - 1;
 
     mloLRNBackwardRunHost<Tgpu, Tref>(static_cast<int>(v_mode),
                                       pad,
@@ -565,8 +602,8 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
                                       in.data(),
                                       dinhost.data());
 
-    auto error           = miopen::rms_range(dinhost, din);
-    const Tref tolerance = 6.0e-5;
+    const auto error        = miopen::rms_range(dinhost, din);
+    const Tref tolerance    = 6.0e-5;
 
     if(!std::isfinite(error) || error > tolerance)
     {
@@ -574,7 +611,53 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
     }
     else
     {
-        printf("Backward LRN Verifies on CPU and GPU (err=%f)\n", error);
+        printf("Backward LRN Verifies OK on CPU and GPU (err=%f)\n", error);
+    }
+
+    mloLRNBackwardRunHost_upd<Tgpu, Tref>(static_cast<int>(v_mode),
+                                        pad,
+                                        v_lrnN,
+                                        alphaoverarea,
+                                        v_lrnAlpha,
+                                        v_lrnBeta,
+                                        v_lrnK,
+                                        nIn,         // batch_sz,
+                                        cOut,        // n_outputs,
+                                        cIn,         // n_inputs,
+                                        hIn,         // bot_height,
+                                        wIn,         // bot_width,
+                                        hInStride,   // bot_stride,
+                                        cInStride,   // bot_channel_stride,
+                                        nInStride,   // bot_batch_stride,
+                                        hdInStride,  // bot_df_v_stride,
+                                        cdInStride,  // bot_df_v_channel_stride,
+                                        ndInStride,  // bot_df_v_batch_stride,
+                                        hOut,        // top_height,
+                                        wOut,        // top_width,
+                                        hOutStride,  // top_stride,
+                                        cOutStride,  // top_channel_stride,
+                                        nOutStride,  // top_batch_stride,
+                                        hdOutStride, // top_df_stride,
+                                        cdOutStride, // top_df_channel_stride,
+                                        ndOutStride, // top_df_batch_stride,
+                                        hdOutStride, // scale_stride,
+                                        cdOutStride, // scale_channel_stride,
+                                        ndOutStride, // scale_batch_stride,
+                                        out.data(),
+                                        dout.data(),
+                                        scale.data(),
+                                        in.data(),
+                                        dinhost.data());
+
+    const auto error_upd = miopen::rms_range(dinhost, din);
+
+    if(!std::isfinite(error_upd) || error_upd > tolerance)
+    {
+        std::cout << "Backward updated  LRN FAILED: " << error_upd << std::endl;
+    }
+    else
+    {
+        printf("Backward updated LRN Verifies OK on CPU and GPU (err=%f)\n", error_upd);
     }
 
     return 0;
