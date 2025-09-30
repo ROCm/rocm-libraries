@@ -5,10 +5,14 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "BatchnormGraphUtils.hpp"
+#include "BatchnormTensorBundles.hpp"
+#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferenceSignatureKey.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
+using namespace hipdnn_sdk_test_utils;
 
 TEST(TestBatchnormFwdInferenceSignatureKey, EqualityOperator)
 {
@@ -60,4 +64,24 @@ TEST(TestBatchnormFwdInferenceSignatureKey, Copy)
     EXPECT_EQ(copied.inputDataType, DataType::FLOAT);
     EXPECT_EQ(copied.scaleBiasDataType, DataType::HALF);
     EXPECT_EQ(copied.meanVarianceDataType, DataType::DOUBLE);
+}
+
+TEST(TestBatchnormFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
+{
+    BatchnormFwdInferenceSignatureKey expectedKey{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    std::vector<int64_t> dims = {1, 1, 1, 1};
+    BatchnormFwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
+
+    auto graphTuple = buildBatchnormFwdInferenceGraph(
+        tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+
+    auto& graph = std::get<0>(graphTuple);
+    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+    auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+
+    BatchnormFwdInferenceSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
 }
