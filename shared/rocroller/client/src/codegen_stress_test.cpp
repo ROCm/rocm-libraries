@@ -116,7 +116,7 @@ Generator<Instruction> simple_mi(ContextPtr m_context)
     {
         mi_mnemonic = "v_mfma_f32_32x32x1f32";
     }
-    else if(arch.HasCapability(GPUCapability::HasWMMA) && arch.target().isRDNA4GPU())
+    else if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f16))
     {
         mi_mnemonic = "v_wmma_f32_16x16x16_f16";
     }
@@ -140,7 +140,7 @@ Generator<Instruction> complex_mi_with_coop(ContextPtr m_context)
     {
         mi_mnemonic = "v_mfma_f32_32x32x1f32";
     }
-    else if(arch.HasCapability(GPUCapability::HasWMMA) && arch.target().isRDNA4GPU())
+    else if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f16))
     {
         mi_mnemonic = "v_wmma_f32_16x16x16_f16";
     }

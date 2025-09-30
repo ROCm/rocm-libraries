@@ -76,7 +76,7 @@ public:
 
         // Check for __builtin_amdgcn_permlane16; if it exists, the DPP equivalent is not available.
         // Swizzle is kept instead of __builtin_amdgcn_permlanex16, as the latter can be slower in some cases.
-        if ROCPRIM_SPIRV_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
+        if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
         {
             if(VirtualWaveSize > 16)
             {

@@ -74,13 +74,18 @@ namespace rocRoller
          */
         bool isSupportedConstantValue(Register::ValuePtr reg) const;
 
+        bool isSupportedConstantValue(Raw32 value) const;
+
+        template <typename T>
+        requires(std::is_pointer_v<T>) bool isSupportedConstantValue(T value) const;
+
         /**
          * Returns true iff `value` can be represented as an iconst value in an
          * instruction. For all supported architectures, currently this is -16..64
          * inclusive
          */
         template <std::integral T>
-        requires(!std::same_as<bool, T>) bool isSupportedConstantValue(T value) const;
+        bool isSupportedConstantValue(T value) const;
 
         /**
          * Returns true iff `value` can be represented as an fconst value in an

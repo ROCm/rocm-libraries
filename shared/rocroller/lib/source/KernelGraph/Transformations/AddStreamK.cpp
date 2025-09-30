@@ -739,21 +739,18 @@ namespace rocRoller
             return concatenate("AddStreamK");
         }
 
-        AddStreamK::AddStreamK(std::vector<int> const& dims,
-                               std::string const&      topLoop,
-                               std::string const&      accumulatorLoop,
-                               bool                    twoTile,
-                               ExpressionPtr           numWGs,
-                               CommandParametersPtr    params,
-                               ContextPtr              context,
-                               bool const              hasWorkgroupMapping)
-            : m_dimensionIndices(dims)
+        AddStreamK::AddStreamK(ContextPtr           context,
+                               CommandParametersPtr params,
+                               std::string const&   topLoop,
+                               std::string const&   accumulatorLoop,
+                               ExpressionPtr        numWGs,
+                               bool const           hasWorkgroupMapping)
+            : m_context(context)
+            , m_params(params)
+            , m_dimensionIndices(params->loopOverOutputTilesDimensions)
             , m_topLoop(topLoop)
             , m_accumulatorLoop(accumulatorLoop)
-            , m_twoTile(twoTile)
             , m_numWGs(numWGs)
-            , m_params(params)
-            , m_context(context)
             , m_hasWorkgroupMapping(hasWorkgroupMapping)
         {
         }
@@ -961,13 +958,12 @@ namespace rocRoller
         //
         // Commit
         //
-        void commit(KernelGraph&           graph,
-                    bool                   twoTile,
+        void commit(ContextPtr             context,
+                    CommandParametersPtr   params,
+                    KernelGraph&           graph,
                     LoopInfo const&        loopInfo,
                     AccumulatorInfo const& accumInfo,
                     ArgumentInfo const&    argInfo,
-                    CommandParametersPtr   params,
-                    ContextPtr             context,
                     bool const             hasWorkgroupMapping)
         {
 
@@ -1031,7 +1027,7 @@ namespace rocRoller
             // way of looking at the DataFlow graph to figure out
             // where to stop.
             int dpTopLoop, dpAccumLoop;
-            if(twoTile)
+            if(params->streamK.isTwoTileMode())
             {
                 // We disable duplication here so that the fix-up pass
                 // uses the correct registers.
@@ -1268,13 +1264,23 @@ namespace rocRoller
                 Sequence(), {sendInfo.assignSendBoolSGPR}, {sendInfo.preWaitZero});
             graph.control.addElement(Sequence(), {sendInfo.sendCond}, {receiveInfo.preWaitZero});
 
-            if(twoTile)
+            if(params->streamK.isTwoTileMode())
             {
-                auto scopeSK
-                    = replaceWith(graph, forTileSKOp, graph.control.addElement(Scope()), false);
-                auto scopeDP = graph.control.addElement(Scope());
+                int scopeSK = graph.control.addElement(Scope());
+                int scopeDP = graph.control.addElement(Scope());
+
+                if(params->streamK == StreamKMode::TwoTileDPFirst)
+                {
+                    scopeDP = replaceWith(graph, forTileSKOp, scopeDP, false);
+                    graph.control.addElement(Sequence(), {scopeDP}, {scopeSK});
+                }
+                else
+                {
+                    scopeSK = replaceWith(graph, forTileSKOp, scopeSK, false);
+                    graph.control.addElement(Sequence(), {scopeSK}, {scopeDP});
+                }
+
                 graph.control.addElement(Body(), {scopeSK}, {forTileSKOp});
-                graph.control.addElement(Sequence(), {scopeSK}, {scopeDP});
 
                 //
                 // Set SK/DP selectors to select DP
@@ -1326,12 +1332,12 @@ namespace rocRoller
             }
         }
 
-        ArgumentInfo setupArguments(ExpressionPtr          numWGs,
-                                    bool                   twoTile,
+        ArgumentInfo setupArguments(ContextPtr             context,
+                                    CommandParametersPtr   params,
+                                    ExpressionPtr          numWGs,
                                     KernelGraph const&     graph,
                                     LoopInfo const&        loopInfo,
-                                    AccumulatorInfo const& accumInfo,
-                                    ContextPtr             context)
+                                    AccumulatorInfo const& accumInfo)
         {
             ArgumentInfo argInfo;
 
@@ -1423,7 +1429,7 @@ namespace rocRoller
                                                     : argInfo.numTileArgExprs[d];
                 }
 
-                if(twoTile)
+                if(params->streamK.isTwoTileMode())
                 {
                     numSKTilesArgExpr      = (numNonAccTiles % numWGs + numWGs) * numAccTiles;
                     numSKTilesPerWGArgExpr = (numSKTilesArgExpr + numWGs - one) / numWGs;
@@ -1445,9 +1451,8 @@ namespace rocRoller
             argInfo.numSKTilesPerWG = k->addArgument(
                 {"numSKTilesPerWG", numTilesDT, DataDirection::ReadOnly, numSKTilesPerWGArgExpr});
 
-            if(twoTile)
+            if(params->streamK.isTwoTileMode())
             {
-
                 argInfo.numDPTiles = k->addArgument(
                     {"numDPTiles", numTilesDT, DataDirection::ReadOnly, numDPTilesArgExpr});
 
@@ -1540,15 +1545,8 @@ namespace rocRoller
             auto graph     = original;
             auto accumInfo = stage(graph, loopInfo, m_hasWorkgroupMapping);
             auto argInfo
-                = setupArguments(m_numWGs, m_twoTile, graph, loopInfo, accumInfo, m_context);
-            commit(graph,
-                   m_twoTile,
-                   loopInfo,
-                   accumInfo,
-                   argInfo,
-                   m_params,
-                   m_context,
-                   m_hasWorkgroupMapping);
+                = setupArguments(m_context, m_params, m_numWGs, graph, loopInfo, accumInfo);
+            commit(m_context, m_params, graph, loopInfo, accumInfo, argInfo, m_hasWorkgroupMapping);
 
             Log::info("==========================AddStreamK DONE===============");
 

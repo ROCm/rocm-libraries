@@ -60,7 +60,11 @@ def from_token(token: str):
 
 
 def run_problems(
-    generator, build_dir: Path, work_dir: Path, env: Dict[str, str]
+    generator,
+    build_dir: Path,
+    work_dir: Path,
+    env: Dict[str, str],
+    id_filter: list[str],
 ) -> bool:
 
     SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
@@ -70,12 +74,15 @@ def run_problems(
     failed = []
 
     for i, problem in enumerate(generator):
-        if filter is not None:
-            pass
+        if id_filter is not None and not any(
+            problem.id.startswith(filt) for filt in id_filter
+        ):
+            continue
 
         if problem in already_run:
             continue
 
+        id = getattr(problem, "id", None)
         yaml = (work_dir / f"{problem.group}-{i:06d}.yaml").resolve()
         problem.set_output(yaml)
         cmd = problem.command()
@@ -89,6 +96,7 @@ def run_problems(
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")
+            print(f"  id: {id}")
             print(f"  command: {scmd}")
             print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
@@ -107,6 +115,11 @@ def run_problems(
         already_run.add(problem)
 
     if len(failed) > 0:
+        ids = [getattr(problem, "id", None) for i, problem in failed]
+        print("")
+        print(f"Failed {len(failed)} problems ids:")
+        print(" ".join([str(id) for id in ids]))
+        print("")
         print(f"Failed {len(failed)} problems:")
         for i, problem in failed:
             cmd = list(map(str, problem.command()))
@@ -155,6 +168,7 @@ def get_args(parser: argparse.ArgumentParser):
     common_args = [
         rrperf.args.rundir,
         rrperf.args.suite,
+        rrperf.args.id_filter,
     ]
     for arg in common_args:
         arg(parser)
@@ -166,7 +180,6 @@ def get_args(parser: argparse.ArgumentParser):
         default=False,
     )
     parser.add_argument("--token", help="Benchmark token to run.")
-    parser.add_argument("--filter", help="Filter benchmarks...")
     parser.add_argument(
         "--rocm_smi",
         default="rocm-smi",
@@ -188,7 +201,7 @@ def run_cli(
     token: str = None,
     suite: str = None,
     submit: bool = False,
-    filter: str = None,
+    id_filter: list[str] = None,
     rundir: str = None,
     build_dir: str = None,
     rocm_smi: str = "rocm-smi",
@@ -241,7 +254,7 @@ def run_cli(
     timestamp = rundir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")
 
-    result = run_problems(generator, build_dir, rundir, env)
+    result = run_problems(generator, build_dir, rundir, env, id_filter)
 
     if submit:
         ptsdir = rundir / "rocRoller"

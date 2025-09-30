@@ -59,6 +59,7 @@ add_subdirectory(ExpressionTransformations)
 add_subdirectory(Observers)
 add_subdirectory(Utilities)
 add_subdirectory(Operations)
+add_subdirectory(Parameters)
 add_subdirectory(Graph)
 add_subdirectory(KernelGraph)
 

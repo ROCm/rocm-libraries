@@ -472,6 +472,14 @@ namespace rocRoller
                 return tree;
             }
 
+            ExpressionTree operator()(BitfieldCombine const& expr) const
+            {
+                AssertFatal(
+                    false,
+                    "BitfieldCombine should be lowered to shift and bitwise AND/OR epxressions");
+                return {};
+            }
+
             template <CNary Expr>
             ExpressionTree operator()(Expr const& expr) const
             {
