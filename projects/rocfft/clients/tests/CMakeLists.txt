@@ -259,6 +259,7 @@ if ( USE_HIPRAND )
   PRIVATE
   hip::hiprand
   )
+  target_compile_definitions( rocfft-test PRIVATE USE_HIPRAND )
 endif()
 
 if( ROCFFT_MPI_ENABLE )
@@ -457,6 +458,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocfft-coverage_*.profraw -o ./coverage-report/rocfft.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

@@ -243,6 +243,21 @@ namespace origami
         return numerator / denominator;
     }
 
+    /**
+     * Computes Emulated arithmetic intensity for TF32 (assumes 3xBF16).
+     * 
+     */
+    double
+        emulated_tf32_arithmetic_intensity(double m, double n, double k, double bytes_per_element)
+    {
+        // Numerator: 3.0 * 2.0 * m * n * k
+        // Denominator: (m*n + n*k + m*k) * bytes_per_element
+        double numerator   = 3.0 * 2.0 * m * n * k;
+        double denominator = (m * n + n * k + m * k) * bytes_per_element;
+
+        return numerator / denominator;
+    }
+
     // Compute cvt overhead in tf32 emulation
     static inline double compute_cvt_overhead(const hardware_t& hardware,
                                               size_t            MT_M,
@@ -333,8 +348,8 @@ namespace origami
                                       bool              debug)
     {
         // Compute the number of matrix instructions
-        size_t N_MI = compute_number_matrix_instructions(
-            hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, debug);
+        size_t N_MI
+            = compute_number_matrix_instructions(hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K);
         // Latency of a single MT_MxMT_NxMT_k tile is the latency of one MI multiplied by
         // number of MI per MT_MxMT_NxMT_k.
         size_t L_MI = hardware.get_mi_latency(MI_M, MI_N, MI_K, mi_datatype);
@@ -359,8 +374,8 @@ namespace origami
                             bool              debug)
     {
         // A and B size
-        size_t Ld_A_value = compute_A_loads(MT_M, MT_K, debug);
-        size_t Ld_B_value = compute_B_loads(MT_N, MT_K, debug);
+        size_t Ld_A_value = compute_A_loads(MT_M, MT_K);
+        size_t Ld_B_value = compute_B_loads(MT_N, MT_K);
         // Size of those in bytes
         size_t LDS_usage = (Ld_A_value + Ld_B_value) * (element_size / 8);
 
@@ -375,7 +390,7 @@ namespace origami
     }
 
     // Compute the amount of data loaded from A to produce a MT_MxMT_NxMT_K tile.
-    size_t compute_A_loads(size_t MT_M, size_t MT_K, bool debug)
+    size_t compute_A_loads(size_t MT_M, size_t MT_K)
     {
         // Compute the size of loads from A for a single MT_MxMT_NxMT_K tiles
         size_t Ld_A_value = MT_M * MT_K;
@@ -384,7 +399,7 @@ namespace origami
     }
 
     // Compute the amount of data loaded from B to produce a MT_MxMT_NxMT_K tile.
-    size_t compute_B_loads(size_t MT_N, size_t MT_K, bool debug)
+    size_t compute_B_loads(size_t MT_N, size_t MT_K)
     {
         // Compute the size of loads from B for a single MT_MxMT_NxMT_K tiles
         size_t Ld_B_value = MT_N * MT_K;
@@ -1037,7 +1052,7 @@ namespace origami
             = (L_tile_single * num_iter) + L_prologue + L_epilogue * 2 + L_WG_setup
               + (500 * num_iter); // 7 instructions (each with 4 cycles) at the end of the loop
 
-        if(debug || hardware_t::is_debug_enabled())
+        if(hardware_t::is_debug_enabled())
         {
             double problem_k_quant = ((K % MT_K) / (double)K);
             hardware.log_debug("Iteration Compute Latency", L_compute);
@@ -1156,7 +1171,7 @@ namespace origami
                                  size_t            split,
                                  bool              debug)
     {
-        if(debug || hardware_t::is_debug_enabled())
+        if(hardware_t::is_debug_enabled())
         {
             hardware.log_debug("Problem_Size",
                                std::to_string(int(M)) + "x" + std::to_string(int(N)) + "x"
@@ -1269,22 +1284,35 @@ namespace origami
                          && (hardware.arch == hardware_t::architecture_t::gfx950));
         if(tf32_emu && heuristics)
         {
+            double bytes_per_element = static_cast<double>(element_size_A) / 8.0;
+            double arith = emulated_tf32_arithmetic_intensity(M, N, K, bytes_per_element);
+            double compute_threshold = 1000; // threshold empirically determined.
+
             // The kernel for this is more optimized (Custom kernel NT)
             if((!transA && transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.6;
+                if(arith < compute_threshold)
+                    total_latency = total_latency * 0.6;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // The kernel for this is more optimized (Custom kernel NN)
             if((!transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.8;
+                if(arith < compute_threshold)
+                    total_latency = total_latency * 0.8;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // The kernel for this is more optimized (Custom kernel TN)
             if((transA && !transB) && MT_M == 256 && MT_N == 256 && MT_K == 32)
             {
-                total_latency = total_latency * 0.8;
+                if(arith < compute_threshold)
+                    total_latency = total_latency * 0.8;
+                else
+                    total_latency = total_latency * 0.4;
             }
 
             // Bias large DU where K-dimension is large and M and N are small.

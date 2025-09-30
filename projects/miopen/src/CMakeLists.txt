@@ -61,7 +61,6 @@ function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
     set(KERNELS_DECLS)
     foreach(KERNEL_FILE ${KERNEL_FILES})
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${KERNEL_FILE})
         get_filename_component(KERNEL_FILENAME ${KERNEL_FILE} NAME)
         get_filename_component(BASE_NAME ${KERNEL_FILE} NAME_WE)
         string(TOUPPER "${BASE_NAME}" KEY_NAME)
@@ -390,7 +389,14 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         ${COMPOSABLE_KERNEL_INCLUDE}
         ${COMPOSABLE_KERNEL_DYNAMIC_ASM_INCLUDE}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE}
+        kernels/vector_types.hpp
+        kernels/static_unroll.hpp
         kernels/activation_functions.hpp
+        kernels/batchnorm_functions.hpp
+        kernels/bnorm_spatial_activation_functions.hpp
+        kernels/reduction_functions.hpp
+        kernels/configuration.hpp
+        kernels/default_configurations.hpp
         kernels/gpu_reference_kernel/fp8_kern_types.h
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride1.inc
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dec.inc
@@ -509,10 +515,9 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_gfx11_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_metadata.inc
         kernels/winograd/Conv_Winograd_Rage_v4_6_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_X_X_metadata.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_fp32_fp32acc_f2x3_stride1.inc
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_gfx94x_bf16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_6_0_metadata.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_7_0_gfx94x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_7_0_metadata.inc
         kernels/xform_bidirect_winograd_code.inc
         kernels/xform_data_filter.inc
         kernels/xform_kd_cov2.inc
@@ -536,6 +541,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormActivFwdTrainPerAct.cl
         kernels/MIOpenBatchNormActivFwdTrainSpatial.cl
         kernels/MIOpenBatchNormFwdTrainSpatial.cl
+        kernels/MIOpenBatchNormFwdTrainSpatialHIP.cpp
         kernels/MIOpenBatchNormFwdTrainPerAct.cl
         kernels/MIOpenBatchNormFwdInferSpatial.cl
         kernels/MIOpenBatchNormFwdInferPerAct.cl
@@ -648,9 +654,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c32_stride1.s
         kernels/winograd/Conv_Winograd_Rage_v4_6_0_fp16_fp32acc_f2x3_stride1.s
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_fp16_fp32acc_f2x3_stride1.s
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_fp32_fp32acc_f2x3_stride1.s
-        kernels/winograd/Conv_Winograd_Rage_v4_9_0_bf16_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_7_0_fp16_fp32acc_f2x3_stride1.s
         kernels/xform_data.s
         kernels/xform_filter.s
         kernels/xform_bidirect_winograd_data.s
@@ -781,16 +785,29 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
                 set(KERNEL_SRC_HPP_FILENAME batch_${KERNELS_BATCH_ID}.cpp.hpp)
                 set(KERNEL_SRC_HPP_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/${KERNEL_SRC_HPP_FILENAME})
                 set(KERNEL_SRC_CPP_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.cpp)
+                set(KERNEL_SRC_ASM_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.S)
+                set(KERNEL_SRC_BIN_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.bin)
 
-                add_custom_command(
-                    OUTPUT ${KERNEL_SRC_HPP_PATH}
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
-                    COMMAND $<TARGET_FILE:addkernels> -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
-                    COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
-                    )
-                configure_file(kernels/kernels_batch.cpp.in ${KERNEL_SRC_CPP_PATH})
-                list(APPEND MIOpen_Source ${KERNEL_SRC_CPP_PATH} ${KERNEL_SRC_HPP_PATH})
+                if(MIOPEN_INCBIN)
+                    add_custom_command(
+                        OUTPUT ${KERNEL_SRC_HPP_PATH} ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH}
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
+                        COMMAND $<TARGET_FILE:addkernels> -asm ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH} -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
+                        COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
+                        )
+                    list(APPEND MIOpen_Source ${KERNEL_SRC_HPP_PATH} ${KERNEL_SRC_ASM_PATH})
+                else()
+                    add_custom_command(
+                        OUTPUT ${KERNEL_SRC_HPP_PATH}
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
+                        COMMAND $<TARGET_FILE:addkernels> -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
+                        COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
+                        )
+                    configure_file(kernels/kernels_batch.cpp.in ${KERNEL_SRC_CPP_PATH})
+                    list(APPEND MIOpen_Source ${KERNEL_SRC_CPP_PATH} ${KERNEL_SRC_HPP_PATH})
+                endif()
 
                 set(KERNELS_BATCH)
                 math(EXPR KERNELS_BATCH_ID "1+${KERNELS_BATCH_ID}")
@@ -1061,8 +1078,8 @@ rocm_export_targets(
 if(NOT MIOPEN_EMBED_DB STREQUAL "")
     include(embed)
     if(MIOPEN_EMBED_BINCACHE AND MIOPEN_BINCACHE_PATH STREQUAL "")
-        if(MIOPEN_NO_LFS_PULLED)
-            message(WARNING "Binary cache files have not been pulled down from git-lfs, will not embed.")
+        if(MIOPEN_NO_DVC_PULLED)
+            message(WARNING "Binary cache files have not been pulled down from DVC, will not embed.")
         else()
             set(MIOPEN_BINCACHE_PATH ${KERNELS_BINARY_DIR})
             message("MIOPEN_BINCACHE_PATH: ${MIOPEN_BINCACHE_PATH}")

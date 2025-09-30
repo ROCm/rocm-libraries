@@ -23,12 +23,12 @@
 #
 ################################################################################
 
-from rrperf.problems import GEMMRun, CodeGenRun, TensileRun, TypeParameters
-from rrperf.utils import rocm_gfx
-
 import pathlib
 from itertools import product
 from typing import List
+
+from rrperf.problems import CodeGenRun, GEMMRun, TensileRun, TypeParameters
+from rrperf.utils import rocm_gfx
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
@@ -525,14 +525,16 @@ def tensile_sgemm_guidepost():
 
 
 def streamk_sweep():
-    for twoTile in {True, False}:
+    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
         for base in [HGEMM_7680x8448x8448]:
             # Currently these run out of LDS everywhere except gfx950.
             # + [SGEMM_3072x4096x4096]
             for mac_m in [64, 128]:
                 for mac_n in [64, 128, 256]:
                     for mac_k in [16, 32, 64]:
-                        if twoTile and mac_m * mac_n * mac_k >= (64 * 256 * 64):
+                        if (twoTile or twoTileDPFirst) and mac_m * mac_n * mac_k >= (
+                            64 * 256 * 64
+                        ):
                             # currently these run out of VGPRs.
                             pass
                         else:
@@ -549,6 +551,7 @@ def streamk_sweep():
                                 # prefetchLDSFactor=2,
                                 streamK=True,
                                 streamKTwoTile=twoTile,
+                                streamKTwoTileDPFirst=twoTileDPFirst,
                                 types=TypeParameters(
                                     base["types"],
                                     trans_A="N",
@@ -558,18 +561,20 @@ def streamk_sweep():
 
 
 def streamk():
-    for twoTile in {True, False}:
+    common_overrides = dict(
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        prefetch=False,
+        streamK=True,
+    )
+
+    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
         # SGEMM
         yield mkGEMM(
             SGEMM_3072x4096x4096,
-            workgroup_size_x=128,
-            workgroup_size_y=2,
-            visualize=False,
-            prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
-            # prefetchLDSFactor=2,
-            streamK=True,
+            **common_overrides,
             streamKTwoTile=twoTile,
+            streamKTwoTileDPFirst=twoTileDPFirst,
             types=TypeParameters(
                 SGEMM_3072x4096x4096["types"],
                 trans_A="N",
@@ -582,13 +587,9 @@ def streamk():
             mac_m=128,
             mac_n=256,
             mac_k=16,
-            workgroup_size_x=128,
-            workgroup_size_y=2,
-            prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
-            # prefetchLDSFactor=2,
-            streamK=True,
+            **common_overrides,
             streamKTwoTile=twoTile,
+            streamKTwoTileDPFirst=twoTileDPFirst,
             types=TypeParameters(
                 HGEMM_7680x8448x8448["types"],
                 trans_A="N",
@@ -600,9 +601,9 @@ def streamk():
             mac_m=128,
             mac_n=256,
             mac_k=16,
-            prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            streamK=True,
+            **common_overrides,
             streamKTwoTile=twoTile,
+            streamKTwoTileDPFirst=twoTileDPFirst,
             types=TypeParameters(
                 HGEMM_7680x8448x8192["types"],
                 trans_A="N",
@@ -1265,7 +1266,7 @@ def does_this_fail():
     )
 
 
-def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
+def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():
     yield GEMMRun(
         M=4096,
         N=4096,
@@ -1294,7 +1295,10 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
         swizzleScale=False,
         prefetchMixMemOps=True,
         betaInFma=True,
+        scaleValue_A=1e-2,
+        scaleValue_B=1e-2,
         scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
         matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
@@ -1304,6 +1308,10 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
             type_C="half",
             type_D="half",
             type_acc="float",
+            scale_A="SingleScale",
+            scaleType_A="E8M0",
+            scale_B="SingleScale",
+            scaleType_B="E8M0",
         ),
         numOuter=1,
         numWarmUp=1000,
@@ -1311,8 +1319,8 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
     )
 
 
-def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm():
-    yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_pf4x1())
+def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1_wgm():
+    yield from add_wgm((0, 2), fp4_single_scale_target_d2lds_mi16x16x128_pf4x1())
 
 
 def fp4_kernels_no_wgm():
@@ -1320,14 +1328,14 @@ def fp4_kernels_no_wgm():
     yield from fp4_target_d2lds_mi32x32x64_pf2x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1()
-    # yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1()
+    # yield from fp4_single_scale_target_d2lds_mi16x16x128_pf4x1()
 
 
 def fp4_kernels_wgm():
     yield from fp4_target_d2lds_mi32x32x64_pf2x1_wgm()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
-    yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from fp4_single_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
 def fp4_16x16x128_scale_options():
@@ -1351,7 +1359,7 @@ def fp4_target_sweep_wgms():
     for wgm_dim in [0, 1]:
         for wgm_value in range(1, 50):
             yield from add_wgm(
-                (wgm_dim, wgm_value), fp4_no_scale_target_d2lds_mi16x16x128_pf4x1()
+                (wgm_dim, wgm_value), fp4_single_scale_target_d2lds_mi16x16x128_pf4x1()
             )
 
 
@@ -1710,18 +1718,18 @@ def fp8_kernels():
 
 def all():
     if rocm_gfx().startswith("gfx95"):
-        # TODO: Add here more GFX950 tests
         yield from fp4_kernels()
         yield from fp8_kernels()
         yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
-    yield from sgemm()
-    yield from hgemm()
-    yield from hgemm_no_store_LDS()
-    yield from streamk()
-    yield from streamk_sweep()
-    yield from scalar_is_zero()
-    yield from codegen()
+    else:
+        yield from sgemm()
+        yield from hgemm()
+        yield from hgemm_no_store_LDS()
+        yield from streamk()
+        yield from streamk_sweep()
+        yield from scalar_is_zero()
+        yield from codegen()
 
 
 def all_gfx120X():
