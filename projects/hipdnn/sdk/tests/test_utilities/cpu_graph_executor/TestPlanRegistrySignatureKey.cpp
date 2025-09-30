@@ -10,7 +10,7 @@
 using namespace hipdnn_sdk::test_utilities;
 using hipdnn_sdk::data_objects::DataType;
 
-TEST(TestPlanRegistrySignatureKey, hashAndEqualityFwdInference)
+TEST(TestPlanRegistrySignatureKey, HashAndEqualityFwdInference)
 {
     BatchnormFwdInferenceSignatureKey key1(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     BatchnormFwdInferenceSignatureKey key2(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
@@ -29,7 +29,7 @@ TEST(TestPlanRegistrySignatureKey, hashAndEqualityFwdInference)
     EXPECT_NE(hasher(v1), hasher(v3));
 }
 
-TEST(TestPlanRegistrySignatureKey, hashAndEqualityBwd)
+TEST(TestPlanRegistrySignatureKey, HashAndEqualityBwd)
 {
     BatchnormBwdSignatureKey key1(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     BatchnormBwdSignatureKey key2(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
@@ -48,7 +48,7 @@ TEST(TestPlanRegistrySignatureKey, hashAndEqualityBwd)
     EXPECT_NE(hasher(v1), hasher(v3));
 }
 
-TEST(TestPlanRegistrySignatureKey, crossTypeEquality)
+TEST(TestPlanRegistrySignatureKey, CrossTypeEquality)
 {
     BatchnormFwdInferenceSignatureKey fwdKey(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     BatchnormBwdSignatureKey bwdKey(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
@@ -60,7 +60,7 @@ TEST(TestPlanRegistrySignatureKey, crossTypeEquality)
     EXPECT_FALSE(eq(vFwd, vBwd));
 }
 
-TEST(TestPlanRegistrySignatureKey, unorderedMapUsage)
+TEST(TestPlanRegistrySignatureKey, UnorderedMapUsage)
 {
     BatchnormFwdInferenceSignatureKey key1(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     BatchnormBwdSignatureKey key2(DataType::HALF, DataType::HALF, DataType::HALF);
