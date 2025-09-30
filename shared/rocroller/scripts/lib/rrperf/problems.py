@@ -212,6 +212,7 @@ class GEMMSolution:
     streamK: bool = False
     numWGs: int = 0
     streamKTwoTile: bool = False
+    streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
     matchMemoryAccess: bool = True
@@ -389,6 +390,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "SCH": self.scheduler[0],
             "SK": TF(self.streamK) + "/" + str(self.numWGs),
             "2TSK": TF(self.streamKTwoTile),
+            "DPFirst": TF(self.streamKTwoTileDPFirst),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
