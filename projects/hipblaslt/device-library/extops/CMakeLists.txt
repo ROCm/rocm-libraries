@@ -9,9 +9,12 @@ set(ops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite")
 set(output_dir "${CMAKE_CURRENT_BINARY_DIR}")
 string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
-set(extop_cp_depends "")
+message(STATUS "Architectures to process: ${archs}")  # Log architectures for debugging
+
+set(previous_target "")  # Track previous target for dependency chain
 
 foreach(arch IN LISTS archs)
+    message(STATUS "Configuring target for architecture: ${arch}")  # Log start of arch configuration
     set(WAVEFRONT "-mwavefrontsize64")
     if(arch MATCHES "^gfx1[12][0-9][0-9]$")
         set(WAVEFRONT "-mno-wavefrontsize64")
@@ -35,6 +38,7 @@ foreach(arch IN LISTS archs)
             "${CMAKE_CURRENT_BINARY_DIR}/A_H_S_256_4_${arch}.s"
             "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s"
     )
+
     add_custom_command(
         OUTPUT
             "${CMAKE_CURRENT_BINARY_DIR}/L_256_4_1_${arch}.s"
@@ -77,10 +81,12 @@ foreach(arch IN LISTS archs)
         DEPENDS
             "${output_code_object_file}"
             ${HIPBLASLT_PYTHON_DEPS}
-            ${extop_cp_depends}
+            ${previous_target}
+        COMMAND ${CMAKE_COMMAND} -E echo "Starting extop-library-${arch} for ${arch}"
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
         COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_TENSILE_LIBPATH}/library"
+        COMMAND ${CMAKE_COMMAND} -E echo "Completed extop-library-${arch} for ${arch}"
         COMMENT "Creating hipblasltExtOpLibrary.dat for ${arch}"
     )
-    list(APPEND extop_cp_depends "extop-library-${arch}")
+    set(previous_target "extop-library-${arch}")  # Update previous target for next iteration
 endforeach()
