@@ -77,8 +77,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     Tensor<InputType> wTensor(wAttr->get_dim(), layout);
     Tensor<InputType> yTensor(yAttr->get_dim(), layout);
 
-    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    xTensor.fillWithRandomValues(static_cast<InputType>(0.1f), static_cast<InputType>(1.0f));
+    wTensor.fillWithRandomValues(static_cast<InputType>(0.1f), static_cast<InputType>(1.0f));
     yTensor.fillWithValue(static_cast<InputType>(0.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -133,6 +133,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All convolution forward runs completed successfully.\n";
+    std::cout << "All convolution forward runs completed.\n";
     return 0;
 }
