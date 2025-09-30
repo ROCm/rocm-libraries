@@ -54,6 +54,7 @@ namespace rocRoller
         BF6,
         FP4,
         bool,
+        Raw32,
         // int16_t*,
         int32_t*,
         int64_t*,

@@ -414,7 +414,7 @@ hipError_t
     hipDevice_t stream_device;
     ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(stream, &stream_device));
 
-    // after setting device, we can't just exit on non-success
+    // After setting device, we can't just exit on non-success.
     hipError_t result = hipSetDevice(stream_device);
 
     int occupancy;
@@ -439,7 +439,7 @@ hipError_t
         result = hipDeviceGetAttribute(&num_multi_processors,
                                        hipDeviceAttribute_t::hipDeviceAttributeMultiprocessorCount,
                                        stream_device);
-        // sanity check
+        // Sanity check.
         if(num_multi_processors == 0)
         {
             result = hipErrorUnknown;
@@ -451,7 +451,7 @@ hipError_t
         grid_dim = occupancy * num_multi_processors;
     }
 
-    // always attempt to restore to default device
+    // Always attempt to restore to default device.
     hipError_t set_result = hipSetDevice(default_device);
     ROCPRIM_RETURN_ON_ERROR(result);
 

@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/random/detail/linear_congruential_engine_discard.h>
 #include <thrust/random/detail/random_core_access.h>
 
@@ -58,7 +65,7 @@ namespace random
  *  #include <thrust/random/linear_congruential_engine.h>
  *  #include <iostream>
  *
- *  int main(void)
+ *  int main()
  *  {
  *    // create a minstd_rand object, which is an instance of linear_congruential_engine
  *    thrust::minstd_rand rng1;
@@ -136,7 +143,11 @@ public:
 
   /*! The smallest value this \p linear_congruential_engine may potentially produce.
    */
+#ifndef THRUST_DOXYGEN_INVOKED // Doxygen breaks on the ternary :shrug:
   static const result_type min = c == 0u ? 1u : 0u;
+#else
+  static const result_type min = 0u;
+#endif // THRUST_DOXYGEN_INVOKED
 
   /*! The largest value this \p linear_congruential_engine may potentially produce.
    */
@@ -151,7 +162,7 @@ public:
   /*! This constructor, which optionally accepts a seed, initializes a new
    *  \p linear_congruential_engine.
    *
-   *  \param s The seed used to intialize this \p linear_congruential_engine's state.
+   *  \param s The seed used to initialize this \p linear_congruential_engine's state.
    */
   THRUST_HOST_DEVICE explicit linear_congruential_engine(result_type s = default_seed);
 

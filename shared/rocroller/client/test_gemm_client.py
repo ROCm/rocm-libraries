@@ -32,11 +32,11 @@ import functools
 import itertools
 import os
 import pathlib
-import pytest
 import subprocess
-import yaml
-
 from dataclasses import dataclass
+
+import pytest
+import yaml
 
 build = pathlib.Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
@@ -241,7 +241,7 @@ wave_k: 2
 wave_b: 1
 workgroup_size_x: 128
 workgroup_size_y: 2
-workgroupMapping: [-1, -1]
+workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
@@ -257,6 +257,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 types:
   trans_A: N
   trans_B: N
@@ -275,6 +276,7 @@ types:
   scaleSkipPermlane: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 matchMemoryAccess: true
 loadLDSScale_A: false
 loadLDSScale_B: false
@@ -299,7 +301,7 @@ wave_k: 8
 wave_b: 1
 workgroup_size_x: 128
 workgroup_size_y: 2
-workgroupMapping: [-1, -1]
+workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
@@ -315,6 +317,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 matchMemoryAccess: true
 types:
   trans_A: N
@@ -338,6 +341,7 @@ swizzleScale: false
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 ...
 """
 
@@ -356,7 +360,7 @@ wave_k: 16
 wave_b: 1
 workgroup_size_x: 64
 workgroup_size_y: 2
-workgroupMapping: [-1, -1]
+workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
@@ -372,6 +376,7 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
+schedulerCost: LinearWeighted
 matchMemoryAccess: true
 types:
   trans_A: N
@@ -395,6 +400,7 @@ swizzleScale: false
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 ...
 """
 
@@ -505,7 +511,8 @@ def build_wgm_params():
                 f"--mac_m={tile_size[0]}",
                 f"--mac_n={tile_size[1]}",
                 f"--mac_k={tile_size[2]}",
-                f"--workgroupMapping={dimension},{wgm}",
+                f"--workgroupMappingDim={dimension}",
+                f"--workgroupMappingValue={wgm}",
             ]
             problem_params = [f"--m={size[0]}", f"--n={size[1]}", f"--k={size[2]}"]
             params.append([solution_params, problem_params])
@@ -623,13 +630,13 @@ def test_gemm_generate(tmp_path):
         # "gemm generate" should pass
         subprocess.run([gemm, "generate"], check=True)
 
-        # "gemm generate --asm" should write an assembly+yaml file in the current directory
+        # "gemm generate --asm" should write an assembly and two yaml files in the current directory
         before = list(tmp_path.glob("*.s")) + list(tmp_path.glob("*.yaml"))
         subprocess.run([gemm, "generate", "--asm"], check=True)
         after = list(tmp_path.glob("*.s")) + list(tmp_path.glob("*.yaml"))
-        assert len(after) == len(before) + 2
+        assert len(after) == len(before) + 3
 
-        # "gemm generate --asm test.s" should write .s+.yaml pair
+        # "gemm generate --asm test.s" should write an .s and .yaml pair
         asm_path = tmp_path / "test_asm.s"
         yaml_path = asm_path.with_suffix(".yaml")
         subprocess.run([gemm, "generate", "--asm", asm_path], check=True)
@@ -637,11 +644,11 @@ def test_gemm_generate(tmp_path):
         assert yaml_path.exists()
 
         # possible to not write a pair?
-        # "gemm generate --co" should write an co+yaml file in the current directory
+        # "gemm generate --co" should write an co and two yaml files in the current directory
         before = list(tmp_path.glob("*.co")) + list(tmp_path.glob("*.yaml"))
         subprocess.run([gemm, "generate", "--co"], check=True)
         after = list(tmp_path.glob("*.co")) + list(tmp_path.glob("*.yaml"))
-        assert len(after) == len(before) + 2
+        assert len(after) == len(before) + 3
 
         # "gemm generate --co test.co" should write .co+.yaml pair
         co_path = tmp_path / "test_co.co"

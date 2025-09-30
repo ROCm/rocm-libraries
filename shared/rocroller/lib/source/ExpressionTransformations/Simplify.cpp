@@ -472,6 +472,15 @@ namespace rocRoller
                 return std::make_shared<Expression>(Expr({lhs, rhs, expr.comment}));
             }
 
+            ExpressionPtr operator()(BitfieldCombine const& expr) const
+            {
+                auto cpy = expr;
+                cpy.lhs  = call(expr.lhs);
+                cpy.rhs  = call(expr.rhs);
+
+                return std::make_shared<Expression>(cpy);
+            }
+
             ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
             {
                 ScaledMatrixMultiply cpy = expr;
@@ -515,6 +524,14 @@ namespace rocRoller
                     cpy.r2hs = call(expr.r2hs);
                 }
                 return std::make_shared<Expression>(cpy);
+            }
+
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression>(std::move(cpy));
             }
 
             template <CValue Value>

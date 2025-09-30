@@ -31,20 +31,19 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponent(RandomScheduler);
         static_assert(Component::Component<RandomScheduler>);
 
-        inline RandomScheduler::RandomScheduler(ContextPtr ctx)
+        RandomScheduler::RandomScheduler(ContextPtr ctx)
             : Scheduler{ctx}
         {
         }
 
-        inline bool RandomScheduler::Match(Argument arg)
+        bool RandomScheduler::Match(Argument arg)
         {
             return std::get<0>(arg) == SchedulerProcedure::Random;
         }
 
-        inline std::shared_ptr<Scheduler> RandomScheduler::Build(Argument arg)
+        std::shared_ptr<Scheduler> RandomScheduler::Build(Argument arg)
         {
             if(!Match(arg))
                 return nullptr;
@@ -52,7 +51,7 @@ namespace rocRoller
             return std::make_shared<RandomScheduler>(std::get<2>(arg));
         }
 
-        inline std::string RandomScheduler::name() const
+        std::string RandomScheduler::name() const
         {
             return Name;
         }
@@ -62,7 +61,7 @@ namespace rocRoller
             return true;
         }
 
-        inline Generator<Instruction>
+        Generator<Instruction>
             RandomScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
             if(seqs.empty())

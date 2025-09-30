@@ -861,4 +861,3 @@ class MemOpTemplate(OpTemplate):
       self.itemList = []   ## list of  COde Modules
       self.tmpSgpr  = None
       self.tmpVgpr  = None
-

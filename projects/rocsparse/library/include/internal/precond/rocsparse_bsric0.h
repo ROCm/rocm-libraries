@@ -75,12 +75,12 @@ rocsparse_status rocsparse_bsric0_zero_pivot(rocsparse_handle   handle,
 /*! \ingroup precond_module
  *  \details
  *  \p rocsparse_bsric0_buffer_size returns the size of the temporary storage buffer
- *  that is required by \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()" and 
- *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". The temporary storage buffer must be 
- *  allocated by the user. The size of the temporary storage buffer is identical to the size 
+ *  that is required by \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()" and
+ *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". The temporary storage buffer must be
+ *  allocated by the user. The size of the temporary storage buffer is identical to the size
  *  returned by \ref rocsparse_sbsrsv_buffer_size "rocsparse_Xbsrsv_buffer_size()" and
- *  \ref rocsparse_sbsrilu0_buffer_size "rocsparse_Xbsrilu0_buffer_size()" if the matrix sparsity 
- *  pattern is identical. The user allocated buffer can thus be shared between subsequent calls 
+ *  \ref rocsparse_sbsrilu0_buffer_size "rocsparse_Xbsrilu0_buffer_size()" if the matrix sparsity
+ *  pattern is identical. The user allocated buffer can thus be shared between subsequent calls
  *  to those functions.
  *
  *  \note
@@ -182,9 +182,9 @@ rocsparse_status rocsparse_zbsric0_buffer_size(rocsparse_handle                h
 
 /*! \ingroup precond_module
  *  \details
- *  \p rocsparse_bsric0_analysis performs the analysis step for 
- *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". It is expected that this function will 
- *  be executed only once for a given matrix and particular operation type. The analysis 
+ *  \p rocsparse_bsric0_analysis performs the analysis step for
+ *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". It is expected that this function will
+ *  be executed only once for a given matrix and particular operation type. The analysis
  *  meta data can be cleared by \ref rocsparse_bsric0_clear().
  *
  *  \p rocsparse_bsric0_analysis can share its meta data with
@@ -310,7 +310,7 @@ rocsparse_status rocsparse_zbsric0_analysis(rocsparse_handle                hand
 /*! \ingroup precond_module
  *  \details
  *  \p rocsparse_bsric0_clear deallocates all memory that was allocated by
- *  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()". This is especially useful, 
+ *  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()". This is especially useful,
  *  if memory is an issue and the analysis data is not required for further computation.
  *
  *  \note
@@ -347,17 +347,17 @@ rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_i
  *    A \approx LL^T
  *  \f]
  *
- *  Computing the above incomplete Cholesky factorization requires three steps to complete. First, 
+ *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
  *  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_sbsric0_buffer_size,
- *  \ref rocsparse_dbsric0_buffer_size, \ref rocsparse_cbsric0_buffer_size, or \ref rocsparse_zbsric0_buffer_size. Once 
+ *  \ref rocsparse_dbsric0_buffer_size, \ref rocsparse_cbsric0_buffer_size, or \ref rocsparse_zbsric0_buffer_size. Once
  *  this buffer size has been determined, the user allocates the buffer and passes it to \ref rocsparse_sbsric0_analysis,
- *  \ref rocsparse_dbsric0_analysis, \ref rocsparse_cbsric0_analysis, or \ref rocsparse_zbsric0_analysis. This will 
- *  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsric0, 
- *  \p rocsparse_dbsric0, \p rocsparse_cbsric0, or \p rocsparse_zbsric0 to perform the actual factorization. The calculation 
- *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern 
- *  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls 
+ *  \ref rocsparse_dbsric0_analysis, \ref rocsparse_cbsric0_analysis, or \ref rocsparse_zbsric0_analysis. This will
+ *  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsric0,
+ *  \p rocsparse_dbsric0, \p rocsparse_cbsric0, or \p rocsparse_zbsric0 to perform the actual factorization. The calculation
+ *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
+ *  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
  *  to \ref rocsparse_sbsric0 "rocsparse_Xbsric0()" are complete, the temporary buffer can be deallocated.
- *  
+ *
  *  \p rocsparse_bsric0 reports the first zero pivot (either numerical or structural zero).
  *  The zero pivot status can be obtained by calling \ref rocsparse_bsric0_zero_pivot().
  *
@@ -409,198 +409,7 @@ rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_i
  *  Consider the sparse \f$m \times m\f$ matrix \f$A\f$, stored in BSR
  *  storage format. The following example computes the incomplete Cholesky factorization
  *  \f$M \approx LL^T\f$ and solves the preconditioned system \f$My = x\f$.
- *  \code{.c}
- *      // Create rocSPARSE handle
- *      rocsparse_handle handle;
- *      rocsparse_create_handle(&handle);
- *
- *      // Create matrix descriptor for M
- *      rocsparse_mat_descr descr_M;
- *      rocsparse_create_mat_descr(&descr_M);
- *
- *      // Create matrix descriptor for L
- *      rocsparse_mat_descr descr_L;
- *      rocsparse_create_mat_descr(&descr_L);
- *      rocsparse_set_mat_fill_mode(descr_L, rocsparse_fill_mode_lower);
- *      rocsparse_set_mat_diag_type(descr_L, rocsparse_diag_type_unit);
- *
- *      // Create matrix descriptor for L'
- *      rocsparse_mat_descr descr_Lt;
- *      rocsparse_create_mat_descr(&descr_Lt);
- *      rocsparse_set_mat_fill_mode(descr_Lt, rocsparse_fill_mode_upper);
- *      rocsparse_set_mat_diag_type(descr_Lt, rocsparse_diag_type_non_unit);
- *
- *      // Create matrix info structure
- *      rocsparse_mat_info info;
- *      rocsparse_create_mat_info(&info);
- *
- *      // Obtain required buffer size
- *      size_t buffer_size_M;
- *      size_t buffer_size_L;
- *      size_t buffer_size_Lt;
- *      rocsparse_dbsric0_buffer_size(handle,
- *                                     rocsparse_direction_row,
- *                                     mb,
- *                                     nnzb,
- *                                     descr_M,
- *                                     bsr_val,
- *                                     bsr_row_ptr,
- *                                     bsr_col_ind,
- *                                     block_dim,
- *                                     info,
- *                                     &buffer_size_M);
- *      rocsparse_dbsrsv_buffer_size(handle,
- *                                   rocsparse_direction_row,
- *                                   rocsparse_operation_none,
- *                                   mb,
- *                                   nnzb,
- *                                   descr_L,
- *                                   bsr_val,
- *                                   bsr_row_ptr,
- *                                   bsr_col_ind,
- *                                   block_dim,
- *                                   info,
- *                                   &buffer_size_L);
- *      rocsparse_dbsrsv_buffer_size(handle,
- *                                   rocsparse_direction_row,
- *                                   rocsparse_operation_transpose,
- *                                   mb,
- *                                   nnzb,
- *                                   descr_Lt,
- *                                   bsr_val,
- *                                   bsr_row_ptr,
- *                                   bsr_col_ind,
- *                                   block_dim,
- *                                   info,
- *                                   &buffer_size_Lt);
- *
- *      size_t buffer_size = max(buffer_size_M, max(buffer_size_L, buffer_size_Lt));
- *
- *      // Allocate temporary buffer
- *      void* temp_buffer;
- *      hipMalloc(&temp_buffer, buffer_size);
- *
- *      // Perform analysis steps, using rocsparse_analysis_policy_reuse to improve
- *      // computation performance
- *      rocsparse_dbsric0_analysis(handle,
- *                                  rocsparse_direction_row,
- *                                  mb,
- *                                  nnzb,
- *                                  descr_M,
- *                                  bsr_val,
- *                                  bsr_row_ptr,
- *                                  bsr_col_ind,
- *                                  block_dim,
- *                                  info,
- *                                  rocsparse_analysis_policy_reuse,
- *                                  rocsparse_solve_policy_auto,
- *                                  temp_buffer);
- *      rocsparse_dbsrsv_analysis(handle,
- *                                rocsparse_direction_row,
- *                                rocsparse_operation_none,
- *                                mb,
- *                                nnzb,
- *                                descr_L,
- *                                bsr_val,
- *                                bsr_row_ptr,
- *                                bsr_col_ind,
- *                                block_dim,
- *                                info,
- *                                rocsparse_analysis_policy_reuse,
- *                                rocsparse_solve_policy_auto,
- *                                temp_buffer);
- *      rocsparse_dbsrsv_analysis(handle,
- *                                rocsparse_direction_row,
- *                                rocsparse_operation_transpose,
- *                                mb,
- *                                nnzb,
- *                                descr_Lt,
- *                                bsr_val,
- *                                bsr_row_ptr,
- *                                bsr_col_ind,
- *                                block_dim,
- *                                info,
- *                                rocsparse_analysis_policy_reuse,
- *                                rocsparse_solve_policy_auto,
- *                                temp_buffer);
- *
- *      // Check for zero pivot
- *      rocsparse_int position;
- *      if(rocsparse_status_zero_pivot == rocsparse_bsric0_zero_pivot(handle,
- *                                                                    info,
- *                                                                    &position))
- *      {
- *          printf("A has structural zero at A(%d,%d)\n", position, position);
- *      }
- *
- *      // Compute incomplete Cholesky factorization M = LL'
- *      rocsparse_dbsric0(handle,
- *                         rocsparse_direction_row,
- *                         mb,
- *                         nnzb,
- *                         descr_M,
- *                         bsr_val,
- *                         bsr_row_ptr,
- *                         bsr_col_ind,
- *                         block_dim,
- *                         info,
- *                         rocsparse_solve_policy_auto,
- *                         temp_buffer);
- *
- *      // Check for zero pivot
- *      if(rocsparse_status_zero_pivot == rocsparse_bsric0_zero_pivot(handle,
- *                                                                     info,
- *                                                                     &position))
- *      {
- *          printf("L has structural and/or numerical zero at L(%d,%d)\n",
- *                 position,
- *                 position);
- *      }
- *
- *      // Solve Lz = x
- *      rocsparse_dbsrsv_solve(handle,
- *                             rocsparse_direction_row,
- *                             rocsparse_operation_none,
- *                             mb,
- *                             nnzb,
- *                             &alpha,
- *                             descr_L,
- *                             bsr_val,
- *                             bsr_row_ptr,
- *                             bsr_col_ind,
- *                             block_dim,
- *                             info,
- *                             x,
- *                             z,
- *                             rocsparse_solve_policy_auto,
- *                             temp_buffer);
- *
- *      // Solve L'y = z
- *      rocsparse_dbsrsv_solve(handle,
- *                             rocsparse_direction_row,
- *                             rocsparse_operation_transpose,
- *                             mb,
- *                             nnzb,
- *                             &alpha,
- *                             descr_Lt,
- *                             bsr_val,
- *                             bsr_row_ptr,
- *                             bsr_col_ind,
- *                             block_dim,
- *                             info,
- *                             z,
- *                             y,
- *                             rocsparse_solve_policy_auto,
- *                             temp_buffer);
- *
- *      // Clean up
- *      hipFree(temp_buffer);
- *      rocsparse_destroy_mat_info(info);
- *      rocsparse_destroy_mat_descr(descr_M);
- *      rocsparse_destroy_mat_descr(descr_L);
- *      rocsparse_destroy_mat_descr(descr_Lt);
- *      rocsparse_destroy_handle(handle);
- *  \endcode
+ *  \snippet example_rocsparse_bsric0.cpp doc example
  */
 /**@{*/
 ROCSPARSE_EXPORT

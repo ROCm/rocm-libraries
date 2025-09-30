@@ -34,6 +34,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 #include "GPUContextFixture.hpp"
 
@@ -270,13 +271,16 @@ namespace LDSCopyTest
 
         addDirect2LDS(kgraph);
 
-        auto addComputeIndex = std::make_shared<AddComputeIndex>();
-        kgraph               = kgraph.transform(addComputeIndex);
-
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+        auto addComputeIndex = std::make_shared<AddComputeIndex>();
+        kgraph               = kgraph.transform(addComputeIndex);
+
+        if(m_context->kernelOptions()->removeSetCoordinate)
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
+        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(m_context));
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());

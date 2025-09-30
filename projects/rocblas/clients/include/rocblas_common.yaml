@@ -459,6 +459,8 @@ Definitions:
   # scan extension applied by Arguments class
   - &c_scan_value
     - [-999]
+  - &c_scan_value_2
+    - [-998]
 
   # int64 API testing constants
   - &c_pos_overflow_int32
@@ -513,6 +515,7 @@ Arguments:
   - incy: c_int64
   - batch_count: c_int64
   - scan: c_int64
+  - scan_2: c_int64
   - iters: c_int32
   - cold_iters: c_int32
   - algo: c_uint32
@@ -612,6 +615,7 @@ Defaults:
   diag: '*'
   batch_count: 1
   scan: *c_scan_value
+  scan_2: *c_scan_value_2
   HMM: false
   pad: 4096
   math_mode: 0

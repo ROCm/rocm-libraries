@@ -27,16 +27,15 @@
 
 import argparse
 import functools
-import os
+import shutil
 
 import rrperf.args as args
-import rrperf.rrsuites
 import rrperf.utils as utils
 
 
 @functools.cache
 def hline():
-    width = os.get_terminal_size().columns
+    width = shutil.get_terminal_size(fallback=(80, 20)).columns
     return "-" * width
 
 
@@ -54,11 +53,12 @@ def run(args):
         else:
             suite = "all"
 
-    generator = getattr(rrperf.rrsuites, suite)
-    for x in generator():
+    generator = utils.load_suite(suite)
+    for x in generator:
         print(hline())
         print("-- rocRoller benchmark run")
         print("--")
+        print("Id: ", x.id)
         print("Token: ", x)
         print("")
         print(utils.sjoin(x.command()))

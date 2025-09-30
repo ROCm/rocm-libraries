@@ -69,7 +69,7 @@ extern "C" {
 *  idxBase    \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p idxBase, \p nnz, \p xVal, 
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p idxBase, \p nnz, \p xVal,
 *          \p xInd, \p y or \p result is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the dot product reduction
 *          could not be allocated.

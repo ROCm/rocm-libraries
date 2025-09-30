@@ -139,8 +139,19 @@ namespace rocRoller
         return os;
     }
 
+    template <typename T>
+    requires(std::is_pointer_v<T>) bool GPUArchitecture::isSupportedConstantValue(T value) const
+    {
+        return false;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(Raw32 value) const
+    {
+        return isSupportedConstantValue(static_cast<int>(value));
+    }
+
     template <std::integral T>
-    requires(!std::same_as<bool, T>) bool GPUArchitecture::isSupportedConstantValue(T value) const
+    bool GPUArchitecture::isSupportedConstantValue(T value) const
     {
         auto range = supportedConstantRange<T>();
         return value >= range.first && value <= range.second;

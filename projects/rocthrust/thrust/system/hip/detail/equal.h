@@ -29,6 +29,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
@@ -39,14 +47,14 @@ namespace hip_rocprim
 {
 
 template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
-bool THRUST_HIP_FUNCTION
+bool THRUST_HOST_DEVICE
 equal(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred)
 {
   return hip_rocprim::mismatch(policy, first1, last1, first2, binary_pred).first == last1;
 }
 
 template <class Derived, class InputIt1, class InputIt2>
-bool THRUST_HIP_FUNCTION equal(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
+bool THRUST_HOST_DEVICE equal(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
 {
   using InputType1 = typename thrust::iterator_value<InputIt1>::type;
   return hip_rocprim::equal(policy, first1, last1, first2, equal_to<InputType1>());

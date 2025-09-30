@@ -187,32 +187,6 @@ and ``<subroutine>_device.h``.
            return rocsparse_status_invalid_handle;
        }
 
-       // Logging
-       if(handle->pointer_mode == rocsparse_pointer_mode_host)
-       {
-           log_trace(handle,
-                     rocsparse::replaceX<T>("rocsparse_Xsubroutine"),
-                     m,
-                     *alpha,
-                     (const void*&)val);
-
-           log_bench(handle,
-                     "./rocsparse-bench -f subroutine -r",
-                     rocsparse::replaceX<T>("X"),
-                     "-m",
-                     m,
-                     "--alpha",
-                     *alpha);
-       }
-       else
-       {
-           log_trace(handle,
-                     rocsparse::replaceX<T>("rocsparse_Xsubroutine"),
-                     m,
-                     (const void*&)alpha,
-                     (const void*&)val);
-       }
-
        // Check size
        if(m < 0)
        {

@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p rocsparse_gpsv_interleaved_batch_buffer_size calculates the required buffer size
-*  for \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()". It is the user's 
+*  for \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()". It is the user's
 *  responsibility to allocate this buffer.
 *
 *  \note
@@ -147,22 +147,22 @@ rocsparse_status rocsparse_zgpsv_interleaved_batch_buffer_size(rocsparse_handle 
 *  \f[
 *    P^{i}*x^{i} = x^{i}
 *  \f]
-*  where for each batch \f$i=0\ldots\f$ \p batch_count, \f$P^{i}\f$ is a sparse pentadiagonal matrix and 
-*  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are 
-*  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower 
-*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals. 
+*  where for each batch \f$i=0\ldots\f$ \p batch_count, \f$P^{i}\f$ is a sparse pentadiagonal matrix and
+*  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are
+*  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower
+*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals.
 *  See below for a description of what this interleaved memory pattern looks like.
 *
-*  Solving the batched pentadiagonal system involves two steps. First, the user calls 
-*  \ref rocsparse_sgpsv_interleaved_batch_buffer_size "rocsparse_Xgpsv_interleaved_batch_buffer_size()" 
-*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates 
-*  this buffer and passes it to \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()" 
-*  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are 
-*  overwritten with the solution after the call to 
+*  Solving the batched pentadiagonal system involves two steps. First, the user calls
+*  \ref rocsparse_sgpsv_interleaved_batch_buffer_size "rocsparse_Xgpsv_interleaved_batch_buffer_size()"
+*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  this buffer and passes it to \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()"
+*  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
+*  overwritten with the solution after the call to
 *  \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()".
 *
-*  Unlike the strided batch routines which write each batch matrix one after the other in memory, the interleaved 
-*  routines write the batch matrices such that each element from each matrix is written consecutively one after 
+*  Unlike the strided batch routines which write each batch matrix one after the other in memory, the interleaved
+*  routines write the batch matrices such that each element from each matrix is written consecutively one after
 *  the other. For example, consider the following batch matrices:
 *
 *  \f[
@@ -181,7 +181,7 @@ rocsparse_status rocsparse_zgpsv_interleaved_batch_buffer_size(rocsparse_handle 
 *    t^{2}_{10} & t^{2}_{11} & t^{2}_{12} \\
 *    t^{2}_{20} & t^{2}_{21} & t^{2}_{22}
 *    \end{bmatrix}
-*  \f] 
+*  \f]
 *
 *  In interleaved format, the highest, higher, lowest, lower, and diagonal arrays would look like:
 *  \f[
@@ -193,7 +193,7 @@ rocsparse_status rocsparse_zgpsv_interleaved_batch_buffer_size(rocsparse_handle 
 *    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
 *    \end{align}
 *  \f]
-*  For the lowest array, the first \p 2*batch_count entries are zero, for the lower array, the first \p batch_count entries are zero, 
+*  For the lowest array, the first \p 2*batch_count entries are zero, for the lower array, the first \p batch_count entries are zero,
 *  for the upper array the last \p batch_count entries are zero, and for the highest array, the last \p 2*batch_count entries are zero.
 *
 *  \note
@@ -246,137 +246,7 @@ rocsparse_status rocsparse_zgpsv_interleaved_batch_buffer_size(rocsparse_handle 
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *
 *  \par Example
-*  \code{.c}
-*   // Size of each square pentadiagonal matrix
-*   rocsparse_int m = 6;
-*
-*   // Number of batches
-*   rocsparse_int batch_count = 4;
-*
-*   // Batch stride
-*   rocsparse_int batch_stride = batch_count;
-*
-*   // Host pentadiagonal matrix
-*   std::vector<float> hds(m * batch_stride);
-*   std::vector<float> hdl(m * batch_stride);
-*   std::vector<float> hd(m * batch_stride);
-*   std::vector<float> hdu(m * batch_stride);
-*   std::vector<float> hdw(m * batch_stride);
-*
-*   // Solve multiple pentadiagonal matrix systems by interleaving matrices for better memory access:
-*   //
-*   //      4 2 1 0 0 0        5 3 2 0 0 0        6 4 3 0 0 0        7 5 4 0 0 0
-*   //      2 4 2 1 0 0        3 5 3 2 0 0        4 6 4 3 0 0        5 7 5 4 0 0
-*   // A1 = 1 2 4 2 1 0   A2 = 2 3 5 3 2 0   A3 = 3 4 6 4 3 0   A4 = 4 5 7 5 4 0
-*   //      0 1 2 4 2 1        0 2 3 5 3 2        0 3 4 6 4 3        0 4 5 7 5 4
-*   //      0 0 1 2 4 2        0 0 2 3 5 3        0 0 3 4 6 4        0 0 4 5 7 5
-*   //      0 0 0 1 2 4        0 0 0 2 3 5        0 0 0 3 4 6        0 0 0 4 5 7
-*   //
-*   // hds = 0 0 0 0 0 0 0 0 1 2 3 4 1 2 3 4 1 2 3 4 1 2 3 4
-*   // hdl = 0 0 0 0 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5
-*   // hd  = 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7 4 5 6 7
-*   // hdu = 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 0 0 0 0
-*   // hdw = 1 2 3 4 1 2 3 4 1 2 3 4 1 2 3 4 0 0 0 0 0 0 0 0
-*   for(int b = 0; b < batch_count; ++b)
-*   {
-*       for(rocsparse_int i = 0; i < m; ++i)
-*       {
-*           hds[batch_stride * i + b] = 1 + b;
-*           hdl[batch_stride * i + b] = 2 + b;
-*           hd[batch_stride * i + b]  = 4 + b;
-*           hdu[batch_stride * i + b] = 2 + b;
-*           hdw[batch_stride * i + b] = 1 + b;
-*       }
-*
-*       hds[batch_stride * 0 + b]       = 0.0f;
-*       hds[batch_stride * 1 + b]       = 0.0f;
-*       hdl[batch_stride * 0 + b]       = 0.0f;
-*       hdu[batch_stride * (m - 1) + b] = 0.0f;
-*       hdw[batch_stride * (m - 1) + b] = 0.0f;
-*       hdw[batch_stride * (m - 2) + b] = 0.0f;
-*   }
-*
-*   // Host dense rhs
-*   std::vector<float> hx(m * batch_stride);
-*
-*   for(int b = 0; b < batch_count; ++b)
-*   {
-*       for(int i = 0; i < m; ++i)
-*       {
-*           hx[batch_stride * i + b] = static_cast<float>(b + 1);
-*       }
-*   }
-*
-*   float* dds = nullptr;
-*   float* ddl = nullptr;
-*   float* dd = nullptr;
-*   float* ddu = nullptr;
-*   float* ddw = nullptr;
-*   float* dx = nullptr;
-*   hipMalloc((void**)&dds, sizeof(float) * m * batch_stride);
-*   hipMalloc((void**)&ddl, sizeof(float) * m * batch_stride);
-*   hipMalloc((void**)&dd, sizeof(float) * m * batch_stride);
-*   hipMalloc((void**)&ddu, sizeof(float) * m * batch_stride);
-*   hipMalloc((void**)&ddw, sizeof(float) * m * batch_stride);
-*   hipMalloc((void**)&dx, sizeof(float) * m * batch_stride);
-*
-*   hipMemcpy(dds, hds.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*   hipMemcpy(ddl, hdl.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*   hipMemcpy(dd, hd.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*   hipMemcpy(ddu, hdu.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*   hipMemcpy(ddw, hdw.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*   hipMemcpy(dx, hx.data(), sizeof(float) * m * batch_stride, hipMemcpyHostToDevice);
-*
-*   // rocSPARSE handle
-*   rocsparse_handle handle;
-*   rocsparse_create_handle(&handle);
-*
-*   // Obtain required buffer size
-*   size_t buffer_size;
-*   rocsparse_sgpsv_interleaved_batch_buffer_size(handle,
-*                                                 rocsparse_gpsv_interleaved_alg_default,
-*                                                 m,
-*                                                 dds,
-*                                                 ddl,
-*                                                 dd,
-*                                                 ddu,
-*                                                 ddw,
-*                                                 dx,
-*                                                 batch_count,
-*                                                 batch_stride,
-*                                                 &buffer_size);
-*
-*   void* dbuffer;
-*   hipMalloc(&dbuffer, buffer_size);
-*
-*   rocsparse_sgpsv_interleaved_batch(handle,
-*                                     rocsparse_gpsv_interleaved_alg_default,
-*                                     m,
-*                                     dds,
-*                                     ddl,
-*                                     dd,
-*                                     ddu,
-*                                     ddw,
-*                                     dx,
-*                                     batch_count,
-*                                     batch_stride,
-*                                     dbuffer);
-*
-*   // Copy right-hand side to host
-*   hipMemcpy(hx.data(), dx, sizeof(float) * m * batch_stride, hipMemcpyDeviceToHost);
-*
-*   // Clear rocSPARSE
-*   rocsparse_destroy_handle(handle);
-*
-*   // Clear device memory
-*   hipFree(dds);
-*   hipFree(ddl);
-*   hipFree(dd);
-*   hipFree(ddu);
-*   hipFree(ddw);
-*   hipFree(dx);
-*   hipFree(dbuffer);
-*  \endcode
+*  \snippet example_rocsparse_gpsv.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

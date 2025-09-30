@@ -594,11 +594,11 @@ class GlobalWriteBatchWriter:
           # loop over registers within one scalar
           for rIdx in range(0, regsPerScalar):
             module.add(replaceHolder(self.codeAccVgprRead.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu))
-      
+
       if self.kernel["MIArchVgpr"] and self.kernel["LocalSplitU"] > 1:
         self.parentWriter.states.c.startVgprValu = tmpStartVgprValuC
         module.add(RegSet("v", "vgprValuC", tmpStartVgprValuC))
-        
+
     elif self.kernel["LocalSplitU"] > 1:
       # read from LSU VGPRs
       regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar

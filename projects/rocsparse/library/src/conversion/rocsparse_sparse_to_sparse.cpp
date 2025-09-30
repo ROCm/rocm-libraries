@@ -175,6 +175,14 @@ try
                                                         &ind_type,
                                                         &base,
                                                         &val_type));
+
+            // Due to the changes in the hipFree introduced in HIP 7.0
+            // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+            // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+            // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+            // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+            RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+
             RETURN_IF_HIP_ERROR(rocsparse_hipFree(row));
             RETURN_IF_HIP_ERROR(rocsparse_hipFree(col));
             RETURN_IF_HIP_ERROR(rocsparse_hipFree(val));

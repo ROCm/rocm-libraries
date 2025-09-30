@@ -87,6 +87,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
         const auto tidy = tid / (MAX_THDS / 2);
         for(I j = tidy; j < n; j += 2)
         {
+            // ignore imaginary part of the diagonal
+            if(i == j)
+                a[i + j * n] = std::real(a[i + j * n]);
+            // copy lower triangle to upper triangle
             if(i < j)
                 a[i + j * n] = conj(a[j + i * n]);
         }
@@ -258,6 +262,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
         const auto tidy = tid / (MAX_THDS / 2);
         for(I j = tidy; j < n; j += 2)
         {
+            // ignore imaginary part of the diagonal
+            if(i == j)
+                a[i + j * n] = std::real(a[i + j * n]);
+            // copy upper triangle to lower triangle
             if(i > j)
                 a[i + j * n] = conj(a[j + i * n]);
         }
@@ -604,10 +612,7 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
     rocblas_stride stridet = 1; //stride for tmptau
 
     // get device prop
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
     if(uplo == rocblas_fill_lower)
     {
@@ -616,8 +621,8 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
         for(rocblas_int j = 0; j < n - 1; ++j)
         {
             const rocblas_int nn = n - j;
-            const size_t lmemsize = ((256 / props.warpSize) + 2 * nn + 1 + nn * nn) * sizeof(T);
-            if(lmemsize <= props.sharedMemPerBlock && nn <= xxTD2_SSKER_MAX_N)
+            const size_t lmemsize = ((256 / props->warpSize) + 2 * nn + 1 + nn * nn) * sizeof(T);
+            if(lmemsize <= props->sharedMemPerBlock && nn <= xxTD2_SSKER_MAX_N)
             {
                 ROCSOLVER_LAUNCH_KERNEL((sytd2_lower_kernel_small<256, T>), dim3(1, 1, batch_count),
                                         dim3(256), lmemsize, stream, nn, A,
@@ -663,8 +668,8 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
         for(rocblas_int j = n - 1; j > 0; --j)
         {
             const rocblas_int nn = j + 1;
-            const size_t lmemsize = ((256 / props.warpSize) + 2 * nn + 1 + nn * nn) * sizeof(T);
-            if(lmemsize <= props.sharedMemPerBlock && nn <= xxTD2_SSKER_MAX_N)
+            const size_t lmemsize = ((256 / props->warpSize) + 2 * nn + 1 + nn * nn) * sizeof(T);
+            if(lmemsize <= props->sharedMemPerBlock && nn <= xxTD2_SSKER_MAX_N)
             {
                 ROCSOLVER_LAUNCH_KERNEL((sytd2_upper_kernel_small<256, T>), dim3(1, 1, batch_count),
                                         dim3(256), lmemsize, stream, nn, A, shiftA, lda, strideA, D,

@@ -74,3 +74,44 @@ class SuiteProblemGenerator:
     def generate_problemSet(self):
         for g in self.suites.values():
             yield from g()
+
+@dataclass
+class ShellScriptProblemGenerator:
+    sh_filename: str = None
+    bench_exec: str = None
+    benchCMDs: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        # print("sh file: " + str(self.sh_filename))
+        # print("bench_exec: " + str(self.bench_exec))
+        # load file and readline
+        try:
+            with open(self.sh_filename, 'r') as sh_file:
+                # Iterate over each line in the file
+                for cmd in sh_file:
+                    cmd = cmd.strip()
+                    # skip invalid line
+                    if cmd.startswith("#") or cmd.count("hipblaslt-bench") == 0:
+                        continue
+                    # --verfiy will output other values, not supported yet
+                    if cmd.count("verfiy") > 0 or cmd.count("-v") > 0:
+                        print(f'--verify or -v is not supported, skip bench.')
+                        continue
+                    # TODO- not supported for offline tuning
+                    if cmd.count("requested_solution") > 0:
+                        print(f'--requested_solution is not supported, skip bench.')
+                        continue
+
+                    cmd = cmd.replace("./hipblaslt-bench", str(self.bench_exec))
+                    # print("parsed cmd: " + cmd)
+                    self.benchCMDs.append(cmd)
+
+        except FileNotFoundError:
+            print(f'Error: The file {self.sh_filename} was not found.')
+
+        except Exception as e:
+            print(f'An error occurred: {e}')
+
+    def iterate_cmd(self):
+        for cmd in self.benchCMDs:
+            yield cmd

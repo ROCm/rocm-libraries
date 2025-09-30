@@ -38,6 +38,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
     case rocsparse::csrmv_alg_rowsplit:
     case rocsparse::csrmv_alg_adaptive:
     case rocsparse::csrmv_alg_lrb:
+    case rocsparse::csrmv_alg_nnzsplit:
     {
         return false;
     }
@@ -93,6 +94,13 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
 
     case rocsparse::csrmv_alg_rowsplit:
     {
+        return rocsparse_status_success;
+    }
+
+    case rocsparse::csrmv_alg_nnzsplit:
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
+            handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
         return rocsparse_status_success;
     }
     }
@@ -160,7 +168,8 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                       "prior analysis has been executed");
             alg = rocsparse::csrmv_alg_rowsplit;
         }
-        else if((alg != rocsparse::csrmv_alg_rowsplit) && (trans != rocsparse_operation_none))
+        else if((alg != rocsparse::csrmv_alg_rowsplit && alg != rocsparse::csrmv_alg_nnzsplit)
+                && (trans != rocsparse_operation_none))
         {
             ROCSPARSE_WARNING_MESSAGE(
                 "The csmrv routine will use the ROWSPLIT algorithm since no other algorithm "
@@ -256,6 +265,37 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                          beta_device_host,
                                                                          y,
                                                                          force_conj));
+        return rocsparse_status_success;
+    }
+
+    case rocsparse::csrmv_alg_nnzsplit:
+    {
+        //
+        // Rows must be stored contiguously.
+        //
+        if((csr_row_ptr_begin + 1) != csr_row_ptr_end)
+        {
+            // LCOV_EXCL_START
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_internal_error, "csrmv nnzsplit algorithm does not support CSR4");
+            // LCOV_EXCL_STOP
+        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_nnzsplit_template_dispatch(handle,
+                                                                              trans,
+                                                                              m,
+                                                                              n,
+                                                                              nnz,
+                                                                              alpha_device_host,
+                                                                              descr,
+                                                                              csr_val,
+                                                                              csr_row_ptr_begin,
+                                                                              csr_col_ind,
+                                                                              csrmv_info,
+                                                                              x,
+                                                                              beta_device_host,
+                                                                              y,
+                                                                              force_conj));
+
         return rocsparse_status_success;
     }
     }

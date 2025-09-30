@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup extra_module
 *  \details
 *  \p rocsparse_csrgemm_buffer_size returns the size of the temporary storage buffer
-*  that is required by \ref rocsparse_csrgemm_nnz() and \ref rocsparse_scsrgemm "rocsparse_Xcsrgemm()". 
+*  that is required by \ref rocsparse_csrgemm_nnz() and \ref rocsparse_scsrgemm "rocsparse_Xcsrgemm()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note

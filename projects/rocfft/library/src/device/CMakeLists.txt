@@ -58,6 +58,12 @@ endif()
 # Make it possible to let install.sh control this ?
 set( kgen ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py )
 set( kgendeps ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
+              ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrr.py
+              ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcc.py
+              ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcr.py
+              ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrc.py
+              ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_2d_single.py
+              ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_pp_3d.py
               ${CMAKE_SOURCE_DIR}/library/src/device/generator.py )
 
 # create list of all N files that will initialize function pool

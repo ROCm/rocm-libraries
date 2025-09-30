@@ -89,8 +89,5 @@ def ci() {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
     properties(auxiliary.addCommonProperties([]))
-
-    stage(urlJobName) {
-        runCI([ubuntu22:['gfx90a']], urlJobName)
-    }
+    runCI([ubuntu22:['gfx90a']], urlJobName)
 }
