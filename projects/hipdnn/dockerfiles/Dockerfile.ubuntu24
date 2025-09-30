@@ -69,7 +69,7 @@ RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
 # docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_HASH=abc123def456 -t hipdnn:custom_source_build .
 #
 # Build mode options:
-# - THEROCK_BUILD_MODE can be: Preset (default), Debug, or Release
+# - THEROCK_BUILD_MODE can be: Preset, Debug, or Release (default)
 # - When using "Preset", specify the preset with THEROCK_BUILD_PRESET
 # - When using "Debug" or "Release", standard CMake build types are used
 #
@@ -90,7 +90,7 @@ FROM base AS install_therock_fullbuild
 
 ARG THEROCK_ASIC=gfx90a
 ARG THEROCK_GIT_HASH=default
-ARG THEROCK_BUILD_MODE=Preset
+ARG THEROCK_BUILD_MODE=Release
 ARG THEROCK_BUILD_PRESET=linux-release-package
 ARG BUILD_JOBS=0
 
