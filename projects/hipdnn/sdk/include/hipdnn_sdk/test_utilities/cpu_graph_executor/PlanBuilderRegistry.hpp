@@ -19,6 +19,7 @@ namespace hipdnn_sdk::test_utilities
  * Eventually we may wish to centalize all the supported signature arrays for all ops in another file
  * once we have a significant number of ops supported.
 */
+
 constexpr std::array<BatchnormFwdInferenceSignatureKey, 3>
     ALL_SUPPORTED_BATCHNORM_FWD_INFERENCE_SIGNATURES
     = {BatchnormFwdInferenceSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
@@ -52,6 +53,12 @@ constexpr std::array<BatchnormTrainSignatureKey, 3> ALL_SUPPORTED_BATCHNORM_TRAI
        BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType::BFLOAT16,
                                   hipdnn_sdk::data_objects::DataType::BFLOAT16,
                                   hipdnn_sdk::data_objects::DataType::BFLOAT16)};
+
+typedef std::unordered_map<PlanRegistrySignatureKey,
+                           std::unique_ptr<IGraphNodePlanBuilder>,
+                           PlanRegistrySignatureKeyHash,
+                           PlanRegistrySignatureKeyEqual>
+    PlanRegistryMap;
 
 class PlanBuilderRegistry
 {
@@ -133,10 +140,6 @@ private:
     }
 
     bool _initialized = false;
-    std::unordered_map<PlanRegistrySignatureKey,
-                       std::unique_ptr<IGraphNodePlanBuilder>,
-                       PlanRegistrySignatureKeyHash,
-                       PlanRegistrySignatureKeyEqual>
-        _registry;
+    PlanRegistryMap _registry;
 };
 }

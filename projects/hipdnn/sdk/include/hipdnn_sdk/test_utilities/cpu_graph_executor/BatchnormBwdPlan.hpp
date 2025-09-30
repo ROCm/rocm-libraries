@@ -94,8 +94,6 @@ public:
                          *shallowDxTensor,
                          *shallowDscaleTensor,
                          *shallowDbiasTensor);
-
-        std::cout << "BatchnormBwdPlan executed\n";
     }
 
 private:

@@ -27,6 +27,33 @@ struct BatchnormFwdInferenceSignatureKey
     {
     }
 
+    BatchnormFwdInferenceSignatureKey(
+        const hipdnn_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap)
+    {
+        const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributes();
+        if(nodeAttributes == nullptr)
+        {
+            throw std::runtime_error(
+                "Node attributes could not be cast to BatchnormInferenceAttributes");
+        }
+
+        auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
+        auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
+        auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid());
+
+        if(xTensorAttr == nullptr || scaleTensorAttr == nullptr || meanTensorAttr == nullptr)
+        {
+            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
+                                     "failed to construct key");
+        }
+
+        inputDataType = xTensorAttr->data_type();
+        scaleBiasDataType = scaleTensorAttr->data_type();
+        meanVarianceDataType = meanTensorAttr->data_type();
+    }
+
     constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))

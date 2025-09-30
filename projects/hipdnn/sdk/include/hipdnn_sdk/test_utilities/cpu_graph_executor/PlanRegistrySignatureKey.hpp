@@ -32,7 +32,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
 
 struct PlanRegistrySignatureKeyHash
 {
-    std::size_t operator()(PlanRegistrySignatureKey const& k) const noexcept
+    std::size_t operator()(const PlanRegistrySignatureKey& k) const noexcept
     {
         return std::visit([](auto const& x) { return x.hashSelf(); }, k);
     }
@@ -47,13 +47,13 @@ struct PlanRegistrySignatureKeyEqual
     }
 
     template <typename T>
-    bool operator()(T const& a, T const& b) const noexcept
+    bool operator()(const T& a, const T& b) const noexcept
     {
         return a == b;
     }
 
-    bool operator()(PlanRegistrySignatureKey const& a,
-                    PlanRegistrySignatureKey const& b) const noexcept
+    bool operator()(const PlanRegistrySignatureKey& a,
+                    const PlanRegistrySignatureKey& b) const noexcept
     {
         return std::visit(*this, a, b);
     }

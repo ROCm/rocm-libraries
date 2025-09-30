@@ -52,8 +52,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     initTensorValues(params.meanTensor, DataType::FLOAT, planTensorBundle.meanTensor, 5);
     initTensorValues(
         params.invVarianceTensor, DataType::FLOAT, planTensorBundle.invVarianceTensor, 6);
-    params.epsilon = static_cast<float>(epsilon);
-    params.momentum = static_cast<float>(momentum);
+    initTensorValues(params.epsilonTensor, DataType::FLOAT, planTensorBundle.epsilonTensor, 7);
 
     BatchnormTrainPlan<float, float, float> patient(std::move(params));
 
@@ -64,6 +63,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
     variantPack[4] = planTensorBundle.yTensor.memory().hostData();
     variantPack[5] = planTensorBundle.meanTensor.memory().hostData();
     variantPack[6] = planTensorBundle.invVarianceTensor.memory().hostData();
+    variantPack[7] = planTensorBundle.epsilonTensor.memory().hostData();
 
     CpuFpReferenceBatchnormImpl<float, float, float>::batchnormFwdTraining(
         directTensorBundle.xTensor,
