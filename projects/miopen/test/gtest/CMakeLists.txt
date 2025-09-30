@@ -154,6 +154,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
     
     if(MIOPEN_TEST_GFX115X)
+        add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("Full/GPU_BNBWDSerialRun3D_FP32*") # This test suite takes over 5 hours to run on this hardware
     endif()
