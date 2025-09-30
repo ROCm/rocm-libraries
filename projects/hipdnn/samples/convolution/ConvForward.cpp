@@ -77,8 +77,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     Tensor<InputType> wTensor(wAttr->get_dim(), layout);
     Tensor<InputType> yTensor(yAttr->get_dim(), layout);
 
-    xTensor.fillWithRandomValues(static_cast<InputType>(0.1f), static_cast<InputType>(1.0f));
-    wTensor.fillWithRandomValues(static_cast<InputType>(0.1f), static_cast<InputType>(1.0f));
+    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     yTensor.fillWithValue(static_cast<InputType>(0.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -91,6 +91,12 @@ void SampleRunner::operator()(const TensorLayout& layout)
     yTensor.memory().markDeviceModified();
 
     auto yHostPtr = yTensor.memory().hostData();
+
+    std::cout << "First 10 y values: ";
+    for(int i = 0; i < 10; ++i)
+    {
+        std::cout << static_cast<float>(yHostPtr[i]) << " ";
+    }
 
     if(config.cpuValidation)
     {
@@ -110,12 +116,17 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
-    }
 
-    std::cout << "First 10 y values: ";
-    for(int i = 0; i < 10; ++i)
-    {
-        std::cout << static_cast<float>(yHostPtr[i]) << " ";
+        if(!yValid)
+        {
+            auto yRefHostPtr = yRefTensor.memory().hostData();
+            std::cout << "First 10 yRef values: ";
+            for(int i = 0; i < 10; ++i)
+            {
+                std::cout << static_cast<float>(yRefHostPtr[i]) << " ";
+            }
+            std::cout << '\n';
+        }
     }
 
     std::cout << "\nConvolution forward graph execution complete for " << inputType << ".\n\n";
