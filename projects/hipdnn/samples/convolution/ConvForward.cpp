@@ -11,6 +11,7 @@
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_sdk/utilities/Workspace.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -86,7 +87,11 @@ void SampleRunner::operator()(const TensorLayout& layout)
     variantPack[wAttr->get_uid()] = wTensor.memory().deviceData();
     variantPack[yAttr->get_uid()] = yTensor.memory().deviceData();
 
-    HIPDNN_FE_CHECK(graph->execute(handle, variantPack, nullptr));
+    int64_t workspaceSize;
+    HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
+    Workspace workspace(static_cast<size_t>(workspaceSize));
+
+    HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
     yTensor.memory().markDeviceModified();
 
