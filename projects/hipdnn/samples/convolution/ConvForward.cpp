@@ -97,6 +97,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << static_cast<float>(yHostPtr[i]) << " ";
     }
+    std::cout << '\n';
 
     if(config.cpuValidation)
     {
@@ -129,7 +130,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         }
     }
 
-    std::cout << "\nConvolution forward graph execution complete for " << inputType << ".\n\n";
+    std::cout << "Convolution forward graph execution complete for " << inputType << ".\n\n";
 }
 
 int main(int argc, char* argv[])
