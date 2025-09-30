@@ -66,8 +66,8 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     globalReadIncACode = removeComments(globalReadIncACode)
     globalReadIncBCode = removeComments(globalReadIncBCode)
-
     numLoopIter = kernel["LoopIters"]
+    ph = -2 # placeholder index
 
     if numLoopIter > 1:
         for uIdx in range(0, numLoopIter):
@@ -162,10 +162,10 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     lastIter = numLoopIter - 1
 
-    miIndex = 0
-    for mi in mfmaCode:
-        module.addComment0("mfmaIndex:%u"%(miIndex))
-        module.add(mi)
+    for miIndex in range(-1, len(mfmaCode)):
+        if miIndex >= 0:
+            module.addComment0("mfmaIndex:%u"%(miIndex))
+            module.add(mfmaCode[miIndex])
 
         def scheduleInst(indexList, instructionList):
             ret = [None]*len(indexList)
@@ -180,7 +180,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                             ret[i] = Module()
                         ret[i].add(instructionList[ind])
                         cc += 1
-                        indexList[i][ind] = -1
+                        indexList[i][ind] = ph
             if ret.count(None) == len(ret):
                 return [None]
             else:
@@ -244,7 +244,6 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
                 if codepath == numCodePath - 1:
                     module.add(TextBlock(".endif\n"))
-        miIndex += 1
 
     module.add(TextBlock(".endm\n"))
     return module, numCodePath

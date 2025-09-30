@@ -416,9 +416,6 @@ class Solution(collections.abc.Mapping):
     state["SwapGlobalReadOrder"] = False
     state["MfmaInitCVgprs"] = False
 
-    hasCMS,_ = hasCustomSchedule(state)
-    state["UseCustomMainLoopSchedule"] = hasCMS
-
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
@@ -3299,6 +3296,9 @@ class Solution(collections.abc.Mapping):
           not (isa == (9, 0, 10) or isa[:2] == (9, 4) or isa == (9, 5, 0)):
         #print("Force to Disable PreloadKernArgs since this hipcc version doesn't support",)
         state["PreloadKernArgs"] = 0
+
+    hasCMS,_ = hasCustomSchedule(state)
+    state["UseCustomMainLoopSchedule"] = hasCMS
 
 
   ########################################
