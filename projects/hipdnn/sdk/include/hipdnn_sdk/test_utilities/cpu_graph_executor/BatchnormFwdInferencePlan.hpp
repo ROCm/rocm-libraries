@@ -132,7 +132,7 @@ public:
 
     std::unique_ptr<IGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_plugin::IGraph& graph,
-                      const hipdnn_sdk::data_objects::Node& node) override
+                      const hipdnn_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributes();
         if(nodeAttributes == nullptr)

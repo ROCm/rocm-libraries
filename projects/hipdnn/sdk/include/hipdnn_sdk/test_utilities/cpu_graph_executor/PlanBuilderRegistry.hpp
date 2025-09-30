@@ -56,16 +56,24 @@ constexpr std::array<BatchnormTrainSignatureKey, 3> ALL_SUPPORTED_BATCHNORM_TRAI
 class PlanBuilderRegistry
 {
 public:
-    IGraphNodePlanBuilder* getPlanBuilder(const PlanRegistrySignatureKey& key)
+    PlanBuilderRegistry() = default;
+
+    PlanBuilderRegistry(const PlanBuilderRegistry&) = delete;
+    PlanBuilderRegistry& operator=(const PlanBuilderRegistry&) = delete;
+    PlanBuilderRegistry(PlanBuilderRegistry&&) = delete;
+    PlanBuilderRegistry& operator=(PlanBuilderRegistry&&) = delete;
+
+    const IGraphNodePlanBuilder& getPlanBuilder(const PlanRegistrySignatureKey& key)
     {
         initializeRegistry();
 
         auto it = _registry.find(key);
         if(it != _registry.end())
         {
-            return it->second.get();
+            return *it->second;
         }
-        return nullptr;
+
+        throw std::runtime_error("No plan builder registered for the given signature key.");
     }
 
 private:

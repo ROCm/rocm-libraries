@@ -13,7 +13,6 @@ class CpuReferenceGraphExecutor
 {
 public:
     CpuReferenceGraphExecutor() = default;
-    ~CpuReferenceGraphExecutor() = default;
 
     void execute(void* graphBuffer,
                  size_t size,
@@ -51,18 +50,13 @@ private:
     {
         auto key = buildSignatureKey(node, graph.getTensorMap());
 
-        auto planBuilder = _planRegistry.getPlanBuilder(key);
-        if(planBuilder == nullptr)
-        {
-            throw std::runtime_error("No plan builder found for given node signature");
-        }
-
-        if(!planBuilder->isApplicable(node, graph.getTensorMap()))
+        const auto& planBuilder = _planRegistry.getPlanBuilder(key);
+        if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
             throw std::runtime_error("Plan builder is not applicable for the given node");
         }
 
-        return planBuilder->buildNodePlan(graph, node);
+        return planBuilder.buildNodePlan(graph, node);
     }
 
     static PlanRegistrySignatureKey buildSignatureKey(

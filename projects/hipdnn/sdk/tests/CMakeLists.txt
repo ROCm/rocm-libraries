@@ -49,6 +49,8 @@ add_executable(hipdnn_sdk_tests
     test_utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
     test_utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
     test_utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormTrainSignatureKey.cpp
+    test_utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
 )
 
 target_compile_options(hipdnn_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
