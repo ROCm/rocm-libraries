@@ -27,12 +27,12 @@
 
 
 from __future__ import print_function
+
+import argparse
 import grp
 import os
 import subprocess
-import argparse
 from pathlib import Path
-import sys
 
 dockerfiles = {
     "clang": "docker/dockerfile-ubuntu-clang",
@@ -186,10 +186,25 @@ def parseArgs():
     return parser.parse_args()
 
 
+def buildx_available():
+    try:
+        subprocess.run(
+            ["docker", "buildx", "version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def buildImage(dockerfile, name, context="./", *args):
-    printAndRun(
-        ["docker", "build", "-t", name, "-f", dockerfile] + list(args) + [context]
-    )
+    build_command = ["docker", "build"]
+    if buildx_available():
+        build_command = ["docker", "buildx", "build"]
+
+    printAndRun(build_command + ["-t", name, "-f", dockerfile] + list(args) + [context])
 
 
 def get_render_group():

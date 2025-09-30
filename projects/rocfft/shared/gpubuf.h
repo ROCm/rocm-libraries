@@ -38,6 +38,7 @@ public:
         std::swap(owned, other.owned);
         std::swap(bsize, other.bsize);
         std::swap(device, other.device);
+        std::swap(is_managed_memory, other.is_managed_memory);
     }
     gpubuf_t& operator=(gpubuf_t&& other)
     {
@@ -45,6 +46,7 @@ public:
         std::swap(owned, other.owned);
         std::swap(bsize, other.bsize);
         std::swap(device, other.device);
+        std::swap(is_managed_memory, other.is_managed_memory);
         return *this;
     }
     gpubuf_t(const gpubuf_t&) = delete;
@@ -53,9 +55,10 @@ public:
     static gpubuf_t make_nonowned(T* p, size_t size_bytes = 0)
     {
         gpubuf_t ret;
-        ret.owned = false;
-        ret.buf   = p;
-        ret.bsize = size_bytes;
+        ret.owned             = false;
+        ret.buf               = p;
+        ret.bsize             = size_bytes;
+        ret.is_managed_memory = false;
         return ret;
     }
 
@@ -69,7 +72,7 @@ public:
         return std::getenv("ROCFFT_MALLOC_MANAGED");
     }
 
-    hipError_t alloc(const size_t size)
+    hipError_t alloc(const size_t size, bool make_it_shared = false)
     {
         // remember the device that was current as of alloc, so we can
         // free on the correct device
@@ -77,10 +80,10 @@ public:
         if(ret != hipSuccess)
             return ret;
 
-        bsize                     = size;
-        static bool alloc_managed = use_alloc_managed();
+        bsize             = size;
+        is_managed_memory = use_alloc_managed() || make_it_shared;
         free();
-        ret = alloc_managed ? hipMallocManaged(&buf, bsize) : hipMalloc(&buf, bsize);
+        ret = is_managed_memory ? hipMallocManaged(&buf, bsize) : hipMalloc(&buf, bsize);
         if(ret != hipSuccess)
         {
             buf   = nullptr;
@@ -142,9 +145,10 @@ private:
     void* buf = nullptr;
     // whether this object owns the 'buf' pointer (and hence needs to
     // free it)
-    bool   owned  = true;
-    size_t bsize  = 0;
-    int    device = 0;
+    bool   owned             = true;
+    bool   is_managed_memory = false;
+    size_t bsize             = 0;
+    int    device            = 0;
 };
 
 // default gpubuf that gives out void* pointers

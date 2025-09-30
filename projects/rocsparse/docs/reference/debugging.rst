@@ -110,4 +110,3 @@ rocsparse_state_debug_force_host_assert()
 -----------------------------------------
 
 .. doxygenfunction:: rocsparse_state_debug_force_host_assert
-

@@ -235,7 +235,8 @@ namespace AddStreamKTest
                                                        nullptr,
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
-        kgraph          = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+        if(m_context->kernelOptions()->removeSetCoordinate)
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         auto kg2 = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
         k->setKernelGraphMeta(kg2);
@@ -439,7 +440,8 @@ namespace AddStreamKTest
                                                        nullptr,
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
-        kgraph          = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+        if(m_context->kernelOptions()->removeSetCoordinate)
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         auto kg2 = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
         k->setKernelGraphMeta(kg2);

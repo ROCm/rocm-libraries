@@ -37,12 +37,21 @@
 // Parse YAML data
 static std::string hipblaslt_parse_yaml(const std::string& yaml)
 {
+#ifdef WIN32
+    // Explicitly run via `python.exe`, without relying on the .py file being
+    // treated as an executable that should be run via the python interpreter.
+    std::string python_command_launcher = "python ";
+#else
+    // Rely on the shebang in the file, e.g. `#!/usr/bin/env python3`.
+    std::string python_command_launcher = "";
+#endif
+
     // TODO: This function is inherently unsafe because it returns a string vs an open
     // file handle which will block further colliding creates. See comments in
     // hipblaslt_tempname() and under no circumstances copy this to new code.
     std::string tmp     = hipblaslt_tempname();
     auto        exepath = hipblaslt_exepath();
-    auto        cmd     = exepath + "hipblaslt_gentest.py --template " + exepath
+    auto cmd = python_command_launcher + exepath + "hipblaslt_gentest.py --template " + exepath
                + "hipblaslt_template.yaml -o " + tmp + " " + yaml;
     hipblaslt_cerr << cmd << std::endl;
 

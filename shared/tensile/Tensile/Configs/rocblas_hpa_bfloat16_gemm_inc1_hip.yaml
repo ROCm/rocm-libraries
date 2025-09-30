@@ -61,4 +61,3 @@ LibraryLogic:
     ScheduleName: "hip"
     DeviceNames: ["Device 0000"]
     ArchitectureName: "fallback"
-

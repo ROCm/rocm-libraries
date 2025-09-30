@@ -35,8 +35,8 @@
 #include "auxiliary/rocauxiliary_ormtr_unmtr.hpp"
 #include "auxiliary/rocauxiliary_stedc.hpp"
 #include "auxiliary/rocauxiliary_sterf.hpp"
+#include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
-#include "roclapack_syev_heev.hpp"
 #include "roclapack_sytrd_hetrd.hpp"
 #include "rocsolver/rocsolver.h"
 
@@ -90,8 +90,9 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     if(alg_mode != rocsolver_alg_mode_hybrid || evect == rocblas_evect_original)
     {
         // extra requirements for computing eigenvalues and vectors (stedc)
-        rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count, &w31,
-                                                     &w22, &w12, size_tmpz, size_splits, &unused);
+        rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count,
+                                                     &w31, &w22, &w12, size_tmpz, size_splits,
+                                                     size_workArr);
     }
     else
     {
@@ -120,9 +121,42 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
 
     // size of array of pointers to workspace
     if(BATCHED)
-        *size_workArr = 2 * sizeof(T*) * batch_count;
-    else
-        *size_workArr = 0;
+        *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
+}
+
+/** Argument checking **/
+template <typename T, typename S>
+rocblas_status rocsolver_syevd_heevd_argCheck(rocblas_handle handle,
+                                              const rocblas_evect evect,
+                                              const rocblas_fill uplo,
+                                              const rocblas_int n,
+                                              T A,
+                                              const rocblas_int lda,
+                                              S* D,
+                                              S* E,
+                                              rocblas_int* info,
+                                              const rocblas_int batch_count = 1)
+{
+    // order is important for unit tests:
+
+    // 1. invalid/non-supported values
+    if((evect != rocblas_evect_original && evect != rocblas_evect_none)
+       || (uplo != rocblas_fill_lower && uplo != rocblas_fill_upper))
+        return rocblas_status_invalid_value;
+
+    // 2. invalid size
+    if(n < 0 || lda < n || batch_count < 0)
+        return rocblas_status_invalid_size;
+
+    // skip pointer check if querying memory size
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_status_continue;
+
+    // 3. invalid pointers
+    if((n && !A) || (n && !E) || (n && !D) || (batch_count && !info))
+        return rocblas_status_invalid_pointer;
+
+    return rocblas_status_continue;
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename S>
@@ -180,7 +214,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     {
         // extra requirements for computing eigenvalues and vectors (stedc)
         rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count,
-                                                     &w31, &w22, &w12, &z1, &s1, &unused);
+                                                     &w31, &w22, &w12, &z1, &s1, size_workArr);
     }
 
     if(evect == rocblas_evect_original)
@@ -207,9 +241,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
 
     // size of array of pointers to workspace
     if(BATCHED)
-        *size_workArr = 2 * sizeof(T*) * batch_count;
-    else
-        *size_workArr = 0;
+        *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename S, typename W>
@@ -294,8 +326,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // quick return for n = 1 (scalar case)
     if(n == 1)
     {
-        ROCSOLVER_LAUNCH_KERNEL(scalar_case<T>, gridReset, threads, 0, stream, evect, A, strideA, D,
-                                strideD, batch_count);
+        ROCSOLVER_LAUNCH_KERNEL(syev_scalar_case<T>, gridReset, threads, 0, stream, evect, A,
+                                strideA, D, strideD, batch_count);
         return rocblas_status_success;
     }
 
@@ -397,7 +429,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
         rocsolver_syevd_heevd_getMemorySize<BATCHED, STRIDED, T, S>(
             handle, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
-            &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau, &size_workArr, &optim_mem);
+            &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau,
+            &size_workArr, &optim_mem);
 
         // Memory in `scalars` has already been initialized at this point
         HIP_CHECK(hipMemsetAsync((void*)work1, 0, size_work1, stream));
@@ -428,8 +461,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // quick return for n = 1 (scalar case)
     if(n == 1)
     {
-        ROCSOLVER_LAUNCH_KERNEL(scalar_case<T>, gridReset, threads, 0, stream, evect, A, strideA, D,
-                                strideD, batch_count);
+        ROCSOLVER_LAUNCH_KERNEL(syev_scalar_case<T>, gridReset, threads, 0, stream, evect, A,
+                                strideA, D, strideD, batch_count);
         return rocblas_status_success;
     }
 

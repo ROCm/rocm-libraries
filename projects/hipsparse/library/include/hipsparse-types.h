@@ -87,11 +87,11 @@ typedef void* hipsparseColorInfo_t;
  *  \brief Pointer type to opaque structure holding bsrsv2 info.
  *
  *  \details
- *  The hipSPARSE bsrsv2 structure holds the information used by hipsparseXbsrsv2_zeroPivot(), 
- *  \ref hipsparseSbsrsv2_bufferSize "hipsparseXbsrsv2_bufferSize()", \ref hipsparseSbsrsv2_bufferSizeExt 
- *  "hipsparseXbsrsv2_bufferSizeExt()", \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()", 
- *  and \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()". It must be initialized using 
- *  hipsparseCreateBsrsv2Info() and the returned structure must be passed to all subsequent library calls 
+ *  The hipSPARSE bsrsv2 structure holds the information used by hipsparseXbsrsv2_zeroPivot(),
+ *  \ref hipsparseSbsrsv2_bufferSize "hipsparseXbsrsv2_bufferSize()", \ref hipsparseSbsrsv2_bufferSizeExt
+ *  "hipsparseXbsrsv2_bufferSizeExt()", \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()",
+ *  and \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()". It must be initialized using
+ *  hipsparseCreateBsrsv2Info() and the returned structure must be passed to all subsequent library calls
  *  that involve bsrsv2. It should be destroyed at the end using hipsparseDestroyBsrsv2Info().
  */
 typedef struct bsrsv2Info* bsrsv2Info_t;
@@ -100,9 +100,9 @@ typedef struct bsrsv2Info* bsrsv2Info_t;
  *  \brief Pointer type to opaque structure holding bsrsm2 info.
  *
  *  \details
- *  The hipSPARSE bsrsm2 structure holds the information used by hipsparseXbsrsm2_zeroPivot(), 
- *  \ref hipsparseSbsrsm2_bufferSize "hipsparseXbsrsm2_bufferSize()", \ref hipsparseSbsrsm2_analysis 
- *  "hipsparseXbsrsm2_analysis()", and \ref hipsparseSbsrsm2_solve "hipsparseXbsrsm2_solve()". It 
+ *  The hipSPARSE bsrsm2 structure holds the information used by hipsparseXbsrsm2_zeroPivot(),
+ *  \ref hipsparseSbsrsm2_bufferSize "hipsparseXbsrsm2_bufferSize()", \ref hipsparseSbsrsm2_analysis
+ *  "hipsparseXbsrsm2_analysis()", and \ref hipsparseSbsrsm2_solve "hipsparseXbsrsm2_solve()". It
  *  must be initialized using hipsparseCreateBsrsm2Info() and the returned structure must be
  *  passed to all subsequent library calls that involve bsrsm2. It should be
  *  destroyed at the end using hipsparseDestroyBsrsm2Info().
@@ -113,10 +113,10 @@ typedef struct bsrsm2Info* bsrsm2Info_t;
  *  \brief Pointer type to opaque structure holding bsrilu02 info.
  *
  *  \details
- *  The hipSPARSE bsrilu02 structure holds the information used by hipsparseXbsrilu02_zeroPivot(), 
- *  \ref hipsparseSbsrilu02_numericBoost "hipsparseXbsrilu02_numericBoost()", \ref hipsparseSbsrilu02_bufferSize 
- *  "hipsparseXbsrilu02_bufferSize()", \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()", 
- *  and \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()". It must be initialized using hipsparseCreateBsrilu02Info() 
+ *  The hipSPARSE bsrilu02 structure holds the information used by hipsparseXbsrilu02_zeroPivot(),
+ *  \ref hipsparseSbsrilu02_numericBoost "hipsparseXbsrilu02_numericBoost()", \ref hipsparseSbsrilu02_bufferSize
+ *  "hipsparseXbsrilu02_bufferSize()", \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()",
+ *  and \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()". It must be initialized using hipsparseCreateBsrilu02Info()
  *  and the returned structure must be passed to all subsequent library calls that involve bsrilu02. It should be
  *  destroyed at the end using hipsparseDestroyBsrilu02Info().
  */
@@ -126,10 +126,10 @@ typedef struct bsrilu02Info* bsrilu02Info_t;
  *  \brief Pointer type to opaque structure holding bsric02 info.
  *
  *  \details
- *  The hipSPARSE bsric02 structure holds the information used by hipsparseXbsric02_zeroPivot(), 
- *  \ref hipsparseSbsric02_bufferSize "hipsparseXbsric02_bufferSize()", \ref hipsparseSbsric02_analysis 
- *  "hipsparseXbsric02_analysis()", and \ref hipsparseSbsric02 "hipsparseXbsric02()". It must be initialized using 
- *  hipsparseCreateBsric02Info() and the returned structure must be passed to all subsequent library calls 
+ *  The hipSPARSE bsric02 structure holds the information used by hipsparseXbsric02_zeroPivot(),
+ *  \ref hipsparseSbsric02_bufferSize "hipsparseXbsric02_bufferSize()", \ref hipsparseSbsric02_analysis
+ *  "hipsparseXbsric02_analysis()", and \ref hipsparseSbsric02 "hipsparseXbsric02()". It must be initialized using
+ *  hipsparseCreateBsric02Info() and the returned structure must be passed to all subsequent library calls
  *  that involve bsric02. It should be destroyed at the end using hipsparseDestroyBsric02Info().
  */
 typedef struct bsric02Info* bsric02Info_t;
@@ -138,10 +138,10 @@ typedef struct bsric02Info* bsric02Info_t;
  *  \brief Pointer type to opaque structure holding csrsv2 info.
  *
  *  \details
- *  The hipSPARSE csrsv2 structure holds the information used by hipsparseXcsrsv2_zeroPivot(), 
+ *  The hipSPARSE csrsv2 structure holds the information used by hipsparseXcsrsv2_zeroPivot(),
  *  \ref hipsparseScsrsv2_bufferSize "hipsparseXcsrsv2_bufferSize()", \ref hipsparseScsrsv2_analysis
- *  "hipsparseXcsrsv2_analysis()", and \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". It must be initialized using 
- *  hipsparseCreateCsrsv2Info() and the returned structure must be passed to all subsequent library calls 
+ *  "hipsparseXcsrsv2_analysis()", and \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". It must be initialized using
+ *  hipsparseCreateCsrsv2Info() and the returned structure must be passed to all subsequent library calls
  *  that involve csrsv2. It should be destroyed at the end using hipsparseDestroyCsrsv2Info().
  */
 typedef struct csrsv2Info* csrsv2Info_t;
@@ -150,10 +150,10 @@ typedef struct csrsv2Info* csrsv2Info_t;
  *  \brief Pointer type to opaque structure holding csrsm2 info.
  *
  *  \details
- *  The hipSPARSE csrsm2 structure holds the information used by hipsparseXcsrsm2_zeroPivot(), 
- *  \ref hipsparseScsrsm2_bufferSizeExt "hipsparseXcsrsm2_bufferSizeExt()", \ref hipsparseScsrsm2_analysis 
- *  "hipsparseXcsrsm2_analysis()", and \ref hipsparseScsrsm2_solve "hipsparseXcsrsm2_solve()". It must be initialized using 
- *  hipsparseCreateCsrsm2Info() and the returned structure must be passed to all subsequent library calls 
+ *  The hipSPARSE csrsm2 structure holds the information used by hipsparseXcsrsm2_zeroPivot(),
+ *  \ref hipsparseScsrsm2_bufferSizeExt "hipsparseXcsrsm2_bufferSizeExt()", \ref hipsparseScsrsm2_analysis
+ *  "hipsparseXcsrsm2_analysis()", and \ref hipsparseScsrsm2_solve "hipsparseXcsrsm2_solve()". It must be initialized using
+ *  hipsparseCreateCsrsm2Info() and the returned structure must be passed to all subsequent library calls
  *  that involve csrsm2. It should be destroyed at the end using hipsparseDestroyCsrsm2Info().
  */
 typedef struct csrsm2Info* csrsm2Info_t;
@@ -162,10 +162,10 @@ typedef struct csrsm2Info* csrsm2Info_t;
  *  \brief Pointer type to opaque structure holding csrilu02 info.
  *
  *  \details
- *  The hipSPARSE csrilu02 structure holds the information used by hipsparseXcsrilu02_zeroPivot(), 
- *  \ref hipsparseScsrilu02_numericBoost "hipsparseXcsrilu02_numericBoost()", \ref hipsparseScsrilu02_bufferSize 
- *  "hipsparseXcsrilu02_bufferSize()", \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()", 
- *  and \ref hipsparseScsrilu02 "hipsparseXcsrilu02()". It must be initialized using hipsparseCreateCsrilu02Info() 
+ *  The hipSPARSE csrilu02 structure holds the information used by hipsparseXcsrilu02_zeroPivot(),
+ *  \ref hipsparseScsrilu02_numericBoost "hipsparseXcsrilu02_numericBoost()", \ref hipsparseScsrilu02_bufferSize
+ *  "hipsparseXcsrilu02_bufferSize()", \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()",
+ *  and \ref hipsparseScsrilu02 "hipsparseXcsrilu02()". It must be initialized using hipsparseCreateCsrilu02Info()
  *  and the returned structure must be passed to all subsequent library calls that involve csrilu02. It should be
  *  destroyed at the end using hipsparseDestroyCsrilu02Info().
  */
@@ -175,11 +175,11 @@ typedef struct csrilu02Info* csrilu02Info_t;
  *  \brief Pointer type to opaque structure holding csric02 info.
  *
  *  \details
- *  The hipSPARSE csric02 structure holds the information used by hipsparseXcsric02_zeroPivot(), 
- *  \ref hipsparseScsric02_bufferSize "hipsparseXcsric02_bufferSize()", \ref hipsparseScsric02_analysis 
- *  "hipsparseXcsric02_analysis()", and \ref hipsparseScsric02 "hipsparseXcsric02()". It must be 
- *  initialized using hipsparseCreateCsric02Info() and the returned structure must be passed to all 
- *  subsequent library calls that involve csric02. It should be destroyed at the end using 
+ *  The hipSPARSE csric02 structure holds the information used by hipsparseXcsric02_zeroPivot(),
+ *  \ref hipsparseScsric02_bufferSize "hipsparseXcsric02_bufferSize()", \ref hipsparseScsric02_analysis
+ *  "hipsparseXcsric02_analysis()", and \ref hipsparseScsric02 "hipsparseXcsric02()". It must be
+ *  initialized using hipsparseCreateCsric02Info() and the returned structure must be passed to all
+ *  subsequent library calls that involve csric02. It should be destroyed at the end using
  *  hipsparseDestroyCsric02Info().
  */
 typedef struct csric02Info* csric02Info_t;
@@ -188,10 +188,10 @@ typedef struct csric02Info* csric02Info_t;
  *  \brief Pointer type to opaque structure holding csrgemm2 info.
  *
  *  \details
- *  The hipSPARSE csrgemm2 structure holds the information used by \ref hipsparseScsrgemm2_bufferSizeExt 
- *  "hipsparseXcsrgemm2_bufferSizeExt()", hipsparseXcsrgemm2Nnz(), and \ref hipsparseScsrgemm2 "hipsparseXcsrgemm2()". 
- *  It must be initialized using hipsparseCreateCsrgemm2Info() and the returned structure must be passed to all 
- *  subsequent library calls that involve csrgemm2. It should be destroyed at the end using 
+ *  The hipSPARSE csrgemm2 structure holds the information used by \ref hipsparseScsrgemm2_bufferSizeExt
+ *  "hipsparseXcsrgemm2_bufferSizeExt()", hipsparseXcsrgemm2Nnz(), and \ref hipsparseScsrgemm2 "hipsparseXcsrgemm2()".
+ *  It must be initialized using hipsparseCreateCsrgemm2Info() and the returned structure must be passed to all
+ *  subsequent library calls that involve csrgemm2. It should be destroyed at the end using
  *  hipsparseDestroyCsrgemm2Info().
  */
 typedef struct csrgemm2Info* csrgemm2Info_t;
@@ -200,16 +200,16 @@ typedef struct csrgemm2Info* csrgemm2Info_t;
  *  \brief Pointer type to opaque structure holding prune info.
  *
  *  \details
- *  The hipSPARSE prune structure holds the information used by \ref hipsparseSpruneDense2csrByPercentage_bufferSize 
+ *  The hipSPARSE prune structure holds the information used by \ref hipsparseSpruneDense2csrByPercentage_bufferSize
  *  "hipsparseXpruneDense2csrByPercentage_bufferSize()", \ref hipsparseSpruneDense2csrByPercentage_bufferSizeExt
- *  "hipsparseXpruneDense2csrByPercentage_bufferSizeExt()", \ref hipsparseSpruneCsr2csrByPercentage_bufferSize 
- *  "hipsparseXpruneCsr2csrByPercentage_bufferSize()", \ref hipsparseSpruneCsr2csrByPercentage_bufferSizeExt 
- *  "hipsparseXpruneCsr2csrByPercentage_bufferSizeExt()", \ref hipsparseSpruneDense2csrNnzByPercentage 
- *  "hipsparseXpruneDense2csrNnzByPercentage()", \ref hipsparseSpruneCsr2csrNnzByPercentage 
- *  "hipsparseXpruneCsr2csrNnzByPercentage()", \ref hipsparseSpruneDense2csrByPercentage 
- *  "hipsparseXpruneDense2csrByPercentage()", and \ref hipsparseSpruneCsr2csrByPercentage 
- *  "hipsparseXpruneCsr2csrByPercentage()". It must be initialized using hipsparseCreatePruneInfo() and the 
- *  returned structure must be passed to all subsequent library calls that involve prune. It should be 
+ *  "hipsparseXpruneDense2csrByPercentage_bufferSizeExt()", \ref hipsparseSpruneCsr2csrByPercentage_bufferSize
+ *  "hipsparseXpruneCsr2csrByPercentage_bufferSize()", \ref hipsparseSpruneCsr2csrByPercentage_bufferSizeExt
+ *  "hipsparseXpruneCsr2csrByPercentage_bufferSizeExt()", \ref hipsparseSpruneDense2csrNnzByPercentage
+ *  "hipsparseXpruneDense2csrNnzByPercentage()", \ref hipsparseSpruneCsr2csrNnzByPercentage
+ *  "hipsparseXpruneCsr2csrNnzByPercentage()", \ref hipsparseSpruneDense2csrByPercentage
+ *  "hipsparseXpruneDense2csrByPercentage()", and \ref hipsparseSpruneCsr2csrByPercentage
+ *  "hipsparseXpruneCsr2csrByPercentage()". It must be initialized using hipsparseCreatePruneInfo() and the
+ *  returned structure must be passed to all subsequent library calls that involve prune. It should be
  *  destroyed at the end using hipsparseDestroyPruneInfo().
  */
 typedef struct pruneInfo* pruneInfo_t;
@@ -218,10 +218,10 @@ typedef struct pruneInfo* pruneInfo_t;
  *  \brief Pointer type to opaque structure holding csru2csr info.
  *
  *  \details
- *  The hipSPARSE csru2csr structure holds the information used by \ref hipsparseScsru2csr_bufferSizeExt 
- *  "hipsparseXcsru2csr_bufferSizeExt()", \ref hipsparseScsru2csr "hipsparseXcsru2csr()", and 
- *  \ref hipsparseScsr2csru "hipsparseXcsr2csru()". It must be initialized using hipsparseCreateCsru2csrInfo() 
- *  and the returned structure must be passed to all subsequent library calls that involve csru2csr. It should be 
+ *  The hipSPARSE csru2csr structure holds the information used by \ref hipsparseScsru2csr_bufferSizeExt
+ *  "hipsparseXcsru2csr_bufferSizeExt()", \ref hipsparseScsru2csr "hipsparseXcsru2csr()", and
+ *  \ref hipsparseScsr2csru "hipsparseXcsr2csru()". It must be initialized using hipsparseCreateCsru2csrInfo()
+ *  and the returned structure must be passed to all subsequent library calls that involve csru2csr. It should be
  *  destroyed at the end using hipsparseDestroyCsru2csrInfo().
  */
 typedef struct csru2csrInfo* csru2csrInfo_t;

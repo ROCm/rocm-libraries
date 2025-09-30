@@ -28,7 +28,15 @@
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
 #  include <thrust/system/cuda/detail/mismatch.h>

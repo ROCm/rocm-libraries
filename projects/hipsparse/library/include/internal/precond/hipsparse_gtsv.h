@@ -31,7 +31,7 @@ extern "C" {
 /*! \ingroup precond_module
 *  \details
 *  \p hipsparseSgtsv2_bufferSizeExt returns the size of the temporary storage buffer
-*  that is required by \ref hipsparseSgtsv2 "hipsparseXgtsv2()". The temporary 
+*  that is required by \ref hipsparseSgtsv2 "hipsparseXgtsv2()". The temporary
 *  storage buffer must be allocated by the user.
 *
 *  \note

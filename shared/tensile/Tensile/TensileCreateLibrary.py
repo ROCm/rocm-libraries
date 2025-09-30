@@ -125,7 +125,7 @@ def prepAsm(
 
     with open(assemblerFileName, "w") as assemblerFile:
         if isLinux:
-            assemblerFile.write("#!/bin/sh {log}\n".format(log="-x" if printLevel >= 3 else ""))
+            assemblerFile.write("#!/bin/sh{log}\n".format(log=" -x" if printLevel >= 3 else ""))
             assemblerFile.write("# usage: asm-new.sh kernelName(no extension) [--wave32]\n")
 
             assemblerFile.write("f=$1\n")
@@ -174,7 +174,7 @@ def prepAsm(
 
             assemblerFile.write(f"if %wave% == 32 ({cArgs32}) else ({cArgs64})\n")
             assemblerFile.write(f"{lArgs}\n")
-            assemblerFile.write("copy %f%.co ..\..\..\library\%f%_%h%.co\n")
+            assemblerFile.write("copy %f%.co ..\\..\\..\\library\\%f%_%h%.co\n")
     os.chmod(assemblerFileName, 0o777)
 
 

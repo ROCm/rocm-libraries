@@ -5,4 +5,4 @@
 License
 =======
 
-.. include:: ../LICENSE.txt
+.. include:: ../LICENSE.md

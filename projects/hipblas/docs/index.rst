@@ -15,7 +15,7 @@ hipBLAS exports an interface that does not require client changes, regardless of
 chosen backend. Currently, it supports :doc:`rocBLAS <rocblas:index>` and
 NVIDIA CUDA `cuBLAS <https://developer.nvidia.com/cublas>`_ as backends.
 
-The hipBLAS public repository is located at 
+The hipBLAS public repository is located at
 `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas>`_.
 
 .. note::
@@ -37,7 +37,7 @@ The hipBLAS public repository is located at
   .. grid-item-card:: Conceptual
 
     * :doc:`Library source code organization <./conceptual/library-source-code-organization>`
-  
+
   .. grid-item-card:: How to
 
     * :doc:`Use hipBLAS clients <./how-to/using-hipblas-clients>`

@@ -80,6 +80,7 @@ foreach( sample ${sample_list} )
       PRIVATE
       hip::hiprand
       )
+    target_compile_definitions( ${sample} PRIVATE USE_HIPRAND )
   endif()
 
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} -Wno-cpp )
@@ -118,5 +119,8 @@ foreach( sample ${sample_list} )
 endforeach( )
 
 # callback functions need to be built as relocatable device code
-target_compile_options( rocfft_example_callback PRIVATE -fgpu-rdc )
-target_link_options( rocfft_example_callback PRIVATE -fgpu-rdc )
+# (causes failure at link stage on Windows)
+if (NOT WIN32)
+  target_compile_options( rocfft_example_callback PRIVATE -fgpu-rdc )
+  target_link_options( rocfft_example_callback PRIVATE -fgpu-rdc )
+endif()

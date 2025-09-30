@@ -33,8 +33,8 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXgebsr2csr converts a GEBSR matrix into a CSR matrix. It is assumed,
-*  that \p csrValC, \p csrColIndC and \p csrRowPtrC are already allocated prior to 
-*  calling \p hipsparseXgebsr2csr. Allocation size for \p csrRowPtrC equals 
+*  that \p csrValC, \p csrColIndC and \p csrRowPtrC are already allocated prior to
+*  calling \p hipsparseXgebsr2csr. Allocation size for \p csrRowPtrC equals
 *  \p m+1 where:
 *
 *  \f[
@@ -44,46 +44,46 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  Allocation size for \p csrValC and \p csrColIndC is computed by the the number of blocks in the GEBSR 
+*  Allocation size for \p csrValC and \p csrColIndC is computed by the the number of blocks in the GEBSR
 *  matrix, \p nnzb, multiplied by the product of the block dimensions, i.e. \p nnz=nnzb*rocBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:
 *  \f[
-*   \left[ 
-*    \begin{array}{c | c | c} 
-*      \begin{array}{c c} 
-*       6 & 2 \\ 
-*       1 & 4 \\ 
-*       5 & 4 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       0 & 3 \\ 
-*       5 & 0 \\ 
-*       0 & 7 
+*   \left[
+*    \begin{array}{c | c | c}
+*      \begin{array}{c c}
+*       6 & 2 \\
+*       1 & 4 \\
+*       5 & 4
 *      \end{array} &
-*      \begin{array}{c c} 
-*       0 & 0 \\ 
-*       0 & 0 \\ 
-*       0 & 0 
-*      \end{array} \\ 
-*    \hline 
-*      \begin{array}{c c} 
-*       0 & 0 \\ 
-*       0 & 0 \\ 
-*       0 & 0 
-*      \end{array} & 
-*      \begin{array}{c c} 
-*       3 & 0 \\ 
-*       0 & 0 \\ 
-*       0 & 7 
+*      \begin{array}{c c}
+*       0 & 3 \\
+*       5 & 0 \\
+*       0 & 7
 *      \end{array} &
-*      \begin{array}{c c} 
-*       2 & 2 \\ 
-*       4 & 3 \\ 
-*       1 & 4 
-*      \end{array} \\ 
-*   \end{array} 
-*  \right] 
+*      \begin{array}{c c}
+*       0 & 0 \\
+*       0 & 0 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       0 & 0 \\
+*       0 & 0 \\
+*       0 & 0
+*      \end{array} &
+*      \begin{array}{c c}
+*       3 & 0 \\
+*       0 & 0 \\
+*       0 & 7
+*      \end{array} &
+*      \begin{array}{c c}
+*       2 & 2 \\
+*       4 & 3 \\
+*       1 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
 *  \f]
 *
 *  \note
@@ -140,21 +140,21 @@ extern "C" {
 *    hipsparseCreateMatDescr(&bsr_descr);
 *
 *    // Sparse matrix in GEBSR format
-*    //     1 2 | 0 3 | 0 0 
+*    //     1 2 | 0 3 | 0 0
 *    //     0 4 | 5 0 | 0 1
 *    // A = 6 0 | 0 7 | 8 0
-*    //     --------------- 
+*    //     ---------------
 *    //     0 0 | 3 0 | 2 2
-*    //     1 0 | 0 0 | 4 3 
+*    //     1 0 | 0 0 | 4 3
 *    //     7 2 | 0 0 | 1 4
 *    int hbsrRowPtr[3] = {0, 3, 6};
 *    int hbsrColInd[6] = {0, 1, 2, 0, 1, 2};
-*    float hbsrVal[36]  = {1.0f, 2.0f, 0.0f, 4.0f, 6.0f, 0.0f, 
+*    float hbsrVal[36]  = {1.0f, 2.0f, 0.0f, 4.0f, 6.0f, 0.0f,
 *                           0.0f, 3.0f, 5.0f, 0.0f, 0.0f, 7.0f,
-*                           0.0f, 0.0f, 0.0f, 1.0f, 8.0f, 0.0f, 
+*                           0.0f, 0.0f, 0.0f, 1.0f, 8.0f, 0.0f,
 *                           0.0f, 0.0f, 1.0f, 0.0f, 7.0f, 2.0f,
-*                           3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 
-*                           2.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f}; 
+*                           3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+*                           2.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f};
 *
 *    int m        = 6;
 *    int n        = 6;
@@ -184,25 +184,25 @@ extern "C" {
 *    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
 *    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
 *
-*    hipsparseSgebsr2csr(handle, 
-*                        dir, 
-*                        mb, 
-*                        nb, 
-*                        bsr_descr, 
-*                        dbsrVal, 
-*                        dbsrRowPtr, 
-*                        dbsrColInd, 
-*                        rowBlockDim, 
-*                        colBlockDim, 
-*                        csr_descr, 
-*                        dcsrVal, 
-*                        dcsrRowPtr, 
+*    hipsparseSgebsr2csr(handle,
+*                        dir,
+*                        mb,
+*                        nb,
+*                        bsr_descr,
+*                        dbsrVal,
+*                        dbsrRowPtr,
+*                        dbsrColInd,
+*                        rowBlockDim,
+*                        colBlockDim,
+*                        csr_descr,
+*                        dcsrVal,
+*                        dcsrRowPtr,
 *                        dcsrColInd);
 *
 *    hipFree(dbsrRowPtr);
 *    hipFree(dbsrColInd);
 *    hipFree(dbsrVal);
-*    
+*
 *    hipFree(dcsrRowPtr);
 *    hipFree(dcsrColInd);
 *    hipFree(dcsrVal);

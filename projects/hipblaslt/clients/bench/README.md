@@ -5,9 +5,9 @@
 cd hipBLASLt; cd build/release
 
 # run hipblaslt-bench
-./clients/staging/hipblaslt-bench --help
+./clients/hipblaslt-bench --help
 
-./clients/staging/hipblaslt-bench [ --data <path> | --yaml <path> ] <options> ...
+./clients/hipblaslt-bench [ --data <path> | --yaml <path> ] <options> ...
 
 --sizem |-m <value>        Specific matrix size: the number of rows or columns in matrix.                      (Default value is: 128)
 --sizen |-n <value>        Specific matrix the number of rows or columns in matrix                             (Default value is: 128)
@@ -80,19 +80,19 @@ cd hipBLASLt; cd build/release
 # demo
 Run fp32 GEMM with validation
 ```
-./clients/staging/hipblaslt-bench --precision f32_r -v
+./clients/hipblaslt-bench --precision f32_r -v
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,hipblaslt-Gflops,hipblaslt-GB/s,us,CPU-Gflops,CPU-us,norm_error,atol,rtol
     N,N,0,1,128,128,128,1,128,16384,0,128,16384,128,16384,128,16384,f32_r,f32_r,f32_r,f32_r,f32_r,0,0,0,0,0,none,0,non-supported type,403.298,17.6063,10.4,0.0960059,43688,2.44879e-07,1e-05,1e-05
 ```
 Show the frequency with environment variable
 ```
-HIPBLASLT_BENCH_FREQ=1 ./clients/staging/hipblaslt-bench -m 16 -n 16 -k 4096 --transA T --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --activation_type none --compute_type f32_r
+HIPBLASLT_BENCH_FREQ=1 ./clients/hipblaslt-bench -m 16 -n 16 -k 4096 --transA T --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --activation_type none --compute_type f32_r
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,lowest-avg-freq,lowest-median-freq,avg-MCLK,median-MCLK,hipblaslt-Gflops,hipblaslt-GB/s,us
     T,N,0,1,16,16,4096,1,4096,65536,0,4096,65536,16,256,16,256,bf16_r,bf16_r,bf16_r,bf16_r,f32_r,0,0,0,0,0,none,0,non-supported type,136,136,900,900,192.399,22.442,10.9
 ```
 Show the multi-XCD frequencies with environment variable
 ```
-HIPBLASLT_BENCH_FREQ_ALL=1 ./clients/staging/hipblaslt-bench -m 16 -n 16 -k 4096 --transA T --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --activation_type none --compute_type f32_r
+HIPBLASLT_BENCH_FREQ_ALL=1 ./clients/hipblaslt-bench -m 16 -n 16 -k 4096 --transA T --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --activation_type none --compute_type f32_r
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,avg-freq_0,avg-freq_1,avg-freq_2,avg-freq_3,avg-freq_4,avg-freq_5,avg-freq_6,avg-freq_7,median-freq_0,median-freq_1,median-freq_2,median-freq_3,median-freq_4,median-freq_5,median-freq_6,median-freq_7,avg-MCLK,median-MCLK,hipblaslt-Gflops,hipblaslt-GB/s,us
     T,N,0,1,16,16,4096,1,4096,65536,0,4096,65536,16,256,16,256,bf16_r,bf16_r,bf16_r,bf16_r,f32_r,0,0,0,0,0,none,0,non-supported type,143,141,143,143,142,143,141,141,143,141,143,143,142,143,141,141,900,900,148.734,17.3488,14.1
 ```

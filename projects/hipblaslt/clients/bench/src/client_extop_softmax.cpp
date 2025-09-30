@@ -149,9 +149,9 @@ int main(int argc, char** argv)
     if(hipblasltErr)
     {
         std::cerr << "Invalid shape (" << m << ", " << n << "), currently support n <= 256\n";
-        hipFree(input);
-        hipFree(output);
-        hipStreamDestroy(stream);
+        hipErr = hipFree(input);
+        hipErr = hipFree(output);
+        hipErr = hipStreamDestroy(stream);
         return EXIT_FAILURE;
     }
 

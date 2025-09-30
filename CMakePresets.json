@@ -1,0 +1,57 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 2
+    },
+    "configurePresets": [
+        {
+            "name": "release:all",
+            "displayName": "Release build (all libraries)",
+            "description": "Configure preset for release builds with installation to /opt/rocm",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/linux-amdclang.cmake",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INSTALL_PREFIX": "/opt/rocm"
+            }
+        },
+        {
+            "name": "mxdatagenerator",
+            "inherits": ["release:all"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator"
+            }
+        },
+        {
+            "name": "rocroller",
+            "inherits": ["release:all"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller"
+            }
+        },
+        {
+            "name": "rocprim",
+            "inherits": ["release:all"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "rocprim"
+            }
+        },
+        {
+            "name": "rocrand",
+            "inherits": ["release:all"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "rocrand"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "default",
+            "displayName": "Default build preset",
+            "description": "Build using the default preset",
+            "configurePreset": "release:all"
+        }
+    ]
+}

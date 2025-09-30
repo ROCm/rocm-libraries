@@ -38,7 +38,7 @@ gemm_ex3 deprecation for all 8 bit float API
 ''''''''''''''''''''''''''''''''''''''''''''
 
 ``rocblas_gemm_ex3``, ``gemm_batched_ex3``, and ``gemm_strided_batched_ex3`` are deprecated and will be removed in the next
-major release of rocBLAS. See `hipBLASLt <https://github.com/ROCm/hipBLASLt>`_ for future 8-bit float usage.
+major release of rocBLAS. See `hipBLASLt <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt>`_ for future 8-bit float usage.
 
 Announced in rocBLAS 4.0
 =========================

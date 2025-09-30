@@ -33,7 +33,6 @@
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
-#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {
@@ -377,6 +376,8 @@ namespace rocRoller
 
         EXPRESSION_INFO(Convert);
 
+        EXPRESSION_INFO(Concatenate);
+
         EXPRESSION_INFO_CUSTOM(SRConvert<DataType::FP8>, "SRConvert_FP8");
         EXPRESSION_INFO_CUSTOM(SRConvert<DataType::BF8>, "SRConvert_BF8");
 
@@ -474,6 +475,18 @@ namespace rocRoller
 
                 return matA & matB & matC & scaleA & scaleB & ScaledMatrixMultiply::EvalTimes;
             }
+
+            template <CNary Expr>
+            EvaluationTimes operator()(Expr const& expr) const
+            {
+                EvaluationTimes result = Expr::EvalTimes;
+                for(auto const& operand : expr.operands)
+                {
+                    result = result & call(operand);
+                }
+                return result;
+            }
+
             template <CTernary Expr>
             EvaluationTimes operator()(Expr const& expr) const
             {

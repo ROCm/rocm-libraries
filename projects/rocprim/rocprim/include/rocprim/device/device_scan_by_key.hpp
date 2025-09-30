@@ -21,8 +21,8 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_HPP_
 #define ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_HPP_
 
-#include "../config.hpp"
 #include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
@@ -46,9 +46,9 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<lookback_scan_determinism Determinism,
+template<typename Config,
+         lookback_scan_determinism Determinism,
          bool                      Exclusive,
-         typename Config,
          typename KeyInputIterator,
          typename InputIterator,
          typename OutputIterator,
@@ -57,8 +57,9 @@ template<lookback_scan_determinism Determinism,
          typename BinaryFunction,
          typename LookbackScanState,
          typename AccType>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    device_scan_by_key_kernel(const KeyInputIterator                       keys,
+inline hipError_t
+    launch_device_scan_by_key(detail::target_arch                          arch,
+                              const KeyInputIterator                       keys,
                               const InputIterator                          values,
                               const OutputIterator                         output,
                               const InitialValueType                       initial_value,
@@ -68,22 +69,31 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block
                               const size_t                                 size,
                               const size_t                                 starting_block,
                               const size_t                                 number_of_blocks,
-                              const ::rocprim::tuple<AccType, bool>* const previous_last_value)
+                              const ::rocprim::tuple<AccType, bool>* const previous_last_value,
+                              dim3                                         grid,
+                              dim3                                         block,
+                              size_t                                       shmem,
+                              hipStream_t                                  stream)
 {
-    device_scan_by_key_kernel_impl<Determinism, Exclusive, Config>(
-        keys,
-        values,
-        output,
-        static_cast<AccType>(get_input_value(initial_value)),
-        compare,
-        scan_op,
-        scan_state,
-        size,
-        starting_block,
-        number_of_blocks,
-        previous_last_value);
-}
 
+    auto kernel = [=](auto arch_config)
+    {
+        device_scan_by_key_kernel_impl<decltype(arch_config), Determinism, Exclusive>(
+            keys,
+            values,
+            output,
+            static_cast<AccType>(get_input_value(initial_value)),
+            compare,
+            scan_op,
+            scan_state,
+            size,
+            starting_block,
+            number_of_blocks,
+            previous_last_value);
+    };
+
+    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
+}
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
@@ -117,7 +127,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     {
         return result;
     }
-    const scan_by_key_config_params params = dispatch_target_arch<config>(target_arch);
+    const scan_by_key_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     using wrapped_type = ::rocprim::tuple<AccType, bool>;
 
@@ -260,15 +270,11 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         {
             start = std::chrono::steady_clock::now();
         }
-        with_scan_state(
+        ROCPRIM_RETURN_ON_ERROR(with_scan_state(
             [&](auto& scan_state)
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(device_scan_by_key_kernel<Determinism, Exclusive, config>),
-                    dim3(scan_blocks),
-                    dim3(block_size),
-                    0,
-                    stream,
+                return launch_device_scan_by_key<config, Determinism, Exclusive>(
+                    target_arch,
                     keys + offset,
                     input + offset,
                     output + offset,
@@ -279,8 +285,12 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                     size,
                     i * number_of_blocks,
                     total_number_of_blocks,
-                    i > 0 ? as_const_ptr(previous_last_value) : nullptr);
-            });
+                    i > 0 ? as_const_ptr(previous_last_value) : nullptr,
+                    dim3(scan_blocks),
+                    dim3(block_size),
+                    0,
+                    stream);
+            }));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
                                                     current_size,
                                                     start);
@@ -288,8 +298,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     return hipSuccess;
 }
 
-
-}
+} // namespace detail
 
 /// \addtogroup devicemodule
 /// @{

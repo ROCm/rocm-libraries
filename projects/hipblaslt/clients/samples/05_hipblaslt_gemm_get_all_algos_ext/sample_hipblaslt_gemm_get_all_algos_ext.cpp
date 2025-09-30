@@ -149,9 +149,11 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
 
     // In this sample, the workspace is already allocated with max_workspace_size
     // If not, allocate d_workspace here
+    // Then initialize gemm with calculated d_workspace and workspace_size
     // CHECK_HIP_ERRORhipMalloc(&d_workspace, workspace_size));
 
     // Make sure to initialize every time when algo changes
+    gemm.setMaxWorkspaceBytes(max_workspace_size);
     CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace));
     CHECK_HIPBLASLT_ERROR(gemm.run(stream));
     return;

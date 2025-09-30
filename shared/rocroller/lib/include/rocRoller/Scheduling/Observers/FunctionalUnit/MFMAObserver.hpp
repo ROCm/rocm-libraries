@@ -54,10 +54,44 @@ namespace rocRoller
                 return true;
             }
 
-        private:
-            bool isMFMAInstruction(Instruction const& inst) const;
+            static bool isTargetedInstruction(Instruction const& inst);
 
+        private:
             int m_remainingCycles = 0;
+
+            std::vector<Register::RegisterId> m_aOperands;
+            std::vector<Register::RegisterId> m_bOperands;
+
+            std::weak_ptr<Context> m_context;
+        };
+
+        class MFMACoexecObserver
+        {
+        public:
+            MFMACoexecObserver();
+            MFMACoexecObserver(ContextPtr ctx);
+
+            InstructionStatus peek(Instruction const& inst) const;
+
+            void modify(Instruction& inst) const;
+
+            void observe(Instruction const& inst);
+
+            constexpr static bool required(GPUArchitectureTarget const& target)
+            {
+                return true;
+            }
+
+            DisallowedCycles getDisallowedCycles(Instruction const& inst) const;
+
+            static bool isTargetedInstruction(Instruction const& inst);
+
+            std::string state() const;
+
+        private:
+            int m_programCycle = 0;
+
+            std::map<int, EnumBitset<CoexecCategory>> m_disallowedOps;
 
             std::vector<Register::RegisterId> m_aOperands;
             std::vector<Register::RegisterId> m_bOperands;

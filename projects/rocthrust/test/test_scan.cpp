@@ -15,16 +15,21 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config.h>
+
+#include <thrust/device_free.h>
+#include <thrust/device_malloc.h>
 #include <thrust/functional.h>
+#include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/scan.h>
 
-#include <tuple>
-
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+#include _THRUST_STD_INCLUDE(array)
 
 TESTS_DEFINE(ScanTests, FullTestsParams);
 
@@ -40,7 +45,7 @@ TESTS_DEFINE(ScanMixedTests, MixedParams);
 template <typename T>
 struct max_functor
 {
-  __host__ __device__ T operator()(T rhs, T lhs) const
+  THRUST_HOST_DEVICE T operator()(T rhs, T lhs) const
   {
     return thrust::max(rhs, lhs);
   }
@@ -59,54 +64,33 @@ TYPED_TEST(ScanVectorTests, TestScanSimple)
   Vector result(5);
   Vector output(5);
 
-  input[0] = 1;
-  input[1] = 3;
-  input[2] = -2;
-  input[3] = 4;
-  input[4] = -5;
-
+  input = {1, 3, -2, 4, -5};
   Vector input_copy(input);
 
   // inclusive scan
-  iter      = thrust::inclusive_scan(input.begin(), input.end(), output.begin());
-  result[0] = 1;
-  result[1] = 4;
-  result[2] = 2;
-  result[3] = 6;
-  result[4] = 1;
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), output.begin());
+  result = {1, 4, 2, 6, 1};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
   ASSERT_EQ(output, result);
 
   // exclusive scan
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(0));
-  result[0] = 0;
-  result[1] = 1;
-  result[2] = 4;
-  result[3] = 2;
-  result[4] = 6;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(0));
+  result = {0, 1, 4, 2, 6};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
   ASSERT_EQ(output, result);
 
   // exclusive scan with init
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3));
-  result[0] = 3;
-  result[1] = 4;
-  result[2] = 7;
-  result[3] = 5;
-  result[4] = 9;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3));
+  result = {3, 4, 7, 5, 9};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
   ASSERT_EQ(output, result);
 
   // inclusive scan with op
-  iter      = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), thrust::plus<T>());
-  result[0] = 1;
-  result[1] = 4;
-  result[2] = 2;
-  result[3] = 6;
-  result[4] = 1;
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), thrust::plus<T>());
+  result = {1, 4, 2, 6, 1};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
   ASSERT_EQ(output, result);
@@ -119,24 +103,16 @@ TYPED_TEST(ScanVectorTests, TestScanSimple)
   ASSERT_EQ(output, result);
 
   // exclusive scan with init and op
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3), thrust::plus<T>());
-  result[0] = 3;
-  result[1] = 4;
-  result[2] = 7;
-  result[3] = 5;
-  result[4] = 9;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3), thrust::plus<T>());
+  result = {3, 4, 7, 5, 9};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
   ASSERT_EQ(output, result);
 
   // inplace inclusive scan
-  input     = input_copy;
-  iter      = thrust::inclusive_scan(input.begin(), input.end(), input.begin());
-  result[0] = 1;
-  result[1] = 4;
-  result[2] = 2;
-  result[3] = 6;
-  result[4] = 1;
+  input  = input_copy;
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), input.begin());
+  result = {1, 4, 2, 6, 1};
   ASSERT_EQ(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQ(input, result);
 
@@ -148,24 +124,16 @@ TYPED_TEST(ScanVectorTests, TestScanSimple)
   ASSERT_EQ(input, result);
 
   // inplace exclusive scan with init
-  input     = input_copy;
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), input.begin(), T(3));
-  result[0] = 3;
-  result[1] = 4;
-  result[2] = 7;
-  result[3] = 5;
-  result[4] = 9;
+  input  = input_copy;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), input.begin(), T(3));
+  result = {3, 4, 7, 5, 9};
   ASSERT_EQ(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQ(input, result);
 
   // inplace exclusive scan with implicit init=0
-  input     = input_copy;
-  iter      = thrust::exclusive_scan(input.begin(), input.end(), input.begin());
-  result[0] = 0;
-  result[1] = 1;
-  result[2] = 4;
-  result[3] = 2;
-  result[4] = 6;
+  input  = input_copy;
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), input.begin());
+  result = {0, 1, 4, 2, 6};
   ASSERT_EQ(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQ(input, result);
 }
@@ -267,8 +235,7 @@ TEST(ScanTests, TestInclusiveScan32)
     thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin());
     thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin());
 
-    thrust::host_vector<T> h_output_d(d_output);
-    ASSERT_EQ(h_output_d, h_output);
+    ASSERT_EQ(d_output, h_output);
   }
 }
 
@@ -299,21 +266,11 @@ TEST(ScanTests, TestExclusiveScan32)
 }
 
 template <class IntVector, class FloatVector>
-void TestScanMixedTypes(void)
+void TestScanMixedTypes()
 {
   // make sure we get types for default args and operators correct
-  IntVector int_input(4);
-  int_input[0] = 1;
-  int_input[1] = 2;
-  int_input[2] = 3;
-  int_input[3] = 4;
-
-  FloatVector float_input(4);
-  float_input[0] = 1.5;
-  float_input[1] = 2.5;
-  float_input[2] = 3.5;
-  float_input[3] = 4.5;
-
+  IntVector int_input{1, 2, 3, 4};
+  FloatVector float_input{1.5, 2.5, 3.5, 4.5};
   IntVector int_output(4);
   FloatVector float_output(4);
 
@@ -360,14 +317,12 @@ void TestScanMixedTypes(void)
   ASSERT_EQ(float_output[2], 8.5f); // out: 8.0f  in: 3 accum: 11.5f
   ASSERT_EQ(float_output[3], 11.5f); // out: 11.f  in: 4 accum: 15.5f
 }
-
 TEST(ScanTests, TestScanMixedTypesHost)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   TestScanMixedTypes<thrust::host_vector<int>, thrust::host_vector<float>>();
 }
-
 TEST(ScanTests, TestScanMixedTypesDevice)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -547,8 +502,7 @@ TEST(ScanTests, TestScanMixedTypes)
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
     thrust::host_vector<unsigned int> h_input = get_random_data<unsigned int>(
-      n, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max(), seed);
-
+      n, get_default_limits<unsigned int>::min(), get_default_limits<unsigned int>::max(), seed);
     for (size_t i = 0; i < n; i++)
     {
       h_input[i] %= 10;
@@ -584,7 +538,7 @@ TEST(ScanTests, TestScanMixedTypes)
 }
 
 template <typename T, unsigned int N>
-void _TestScanWithLargeTypes(void)
+void _TestScanWithLargeTypes()
 {
   size_t n = (1024 * 1024) / sizeof(FixedVector<T, N>);
 
@@ -593,7 +547,7 @@ void _TestScanWithLargeTypes(void)
 
   for (size_t i = 0; i < h_input.size(); i++)
   {
-    h_input[i] = FixedVector<T, N>(i);
+    h_input[i] = FixedVector<T, N>(static_cast<T>(i));
   }
 
   thrust::device_vector<FixedVector<T, N>> d_input = h_input;
@@ -616,8 +570,7 @@ TEST(ScanTests, TestScanWithLargeTypes)
 
   _TestScanWithLargeTypes<int, 1>();
 
-  // XXX these are too big for sm_1x
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP && !defined(__QNX__)
+#if !defined(__QNX__)
   _TestScanWithLargeTypes<int, 8>();
   _TestScanWithLargeTypes<int, 64>();
 #else
@@ -634,7 +587,7 @@ struct plus_mod3
       : table(table)
   {}
 
-  __host__ __device__ T operator()(T a, T b)
+  THRUST_HOST_DEVICE T operator()(T a, T b)
   {
     return table[(int) (a + b)];
   }
@@ -642,37 +595,17 @@ struct plus_mod3
 
 TYPED_TEST(ScanVectorTests, TestInclusiveScanWithIndirection)
 {
+  // add numbers modulo 3 with external lookup table
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(7);
-  data[0] = 0;
-  data[1] = 1;
-  data[2] = 2;
-  data[3] = 1;
-  data[4] = 2;
-  data[5] = 0;
-  data[6] = 1;
-
-  Vector table(6);
-  table[0] = 0;
-  table[1] = 1;
-  table[2] = 2;
-  table[3] = 0;
-  table[4] = 1;
-  table[5] = 2;
-
+  Vector data{0, 1, 2, 1, 2, 0, 1};
+  Vector table{0, 1, 2, 0, 1, 2};
   thrust::inclusive_scan(data.begin(), data.end(), data.begin(), plus_mod3<T>(thrust::raw_pointer_cast(&table[0])));
 
-  ASSERT_EQ(data[0], T(0));
-  ASSERT_EQ(data[1], T(1));
-  ASSERT_EQ(data[2], T(0));
-  ASSERT_EQ(data[3], T(1));
-  ASSERT_EQ(data[4], T(0));
-  ASSERT_EQ(data[5], T(0));
-  ASSERT_EQ(data[6], T(1));
+  ASSERT_EQ(data, (Vector{0, 1, 0, 1, 0, 0, 1}));
 }
 
 __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void InclusiveScanKernel(int const N, int* in_array, int* out_array)
@@ -763,30 +696,6 @@ TEST(ScanTests, TestExclusiveScanDevice)
   }
 }
 
-struct Int
-{
-  int i{};
-  __host__ __device__ explicit Int(int num)
-      : i(num)
-  {}
-  __host__ __device__ Int()
-      : i{}
-  {}
-  __host__ __device__ Int operator+(Int const& o) const
-  {
-    return Int{this->i + o.i};
-  }
-};
-
-TEST(ScanTests, TestInclusiveScanWithUserDefinedType)
-{
-  thrust::device_vector<Int> vec(5, Int{1});
-
-  thrust::inclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin());
-
-  ASSERT_EQ(static_cast<Int>(vec.back()).i, 5);
-}
-
 template <typename T>
 struct const_ref_plus_mod3
 {
@@ -796,40 +705,271 @@ struct const_ref_plus_mod3
       : table(table)
   {}
 
-  __host__ __device__ const T& operator()(T a, T b)
+  THRUST_HOST_DEVICE const T& operator()(T a, T b)
   {
     return table[(int) (a + b)];
   }
 };
 
-TEST(ScanTests, TestInclusiveScanWithConstAccumulator)
+TYPED_TEST(ScanTests, TestInclusiveScanWithConstAccumulator)
 {
   // add numbers modulo 3 with external lookup table
-  thrust::device_vector<int> data(7);
-  data[0] = 0;
-  data[1] = 1;
-  data[2] = 2;
-  data[3] = 1;
-  data[4] = 2;
-  data[5] = 0;
-  data[6] = 1;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
-  thrust::device_vector<int> table(6);
-  table[0] = 0;
-  table[1] = 1;
-  table[2] = 2;
-  table[3] = 0;
-  table[4] = 1;
-  table[5] = 2;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
+  Vector data{0, 1, 2, 1, 2, 0, 1};
+  Vector table{0, 1, 2, 0, 1, 2};
   thrust::inclusive_scan(
-    data.begin(), data.end(), data.begin(), const_ref_plus_mod3<int>(thrust::raw_pointer_cast(&table[0])));
+    data.begin(), data.end(), data.begin(), const_ref_plus_mod3<T>(thrust::raw_pointer_cast(&table[0])));
 
-  ASSERT_EQ(data[0], 0);
-  ASSERT_EQ(data[1], 1);
-  ASSERT_EQ(data[2], 0);
-  ASSERT_EQ(data[3], 1);
-  ASSERT_EQ(data[4], 0);
-  ASSERT_EQ(data[5], 0);
-  ASSERT_EQ(data[6], 1);
+  ASSERT_EQ(data, (Vector{0, 1, 0, 1, 0, 0, 1}));
+}
+
+struct only_set_when_expected_it
+{
+  long long expected;
+  bool* flag;
+
+  THRUST_HOST_DEVICE only_set_when_expected_it operator++() const
+  {
+    return *this;
+  }
+  THRUST_HOST_DEVICE only_set_when_expected_it operator*() const
+  {
+    return *this;
+  }
+  template <typename Difference>
+  THRUST_HOST_DEVICE only_set_when_expected_it operator+(Difference) const
+  {
+    return *this;
+  }
+  template <typename Index>
+  THRUST_HOST_DEVICE only_set_when_expected_it operator[](Index) const
+  {
+    return *this;
+  }
+
+  THRUST_DEVICE void operator=(long long value) const
+  {
+    if (value == expected)
+    {
+      *flag = true;
+    }
+  }
+};
+
+THRUST_NAMESPACE_BEGIN
+template <>
+struct iterator_traits<only_set_when_expected_it>
+{
+  using value_type = long long;
+  using reference  = only_set_when_expected_it;
+};
+THRUST_NAMESPACE_END
+
+namespace std
+{
+template <>
+struct iterator_traits<only_set_when_expected_it>
+{
+  using value_type = long long;
+  using reference  = only_set_when_expected_it;
+};
+} // namespace std
+
+void TestInclusiveScanWithBigIndexesHelper(int magnitude)
+{
+  thrust::constant_iterator<long long> begin(1);
+  thrust::constant_iterator<long long> end = begin + (1ll << magnitude);
+  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+
+  thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
+  *has_executed                         = false;
+
+  only_set_when_expected_it out = {(1ll << magnitude), thrust::raw_pointer_cast(has_executed)};
+
+  thrust::inclusive_scan(thrust::device, begin, end, out);
+
+  bool has_executed_h = *has_executed;
+  thrust::device_free(has_executed);
+
+  ASSERT_EQ(has_executed_h, true);
+}
+
+TEST(ScanTests, TestInclusiveScanWithBigIndexes)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestInclusiveScanWithBigIndexesHelper(30);
+  TestInclusiveScanWithBigIndexesHelper(31);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
+  TestInclusiveScanWithBigIndexesHelper(32);
+  TestInclusiveScanWithBigIndexesHelper(33);
+#endif
+}
+
+void TestExclusiveScanWithBigIndexesHelper(int magnitude)
+{
+  thrust::constant_iterator<long long> begin(1);
+  thrust::constant_iterator<long long> end = begin + (1ll << magnitude);
+  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+
+  thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
+  *has_executed                         = false;
+
+  only_set_when_expected_it out = {(1ll << magnitude) - 1, thrust::raw_pointer_cast(has_executed)};
+
+  thrust::exclusive_scan(thrust::device, begin, end, out, 0ll);
+
+  bool has_executed_h = *has_executed;
+  thrust::device_free(has_executed);
+
+  ASSERT_EQ(has_executed_h, true);
+}
+
+TEST(ScanTests, TestExclusiveScanWithBigIndexes)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestExclusiveScanWithBigIndexesHelper(30);
+  TestExclusiveScanWithBigIndexesHelper(31);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
+  TestExclusiveScanWithBigIndexesHelper(32);
+  TestExclusiveScanWithBigIndexesHelper(33);
+#endif
+}
+
+struct Int
+{
+  int i{};
+  THRUST_HOST_DEVICE explicit Int(int num)
+      : i(num)
+  {}
+  THRUST_HOST_DEVICE Int()
+      : i{}
+  {}
+  THRUST_HOST_DEVICE Int operator+(Int const& o) const
+  {
+    return Int{this->i + o.i};
+  }
+};
+
+TEST(ScanTests, TestInclusiveScanWithUserDefinedType)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<Int> vec(5, Int{1});
+
+  thrust::inclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin());
+
+  ASSERT_EQ(static_cast<Int>(vec.back()).i, 5);
+}
+
+// Represents a permutation as a tuple of integers, see also: https://en.wikipedia.org/wiki/Permutation
+// We need a distinct type (instead of an alias) for operator<< to be found via ADL
+struct permutation_t : _THRUST_STD::array<int, 5>
+{
+  permutation_t() = default;
+
+  constexpr THRUST_HOST_DEVICE permutation_t(int a, int b, int c, int d, int e)
+      : _THRUST_STD::array<int, 5>{a, b, c, d, e}
+  {}
+
+  friend std::ostream& operator<<(std::ostream& os, const permutation_t& p)
+  {
+    os << '{';
+    for (std::size_t i = 0; i < p.size(); i++)
+    {
+      if (i > 0)
+      {
+        os << ", ";
+      }
+      os << p[i];
+    }
+    return os << '}';
+  }
+
+  friend THRUST_HOST_DEVICE bool operator==(const permutation_t& lhs, const permutation_t& rhs)
+  {
+    auto lhs_ptr = lhs.data();
+    auto rhs_ptr = rhs.data();
+    for (size_t i = 0; i < lhs.size(); ++i)
+    {
+      if (lhs_ptr[i] != rhs_ptr[i])
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+// Composes two permutations. This operation is associative, but not commutative.
+struct composition_op_t
+{
+  THRUST_HOST_DEVICE permutation_t operator()(permutation_t lhs, permutation_t rhs) const
+  {
+    permutation_t result;
+    // Get raw pointers to the underlying data to avoid operator[] which
+    // results in debug-assert calls (and __glibcxx_assert_fail) on device.
+    auto lhs_ptr    = lhs.data();
+    auto rhs_ptr    = rhs.data();
+    auto result_ptr = result.data();
+    for (std::size_t i = 0; i < lhs.size(); i++)
+    {
+      result_ptr[i] = rhs_ptr[lhs_ptr[i]];
+    }
+    return result;
+  }
+};
+
+TEST(ScanTests, TestInclusiveScanWithNonCommutativeOp)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  const thrust::device_vector<permutation_t> input = {
+    {3, 2, 0, 1, 4},
+    {2, 4, 0, 1, 3},
+    {3, 2, 1, 4, 0},
+    {4, 3, 1, 0, 2},
+    {0, 3, 2, 4, 1},
+    {3, 2, 1, 0, 4},
+    {3, 4, 1, 2, 0},
+    {4, 2, 1, 0, 3},
+    {4, 0, 1, 3, 2},
+    {0, 2, 3, 1, 4}};
+  thrust::device_vector<permutation_t> output(10);
+  constexpr auto identity = permutation_t{0, 1, 2, 3, 4};
+
+  thrust::inclusive_scan(input.begin(), input.end(), output.begin(), composition_op_t{});
+  ASSERT_EQ(
+    output,
+    (thrust::device_vector<permutation_t>{
+      {3, 2, 0, 1, 4},
+      {1, 0, 2, 4, 3},
+      {2, 3, 1, 0, 4},
+      {1, 0, 3, 4, 2},
+      {3, 0, 4, 1, 2},
+      {0, 3, 4, 2, 1},
+      {3, 2, 0, 1, 4},
+      {0, 1, 4, 2, 3},
+      {4, 0, 2, 1, 3},
+      {4, 0, 3, 2, 1}}));
+
+  thrust::exclusive_scan(input.begin(), input.end(), output.begin(), identity, composition_op_t{});
+  ASSERT_EQ(
+    output,
+    (thrust::device_vector<permutation_t>{
+      {0, 1, 2, 3, 4},
+      {3, 2, 0, 1, 4},
+      {1, 0, 2, 4, 3},
+      {2, 3, 1, 0, 4},
+      {1, 0, 3, 4, 2},
+      {3, 0, 4, 1, 2},
+      {0, 3, 4, 2, 1},
+      {3, 2, 0, 1, 4},
+      {0, 1, 4, 2, 3},
+      {4, 0, 2, 1, 3}}));
 }
