@@ -97,9 +97,12 @@ Arguments setup_bsrmv_arguments(bsrmv_bin_tuple tup)
 
     // Matrices are stored at the same path in matrices directory
     std::string filename = get_filename(bin_file);
-    std::cout << "filename: " << filename << std::endl;
+    std::cout << "filename: " << filename << " filename.length(): " << filename.length()
+              << std::endl;
     strncpy(arg.filename, filename.c_str(), filename.length());
+    std::cout << "1111" << std::endl;
     arg.filename[filename.length()] = '\0';
+    std::cout << "2222" << std::endl;
 
     return arg;
 }
