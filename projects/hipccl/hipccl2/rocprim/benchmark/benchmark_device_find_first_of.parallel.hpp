@@ -150,7 +150,7 @@ struct device_find_first_of_benchmark : public benchmark_utils::autotune_interfa
         void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
 
-        auto run = [&](size_t key_size, const type* d_input)
+        const auto launch = [&](size_t key_size, const type* d_input)
         {
             HIP_CHECK(rocprim::find_first_of<Config>(d_temporary_storage,
                                                      temporary_storage_bytes,
@@ -166,7 +166,7 @@ struct device_find_first_of_benchmark : public benchmark_utils::autotune_interfa
         size_t max_temporary_storage_bytes = 0;
         for(size_t keys_size : keys_sizes)
         {
-            run(keys_size, d_inputs[0]);
+            launch(keys_size, d_inputs[0]);
             max_temporary_storage_bytes
                 = std::max(max_temporary_storage_bytes, temporary_storage_bytes);
         }
@@ -180,7 +180,7 @@ struct device_find_first_of_benchmark : public benchmark_utils::autotune_interfa
                 {
                     for(size_t keys_size : keys_sizes)
                     {
-                        run(keys_size, d_inputs[fi]);
+                        launch(keys_size, d_inputs[fi]);
                     }
                 }
             });
