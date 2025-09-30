@@ -755,7 +755,7 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-std::string rocfft_bench_command(rocfft_plan plan)
+std::string rocfft_bench_command(const rocfft_plan& plan)
 {
     rocfft_params params;
 
@@ -769,64 +769,35 @@ std::string rocfft_bench_command(rocfft_plan plan)
     params.odist          = plan->desc.outDist;
     params.scale_factor   = plan->desc.storeOps.scale_factor;
 
-    for(auto idx = plan->lengths.size(); idx-- > 0;)
-    {
-        params.length.push_back(plan->lengths[idx]);
-    }
-    for(auto val : plan->desc.inStrides)
-    {
-        params.istride.push_back(val);
-    }
-    for(auto val : plan->desc.outStrides)
-    {
-        params.ostride.push_back(val);
-    }
-    for(auto val : plan->desc.inOffset)
-    {
-        params.ioffset.push_back(val);
-    }
-    for(auto val : plan->desc.outOffset)
-    {
-        params.ooffset.push_back(val);
-    }
-
-    params.ifields.resize(plan->desc.inFields.size());
-    for(size_t fidx = 0; fidx < plan->desc.inFields.size(); ++fidx)
-    {
-        params.ifields[fidx].bricks.resize(plan->desc.inFields[fidx].bricks.size());
-        for(size_t bidx = 0; bidx < plan->desc.inFields[fidx].bricks.size(); ++bidx)
-        {
-            for(auto val : plan->desc.inFields[fidx].bricks[bidx].lower)
-                params.ifields[fidx].bricks[bidx].lower.push_back(val);
-            for(auto val : plan->desc.inFields[fidx].bricks[bidx].upper)
-                params.ifields[fidx].bricks[bidx].upper.push_back(val);
-            for(auto val : plan->desc.inFields[fidx].bricks[bidx].stride)
-                params.ifields[fidx].bricks[bidx].stride.push_back(val);
-            params.ifields[fidx].bricks[bidx].rank
-                = plan->desc.inFields[fidx].bricks[bidx].location.comm_rank;
-            params.ifields[fidx].bricks[bidx].device
-                = plan->desc.inFields[fidx].bricks[bidx].location.device;
-        }
-    }
-
-    params.ofields.resize(plan->desc.outFields.size());
-    for(size_t fidx = 0; fidx < plan->desc.outFields.size(); ++fidx)
-    {
-        params.ofields[fidx].bricks.resize(plan->desc.outFields[fidx].bricks.size());
-        for(size_t bidx = 0; bidx < plan->desc.outFields[fidx].bricks.size(); ++bidx)
-        {
-            for(auto val : plan->desc.outFields[fidx].bricks[bidx].lower)
-                params.ofields[fidx].bricks[bidx].lower.push_back(val);
-            for(auto val : plan->desc.outFields[fidx].bricks[bidx].upper)
-                params.ofields[fidx].bricks[bidx].upper.push_back(val);
-            for(auto val : plan->desc.outFields[fidx].bricks[bidx].stride)
-                params.ofields[fidx].bricks[bidx].stride.push_back(val);
-            params.ofields[fidx].bricks[bidx].rank
-                = plan->desc.outFields[fidx].bricks[bidx].location.comm_rank;
-            params.ofields[fidx].bricks[bidx].device
-                = plan->desc.outFields[fidx].bricks[bidx].location.device;
-        }
-    }
+    // reverse-copy lengths and strides (col-major to row-major)
+    params.length.assign(plan->lengths.rbegin(), plan->lengths.rend());
+    params.istride.assign(plan->desc.inStrides.rbegin(), plan->desc.inStrides.rend());
+    params.ostride.assign(plan->desc.outStrides.rbegin(), plan->desc.outStrides.rend());
+    // copy offsets
+    params.ioffset.assign(plan->desc.inOffset.begin(), plan->desc.inOffset.end());
+    params.ooffset.assign(plan->desc.outOffset.begin(), plan->desc.outOffset.end());
+    // fields:
+    auto copy_fields_to_params
+        = [&](std::vector<fft_params::fft_field>& dest, const std::vector<rocfft_field_t>& src) {
+              dest.resize(src.size());
+              for(size_t fidx = 0; fidx < src.size(); ++fidx)
+              {
+                  dest[fidx].bricks.resize(src[fidx].bricks.size());
+                  for(size_t bidx = 0; bidx < src.size(); ++bidx)
+                  {
+                      fft_params::fft_brick& dest_brick = dest[fidx].bricks[bidx];
+                      const rocfft_brick_t&  src_brick  = src[fidx].bricks[bidx];
+                      // reverse-copy bricks' coordinates and strides (col-major to row-major)
+                      dest_brick.lower.assign(src_brick.lower.rbegin(), src_brick.lower.rend());
+                      dest_brick.upper.assign(src_brick.upper.rbegin(), src_brick.upper.rend());
+                      dest_brick.stride.assign(src_brick.stride.rbegin(), src_brick.stride.rend());
+                      dest_brick.rank   = src_brick.location.comm_rank;
+                      dest_brick.device = src_brick.location.device;
+                  }
+              }
+          };
+    copy_fields_to_params(params.ifields, plan->desc.inFields);
+    copy_fields_to_params(params.ofields, plan->desc.outFields);
 
     std::stringstream bench;
     bench << "rocfft-bench --token ";

@@ -307,14 +307,14 @@ namespace origami
             {
                 for(const auto& tile : valid_results)
                 {
-                    std::cout << M << "x" << N << "x" << K
-                              << "Selected Macro-Tile: Latency=" << std::get<0>(tile)
-                              << ", MT_M=" << std::get<1>(tile) << ", MT_N=" << std::get<2>(tile)
-                              << ", MT_K=" << std::get<3>(tile) << ", MI_M=" << std::get<4>(tile)
-                              << ", MI_N=" << std::get<5>(tile) << ", MI_K=" << std::get<6>(tile)
+                    std::cout << "For "<< M << "x" << N << "x" << batch << "x" << K
+                              << " trans " << std::boolalpha << transA << "_" << transB
+                              << ": Selected Macro-Tile " << std::get<1>(tile) << "x" << std::get<2>(tile) << "x" << std::get<3>(tile)
+                              << ", MI " << std::get<4>(tile) << "x" << std::get<5>(tile) << "x" << std::get<6>(tile)
+                              << ", Latency " << std::get<0>(tile)
                               << ", Occupancy=" << std::get<7>(tile) << ", WGM=" << std::get<8>(tile)
                               << ", NonTemporalA=" << std::get<9>(tile) << ", NonTemporalB=" << std::get<10>(tile)
-                              << "\n";
+                              << "\n";                              
                 }
             }
 
@@ -340,7 +340,7 @@ namespace origami
             size_t                     N,
             size_t                     K,
             size_t                     batch,
-            hardware_t&                hardware,
+            const hardware_t&          hardware,
             size_t                     MT_M,
             size_t                     MT_N,
             size_t                     MT_K,

@@ -42,7 +42,6 @@ RUN [ -z ${HTTP_PROXY} ] || (echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /e
 RUN apt-get update && apt-get install -y \
    bc \
    gdb \
-   libboost-container1.74-dev \
    libopenblas-dev \
    libncurses-dev \
    m4 \
@@ -103,7 +102,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.
 ADD docker/setup-node /tmp
 RUN bash --login -ex /tmp/setup-node install && rm /tmp/setup-node
 
-# Tensile
+# HipBLASLt
 RUN apt-get update && apt-get install -y \
     libmsgpack-dev \
     libboost-program-options-dev \
