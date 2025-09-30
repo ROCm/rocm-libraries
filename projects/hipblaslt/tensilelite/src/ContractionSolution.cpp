@@ -3045,7 +3045,7 @@ namespace TensileLite
         {
             size_t batch = problem.d().sizes()[2];
             size_t tiles = problem.getNumTiles(sizeMapping, 1) * batch;
-            return tiles * sizeMapping.synchronizerSizePerWG;
+            return tiles * sizeMapping.synchronizerSizePerWG * sizeMapping.globalSplitU * sizeof(int);
         }
         return 0;
     }
