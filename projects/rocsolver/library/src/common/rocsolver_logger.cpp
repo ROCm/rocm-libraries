@@ -33,6 +33,7 @@
 
 #include "rocblas_utility.hpp"
 #include "rocsolver_logger.hpp"
+#include "hip/hip_runtime.h"
 
 #define STRINGIFY(s) STRINGIFY_HELPER(s)
 #define STRINGIFY_HELPER(s) #s
@@ -95,19 +96,30 @@ std::ostream* rocsolver_logger::open_log_stream(const char* environment_variable
 
 rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std::string&& name)
 {
+    double start_time, stack_time, move_time, stream_time, event_time, push_time;
+    start_time = get_time_us_no_sync();
     std::vector<rocsolver_log_entry>& stack = call_stack[handle];
     stack.push_back(rocsolver_log_entry());
 
+    stack_time = get_time_us_no_sync();
     rocsolver_log_entry& result = stack.back();
     result.name = std::move(name);
     result.level = stack.size() - 1;
+    move_time = get_time_us_no_sync();
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
     // HIP event-based timing: create and record a start event
     hipStream_t stream = nullptr;
     rocblas_get_stream(handle, &stream);
-    THROW_IF_HIP_ERROR(hipEventCreate(&result.start_evt));
+    stream_time = get_time_us_no_sync();
+    result.start_evt = rocsolver_logger::_instance->get_event();
     THROW_IF_HIP_ERROR(hipEventRecord(result.start_evt, stream));
+    // hipEventRecord(result.start_evt, 0);
+    // printf("stream id: %d\n", handle->get_stream());
+    // unsigned long long stream_id;
+    // THROW_IF_HIP_ERROR(hipStreamGetId(stream, &stream_id));
+    // printf("stream id: %llu\n", stream_id);
+    event_time = get_time_us_no_sync();
 #else
     // Synchronous timing: record start time without sync
     result.start_time = get_time_us_no_sync();
@@ -115,7 +127,14 @@ rocsolver_log_entry& rocsolver_logger::push_log_entry(rocblas_handle handle, std
 
     for(int i = 1; i < stack.size() - 1; i++)
         result.callers.push_back(stack[i].name);
+    push_time = get_time_us_no_sync();
 
+    printf("push_log_entry times: start %.3f, stack %.3f, move %.3f, stream %.3f, event %.3f, push %.3f\n",
+           start_time, stack_time - start_time, move_time - stack_time, stream_time - move_time,
+           event_time - stream_time, push_time - event_time);
+    event_record_time += push_time - start_time;
+
+    // rocsolver_log_entry result = rocsolver_log_entry();
     return result;
 }
 
@@ -128,23 +147,36 @@ rocsolver_log_entry& rocsolver_logger::peek_log_entry(rocblas_handle handle)
 
 rocsolver_log_entry rocsolver_logger::pop_log_entry(rocblas_handle handle)
 {
+    double start_time, stack_time, stream_time, event_time, pop_time, check_time;
+    start_time = get_time_us_no_sync();
     std::vector<rocsolver_log_entry>& stack = call_stack[handle];
     rocsolver_log_entry result = stack.back();
+    stack_time = get_time_us_no_sync();
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
     // HIP event-based timing: create and record a stop event
     hipStream_t stream = nullptr;
     rocblas_get_stream(handle, &stream);
-    THROW_IF_HIP_ERROR(hipEventCreate(&result.stop_evt));
+    stream_time = get_time_us_no_sync();
+    result.stop_evt = rocsolver_logger::_instance->get_event();
     THROW_IF_HIP_ERROR(hipEventRecord(result.stop_evt, stream));
+    // hipEventRecord(result.stop_evt, 0);
+    event_time = get_time_us_no_sync();
 #endif
     // For synchronous logger, no additional timing work needed here
 
     stack.pop_back();
+    pop_time = get_time_us_no_sync();
 
     if(stack.empty())
         call_stack.erase(handle);
+    check_time = get_time_us_no_sync();
 
+    printf("pop_log_entry times: start %.3f, stack %.3f, stream %.3f, event %.3f, pop %.3f, check %.3f\n",
+           start_time, stack_time - start_time, stream_time - stack_time, event_time - stream_time,
+           pop_time - event_time, check_time - pop_time);
+    event_record_time += check_time - start_time;
+    // rocsolver_log_entry result = rocsolver_log_entry();
     return result;
 }
 
@@ -238,17 +270,23 @@ rocblas_status rocsolver_log_end_impl()
         return rocblas_status_internal_error;
 
     auto logger = rocsolver_logger::_instance;
+    printf("Total time spent in hipEventRecord: %f us\n", logger->event_record_time);
+    printf("Total time spent between macro entry and kernel launch: %f us\n",
+              logger->kernel_launch_time);
 
     // if there are pending log_exit calls:
     if(!rocsolver_logger::_instance->call_stack.empty())
         return rocblas_status_internal_error;
 
 #if ROCSOLVER_USE_ASYNC_LOGGER
-    // ONE device sync prior to time collection
-    hipDeviceSynchronize();
-
-    // Recursively accumulate elapsed times for all profile entries and destroy events
-    logger->accumulate_times(logger->profile);
+    // Clean up any remaining events in the cache
+    // Only destroy events that are actually in use (from 0 to event_cache_head-1)
+    for(size_t i = 0; i < logger->event_cache_head; ++i)
+    {
+        THROW_IF_HIP_ERROR(hipEventDestroy(logger->event_cache[i]));
+    }
+    logger->event_cache.clear();
+    logger->event_cache_head = 0;
 #endif
 
     // print profile logging results
@@ -280,14 +318,63 @@ void rocsolver_logger::accumulate_times(rocsolver_profile_map& m)
             if(pair.first && pair.second)
                 THROW_IF_HIP_ERROR(hipEventElapsedTime(&ms, pair.first, pair.second));
             entry.total_time += ms * 1000; // us
-            // destroy events after measurement
-            THROW_IF_HIP_ERROR(hipEventDestroy(pair.first));
-            THROW_IF_HIP_ERROR(hipEventDestroy(pair.second));
+
+            printf("function %s took %.3f ms\n", kv.first.c_str(), ms);
+            
+            // return events to cache or destroy them
+            if(is_event_caching_enabled())
+            {
+                printf("good!\n");
+                release_event(pair.first);
+                release_event(pair.second);
+            }
+            else
+            {
+                THROW_IF_HIP_ERROR(hipEventDestroy(pair.first));
+                THROW_IF_HIP_ERROR(hipEventDestroy(pair.second));
+            }
         }
         entry.events.clear();
         // recurse on internal calls
         if(entry.internal_calls)
             accumulate_times(*entry.internal_calls);
+    }
+}
+
+hipEvent_t rocsolver_logger::get_event()
+{
+    if(is_event_caching_enabled() && event_cache_head > 0)
+    {
+        // Return an event from cache by decrementing head
+        --event_cache_head;
+        return event_cache[event_cache_head];
+    }
+    else
+    {
+        printf("making new event!\n");
+        hipEvent_t event;
+        THROW_IF_HIP_ERROR(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+        return event;
+    }
+}
+
+void rocsolver_logger::release_event(hipEvent_t event)
+{
+    if(is_event_caching_enabled())
+    {
+        // Ensure cache has enough space
+        if(event_cache_head >= event_cache.size())
+        {
+            event_cache.resize(event_cache_head + 1);
+        }
+        
+        // Store event at head position and increment head
+        event_cache[event_cache_head] = event;
+        ++event_cache_head;
+    }
+    else
+    {
+        THROW_IF_HIP_ERROR(hipEventDestroy(event));
     }
 }
 #endif
