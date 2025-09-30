@@ -219,8 +219,7 @@ namespace origami
                                               size_t            MT_K,
                                               size_t            MI_M,
                                               size_t            MI_N,
-                                              size_t            MI_K,
-                                              bool              debug)
+                                              size_t            MI_K)
     {
         // Compute the number of Matrix Instructions required in each dim
         size_t N_MI_M = safe_ceil_div(MT_M, MI_M);
@@ -366,12 +365,8 @@ namespace origami
     /* Memory-related functions                                                                 */
     /* ---------------------------------------------------------------------------------------- */
     // Check if MT fits in LDS
-    bool check_lds_capacity(const hardware_t& hardware,
-                            size_t            MT_M,
-                            size_t            MT_N,
-                            size_t            MT_K,
-                            size_t            element_size,
-                            bool              debug)
+    bool check_lds_capacity(
+        const hardware_t& hardware, size_t MT_M, size_t MT_N, size_t MT_K, size_t element_size)
     {
         // A and B size
         size_t Ld_A_value = compute_A_loads(MT_M, MT_K);
@@ -1168,9 +1163,9 @@ namespace origami
                                  size_t            non_temporal_a,
                                  size_t            non_temporal_b,
                                  size_t            occupancy,
-                                 size_t            split,
-                                 bool              debug)
+                                 size_t            split)
     {
+        bool debug = hardware_t::is_debug_enabled();
         if(hardware_t::is_debug_enabled())
         {
             hardware.log_debug("Problem_Size",
