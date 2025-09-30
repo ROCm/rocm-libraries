@@ -27,8 +27,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 TEST_CASE("Replace tile", "[kernel-graph]")
 {
@@ -103,4 +105,85 @@ TEST_CASE("Replace tile", "[kernel-graph]")
     CHECK(tile2Children.count(user) == 1);
     CHECK(graph.mapper.get<CT::MacroTile>(store) == newTile2);
     CHECK(only(graph.mapper.getConnections(assign))->coordinate == newTile2);
+}
+
+TEST_CASE("ForLoop utils", "[kernel-graph]")
+{
+    using namespace rocRoller;
+    namespace CF = rocRoller::KernelGraph::ControlGraph;
+    namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+    auto graph = KernelGraph::KernelGraph();
+
+    SECTION("Basic rangeFor")
+    {
+        auto [forLoopCoord, forLoopOp]
+            = KernelGraph::rangeFor(graph, Expression::literal(10), "DummyLoop");
+
+        CHECK(forLoopCoord == graph.mapper.get<CT::ForLoop>(forLoopOp));
+    }
+
+    SECTION("Basic purgeFor")
+    {
+        auto [forLoopCoord, forLoopOp]
+            = KernelGraph::rangeFor(graph, Expression::literal(10), "DummyLoop");
+
+        // for loop coord, iterator, and dataflow edge
+        CHECK(graph.coordinates.allElements().to<std::vector>().size() == 3);
+        // for loop op, init, increment nodes and edges
+        CHECK(graph.control.allElements().to<std::vector>().size() == 5);
+
+        purgeFor(graph, forLoopOp);
+
+        // Everything should be gone
+        CHECK(graph.coordinates.allElements().to<std::vector>().size() == 0);
+        CHECK(graph.control.allElements().to<std::vector>().size() == 0);
+    }
+
+    SECTION("Shared purgeFor")
+    {
+        auto [forLoopCoord0, forLoopOp]
+            = KernelGraph::rangeFor(graph, Expression::literal(10), "DummyLoop");
+
+        auto [forLoopCoord, forLoopIterator] = getForLoopCoords(forLoopOp, graph);
+
+        CHECK(forLoopCoord == forLoopCoord0);
+
+        // Add a new ForLoopOp that uses the same iterator manually
+        auto newForLoopOp = graph.control.addElement(CF::ForLoopOp());
+        graph.mapper.connect(newForLoopOp, forLoopIterator, NaryArgument::DEST);
+        graph.mapper.connect<CT::ForLoop>(newForLoopOp, forLoopCoord);
+
+        CHECK(graph.coordinates.allElements().to<std::vector>().size() == 3);
+        CHECK(graph.control.allElements().to<std::vector>().size() == 6);
+
+        purgeFor(graph, forLoopOp);
+
+        // The for-loop coord and iterator should still exist
+        CHECK(graph.coordinates.allElements().to<std::vector>().size() == 3);
+
+        // The newForLoopOp should still exist
+        CHECK(graph.control.allElements().to<std::vector>().size() == 1);
+
+        purgeFor(graph, newForLoopOp);
+
+        // Now everything should be gone
+        CHECK(graph.coordinates.allElements().to<std::vector>().size() == 0);
+        CHECK(graph.control.allElements().to<std::vector>().size() == 0);
+    }
+
+    SECTION("Basic cloneForLoop")
+    {
+        auto [forLoopCoord, forLoopOp]
+            = KernelGraph::rangeFor(graph, Expression::literal(10), "DummyLoop");
+
+        CHECK(graph.control.allElements().to<std::vector>().size() == 5);
+        CHECK(graph.coordinates.allElements().to<std::vector>().size() == 3);
+
+        auto clonedForLoopOp = KernelGraph::cloneForLoop(graph, forLoopOp);
+
+        CHECK(graph.control.allElements().to<std::vector>().size() == 10);
+	// The new loop re-uses the ForLoop coordinate
+        CHECK(graph.coordinates.allElements().to<std::vector>().size() == 5);
+    }
 }
