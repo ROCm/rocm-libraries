@@ -89,6 +89,8 @@ public:
     {
         int64_t index = getIndex(indices...);
         const auto* data = memory().hostData();
+
+        throwIfOutOfBounds(index);
         return data[index];
     }
 
@@ -98,13 +100,7 @@ public:
         int64_t index = getIndex(indices);
         const auto* data = memory().hostData();
 
-        if(static_cast<size_t>(index) >= memory().count())
-        {
-            throw std::out_of_range("Index " + std::to_string(index)
-                                    + " is out of range for tensor with "
-                                    + std::to_string(memory().count()) + " elements");
-        }
-
+        throwIfOutOfBounds(index);
         return data[index];
     }
 
@@ -114,13 +110,7 @@ public:
         int64_t index = getIndex(indices...);
         auto* data = memory().hostData();
 
-        if(static_cast<size_t>(index) >= memory().count())
-        {
-            throw std::out_of_range("Index " + std::to_string(index)
-                                    + " is out of range for tensor with "
-                                    + std::to_string(memory().count()) + " elements");
-        }
-
+        throwIfOutOfBounds(index);
         data[index] = value;
     }
 
@@ -129,6 +119,8 @@ public:
     {
         int64_t index = getIndex(indices);
         auto* data = memory().hostData();
+
+        throwIfOutOfBounds(index);
         data[index] = value;
     }
 
@@ -163,6 +155,18 @@ protected:
 
         return static_cast<size_t>(
             std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>()));
+    }
+
+    void throwIfOutOfBounds(int64_t index) const
+    {
+#ifndef NDEBUG
+        if(static_cast<size_t>(index) >= memory().count())
+        {
+            throw std::out_of_range("Index " + std::to_string(index)
+                                    + " is out of range for tensor with "
+                                    + std::to_string(memory().count()) + " elements");
+        }
+#endif
     }
 };
 
