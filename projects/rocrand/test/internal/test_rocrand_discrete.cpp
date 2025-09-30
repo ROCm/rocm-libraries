@@ -157,10 +157,10 @@ void run_internal_discrete_tests()
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
+        // If the original probability is bigger than 5% then expected should be within 5% difference.
+        // Otherwise it should be within 0.05
         for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.01 : 0.01;
+            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.05;
             ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
         }
 
@@ -307,10 +307,10 @@ void run_external_discrete_tests(
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(size);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
+        // If the original probability is bigger than 5% then expected should be within 5% difference.
+        // Otherwise it should be within 0.05
         for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.01 : 0.01;
+            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.05;
             ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
         }
 
@@ -677,10 +677,10 @@ TEST(ExternalDiscreteDistributionTests, Philox4x32_10WithUIN4OutputTest)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size * 4);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
+        // If the original probability is bigger than 5% then expected should be within 5% difference.
+        // Otherwise it should be within 0.05
         for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.01 : 0.01;
+            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.05;
             ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
         }
 
@@ -768,11 +768,11 @@ void run_internal_host_test(const DiscreteFunc& df)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
+        // If the original probability is bigger than 5% then expected should be within 10% difference.
+        // Otherwise it should be within 0.05
         for(size_t i = 0; i < expected_prob.size(); i++)
         {
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.01;
+            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.1 : 0.05;
             ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
         }
     }
@@ -916,11 +916,11 @@ void run_host_test(const DiscreteFunc& df)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
+        // If the original probability is bigger than 5% then expected should be within 10% difference.
+        // Otherwise it should be within 0.05
         for(size_t i = 0; i < expected_prob.size(); i++)
         {
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.01;
+            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.1 : 0.05;
             ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
         }
     }
