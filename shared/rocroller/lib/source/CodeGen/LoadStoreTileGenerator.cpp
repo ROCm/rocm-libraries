@@ -272,7 +272,7 @@ namespace rocRoller
                         Register::Type::Vector,
                         getOffsetTypeFromComputeIndex(*m_graph, offsetTag),
                         1);
-                    info.rowOffsetReg->setName(concatenate("offset", offsetTag));
+                    info.rowOffsetReg->setName(concatenate("Offset", offsetTag));
                     m_context->getScopeManager()->addRegister(offsetTag);
 
                     // Copy base to new offset register
@@ -332,7 +332,7 @@ namespace rocRoller
                 {
                     stride = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, strideAttributes.dataType, 1);
-                    stride->setName("Stride");
+                    stride->setName(concatenate("Stride", strideTag));
                 }
                 else
                 {
@@ -440,7 +440,7 @@ namespace rocRoller
                 if(ci.isDirect2LDS)
                     offsetType = Register::Type::Scalar;
                 auto offsetReg = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
-                offsetReg->setName(concatenate("Offset", tag));
+                offsetReg->setName(concatenate("Offset", offset));
                 scope->addRegister(offset);
             }
 
@@ -519,7 +519,7 @@ namespace rocRoller
                 const auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
                 info.offset            = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::UInt32, 1);
-                info.offset->setName("Offset");
+                info.offset->setName("OffsetD2L");
                 co_yield generate(info.offset, Expression::literal(offsetValue))
                     .map(AddComment(fmt::format("{} is not a supported value!", offsetValue)));
             }
