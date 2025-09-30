@@ -856,72 +856,6 @@ namespace origami
         return L_mem;
     }
 
-    /**
- * @brief Computes the latency in clock cycles imposed by LDS bandwidth.
- *
- * This function models the time it takes for a single workgroup to read all the necessary
- * data for one full M-by-N macro-tile from the LDS into vector registers, covering
- * all iterations of the K-dimension loop.
- *
- * @param K The full K-dimension of the GEMM problem.
- * @param MT_M The M-dimension of the macro-tile.
- * @param MT_N The N-dimension of the macro-tile.
- * @param MT_K The K-dimension of the macro-tile (the K-slice size in LDS).
- * @param element_size_A The size of elements in matrix A, in bits.
- * @param element_size_B The size of elements in matrix B, in bits.
- * @param splittingFactor The Stream-K splitting factor. A factor of 1 means no split.
- * @return The total number of clock cycles limited by LDS bandwidth.
- */
-    double compute_lds_latency_cycles(size_t K,
-                                      size_t MT_M,
-                                      size_t MT_N,
-                                      size_t MT_K,
-                                      size_t element_size_A,
-                                      size_t element_size_B,
-                                      size_t splittingFactor)
-    {
-        // --- Step 1: Define Hardware Parameters (EDIT THESE FOR YOUR TARGET GPU) ---
-        // These are defined locally so you don't have to change the hardware_t struct.
-        // The values below are reasonable placeholders for a modern AMD CDNA-class GPU.
-        constexpr double COMPUTE_CLOCK_GHZ = 1.7; // GPU core clock speed in GHz.
-        constexpr double LDS_BANDWIDTH_THEORETICAL_GBPS
-            = 160.0; // Theoretical peak LDS bandwidth per CU.
-        // (e.g., for CDNA2: 96 bytes/cycle * 1.7 GHz clock ≈ 163 GB/s)
-        constexpr double LDS_EFFECTIVE_BW_PERCENT
-            = 0.90; // Effective bandwidth (0.0 to 1.0) to account for scheduling, etc.
-
-        // --- Step 2: Calculate Effective LDS Bandwidth in Bytes per Cycle ---
-        const double effective_lds_bw_gbps
-            = LDS_BANDWIDTH_THEORETICAL_GBPS * LDS_EFFECTIVE_BW_PERCENT;
-        // B/cycle = (GB/s) / (G_cycles/s) = (B * 1e9 / s) / (cycles * 1e9 / s)
-        const double bytes_per_cycle = 256 * LDS_EFFECTIVE_BW_PERCENT;
-
-        if(bytes_per_cycle <= 0)
-        {
-            return 0.0;
-        }
-
-        // --- Step 3: Calculate Total Data Read from LDS per Macro-Tile ---
-        // A workgroup is responsible for a fraction of K if K-splitting is active.
-        const size_t k_per_workgroup = safe_ceil_div(K, splittingFactor);
-        const size_t num_k_slices    = safe_ceil_div(k_per_workgroup, MT_K);
-
-        // Bytes read from LDS in a single K-loop iteration
-        const double bytes_A_per_slice
-            = static_cast<double>(MT_M / 4 * MT_K / 4 * element_size_A) / 8.0;
-        const double bytes_B_per_slice
-            = static_cast<double>(MT_M / 4 * MT_K / 4 * element_size_B) / 8.0;
-
-        // Total bytes read over all K-loop iterations for one M x N output tile
-        const double total_bytes_read_from_lds
-            = num_k_slices * (bytes_A_per_slice + bytes_B_per_slice);
-
-        // --- Step 4: Compute Final Latency in Cycles ---
-        const double lds_cycles = (bytes_A_per_slice + bytes_B_per_slice) / bytes_per_cycle;
-
-        return lds_cycles;
-    }
-
     /* ---------------------------------------------------------------------------------------- */
     /* Tile-related functions                                                                   */
     /* ---------------------------------------------------------------------------------------- */
@@ -984,9 +918,6 @@ namespace origami
                                               numActiveCUs,
                                               splittingFactor,
                                               debug);
-
-        double L_LDS = compute_lds_latency_cycles(
-            K, MT_M, MT_N, MT_K, element_size_A, element_size_B, splittingFactor);
 
         // TODO Does work utilization need to be 128-byte rounded for a cache line?
         double utilization        = calculate_work_utilization(M, N, K, MT_M, MT_N, MT_K);
