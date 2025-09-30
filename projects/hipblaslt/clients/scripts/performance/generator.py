@@ -69,7 +69,7 @@ class SuiteProblemGenerator:
                                    None]] = field(default_factory=dict)
 
     # default arch is gfx942 when no argument is set and query is failed
-    target_arch_static: str = str("gfx942")
+    target_arch_static: str = "gfx942"
 
     @staticmethod
     def detectISA():
@@ -79,11 +79,10 @@ class SuiteProblemGenerator:
         process = run([enumerator], stdout=PIPE)
         for line in process.stdout.decode().split("\n"):
             archStr = line.strip()
-            if archStr is not None:
-                if "gfx" in archStr:
-                    print(f"Info: Auto Detected GPU with ISA: {archStr}")
-                    SuiteProblemGenerator.target_arch_static = archStr
-                    break
+            if "gfx" in archStr:
+                print(f"Info: Auto Detected GPU with ISA: {archStr}")
+                SuiteProblemGenerator.target_arch_static = archStr
+                break
         if process.returncode:
             print(f"{enumerator} exited with code {process.returncode}, using default arch gfx942")
 
