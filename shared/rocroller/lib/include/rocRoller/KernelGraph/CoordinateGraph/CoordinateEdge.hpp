@@ -95,6 +95,11 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Alias);
 
         /**
+         * Identify - denotes coordinates that ...
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(Identify);
+
+        /**
          * Index - denotes that the source will index the register
          * allocation from the dest.
          */
