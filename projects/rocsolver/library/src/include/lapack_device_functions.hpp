@@ -3076,7 +3076,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM) eigen_sort_copyD(const rocblas_int 
                                                               S* DDin,
                                                               const rocblas_stride strideDin,
                                                               S* DDout,
-                                                              const rocblas_stride strideDout)
+                                                              const rocblas_stride strideDout,
+                                                              rocblas_int* nev = nullptr)
 {
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -3086,9 +3087,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM) eigen_sort_copyD(const rocblas_int 
 
     int tid = hipThreadIdx_x;
 
+    const rocblas_int nn = (nev) ? nev[bid] : n;
+
     constexpr int regs = 16;
     const int chunk_width = regs * hipBlockDim_x;
-    const int n_chunks = (n - 1) / chunk_width + 1;
+    const int n_chunks = (nn - 1) / chunk_width + 1;
     S bval[regs];
 
     for(int chunk = 0; chunk < n_chunks; chunk++)
@@ -3096,13 +3099,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM) eigen_sort_copyD(const rocblas_int 
         for(int i = 0; i < regs; i++)
         {
             int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
-            if(x < n)
+            if(x < nn)
                 bval[i] = Din[x];
         }
         for(int i = 0; i < regs; i++)
         {
             int x = chunk * chunk_width + i * hipBlockDim_x + hipThreadIdx_x;
-            if(x < n)
+            if(x < nn)
                 Dout[x] = bval[i];
         }
     }
@@ -3117,7 +3120,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM) eigen_sort_copyC(const rocblas_int 
                                                               U2 CCout,
                                                               const rocblas_int shiftCout,
                                                               const rocblas_int ldcout,
-                                                              const rocblas_stride strideCout)
+                                                              const rocblas_stride strideCout,
+                                                              rocblas_int* nev = nullptr)
 {
     // batch instance id
     rocblas_int bid = hipBlockIdx_y;
@@ -3129,6 +3133,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM) eigen_sort_copyC(const rocblas_int 
 
     T* src = Cin + ldcin * gid;
     T* dst = Cout + ldcout * gid;
+
+    const rocblas_int nn = (nev) ? nev[bid] : n;
+
+    if(gid >= nn)
+        return;
 
     constexpr int regs = 16;
     const int chunk_width = regs * hipBlockDim_x;
@@ -3309,10 +3318,10 @@ void run_eigen_sort(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     ROCSOLVER_LAUNCH_KERNEL(eigen_sort_copyD<DIM>, dim3(1, batch_count), dim3(DIM), 0, stream, n,
-                            D + shiftD, strideD, tempD, strideTempD);
+                            D + shiftD, strideD, tempD, strideTempD, nev);
 
     ROCSOLVER_LAUNCH_KERNEL((eigen_sort_copyC<DIM, T>), dim3(n, batch_count), dim3(DIM), 0, stream,
-                            n, C, shiftC, ldc, strideC, tempC, shiftTempC, ldtempc, strideTempC);
+                            n, C, shiftC, ldc, strideC, tempC, shiftTempC, ldtempc, strideTempC, nev);
 
     ROCSOLVER_LAUNCH_KERNEL((eigen_sort<DIM, T>), dim3(n, batch_count), dim3(DIM), 0, stream, n,
                             tempD, strideTempD, D + shiftD, strideD, tempC, shiftTempC, ldtempc,
