@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -173,6 +173,9 @@ void rocsolver_bdsvdx_getMemorySize(const rocblas_int n,
 
     *size_work1_iwork = std::max(*size_work1_iwork, a1);
     *size_work2_pivmin = std::max(*size_work2_pivmin, b1);
+
+    // size of arrays for temporary matrix copy for eig sort
+    *size_work2_pivmin = std::max(*size_work2_pivmin, sizeof(T) * (4 * n * n) * batch_count);
 
     // size of arrays for temporary submatrix indices
     *size_nsplit = sizeof(rocblas_int) * batch_count;
@@ -346,10 +349,18 @@ rocblas_status rocsolver_bdsvdx_template(rocblas_handle handle,
                                     iblock, ntgk, isplit_map, ntgk, Z, shiftZ, ldz, strideZ, ifail,
                                     strideF, info, batch_count, work2_pivmin, work1_iwork);
 
-        // sort eigenvalues and vectors
-        ROCSOLVER_LAUNCH_KERNEL(syevx_sort_eigs<T>, dim3(1, batch_count, 1), dim3(BS1, 1, 1), 0,
-                                stream, ntgk, nsv, Stmp, ntgk, Z, shiftZ, ldz, strideZ, ifail,
-                                strideF, info, isplit_map);
+        // sort eigenvalues and eigenvectors
+        run_eigen_sort<512, T>(handle, ntgk, batch_count, Dtgk, ntgk, Stmp, 0, ntgk, work2_pivmin,
+                               0, ntgk, ntgk * ntgk, Z, shiftZ, ldz, strideZ, nsv, isplit_map);
+
+        // sort ifail
+        if(ifail)
+        {
+            ROCSOLVER_LAUNCH_KERNEL(sort_copy_values<512>, dim3(1, batch_count), dim3(512), 0,
+                                    stream, ntgk, ifail, strideF, iblock, ntgk);
+            ROCSOLVER_LAUNCH_KERNEL(sort_ifail<512>, dim3(1, batch_count), dim3(512), 0, stream,
+                                    ntgk, iblock, ntgk, ifail, strideF, info, isplit_map);
+        }
 
         // take absolute value of eigenvalues, reorder and normalize eigenvector elements, and negate elements of V
         ROCSOLVER_LAUNCH_KERNEL(bdsvdx_reorder_vect<T>, dim3(1, batch_count, 1), dim3(BS1, 1, 1), 0,

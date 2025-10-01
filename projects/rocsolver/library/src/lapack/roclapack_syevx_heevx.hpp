@@ -442,7 +442,7 @@ rocblas_status rocsolver_syevx_heevx_template(rocblas_handle handle,
         // sort ifail
         if(ifail)
         {
-            ROCSOLVER_LAUNCH_KERNEL(eigen_sort_copyD<512>, dim3(1, batch_count), dim3(512), 0,
+            ROCSOLVER_LAUNCH_KERNEL(sort_copy_values<512>, dim3(1, batch_count), dim3(512), 0,
                                     stream, n, ifail, strideF, iblock, n);
             ROCSOLVER_LAUNCH_KERNEL(sort_ifail<512>, dim3(1, batch_count), dim3(512), 0, stream, n,
                                     iblock, n, ifail, strideF, info, isplit_map);

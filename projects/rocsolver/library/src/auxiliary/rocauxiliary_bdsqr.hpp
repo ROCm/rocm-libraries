@@ -966,7 +966,7 @@ ROCSOLVER_KERNEL void bdsqr_chk_completed(const rocblas_int n,
 
 /** BDSQR_FINALIZE sets the output values for BDSQR, and sorts the singular values and
     vectors by shell sort or selection sort if applicable. **/
-template <typename T, typename S, typename W1, typename W2, typename W3>
+template <typename T, typename S, typename U>
 ROCSOLVER_KERNEL void bdsqr_finalize(const rocblas_int n,
                                      const rocblas_int nv,
                                      const rocblas_int nu,
@@ -975,20 +975,11 @@ ROCSOLVER_KERNEL void bdsqr_finalize(const rocblas_int n,
                                      const rocblas_stride strideD,
                                      S* EE,
                                      const rocblas_stride strideE,
-                                     W1 VV,
+                                     U VV,
                                      const rocblas_int shiftV,
                                      const rocblas_int ldv,
                                      const rocblas_stride strideV,
-                                     W2 UU,
-                                     const rocblas_int shiftU,
-                                     const rocblas_int ldu,
-                                     const rocblas_stride strideU,
-                                     W3 CC,
-                                     const rocblas_int shiftC,
-                                     const rocblas_int ldc,
-                                     const rocblas_stride strideC,
                                      rocblas_int* info,
-                                     rocblas_int* splits_map,
                                      rocblas_int* completed)
 {
     auto const tid = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
@@ -1011,9 +1002,6 @@ ROCSOLVER_KERNEL void bdsqr_finalize(const rocblas_int n,
     S* const D = DD + bid * strideD;
     S* const E = EE + bid * strideE;
     T* const V = (VV ? load_ptr_batch<T>(VV, bid, shiftV, strideV) : nullptr);
-    T* const U = (UU ? load_ptr_batch<T>(UU, bid, shiftU, strideU) : nullptr);
-    T* const C = (CC ? load_ptr_batch<T>(CC, bid, shiftC, strideC) : nullptr);
-    rocblas_int* map = (splits_map ? splits_map + bid * (2 * n) : nullptr);
 
     // ensure all singular values converged and are positive
     for(rocblas_int i = 0; i < n; i++)
@@ -1042,76 +1030,12 @@ ROCSOLVER_KERNEL void bdsqr_finalize(const rocblas_int n,
         return;
     }
     __syncthreads();
-
-    // sort singular values & vectors
-    if(map)
-    {
-        if(nv || nu || nc)
-        {
-            shell_sort_descending(n, D, map);
-            __syncthreads();
-            bdsqr_permute_swap(n, nv, V, ldv, nu, U, ldu, nc, C, ldc, map);
-        }
-        else
-        {
-            rocblas_int* const null_map = nullptr;
-            shell_sort_descending(n, D, null_map);
-        }
-
-        __syncthreads();
-    }
-    else
-    {
-        S p;
-        for(i = 0; i < n - 1; i++)
-        {
-            m = i;
-            p = D[i];
-            for(j = i + 1; j < n; j++)
-            {
-                if(D[j] > p)
-                {
-                    m = j;
-                    p = D[j];
-                }
-            }
-            __syncthreads();
-
-            if(m != i)
-            {
-                if(tid == 0)
-                {
-                    D[m] = D[i];
-                    D[i] = p;
-                }
-
-                if(nv)
-                {
-                    for(j = tid; j < nv; j += hipBlockDim_x)
-                        swap(V[m + j * ldv], V[i + j * ldv]);
-                    __syncthreads();
-                }
-                if(nu)
-                {
-                    for(j = tid; j < nu; j += hipBlockDim_x)
-                        swap(U[j + m * ldu], U[j + i * ldu]);
-                    __syncthreads();
-                }
-                if(nc)
-                {
-                    for(j = tid; j < nc; j += hipBlockDim_x)
-                        swap(C[m + j * ldc], C[i + j * ldc]);
-                    __syncthreads();
-                }
-            }
-        }
-    }
 }
 
 /****** Template function, workspace size and argument validation **********/
 /***************************************************************************/
 
-template <typename T>
+template <typename T, typename S>
 void rocsolver_bdsqr_getMemorySize(const rocblas_int n,
                                    const rocblas_int nv,
                                    const rocblas_int nu,
@@ -1119,6 +1043,9 @@ void rocsolver_bdsqr_getMemorySize(const rocblas_int n,
                                    const rocblas_int batch_count,
                                    size_t* size_splits_map,
                                    size_t* size_work,
+                                   size_t* size_tmpV,
+                                   size_t* size_tmpU,
+                                   size_t* size_tmpC,
                                    size_t* size_completed)
 {
     // if quick return, no workspace is needed
@@ -1126,6 +1053,9 @@ void rocsolver_bdsqr_getMemorySize(const rocblas_int n,
     {
         *size_splits_map = 0;
         *size_work = 0;
+        *size_tmpV = 0;
+        *size_tmpU = 0;
+        *size_tmpC = 0;
         *size_completed = 0;
         return;
     }
@@ -1139,7 +1069,12 @@ void rocsolver_bdsqr_getMemorySize(const rocblas_int n,
         incW += 2;
     if(nu || nc)
         incW += 2;
-    *size_work = sizeof(T) * (4 + incW * n) * batch_count;
+    *size_work = sizeof(S) * (4 + incW * n) * batch_count;
+
+    // size of temporary copy for sort
+    *size_tmpV = sizeof(T) * n * nv * batch_count;
+    *size_tmpU = sizeof(T) * n * nu * batch_count;
+    *size_tmpC = sizeof(T) * n * nc * batch_count;
 
     // size of temporary workspace to indicate problem completion
     *size_completed = sizeof(rocblas_int) * (batch_count + 2);
@@ -1213,6 +1148,9 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                                         const rocblas_int batch_count,
                                         rocblas_int* splits_map,
                                         S* work,
+                                        T* tmpV,
+                                        T* tmpU,
+                                        T* tmpC,
                                         rocblas_int* completed)
 {
     ROCSOLVER_ENTER("bdsqr", "uplo:", uplo, "n:", n, "nv:", nv, "nu:", nu, "nc:", nc,
@@ -1351,10 +1289,14 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
         }
     }
 
-    // sort the singular values and vectors
+    // set the output values for BDSQR
     ROCSOLVER_LAUNCH_KERNEL((bdsqr_finalize<T>), gridBasic, threadsVUC, 0, stream, n, nv, nu, nc, D,
-                            strideD, E, strideE, V, shiftV, ldv, strideV, U, shiftU, ldu, strideU,
-                            C, shiftC, ldc, strideC, info, splits_map, completed);
+                            strideD, E, strideE, V, shiftV, ldv, strideV, info, completed);
+
+    // sort the singular values and vectors
+    run_svd_sort<512, T>(handle, n, nv, nu, nc, batch_count, work, n, D, 0, strideD, tmpV, 0, n,
+                         n * nv, V, shiftV, ldv, strideV, tmpU, 0, nu, n * nu, U, shiftU, ldu,
+                         strideU, tmpC, 0, n, n * nc, C, shiftC, ldc, strideC);
 
     return rocblas_status_success;
 }
