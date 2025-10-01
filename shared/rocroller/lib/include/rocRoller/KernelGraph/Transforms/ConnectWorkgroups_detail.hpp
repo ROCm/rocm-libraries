@@ -40,6 +40,18 @@ namespace rocRoller
              */
             std::map<std::pair<int, rocRoller::Graph::Direction>, int>
                 connectWorkgroups(KernelGraph& kgraph);
+
+            /**
+             * @brief Remap Workgroup to be more cache friendly
+             * (consecutive workgroups land within the same XCC).
+             *
+             * Modifies the coordinate graph.
+             *
+             * Returns the newly added Workgroup dimension.
+             */
+            int remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& graph,
+                                  int                                  workgroupTag,
+                                  uint                                 numXCC);
         }
     }
 }

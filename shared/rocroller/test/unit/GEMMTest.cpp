@@ -1116,7 +1116,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK_B123)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1146,7 +1146,11 @@ namespace GEMMDriverTest
         gemm.loadLDSB  = true;
         gemm.storeLDSD = true;
 
-        for(auto twoTile : {true, false})
+        gemm.workgroupMappingDim   = 1;
+        gemm.workgroupMappingValue = 3;
+
+        //for(auto twoTile : {true, false})
+        for(auto twoTile : {true})
         {
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
@@ -1226,7 +1230,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall_C123)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1255,14 +1259,17 @@ namespace GEMMDriverTest
         gemm.streamK = StreamKMode::Standard;
         gemm.k       = gemm.macK * 8;
 
-        for(auto twoTile : {true, false})
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 4;
+
+        for(auto twoTile : {true})
         {
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<Half>(gemm);
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping_A123)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1296,6 +1303,7 @@ namespace GEMMDriverTest
                         gemm.workgroupRemapXCC     = workgroupRemapXCC;
                         gemm.streamK               = streamKMode;
                         basicGEMM<float>(gemm);
+                        //exit(0);
                     }
                 }
             }

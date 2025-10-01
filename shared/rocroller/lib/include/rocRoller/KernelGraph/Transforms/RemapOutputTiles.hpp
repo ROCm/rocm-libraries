@@ -40,9 +40,7 @@ namespace rocRoller
         class RemapOutputTiles : public GraphTransform
         {
         public:
-            RemapOutputTiles(ContextPtr                context,
-                             std::optional<int>        workgroupMappingDim,
-                             std::optional<int>        workgroupRemapXCC,
+            RemapOutputTiles(std::optional<int>        workgroupMappingDim,
                              Expression::ExpressionPtr workgroupMappingValue = nullptr);
 
             KernelGraph apply(KernelGraph const& original) override;
@@ -52,10 +50,7 @@ namespace rocRoller
             }
 
         private:
-            ContextPtr m_context;
-
             std::optional<int>        m_workgroupMappingDim;
-            std::optional<int>        m_workgroupRemapXCC;
             Expression::ExpressionPtr m_workgroupMappingValue;
         };
     }

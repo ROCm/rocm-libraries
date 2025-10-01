@@ -83,8 +83,7 @@ namespace rocRoller
                        CommandParametersPtr      params,
                        std::string const&        topLoop,
                        std::string const&        accumulatorLoop,
-                       Expression::ExpressionPtr numWGs,
-                       bool const                hasWorkgroupMapping = false);
+                       Expression::ExpressionPtr numWGs);
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;
@@ -122,8 +121,6 @@ namespace rocRoller
              * 2. Is a literal (for testing)
              */
             Expression::ExpressionPtr m_numWGs;
-
-            bool m_hasWorkgroupMapping;
         };
     }
 }

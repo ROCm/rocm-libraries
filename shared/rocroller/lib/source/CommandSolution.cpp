@@ -374,10 +374,7 @@ namespace rocRoller
             workgroupMappingValue = size;
         }
         transforms.push_back(std::make_shared<KernelGraph::RemapOutputTiles>(
-            m_context,
-            m_commandParameters->workgroupMappingDim,
-            m_commandParameters->workgroupRemapXCC,
-            workgroupMappingValue));
+            m_commandParameters->workgroupMappingDim, workgroupMappingValue));
 
         if(m_commandParameters->streamK)
         {
@@ -393,12 +390,7 @@ namespace rocRoller
             }
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
-                m_context,
-                m_commandParameters,
-                rocRoller::XLOOP,
-                rocRoller::KLOOP,
-                numWGsExpr,
-                m_commandParameters->workgroupMappingDim.has_value()));
+                m_context, m_commandParameters, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
         }
         else if(!m_commandParameters->loopOverOutputTilesDimensions.empty())
         {
@@ -410,7 +402,8 @@ namespace rocRoller
                 m_context));
         }
 
-        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>());
+        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(
+            m_context, m_commandParameters->workgroupRemapXCC));
 
         transforms.push_back(
             std::make_shared<KernelGraph::UnrollLoops>(m_commandParameters, m_context));

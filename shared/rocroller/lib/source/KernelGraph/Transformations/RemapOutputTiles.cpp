@@ -177,7 +177,7 @@ namespace rocRoller
                 AssertFatal(workgroupDimensions(info) == 2);
 
                 auto totalSize = totalNumberOfWorkgroups(info);
-                auto workgroup = graph.coordinates.addElement(Workgroup(0, totalSize));
+                auto workgroup = graph.coordinates.addElement(Linear(totalSize, nullptr));
 
                 // Downstream: Starting at workgroup looking down (forward transform)
                 // Upstream:   Starting at workgroup looking up (reverse transform)
@@ -212,10 +212,9 @@ namespace rocRoller
                 auto tailBlockNumber = graph.coordinates.addElement(Linear());
                 auto tailBlockIndex  = graph.coordinates.addElement(Linear(tailBlockSize, nullptr));
 
-                auto parallel = graph.coordinates.addElement(
-                    MacroTileNumber(dimension, parallelSize, nullptr));
-                auto perpendicular = graph.coordinates.addElement(
-                    MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
+                auto parallel = graph.coordinates.addElement(Linear(parallelSize, nullptr));
+                auto perpendicular
+                    = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
 
                 // 0 argument is mainBlockNumber
                 auto condition
@@ -251,11 +250,32 @@ namespace rocRoller
                     graph.coordinates.addElement(Flatten(), {groupNumber, groupIndex}, {workgroup});
                     graph.coordinates.addElement(
                         Flatten(), {mainBlockNumber, mainBlockIndex}, {workgroup});
+
+                    auto dim0 = graph.coordinates.addElement(
+                        MacroTileNumber(dimension, parallelSize, nullptr));
+                    auto dim1 = graph.coordinates.addElement(
+                        MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
+                    if(dimension == 0)
+                        graph.coordinates.addElement(Tile(), {workgroup}, {dim0, dim1});
+                    else
+                        graph.coordinates.addElement(Tile(), {workgroup}, {dim1, dim0});
+                    Log::info("1 new MTN = {}, {}", dim0, dim1);
                 }
                 else
                 {
                     graph.coordinates.addElement(
                         Tile(), {workgroup}, {mainBlockNumber, mainBlockIndex});
+
+                    auto dim0 = graph.coordinates.addElement(
+                        MacroTileNumber(dimension, parallelSize, nullptr));
+                    auto dim1 = graph.coordinates.addElement(
+                        MacroTileNumber(1 - dimension, perpendicularSize, nullptr));
+                    if(dimension == 0)
+                        graph.coordinates.addElement(Flatten(), {dim0, dim1}, {workgroup});
+                    else
+                        graph.coordinates.addElement(Flatten(), {dim1, dim0}, {workgroup});
+                    Log::info("2 new MTN = {}, {}", dim0, dim1);
+
                     graph.coordinates.addElement(Tile(), {workgroup}, {groupNumber, groupIndex});
                     graph.coordinates.addElement(Tile(), {groupNumber}, {blockNumber, blockIndex});
                     graph.coordinates.addElement(
@@ -278,73 +298,11 @@ namespace rocRoller
 
                 return {workgroup, perpendicular, parallel};
             }
-
-            int remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& graph,
-                                  int                                  workgroupTag,
-                                  uint                                 numXCC)
-            {
-                using ExpressionPtr     = Expression::ExpressionPtr;
-                using ExpressionPtrPair = std::pair<ExpressionPtr, ExpressionPtr>;
-                using ExpressionPtrVectorPair
-                    = std::pair<std::vector<ExpressionPtr>, std::vector<ExpressionPtr>>;
-
-                auto workgroup = graph.coordinates.get<Workgroup>(workgroupTag).value();
-                auto size      = workgroup.size;
-
-                auto newWorkgroupTag = graph.coordinates.addElement(Workgroup(0, size));
-
-                // Upstream: newWorkgroupTag is added above workgroupTag
-                auto direction
-                    = std::empty(graph.coordinates.getNeighbours(workgroupTag, GD::Upstream))
-                          ? GD::Upstream
-                          : GD::Downstream;
-
-                auto one           = Expression::literal(1u);
-                auto numXCCLiteral = Expression::literal(numXCC);
-
-                auto ceilDiv = [&](ExpressionPtr a, ExpressionPtr b) { return (a + b - one) / b; };
-
-                auto xcc = graph.coordinates.addElement(Linear(numXCCLiteral, nullptr));
-                auto cu
-                    = graph.coordinates.addElement(Linear(ceilDiv(size, numXCCLiteral), nullptr));
-
-                // 0 argument is XCC, 1 argument is CU
-                auto condition
-                    = Expression::positionalArgument(0, Register::Type::Scalar, DataType::UInt32)
-                      <= (size % numXCCLiteral);
-
-                ExpressionPtrVectorPair strides{{ceilDiv(size, numXCCLiteral), one},
-                                                {size / numXCCLiteral, one}};
-                ExpressionPtrPair       initialValues{nullptr, size % numXCCLiteral};
-
-                if(direction == GD::Upstream)
-                {
-                    graph.coordinates.addElement(Tile(), {newWorkgroupTag}, {cu, xcc});
-                    graph.coordinates.addElement(
-                        PiecewiseAffineJoin(condition, strides, initialValues),
-                        {xcc, cu},
-                        {workgroupTag});
-                }
-                else
-                {
-                    graph.coordinates.addElement(
-                        PiecewiseAffineJoin(condition, strides, initialValues),
-                        {workgroupTag},
-                        {xcc, cu});
-                    graph.coordinates.addElement(Flatten(), {cu, xcc}, {newWorkgroupTag});
-                }
-
-                return newWorkgroupTag;
-            }
         }
 
-        RemapOutputTiles::RemapOutputTiles(ContextPtr                context,
-                                           std::optional<int>        workgroupMappingDim,
-                                           std::optional<int>        workgroupRemapXCC,
+        RemapOutputTiles::RemapOutputTiles(std::optional<int>        workgroupMappingDim,
                                            Expression::ExpressionPtr workgroupMappingValue)
-            : m_context(context)
-            , m_workgroupMappingDim(workgroupMappingDim)
-            , m_workgroupRemapXCC(workgroupRemapXCC)
+            : m_workgroupMappingDim(workgroupMappingDim)
             , m_workgroupMappingValue(workgroupMappingValue)
         {
         }
@@ -359,21 +317,9 @@ namespace rocRoller
             {
                 Log::info("=================RemapOutputTiles========================");
                 auto info = getTileSizeInfo(original);
+
                 connectWorkgroupsWithMapping(
                     info, kgraph, m_workgroupMappingDim.value(), m_workgroupMappingValue);
-            }
-
-            if(m_workgroupRemapXCC.has_value())
-            {
-                auto const& arch = m_context->targetArchitecture();
-                AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
-                            "XCC-aware workgroup remapping not available on: ",
-                            arch.target().toString());
-                auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
-                for(auto workgroupTag : workgroupTags)
-                {
-                    remapWorkgroupXCC(kgraph, workgroupTag, m_workgroupRemapXCC.value());
-                }
             }
 
             return kgraph;

@@ -84,6 +84,64 @@ namespace rocRoller
 
                 return rv;
             }
+
+            int remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& graph,
+                                  int                                  workgroupTag,
+                                  uint                                 numXCC)
+            {
+                using ExpressionPtr     = Expression::ExpressionPtr;
+                using ExpressionPtrPair = std::pair<ExpressionPtr, ExpressionPtr>;
+                using ExpressionPtrVectorPair
+                    = std::pair<std::vector<ExpressionPtr>, std::vector<ExpressionPtr>>;
+
+                auto workgroup = graph.coordinates.get<Workgroup>(workgroupTag).value();
+                auto size      = workgroup.size;
+
+                auto newWorkgroupTag = graph.coordinates.addElement(Workgroup(0, size));
+
+                // Upstream: newWorkgroupTag is added above workgroupTag
+                auto direction
+                    = std::empty(graph.coordinates.getNeighbours(workgroupTag, GD::Upstream))
+                          ? GD::Upstream
+                          : GD::Downstream;
+
+                auto one           = Expression::literal(1u);
+                auto numXCCLiteral = Expression::literal(numXCC);
+
+                auto ceilDiv = [&](ExpressionPtr a, ExpressionPtr b) { return (a + b - one) / b; };
+
+                auto xcc = graph.coordinates.addElement(Linear(numXCCLiteral, nullptr));
+                auto cu
+                    = graph.coordinates.addElement(Linear(ceilDiv(size, numXCCLiteral), nullptr));
+
+                // 0 argument is XCC, 1 argument is CU
+                auto condition
+                    = Expression::positionalArgument(0, Register::Type::Scalar, DataType::UInt32)
+                      <= (size % numXCCLiteral);
+
+                ExpressionPtrVectorPair strides{{ceilDiv(size, numXCCLiteral), one},
+                                                {size / numXCCLiteral, one}};
+                ExpressionPtrPair       initialValues{nullptr, size % numXCCLiteral};
+
+                if(direction == GD::Upstream)
+                {
+                    graph.coordinates.addElement(Tile(), {newWorkgroupTag}, {cu, xcc});
+                    graph.coordinates.addElement(
+                        PiecewiseAffineJoin(condition, strides, initialValues),
+                        {xcc, cu},
+                        {workgroupTag});
+                }
+                else
+                {
+                    graph.coordinates.addElement(
+                        PiecewiseAffineJoin(condition, strides, initialValues),
+                        {workgroupTag},
+                        {xcc, cu});
+                    graph.coordinates.addElement(Flatten(), {cu, xcc}, {newWorkgroupTag});
+                }
+
+                return newWorkgroupTag;
+            }
         }
 
         KernelGraph ConnectWorkgroups::apply(KernelGraph const& original)
@@ -92,6 +150,21 @@ namespace rocRoller
 
             auto kgraph = original;
             connectWorkgroups(kgraph);
+
+            if(m_workgroupRemapXCC.has_value())
+            {
+                auto const& arch = m_context->targetArchitecture();
+                AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
+                            "XCC-aware workgroup remapping not available on: ",
+                            arch.target().toString());
+                auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
+                for(auto workgroupTag : workgroupTags)
+                {
+                    remapWorkgroupXCC(kgraph, workgroupTag, m_workgroupRemapXCC.value());
+                }
+            }
+
+            Log::info("================ConnectWorkgroups=================");
 
             return kgraph;
         }
