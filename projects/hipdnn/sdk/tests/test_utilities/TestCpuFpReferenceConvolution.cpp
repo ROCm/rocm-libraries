@@ -433,8 +433,7 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DGrouped)
     EXPECT_EQ(output0, 29.6f) << "Group 0 output should be 29.6";
 
     // 0.2 * (sum(i for i in range(30, 38)) + sum(i for i in range(40, 48))) = 123.2
-    EXPECT_GT(output1, 123.2f) << "Group 1 output should be 123.2";
-    EXPECT_NE(output0, output1) << "Different groups should produce different outputs";
+    EXPECT_EQ(output1, 123.200005f) << "Group 1 output should be 123.2";
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3D)
@@ -780,17 +779,51 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DSymmetricPadding)
     CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
-    // Verify corner values (should have fewer contributions due to padding)
-    float corner = outputTensor.getHostValue(0, 0, 0, 0, 0);
-    EXPECT_GT(corner, 0.0f);
+    const std::vector<float> expectedOutput = {// d=0
+                                               1,
+                                               3,
+                                               2,
+                                               4,
+                                               10,
+                                               6,
+                                               3,
+                                               7,
+                                               4,
+                                               // d=1
+                                               6,
+                                               14,
+                                               8,
+                                               16,
+                                               36,
+                                               20,
+                                               10,
+                                               22,
+                                               12,
+                                               // d=2
+                                               5,
+                                               11,
+                                               6,
+                                               12,
+                                               26,
+                                               14,
+                                               7,
+                                               15,
+                                               8};
 
-    // Verify center values (should have more contributions)
-    float center = outputTensor.getHostValue(0, 0, 1, 1, 1);
-    EXPECT_GT(center, corner);
-
-    // The center value at (1,1,1) should be the sum of all input values
-    // since the 2x2x2 kernel covers the entire input when centered there
-    EXPECT_FLOAT_EQ(center, 36.0f); // 1+2+3+4+5+6+7+8 = 36
+    int index = 0;
+    for(int d = 0; d < 3; ++d)
+    {
+        for(int h = 0; h < 3; ++h)
+        {
+            for(int w = 0; w < 3; ++w)
+            {
+                float actual = outputTensor.getHostValue(0, 0, d, h, w);
+                float expected = expectedOutput[static_cast<size_t>(index++)];
+                EXPECT_FLOAT_EQ(actual, expected) << "Mismatch at output coordinate (d,h,w) = ("
+                                                  << d << "," << h << "," << w << ")";
+            }
+        }
+    }
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DAsymmetricPadding)
@@ -1768,9 +1801,14 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData1DPadding)
     CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
-    // Verify gradients with padding
-    EXPECT_GT(inputTensor.getHostValue(0, 0, 0), 0.0f);
-    EXPECT_GT(inputTensor.getHostValue(0, 0, 4), 0.0f);
+    const std::vector<float> expectedGradients = {3.0f, 4.0f, 4.0f, 4.0f, 3.0f};
+
+    for(int i = 0; i < 5; ++i)
+    {
+        float actual = inputTensor.getHostValue(0, 0, i);
+        float expected = expectedGradients[static_cast<size_t>(i)];
+        EXPECT_FLOAT_EQ(actual, expected) << "Mismatch at grad_X index [" << i << "]";
+    }
 }
 
 TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionBwdData3D)
@@ -1894,14 +1932,16 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData2DAsymmetricPadding)
     CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
         inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
 
-    // Verify all input gradients are computed
+    const std::array<std::array<float, 3>, 3> expectedGradients
+        = {{{29, 39, 49}, {79, 89, 99}, {129, 139, 149}}};
+
     for(int h = 0; h < 3; ++h)
     {
         for(int w = 0; w < 3; ++w)
         {
-            float grad = inputTensor.getHostValue(0, 0, h, w);
-            EXPECT_GT(grad, 0.0f) << "Input gradient at (" << h << "," << w
-                                  << ") should be positive";
+            float actual = inputTensor.getHostValue(0, 0, h, w);
+            float expected = expectedGradients[static_cast<size_t>(h)][static_cast<size_t>(w)];
+            EXPECT_FLOAT_EQ(actual, expected) << "Mismatch at grad_X(" << h << "," << w << ")";
         }
     }
 }
@@ -1943,19 +1983,56 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DAsymmetricPadding)
     CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
         inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
 
-    // Verify all input gradients are computed
+    const std::array<std::array<std::array<float, 2>, 2>, 2> expectedGradients = {{
+        // d=0
+        {{{3.2f, 4.6f}, // h=0
+          {6.0f, 8.2f}}}, // h=1
+        // d=1
+        {{{8.8f, 10.2f}, // h=0
+          {14.8f, 17.0f}}} // h=1
+    }};
+
     for(int d = 0; d < 2; ++d)
     {
         for(int h = 0; h < 2; ++h)
         {
             for(int w = 0; w < 2; ++w)
             {
-                float grad = inputTensor.getHostValue(0, 0, d, h, w);
-                EXPECT_GT(grad, 0.0f)
-                    << "Input gradient at (" << d << "," << h << "," << w << ") should be positive";
+                float actual = inputTensor.getHostValue(0, 0, d, h, w);
+                float expected = expectedGradients[static_cast<size_t>(d)][static_cast<size_t>(h)]
+                                                  [static_cast<size_t>(w)];
+                EXPECT_FLOAT_EQ(actual, expected)
+                    << "Mismatch at grad_X(" << d << "," << h << "," << w << ")";
             }
         }
     }
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DInvalidOutputDim)
+{
+    std::vector<int64_t> strides = {1, 1, 1};
+    std::vector<int64_t> dilations = {1, 1, 1};
+    std::vector<int64_t> prePadding = {1, 0, 1};
+    std::vector<int64_t> postPadding = {1, 0, 2};
+
+    // Test 3D forward convolution with asymmetric padding
+    // The output tensor's height (2) is invalid for the given input (height 2) and kernel (height 2).
+    // The expected output height is 1. This test verifies that an exception is thrown.
+    Tensor<float> inputTensor({1, 1, 2, 2, 2});
+    Tensor<float> weightTensor({1, 1, 2, 2, 2});
+    Tensor<float> outputTensor({1, 1, 3, 2, 4}); // Output with invalid height dimension
+
+    // Fill tensors with dummy values
+    for(int i = 0; i < 8; ++i)
+    {
+        inputTensor.memory().hostData()[i] = 1.0f;
+        weightTensor.memory().hostData()[i] = 1.0f;
+    }
+
+    EXPECT_THROW(
+        (CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+            inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding)),
+        std::invalid_argument);
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DInvalidOutputDim)
