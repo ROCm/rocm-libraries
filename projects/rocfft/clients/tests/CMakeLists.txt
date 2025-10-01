@@ -375,44 +375,47 @@ if( ROCFFT_MPI_ENABLE )
     )
     target_compile_options( ${worker} PRIVATE ${WARNING_FLAGS} )
 
-  if ( ROCFFT_CRAY_MPI_ENABLE )
-    target_link_libraries( ${worker}
-      OpenMP::OpenMP_CXX 
-      hip::hiprand
-      hip::device
-      MPI::MPI_CXX
-      ${FFTW_LIBRARIES}
-      "mpi_gtl_hsa"
-    )
-      get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
-      target_link_directories( ${worker}
-	PRIVATE
-	${MPI_LIBDIR}/../../../../gtl/lib )
+    if ( ROCFFT_CRAY_MPI_ENABLE )
+      target_link_libraries( ${worker} PRIVATE
+        OpenMP::OpenMP_CXX 
+        hip::hiprand
+        hip::device
+        MPI::MPI_CXX
+        ${FFTW_LIBRARIES}
+        "mpi_gtl_hsa"
+      )
+        get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
+        target_link_directories( ${worker}
+  	PRIVATE
+  	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
-    target_link_libraries( ${worker}
-      OpenMP::OpenMP_CXX 
-      hip::hiprand
-      hip::device
-      MPI::MPI_CXX
-      ${FFTW_LIBRARIES}
-    )    
+      target_link_libraries( ${worker} PRIVATE
+        OpenMP::OpenMP_CXX 
+        hip::hiprand
+        hip::device
+        MPI::MPI_CXX
+        ${FFTW_LIBRARIES}
+      )    
     endif()
+
+    target_compile_definitions( ${worker} PRIVATE USE_HIPRAND )
+
     set_target_properties(${worker}
                           PROPERTIES 
                           RUNTIME_OUTPUT_DIRECTORY 
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
-    
+
   endforeach()
 
   # link normal MPI worker against rocFFT
-  target_link_libraries( rocfft_mpi_worker
+  target_link_libraries( rocfft_mpi_worker PRIVATE
     roc::rocfft
   )
 
   # dyna worker only needs to dynamically load libraries
   target_compile_definitions( dyna_rocfft_mpi_worker PRIVATE ROCFFT_DYNA_MPI_WORKER )
-  target_link_libraries( dyna_rocfft_mpi_worker
+  target_link_libraries( dyna_rocfft_mpi_worker PRIVATE
     ${CMAKE_DL_LIBS}
   )
 

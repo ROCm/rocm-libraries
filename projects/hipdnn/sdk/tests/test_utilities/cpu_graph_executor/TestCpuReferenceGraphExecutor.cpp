@@ -3,6 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+
+#include "BatchnormGraphUtils.hpp"
+#include "BatchnormTensorBundles.hpp"
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
@@ -17,164 +23,85 @@ using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::utilities;
 using namespace ::testing;
+using namespace hipdnn_sdk_test_utils;
 
 class TestCpuReferenceGraphExecutor
 {
-private:
 public:
-    static flatbuffers::FlatBufferBuilder createValidBatchnormGraph(
-        std::vector<int64_t> strides = {1, 3, 224, 224},
-        std::vector<int64_t> dims = {1, 3, 224, 224},
-        bool hasOptionalAttributes = true,
-        hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT,
-        hipdnn_sdk::data_objects::DataType scaleBiasDataType = DataType::FLOAT,
-        hipdnn_sdk::data_objects::DataType meanVarianceDataType = DataType::FLOAT)
-    {
-        flatbuffers::FlatBufferBuilder builder;
-        std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>
-            tensorAttributes;
-
-        std::vector<int64_t> derivedStrides = {1, strides[1], 1, 1};
-        std::vector<int64_t> derivedDims = {1, dims[1], 1, 1};
-
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-            builder, 1, "x", inputDataType, &strides, &dims));
-
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-            builder, 2, "y", inputDataType, &strides, &dims));
-
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-            builder, 3, "scale", scaleBiasDataType, &derivedStrides, &derivedDims));
-
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-            builder, 4, "bias", scaleBiasDataType, &derivedStrides, &derivedDims));
-
-        if(hasOptionalAttributes)
-        {
-            tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-                builder, 5, "est_mean", meanVarianceDataType, &derivedStrides, &derivedDims));
-
-            tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-                builder, 6, "est_variance", meanVarianceDataType, &derivedStrides, &derivedDims));
-        }
-
-        auto bnormAttributes
-            = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(builder,
-                                                                           1, // x uid
-                                                                           5, // mean uid
-                                                                           6, // inv_variance uid
-                                                                           3, // scale uid
-                                                                           4, // bias uid
-                                                                           2 // y uid
-            );
-
-        std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-        auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
-            builder,
-            "batchnorm",
-            hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-            bnormAttributes.Union());
-        nodes.push_back(node);
-
-        auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                                       "test",
-                                                                       DataType::FLOAT,
-                                                                       DataType::HALF,
-                                                                       DataType::BFLOAT16,
-                                                                       &tensorAttributes,
-                                                                       &nodes);
-        builder.Finish(graphOffset);
-        return builder;
-    }
-
     template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
     static void runBatchnormFwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
                                     hipdnn_sdk::data_objects::DataType scaleBiasDataType,
                                     hipdnn_sdk::data_objects::DataType meanVarianceDataType)
     {
-        unsigned int seed = std::random_device{}();
-
         std::vector<int64_t> dims = {1, 3, 14, 14};
+        BatchnormFwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
+            dims, 1, TensorLayout::NCHW);
 
-        std::vector<int64_t> derivedDims = {1, dims[1]};
+        auto graphTuple = buildBatchnormFwdInferenceGraph(
+            tensorBundle, inputDataType, scaleBiasDataType, meanVarianceDataType);
 
-        std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
 
-        TensorLayout layout = TensorLayout::NCHW;
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        PinnedTensor<InputType> xTensor(dims, layout);
-        deviceBuffers.push_back(generateRandomHostBuffer(
-            xTensor, 1, static_cast<InputType>(0.0f), static_cast<InputType>(1.0f), seed));
-
-        PinnedTensor<InputType> yTensor(dims, layout);
-        deviceBuffers.push_back(generateEmptyHostBuffer(yTensor, 2));
-
-        PinnedTensor<ScaleBiasType> scaleTensor(derivedDims);
-        deviceBuffers.push_back(generateRandomHostBuffer(scaleTensor,
-                                                         3,
-                                                         static_cast<ScaleBiasType>(0.0f),
-                                                         static_cast<ScaleBiasType>(1.0f),
-                                                         seed));
-
-        PinnedTensor<ScaleBiasType> biasTensor(derivedDims);
-        deviceBuffers.push_back(generateRandomHostBuffer(biasTensor,
-                                                         4,
-                                                         static_cast<ScaleBiasType>(0.0f),
-                                                         static_cast<ScaleBiasType>(1.0f),
-                                                         seed));
-
-        PinnedTensor<MeanVarianceType> meanTensor(derivedDims);
-        deviceBuffers.push_back(generateRandomHostBuffer(meanTensor,
-                                                         5,
-                                                         static_cast<MeanVarianceType>(0.0f),
-                                                         static_cast<MeanVarianceType>(1.0f),
-                                                         seed));
-
-        PinnedTensor<MeanVarianceType> varianceTensor(derivedDims);
-        deviceBuffers.push_back(generateRandomHostBuffer(varianceTensor,
-                                                         6,
-                                                         static_cast<MeanVarianceType>(0.1f),
-                                                         static_cast<MeanVarianceType>(1.0f),
-                                                         seed));
-
-        auto batchnormBuilder
-            = TestCpuReferenceGraphExecutor::createValidBatchnormGraph(xTensor.strides(),
-                                                                       xTensor.dims(),
-                                                                       true,
-                                                                       inputDataType,
-                                                                       scaleBiasDataType,
-                                                                       meanVarianceDataType);
-
-        auto batchnormGraph = batchnormBuilder.GetBufferPointer();
-
-        std::unordered_map<int64_t, void*> variantPack;
-        for(const auto& deviceBuffer : deviceBuffers)
-        {
-            variantPack[deviceBuffer.uid] = deviceBuffer.ptr;
-        }
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
         hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
-            batchnormGraph, batchnormBuilder.GetSize(), variantPack);
+            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
-    template <typename T>
-    static hipdnnPluginDeviceBuffer_t generateRandomHostBuffer(
-        TensorBase<T>& tensor, int uid, T min, T max, unsigned int seed = 0)
+    template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
+    static void runBatchnormBwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
+                                    hipdnn_sdk::data_objects::DataType scaleBiasDataType,
+                                    hipdnn_sdk::data_objects::DataType meanVarianceDataType)
     {
-        tensor.fillWithRandomValues(min, max, seed);
-        hipdnnPluginDeviceBuffer_t buffer;
-        buffer.uid = uid;
-        buffer.ptr = tensor.memory().hostData();
-        return buffer;
+        std::vector<int64_t> dims = {1, 3, 14, 14};
+        BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
+            dims, 1, TensorLayout::NCHW);
+
+        auto graphTuple = buildBatchnormBwdGraph(
+            tensorBundle, inputDataType, scaleBiasDataType, meanVarianceDataType);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
+            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
-    template <typename T>
-    static hipdnnPluginDeviceBuffer_t generateEmptyHostBuffer(TensorBase<T>& tensor, int uid)
+    template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
+    static void runBatchnormTrainTest(hipdnn_sdk::data_objects::DataType inputDataType,
+                                      hipdnn_sdk::data_objects::DataType scaleBiasDataType,
+                                      hipdnn_sdk::data_objects::DataType meanVarianceDataType,
+                                      bool useOptionalTensors = false)
     {
-        hipdnnPluginDeviceBuffer_t buffer;
-        buffer.uid = uid;
-        buffer.ptr = tensor.memory().hostData();
-        return buffer;
+        std::vector<int64_t> dims = {1, 3, 14, 14};
+        BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType> tensorBundle(
+            dims, 1, TensorLayout::NCHW, useOptionalTensors);
+
+        auto graphTuple = buildBatchnormTrainGraph(tensorBundle,
+                                                   inputDataType,
+                                                   scaleBiasDataType,
+                                                   meanVarianceDataType,
+                                                   useOptionalTensors);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+        hipdnn_sdk::test_utilities::CpuReferenceGraphExecutor().execute(
+            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 };
 
@@ -190,6 +117,12 @@ TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllHalfs)
         DataType::HALF, DataType::HALF, DataType::HALF);
 }
 
+TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllBFloats)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormFwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
 TEST(TestCpuReferenceGraphExecutor, SignaturesThatDontExist)
 {
     EXPECT_THROW((TestCpuReferenceGraphExecutor::runBatchnormFwdTest<float, half, half>(
@@ -199,4 +132,43 @@ TEST(TestCpuReferenceGraphExecutor, SignaturesThatDontExist)
     EXPECT_THROW((TestCpuReferenceGraphExecutor::runBatchnormFwdTest<float, half, float>(
                      DataType::FLOAT, DataType::HALF, DataType::FLOAT)),
                  std::runtime_error);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<float, float, float>(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<half, half, half>(
+        DataType::HALF, DataType::HALF, DataType::HALF);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormBwdAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormBwdTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<float, float, float>(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<float, float, float>(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, true);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<half, half, half>(
+        DataType::HALF, DataType::HALF, DataType::HALF);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BatchnormTrainAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runBatchnormTrainTest<hip_bfloat16, hip_bfloat16, hip_bfloat16>(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
 }
