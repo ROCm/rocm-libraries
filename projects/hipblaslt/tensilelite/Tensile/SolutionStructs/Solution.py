@@ -390,7 +390,9 @@ class Solution(collections.abc.Mapping):
     if (aemB * bpeB) % 4 != 0 or not state["BufferLoad"]:
       state["NonDTLTailLoopB"] = True
 
+    # 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
+       (state["ISA"] == (9, 5, 0) and state["ProblemType"]["ComputeDataType"].isInt32()) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):
       state["tailLoopOptA"] = False
