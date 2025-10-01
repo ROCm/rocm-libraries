@@ -420,7 +420,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     const miopen::ExecutionContext& ctx, const ProblemDescription& problem)
 {
     index     = 0;
-    kernel_id = "";
+    kernel_id = valid_kernels[index];
     split_k   = 0;
     // split_k is not used in this solver, but it is required by the AI heuristics interface
 
