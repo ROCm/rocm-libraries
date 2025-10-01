@@ -24,10 +24,14 @@ public:
     ShallowTensor(void* memory,
                   const std::vector<int64_t>& dims,
                   const std::vector<int64_t>& strides)
-        : _memory(memory)
+        : _memory(memory, TensorBase<T>::calculateItemCount(dims))
         , _dims(dims)
         , _strides(strides)
     {
+        if(!TensorBase<T>::isPacked(dims, strides))
+        {
+            throw std::invalid_argument("Tensor must be packed");
+        }
     }
 
     ShallowTensor(const ShallowTensor&) = delete;
