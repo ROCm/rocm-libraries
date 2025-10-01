@@ -77,7 +77,7 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto mode    = bn_problem.GetMode();
         if(mode == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "Spatial.cl";
+            kernel.kernel_file += "SpatialHIP.cpp";
             kernel.kernel_name += "Spatial";
         }
         else

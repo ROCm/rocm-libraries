@@ -62,6 +62,49 @@ constexpr static int log2_ceil_v = log2_ceil<N>::value;
 
 } // namespace detail
 
+/**
+ * Partial sum reduction over data stored in shared memory.
+ *
+ * @param lcl_mem   Shared memory.
+ * @param stride    Distance of to-be reduced elements in shared memory.
+ * @param id        Thread id.
+ * @param count     Number of elements to be reduced in one function call.
+ */
+template <typename FloatAccum, unsigned int SizeLclData>
+__forceinline__ __device__ void reduce_kernel(FloatAccum (&lcl_mem)[SizeLclData],
+                                              unsigned int stride,
+                                              unsigned int id,
+                                              unsigned int count)
+{
+    FloatAccum sum          = FloatAccum(0.);
+    unsigned int lcl_offset = id * count;
+
+    /*__attribute__((opencl_unroll_hint(2)))*/
+    for(unsigned int i = 0; i < count; i += stride)
+    {
+        sum += lcl_mem[lcl_offset + i];
+    }
+    lcl_mem[lcl_offset] = sum;
+}
+
+template <typename FloatAccu, unsigned int SizeLclData>
+__forceinline__ __device__ void
+regLDSreduce(FloatAccu* value, FloatAccu (&data)[SizeLclData], unsigned int localID, FloatAccu scale)
+{
+    data[localID] = *value;
+    __syncthreads();
+    if(localID < (SizeLclData >> 2))
+        reduce_kernel(data, 1, localID, 4);
+    __syncthreads();
+    if(localID < (SizeLclData >> 4))
+        reduce_kernel(data, 4, localID, 16);
+    __syncthreads();
+    if(localID == 0)
+        reduce_kernel(data, 16, localID, SizeLclData);
+    __syncthreads();
+    *value = data[0] * scale;
+}
+
 template <typename FloatAccum, unsigned int SizeLclData>
 __forceinline__ __device__ void lds_reduce2(FloatAccum& x,
                                             FloatAccum& y,
