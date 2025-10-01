@@ -37,6 +37,10 @@ function(add_hipsparse_example EXAMPLE_SOURCE)
   # Include common client headers
   target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
+  if (BUILD_CLIENTS_ONLY)
+    target_include_directories(${EXAMPLE_TARGET} PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
+  endif()
+
   # Linker dependencies
   target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::hipsparse)
 

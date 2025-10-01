@@ -41,6 +41,10 @@ endif()
 # This project may compile dependencies for clients
 project(hipsparse-clients LANGUAGES CXX)
 
+if (BUILD_CLIENTS_ONLY)
+  find_package(hipsparse 4.0.0 REQUIRED)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 # This option only works for make/nmake and the ninja generators, but no reason it shouldn't be on all the time
