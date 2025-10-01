@@ -159,6 +159,8 @@ static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
     }
 }
 
+// Constructs a full tensor indices vector from batch, channel, and spatial components. spatialOffset allows
+// skipping initial elements in the spatialIndices vector for convenience.
 static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
                                                       int64_t channelIdx,
                                                       const std::vector<int64_t>& spatialIndices,

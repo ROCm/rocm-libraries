@@ -895,36 +895,6 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DAsymmetricPadding)
     }
 }
 
-// TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DNdhwc)
-// {
-//     // Test 3D convolution with NDHWC layout
-//     Tensor<float> inputTensor({1, 2, 3, 3, 3}, TensorLayout::NDHWC);
-//     Tensor<float> weightTensor({1, 2, 2, 2, 2}); // KCDHW
-//     Tensor<float> outputTensor({1, 1, 2, 2, 2}, TensorLayout::NDHWC);
-
-//     // Fill input with sequential values
-//     for(int i = 0; i < 2 * 3 * 3 * 3; ++i)
-//     {
-//         inputTensor.setHostValue(static_cast<float>(i + 1), i);
-//     }
-
-//     // Fill weights with 1s
-//     for(int i = 0; i < 1 * 2 * 2 * 2 * 2; ++i)
-//     {
-//         weightTensor.setHostValue(1.0f, i);
-//     }
-
-//     std::vector<int64_t> strides   = {1, 1, 1};
-//     std::vector<int64_t> dilations = {1, 1, 1};
-//     std::vector<int64_t> padding   = {0, 0, 0};
-
-//     CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
-//         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
-
-//     // Verify that output is non-zero
-//     EXPECT_NE(outputTensor.getHostValue(0, 0, 0, 0, 0), 0.0f);
-// }
-
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSanityValidation)
 {
     // Basic backward data convolution test
