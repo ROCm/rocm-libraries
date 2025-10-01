@@ -27,6 +27,8 @@
 #include "gemm.hpp"
 #include "runtime_args_selection.hpp"
 
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
+
 #include "utility.hpp"
 
 using namespace rocRoller;
@@ -459,10 +461,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
     if(gemm->streamK)
     {
-        params->streamK = true;
-        params->loopOverOutputTilesDimensions = {0, 1};
+        StreamKMode streamKMode = StreamKMode::Standard;
         if(gemm->streamKTwoTile)
-            params->streamKTwoTile = true;
+            streamKMode = StreamKMode::TwoTile;
+        params->streamK = streamKMode;
+
+        params->loopOverOutputTilesDimensions = {0, 1};
     }
 
     params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});

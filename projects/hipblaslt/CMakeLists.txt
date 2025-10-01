@@ -193,13 +193,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBS_SUPERBUILD)
             set(BUILD_TESTING OFF)
             set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
             set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-            include(FetchContent)
-            FetchContent_Declare(
-                rocRoller
-                GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-                GIT_TAG 7ba790874d9bf3fd89d6287524cc91e552a72e3b
-            )
-            FetchContent_MakeAvailable(rocRoller)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
         endblock()
     else()
         find_package(rocroller REQUIRED)
