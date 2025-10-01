@@ -68,8 +68,8 @@ public:
         {
             now = boost::posix_time::second_clock::universal_time();
             acquired = fs::create_directory(lockfile_path);
-            //if(acquired)
-            //    acquired = try_lock_hardlink();
+            if(acquired)
+                acquired = try_lock_hardlink();
             if(!acquired) {
                 MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 if(now < abs_time)
@@ -87,8 +87,8 @@ public:
         while(!acquired)
         {
             acquired = fs::create_directory(lockfile_path);
-            //if(acquired)
-            //    acquired = try_lock_hardlink();
+            if(acquired)
+                acquired = try_lock_hardlink();
             if(!acquired) {
                 MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 std::this_thread::sleep_for(std::chrono::microseconds(100));
@@ -102,8 +102,8 @@ public:
     {
         bool acquired = false;
         acquired = fs::create_directory(lockfile_path);
-        //if(acquired)
-        //    acquired = try_lock_hardlink();
+        if(acquired)
+            acquired = try_lock_hardlink();
         if(acquired)
             MIOPEN_LOG_I2("Lock < " << lockfile_path.string());
         return acquired;
@@ -133,7 +133,7 @@ public:
     void unlock()
     {
         MIOPEN_LOG_I2("Unlock < " << lockfile_path.string());
-        //unlock_hardlink();
+        unlock_hardlink();
         fs::remove(lockfile_path);
     }
 
