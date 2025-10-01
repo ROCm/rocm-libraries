@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2021-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,6 @@ namespace miopen {
 namespace solver {
 
 namespace activ {
-
 bool ActivFwdSolver1::IsApplicable(const ExecutionContext& context,
                                    const miopen::activ::ProblemDescription& problem) const
 {
@@ -49,8 +48,7 @@ bool ActivFwdSolver1::IsApplicable(const ExecutionContext& context,
         return false;
 
     // Todo: probably fix "the rest" logic here
-    // return !ActivFwdSolver0{}.IsApplicable(context, problem);
-    return true; // Force fwd_1 for testing
+    return !ActivFwdSolver0{}.IsApplicable(context, problem);
 }
 
 ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
@@ -243,7 +241,9 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
     kernel.l_wk.push_back(grp_tile1);
     kernel.l_wk.push_back(1);
 
-    kernel.g_wk.push_back(glbl_wk);
+    const auto global_work_size = ((glbl_wk + grp_tile0 - 1) / grp_tile0) * grp_tile0;
+
+    kernel.g_wk.push_back(global_work_size);
     kernel.g_wk.push_back(1);
     kernel.g_wk.push_back(1);
 

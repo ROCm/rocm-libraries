@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2021-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,11 +100,15 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
                         : (x_lens.size() == 4) ? x_lens[2]
                                                : x_lens[3];
 
+    const auto map_size_aligned = (x_elem_sz + read_unit - 1) / read_unit;
+
     auto build_params = KernelBuildParameters{
         {"LITE"},
         {"MIOPEN_READ_UNIT", read_unit},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", problem.GetActivDesc().GetMode()},
+        {"MIOPEN_MAP_SZ", x_elem_sz},
+        {"MIOPEN_MAP_SZ_ALIGNED", map_size_aligned},
     };
 
     if(problem.GetXDesc().GetType() == miopenFloat)
@@ -129,13 +133,17 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
         auto kernel_info         = KernelInfo{};
         kernel_info.comp_options = build_params.GenerateFor(kbp::HIP{});
 
-        kernel_info.l_wk.push_back(256);
+        const auto local_work_size = 256;
+
+        kernel_info.l_wk.push_back(local_work_size);
         kernel_info.l_wk.push_back(1);
         kernel_info.l_wk.push_back(1);
 
         const auto MAP_RD = read_len / read_unit;
+        const auto global_work_size =
+            ((MAP_RD + local_work_size - 1) / local_work_size) * local_work_size;
 
-        kernel_info.g_wk.push_back(MAP_RD);
+        kernel_info.g_wk.push_back(global_work_size);
         kernel_info.g_wk.push_back(packed ? 1 : height);
         kernel_info.g_wk.push_back(1);
 
