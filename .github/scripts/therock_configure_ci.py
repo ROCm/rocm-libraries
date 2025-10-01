@@ -31,7 +31,7 @@ def set_github_output(d: Mapping[str, str]):
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
-        
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -96,13 +96,14 @@ def retrieve_projects(args):
     if args.get("is_push"):
         subtrees = list(subtree_to_project_map.keys())
 
-    # If .github/*/therock* were changed, run all subtrees
-    base_ref = args.get("base_ref")
-    modified_paths = get_modified_paths(base_ref)
-    print("modified_paths (max 200):", modified_paths[:200])
-    related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
-    if related_to_therock_ci:
-        subtrees = list(subtree_to_project_map.keys())
+    # If .github/*/therock* were changed for a push or pull request, run all subtrees
+    if args.get("is_push") or args.get("is_pull_request"):
+        base_ref = args.get("base_ref")
+        modified_paths = get_modified_paths(base_ref)
+        print("modified_paths (max 200):", modified_paths[:200])
+        related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
+        if related_to_therock_ci:
+            subtrees = list(subtree_to_project_map.keys())
 
     projects = set()
     # collect the associated subtree to project

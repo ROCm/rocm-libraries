@@ -26,6 +26,7 @@ from rocisa.instruction import DSLoadB128, DSLoadB32, DSLoadB64, DSStoreB128, \
     DSStoreB32, DSStoreB64, SAndB32, SCBranchSCC0, SCmpEQU32, SMovB32, SWaitCnt, \
     VAddF32, VAddI32, VAddU32, VAndB32, VLShiftLeftAddU32, VMovB32, VMulLOU32
 from rocisa.functions import vectorStaticDivide
+from copy import deepcopy
 from ..Common import log2, ceilDivide
 from ..Component import Component
 from ..KernelWriterModules import *
@@ -189,6 +190,11 @@ class LSUOn(LSU):
         module.add(VAndB32(vgpr(wave_id), hex(numWaves - 1), vgpr(wave_id), \
             comment="Get wave ID"))
 
+        # accVgprs read in GSUAMBSK
+        codeAccVgprRead = []
+        if kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+            codeAccVgprRead = deepcopy(writer.codes.accVgprRead) if writer.states.serializedStore else None
+
         for reUseIdx in range(kernel["LocalSplitUReuseLDS"]):
             module.addComment1("LocalSplitU: local write %d/%d"%(reUseIdx+1,kernel["LocalSplitUReuseLDS"]))
             module.add(Label("localSplitULocalWriteAndRead_%d"%(reUseIdx+1), ""))
@@ -349,6 +355,24 @@ class LSUOn(LSU):
                                 else:
                                 # TODO: hpa_half, int8
                                     assert(0) # unsupported data type, need to modify here and LSU write/read code
+                    
+                    if kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+                        if not kernel["MIArchVgpr"]:
+                            # write to accvgpr
+                            for regToAdd in range(regsPerStore):
+                                codeAccVgprReadInst = codeAccVgprRead.popFirstItem() # v_accvgpr_read_b32
+                                accIdx = codeAccVgprReadInst.srcs[0].regIdx
+                                writeInst = writer.accVgprReadWriteFunction(kernel, accIdx, False)
+                                dstVgpr  = writer.accVgprReadWriteIndex(kernel, accIdx)
+                                moduleReduction.add(writeInst(dst=dstVgpr, src=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd)),
+                                                    comment="copy vreg[%u] to acc[%u]" % (localReadVgprIdx+regToAdd, accIdx)))
+                        else:
+                            # write to vgpr
+                            for regToAdd in range(regsPerStore):
+                                codeAccVgprReadInst = codeAccVgprRead.popFirstItem() # v_mov_b32
+                                dstVgpr = codeAccVgprReadInst.srcs[0]
+                                moduleReduction.add(VMovB32(dst=dstVgpr, src=vgpr("LsuReduction+%u"%(localReadVgprIdx+regToAdd)),
+                                                            comment="copy lsu results to vreg"))
                     localReadVgprIdx += regsPerStore
 
             # Release write/read resource
@@ -550,7 +574,7 @@ class LSUOn(LSU):
         vectorWidths     = [fullVw, edgeVw]
         vectorWidths_1 = [fullVw_1, edgeVw_1]
 
-        noGSUBranch = (kernel["GlobalSplitU"] == 0)
+        noGSUBranch = (kernel["GlobalSplitU"] == 0 and kernel["StreamK"] != 3)
         module = Module("localSplitUGlobalWrite")
         module.add(writer.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch))
         writer.cleanupGlobalWrite(kernel)

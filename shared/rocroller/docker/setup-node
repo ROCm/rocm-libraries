@@ -42,7 +42,7 @@ setup-node
 Usage:
 
  $ source $0
- Adds the node installation binary directory 
+ Adds the node installation binary directory
  (${RR_NODE_BINPATH})
  to your \$PATH.
 

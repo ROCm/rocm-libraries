@@ -46,8 +46,8 @@ The captured graph can be launched as shown below:
       CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, NULL, NULL, 0));
       CHECK_HIP_ERROR(hipGraphLaunch(instance, stream));
 
-Graph support requires asynchronous HIP APIs, so users must enable stream-order memory allocation.
-For more details, see :ref:`stream order alloc`.
+Graph support requires asynchronous HIP APIs, so users must use the ``rocBLAS_managed`` (default) memory allocation scheme which uses stream-order memory allocation.
+For more details, see :ref:`Device Memory Allocation Usage`.
 
 During stream capture, rocBLAS stores the allocated host and device memory in the handle.
 The allocated memory is freed when the handle is destroyed.
@@ -71,4 +71,3 @@ HIP Graph known issues in rocBLAS
 =========================================================
 
 On the Windows platform, batched functions (Level-1, Level-2, and Level-3) produce incorrect results.
-

@@ -1,3 +1,8 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+/**
+
 /**
  * @name Variant access from get element
  * @description Variant access from get element

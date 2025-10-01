@@ -890,6 +890,81 @@ namespace TensileLite
         };
 
         /**
+         * Specialization of DistanceMatchingTable for Range Distance. This special case will
+         * only select key in the table if it is within the range described by the provided key
+         */
+        template <typename Key, typename Object, typename Value, typename ReturnValue>
+        struct DistanceMatchingTable<Key, Object, Value, ReturnValue, Matching::Range<Key>>
+            : public DistanceMatchingCommon<Key,
+                                            Object,
+                                            Value,
+                                            ReturnValue,
+                                            Matching::Range<Key>>
+        {
+            using Base       = MatchingTable<Object, Value, ReturnValue>;
+            using Entry      = MatchingTableEntry<Key, Value>;
+            using Transform  = typename Base::Transform;
+            using Properties = typename Base::Properties;
+            using Range      = Matching::Range<Key>;
+            using Common
+                = DistanceMatchingCommon<Key, Object, Value, ReturnValue, Matching::Range<Key>>;
+            using Common::distance;
+            using Common::nullValue;
+            using Common::table;
+
+            DistanceMatchingTable(ReturnValue nullValue = ReturnValue())
+                : Common(nullValue)
+            {
+            }
+
+            DistanceMatchingTable(Properties const& properties,
+                               ReturnValue       nullValue = ReturnValue())
+                : Common(properties, nullValue)
+            {
+            }
+
+            DistanceMatchingTable(Range const&   distance,
+                               Properties const& properties,
+                               ReturnValue       nullValue = ReturnValue())
+                : Common(distance, properties, nullValue)
+            {
+            }
+
+            std::tuple<ReturnValue, double> findBestKeyMatch(Key const& key,
+                                                             Transform  transform) const
+            {
+                for(const auto& row : table)
+                {
+                    if((row.key[0] == -1 || key[0] >= row.key[0]) &&  // M >= M_min
+                       (row.key[1] == -1 || key[1] <= row.key[1]) &&  // M <= M_max
+                       (row.key[2] == -1 || key[2] >= row.key[2]) &&  // N >= N_min
+                       (row.key[3] == -1 || key[3] <= row.key[3]) &&  // N <= N_max
+                       (row.key[4] == -1 || key[4] >= row.key[4]) &&  // batch >= batch_min
+                       (row.key[5] == -1 || key[5] <= row.key[5]) &&  // batch <= batch_max
+                       (row.key[6] == -1 || key[6] >= row.key[6]) &&  // K >= K_min
+                       (row.key[7] == -1 || key[7] <= row.key[7]))    // K <= K_max
+                    {
+                        return std::make_tuple(transform(row.value), 0.0);
+                    }
+                }
+                return std::make_tuple(this->nullValue, std::numeric_limits<double>::max());
+            }
+
+            std::vector<ReturnValue>
+                findTopKeyMatch(Key const& key, Transform transform, int numSolutions) const
+            {
+                ReturnValue              solution;
+                std::vector<ReturnValue> solutions;
+                double                   fitness;
+            std:
+                tie(solution, fitness) = findBestKeyMatch(key, transform);
+                if(solution)
+                    solutions.push_back(solution);
+                return solutions;
+            }
+        };
+
+        /**
          * Specialization of DistanceMatchingTable for GridBased Distance. This special case will
          * use a more efficient search algorithm that depends on the grid structure
          */

@@ -90,8 +90,8 @@ Static library
 ----------------
 
 To build static libraries with ``install.sh``, use the ``--static`` option.
-This produces a non-standard static library build. This means it has an additional runtime dependency 
-consisting of the entire ``hipblaslt/`` subdirectory, which is located in the ``/opt/rocm/lib`` folder. 
+This produces a non-standard static library build. This means it has an additional runtime dependency
+consisting of the entire ``hipblaslt/`` subdirectory, which is located in the ``/opt/rocm/lib`` folder.
 You can move this folder, but you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH``
 to the new location.
 
@@ -113,7 +113,7 @@ Building the library manually
 Before building hipBLASLt manually, ensure the following dependencies are installed on your system:
 
 *  The `hipBLAS-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_ header files.
-*  The `ROC-tracer (ROC-TX) <https://github.com/ROCm/roctracer>`_ library (this is typically pre-installed).
+*  The `ROC-tracer (ROC-TX) <https://github.com/ROCm/rocm-systems/tree/develop/projects/roctracer>`_ library (this is typically pre-installed).
 
 Building hipBLASLt
 ^^^^^^^^^^^^^^^^^^^^

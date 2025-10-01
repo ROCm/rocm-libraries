@@ -2,7 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.24.4)
-project(rocroller VERSION 1.0.0 LANGUAGES CXX)
+set(ROCROLLER_VERSION 1.0.0)
+set(ROCROLLER_SOVERSION 1)
+project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -124,27 +126,6 @@ else()
     set(msgpack_libs msgpackc)
 endif()
 
-find_package(Boost 1.74.0 QUIET)
-if(NOT Boost_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            boost
-            URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
-        )
-        set(boost_temp_testing ${BUILD_TESTING})
-        set(BUILD_TESTING OFF)
-        set(BUILD_SHARED_LIBS OFF)
-        set(boost_temp_shared ${BUILD_SHARED_LIBS})
-        set(Boost_USE_STATIC_LIBS ON)
-        set(BOOST_INCLUDE_LIBRARIES multi_index)
-        FetchContent_MakeAvailable(boost)
-        set(BUILD_TESTING ${boost_temp_testing})
-        set(BUILD_SHARED_LIBS ${boost_temp_shared})
-    else()
-        message(FATAL_ERROR "Failed to find boost")
-    endif()
-endif()
-
 find_package(hip REQUIRED)
 find_package(amd_comgr REQUIRED)
 if(ROCROLLER_ENABLE_LLVM)
@@ -157,6 +138,11 @@ else()
     add_library(rocroller STATIC)
     set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
+set_target_properties(rocroller
+    PROPERTIES
+        VERSION ${ROCROLLER_VERSION}
+        SOVERSION ${ROCROLLER_SOVERSION}
+)
 add_library(roc::rocroller ALIAS rocroller)
 
 add_library(rocroller-interface INTERFACE)
@@ -188,15 +174,10 @@ if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
     set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH};ASAN_OPTIONS=detect_leaks=0")
 endif()
 
-if(ROCROLLER_BUILD_SHARED_LIBS)
-    target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
-else()
-    target_link_libraries(rocroller-interface INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,roc::rocroller>)
-endif()
+target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(rocroller PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
@@ -233,7 +214,6 @@ endif()
 
 target_link_libraries(rocroller
     PUBLIC
-       Boost::headers
        hip::host
     PRIVATE
         ${msgpack_libs}
@@ -256,8 +236,8 @@ target_link_libraries(rocroller
         ${llvm_libs}
 )
 
-target_include_directories(rocroller 
-    PUBLIC 
+target_include_directories(rocroller
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
 )
 
@@ -312,7 +292,6 @@ rocm_export_targets(
     NAMESPACE roc::
     EXPORT rocroller-targets
     DEPENDS PACKAGE yaml-cpp
-    DEPENDS PACKAGE Boost
     DEPENDS PACKAGE fmt
     DEPENDS PACKAGE hip
 )

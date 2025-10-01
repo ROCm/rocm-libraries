@@ -3,23 +3,36 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## (Unreleased) rocBLAS 5.0.0
+## rocBLAS 5.1.0 for ROCm 7.1
+
+### Added
+* Sample for clients using OpenMP threads calling rocBLAS functions.
+* gfx1103, gfx1150, and gfx1151 enabled.
+
+### Changed
+* By default, the Tensile build is no longer based on `tensile_tag.txt` but uses the same commit from shared/tensile in the rocm-libraries repository. The rmake or install `-t` option can build from another local path with a different commit.
+
+### Optimized
+
+* Improved the performance of Level 2 gemv transposed (`TransA != N`) for the problem sizes where `m` is small and `n` is large on gfx90a and gfx942.
+
+## rocBLAS 5.0.0 for ROCm 7.0
 
 ### Added
 
 * gfx950 support
 * `ROCBLAS_LAYER = 8` internal API logging for `gemm` debugging
-* Support for AOCL 5.0 gcc build as a client reference library 
-* Allow `PkgConfig` for client reference library fallback detection 
+* Support for AOCL 5.0 gcc build as a client reference library
+* Allow `PkgConfig` for client reference library fallback detection
 
 ### Changed
 
-* `CMAKE_CXX_COMPILER` is now passed on during compilation for a Tensile build 
+* `CMAKE_CXX_COMPILER` is now passed on during compilation for a Tensile build
 * Change default atomics mode from `allowed` to `not allowed`
 
 ### Removed
 
-* Support code for non-production gfx targets 
+* Support code for non-production gfx targets
 * `rocblas_hgemm_kernel_name`, `rocblas_sgemm_kernel_name`, and `rocblas_dgemm_kernel_name` API functions
 * Use of `warpSize` as a constexpr
 * Use of deprecated behavior of `hipPeekLastError`
@@ -29,8 +42,8 @@ rocBLAS documentation is available at
 
 ### Optimized
 
-* Optimized `gemm` by using `gemv` kernels when applicable 
-* Optimized `gemv` for small `m` and `n` with a large batch count on gfx942 
+* Optimized `gemm` by using `gemv` kernels when applicable
+* Optimized `gemv` for small `m` and `n` with a large batch count on gfx942
 * Improved the performance of Level 1 `dot` for all precisions and variants when `N > 100000000` on gfx942
 * Improved the performance of Level 1 `asum` and `nrm2` for all precisions and variants on gfx942
 * Improved the performance of Level 2 `sger` (single precision) on gfx942
@@ -38,17 +51,18 @@ rocBLAS documentation is available at
 
 ### Resolved issues
 
-* Fixed environment variable path-based logging to append multiple handle output to the same file 
-* Support numerics when `trsm` is running with `rocblas_status_perf_degraded` 
+* Fixed environment variable path-based logging to append multiple handle output to the same file
+* Support numerics when `trsm` is running with `rocblas_status_perf_degraded`
 * Fixed the build dependency installation of `joblib` on some operating systems
-* Return `rocblas_status_internal_error` when `rocblas_[set,get]_ [matrix,vector]` is called with a host pointer in place of a device pointer 
+* Return `rocblas_status_internal_error` when `rocblas_[set,get]_ [matrix,vector]` is called with a host pointer in place of a device pointer
 * Reduced the default verbosity level for internal GEMM backend information
 * Updated from the deprecated rocm-cmake to ROCmCMakeBuildTools
 * Corrected AlmaLinux gfortran package dependencies
+* Included upgrade of `packaging` in addition to `pip` in Tensile Virtual Environment to stabilize `setuptools` from failures
 
 ### Upcoming changes
 
-* Deprecated the use of negative indices to indicate the default solution is being used for `gemm_ex` with `rocblas_gemm_algo_solution_index` 
+* Deprecated the use of negative indices to indicate the default solution is being used for `gemm_ex` with `rocblas_gemm_algo_solution_index`
 
 ## rocBLAS 4.4.0 for ROCm 6.4
 
@@ -692,4 +706,3 @@ rocBLAS documentation is available at
 When using the install.sh script for "all" GPU Targets, which is the default, you must first set an environment variable `HCC_AMDGPU_TARGET` listing the GPU targets, e.g.  `HCC_AMDGPU_TARGET=gfx803,gfx900,gfx906,gfx908`
 If building for a specific architecture(s) using the  `-a` | --architecture flag, you should also set the environment variable `HCC_AMDGPU_TARGET` to match.
 Mismatching the environment variable to the `-a` flag architectures creates builds that may result in `SEGFAULTS` when running on GPUs which weren't specified.
-

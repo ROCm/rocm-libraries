@@ -53,9 +53,15 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       $<BUILD_INTERFACE:${COMMON_TEST_HEADER_DIRECTORY}>
   )
 
+  if(USE_SYSTEM_LIB)
+    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocprim)
+    # We need this include to allow tests to find the common utilities folder
+    target_include_directories(${TEST_TARGET} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  else()
+    target_link_libraries(${TEST_TARGET} PRIVATE rocprim)
+  endif()
   target_link_libraries(${TEST_TARGET}
     PRIVATE
-      rocprim
       GTest::GTest
       GTest::Main
   )
@@ -319,6 +325,7 @@ add_rocprim_test("rocprim.rocprim_types" test_rocprim_types.cpp)
 add_rocprim_test("rocprim.texture_cache_iterator" test_texture_cache_iterator.cpp)
 add_rocprim_test("rocprim.thread" test_thread.cpp)
 add_rocprim_test("rocprim.thread_algos" test_thread_algos.cpp)
+add_rocprim_test("rocprim.tuple" test_tuple.cpp)
 add_rocprim_test("rocprim.utils_sort_checker" test_utils_sort_checker.cpp)
 add_rocprim_test("rocprim.transform_iterator" test_transform_iterator.cpp)
 add_rocprim_cpp_standard_test(17 OFF "_cpp17" "rocprim.type_traits_interface" test_type_traits_interface.cpp)

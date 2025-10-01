@@ -101,8 +101,11 @@ add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
 
 # callback functions need to be built as relocatable device code
-target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
-target_link_options( rocfft-test PRIVATE -fgpu-rdc )
+# (causes failure at link stage on Windows)
+if (NOT WIN32)
+  target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
+  target_link_options( rocfft-test PRIVATE -fgpu-rdc )
+endif()
 
 find_package( Boost REQUIRED )
 set( Boost_DEBUG ON )
@@ -216,16 +219,14 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
   )
 endif()
 
+find_package( GTest QUIET )
 
-
-include( ../cmake/build-gtest.cmake )
-
-if( BUILD_GTEST OR NOT GTEST_FOUND )
+if( GTest_FOUND )
+    target_link_libraries( rocfft-test PRIVATE GTest::gtest )
+else()
+  include( ../cmake/build-gtest.cmake )
   add_dependencies( rocfft-test gtest )
   list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
-else()  
-  list( APPEND rocfft-test_include_dirs $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
   list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
 endif()
 
@@ -258,6 +259,7 @@ if ( USE_HIPRAND )
   PRIVATE
   hip::hiprand
   )
+  target_compile_definitions( rocfft-test PRIVATE USE_HIPRAND )
 endif()
 
 if( ROCFFT_MPI_ENABLE )
@@ -373,44 +375,47 @@ if( ROCFFT_MPI_ENABLE )
     )
     target_compile_options( ${worker} PRIVATE ${WARNING_FLAGS} )
 
-  if ( ROCFFT_CRAY_MPI_ENABLE )
-    target_link_libraries( ${worker}
-      OpenMP::OpenMP_CXX 
-      hip::hiprand
-      hip::device
-      MPI::MPI_CXX
-      ${FFTW_LIBRARIES}
-      "mpi_gtl_hsa"
-    )
-      get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
-      target_link_directories( ${worker}
-	PRIVATE
-	${MPI_LIBDIR}/../../../../gtl/lib )
+    if ( ROCFFT_CRAY_MPI_ENABLE )
+      target_link_libraries( ${worker} PRIVATE
+        OpenMP::OpenMP_CXX 
+        hip::hiprand
+        hip::device
+        MPI::MPI_CXX
+        ${FFTW_LIBRARIES}
+        "mpi_gtl_hsa"
+      )
+        get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
+        target_link_directories( ${worker}
+  	PRIVATE
+  	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
-    target_link_libraries( ${worker}
-      OpenMP::OpenMP_CXX 
-      hip::hiprand
-      hip::device
-      MPI::MPI_CXX
-      ${FFTW_LIBRARIES}
-    )    
+      target_link_libraries( ${worker} PRIVATE
+        OpenMP::OpenMP_CXX 
+        hip::hiprand
+        hip::device
+        MPI::MPI_CXX
+        ${FFTW_LIBRARIES}
+      )    
     endif()
+
+    target_compile_definitions( ${worker} PRIVATE USE_HIPRAND )
+
     set_target_properties(${worker}
                           PROPERTIES 
                           RUNTIME_OUTPUT_DIRECTORY 
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
-    
+
   endforeach()
 
   # link normal MPI worker against rocFFT
-  target_link_libraries( rocfft_mpi_worker
+  target_link_libraries( rocfft_mpi_worker PRIVATE
     roc::rocfft
   )
 
   # dyna worker only needs to dynamically load libraries
   target_compile_definitions( dyna_rocfft_mpi_worker PRIVATE ROCFFT_DYNA_MPI_WORKER )
-  target_link_libraries( dyna_rocfft_mpi_worker
+  target_link_libraries( dyna_rocfft_mpi_worker PRIVATE
     ${CMAKE_DL_LIBS}
   )
 
@@ -456,6 +461,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocfft-coverage_*.profraw -o ./coverage-report/rocfft.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

@@ -67,9 +67,19 @@ namespace rocRoller
                 return EvaluateDetail::evaluateOp(expr, arg);
             }
 
+            CommandArgumentValue operator()(Concatenate const& expr)
+            {
+                throw std::runtime_error("N-ary operation present in runtime expression");
+            }
+
             CommandArgumentValue operator()(BitFieldExtract const& expr)
             {
                 throw std::runtime_error("BitFieldExtract present in runtime expression.");
+            }
+
+            CommandArgumentValue operator()(BitfieldCombine const& expr)
+            {
+                throw std::runtime_error("BitfieldCombine present in runtime expression.");
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)

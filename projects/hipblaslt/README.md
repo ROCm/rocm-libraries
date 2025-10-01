@@ -72,7 +72,7 @@ cmake -B build                                       \
       -S .                                           \
       -D CMAKE_BUILD_TYPE=Release                    \
       -D GPU_TARGETS=gfx950                          \
-      --prefix opt-rocm
+      --preset opt-rocm
 # build
 cmake --build build --parallel 32
 ```
@@ -83,7 +83,7 @@ cd projects/hipblaslt
 # configure
 cmake -B build \
       -S .     \
-      --prefix gemm-libs
+      --preset gemm-libs
 # build
 cmake --build build --parallel 32
 ```
@@ -177,7 +177,7 @@ python3 -m pip install -r tensilelite/requirements.txt
 
 ## Unit tests
 
-All unit tests are located in `build/release/clients/staging/`. To build these tests, you must build
+All unit tests are located in `build/release/clients/`. To build these tests, you must build
 hipBLASLt with `--clients`.
 
 You can find more information at the following links:
