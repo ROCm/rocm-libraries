@@ -294,23 +294,33 @@ public:
   // Constructors
   //==========================================================================
 
+  /*! Constructs a \p unique_ptr that does not own an object.
+   */
   template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
   THRUST_HOST constexpr unique_ptr() noexcept
       : m_ptr()
       , m_deleter()
   {}
 
+  /*! Constructs a \p unique_ptr that does not own an object.
+   */
   template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
   THRUST_HOST constexpr unique_ptr(std::nullptr_t) noexcept
       : unique_ptr()
   {}
 
+  /*! Constructs a \p unique_ptr that owns the object pointed to by \p p.
+   *  \param p A pointer to the object in device memory to manage.
+   */
   template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(pointer p) noexcept
       : m_ptr(p)
       , m_deleter()
   {}
 
+  /*! Constructs a \p unique_ptr that owns the object pointed to by \p raw_p.
+   *  \param raw_p A raw pointer to the object in device memory to manage.
+   */
   template <bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
             class      = EnableIfDeleterDefaultDelete<Dummy>>
@@ -319,12 +329,22 @@ public:
       , m_deleter()
   {}
 
+  /*! Constructs a \p unique_ptr that owns the object pointed to by \p p and
+   *  uses \p d as the deleter.
+   *  \param p A pointer to the object in device memory to manage.
+   *  \param d The deleter to use.
+   */
   template <bool Dummy = true, class = EnableIfDeleterConstructible<LValRefType<Dummy>>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer p, LValRefType<Dummy> d) noexcept
       : m_ptr(p)
       , m_deleter(d)
   {}
 
+  /*! Constructs a \p unique_ptr that owns the object pointed to by \p p and
+   *  uses \p d as the deleter.
+   *  \param p A pointer to the object in device memory to manage.
+   *  \param d The deleter to use.
+   */
   template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer p, GoodRValRefType<Dummy> d) noexcept
       : m_ptr(p)
@@ -336,11 +356,19 @@ public:
   template <bool Dummy = true, class = EnableIfDeleterConstructible<BadRValRefType<Dummy>>>
   unique_ptr(pointer p, BadRValRefType<Dummy> d) = delete;
 
+  /*! Move constructor. Constructs a \p unique_ptr by taking ownership of the
+   *  object managed by \p u.
+   *  \param u The \p unique_ptr to move from.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr&& u) noexcept
       : m_ptr(u.release())
       , m_deleter(std::forward<deleter_type>(u.get_deleter()))
   {}
 
+  /*! Move constructor. Constructs a \p unique_ptr by taking ownership of the
+   *  object managed by \p u.
+   *  \param u The \p unique_ptr to move from.
+   */
   template <class U, class E, class = EnableIfMoveConvertible<unique_ptr<U, E>, U>, class = EnableIfDeleterConvertible<E>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<U, E>&& u) noexcept
       : m_ptr(u.release())
