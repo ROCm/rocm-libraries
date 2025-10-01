@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <numeric>
 #include <vector>
 
@@ -49,9 +50,12 @@ public:
         std::for_each(channels.begin(), channels.end(), [&](int64_t cidx) {
             auto mean = estimatedMean.getHostValue(0, cidx);
             auto variance = estimatedVariance.getHostValue(0, cidx);
+
+            //There is some extra casting in here to deal with double -> float implicit casts.
             MeanVarianceDataType invVariance
                 = static_cast<MeanVarianceDataType>(1.0f)
-                  / sqrtInternal(variance + static_cast<MeanVarianceDataType>(epsilon));
+                  / sqrtInternal(variance
+                                 + static_cast<MeanVarianceDataType>(static_cast<float>(epsilon)));
 
             // process the batch per channel
             iterateAlongDimensions(
@@ -96,7 +100,7 @@ public:
         auto nChannels = x.dims().at(1);
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
 
-        auto nhw = static_cast<MeanVarianceDataType>(elementsPerChannel);
+        auto nhw = static_cast<MeanVarianceDataType>(static_cast<float>(elementsPerChannel));
 
         // Build dimensions for iteration: [batch, spatial...]
         std::vector<int64_t> batchAndSpatial = {x.dims()[0]};
@@ -106,8 +110,8 @@ public:
         std::iota(channels.begin(), channels.end(), 0);
 
         std::for_each(channels.begin(), channels.end(), [&](int64_t cidx) {
-            MeanVarianceDataType meanAccum = 0.0;
-            MeanVarianceDataType varianceAccum = 0.0;
+            auto meanAccum = static_cast<MeanVarianceDataType>(0.0);
+            auto varianceAccum = static_cast<MeanVarianceDataType>(0.0);
 
             // Calculate mean and variance for this channel
             iterateAlongDimensions(
@@ -119,7 +123,7 @@ public:
                     varianceAccum += inVal * inVal;
                 });
 
-            MeanVarianceDataType channelMean = meanAccum /= nhw;
+            MeanVarianceDataType channelMean = meanAccum = meanAccum / nhw;
             MeanVarianceDataType channelVariance
                 = (varianceAccum / nhw) - (channelMean * channelMean);
 
@@ -163,8 +167,9 @@ public:
 
                 auto currentVar = prevRunningVariance->getHostValue(0, cidx);
                 // Apply Bessel's correction for unbiased variance estimate
-                auto adjustedVariance
-                    = (nhw == one) ? channelVariance : (nhw / (nhw - one)) * channelVariance;
+                auto adjustedVariance = (nhw == one) ? channelVariance
+                                                     : static_cast<MeanVarianceDataType>(
+                                                           (nhw / (nhw - one)) * channelVariance);
                 auto newVar = (one - momentum) * currentVar + momentum * adjustedVariance;
                 nextRunningVariance->setHostValue(newVar, 0, cidx);
             }
@@ -211,7 +216,8 @@ public:
 
         auto nChannels = x.dims().at(1);
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
-        auto nhwF = static_cast<MeanVarianceDataType>(elementsPerChannel);
+        //Cant cast directly from int64 to half or bloat16 so cast to float first.
+        auto nhwF = static_cast<MeanVarianceDataType>(static_cast<float>(elementsPerChannel));
 
         std::vector<int64_t> channels(static_cast<size_t>(nChannels));
         std::iota(channels.begin(), channels.end(), 0);
@@ -226,8 +232,8 @@ public:
             auto channelScale = scale.getHostValue(0, cidx);
 
             // Calculate dot product for (x - mean) * channelInvVariance * dy and ∑ dy for this channel
-            MeanVarianceDataType dotProduct = 0;
-            MeanVarianceDataType sumDy = 0;
+            auto dotProduct = static_cast<MeanVarianceDataType>(0.0);
+            auto sumDy = static_cast<MeanVarianceDataType>(0.0);
 
             iterateAlongDimensions(
                 batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
@@ -237,8 +243,9 @@ public:
                     auto dyVal = static_cast<MeanVarianceDataType>(dy.getHostValue(fullIndices));
 
                     MeanVarianceDataType xHat = (xVal - channelMean) * channelInvVariance;
-                    dotProduct += xHat * dyVal;
-                    sumDy += dyVal;
+                    // for half no += operator exists
+                    dotProduct = dotProduct + (xHat * dyVal);
+                    sumDy = sumDy + dyVal;
                 });
 
             // Per channel:
