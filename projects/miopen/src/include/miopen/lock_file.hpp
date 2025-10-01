@@ -68,8 +68,8 @@ public:
         {
             now = boost::posix_time::second_clock::universal_time();
             acquired = fs::create_directory(lockfile_path);
-            if(acquired)
-                acquired = try_lock_hardlink();
+            //if(acquired)
+            //    acquired = try_lock_hardlink();
             if(!acquired) {
                 MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 if(now < abs_time)
@@ -87,8 +87,8 @@ public:
         while(!acquired)
         {
             acquired = fs::create_directory(lockfile_path);
-            if(acquired)
-                acquired = try_lock_hardlink();
+            //if(acquired)
+            //    acquired = try_lock_hardlink();
             if(!acquired) {
                 MIOPEN_LOG_I2("Lock Sleep < " << lockfile_path.string());
                 std::this_thread::sleep_for(std::chrono::microseconds(100));
@@ -102,8 +102,8 @@ public:
     {
         bool acquired = false;
         acquired = fs::create_directory(lockfile_path);
-        if(acquired)
-            acquired = try_lock_hardlink();
+        //if(acquired)
+        //    acquired = try_lock_hardlink();
         if(acquired)
             MIOPEN_LOG_I2("Lock < " << lockfile_path.string());
         return acquired;
@@ -115,7 +115,7 @@ public:
         create_hard_link(path, hardlink_path, ec);
         if(ec.value() == 0)
         {
-            if(fs::hard_link_count(path) == 2)
+            if(fs::hard_link_count(hardlink_path) == 2)
                 return true;
         }
         fs::remove(hardlink_path);
@@ -133,7 +133,7 @@ public:
     void unlock()
     {
         MIOPEN_LOG_I2("Unlock < " << lockfile_path.string());
-        unlock_hardlink();
+        //unlock_hardlink();
         fs::remove(lockfile_path);
     }
 
@@ -141,6 +141,7 @@ private:
     fs::path path;
     fs::path lockfile_path;
     fs::path hardlink_path;
+    boost::interprocess::file_lock flock;
 };
 
 MIOPEN_INTERNALS_EXPORT fs::path LockFilePath(const fs::path& filename_);
@@ -163,7 +164,16 @@ public:
     bool timed_lock(const boost::posix_time::ptime& abs_time)
     {
         access_mutex.lock();
-        return fs_lock.timed_lock(abs_time);
+        bool ack = flock.timed_lock(abs_time);
+        if(ack)
+        {
+            ack = fs_lock.timed_lock(abs_time);
+            if(!ack)
+                flock.unlock();
+        }
+        if(!ack)
+            access_mutex.unlock();
+        return ack;
     }
 
     bool timed_lock_shared(const boost::posix_time::ptime& abs_time)
@@ -173,7 +183,7 @@ public:
     }
     void lock()
     {
-        LockOperation("lock", MIOPEN_GET_FN_NAME, [&]() { std::lock(access_mutex, fs_lock); });
+        LockOperation("lock", MIOPEN_GET_FN_NAME, [&]() { std::lock(access_mutex, flock, fs_lock); });
     }
 
     void lock_shared()
@@ -192,7 +202,7 @@ public:
     bool try_lock()
     {
         return TryLockOperation(
-            "lock", MIOPEN_GET_FN_NAME, [&]() { return std::try_lock(access_mutex, fs_lock) != 0; });
+            "lock", MIOPEN_GET_FN_NAME, [&]() { return std::try_lock(access_mutex, flock, fs_lock) != 0; });
     }
 
     bool try_lock_shared()
@@ -209,7 +219,8 @@ public:
 
     void unlock()
     {
-        LockOperation("unlock", MIOPEN_GET_FN_NAME, [&]() { fs_lock.unlock(); });
+        LockOperation("fs_lock unlock", MIOPEN_GET_FN_NAME, [&]() { fs_lock.unlock(); });
+        LockOperation("flock unlock", MIOPEN_GET_FN_NAME, [&]() { flock.unlock(); });
         access_mutex.unlock();
     }
 
@@ -228,7 +239,14 @@ public:
             return false;
 
         if(TryLockOperation("timed lock", MIOPEN_GET_FN_NAME, [&]() {
-               return fs_lock.timed_lock(ToPTime(duration));
+               bool ack = flock.timed_lock(ToPTime(duration));
+               if(ack)
+               {
+                   ack = fs_lock.timed_lock(ToPTime(duration));
+                   if(!ack)
+                        flock.unlock();
+               }
+               return ack;
            }))
             return true;
         access_mutex.unlock();
