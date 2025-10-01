@@ -56,9 +56,11 @@ extern "C" __global__ void MIOpenActiveFwdLite(const FP_TYPE* bot,
                                                const long bot_offset,
                                                const long top_offset)
 {
-    const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
+    const unsigned int tid   = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int index = tid * MIOPEN_READ_UNIT;
+
+    if(tid >= MIOPEN_MAP_SZ)
+        return;
 
     FP_TYPE data[MIOPEN_READ_UNIT];
     FP_TYPE response[MIOPEN_READ_UNIT];
@@ -85,6 +87,9 @@ extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
 {
     const unsigned int x_id = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if(y * (bot_stride / MIOPEN_READ_UNIT) + x_id >= MIOPEN_MAP_SZ_ALIGNED)
+        return;
 
     uint bot_index = y * bot_stride + x_id * MIOPEN_READ_UNIT;
     uint top_index = y * top_stride + x_id * MIOPEN_READ_UNIT;
@@ -116,8 +121,10 @@ extern "C" __global__ void MIOpenActiveBwdLite(FP_TYPE* bot_diff,
                                                const long top_offset)
 {
     const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int index              = tid * MIOPEN_READ_UNIT;
 
-    int index = tid * MIOPEN_READ_UNIT;
+    if(tid >= MIOPEN_MAP_SZ)
+        return;
 
     FP_TYPE bot_diff_dat[MIOPEN_READ_UNIT];
     FP_TYPE top_diff_dat[MIOPEN_READ_UNIT];
@@ -158,6 +165,9 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
     const unsigned int x_id = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
 
+    if(y * (bot_stride / MIOPEN_READ_UNIT) + x_id >= MIOPEN_MAP_SZ_ALIGNED)
+        return;
+
     uint bot_diff_index = y * bot_diff_stride + x_id * MIOPEN_READ_UNIT;
     uint top_diff_index = y * top_diff_stride + x_id * MIOPEN_READ_UNIT;
     uint bot_index      = y * bot_stride + x_id * MIOPEN_READ_UNIT;
@@ -196,17 +206,20 @@ __launch_bounds__(
 {
     const unsigned int x = blockIdx.x * blockDim.x + threadIdx.x; // channel x
 
+    if(x >= MIOPEN_MAP_SZ)
+        return;
+
 #if MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ
-    int n_out_stride     = MIOPEN_N_OUT_STRIDE;
-    int c_out            = MIOPEN_C_OUT;
-    int h_out            = MIOPEN_H_OUT;
-    int w_out            = MIOPEN_W_OUT;
+    int n_out_stride = MIOPEN_N_OUT_STRIDE;
+    int c_out        = MIOPEN_C_OUT;
+    int h_out        = MIOPEN_H_OUT;
+    int w_out        = MIOPEN_W_OUT;
 #endif
 #if MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ
-    int n_in_stride      = MIOPEN_N_IN_STRIDE;
-    int c_in             = MIOPEN_C_IN;
-    int h_in             = MIOPEN_H_IN;
-    int w_in             = MIOPEN_W_IN;
+    int n_in_stride  = MIOPEN_N_IN_STRIDE;
+    int c_in         = MIOPEN_C_IN;
+    int h_in         = MIOPEN_H_IN;
+    int w_in         = MIOPEN_W_IN;
 #endif
 
     FP_TYPE data[MIOPEN_READ_UNIT];
@@ -356,27 +369,30 @@ extern "C" __global__ void MIOpenNeuronBwd(FP_TYPE* bot_diff,
 {
     const unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
 
+    if(x >= MIOPEN_MAP_SZ)
+        return;
+
 #if MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ || MIOPEN_N_DOUT_STRIDE > MIOPEN_DOUT_BLOCK_SZ || \
     MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ
-    int n_out_stride     = MIOPEN_N_OUT_STRIDE;
-    int c_out            = MIOPEN_C_OUT;
-    int h_out            = MIOPEN_H_OUT;
-    int w_out            = MIOPEN_W_OUT;
-    int n_dout_stride    = MIOPEN_N_DOUT_STRIDE;
-    int c_dout           = MIOPEN_C_DOUT;
-    int h_dout           = MIOPEN_H_DOUT;
-    int w_dout           = MIOPEN_W_DOUT;
-    int n_in_stride      = MIOPEN_N_IN_STRIDE;
-    int c_in             = MIOPEN_C_IN;
-    int h_in             = MIOPEN_H_IN;
-    int w_in             = MIOPEN_W_IN;
+    int n_out_stride  = MIOPEN_N_OUT_STRIDE;
+    int c_out         = MIOPEN_C_OUT;
+    int h_out         = MIOPEN_H_OUT;
+    int w_out         = MIOPEN_W_OUT;
+    int n_dout_stride = MIOPEN_N_DOUT_STRIDE;
+    int c_dout        = MIOPEN_C_DOUT;
+    int h_dout        = MIOPEN_H_DOUT;
+    int w_dout        = MIOPEN_W_DOUT;
+    int n_in_stride   = MIOPEN_N_IN_STRIDE;
+    int c_in          = MIOPEN_C_IN;
+    int h_in          = MIOPEN_H_IN;
+    int w_in          = MIOPEN_W_IN;
 #endif
 
 #if MIOPEN_N_DIN_STRIDE > MIOPEN_DIN_BLOCK_SZ
-    int n_din_stride     = MIOPEN_N_DIN_STRIDE;
-    int c_din            = MIOPEN_C_DIN;
-    int h_din            = MIOPEN_H_DIN;
-    int w_din            = MIOPEN_W_DIN;
+    int n_din_stride  = MIOPEN_N_DIN_STRIDE;
+    int c_din         = MIOPEN_C_DIN;
+    int h_din         = MIOPEN_H_DIN;
+    int w_din         = MIOPEN_W_DIN;
 #endif
 
     FP_TYPE bot_diff_dat[MIOPEN_READ_UNIT];
