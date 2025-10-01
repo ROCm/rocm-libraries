@@ -113,7 +113,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         }
 
         auto tolerance = test_utilities::batchnorm::getToleranceInference<InputType>();
-        auto epsilon = tolerance;
+        double epsilon = 1e-3;
 
         test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::
             batchnormFwdInference(
