@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
     int version;
     HIPSPARSE_CHECK(hipsparseGetVersion(handle, &version));
 
-    char rev[128];
+    char rev[256];
     HIPSPARSE_CHECK(hipsparseGetGitRevision(handle, rev));
 
     printf("hipSPARSE version %d.%d.%d-%s\n",
