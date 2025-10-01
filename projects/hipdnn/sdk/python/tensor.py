@@ -21,9 +21,10 @@ class TensorAttributes:
             "data_type": DTypeConverter.to_string(self.tensor.dtype),
             "virtual": self.virtual
         }
+
     @staticmethod
-    def empty(dtype: torch.dtype=torch.float, dims: list[int]=[]):
-        return TensorAttributes(torch.empty(dims, dtype=dtype))
+    def empty(dtype: torch.dtype=torch.float, dims: list[int]=[], uid: int=None, name: str="", virtual: bool=False):
+        return TensorAttributes(torch.empty(dims, dtype=dtype), uid, name, virtual)
 
     @staticmethod
     def random(min_val, max_val, dtype: torch.dtype, dims: list[int], generator: torch.Generator = None):
@@ -34,13 +35,20 @@ class TensorAttributes:
         tensor = torch.rand(dtype=dtype, size=dims, generator=generator)
         return TensorAttributes(tensor*(max_val - min_val) + min_val)
 
+    @staticmethod
+    def from_dict(d: dict):
+        dtype = DTypeConverter.from_string(d["data_type"])
+        return TensorAttributes.empty(dtype, d["dims"], d["uid"], d["name"], d["virtual"])
 
-def dump_data_as_binary(filename: str, tensor: torch.Tensor):
+
+def dump_data_as_binary(filename: str, tensor_attr: TensorAttributes):
+    tensor = tensor_attr.tensor
     with open(filename, "wb") as file:
         bytes = bytearray(tensor.untyped_storage())
         file.write(bytes)
 
-def load_data_from_binary(filename: str, tensor: torch.Tensor):
+def load_data_from_binary(filename: str, tensor_attr: TensorAttributes):
+    tensor = tensor_attr.tensor
     num_bytes = os.path.getsize(filename)
     storage = torch.UntypedStorage.from_file(filename, nbytes=num_bytes)
     tensor.set_(storage, storage_offset=0, size=tuple(tensor.size()), stride=tensor.stride())

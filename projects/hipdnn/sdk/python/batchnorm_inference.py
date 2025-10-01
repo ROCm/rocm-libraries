@@ -52,4 +52,14 @@ class BatchnormInference:
             inputs.x.tensor, inputs.mean.tensor, inputs.inv_variance.tensor, inputs.scale.tensor, inputs.bias.tensor, training=False
         )
 
-    # TODO Add constructor from json
+    @staticmethod
+    def from_dict(d: dict, tensors: dict[int, TensorAttributes]):
+        inputs = d["inputs"]
+        outputs = d["outputs"]
+        return BatchnormInference(tensors[inputs["x_tensor_uid"]],
+                                  tensors[inputs["mean_tensor_uid"]],
+                                  tensors[inputs["inv_variance_tensor_uid"]],
+                                  tensors[inputs["scale_tensor_uid"]],
+                                  tensors[inputs["bias_tensor_uid"]],
+                                  tensors[outputs["y_tensor_uid"]],
+                                  d["name"])
