@@ -97,7 +97,7 @@ public:
         char* d = nullptr;
         if((use_HMM ? hipMallocManaged(&d, capacity) : hipMalloc(&d, capacity)) != hipSuccess)
         {
-            hipblaslt_cerr << "Error allocating (" << (m_size >> 30) << " GB) device memory"
+            hipblaslt_cerr << "Insufficient memory to  allocate (" << (m_size >> 30) << " GB) in device "
                            << std::endl;
             d      = nullptr;
             m_size = m_capacity = 0;
@@ -201,9 +201,15 @@ private:
             auto e = M(bytes, bytes * 1.2, use_HMM);
             if(e.get())
                 return e;
-            hipblaslt_cerr << "Clearing memory pool" << std::endl;
+            hipblaslt_cerr << "Clearing memory pool and retrying" << std::endl;
             // allocation failed, so clear the pool and try again (without the 20%)
             pool.clear();
+
+            // reset the error code from previous hipMalloc failure and try again to allocate memory
+            hipError_t err = hipPeekAtLastError();
+            if(err == hipErrorOutOfMemory || err == hipErrorMemoryAllocation )
+                hipGetLastError();
+
             return M(bytes, bytes, use_HMM);
         }
     }
