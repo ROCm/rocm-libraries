@@ -30,7 +30,8 @@
 
 #include "float_types.h"
 
-#define NEGATIVE_CUTOFF_VAL -1e20
+template <typename T>
+constexpr T NEGATIVE_CUTOFF_VAL = T{-1e20};
 
 template <typename T>
 __device__ T logaddexp(T x, T y)
@@ -39,8 +40,65 @@ __device__ T logaddexp(T x, T y)
     T b = min(x, y);
     T c = b - a;
 
-    return c <= T(NEGATIVE_CUTOFF_VAL) ? max(a, T(NEGATIVE_CUTOFF_VAL))
-                                       : max(T(a + log(T(1) + exp(b - a))), T(NEGATIVE_CUTOFF_VAL));
+    return c <= NEGATIVE_CUTOFF_VAL<T> ? max(a, NEGATIVE_CUTOFF_VAL<T>)
+                                       : max(T(a + log(T(1) + exp(b - a))), NEGATIVE_CUTOFF_VAL<T>);
+}
+
+template <int ARRAY_SIZE, typename LAMBDA>
+__device__ void reduce(FLOAT_ACCUM array[ARRAY_SIZE],
+                       const unsigned int lid,
+                       const unsigned int batch_lid,
+                       FLOAT_ACCUM value_lid,
+                       LAMBDA&& lambda)
+{
+    array[lid] = value_lid;
+    __syncthreads();
+
+#pragma unroll
+    for(auto i = ARRAY_SIZE >> 1; i > 0; i >>= 1)
+    {
+        if(batch_lid < i)
+        {
+            lambda.template operator()<ARRAY_SIZE>(array, lid, i);
+        }
+        __syncthreads();
+    }
+}
+
+constexpr static auto reduce_sum = []<int ARRAY_SIZE>(FLOAT_ACCUM array[LOCAL_SIZE],
+                                                      const unsigned int lid,
+                                                      int i) { array[lid] += array[lid + i]; };
+
+constexpr static auto reduce_sum_log =
+    []<int ARRAY_SIZE>(FLOAT_ACCUM array[ARRAY_SIZE], const unsigned int lid, int i) {
+        if constexpr(USE_SOFTMAX_LOG)
+        {
+            array[lid] = logaddexp(array[lid], array[lid + i]);
+        }
+        else
+        {
+            array[lid] += array[lid + i];
+        }
+    };
+
+constexpr static auto reduce_max =
+    []<int ARRAY_SIZE>(FLOAT_ACCUM array[LOCAL_SIZE], const unsigned int lid, int i) {
+        array[lid] = max(array[lid], array[lid + i]);
+    };
+
+template <int BOUND, int STEP, typename LAMBDA>
+__device__ void loop(const unsigned int lid, LAMBDA&& lambda)
+{
+    auto i = 0;
+#pragma unroll
+    for(; i + STEP < BOUND; i += STEP)
+    {
+        lambda(i + lid);
+    }
+    if(i + lid < BOUND)
+    {
+        lambda(i + lid);
+    }
 }
 
 template <typename TI, typename TO>
@@ -84,8 +142,7 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                 // Compute max per channel
                 // Iterate over all the channels one thread is supposed to loop over
                 // and compute max
-                for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
-                {
+                loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
                     auto x_idx = x_offset + n * N_STRIDE;
                     if constexpr(USE_SOFTMAX_MODE_INSTANCE)
                     {
@@ -99,21 +156,9 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                         x_idx += i * C_STRIDE + s0 * H_STRIDE + s1;
                     }
                     tmp = max(CVT_FLOAT2ACCUM(x[x_idx]), tmp);
-                }
+                });
 
-                // Now we have to compute the max from 256 values (one per each thread)
-                ltmp[lid] = tmp;
-                __syncthreads();
-
-                // Logarithmic reduction to compute the max.
-                for(auto i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
-                {
-                    if(lid < i)
-                    {
-                        ltmp[lid] = max(ltmp[lid], ltmp[lid + i]);
-                    }
-                    __syncthreads();
-                }
+                reduce<LOCAL_SIZE>(ltmp, lid, lid, tmp, reduce_max);
 
                 channel_max = ltmp[0];
                 __syncthreads();
@@ -121,7 +166,7 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
 
             if constexpr(USE_SOFTMAX_LOG)
             {
-                tmp = NEGATIVE_CUTOFF_VAL;
+                tmp = NEGATIVE_CUTOFF_VAL<FLOAT_ACCUM>;
             }
             else
             {
@@ -129,8 +174,7 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
             }
 
             // Subtract channel_max from each value
-            for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
-            {
+            loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
                 auto x_idx = x_offset + n * N_STRIDE;
                 if constexpr(USE_SOFTMAX_MODE_INSTANCE)
                 {
@@ -159,34 +203,14 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                 {
                     tmp += exp(value - channel_max);
                 }
-            }
+            });
 
-            ltmp[lid] = tmp;
-            __syncthreads();
-
-            // Compute sum of 256 values (one for each thread)
-            // Logarithmic reduction to compute the sum
-            for(auto i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
-            {
-                if(lid < i)
-                {
-                    if constexpr(USE_SOFTMAX_LOG)
-                    {
-                        ltmp[lid] = logaddexp(ltmp[lid], ltmp[lid + i]);
-                    }
-                    else
-                    {
-                        ltmp[lid] += ltmp[lid + i];
-                    }
-                }
-                __syncthreads();
-            }
+            reduce<LOCAL_SIZE>(ltmp, lid, lid, tmp, reduce_sum_log);
 
             FLOAT_ACCUM channel_sum = ltmp[0];
 
             // Normalize each value in the channel by the channel_sum
-            for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
-            {
+            loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
                 auto idx = n * N_STRIDE;
                 if constexpr(USE_SOFTMAX_MODE_INSTANCE)
                 {
@@ -226,7 +250,7 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                 value = value * FLOAT_ACCUM(alpha) +
                         CVT_FLOAT2ACCUM(y[idx + y_offset]) * FLOAT_ACCUM(beta);
                 y[idx + y_offset] = CVT_ACCUM2FLOAT(value);
-            }
+            });
         }
     }
     else // CSR-Stream like approach
@@ -267,8 +291,7 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
         // BATCH_SIZE threads iterate over the channels
         const auto index0 = batch_lid / BATCH_SIZE;
         auto index        = index0;
-        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
-        {
+        loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int i) {
             if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
             {
                 auto idx = x_offset + batch_n * N_STRIDE;
@@ -290,24 +313,13 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
                     tmp = max(values[index], tmp);
                 }
             }
-        }
+            ++index;
+        });
 
         FLOAT_ACCUM channel_max;
         if constexpr(!USE_SOFTMAX_FAST)
         {
-            // Now we have to compute the max from 256 values (one per each thread)
-            ltmp[lid] = tmp;
-            __syncthreads();
-
-            // Logarithmic reduction to compute the max.
-            for(auto i = BATCH_SIZE >> 1; i > 0; i >>= 1)
-            {
-                if(batch_lid < i)
-                {
-                    ltmp[lid] = max(ltmp[lid], ltmp[lid + i]);
-                }
-                __syncthreads();
-            }
+            reduce<BATCH_SIZE>(ltmp, lid, batch_lid, tmp, reduce_max);
 
             channel_max = ltmp[batch * BATCH_SIZE];
             __syncthreads();
@@ -315,7 +327,7 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
 
         if constexpr(USE_SOFTMAX_LOG)
         {
-            tmp = NEGATIVE_CUTOFF_VAL;
+            tmp = NEGATIVE_CUTOFF_VAL<FLOAT_ACCUM>;
         }
         else
         {
@@ -324,8 +336,7 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
 
         // Subtract channel_max from each value
         index = index0;
-        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
-        {
+        loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int) {
             // Compute exponent of each value
             // Then sum all the values touched by this thread
             FLOAT_ACCUM value = values[index];
@@ -347,35 +358,16 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
             }
 
             values[index] = value;
-        }
+            ++index;
+        });
 
-        ltmp[lid] = tmp;
-        __syncthreads();
-
-        // Compute sum of 256 values (one for each thread)
-        // Logarithmic reduction to compute the sum
-        for(auto i = BATCH_SIZE >> 1; i > 0; i >>= 1)
-        {
-            if(batch_lid < i)
-            {
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    ltmp[lid] = logaddexp(ltmp[lid], ltmp[lid + i]);
-                }
-                else
-                {
-                    ltmp[lid] += ltmp[lid + i];
-                }
-            }
-            __syncthreads();
-        }
+        reduce<BATCH_SIZE>(ltmp, lid, batch_lid, tmp, reduce_sum_log);
 
         FLOAT_ACCUM channel_sum = ltmp[batch * BATCH_SIZE];
 
         // Normalize each value in the channel by the channel_sum
         index = index0;
-        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
-        {
+        loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int i) {
             if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
             {
                 auto y_idx = y_offset + batch_n * N_STRIDE;
@@ -407,7 +399,8 @@ __device__ void softmaxfwd(const TI* __restrict__ x,
 
                 y[y_idx] = CVT_ACCUM2FLOAT(values[v_idx]);
             }
-        }
+            ++index;
+        });
     }
 }
 
@@ -439,8 +432,7 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
             // Iterate over all the channels one thread is supposed to loop over
             // and compute dot-product
             FLOAT_ACCUM channel_dot = static_cast<FLOAT_ACCUM>(0);
-            for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
-            {
+            loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
                 auto idx = n * N_STRIDE;
                 if constexpr(USE_SOFTMAX_MODE_INSTANCE)
                 {
@@ -460,27 +452,14 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
                     value *= CVT_FLOAT2ACCUM(y[idx + y_offset]);
                 }
                 channel_dot += value;
-            }
+            });
 
-            // Now we have to compute the sum from 256 values (one per each thread)
-            ltmp[lid] = channel_dot;
-            __syncthreads();
-
-            // Logarithmic reduction to compute the sum.
-            for(auto i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
-            {
-                if(lid < i)
-                {
-                    ltmp[lid] += ltmp[lid + i];
-                }
-                __syncthreads();
-            }
+            reduce<LOCAL_SIZE>(ltmp, lid, lid, channel_dot, reduce_sum);
 
             channel_dot = ltmp[0];
 
             // Subtract and element-wise multiplication
-            for(auto i = lid; i < VECTOR_SIZE; i += LOCAL_SIZE)
-            {
+            loop<VECTOR_SIZE, LOCAL_SIZE>(lid, [&](int i) {
                 auto idx = n * N_STRIDE;
                 if constexpr(USE_SOFTMAX_MODE_INSTANCE)
                 {
@@ -506,7 +485,7 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
                 value = value * FLOAT_ACCUM(alpha) +
                         CVT_FLOAT2ACCUM(dx[idx + dx_offset]) * FLOAT_ACCUM(beta);
                 dx[idx + dx_offset] = CVT_ACCUM2FLOAT(value);
-            }
+            });
         }
     }
     else // CSR-Stream like approach
@@ -533,8 +512,7 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
         // BATCH_SIZE threads iterate over the channels
         const auto index0 = batch_lid / BATCH_SIZE;
         auto index        = index0;
-        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
-        {
+        loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int i) {
             if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
             {
                 auto idx = batch_n * N_STRIDE;
@@ -551,7 +529,7 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
                 }
 
                 y_values[index]  = CVT_FLOAT2ACCUM(y[idx + y_offset]);
-                dy_values[index] = CVT_FLOAT2ACCUM(dy[idx + dx_offset]);
+                dy_values[index] = CVT_FLOAT2ACCUM(dy[idx + dy_offset]);
                 auto value       = dy_values[index];
                 if constexpr(!USE_SOFTMAX_LOG)
                 {
@@ -559,28 +537,16 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
                 }
                 channel_dot += value;
             }
-        }
+            ++index;
+        });
 
-        // Now we have to compute the sum from 256 values (one per each thread)
-        ltmp[lid] = channel_dot;
-        __syncthreads();
-
-        // Logarithmic reduction to compute the sum.
-        for(auto i = BATCH_SIZE >> 1; i > 0; i >>= 1)
-        {
-            if(batch_lid < i)
-            {
-                ltmp[lid] += ltmp[lid + i];
-            }
-            __syncthreads();
-        }
+        reduce<BATCH_SIZE>(ltmp, lid, batch_lid, channel_dot, reduce_sum);
 
         channel_dot = ltmp[batch * BATCH_SIZE];
 
         // Subtract and element-wise multiplication
         index = index0;
-        for(auto i = batch_lid; i < VECTOR_SIZE; i += BATCH_SIZE, ++index)
-        {
+        loop<VECTOR_SIZE, BATCH_SIZE>(batch_lid, [&](int i) {
             if((batch_n * VECTOR_SIZE + i) * SPATIAL_DIM + batch_s < VECTOR_SIZE * GRID_SIZE)
             {
                 auto dx_idx = dx_offset + batch_n * N_STRIDE;
@@ -609,7 +575,8 @@ __device__ void softmaxbwd(const TI* __restrict__ y,
                              CVT_FLOAT2ACCUM(dx[dx_idx]) * FLOAT_ACCUM(beta);
                 dx[dx_idx] = CVT_ACCUM2FLOAT(value);
             }
-        }
+            ++index;
+        });
     }
 }
 

@@ -67,8 +67,7 @@ bool Softmax::IsApplicable(
     [[maybe_unused]] const ExecutionContext& context,
     [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
 {
-    if(!(problem.GetYDesc().GetType() == miopenFloat ||
-         problem.GetYDesc().GetType() == miopenHalf))
+    if(!(problem.GetYDesc().GetType() == miopenFloat || problem.GetYDesc().GetType() == miopenHalf))
     {
         return false;
     }
@@ -173,11 +172,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                               {"VECTOR_SIZE", vector_size},
                               {"NUM_BATCH", num_batch},
                               {"BATCH_SIZE", batch_size},
-                              {"U_BATCH_SIZE", u_batch_size},
-                              {"X_OFFSET", 0},
-                              {"Y_OFFSET", 0},
-                              {"DX_OFFSET", 0},
-                              {"DY_OFFSET", 0}};
+                              {"U_BATCH_SIZE", u_batch_size}};
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
