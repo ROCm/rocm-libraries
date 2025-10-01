@@ -118,9 +118,9 @@ public:
                 batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
                     auto fullIndices
                         = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
-                    auto inVal = x.getHostValue(fullIndices);
-                    meanAccum += inVal;
-                    varianceAccum += inVal * inVal;
+                    auto inVal = static_cast<MeanVarianceDataType>(x.getHostValue(fullIndices));
+                    meanAccum = meanAccum + inVal;
+                    varianceAccum = varianceAccum + (inVal * inVal);
                 });
 
             MeanVarianceDataType channelMean = meanAccum = meanAccum / nhw;
@@ -305,6 +305,11 @@ private:
     static float sqrtInternal(float value)
     {
         return sqrtf(value);
+    }
+
+    static hip_bfloat16 sqrtInternal(hip_bfloat16 value)
+    {
+        return static_cast<hip_bfloat16>(sqrtf(static_cast<float>(value)));
     }
 };
 

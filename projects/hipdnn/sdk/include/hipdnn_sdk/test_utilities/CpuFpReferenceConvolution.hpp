@@ -45,8 +45,7 @@ public:
         return validNode;
     }
 
-    // Temporarily comment
-    // [[deprecated("Use convFwdInference overload that takes both prePadding and postPadding.")]]
+    // Overload for uniform padding
     static void convFwdInference(const TensorBase<InputDataType>& input,
                                  const TensorBase<InputDataType>& weight,
                                  TensorBase<InputDataType>& output,
@@ -171,7 +170,7 @@ public:
         output.memory().markHostModified();
     }
 
-    // [[deprecated("Use convBwdData overload that takes both prePadding and postPadding.")]]
+    // Overload for uniform padding
     static void convBwdData(TensorBase<InputDataType>& gradInput,
                             const TensorBase<InputDataType>& weight,
                             const TensorBase<InputDataType>& gradOutput,
