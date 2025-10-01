@@ -66,14 +66,11 @@ endif()
 option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
 option(HIPSPARSELT_ENABLE_MARKER "Enable rocTracer marker support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
-option(HIPSPARSELT_ENABLE_VERBOSE "Output additional build information." OFF)
 
 set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
     CACHE PATH "Path to hipblaslt directory."
 )
-set(HIPSPARSELT_COVERAGE_GTEST_FILTER "*pre_checkin*" CACHE STRING
-                                                            "GTest filter for coverage tests."
-)
+set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
 
 if(NOT HIPSPARSELT_ENABLE_CUDA)
     set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")

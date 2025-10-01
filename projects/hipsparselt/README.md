@@ -167,9 +167,8 @@ Refer to the available build options using `./install.sh --help`
 
 * `HIPSPARSELT_ENABLE_MARKER`: Enable rocTracer marker support (default: `OFF`)
 * `HIPSPARSELT_ENABLE_ASAN`: Build with address sanitizer enabled (default: `OFF`)
-* `HIPSPARSELT_ENABLE_VERBOSE`: Output additional build information (default: `OFF`)
 * `HIPSPARSELT_HIPBLASLT_PATH`: Path to hipblaslt directory (default: `${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt/next-cmake`)
-* `HIPSPARSELT_COVERAGE_GTEST_FILTER`: GTest filter for coverage tests (default: `*pre_checkin*`)
+* `HIPSPARSELT_COVERAGE_GTEST_FILTER`: GTest filter for coverage tests (default: empty)
 * `TENSILE_ENABLE_MARKER`: Enables or disables the Tensile marker functionality (default: `OFF`)
 
 ## CMake Targets
