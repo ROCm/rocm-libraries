@@ -1,3 +1,9 @@
+/*! \file
+ *  \brief A smart pointer that owns and manages another object through a
+ *         pointer and disposes of that object when the \p unique_ptr goes
+ *         out of scope.
+ */
+
 #pragma once
 
 #include <thrust/detail/config.h>
@@ -15,6 +21,10 @@
 #include <utility>
 
 THRUST_NAMESPACE_BEGIN
+
+/*! \addtogroup memory_management Memory Management
+ *  \{
+ */
 
 template <class T, class = void>
 struct default_delete;
@@ -885,5 +895,8 @@ template <class T, class... Args, class = std::enable_if_t<thrust::detail::is_bo
 THRUST_HOST void make_unique_for_overwrite(Args&&...) = delete;
 
 #endif
+
+/*! \} // end smart_pointers
+ */
 
 THRUST_NAMESPACE_END
