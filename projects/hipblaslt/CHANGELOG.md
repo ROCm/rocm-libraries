@@ -13,6 +13,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Added the ability to print logs (using ``HIPBLASLT_LOG_MASK=32``) for Grouped GEMM.
 * Support for swizzleA by using the hipblaslt-ext cpp API.
 * Support for hipBLASLt extop for gfx11xx and gfx12xx.
+* Support ldd and ldc in MBSK
 
 ### Changed
 * ``hipblasLtMatmul()`` now returns an error when the workspace size is insufficient, rather than causing a segmentation fault.
