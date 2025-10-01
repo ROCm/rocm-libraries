@@ -278,8 +278,7 @@ protected:
             cpuTensorBundle.dbiasTensor);
     }
 
-    void runBatchnormTest(float tolerance,
-                          const TensorLayout& layout = TensorLayout::NCHW)
+    void runBatchnormTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         TestCaseType testCase = this->GetParam();
 
@@ -303,12 +302,13 @@ protected:
 
         runCpuBatchnormBwd(cpuTensorBundle);
 
-        CpuFpReferenceValidation<InputType> cpuRefValidation(static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
+        CpuFpReferenceValidation<InputType> cpuRefValidation(static_cast<InputType>(tolerance),
+                                                             static_cast<InputType>(tolerance));
         EXPECT_TRUE(cpuRefValidation.allClose(cpuTensorBundle.dxTensor.memory(),
                                               graphTensorBundle.dxTensor.memory()));
 
-        CpuFpReferenceValidation<IntermediateType> cpuRefIntermediateValidation(static_cast<InputType>(tolerance),
-                                                                                static_cast<InputType>(tolerance));
+        CpuFpReferenceValidation<IntermediateType> cpuRefIntermediateValidation(
+            static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
         EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dscaleTensor.memory(),
                                                           graphTensorBundle.dscaleTensor.memory()));
         EXPECT_TRUE(cpuRefIntermediateValidation.allClose(cpuTensorBundle.dbiasTensor.memory(),

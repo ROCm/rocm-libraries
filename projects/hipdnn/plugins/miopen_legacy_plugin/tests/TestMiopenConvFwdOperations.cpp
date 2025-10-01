@@ -159,7 +159,8 @@ public:
 TEST_P(TestGpuMiopenConvFwdExecuteGraphNchwFp32, Correctness)
 {
     const ConvTestCase& testCase = GetParam();
-    runConvFwdGraph(testCase, hipdnn_sdk::data_objects::DataType::FLOAT, conv::getToleranceFwd<float>());
+    runConvFwdGraph(
+        testCase, hipdnn_sdk::data_objects::DataType::FLOAT, conv::getToleranceFwd<float>());
 }
 
 INSTANTIATE_TEST_SUITE_P(,

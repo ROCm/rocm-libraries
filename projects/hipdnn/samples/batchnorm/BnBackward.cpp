@@ -116,23 +116,22 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> dscaleRefTensor(dscale->get_dim());
         utilities::Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
 
-        test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::
-            batchnormBwd(dyTensor,
-                         xTensor,
-                         savedMeanTensor,
-                         savedInvVarTensor,
-                         scaleTensor,
-                         dxRefTensor,
-                         dscaleRefTensor,
-                         dbiasRefTensor);
+        test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormBwd(
+            dyTensor,
+            xTensor,
+            savedMeanTensor,
+            savedInvVarTensor,
+            scaleTensor,
+            dxRefTensor,
+            dscaleRefTensor,
+            dbiasRefTensor);
 
         auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
 
         auto dxValidator = test_utilities::CpuFpReferenceValidation<InputType>(
             static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
-        auto dscaleDbiasValidator
-            = test_utilities::CpuFpReferenceValidation<IntermediateType>(
-                static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
+        auto dscaleDbiasValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
+            static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
         bool dxValid = dxValidator.allClose(dxRefTensor.memory(), dxTensor.memory());
         bool dscaleValid

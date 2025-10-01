@@ -172,8 +172,10 @@ protected:
                                                                                dscaleTensorCpu,
                                                                                dbiasTensorCpu);
 
-        CpuFpReferenceValidation<InputType> cpuRefValidationInput(static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
-        CpuFpReferenceValidation<IntermediateType> cpuRefValidationIntermediate(static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
+        CpuFpReferenceValidation<InputType> cpuRefValidationInput(
+            static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
+        CpuFpReferenceValidation<IntermediateType> cpuRefValidationIntermediate(
+            static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
 
         EXPECT_TRUE(cpuRefValidationInput.allClose(dxTensorCpu.memory(), dxTensor.memory()));
         EXPECT_TRUE(
@@ -268,32 +270,42 @@ public:
 TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNchwFp32, Correctness)
 {
     Batchnorm2dTestCase testCase = GetParam();
-    runBwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::FLOAT, batchnorm::getToleranceBackward<float>());
+    runBwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::FLOAT,
+                         batchnorm::getToleranceBackward<float>());
 }
 
 TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNchwBfp16, Correctness)
 {
     Batchnorm2dTestCase testCase = GetParam();
-    runBwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::BFLOAT16, batchnorm::getToleranceBackward<hip_bfloat16>());
+    runBwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                         batchnorm::getToleranceBackward<hip_bfloat16>());
 }
 
 TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNchwFp16, Correctness)
 {
     Batchnorm2dTestCase testCase = GetParam();
-    runBwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::HALF, batchnorm::getToleranceBackward<half>());
+    runBwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::HALF,
+                         batchnorm::getToleranceBackward<half>());
 }
 
 // TODO: Re-enable when double support is added to MIOpen plugin
 TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNchwFp64, DISABLED_Correctness)
 {
     Batchnorm2dTestCase testCase = GetParam();
-    runBwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::DOUBLE, batchnorm::getToleranceBackward<double>());
+    runBwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::DOUBLE,
+                         batchnorm::getToleranceBackward<double>());
 }
 
 TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNhwcFp32, Correctness)
 {
     Batchnorm2dTestCase testCase = GetParam();
-    runBwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::FLOAT, batchnorm::getToleranceBackward<float>());
+    runBwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::FLOAT,
+                         batchnorm::getToleranceBackward<float>());
 }
 
 // TODO: add unique test suite and conform to naming rules
@@ -303,7 +315,9 @@ TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNhwcFp32, Correctness)
 TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNhwcBfp16, DISABLED_Correctness)
 {
     Batchnorm2dTestCase testCase = GetParam();
-    runBwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::BFLOAT16, batchnorm::getToleranceBackward<hip_bfloat16>());
+    runBwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                         batchnorm::getToleranceBackward<hip_bfloat16>());
 }
 
 // MIOpen segfaults for this case, re-enable when fix is released:
@@ -311,14 +325,18 @@ TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNhwcBfp16, DISABLED_Correctness)
 TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNhwcFp16, DISABLED_Correctness)
 {
     Batchnorm2dTestCase testCase = GetParam();
-    runBwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::HALF, batchnorm::getToleranceBackward<half>());
+    runBwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::HALF,
+                         batchnorm::getToleranceBackward<half>());
 }
 
 // TODO: Re-enable when double support is added to MIOpen plugin
 TEST_P(TestGpuMiopenBatchnormBwdExecuteGraphNhwcFp64, DISABLED_Correctness)
 {
     Batchnorm2dTestCase testCase = GetParam();
-    runBwdBatchnormGraph(testCase, hipdnn_sdk::data_objects::DataType::DOUBLE, batchnorm::getToleranceBackward<double>());
+    runBwdBatchnormGraph(testCase,
+                         hipdnn_sdk::data_objects::DataType::DOUBLE,
+                         batchnorm::getToleranceBackward<double>());
 }
 
 INSTANTIATE_TEST_SUITE_P(,

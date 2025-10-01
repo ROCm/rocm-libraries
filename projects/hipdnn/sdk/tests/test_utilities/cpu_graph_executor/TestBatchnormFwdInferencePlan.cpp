@@ -7,8 +7,8 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
@@ -113,8 +113,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance,
-                                                           tolerance);
+    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.outputTensor.memory(),
                                                 planTensorBundle.outputTensor.memory()));
