@@ -78,7 +78,7 @@
 #    define THRUST_INCLUDE_DEVICE_CODE 0
 #    define THRUST_INCLUDE_HOST_CODE   1
 #  endif
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#else
 // These definitions were intended for internal use only and are now obsolete.
 // If you relied on them, consider porting your code to use the functionality
 // in libcu++'s <nv/target> header.

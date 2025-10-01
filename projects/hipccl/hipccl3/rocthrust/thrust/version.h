@@ -39,11 +39,7 @@
 #endif // no system header
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/version> // IWYU pragma: export
-#  else
-#    include <hip/version> // IWYU pragma: export
-#  endif
+#  include _THRUST_LIBCXX_INCLUDE(version) // IWYU pragma: export
 #endif
 
 //  This is the only Thrust header that is guaranteed to
@@ -94,7 +90,7 @@
  */
 #define THRUST_PATCH_NUMBER 0
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 static_assert(THRUST_MAJOR_VERSION == CCCL_MAJOR_VERSION, "");
 static_assert(THRUST_MINOR_VERSION == CCCL_MINOR_VERSION, "");
 static_assert(THRUST_SUBMINOR_VERSION == CCCL_PATCH_VERSION, "");

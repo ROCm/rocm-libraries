@@ -37,11 +37,7 @@
 #include _THRUST_STD_INCLUDE(functional)
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/functional>
-#  else
-#    include <hip/functional>
-#  endif
+#  include _THRUST_LIBCXX_INCLUDE(functional)
 #else
 #  include <utility>
 #endif
@@ -52,13 +48,8 @@ namespace internal
 {
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using ::cuda::maximum;
-using ::cuda::minimum;
-#  else
-using ::hip::maximum;
-using ::hip::minimum;
-#  endif
+using _THRUST_LIBCXX::maximum;
+using _THRUST_LIBCXX::minimum;
 using identity = _THRUST_STD::__identity;
 #else
 // cuda::maximum or hip::maximum
