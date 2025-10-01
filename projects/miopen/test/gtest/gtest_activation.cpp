@@ -376,14 +376,10 @@ struct PrintToStringParamName
     {
         auto data_type  = std::get<0>(info.param);
         auto activ_mode = std::get<1>(info.param);
-        auto config     = std::get<2>(info.param);
 
         std::string type_str = (data_type == miopenFloat) ? "FP32" : "FP16";
         std::string mode_str = GetActivationModeName(activ_mode);
 
-        // return type_str + "_" + mode_str + "_N" + std::to_string(config.N) + "_C" +
-        //        std::to_string(config.C) + "_H" + std::to_string(config.H) + "_W" +
-        //        std::to_string(config.W);
         return std::to_string(info.index) + "_" + type_str + "_" + mode_str;
     }
 };
