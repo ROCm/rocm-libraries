@@ -54,7 +54,6 @@ public:
 
             if(absDiff > threshold)
             {
-#if 0
                 HIPDNN_LOG_ERROR("Validation failed at index {}: reference value = {}, "
                                  "implementation value = {}, "
                                  "absolute difference = {}, threshold = {} (atol={}, rtol={})",
@@ -65,14 +64,6 @@ public:
                                  threshold,
                                  _absoluteTolerance,
                                  _relativeTolerance);
-#else
-                std::cout << "Validation failed at index " << i << ": reference value = " << refValue
-                          << ", implementation value = " << implValue
-                          << ", absolute difference = " << absDiff
-                          << ", threshold = " << threshold
-                          << " (atol=" << _absoluteTolerance
-                          << ", rtol=" << _relativeTolerance << ")" << std::endl;
-#endif
                 return false;
             }
         }
