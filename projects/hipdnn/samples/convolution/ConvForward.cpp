@@ -10,13 +10,14 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_sdk;
 
 template <typename InputType, typename IntermediateType>
 void SampleRunner::operator()(const TensorLayout& layout)
@@ -74,9 +75,9 @@ void SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
 
-    Tensor<InputType> xTensor(xAttr->get_dim(), layout);
-    Tensor<InputType> wTensor(wAttr->get_dim(), layout);
-    Tensor<InputType> yTensor(yAttr->get_dim(), layout);
+    utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
+    utilities::Tensor<InputType> wTensor(wAttr->get_dim(), layout);
+    utilities::Tensor<InputType> yTensor(yAttr->get_dim(), layout);
 
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     wTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
@@ -89,7 +90,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     int64_t workspaceSize;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
-    Workspace workspace(static_cast<size_t>(workspaceSize));
+    utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
@@ -108,31 +109,20 @@ void SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << "Running CPU reference validation...\n";
 
-        Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
+        utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
 
-        hipdnn_sdk::test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::
+        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::
             convFwdInference(xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        auto epsilon = getEpsilonConv<InputType>();
+        auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();
 
-        auto yValidator = hipdnn_sdk::test_utilities::CpuFpReferenceValidation<InputType>(
-            static_cast<InputType>(epsilon), static_cast<InputType>(epsilon));
+        auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(
+            static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
 
         bool yValid = yValidator.allClose(yRefTensor.memory(), yTensor.memory());
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
-
-        if(!yValid)
-        {
-            auto yRefHostPtr = yRefTensor.memory().hostData();
-            std::cout << "First 10 yRef values: ";
-            for(int i = 0; i < 10; ++i)
-            {
-                std::cout << static_cast<float>(yRefHostPtr[i]) << " ";
-            }
-            std::cout << '\n';
-        }
     }
 
     std::cout << "Convolution forward graph execution complete for " << inputType << ".\n\n";
