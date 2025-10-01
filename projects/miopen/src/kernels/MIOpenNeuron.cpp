@@ -209,29 +209,13 @@ __launch_bounds__(
     if(x >= MIOPEN_MAP_SZ)
         return;
 
-#if MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ
-    int n_out_stride = MIOPEN_N_OUT_STRIDE;
-    int c_out        = MIOPEN_C_OUT;
-    int h_out        = MIOPEN_H_OUT;
-    int w_out        = MIOPEN_W_OUT;
-#endif
-#if MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ
-    int n_in_stride  = MIOPEN_N_IN_STRIDE;
-    int c_in         = MIOPEN_C_IN;
-    int h_in         = MIOPEN_H_IN;
-    int w_in         = MIOPEN_W_IN;
-#endif
-
     FP_TYPE data[MIOPEN_READ_UNIT];
     FP_TYPE response[MIOPEN_READ_UNIT];
-#if MIOPEN_N_PIXS_OFF > 0
-    if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
-    {
-        int i = 0;
-        for(; i < MIOPEN_N_PIXS_OFF; ++i)
+    auto load_element = [&](int i) -> FP_TYPE {
+        if constexpr(MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ)
         {
-#if MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ
-            if(n_in_stride > c_in * h_in * w_in && c_in != 0 && h_in != 0 && w_in != 0)
+            if constexpr(MIOPEN_N_IN_STRIDE > MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN &&
+                         MIOPEN_C_IN != 0 && MIOPEN_H_IN != 0 && MIOPEN_W_IN != 0)
             {
                 int loc, n_loc, c_loc, h_loc, w_loc;
                 loc   = x * MIOPEN_READ_UNIT + i;
@@ -245,60 +229,54 @@ __launch_bounds__(
                          (MIOPEN_H_IN * MIOPEN_W_IN)) %
                         MIOPEN_W_IN;
 
-                data[i] = bot[xOffset + n_loc * MIOPEN_N_IN_STRIDE + c_loc * MIOPEN_C_IN_STRIDE +
-                              h_loc * MIOPEN_H_IN_STRIDE + w_loc * MIOPEN_W_IN_STRIDE];
-            }
-            else
-#endif
-            {
-                data[i] = bot[xOffset + x * MIOPEN_READ_UNIT + i];
+                return bot[xOffset + n_loc * MIOPEN_N_IN_STRIDE + c_loc * MIOPEN_C_IN_STRIDE +
+                           h_loc * MIOPEN_H_IN_STRIDE + w_loc * MIOPEN_W_IN_STRIDE];
             }
         }
-        for(; i < MIOPEN_READ_UNIT; ++i)
+        return bot[xOffset + x * MIOPEN_READ_UNIT + i];
+    };
+
+    if constexpr(MIOPEN_N_PIXS_OFF > 0)
+    {
+        if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
         {
-            data[i] = (FP_TYPE)1.f;
+            int i = 0;
+#pragma unroll
+            for(; i < MIOPEN_N_PIXS_OFF; ++i)
+            {
+                data[i] = load_element(i);
+            }
+#pragma unroll
+            for(; i < MIOPEN_READ_UNIT; ++i)
+            {
+                data[i] = (FP_TYPE)1.f;
+            }
+        }
+        else
+        {
+#pragma unroll
+            for(int i = 0; i < MIOPEN_READ_UNIT; ++i)
+            {
+                data[i] = load_element(i);
+            }
         }
     }
     else
-#endif
     {
+#pragma unroll
         for(int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
-#if MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ
-            if(n_in_stride > c_in * h_in * w_in && c_in != 0 && h_in != 0 && w_in != 0)
-            {
-                int loc, n_loc, c_loc, h_loc, w_loc;
-                loc   = x * MIOPEN_READ_UNIT + i;
-                n_loc = loc / (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN);
-                c_loc =
-                    (loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) / (MIOPEN_H_IN * MIOPEN_W_IN);
-                h_loc = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
-                         (MIOPEN_H_IN * MIOPEN_W_IN)) /
-                        MIOPEN_W_IN;
-                w_loc = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
-                         (MIOPEN_H_IN * MIOPEN_W_IN)) %
-                        MIOPEN_W_IN;
-
-                data[i] = bot[xOffset + n_loc * MIOPEN_N_IN_STRIDE + c_loc * MIOPEN_C_IN_STRIDE +
-                              h_loc * MIOPEN_H_IN_STRIDE + w_loc * MIOPEN_W_IN_STRIDE];
-            }
-            else
-#endif
-            {
-                data[i] = bot[xOffset + x * MIOPEN_READ_UNIT + i];
-            }
+            data[i] = load_element(i);
         }
     }
+
     ActivationFunction(response, data, gamma, beta, alpha);
 
-#if MIOPEN_N_PIXS_OFF > 0
-    if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
-    {
-        int i = 0;
-        for(; i < MIOPEN_N_PIXS_OFF; ++i)
+    auto store_element = [&](int i, FP_TYPE value) {
+        if constexpr(MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ)
         {
-#if MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ
-            if(n_out_stride > c_out * h_out * w_out && c_out != 0 && h_out != 0 && w_out != 0)
+            if constexpr(MIOPEN_N_OUT_STRIDE > MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT &&
+                         MIOPEN_C_OUT != 0 && MIOPEN_H_OUT != 0 && MIOPEN_W_OUT != 0)
             {
                 int loc, n_loc, c_loc, h_loc, w_loc;
                 loc   = x * MIOPEN_READ_UNIT + i;
@@ -313,44 +291,30 @@ __launch_bounds__(
                         MIOPEN_W_OUT;
 
                 top[yOffset + n_loc * MIOPEN_N_OUT_STRIDE + c_loc * MIOPEN_C_OUT_STRIDE +
-                    h_loc * MIOPEN_H_OUT_STRIDE + w_loc * MIOPEN_W_OUT_STRIDE] = response[i];
+                    h_loc * MIOPEN_H_OUT_STRIDE + w_loc * MIOPEN_W_OUT_STRIDE] = value;
+                return;
             }
-            else
-#endif
+        }
+        top[yOffset + x * MIOPEN_READ_UNIT + i] = value;
+    };
+
+    if constexpr(MIOPEN_N_PIXS_OFF > 0)
+    {
+        if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
+        {
+#pragma unroll
+            for(int i = 0; i < MIOPEN_N_PIXS_OFF; ++i)
             {
-                top[yOffset + x * MIOPEN_READ_UNIT + i] = response[i];
+                store_element(i, response[i]);
             }
+            return;
         }
     }
-    else
-#endif
-    {
-        for(int i = 0; i < MIOPEN_READ_UNIT; ++i)
-        {
-#if MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ
-            if(n_out_stride > c_out * h_out * w_out && c_out != 0 && h_out != 0 && w_out != 0)
-            {
-                int loc, n_loc, c_loc, h_loc, w_loc;
-                loc   = x * MIOPEN_READ_UNIT + i;
-                n_loc = loc / (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT);
-                c_loc = (loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                        (MIOPEN_H_OUT * MIOPEN_W_OUT);
-                h_loc = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                         (MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                        MIOPEN_W_OUT;
-                w_loc = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                         (MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                        MIOPEN_W_OUT;
 
-                top[yOffset + n_loc * MIOPEN_N_OUT_STRIDE + c_loc * MIOPEN_C_OUT_STRIDE +
-                    h_loc * MIOPEN_H_OUT_STRIDE + w_loc * MIOPEN_W_OUT_STRIDE] = response[i];
-            }
-            else
-#endif
-            {
-                top[yOffset + x * MIOPEN_READ_UNIT + i] = response[i];
-            }
-        }
+#pragma unroll
+    for(int i = 0; i < MIOPEN_READ_UNIT; ++i)
+    {
+        store_element(i, response[i]);
     }
 }
 
@@ -372,246 +336,172 @@ extern "C" __global__ void MIOpenNeuronBwd(FP_TYPE* bot_diff,
     if(x >= MIOPEN_MAP_SZ)
         return;
 
-#if MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ || MIOPEN_N_DOUT_STRIDE > MIOPEN_DOUT_BLOCK_SZ || \
-    MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ
-    int n_out_stride  = MIOPEN_N_OUT_STRIDE;
-    int c_out         = MIOPEN_C_OUT;
-    int h_out         = MIOPEN_H_OUT;
-    int w_out         = MIOPEN_W_OUT;
-    int n_dout_stride = MIOPEN_N_DOUT_STRIDE;
-    int c_dout        = MIOPEN_C_DOUT;
-    int h_dout        = MIOPEN_H_DOUT;
-    int w_dout        = MIOPEN_W_DOUT;
-    int n_in_stride   = MIOPEN_N_IN_STRIDE;
-    int c_in          = MIOPEN_C_IN;
-    int h_in          = MIOPEN_H_IN;
-    int w_in          = MIOPEN_W_IN;
-#endif
-
-#if MIOPEN_N_DIN_STRIDE > MIOPEN_DIN_BLOCK_SZ
-    int n_din_stride  = MIOPEN_N_DIN_STRIDE;
-    int c_din         = MIOPEN_C_DIN;
-    int h_din         = MIOPEN_H_DIN;
-    int w_din         = MIOPEN_W_DIN;
-#endif
-
     FP_TYPE bot_diff_dat[MIOPEN_READ_UNIT];
     FP_TYPE top_diff_dat[MIOPEN_READ_UNIT];
     FP_TYPE bot_dat[MIOPEN_READ_UNIT];
     FP_TYPE top_dat[MIOPEN_READ_UNIT];
-#if MIOPEN_N_PIXS_OFF > 0
-    if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
-    {
-        int i = 0;
-        for(; i < MIOPEN_N_PIXS_OFF; ++i)
+
+    auto load_top_diff = [&](int i) -> FP_TYPE {
+        if constexpr(MIOPEN_N_DOUT_STRIDE > MIOPEN_DOUT_BLOCK_SZ)
         {
-#if MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ || MIOPEN_N_DOUT_STRIDE > MIOPEN_DOUT_BLOCK_SZ || \
-    MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ
-            if((n_out_stride > c_out * h_out * w_out || n_dout_stride > c_dout * h_dout * w_dout ||
-                n_in_stride > c_in * h_in * w_in) &&
-               c_out != 0 && h_out != 0 && w_out != 0 && c_dout != 0 && h_dout != 0 &&
-               w_dout != 0 && c_in != 0 && h_in != 0 && w_in != 0)
+            if constexpr(MIOPEN_N_DOUT_STRIDE > MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT &&
+                         MIOPEN_C_DOUT != 0 && MIOPEN_H_DOUT != 0 && MIOPEN_W_DOUT != 0)
             {
-                int loc, n_loc_top_diff, c_loc_top_diff, h_loc_top_diff, w_loc_top_diff, n_loc_top,
-                    c_loc_top, h_loc_top, w_loc_top, n_loc_bot, c_loc_bot, h_loc_bot, w_loc_bot;
-                loc = x * MIOPEN_READ_UNIT + i;
+                int loc   = x * MIOPEN_READ_UNIT + i;
+                int n_loc = loc / (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT);
+                int c_loc = (loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) /
+                            (MIOPEN_H_DOUT * MIOPEN_W_DOUT);
+                int h_loc = ((loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
+                             (MIOPEN_H_DOUT * MIOPEN_W_DOUT)) /
+                            MIOPEN_W_DOUT;
+                int w_loc = ((loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
+                             (MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
+                            MIOPEN_W_DOUT;
 
-                n_loc_top_diff = loc / (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT);
-                c_loc_top_diff = (loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) /
-                                 (MIOPEN_H_DOUT * MIOPEN_W_DOUT);
-                h_loc_top_diff = ((loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                                  (MIOPEN_H_DOUT * MIOPEN_W_DOUT)) /
-                                 MIOPEN_W_DOUT;
-                w_loc_top_diff = ((loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                                  (MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                                 MIOPEN_W_DOUT;
+                return top_diff[dyOffset + n_loc * MIOPEN_N_DOUT_STRIDE +
+                                c_loc * MIOPEN_C_DOUT_STRIDE + h_loc * MIOPEN_H_DOUT_STRIDE +
+                                w_loc * MIOPEN_W_DOUT_STRIDE];
+            }
+        }
+        return top_diff[dyOffset + x * MIOPEN_READ_UNIT + i];
+    };
 
-                n_loc_top = loc / (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT);
-                c_loc_top = (loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                            (MIOPEN_H_OUT * MIOPEN_W_OUT);
-                h_loc_top = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                             (MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                            MIOPEN_W_OUT;
-                w_loc_top = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                             (MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                            MIOPEN_W_OUT;
-
-                n_loc_bot = loc / (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN);
-                c_loc_bot =
+    auto load_bot_data = [&](int i) -> FP_TYPE {
+        if constexpr(MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ)
+        {
+            if constexpr(MIOPEN_N_IN_STRIDE > MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN &&
+                         MIOPEN_C_IN != 0 && MIOPEN_H_IN != 0 && MIOPEN_W_IN != 0)
+            {
+                int loc   = x * MIOPEN_READ_UNIT + i;
+                int n_loc = loc / (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN);
+                int c_loc =
                     (loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) / (MIOPEN_H_IN * MIOPEN_W_IN);
-                h_loc_bot = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
+                int h_loc = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
                              (MIOPEN_H_IN * MIOPEN_W_IN)) /
                             MIOPEN_W_IN;
-                w_loc_bot = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
+                int w_loc = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
                              (MIOPEN_H_IN * MIOPEN_W_IN)) %
                             MIOPEN_W_IN;
 
-                top_diff_dat[i] = top_diff[dyOffset + n_loc_top_diff * MIOPEN_N_DOUT_STRIDE +
-                                           c_loc_top_diff * MIOPEN_C_DOUT_STRIDE +
-                                           h_loc_top_diff * MIOPEN_H_DOUT_STRIDE +
-                                           w_loc_top_diff * MIOPEN_W_DOUT_STRIDE];
-                bot_dat[i] =
-                    bot_data[xOffset + n_loc_bot * MIOPEN_N_IN_STRIDE +
-                             c_loc_bot * MIOPEN_C_IN_STRIDE + h_loc_bot * MIOPEN_H_IN_STRIDE +
-                             w_loc_bot * MIOPEN_W_IN_STRIDE];
-                top_dat[i] =
-                    top_data[yOffset + n_loc_top * MIOPEN_N_OUT_STRIDE +
-                             c_loc_top * MIOPEN_C_OUT_STRIDE + h_loc_top * MIOPEN_H_OUT_STRIDE +
-                             w_loc_top * MIOPEN_W_OUT_STRIDE];
-            }
-            else
-#endif
-            {
-                top_diff_dat[i] = top_diff[dyOffset + x * MIOPEN_READ_UNIT + i];
-                bot_dat[i]      = bot_data[xOffset + x * MIOPEN_READ_UNIT + i];
-                top_dat[i]      = top_data[yOffset + x * MIOPEN_READ_UNIT + i];
+                return bot_data[xOffset + n_loc * MIOPEN_N_IN_STRIDE + c_loc * MIOPEN_C_IN_STRIDE +
+                                h_loc * MIOPEN_H_IN_STRIDE + w_loc * MIOPEN_W_IN_STRIDE];
             }
         }
-        for(; i < MIOPEN_READ_UNIT; ++i)
+        return bot_data[xOffset + x * MIOPEN_READ_UNIT + i];
+    };
+
+    auto load_top_data = [&](int i) -> FP_TYPE {
+        if constexpr(MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ)
         {
-            top_diff_dat[i] = (FP_TYPE)1.f;
-            bot_dat[i]      = (FP_TYPE)1.f;
-            top_dat[i]      = (FP_TYPE)1.f;
+            if constexpr(MIOPEN_N_OUT_STRIDE > MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT &&
+                         MIOPEN_C_OUT != 0 && MIOPEN_H_OUT != 0 && MIOPEN_W_OUT != 0)
+            {
+                int loc   = x * MIOPEN_READ_UNIT + i;
+                int n_loc = loc / (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT);
+                int c_loc = (loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) /
+                            (MIOPEN_H_OUT * MIOPEN_W_OUT);
+                int h_loc = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
+                             (MIOPEN_H_OUT * MIOPEN_W_OUT)) /
+                            MIOPEN_W_OUT;
+                int w_loc = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
+                             (MIOPEN_H_OUT * MIOPEN_W_OUT)) %
+                            MIOPEN_W_OUT;
+
+                return top_data[yOffset + n_loc * MIOPEN_N_OUT_STRIDE +
+                                c_loc * MIOPEN_C_OUT_STRIDE + h_loc * MIOPEN_H_OUT_STRIDE +
+                                w_loc * MIOPEN_W_OUT_STRIDE];
+            }
+        }
+        return top_data[yOffset + x * MIOPEN_READ_UNIT + i];
+    };
+
+    if constexpr(MIOPEN_N_PIXS_OFF > 0)
+    {
+        if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
+        {
+            int i = 0;
+#pragma unroll
+            for(; i < MIOPEN_N_PIXS_OFF; ++i)
+            {
+                top_diff_dat[i] = load_top_diff(i);
+                bot_dat[i]      = load_bot_data(i);
+                top_dat[i]      = load_top_data(i);
+            }
+#pragma unroll
+            for(; i < MIOPEN_READ_UNIT; ++i)
+            {
+                top_diff_dat[i] = (FP_TYPE)1.f;
+                bot_dat[i]      = (FP_TYPE)1.f;
+                top_dat[i]      = (FP_TYPE)1.f;
+            }
+        }
+        else
+        {
+#pragma unroll
+            for(int i = 0; i < MIOPEN_READ_UNIT; ++i)
+            {
+                top_diff_dat[i] = load_top_diff(i);
+                bot_dat[i]      = load_bot_data(i);
+                top_dat[i]      = load_top_data(i);
+            }
         }
     }
     else
-#endif
     {
+#pragma unroll
         for(int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
-#if MIOPEN_N_OUT_STRIDE > MIOPEN_OUT_BLOCK_SZ || MIOPEN_N_DOUT_STRIDE > MIOPEN_DOUT_BLOCK_SZ || \
-    MIOPEN_N_IN_STRIDE > MIOPEN_IN_BLOCK_SZ
-            if((n_out_stride > c_out * h_out * w_out || n_dout_stride > c_dout * h_dout * w_dout ||
-                n_in_stride > c_in * h_in * w_in) &&
-               c_out != 0 && h_out != 0 && w_out != 0 && c_dout != 0 && h_dout != 0 &&
-               w_dout != 0 && c_in != 0 && h_in != 0 && w_in != 0)
-            {
-                int loc, n_loc_top_diff, c_loc_top_diff, h_loc_top_diff, w_loc_top_diff, n_loc_top,
-                    c_loc_top, h_loc_top, w_loc_top, n_loc_bot, c_loc_bot, h_loc_bot, w_loc_bot;
-                loc = x * MIOPEN_READ_UNIT + i;
-
-                n_loc_top_diff = loc / (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT);
-                c_loc_top_diff = (loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) /
-                                 (MIOPEN_H_DOUT * MIOPEN_W_DOUT);
-                h_loc_top_diff = ((loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                                  (MIOPEN_H_DOUT * MIOPEN_W_DOUT)) /
-                                 MIOPEN_W_DOUT;
-                w_loc_top_diff = ((loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                                  (MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                                 MIOPEN_W_DOUT;
-
-                n_loc_top = loc / (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT);
-                c_loc_top = (loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                            (MIOPEN_H_OUT * MIOPEN_W_OUT);
-                h_loc_top = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                             (MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                            MIOPEN_W_OUT;
-                w_loc_top = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                             (MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                            MIOPEN_W_OUT;
-
-                n_loc_bot = loc / (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN);
-                c_loc_bot =
-                    (loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) / (MIOPEN_H_IN * MIOPEN_W_IN);
-                h_loc_bot = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
-                             (MIOPEN_H_IN * MIOPEN_W_IN)) /
-                            MIOPEN_W_IN;
-                w_loc_bot = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
-                             (MIOPEN_H_IN * MIOPEN_W_IN)) %
-                            MIOPEN_W_IN;
-
-                top_diff_dat[i] = top_diff[dyOffset + n_loc_top_diff * MIOPEN_N_DOUT_STRIDE +
-                                           c_loc_top_diff * MIOPEN_C_DOUT_STRIDE +
-                                           h_loc_top_diff * MIOPEN_H_DOUT_STRIDE +
-                                           w_loc_top_diff * MIOPEN_W_DOUT_STRIDE];
-                bot_dat[i] =
-                    bot_data[xOffset + n_loc_bot * MIOPEN_N_IN_STRIDE +
-                             c_loc_bot * MIOPEN_C_IN_STRIDE + h_loc_bot * MIOPEN_H_IN_STRIDE +
-                             w_loc_bot * MIOPEN_W_IN_STRIDE];
-                top_dat[i] =
-                    top_data[yOffset + n_loc_top * MIOPEN_N_OUT_STRIDE +
-                             c_loc_top * MIOPEN_C_OUT_STRIDE + h_loc_top * MIOPEN_H_OUT_STRIDE +
-                             w_loc_top * MIOPEN_W_OUT_STRIDE];
-            }
-            else
-#endif
-            {
-                top_diff_dat[i] = top_diff[dyOffset + x * MIOPEN_READ_UNIT + i];
-                bot_dat[i]      = bot_data[xOffset + x * MIOPEN_READ_UNIT + i];
-                top_dat[i]      = top_data[yOffset + x * MIOPEN_READ_UNIT + i];
-            }
+            top_diff_dat[i] = load_top_diff(i);
+            bot_dat[i]      = load_bot_data(i);
+            top_dat[i]      = load_top_data(i);
         }
     }
 
     ActivationFunction_Diff(
         bot_diff_dat, top_diff_dat, bot_dat, top_dat, diff_scale, gamma, beta, alpha);
 
-#if MIOPEN_N_PIXS_OFF > 0
-    if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
-    {
-        int i = 0;
-        for(; i < MIOPEN_N_PIXS_OFF; ++i)
+    auto store_bot_diff = [&](int i, FP_TYPE value) {
+        if constexpr(MIOPEN_N_DIN_STRIDE > MIOPEN_DIN_BLOCK_SZ)
         {
-#if MIOPEN_N_DIN_STRIDE > MIOPEN_DIN_BLOCK_SZ
-            if(n_din_stride > c_din * h_din * w_din && c_din != 0 && h_din != 0 && w_din != 0)
+            if constexpr(MIOPEN_N_DIN_STRIDE > MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN &&
+                         MIOPEN_C_DIN != 0 && MIOPEN_H_DIN != 0 && MIOPEN_W_DIN != 0)
             {
-                int loc, n_loc_bot_diff, c_loc_bot_diff, h_loc_bot_diff, w_loc_bot_diff;
-                loc = x * MIOPEN_READ_UNIT + i;
+                int loc   = x * MIOPEN_READ_UNIT + i;
+                int n_loc = loc / (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN);
+                int c_loc = (loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) /
+                            (MIOPEN_H_DIN * MIOPEN_W_DIN);
+                int h_loc = ((loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) %
+                             (MIOPEN_H_DIN * MIOPEN_W_DIN)) /
+                            MIOPEN_W_DIN;
+                int w_loc = ((loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) %
+                             (MIOPEN_H_DIN * MIOPEN_W_DIN)) %
+                            MIOPEN_W_DIN;
 
-                n_loc_bot_diff = loc / (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN);
-                c_loc_bot_diff = (loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) /
-                                 (MIOPEN_H_DIN * MIOPEN_W_DIN);
-                h_loc_bot_diff = ((loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                                  (MIOPEN_H_DIN * MIOPEN_W_DIN)) /
-                                 MIOPEN_W_DIN;
-                w_loc_bot_diff = ((loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                                  (MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                                 MIOPEN_W_DIN;
-
-                bot_diff[dxOffset + n_loc_bot_diff * MIOPEN_N_DIN_STRIDE +
-                         c_loc_bot_diff * MIOPEN_C_DIN_STRIDE +
-                         h_loc_bot_diff * MIOPEN_H_DIN_STRIDE +
-                         w_loc_bot_diff * MIOPEN_W_DIN_STRIDE] = bot_diff_dat[i];
+                bot_diff[dxOffset + n_loc * MIOPEN_N_DIN_STRIDE + c_loc * MIOPEN_C_DIN_STRIDE +
+                         h_loc * MIOPEN_H_DIN_STRIDE + w_loc * MIOPEN_W_DIN_STRIDE] = value;
+                return;
             }
-            else
-#endif
+        }
+        bot_diff[dxOffset + x * MIOPEN_READ_UNIT + i] = value;
+    };
+
+    if constexpr(MIOPEN_N_PIXS_OFF > 0)
+    {
+        if(x == MIOPEN_MAP_SZ_ALIGNED - 1)
+        {
+#pragma unroll
+            for(int i = 0; i < MIOPEN_N_PIXS_OFF; ++i)
             {
-                bot_diff[dxOffset + x * MIOPEN_READ_UNIT + i] = bot_diff_dat[i];
+                store_bot_diff(i, bot_diff_dat[i]);
             }
+            return;
         }
     }
-    else
-#endif
+
+#pragma unroll
+    for(int i = 0; i < MIOPEN_READ_UNIT; ++i)
     {
-        for(int i = 0; i < MIOPEN_READ_UNIT; ++i)
-        {
-#if MIOPEN_N_DIN_STRIDE > MIOPEN_DIN_BLOCK_SZ
-            if(n_din_stride > c_din * h_din * w_din && c_din != 0 && h_din != 0 && w_din != 0)
-            {
-                int loc, n_loc_bot_diff, c_loc_bot_diff, h_loc_bot_diff, w_loc_bot_diff;
-                loc = x * MIOPEN_READ_UNIT + i;
-
-                n_loc_bot_diff = loc / (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN);
-                c_loc_bot_diff = (loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) /
-                                 (MIOPEN_H_DIN * MIOPEN_W_DIN);
-                h_loc_bot_diff = ((loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                                  (MIOPEN_H_DIN * MIOPEN_W_DIN)) /
-                                 MIOPEN_W_DIN;
-                w_loc_bot_diff = ((loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                                  (MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                                 MIOPEN_W_DIN;
-
-                bot_diff[dxOffset + n_loc_bot_diff * MIOPEN_N_DIN_STRIDE +
-                         c_loc_bot_diff * MIOPEN_C_DIN_STRIDE +
-                         h_loc_bot_diff * MIOPEN_H_DIN_STRIDE +
-                         w_loc_bot_diff * MIOPEN_W_DIN_STRIDE] = bot_diff_dat[i];
-            }
-            else
-#endif
-            {
-                bot_diff[dxOffset + x * MIOPEN_READ_UNIT + i] = bot_diff_dat[i];
-            }
-        }
+        store_bot_diff(i, bot_diff_dat[i]);
     }
 }
 
