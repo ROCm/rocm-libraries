@@ -60,10 +60,10 @@ git checkout develop # or the branch you are starting from
 
 hipBLASLt provides modern CMake support and relies on native CMake functionality, with the exception of
 some project specific options. As such, users are advised to consult the CMake documentation for
-general usage questions. For details on all configuration options see the [Options](#options) section.
+general usage questions. For details on all configuration options, see the [Options](#options) section.
 
 This section provides usage examples on how to configure, build and install hipBLASLt using various supported methods.
-We assume the user has a ROCm installation (conventionally installed to `/opt/rocm`), Python 3.8 or newer, 
+It assumes the user has a ROCm installation (conventionally installed to `/opt/rocm`), Python 3.8 or newer, 
 and a CMake version greater than or equal to the `cmake_minimum_required` defined at [CMakeLists.txt](CMakeLists.txt#L4).
 
 ### Using CMake presets
@@ -113,7 +113,7 @@ cmake --build build --parallel
 
 ### Using the installation script
 
-Refer to the available build options using `./install.sh --help`
+Refer to the available build options using `./install.sh --help`:
 
 ```bash
 # Command line options:
@@ -128,7 +128,7 @@ Refer to the available build options using `./install.sh --help`
 ```
 
 > [!NOTE]
-> To build hipBLASLt for ROCm <= 6.2, pass the `--legacy_hipblas_direct` flag to `install.sh`
+> To build hipBLASLt for ROCm <= 6.2, pass the `--legacy_hipblas_direct` flag to `install.sh`.
 
 ### Options
 
