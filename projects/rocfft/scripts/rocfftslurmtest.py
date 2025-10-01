@@ -189,9 +189,8 @@ def main():
         buildparams.modules = args.modules
         buildparams.exports = args.exports
         buildparams.ntaskspernode = 1
-        buildparams.gpuspernode = 1
+        buildparams.gpuspernode = None
         buildparams.timelimit = datetime.timedelta(hours=2)
-        buildparams.ntaskspernode = 1
 
         buildjob = rocslurm.sbatch("build",
                                    buildparams,
@@ -211,10 +210,10 @@ def main():
         jobparams.acct = args.acct
     jobparams.modules = args.modules
     jobparams.exports = args.exports
-    jobparams.ntaskspernode = 1
-    jobparams.gpuspernode = args.gpuspernode
+    #jobparams.gpuspernode = args.gpuspernode
     jobparams.timelimit = datetime.timedelta(hours=2)
-    jobparams.ntaskspernode = jobparams.gpuspernode
+    #jobparams.ntaskspernode = jobparams.gpuspernode
+    jobparams.ntasks = jobparams.gpuspernode
     if buildjob != None:
         jobparams.afterok = [buildjob.jobid]
 
@@ -233,11 +232,10 @@ def main():
         mpigpucmd += " --launcher srun"
         if args.gpuidvar != None:
             mpigpucmd += " --gpuidvar " + args.gpuidvar
-        mpigpucmd += " --nranks " + str(
-            jobparams.ntaskspernode * jobparams.nnodes)
+        mpigpucmd += " --nranks " + str(args.gpuspernode * jobparams.nnodes)
         mpigpucmd += " --gpusperrank " + str(1)  #args.gpuspernode
 
-        jobparams.ntaskspernode = 8
+        #jobparams.ntaskspernode = args.gpuspernode
         mpijob = rocslurm.sbatch("mpi" + str(nodes),
                                  jobparams,
                                  args.logdir,

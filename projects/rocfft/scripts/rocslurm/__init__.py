@@ -30,6 +30,7 @@ class sbatchparams:
         self.modules = []
         self.exports = []
         self.ntaskspernode = None
+        self.ntasks = None
         self.gpuspernode = None
         self.afterok = []
         self.afterany = []
@@ -61,6 +62,9 @@ def sbatch(jobname, params, logdir, workdir, jobcmd, verbose=0):
     if params.ntaskspernode != None:
         batchscript += "#SBATCH --ntasks-per-node=" + str(
             params.ntaskspernode) + "\n"
+    if params.ntasks != None:
+        batchscript += "#SBATCH --ntasks=" + str(params.ntasks) + "\n"
+
     if params.gpuspernode != None:
         batchscript += "#SBATCH --gpus-per-node=" + str(
             params.gpuspernode) + "\n"
