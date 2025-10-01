@@ -401,10 +401,9 @@ target_compile_definitions(rocsparse-test PRIVATE GOOGLE_TEST)
 target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprecated -Wno-unused-command-line-argument -Wall)
 
 # Internal common header
+target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 if (BUILD_CLIENTS_ONLY)
-  target_include_directories(rocsparse-test PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-else()
-  target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+  target_include_directories(rocsparse-test PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
 endif()
 
 # Add OpenMP if available

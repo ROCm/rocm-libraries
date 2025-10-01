@@ -213,10 +213,9 @@ add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENT
 target_compile_options(rocsparse-bench PRIVATE -Wno-deprecated -Wno-unused-command-line-argument -Wall)
 
 # Internal common header
+target_include_directories(rocsparse-bench PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 if (BUILD_CLIENTS_ONLY)
-  target_include_directories(rocsparse-bench PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-else()
-  target_include_directories(rocsparse-bench PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+  target_include_directories(rocsparse-bench PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
 endif()
 
 # Add OpenMP if available
