@@ -64,7 +64,6 @@ namespace rocRoller
         msg << ShowValue(prefetchMixMemOps);
 
         msg << ShowValue(streamK);
-        msg << ShowValue(streamKTwoTile);
 
         msg << "loopOverOutputTilesDimensions: ";
         streamJoin(msg, loopOverOutputTilesDimensions, ", ");
@@ -369,13 +368,7 @@ namespace rocRoller
             }
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
-                m_commandParameters->loopOverOutputTilesDimensions,
-                rocRoller::XLOOP,
-                rocRoller::KLOOP,
-                m_commandParameters->streamKTwoTile,
-                numWGsExpr,
-                m_commandParameters,
-                m_context));
+                m_context, m_commandParameters, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
         }
         else if(!m_commandParameters->loopOverOutputTilesDimensions.empty())
         {
