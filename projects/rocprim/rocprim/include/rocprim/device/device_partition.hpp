@@ -428,17 +428,12 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                     current_number_of_blocks,
                                                     start);
 
-        if(UsingOrderedBlockId)
-        {
-            result = hipMemsetAsync(block_id_pool, 0, sizeof(unsigned int), stream);
-            if(result != hipSuccess)
-            {
-                return result;
-            }
-        }
+        ROCPRIM_RETURN_ON_ERROR(block_id.reset_from_host(stream));
 
         if(debug_synchronous)
+        {
             start = std::chrono::steady_clock::now();
+        }
 
         ROCPRIM_RETURN_ON_ERROR(with_scan_state(
             [&](const auto scan_state)

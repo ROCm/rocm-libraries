@@ -85,7 +85,8 @@ hipError_t
 
     key_type* keys_buffer = nullptr;
 
-    using ordered_bid_type = ordered_block_id<unsigned int>;
+    // TODO: make dynamic
+    using ordered_bid_type = block_id_wrapper<unsigned int, true>;
     ordered_bid_type::id_type* ordered_bid_storage;
 
     {

@@ -825,7 +825,8 @@ template<typename ArchConfig,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
          typename RunsCountOutputIterator,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     non_trivial_kernel_impl(InputIterator,
                             const OffsetsOutputIterator,
@@ -834,7 +835,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             const LookbackScanState,
                             const size_t,
                             const size_t,
-                            ordered_block_id<>)
+                            BlockIdWrapper)
         -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
 {
     // No need to build the kernel with sleep on a device that does not require it
@@ -846,16 +847,17 @@ template<typename ArchConfig,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
          typename RunsCountOutputIterator,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
-    non_trivial_kernel_impl(InputIterator                  input,
-                            const OffsetsOutputIterator    offsets_output,
-                            const CountsOutputIterator     counts_output,
-                            const RunsCountOutputIterator  runs_count_output,
-                            const LookbackScanState        scan_state,
-                            const size_t              grid_size,
-                            const size_t              size,
-                            ordered_block_id<>        ordered_bid)
+    non_trivial_kernel_impl(InputIterator                 input,
+                            const OffsetsOutputIterator   offsets_output,
+                            const CountsOutputIterator    counts_output,
+                            const RunsCountOutputIterator runs_count_output,
+                            const LookbackScanState       scan_state,
+                            const size_t                  grid_size,
+                            const size_t                  size,
+                            BlockIdWrapper                ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
     static constexpr non_trivial_runs_config_params params     = ArchConfig::params;

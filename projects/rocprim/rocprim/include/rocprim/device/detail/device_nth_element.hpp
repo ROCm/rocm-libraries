@@ -438,7 +438,7 @@ inline hipError_t launch_find_nth_element_bucket(detail::target_arch          ar
     return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<class ArchConfig, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
+template<class ArchConfig, unsigned int NumPartitions, class KeysIterator, class BinaryFunction, class WrappedBlockId>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     copy_buckets_kernel_impl(KeysIterator                                             keys,
                              typename std::iterator_traits<KeysIterator>::value_type* tree,
@@ -448,7 +448,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                              typename std::iterator_traits<KeysIterator>::value_type* keys_buffer,
                              bool*              equality_buckets,
                              BinaryFunction     compare_function,
-                             ordered_block_id<> ordered_bid)
+                             WrappedBlockId     ordered_bid)
 {
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
     using state    = nth_element_onesweep_lookback_state;
@@ -633,7 +633,11 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     }
 }
 
-template<class Config, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
+template<class Config,
+         unsigned int NumPartitions,
+         class KeysIterator,
+         class BinaryFunction,
+         class WrappedBlockId>
 inline hipError_t
     launch_copy_buckets(detail::target_arch                                      arch,
                         KeysIterator                                             keys,
@@ -644,7 +648,7 @@ inline hipError_t
                         typename std::iterator_traits<KeysIterator>::value_type* keys_buffer,
                         bool*                                                    equality_buckets,
                         BinaryFunction                                           compare_function,
-                        ordered_block_id<>                                       ordered_bid,
+                        WrappedBlockId                                           ordered_bid,
                         dim3                                                     grid,
                         dim3                                                     block,
                         size_t                                                   shmem,
@@ -666,7 +670,11 @@ inline hipError_t
     return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<class Config, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
+template<class Config,
+         unsigned int NumPartitions,
+         class KeysIterator,
+         class BinaryFunction,
+         class WrappedBlockId>
 ROCPRIM_INLINE
 hipError_t
     nth_element_keys_impl(detail::target_arch                                      arch,
@@ -686,7 +694,7 @@ hipError_t
                           BinaryFunction               compare_function,
                           hipStream_t                  stream,
                           bool                         debug_synchronous,
-                          ordered_block_id<>           ordered_bid)
+                          WrappedBlockId               ordered_bid)
 {
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
 
@@ -730,7 +738,7 @@ hipError_t
                                                        stream));
 
         // Reset ordered block id.
-        ROCPRIM_RETURN_ON_ERROR(ordered_bid.host_reset());
+        ROCPRIM_RETURN_ON_ERROR(ordered_bid.reset_from_host(stream));
 
         start_timer();
         ROCPRIM_RETURN_ON_ERROR(launch_find_splitters<Config>(arch,

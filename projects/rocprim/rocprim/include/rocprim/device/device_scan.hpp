@@ -137,7 +137,8 @@ template<class Config,
          class BinaryFunction,
          class InitValueType,
          class AccType,
-         class LookBackScanState>
+         class LookBackScanState,
+         class BlockIdWrapper>
 inline hipError_t launch_lookback_scan(detail::target_arch            arch,
                                        InputIterator                  input,
                                        OutputIterator                 output,
@@ -154,7 +155,7 @@ inline hipError_t launch_lookback_scan(detail::target_arch            arch,
                                        AccType*                       new_last_element,
                                        bool                           override_first_value,
                                        bool                           save_last_value,
-                                       ordered_block_id<unsigned int> ordered_bid)
+                                       BlockIdWrapper                 ordered_bid)
 {
     auto kernel = [=](auto arch_config)
     {
@@ -228,7 +229,7 @@ inline auto scan_impl(void*               temporary_storage,
     detail::temp_storage::layout layout{};
     ROCPRIM_RETURN_ON_ERROR(scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
 
-    using ordered_bid_type = ordered_block_id<unsigned int>;
+    using ordered_bid_type = ::rocprim::detail::block_id_wrapper<unsigned int, /* UsingOrderedBlockId */ true>;
     ordered_bid_type::id_type* ordered_bid_storage;
 
     const hipError_t partition_result = detail::temp_storage::partition(

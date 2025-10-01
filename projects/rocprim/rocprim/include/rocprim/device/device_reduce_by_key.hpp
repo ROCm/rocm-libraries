@@ -52,7 +52,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename LookBackScanState, typename AccumulatorType>
+template<typename LookBackScanState, typename AccumulatorType, typename BlockIdWrapper>
 ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
     reduce_by_key_init_kernel(LookBackScanState      lookback_scan_state,
                               const unsigned int     number_of_blocks,
@@ -60,7 +60,7 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
                               const unsigned int     block_save_idx,
                               std::size_t* const     global_head_count,
                               AccumulatorType* const previous_accumulated,
-                              ordered_block_id<>     ordered_bid)
+                              BlockIdWrapper         ordered_bid)
 {
     // 'ordered_bid' gets reset by 'init_lookback_scan_state'.
 
@@ -106,26 +106,27 @@ template<typename Config,
          typename UniqueCountIterator,
          typename CompareFunction,
          typename BinaryOp,
-         typename LookbackScanState>
-inline hipError_t launch_reduce_by_key(detail::target_arch            arch,
-                                       const KeyIterator              keys_input,
-                                       const ValueIterator            values_input,
-                                       const UniqueIterator           unique_keys,
-                                       const ReductionIterator        reductions,
-                                       const UniqueCountIterator      unique_count,
-                                       const BinaryOp                 reduce_op,
-                                       const CompareFunction          compare,
-                                       const LookbackScanState        scan_state,
-                                       const std::size_t              starting_block,
-                                       const std::size_t              total_number_of_blocks,
-                                       const std::size_t              size,
-                                       const std::size_t* const       global_head_count,
-                                       const AccumulatorType* const   previous_accumulated,
-                                       ordered_block_id<unsigned int> ordered_bid,
-                                       dim3                           grid,
-                                       dim3                           block,
-                                       size_t                         shmem,
-                                       hipStream_t                    stream)
+         typename LookbackScanState,
+         typename BlockIdWrapper>
+inline hipError_t launch_reduce_by_key(detail::target_arch          arch,
+                                       const KeyIterator            keys_input,
+                                       const ValueIterator          values_input,
+                                       const UniqueIterator         unique_keys,
+                                       const ReductionIterator      reductions,
+                                       const UniqueCountIterator    unique_count,
+                                       const BinaryOp               reduce_op,
+                                       const CompareFunction        compare,
+                                       const LookbackScanState      scan_state,
+                                       const std::size_t            starting_block,
+                                       const std::size_t            total_number_of_blocks,
+                                       const std::size_t            size,
+                                       const std::size_t* const     global_head_count,
+                                       const AccumulatorType* const previous_accumulated,
+                                       BlockIdWrapper               ordered_bid,
+                                       dim3                         grid,
+                                       dim3                         block,
+                                       size_t                       shmem,
+                                       hipStream_t                  stream)
 {
     auto kernel = [=](auto arch_config)
     {
@@ -204,7 +205,8 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
     ROCPRIM_RETURN_ON_ERROR(
         scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
 
-    using ordered_bid_type = ordered_block_id<unsigned int>;
+    // TODO: allow dynamic switching
+    using ordered_bid_type = block_id_wrapper<unsigned int, /*UsingOrderedBlockId*/ true>;
     ordered_bid_type::id_type* ordered_bid_storage;
 
     auto result = detail::temp_storage::partition(

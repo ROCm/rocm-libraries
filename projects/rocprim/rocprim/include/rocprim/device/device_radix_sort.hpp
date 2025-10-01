@@ -39,6 +39,7 @@
 #include "detail/config/device_radix_sort_onesweep.hpp"
 #include "detail/device_radix_sort.hpp"
 #include "device_transform.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 #include "specialization/device_radix_block_sort.hpp"
 #include "specialization/device_radix_merge_sort.hpp"
 
@@ -235,25 +236,26 @@ template<class Config,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class Offset,
-         class Decomposer>
-inline hipError_t launch_onesweep_iteration(detail::target_arch            arch,
-                                            KeysInputIterator              keys_input,
-                                            KeysOutputIterator             keys_output,
-                                            ValuesInputIterator            values_input,
-                                            ValuesOutputIterator           values_output,
-                                            const unsigned int             size,
-                                            Offset*                        global_digit_offsets_in,
-                                            Offset*                        global_digit_offsets_out,
-                                            onesweep_lookback_state*       lookback_states,
-                                            Decomposer                     decomposer,
-                                            const unsigned int             bit,
-                                            const unsigned int             current_radix_bits,
-                                            const unsigned int             full_blocks,
-                                            ordered_block_id<unsigned int> ordered_bid,
-                                            dim3                           grid,
-                                            dim3                           block,
-                                            size_t                         shmem,
-                                            hipStream_t                    stream)
+         class Decomposer,
+         class BlockIdWrapper>
+inline hipError_t launch_onesweep_iteration(detail::target_arch      arch,
+                                            KeysInputIterator        keys_input,
+                                            KeysOutputIterator       keys_output,
+                                            ValuesInputIterator      values_input,
+                                            ValuesOutputIterator     values_output,
+                                            const unsigned int       size,
+                                            Offset*                  global_digit_offsets_in,
+                                            Offset*                  global_digit_offsets_out,
+                                            onesweep_lookback_state* lookback_states,
+                                            Decomposer               decomposer,
+                                            const unsigned int       bit,
+                                            const unsigned int       current_radix_bits,
+                                            const unsigned int       full_blocks,
+                                            BlockIdWrapper           ordered_bid,
+                                            dim3                     grid,
+                                            dim3                     block,
+                                            size_t                   shmem,
+                                            hipStream_t              stream)
 {
     auto kernel = [=](auto arch_config)
     {
@@ -294,7 +296,8 @@ template<class Config,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class Offset,
-         class Decomposer>
+         class Decomposer,
+         class BlockIdWrapper>
 hipError_t radix_sort_onesweep_iteration(
     KeysInputIterator                                               keys_input,
     typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
@@ -311,7 +314,7 @@ hipError_t radix_sort_onesweep_iteration(
     Decomposer                                                      decomposer,
     const unsigned int                                              bit,
     const unsigned int                                              end_bit,
-    ordered_block_id<unsigned int>                                  ordered_bid,
+    BlockIdWrapper                                                  ordered_bid,
     const hipStream_t                                               stream,
     const bool                                                      debug_synchronous)
 {
@@ -378,7 +381,7 @@ hipError_t radix_sort_onesweep_iteration(
             start = std::chrono::steady_clock::now();
         }
 
-        ROCPRIM_RETURN_ON_ERROR(ordered_bid.host_reset());
+        ROCPRIM_RETURN_ON_ERROR(ordered_bid.reset_from_host(stream));
 
         if(from_input && to_output)
         {
@@ -504,7 +507,8 @@ hipError_t radix_sort_onesweep_impl(
     using key_type    = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type  = typename std::iterator_traits<ValuesInputIterator>::value_type;
     using offset_type = offset_type_t<Size>;
-    using ordered_bid_type = ordered_block_id<unsigned int>;
+    // TODO: make this dynamic?
+    using ordered_bid_type = block_id_wrapper<unsigned int, /* BlockIdWrapper */ true>;
     using config = wrapped_radix_sort_onesweep_config<Config, key_type, value_type>;
 
     detail::target_arch target_arch;

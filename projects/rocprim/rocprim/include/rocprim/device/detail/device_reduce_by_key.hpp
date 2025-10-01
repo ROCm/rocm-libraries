@@ -526,7 +526,8 @@ template<typename ArchConfig,
          typename UniqueCountIterator,
          typename CompareFunction,
          typename BinaryOp,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
                                                      ValueIterator,
                                                      const UniqueIterator,
@@ -540,7 +541,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
                                                      const std::size_t,
                                                      const std::size_t* const,
                                                      const AccumulatorType* const,
-                                                     ordered_block_id<unsigned int>)
+                                                     BlockIdWrapper)
     -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
 {
     // No need to build the kernel with sleep on a device that does not require it
@@ -556,7 +557,8 @@ template<typename ArchConfig,
          typename UniqueCountIterator,
          typename CompareFunction,
          typename BinaryOp,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     kernel_impl(KeyIterator                    keys_input,
                 ValueIterator                  values_input,
@@ -571,7 +573,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                 const std::size_t              size,
                 const std::size_t* const       global_head_count,
                 const AccumulatorType* const   previous_accumulated,
-                ordered_block_id<>             ordered_bid)
+                BlockIdWrapper                 ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
     static constexpr reduce_by_key_config_params params = ArchConfig::params;

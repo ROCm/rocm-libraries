@@ -25,7 +25,6 @@
 #include "../../intrinsics/thread.hpp"
 
 #include "lookback_scan_state.hpp"
-#include "ordered_block_id.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -54,12 +53,12 @@ void access_indexed_lookback_value(LookBackScanState  lookback_scan_state,
     }
 }
 
-template<typename LookBackScanState>
-ROCPRIM_DEVICE ROCPRIM_INLINE void
-    init_lookback_scan_state(LookBackScanState              lookback_scan_state,
-                             const unsigned int             number_of_blocks,
-                             ordered_block_id<unsigned int> ordered_bid,
-                             unsigned int                   flat_thread_id)
+template<class LookBackScanState, class BlockIdWrapper>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void init_lookback_scan_state(LookBackScanState  lookback_scan_state,
+                              const unsigned int number_of_blocks,
+                              BlockIdWrapper     ordered_bid,
+                              unsigned int       flat_thread_id)
 {
     // Reset ordered_block_id.
     if(flat_thread_id == 0)
@@ -71,7 +70,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
     lookback_scan_state.initialize_prefix(flat_thread_id, number_of_blocks);
 }
 
-template<typename LookBackScanState>
+template<class LookBackScanState>
 ROCPRIM_DEVICE ROCPRIM_INLINE void init_lookback_scan_state(LookBackScanState  lookback_scan_state,
                                                             const unsigned int number_of_blocks,
                                                             unsigned int       flat_thread_id)
@@ -81,11 +80,11 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void init_lookback_scan_state(LookBackScanState  l
     lookback_scan_state.initialize_prefix(flat_thread_id, number_of_blocks);
 }
 
-template<typename LookBackScanState>
+template<class LookBackScanState, class WrappedBlockId>
 ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE 
 void init_lookback_scan_state_kernel_impl(LookBackScanState              lookback_scan_state,
                                           const unsigned int             number_of_blocks,
-                                          ordered_block_id<unsigned int> ordered_bid, // ordered block id is passed by value, so no need to call its constructor
+                                          WrappedBlockId ordered_bid, // ordered block id is passed by value, so no need to call its constructor
                                           unsigned int                   save_index,
                                           typename LookBackScanState::value_type* const save_dest)
 {

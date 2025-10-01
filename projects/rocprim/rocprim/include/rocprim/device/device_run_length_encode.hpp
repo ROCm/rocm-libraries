@@ -101,7 +101,8 @@ template<typename Config,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
          typename RunsCountOutputIterator,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 inline hipError_t launch_non_trivial(detail::target_arch           arch,
                                      const InputIterator           input,
                                      const OffsetsOutputIterator   offsets_output,
@@ -110,7 +111,7 @@ inline hipError_t launch_non_trivial(detail::target_arch           arch,
                                      const LookbackScanState       scan_state,
                                      const std::size_t             grid_size,
                                      const std::size_t             size,
-                                     ordered_block_id<>            ordered_bid,
+                                     BlockIdWrapper                ordered_bid,
                                      dim3                          grid,
                                      dim3                          block,
                                      size_t                        shmem,
@@ -174,7 +175,8 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
     detail::temp_storage::layout layout{};
     ROCPRIM_RETURN_ON_ERROR(scan_state_type::get_temp_storage_layout(grid_size, stream, layout));
 
-    using ordered_bid_type = ordered_block_id<unsigned int>;
+    // TODO: make dynamic
+    using ordered_bid_type = block_id_wrapper<unsigned int, true>;
     ordered_bid_type::id_type* ordered_bid_storage;
 
     hipError_t result = detail::temp_storage::partition(

@@ -106,7 +106,8 @@ template<typename Config,
          typename CompareFunction,
          typename BinaryFunction,
          typename LookbackScanState,
-         typename AccType>
+         typename AccType,
+         typename WrappedBlockId>
 inline hipError_t launch_device_scan_by_key(
     detail::target_arch                          arch,
     const KeyInputIterator                       keys,
@@ -122,7 +123,7 @@ inline hipError_t launch_device_scan_by_key(
     const ::rocprim::tuple<AccType, bool>* const previous_last_value,
     bool                                         use_last_keys,
     const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__ last_keys,
-    ordered_block_id<unsigned int> ordered_bid,
+    WrappedBlockId ordered_bid,
     dim3                           grid,
     dim3                           block,
     size_t                         shmem,
@@ -248,7 +249,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     ROCPRIM_RETURN_ON_ERROR(
         scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
 
-    using ordered_bid_type = ordered_block_id<unsigned int>;
+    using ordered_bid_type = block_id_wrapper<unsigned int, /*UsingOrderedBlockId*/ true>;
     ordered_bid_type::id_type* ordered_bid_storage;
 
     key_type*  last_keys_of_each_block;

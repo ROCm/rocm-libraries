@@ -1054,7 +1054,8 @@ template<class Key,
          unsigned int               RadixBits,
          bool                       Descending,
          block_radix_rank_algorithm RadixRankAlgorithm,
-         class Decomposer>
+         class Decomposer,
+         class BlockIdWrapper>
 struct onesweep_iteration_helper
 {
     static constexpr unsigned int radix_size      = 1u << RadixBits;
@@ -1086,8 +1087,8 @@ struct onesweep_iteration_helper
 
     struct storage_type_
     {
-        data_storage                                          data;
-        typename ordered_block_id<unsigned int>::storage_type ordered_bid;
+        data_storage                          data;
+        typename BlockIdWrapper::storage_type ordered_bid;
     };
 
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
@@ -1357,7 +1358,8 @@ template<unsigned int               BlockSize,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class Offset,
-         class Decomposer>
+         class Decomposer,
+         class BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     onesweep_iteration(KeysInputIterator        keys_input,
                        KeysOutputIterator       keys_output,
@@ -1371,7 +1373,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                        const unsigned int       bit,
                        const unsigned int       current_radix_bits,
                        const unsigned int       full_blocks,
-                    ordered_block_id<unsigned int> ordered_bid)
+                       BlockIdWrapper           ordered_bid)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -1384,7 +1386,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                      RadixBits,
                                                                      Descending,
                                                                      RadixRankAlgorithm,
-                                                                     Decomposer>;
+                                                                     Decomposer,
+                                                                     BlockIdWrapper>;
 
     ROCPRIM_SHARED_MEMORY typename onesweep_iteration_helper_type::storage_type storage;
 

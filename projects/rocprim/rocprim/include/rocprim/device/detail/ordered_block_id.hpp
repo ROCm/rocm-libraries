@@ -21,12 +21,15 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_ORDERED_BLOCK_ID_HPP_
 #define ROCPRIM_DEVICE_DETAIL_ORDERED_BLOCK_ID_HPP_
 
-#include <type_traits>
-
+#include "../../config.hpp"
 #include "../../detail/temp_storage.hpp"
 #include "../../intrinsics/atomic.hpp"
 #include "../../intrinsics/thread.hpp"
-#include "rocprim/config.hpp"
+#include "../config_types.hpp"
+
+#include <atomic>
+#include <exception>
+#include <type_traits>
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -109,7 +112,7 @@ struct ordered_block_id
     /// Resets the ordered block id from host. Don't use this if we have an init kernel!
     /// Call `ordered_block_id::reset()` from that kernel instead.
     ROCPRIM_HOST ROCPRIM_INLINE
-    hipError_t host_reset()
+    hipError_t reset_from_host(const hipStream_t = hipStreamDefault)
     {
         return hipMemset(id, 0, sizeof(id_type));
     }
@@ -212,6 +215,84 @@ struct block_id_wrapper<T, true>
 
     ::rocprim::detail::ordered_block_id<id_type> ordered_id;
 };
+
+ROCPRIM_INLINE ROCPRIM_HOST hipError_t check_if_using_atomic_block_id(hipStream_t stream, bool& enable)
+{
+    // Define possible options
+    enum class use_atomic_block_id : int
+    {
+        never  = 0,
+        hotfix = 1,
+        always = 2,
+
+        default_option = use_atomic_block_id::hotfix,
+    };
+
+    struct data_t
+    {
+        bool                valid  = false;
+        use_atomic_block_id option = use_atomic_block_id::hotfix;
+    };
+
+    // Store our data in a static atomic.
+    static std::atomic<data_t> cache = {};
+
+    // First load the atomic, if it's invalid, we need to check the env vars.
+    data_t data = cache.load();
+    if(!data.valid)
+    {
+        // Try to parse the env var, if it fails fall back to the default option.
+        auto* env = std::getenv("ROCPRIM_USE_ATOMIC_BLOCK_ID");
+        try
+        {
+            data = {
+                .valid  = true,
+                .option = use_atomic_block_id{std::stoi(env)},
+            };
+        }
+        catch(std::exception)
+        {
+            data = {
+                .valid  = true,
+                .option = use_atomic_block_id::default_option,
+            };
+        }
+        // Now finally update our static atomic.
+        cache.store(data);
+    }
+
+    // Now we have our data, we need to check what the behaviour is.
+    bool needs_hotfix = false;
+    if (data.option == use_atomic_block_id::hotfix)
+    {
+        // First get the device ID.
+        int device_id;
+        ROCPRIM_RETURN_ON_ERROR(::rocprim::detail::get_device_from_stream(stream, device_id));
+
+        // Then we get the arch. This property is cached.
+        target_arch arch;
+        ROCPRIM_RETURN_ON_ERROR(rocprim::detail::get_device_arch(device_id, arch));
+
+        needs_hotfix = arch == target_arch::gfx942;
+    }
+
+    switch(data.option)
+    {
+        // clang-format off
+        case use_atomic_block_id::never:
+            enable = false;
+            break;
+        case use_atomic_block_id::always:
+            enable = true;
+            break;
+        case use_atomic_block_id::hotfix:
+        default:
+            enable = needs_hotfix;
+        //clang-format on
+    }
+
+    return hipSuccess;
+}
 
 } // end of detail namespace
 

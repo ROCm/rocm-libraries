@@ -349,7 +349,8 @@ struct AliasType<true, InputBufferItType>
     using type = unsigned char;
 };
 
-template<bool IsMemCpy, class InputBufferItType, class OutputBufferItType, class BufferSizeItType>
+// TODO: make UseOrderedBlockId dynamic
+template<bool IsMemCpy, class InputBufferItType, class OutputBufferItType, class BufferSizeItType, class WrappedBlockId>
 struct batch_memcpy_impl
 {
     using input_buffer_type  = typename std::iterator_traits<InputBufferItType>::value_type;
@@ -367,6 +368,9 @@ struct batch_memcpy_impl
 
     // The byte offset within a thread-level buffer. Must fit at least `wlev_size_threshold`.
     using tlev_byte_offset_type = uint16_t;
+
+    
+    using ordered_bid_type = WrappedBlockId;
 
     struct copyable_buffers
     {
@@ -944,7 +948,7 @@ public:
     void init_tile_state_kernel(blev_buffer_scan_state_type buffer_scan_state,
                                 blev_block_scan_state_type  block_scan_state,
                                 tile_offset_type            num_tiles,
-                                ordered_block_id<>          ordered_bid)
+                                ordered_bid_type            ordered_bid)
     {
         const uint32_t block_id        = rocprim::detail::block_id<0>();
         const uint32_t block_size      = rocprim::detail::block_size<0>();
@@ -968,7 +972,7 @@ public:
                                      copyable_blev_buffers       blev_buffers,
                                      blev_buffer_scan_state_type blev_buffer_scan_state,
                                      blev_block_scan_state_type  blev_block_scan_state,
-                                     ordered_block_id<>          ordered_bid)
+                                     ordered_bid_type            ordered_bid)
     {
         ROCPRIM_SHARED_MEMORY typename non_blev_memcpy<ArchConfig>::storage_type temp_storage;
 
@@ -1103,8 +1107,11 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
     using BufferOffsetType = unsigned int;
     using BlockOffsetType  = unsigned int;
 
+    // TODO: make dynamic
+    using WrappedBlockId = block_id_wrapper<unsigned int, true>;
+
     using batch_memcpy_impl_type = detail::
-        batch_memcpy_impl<IsMemCpy, InputBufferItType, OutputBufferItType, BufferSizeItType>;
+        batch_memcpy_impl<IsMemCpy, InputBufferItType, OutputBufferItType, BufferSizeItType, WrappedBlockId>;
 
     static const uint32_t non_blev_block_size
         = params.non_blev_batch_memcpy_kernel_config.block_size;
@@ -1139,9 +1146,8 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
 
     uint8_t* blev_buffer_scan_data;
     uint8_t* blev_block_scan_state_data;
-
-    using ordered_bid_type = ordered_block_id<unsigned int>;
-    ordered_bid_type::id_type* ordered_bid_storage;
+ 
+    WrappedBlockId::id_type* ordered_bid_storage;
 
     // The non-blev kernel will prepare blev copy. Communication between the two
     // kernels is done via `blev_buffers`.
@@ -1161,7 +1167,7 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
             detail::temp_storage::make_partition(&blev_block_scan_state_data,
                                                  blev_block_scan_state_layout),
             detail::temp_storage::make_partition(&ordered_bid_storage,
-                                                 ordered_bid_type::get_temp_storage_layout()))));
+                                                 WrappedBlockId::get_temp_storage_layout()))));
 
     // Return the storage size.
     if(temporary_storage == nullptr)
@@ -1199,7 +1205,7 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
                                                           num_blocks,
                                                           stream));
 
-    auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+    auto ordered_bid = WrappedBlockId::create(ordered_bid_storage);
 
     // `hipOccupancyMaxActiveBlocksPerMultiprocessor` uses the default device.
     // We need to perserve the current default device id while we change it temporarily

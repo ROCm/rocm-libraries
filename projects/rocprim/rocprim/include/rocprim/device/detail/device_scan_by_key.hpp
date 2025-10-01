@@ -262,7 +262,8 @@ struct unwrap_store
              typename ResultType,
              typename CompareFunction,
              typename BinaryFunction,
-             typename LookbackScanState>
+             typename LookbackScanState,
+             typename WrappedBlockId>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         device_scan_by_key_kernel_impl(KeyInputIterator,
                                        InputIterator,
@@ -277,7 +278,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                        const rocprim::tuple<ResultType, bool>* const,
                                        bool,
                                        const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__,
-                                       ordered_block_id<unsigned int>)
+                                       WrappedBlockId)
             -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
     {
         // No need to build the kernel with sleep on a device that does not require it
@@ -292,7 +293,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
              typename ResultType,
              typename CompareFunction,
              typename BinaryFunction,
-             typename LookbackScanState>
+             typename LookbackScanState,
+             typename WrappedBlockId>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto device_scan_by_key_kernel_impl(
         KeyInputIterator                              keys,
         InputIterator                                 values,
@@ -307,7 +309,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         const rocprim::tuple<ResultType, bool>* const previous_last_value,
         bool use_last_keys,
         const typename std::iterator_traits<KeyInputIterator>::value_type* const __restrict__ last_keys,
-        ordered_block_id<unsigned int> ordered_bid)
+        WrappedBlockId ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
     {
         using result_type = ResultType;
