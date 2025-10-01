@@ -238,6 +238,11 @@ namespace rocRoller
         std::optional<int> findTopOfContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
+	 * @brief Follow Identify edges.  XXX
+	 */
+        int followIdentify(int coordinateTag, KernelGraph const& graph);
+
+        /**
          * @brief Create a new coordinate representing data within the scratch space. This will return a
          * coordinate that can be added to a coordinate graph. It also allocates the required scratch space
          * within the context.

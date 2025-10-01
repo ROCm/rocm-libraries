@@ -327,6 +327,22 @@ namespace rocRoller
             Throw<FatalError>("No forLoopIncrement for supplied forLoop.");
         }
 
+        int followIdentify(int coordinateTag, KernelGraph const& graph)
+        {
+            using namespace CoordinateGraph;
+
+            while(true)
+            {
+                auto other
+                    = only(graph.coordinates.getOutputNodeIndices(coordinateTag, isEdge<Identify>));
+                if(other)
+                    coordinateTag = *other;
+                else
+                    break;
+            }
+            return coordinateTag;
+        }
+
         int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody)
         {
             auto& ctrl     = graph.control;
