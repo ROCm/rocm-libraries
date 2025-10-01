@@ -378,6 +378,10 @@ public:
   //==========================================================================
   // Assignment
   //==========================================================================
+  /*! Move assignment operator. Replaces the managed object with the one from \p u.
+   *  \param u The \p unique_ptr to move from.
+   *  \return `*this`
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr&& u) noexcept
   {
     reset(u.release());
@@ -385,6 +389,10 @@ public:
     return *this;
   }
 
+  /*! Converting assignment operator.. Replaces the managed object with the one from \p u.
+   *  \param u The \p unique_ptr to move from.
+   *  \return `*this`
+   */
   template <class U, class E, class = EnableIfMoveConvertible<unique_ptr<U, E>, U>, class = EnableIfDeleterAssignable<E>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr<U, E>&& u) noexcept
   {
@@ -393,6 +401,9 @@ public:
     return *this;
   }
 
+  /*! Assigns a null pointer, deallocating the managed object. Effectively the same as calling reset().
+   *  \return `*this`
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
   {
     reset();
