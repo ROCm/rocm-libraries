@@ -5,7 +5,9 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 SET(HIP_DNN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/sdk")
 
-hipdnn_add_dependency(flatbuffers VERSION 23.1.21)
+hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
+hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
+hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
 # Hack to workaround an issue with how flatbuffers sets up its INSTALL_INTERFACE.
 # internally it uses the following: $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
@@ -55,10 +57,6 @@ set_target_properties(flatc PROPERTIES COMPILE_FLAGS "-w")
 
 
 _restore_var(FLATBUFFERS_FLATC_SCHEMA_EXTRA_ARGS)
-
-hipdnn_add_dependency(spdlog VERSION 1.15.2)
-
-hipdnn_add_dependency(nlohmann_json VERSION 3.12.0)
 
 add_library(hipdnn_sdk INTERFACE)
 target_link_libraries(hipdnn_sdk INTERFACE FlatBuffers spdlog_header_only nlohmann_json)
