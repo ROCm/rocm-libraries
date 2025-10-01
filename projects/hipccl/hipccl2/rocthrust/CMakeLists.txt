@@ -2,7 +2,7 @@
 # Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 # --------------------------------------
 # Update these variables at release time

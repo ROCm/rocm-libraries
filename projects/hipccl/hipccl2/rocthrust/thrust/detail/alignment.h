@@ -33,14 +33,8 @@
 #include _THRUST_STD_INCLUDE(type_traits) // For `std::alignment_of`.
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/cmath>
-#  else
-#    include <hip/cmath>
-#  endif
-#endif
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(cmath)
+#else
 #  include <rocprim/detail/various.hpp>
 #endif
 
@@ -87,11 +81,7 @@ THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
 THRUST_HOST_DEVICE inline _THRUST_STD::size_t aligned_storage_size(_THRUST_STD::size_t n, _THRUST_STD::size_t align)
 {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  return ::cuda::ceil_div(n, align) * align;
-#  else
-  return ::hip::ceil_div(n, align) * align;
-#  endif
+  return _THRUST_LIBCXX::ceil_div(n, align) * align;
 #else
   return ::rocprim::detail::ceiling_div(n, align) * align;
 #endif

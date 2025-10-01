@@ -28,7 +28,6 @@
 
 #include <thrust/detail/alignment.h>
 #include <thrust/detail/config/cpp_compatibility.h>
-#include <thrust/detail/preprocessor.h>
 
 #include <cstddef>
 
@@ -37,7 +36,9 @@
 #if THRUST_HAS_INCLUDE(<memory_resource>)
 #  define THRUST_MR_STD_MR_HEADER <memory_resource>
 #  define THRUST_MR_STD_MR_NS     std::pmr
-#elif THRUST_HAS_INCLUDE(<experimental / memory_resource>)
+// clang-format off
+#elif THRUST_HAS_INCLUDE(<experimental/memory_resource>)
+// clang-format on
 #  define THRUST_MR_STD_MR_HEADER <experimental/memory_resource>
 #  define THRUST_MR_STD_MR_NS     std::experimental::pmr
 #endif
