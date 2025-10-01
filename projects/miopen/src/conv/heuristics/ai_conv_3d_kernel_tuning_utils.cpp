@@ -245,19 +245,27 @@ bool RunParameterPredictionModel(
         auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(
             arch, solver_name, features, heuristic_kernels, use_split_k);
 
-        if(result.kernel_index >= 0 && result.kernel_index < static_cast<int>(valid_kernels.size()))
+        // Check if we have any candidates
+        if(!result.IsEmpty())
         {
-            index   = result.kernel_index;
-            split_k = result.split_k;
-            if(use_split_k)
+            // Get the best candidate (first in the sorted list)
+            int best_index   = result.GetBestKernelIndex();
+            int best_split_k = result.GetBestSplitK();
+
+            if(best_index >= 0 && best_index < static_cast<int>(valid_kernels.size()))
             {
-                kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+                index   = best_index;
+                split_k = best_split_k;
+                if(use_split_k)
+                {
+                    kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+                }
+                else
+                {
+                    kernel_id = valid_kernels[index];
+                }
+                return true;
             }
-            else
-            {
-                kernel_id = valid_kernels[index];
-            }
-            return true;
         }
         MIOPEN_LOG_I("AI prediction returned invalid kernel index, falling back");
         return false;

@@ -285,34 +285,40 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
 }
 
 MIOPEN_INTERNALS_EXPORT
-int CandidateSelectionModel::SelectBestCandidateIdx(
+std::vector<std::pair<int, float>> CandidateSelectionModel::SelectBestCandidateIndices(
     const std::vector<float>& encoded_features,
     const std::vector<std::vector<float>>& encoded_configs) const
 {
     if(encoded_configs.empty() || encoded_features.empty())
     {
         MIOPEN_THROW(miopenStatusInternalError,
-                     "Empty features or configs in SelectBestCandidateIdx");
+                     "Empty features or configs in SelectBestCandidateIndices");
     }
 
     size_t feature_dim    = encoded_features.size();
     size_t num_candidates = encoded_configs.size();
 
-    std::vector<float> selection_scores(num_candidates, 0.0f);
+    std::vector<std::pair<int, float>> scored_candidates;
+    scored_candidates.reserve(num_candidates);
 
     for(size_t i = 0; i < num_candidates; ++i)
     {
         if(encoded_configs[i].size() != feature_dim)
             MIOPEN_THROW(miopenStatusInternalError,
-                         "Config dimension mismatch in SelectBestCandidateIdx");
-        selection_scores[i] = std::inner_product(
+                         "Config dimension mismatch in SelectBestCandidateIndices");
+
+        float score = std::inner_product(
             encoded_configs[i].begin(), encoded_configs[i].end(), encoded_features.begin(), 0.0f);
+        scored_candidates.emplace_back(static_cast<int>(i), score);
     }
 
-    return static_cast<int>(std::max_element(selection_scores.begin(), selection_scores.end()) -
-                            selection_scores.begin());
-}
+    // Sort by score in descending order (best to worst)
+    std::sort(scored_candidates.begin(), scored_candidates.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
 
+    return scored_candidates;
+}
 // --- Factory and Helper Functions -------------------------------------------
 
 // Helper: Expand kernel params with split_k and keep mapping
@@ -552,7 +558,6 @@ ModelSelectBestCandidate(const std::string& arch,
 
         if(use_split_k)
         {
-            // std::vector<int> split_ks = GenerateSplitK(128); // TODO: make configurable
             // get split_k values from metadata
             const auto& split_ks = model.metadata().GetSplitKValues();
 
@@ -574,36 +579,42 @@ ModelSelectBestCandidate(const std::string& arch,
         if(encoded_candidates.empty())
         {
             MIOPEN_LOG_W("No valid encoded candidates available");
-            return CandidateSelectionResult{-1, 0};
+            return CandidateSelectionResult{{}, {}};
         }
 
         const auto& encoded_features = model.EncodeInputFeatures(features);
         const auto& encoded_configs  = model.EncodeKernelConfigs(encoded_candidates);
 
-        const int best_idx = model.SelectBestCandidateIdx(encoded_features, encoded_configs);
+        // Get all candidates sorted by score (best to worst)
+        auto scored_candidates =
+            model.SelectBestCandidateIndices(encoded_features, encoded_configs);
+        ;
 
-        if(best_idx >= 0)
+        CandidateSelectionResult result;
+        result.kernel_indices.reserve(scored_candidates.size());
+        result.split_k_values.reserve(scored_candidates.size());
+
+        for(const auto& [candidate_idx, score] : scored_candidates)
         {
-            int original_index = mapping_pairs[best_idx].first;
-            int split_k_value  = mapping_pairs[best_idx].second;
-            return CandidateSelectionResult{original_index, split_k_value};
+            if(candidate_idx >= 0 && candidate_idx < static_cast<int>(mapping_pairs.size()))
+            {
+                result.kernel_indices.push_back(mapping_pairs[candidate_idx].first);
+                result.split_k_values.push_back(mapping_pairs[candidate_idx].second);
+            }
         }
-        else
-        {
-            MIOPEN_LOG_W("Invalid candidate index returned: " << best_idx);
-            return CandidateSelectionResult{-1, 0};
-        }
+
+        return result;
     }
     catch(const miopen::Exception& ex)
     {
         MIOPEN_LOG_I2("[Warning] Candidate selection model failed: " << ex.what());
-        return CandidateSelectionResult{-1, 0};
+        return CandidateSelectionResult{{}, {}};
     }
     catch(const std::exception& ex)
     {
         MIOPEN_LOG_I2(
             "[Warning] Candidate selection model failed with std exception: " << ex.what());
-        return CandidateSelectionResult{-1, 0};
+        return CandidateSelectionResult{{}, {}};
     }
 }
 

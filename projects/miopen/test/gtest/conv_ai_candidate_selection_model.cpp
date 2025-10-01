@@ -246,9 +246,17 @@ TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateValid_Test)
     auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
     auto encoded_candidates  = EncodeKernelParams(valid_kernel_params, meta);
     auto encoded_configs     = model.EncodeKernelConfigs(encoded_candidates);
-    int idx                  = model.SelectBestCandidateIdx(encoded_features, encoded_configs);
-    ASSERT_GE(idx, 0);
-    ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()));
+    std::vector<std::pair<int, float>> ids =
+        model.SelectBestCandidateIndices(encoded_features, encoded_configs);
+    ASSERT_FALSE(ids.empty()) << "No candidates were selected!";
+    for(const auto& candidate : ids)
+    {
+        const int idx = candidate.first;
+        ASSERT_GE(idx, 0) << "Candidate index is negative!";
+        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
+            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
+            << "]";
+    }
 }
 
 TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateEmptyInput_Test)
@@ -257,7 +265,8 @@ TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateEmptyInput_Test)
     CandidateSelectionModel model(params.arch, params.solver);
     std::vector<float> encoded_features;
     std::vector<std::vector<float>> encoded_configs;
-    EXPECT_THROW(model.SelectBestCandidateIdx(encoded_features, encoded_configs), std::exception);
+    EXPECT_THROW(model.SelectBestCandidateIndices(encoded_features, encoded_configs),
+                 std::exception);
 }
 
 TEST_P(CPU_CandidateSelection_NONE, ModelSelectBestCandidate_Test)
@@ -270,8 +279,13 @@ TEST_P(CPU_CandidateSelection_NONE, ModelSelectBestCandidate_Test)
     auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
     auto result              = ModelSelectBestCandidate(
         params.arch, params.solver, features, valid_kernel_params, /*use_split_k=*/false);
-    ASSERT_GE(result.kernel_index, 0);
-    ASSERT_LT(result.kernel_index, static_cast<int>(valid_kernel_params.size()));
+    for(const auto& idx : result.kernel_indices)
+    {
+        ASSERT_GE(idx, 0) << "Candidate index is negative!";
+        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
+            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
+            << "]";
+    }
 }
 
 TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitK_Test)
