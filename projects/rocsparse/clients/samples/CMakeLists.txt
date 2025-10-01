@@ -30,7 +30,11 @@ function(add_rocsparse_example EXAMPLE_SOURCE)
   target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
 
   # Include common client headers
-  target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+  if (BUILD_CLIENTS_ONLY)
+    target_include_directories(${EXAMPLE_TARGET} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+  else()
+    target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+  endif()
 
   # Linker dependencies
   target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocsparse hip::host hip::device)
@@ -135,7 +139,11 @@ if(TARGET rocsparse)
       target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
 
       # Include common client headers
-      target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+      if (BUILD_CLIENTS_ONLY)
+        target_include_directories(${EXAMPLE_TARGET} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+      else()
+        target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+      endif()
 
       # Linker dependencies
       target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocsparse hip::host)
