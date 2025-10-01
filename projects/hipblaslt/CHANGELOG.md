@@ -6,13 +6,13 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* Fused Clamp GEMM in hipBLASLt (enabled by ``HIPBLASLT_EPILOGUE_CLAMP_EXT`` and ``HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT``, requiring the min (``HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT``) and max (``HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT``) to be set)
-* Support ReLU/Clamp activation functions with auxiliary output for f16/bf16 data types for gfx942 to capture intermediate results (enabled by ``HIPBLASLT_EPILOGUE_RELU_AUX``, ``HIPBLASLT_EPILOGUE_RELU_AUX_BIAS``, ``HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT``, and ``HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT``)
-* Support SS_BSS datatype (``HIPBLAS_COMPUTE_32F_FAST_16BF``) for gfx950 only
-* Added the CPP extension APIs ``setMaxWorkspaceBytes`` and ``getMaxWorkspaceBytes``
-* Added the log print (`HIPBLASLT_LOG_MASK=32`) for Grouped Gemm
-* Supported swizzleA by hipblaslt-ext cpp API
-* Support hipblaslt extop for gfx11xx/gfx12xx
+* Fused Clamp GEMM for ``HIPBLASLT_EPILOGUE_CLAMP_EXT`` and ``HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT``. This feature requires the minimum (``HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT``) and maximum (``HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT``) to be set.
+* Support for ReLU/Clamp activation functions with auxiliary output for the `f16` and `bf16` data types for gfx942 to capture intermediate results. This feature is enabled for ``HIPBLASLT_EPILOGUE_RELU_AUX``, ``HIPBLASLT_EPILOGUE_RELU_AUX_BIAS``, ``HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT``, and ``HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT``.
+* Support for the ``SS_BSS`` data type (``HIPBLAS_COMPUTE_32F_FAST_16BF``) for gfx950 only.
+* Added the CPP extension APIs ``setMaxWorkspaceBytes`` and ``getMaxWorkspaceBytes``.
+* Added the ability to print logs (using ``HIPBLASLT_LOG_MASK=32``) for Grouped GEMM.
+* Support for swizzleA by using the hipblaslt-ext cpp API.
+* Support for hipBLASLt extop for gfx11xx and gfx12xx.
 
 ### Changed
 * ``hipblasLtMatmul()`` now returns an error when the workspace size is insufficient, rather than causing a segmentation fault.
