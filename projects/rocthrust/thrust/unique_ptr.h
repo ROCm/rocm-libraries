@@ -491,6 +491,9 @@ public:
   //==========================================================================
   // Modifiers
   //==========================================================================
+  /*! Releases ownership of the managed object, if any.
+   *  \return A pointer to the released object.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
   {
     pointer temp = m_ptr;
@@ -498,6 +501,9 @@ public:
     return temp;
   }
 
+  /*! Replaces the managed object.
+   *  \param p The new object to manage.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(pointer p = pointer()) noexcept
   {
     pointer temp = m_ptr;
@@ -508,6 +514,9 @@ public:
     }
   }
 
+  /*! Swaps the managed object and deleter with another \p unique_ptr.
+   *  \param u The \p unique_ptr to swap with.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
   {
     using std::swap;
