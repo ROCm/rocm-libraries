@@ -540,6 +540,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJT_X(csrgemm_reuse, testing_spgemm_reuse_csr);
         DEFINE_CASE_IJAXYT_X(bsrmv, testing_spmv_bsr);
         DEFINE_CASE_IJAXYT_X(csrmv, testing_spmv_csr);
+        DEFINE_CASE_IJAXYT_X(csrmv_analysis, testing_spmv_csr_analysis);
         DEFINE_CASE_T(csrmv_managed);
         DEFINE_CASE_IJABCT_X(bsrmm, testing_spmm_bsr);
         DEFINE_CASE_IJAXYT_X(cscmv, testing_spmv_csc);

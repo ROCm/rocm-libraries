@@ -1,0 +1,22 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "convolution_common.fbs";
+
+namespace hipdnn_sdk.data_objects;
+
+table ConvolutionFwdAttributes {
+    // Input/Output tensor UIDs
+    x_tensor_uid: long;          // Input tensor
+    w_tensor_uid: long;          // Weights/filter tensor  
+    y_tensor_uid: long;          // Output tensor
+    
+    // Convolution parameters (N-dimensional support)
+    pre_padding: [long];         // Padding before each dimension
+    post_padding: [long];        // Padding after each dimension
+    stride: [long];              // Stride for each dimension
+    dilation: [long];            // Dilation for each dimension
+    
+    // Algorithm/mode selection
+    conv_mode: ConvMode;
+}

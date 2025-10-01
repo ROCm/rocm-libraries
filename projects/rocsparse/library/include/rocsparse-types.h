@@ -711,7 +711,8 @@ typedef enum rocsparse_spmv_input_
     rocsparse_spmv_input_alg, /**< Select algorithm for input on SpMV descriptor. */
     rocsparse_spmv_input_operation, /**< Select matrix transpose operation for input on SpMV descriptor. */
     rocsparse_spmv_input_scalar_datatype, /**< Select scalar  datatype for input on SpMV descriptor. */
-    rocsparse_spmv_input_compute_datatype /**< Select compute datatype for input on SpMV descriptor. */
+    rocsparse_spmv_input_compute_datatype, /**< Select compute datatype for input on SpMV descriptor. */
+    rocsparse_spmv_input_nnz_use_starting_block_ids
 } rocsparse_spmv_input;
 
 /*! \ingroup types_module
@@ -757,6 +758,7 @@ typedef enum rocsparse_spmv_alg_
     rocsparse_spmv_alg_coo_atomic   = 5, /**< COO SpMV algorithm 2 (atomic) for COO matrices. */
     rocsparse_spmv_alg_bsr          = 6, /**< BSR SpMV algorithm 1 for BSR matrices. */
     rocsparse_spmv_alg_csr_lrb      = 7, /**< CSR SpMV algorithm 3 (LRB) for CSR matrices. */
+    rocsparse_spmv_alg_csr_nnzsplit = 8, /**< CSR SpMV algorithm 4 (nnzsplit) for CSR matrices. */
     rocsparse_spmv_alg_csr_stream [[deprecated]]
     = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. */
 } rocsparse_spmv_alg;

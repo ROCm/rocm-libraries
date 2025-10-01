@@ -20,7 +20,9 @@ namespace origami
                                        size_t, // MI_N
                                        size_t, // MI_K
                                        size_t,  // Occupancy
-                                       int>;    // WGM
+                                       int,     // WGM
+                                       size_t, // non_temporal_a
+                                       size_t>; // non_temporal_b
 
         using tile_tuple = std::tuple<size_t, // MT_M
                                      size_t, // MT_N
@@ -29,7 +31,9 @@ namespace origami
                                      size_t, // MI_N
                                      size_t, // MI_K
                                      size_t,  // Occupancy
-                                     int>;    // WGM
+                                     int,     // WGM
+                                     size_t, // non_temporal_a
+                                     size_t>; // non_temporal_b
 
         size_t select_best_grid_size(size_t          M,
                                      size_t          N,
@@ -93,7 +97,7 @@ namespace origami
             size_t                     N,
             size_t                     K,
             size_t                     batch,
-            hardware_t&                hardware,
+            const hardware_t&          hardware,
             size_t                     MT_M,
             size_t                     MT_N,
             size_t                     MT_K,
