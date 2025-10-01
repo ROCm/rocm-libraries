@@ -254,7 +254,7 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
      set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
      set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
   endif()
-  list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )
+  list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX -fopenmp )
 
   set_target_properties( rocfft-test PROPERTIES
      BUILD_RPATH "{$BUILD_RPATH}"

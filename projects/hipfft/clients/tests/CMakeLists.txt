@@ -244,7 +244,7 @@ foreach( target ${TEST_TARGETS} )
         set_target_properties( ${target} PROPERTIES BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
         set_target_properties( ${target} PROPERTIES INSTALL_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
       endif()
-      target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
+      target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX -fopenmp )
     endif()
   endif()
 
