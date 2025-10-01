@@ -124,6 +124,141 @@ TEST_P(AllLong, Test)
     CHECK_RESULT(result);
 }
 
+// ---------------------------------------------------------------
+// Negative tests: padding not supported with appendkv/splitkv/pagedkv
+// ---------------------------------------------------------------
+
+#if CK_TILE_FMHA_FWD_APPENDKV_API
+TEST(TestCkTileFmhaFwd, AppendKvWithBatchEffLensShouldFail)
+{
+    // batch mode effective lengths simulate padding
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        2,          // batch
+        4,          // nhead
+        -1,         // nhead_k
+        {128},      // seqlen_qs
+        {128},      // seqlen_ks
+        64,         // hdim_q
+        64,         // hdim_v
+        32,         // seqlen_knew -> triggers appendkv
+        {},         // seqlen_qpads
+        {},         // seqlen_kpads
+        {100, 120}, // q_eff_lens_per_batch
+        {90, 110},  // kv_eff_lens_per_batch
+        0,          // rotary_dim
+        true,       // i_perm
+        true,       // o_perm
+        0,          // scale_s
+        0,          // logits_soft_cap
+        def_is_v_rowmajor,
+        def_lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        "0",   // mask
+        squant,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        0,
+        stream_config);
+    ASSERT_EQ(result, fwd_result::invalid_args);
+}
+#endif
+
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+TEST(TestCkTileFmhaFwd, SplitKvWithGroupPaddingShouldFail)
+{
+    // group mode physical padding
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::group,
+        2,          // batch
+        4,          // nhead
+        -1,         // nhead_k
+        {96, 120},  // seqlen_qs logical
+        {96, 120},  // seqlen_ks logical
+        64,         // hdim_q
+        64,         // hdim_v
+        0,          // seqlen_knew
+        {128, 128}, // seqlen_qpads
+        {128, 128}, // seqlen_kpads
+        {},         // q_eff
+        {},         // kv_eff
+        0,          // rotary_dim
+        true,       // i_perm
+        true,       // o_perm
+        0,          // scale_s
+        0,          // logits_soft_cap
+        def_is_v_rowmajor,
+        def_lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias
+        0.0f,
+        0,
+        0,
+        false,
+        "0",
+        squant,
+        true,
+        2, // num_splits (>1 triggers splitkv)
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        0,
+        stream_config);
+    ASSERT_EQ(result, fwd_result::invalid_args);
+}
+#endif
+
+#if CK_TILE_FMHA_FWD_PAGEDKV_API
+TEST(TestCkTileFmhaFwd, PagedKvWithGroupPaddingShouldFail)
+{
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::group,
+        2,
+        4,
+        -1,
+        {80, 100},
+        {80, 100},
+        64,
+        64,
+        0,         // seqlen_knew
+        {96, 128}, // seqlen_qpads
+        {96, 128}, // seqlen_kpads
+        {},
+        {},
+        0,
+        true,
+        true,
+        0,
+        0,
+        def_is_v_rowmajor,
+        def_lse,
+        128, // page_block_size triggers pagedkv
+        false,
+        "n",
+        0.0f,
+        0,
+        0,
+        false,
+        "0",
+        squant,
+        true,
+        1,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        0,
+        stream_config);
+    ASSERT_EQ(result, fwd_result::invalid_args);
+}
+#endif
+
 class HDimPadding
     : public TestWithParam<std::tuple<std::tuple<int, int>,
                                       bool,
@@ -380,6 +515,8 @@ class PagedKV : public TestWithParam<std::tuple<std::tuple<int, int>,
 {
 };
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(PagedKV);
+
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                          PagedKV,
                          Combine(SplitKVHDimValues,
@@ -444,6 +581,8 @@ class SplitKV : public TestWithParam<std::tuple<std::tuple<int, int>,
                                                 std::tuple<int, int, int, int, int, std::string>>>
 {
 };
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKV);
 
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                          SplitKV,
@@ -526,6 +665,8 @@ INSTANTIATE_TEST_SUITE_P(
                    std::tuple{3, 2, 2, 256, 256, "0"},
                    std::tuple{2, 3, 1, 264, 265, "1"},
                    std::tuple{4, 4, 2, 71, 64, "1"})));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(AppendKV);
 
 TEST_P(AppendKV, Test)
 {
@@ -652,36 +793,267 @@ TEST_P(AppendKVRoPE, Test)
 #endif // CK_TILE_FMHA_FWD_APPENDKV_API
 
 // ---------------------------------------------------------------
-// Additional padding tests (q/kv physical padding & effective len)
+// Parameterized padding tests (batch & group) using Combine+Values
 // ---------------------------------------------------------------
 
-// Simple batch-mode test with per-batch Q/KV padding strides and effective lengths
-TEST(TestCkTileFmhaFwd, BatchModeQKvPadding)
+using PaddingParam = std::tuple<mode_enum,        // mode
+                                int,              // batch
+                                int,              // nhead
+                                int,              // nhead_k
+                                std::vector<int>, // seqlen_qs (logical)
+                                std::vector<int>, // seqlen_ks (logical)
+                                std::vector<int>, // seqlen_qpads (physical padded lengths)
+                                std::vector<int>, // seqlen_kpads (physical padded lengths)
+                                std::vector<int>, // q_eff_lens
+                                std::vector<int>, // kv_eff_lens
+                                bool,             // i_perm
+                                bool,             // o_perm
+                                std::string>;     // mask_str
+
+// Ensure headers for containers / algorithms used in padding param builder.
+#include <vector>
+#include <array>
+#include <cmath>
+#include <algorithm>
+
+class PaddingCases : public TestWithParam<PaddingParam>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(PaddingCases);
+
+// Build padding test params programmatically to enforce constraints
+static std::vector<PaddingParam> BuildPaddingParams()
+{
+    std::vector<PaddingParam> params;
+
+    // mask variants to cover
+    const std::vector<std::string> mask_variants{"0", "t:50,64", "b:32,40"};
+    const std::vector<std::string> mask_variants_reduced{"0", "t:50,64"}; // used for trimmed sets
+
+    // Representative ratio pairs (q_ratio, k_ratio) to avoid explosion
+    const std::vector<std::pair<double, double>> ratio_pairs_full{
+        {1.0, 1.0}, // both full
+        {1.0, 0.5}, // q full, k half
+        {0.5, 1.0}, // q half, k full
+    };
+    const std::vector<std::pair<double, double>> ratio_pairs_reduced{{1.0, 1.0}, {0.5, 1.0}};
+
+    // candidate physical seqlens for batch mode (single value) & for group mode (per batch)
+    const std::vector<int> physical_lengths_full{64, 128, 256};
+    const std::vector<int> physical_lengths_reduced{64};
+
+    // batch sizes to sample
+    const std::vector<int> batch_sizes{1, 4};
+    // --------------------------------------------------------------------
+    // Head configuration space (cover MHA, GQA, MQA)
+    //  - Standard MHA: nhead_k == -1 (treated internally as nhead)
+    //  - GQA: nhead_k > 0 and nhead % nhead_k == 0, nhead_k < nhead
+    //  - MQA: nhead_k == 1
+    // We choose (9, -1), (9, 3), (9, 1) so that divisibility holds. Full
+    // combinatorics only applied to the first (standard) configuration to
+    // avoid test explosion.
+    // --------------------------------------------------------------------
+    struct HeadCfg
+    {
+        int nhead;
+        int nhead_k; // -1 for standard; else must divide nhead
+        bool full;   // whether to use full coverage sets
+    };
+    const std::vector<HeadCfg> head_cfgs = {
+        {9, -1, true}, // MHA full
+        {9, 3, false}, // GQA reduced (nhead/nhead_k=3)
+        {9, 1, false}  // MQA reduced
+    };
+
+    // Helper to clamp and ensure >=1
+    auto logical_len = [](int physical, double ratio) {
+        int v = static_cast<int>(std::round(physical * ratio));
+        v     = std::max(1, std::min(v, physical));
+        return v;
+    };
+    // Iterate over head configurations
+    for(const auto& hc : head_cfgs)
+    {
+        const auto& ratio_pairs        = hc.full ? ratio_pairs_full : ratio_pairs_reduced;
+        const auto& phys_lengths_batch = hc.full ? physical_lengths_full : physical_lengths_reduced;
+        const auto& phys_lengths_group_q = phys_lengths_batch; // reuse
+        const auto& phys_lengths_group_k = phys_lengths_batch; // reuse
+        const auto& masks                = hc.full ? mask_variants : mask_variants_reduced;
+
+        // -----------------
+        // Batch mode params (effective lengths only)
+        // -----------------
+        for(int b : batch_sizes)
+        {
+            for(int phys_qkv : phys_lengths_batch)
+            {
+                for(const auto& rkpair : ratio_pairs)
+                {
+                    double rq = rkpair.first;
+                    double rk = rkpair.second;
+                    std::vector<int> q_eff(b), kv_eff(b);
+                    int log_q = logical_len(phys_qkv, rq);
+                    int log_k = logical_len(phys_qkv, rk);
+                    for(int i = 0; i < b; ++i)
+                    {
+                        q_eff[i]  = log_q;
+                        kv_eff[i] = log_k;
+                    }
+                    for(const auto& mask : masks)
+                    {
+                        params.emplace_back(PaddingParam{mode_enum::batch,
+                                                         b,
+                                                         hc.nhead,
+                                                         hc.nhead_k,
+                                                         {phys_qkv}, // seqlen_qs
+                                                         {phys_qkv}, // seqlen_ks
+                                                         {},         // seqlen_qpads
+                                                         {},         // seqlen_kpads
+                                                         q_eff,
+                                                         kv_eff,
+                                                         true,
+                                                         true,
+                                                         mask});
+                    }
+                }
+                // Single-token logical length case (both q & k = 1)
+                for(const auto& mask : masks)
+                {
+                    std::vector<int> q_eff(b, 1), kv_eff(b, 1);
+                    params.emplace_back(PaddingParam{mode_enum::batch,
+                                                     b,
+                                                     hc.nhead,
+                                                     hc.nhead_k,
+                                                     {phys_qkv},
+                                                     {phys_qkv},
+                                                     {},
+                                                     {},
+                                                     q_eff,
+                                                     kv_eff,
+                                                     true,
+                                                     true,
+                                                     mask});
+                }
+            }
+        }
+
+        // -----------------
+        // Group mode params (physical padding + logical variants)
+        // -----------------
+        for(int b : batch_sizes)
+        {
+            for(int phys_q : phys_lengths_group_q)
+            {
+                for(int phys_k : phys_lengths_group_k)
+                {
+                    for(const auto& rkpair : ratio_pairs)
+                    {
+                        double rq = rkpair.first;
+                        double rk = rkpair.second;
+                        std::vector<int> seqlen_qs(b), seqlen_ks(b), seqlen_qpads(b),
+                            seqlen_kpads(b);
+                        for(int i = 0; i < b; ++i)
+                        {
+                            seqlen_qpads[i] = phys_q;
+                            seqlen_kpads[i] = phys_k;
+                            seqlen_qs[i]    = logical_len(phys_q, rq);
+                            seqlen_ks[i]    = logical_len(phys_k, rk);
+                        }
+                        std::array<std::pair<std::vector<int>, std::vector<int>>, 3> pad_variants{
+                            std::pair{seqlen_qpads, seqlen_kpads}, // both
+                            std::pair{seqlen_qpads, seqlen_ks},    // only q padding
+                            std::pair{seqlen_qs, seqlen_kpads}     // only kv padding
+                        };
+                        for(const auto& mask : masks)
+                        {
+                            for(const auto& pv : pad_variants)
+                            {
+                                params.emplace_back(PaddingParam{mode_enum::group,
+                                                                 b,
+                                                                 hc.nhead,
+                                                                 hc.nhead_k,
+                                                                 seqlen_qs,
+                                                                 seqlen_ks,
+                                                                 pv.first,
+                                                                 pv.second,
+                                                                 {},
+                                                                 {},
+                                                                 true,
+                                                                 true,
+                                                                 mask});
+                            }
+                        }
+                    }
+                    // Single-token logical length case
+                    for(const auto& mask : masks)
+                    {
+                        std::vector<int> seqlen_qs(b, 1), seqlen_ks(b, 1);
+                        std::vector<int> seqlen_qpads(b, phys_q), seqlen_kpads(b, phys_k);
+                        // both padding variant only (others degenerate)
+                        params.emplace_back(PaddingParam{mode_enum::group,
+                                                         b,
+                                                         hc.nhead,
+                                                         hc.nhead_k,
+                                                         seqlen_qs,
+                                                         seqlen_ks,
+                                                         seqlen_qpads,
+                                                         seqlen_kpads,
+                                                         {},
+                                                         {},
+                                                         true,
+                                                         true,
+                                                         mask});
+                    }
+                }
+            }
+        }
+    }
+
+    return params;
+}
+
+static const std::vector<PaddingParam> kPaddingParams = BuildPaddingParams();
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd_Padding, PaddingCases, ValuesIn(kPaddingParams));
+
+TEST_P(PaddingCases, Test)
 {
     if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8>)
     {
         GTEST_SKIP() << "Skip for fp8";
     }
-    const mode_enum mode  = mode_enum::batch;
-    const int batch       = 3;
-    const int nhead       = 2;
-    const int nhead_k     = -1;
-    const int seqlen_q    = 128;
-    const int seqlen_k    = 128;
+
+    auto [mode,
+          batch,
+          nhead,
+          nhead_k,
+          seqlen_qs,
+          seqlen_ks,
+          seqlen_qpads,
+          seqlen_kpads,
+          q_eff_lens,
+          kv_eff_lens,
+          i_perm,
+          o_perm,
+          mask_str] = GetParam();
+
+    // For batch mode we wrap single logical lengths with adjust_seqlen.
+    std::vector<int> adj_qs =
+        (mode == mode_enum::batch) ? std::vector<int>{adjust_seqlen(seqlen_qs.at(0))} : seqlen_qs;
+    std::vector<int> adj_ks =
+        (mode == mode_enum::batch) ? std::vector<int>{adjust_seqlen(seqlen_ks.at(0))} : seqlen_ks;
+
     const int hdim_q      = 64;
     const int hdim_v      = 64;
     const int seqlen_knew = 0;
-    const std::vector<int> seqlen_qpads{};
-    const std::vector<int> seqlen_kpads{};
-    const std::vector<int> q_eff_lens{120, 128, 100};
-    const std::vector<int> kv_eff_lens{110, 128, 90};
 
     auto result = fmha_fwd_run<DataTypeConfig>(mode,
                                                batch,
                                                nhead,
                                                nhead_k,
-                                               {adjust_seqlen(seqlen_q)},
-                                               {adjust_seqlen(seqlen_k)},
+                                               adj_qs,
+                                               adj_ks,
                                                hdim_q,
                                                hdim_v,
                                                seqlen_knew,  // seqlen_knew
@@ -690,75 +1062,21 @@ TEST(TestCkTileFmhaFwd, BatchModeQKvPadding)
                                                q_eff_lens,   // q_eff_lens_per_batch
                                                kv_eff_lens,  // kv_eff_lens_per_batch
                                                0,            // rotary_dim
-                                               true,         // i_perm
-                                               true,         // o_perm
+                                               i_perm,       // i_perm
+                                               o_perm,       // o_perm
                                                0,            // scale_s
                                                0,            // logits_soft_cap
                                                def_is_v_rowmajor,
-                                               def_lse, // lse
-                                               0,       // page_block_size
-                                               false,   // use_cache_batch_idx
-                                               "n",     // bias_str
-                                               0.0f,    // p_drop
-                                               0,       // drop_seed
-                                               0,       // drop_offset
-                                               false,   // drop_prefs
-                                               "0",     // mask_str
-                                               QUANT_ARGS,
-                                               true, // is_rotary_interleaved
-                                               1,    // num_splits
-                                               COMMON_ARGS);
-    CHECK_RESULT(result);
-}
-
-// Simple group-mode test with uniform seqlen but per-batch padding & effective lengths
-TEST(TestCkTileFmhaFwd, GroupModeQKvPadding)
-{
-    if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8>)
-    {
-        GTEST_SKIP() << "Skip for fp8";
-    }
-    const mode_enum mode = mode_enum::group;
-    const int batch      = 2;
-    const int nhead      = 2;
-    const int nhead_k    = -1;
-    const std::vector<int> seqlen_q{96, 128}; // unpadded
-    const std::vector<int> seqlen_k{96, 128}; // unpadded
-    const int hdim_q      = 64;
-    const int hdim_v      = 64;
-    const int seqlen_knew = 0;
-    const std::vector<int> seqlen_qpads{128, 160};
-    const std::vector<int> seqlen_kpads{128, 160};
-
-    auto result = fmha_fwd_run<DataTypeConfig>(mode,
-                                               batch,
-                                               nhead,
-                                               nhead_k,
-                                               seqlen_q,
-                                               seqlen_k,
-                                               hdim_q,
-                                               hdim_v,
-                                               seqlen_knew,  // seqlen_knew
-                                               seqlen_qpads, // seqlen_qpads
-                                               seqlen_kpads, // seqlen_kpads
-                                               {},           // q_eff_lens_per_batch
-                                               {},           // kv_eff_lens_per_batch
-                                               0,            // rotary_dim
-                                               true,         // i_perm
-                                               true,         // o_perm
-                                               0,            // scale_s
-                                               0,            // logits_soft_cap
-                                               def_is_v_rowmajor,
-                                               def_lse, // lse
-                                               0,       // page_block_size
-                                               false,   // use_cache_batch_idx
-                                               "n",     // bias_str
-                                               0.0f,    // p_drop
-                                               0,       // drop_seed
-                                               0,       // drop_offset
-                                               false,   // drop_prefs
-                                               "0",     // mask_str
-                                               QUANT_ARGS,
+                                               def_lse,  // lse
+                                               0,        // page_block_size
+                                               false,    // use_cache_batch_idx
+                                               "n",      // bias_str
+                                               0.0f,     // p_drop
+                                               0,        // drop_seed
+                                               0,        // drop_offset
+                                               false,    // drop_prefs
+                                               mask_str, // mask_str
+                                               squant,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);

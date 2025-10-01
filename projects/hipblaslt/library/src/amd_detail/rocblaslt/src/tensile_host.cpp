@@ -777,6 +777,7 @@ namespace
             "--activation_type",
             tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
             flush ? "--flush" : "",
+            "--any_stride",
             "--rotating",
             rotatingBufferSize,
             "--cold_iters",
@@ -881,6 +882,8 @@ namespace
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
                     flush ? "true" : "false",
+                    "any_stride",
+                    "true",
                     "rotating",
                     rotatingBufferSize,
                     "cold_iters",
@@ -976,6 +979,8 @@ namespace
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
                     flush ? "true" : "false",
+                    "any_stride",
+                    "true",
                     "rotating",
                     rotatingBufferSize,
                     "cold_iters",
@@ -1106,6 +1111,7 @@ namespace
             "--activation_type",
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             flush ? "--flush" : "",
+            "--any_stride",
             "--rotating",
             rotatingBufferSize,
             "--cold_iters",
@@ -1256,6 +1262,8 @@ namespace
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
             flush ? "true" : "false",
+            "any_stride",
+            "true",
             "rotating",
             rotatingBufferSize,
             "cold_iters",
@@ -1395,6 +1403,8 @@ namespace
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
             flush ? "true" : "false",
+            "any_stride",
+            "true",
             "rotating",
             rotatingBufferSize,
             "cold_iters",
@@ -2870,6 +2880,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               const rocblaslt_matmul_algo& algo,
                               const Tuning*                tuning,
                               void*                        workspace,
+                              size_t                       workspaceSizeInBytes,
                               bool                         useUserArgs,
                               hipStream_t                  stream,
                               std::shared_ptr<void>        gemmData)
@@ -2934,6 +2945,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 
             data->inputs.ws = workspace;
 
+            // set workspace size from argument
+            data->inputs.workspaceSize = workspaceSizeInBytes;
+            data->problem.setWorkspaceSize(workspaceSizeInBytes);
+
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -2994,6 +3009,19 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->inputs.grouped[i].ws = workspace;
             }
             data->inputs.ws = workspace;
+
+            // set workspace size from argument
+            data->problem.setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
+            data->problem.setWorkspaceSize(workspaceSizeInBytes);
+            for(int i = 0; i < data->inputs.grouped.size(); i++)
+            {
+                data->inputs.grouped[i].workspaceSize = workspaceSizeInBytes;
+            }
+            for(size_t i = 0; i < data->problem.gemms.size(); i++)
+            {
+                data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
+                data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
+            }
 
             data->useUserArgs = useUserArgs;
             if(useUserArgs)
@@ -4285,6 +4313,7 @@ std::atomic_bool& rocblaslt_internal_tensile_is_initialized()
                                                    const rocblaslt_matmul_algo& algo,                          \
                                                    const Tuning*                tuning,                        \
                                                    void*                        workspace,                     \
+                                                   size_t                       workspaceSizeInBytes,          \
                                                    bool                         useUserArgs,                   \
                                                    hipStream_t                  stream,                        \
                                                    std::shared_ptr<void>        gemmData);                     \
