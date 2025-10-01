@@ -423,32 +423,55 @@ public:
   //==========================================================================
   // Observers
   //==========================================================================
+  /*! Returns a pointer to the managed object or `nullptr` if no object is owned.
+   *  \return Pointer to the managed object.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
   {
     return m_ptr;
   }
 
+  /*! Returns a raw pointer to the managed object or `nullptr` if no object is owned.
+   *  \return Raw pointer to the managed object.
+   */
   template <bool Dummy = true, class = EnableIfDeleterDefaultDelete<Dummy>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
   {
     return raw_pointer_cast(m_ptr);
   }
 
+  /*! Returns a reference to the deleter object which would be used for destruction of the managed object.
+   *  \return A reference to the stored deleter.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
   {
     return m_deleter;
   }
 
+  /*! Returns a reference to the deleter object which would be used for destruction of the managed object.
+   *  \return A reference to the stored deleter.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
   {
     return m_deleter;
   }
 
+  /*! Checks if the \p unique_ptr owns an object.
+   *  \return `true` if an object is owned, `false` otherwise.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
   {
     return m_ptr != nullptr;
   }
 
+  /*! Dereferences the stored pointer.
+   * 
+   *  The default `unique_ptr` implementation uses `thrust::device_ptr`.
+   *  Dereferencing this pointer in host code is a valid operation that
+   *  results in a copy of the object from device to host memory.
+   *
+   *  \return A reference to the managed object.
+   */
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 auto operator*() const noexcept
   {
     return *m_ptr;
