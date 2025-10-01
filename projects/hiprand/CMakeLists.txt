@@ -221,8 +221,3 @@ rocm_create_package(
         LDCONFIG
         LDCONFIG_DIR ${HIPRAND_CONFIG_DIR}
 )
-
-if(BUILD_CODE_COVERAGE)
-  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
-endif()

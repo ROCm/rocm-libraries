@@ -43,6 +43,11 @@ endif()
 add_library(hiprand ${hipRAND_SRCS})
 add_library(hip::hiprand ALIAS hiprand)
 
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
+endif()
+
 # Add interface include directory so that other CMake applications can maintain previous behaviour.
 # This will be removed with upcoming packaging changes.
 target_include_directories(hiprand INTERFACE $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/include/hiprand>)
