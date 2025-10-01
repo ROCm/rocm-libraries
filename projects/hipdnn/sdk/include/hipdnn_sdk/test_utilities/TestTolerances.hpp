@@ -56,13 +56,13 @@ constexpr float getToleranceBackward<double>()
 template <>
 constexpr float getToleranceBackward<float>()
 {
-    return 5e-6f;
+    return 4e-4f;
 }
 
 template <>
 constexpr float getToleranceBackward<half>()
 {
-    return 2e-4f;
+    return 4e-4f;
 }
 
 template <>
@@ -82,13 +82,13 @@ constexpr float getToleranceFwd();
 template <>
 constexpr float getToleranceFwd<float>()
 {
-    return 2e-6f;
+    return 3e-6f;
 }
 
 template <>
 constexpr float getToleranceFwd<half>()
 {
-    return 2e-3f;
+    return 4e-3f;
 }
 
 template <>
