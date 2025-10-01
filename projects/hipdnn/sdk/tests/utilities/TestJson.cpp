@@ -1,16 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "data_types_generated.h"
-#include "graph_generated.h"
-#include "hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp"
-#include "tensor_attributes_generated.h"
 #include <flatbuffers/flatbuffer_builder.h>
 #include <gtest/gtest.h>
 
+#include <hipdnn_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/json/Graph.hpp>
-#include <spdlog/fmt/bundled/format.h>
 
 using namespace hipdnn_sdk::data_objects;
 
