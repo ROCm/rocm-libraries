@@ -9,6 +9,8 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormBwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormTrainPlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanRegistrySignatureKey.hpp>
 
@@ -53,6 +55,22 @@ constexpr std::array<BatchnormTrainSignatureKey, 3> ALL_SUPPORTED_BATCHNORM_TRAI
        BatchnormTrainSignatureKey(hipdnn_sdk::data_objects::DataType::BFLOAT16,
                                   hipdnn_sdk::data_objects::DataType::BFLOAT16,
                                   hipdnn_sdk::data_objects::DataType::BFLOAT16)};
+
+constexpr std::array<ConvolutionFwdSignatureKey, 3> ALL_SUPPORTED_CONVOLUTION_FWD_SIGNATURES
+    = {ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT),
+       ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType::HALF,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT),
+       ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT)};
+
+constexpr std::array<ConvolutionBwdSignatureKey, 3> ALL_SUPPORTED_CONVOLUTION_BWD_SIGNATURES
+    = {ConvolutionBwdSignatureKey(hipdnn_sdk::data_objects::DataType::FLOAT,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT),
+       ConvolutionBwdSignatureKey(hipdnn_sdk::data_objects::DataType::HALF,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT),
+       ConvolutionBwdSignatureKey(hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                                  hipdnn_sdk::data_objects::DataType::FLOAT)};
 
 typedef std::unordered_map<PlanRegistrySignatureKey,
                            std::unique_ptr<IGraphNodePlanBuilder>,
@@ -103,6 +121,12 @@ private:
 
         registerBatchnormTrainPlanBuilders(
             std::make_index_sequence<ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES.size()>{});
+
+        registerConvolutionFwdPlanBuilders(
+            std::make_index_sequence<ALL_SUPPORTED_CONVOLUTION_FWD_SIGNATURES.size()>{});
+
+        registerConvolutionBwdPlanBuilders(
+            std::make_index_sequence<ALL_SUPPORTED_CONVOLUTION_BWD_SIGNATURES.size()>{});
     }
 
     template <std::size_t... Is>
@@ -136,6 +160,26 @@ private:
               ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES[Is].inputDataType,
               ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES[Is].scaleBiasDataType,
               ALL_SUPPORTED_BATCHNORM_TRAIN_SIGNATURES[Is].meanVarianceDataType>>()),
+         ...);
+    }
+
+    template <std::size_t... Is>
+    void registerConvolutionFwdPlanBuilders([[maybe_unused]] std::index_sequence<Is...> sequence)
+    {
+        ((_registry[ALL_SUPPORTED_CONVOLUTION_FWD_SIGNATURES[Is]]
+          = std::make_unique<ConvolutionFwdPlanBuilder<
+              ALL_SUPPORTED_CONVOLUTION_FWD_SIGNATURES[Is].inputDataType,
+              ALL_SUPPORTED_CONVOLUTION_FWD_SIGNATURES[Is].accumulatorDataType>>()),
+         ...);
+    }
+
+    template <std::size_t... Is>
+    void registerConvolutionBwdPlanBuilders([[maybe_unused]] std::index_sequence<Is...> sequence)
+    {
+        ((_registry[ALL_SUPPORTED_CONVOLUTION_BWD_SIGNATURES[Is]]
+          = std::make_unique<ConvolutionBwdPlanBuilder<
+              ALL_SUPPORTED_CONVOLUTION_BWD_SIGNATURES[Is].inputDataType,
+              ALL_SUPPORTED_CONVOLUTION_BWD_SIGNATURES[Is].accumulatorDataType>>()),
          ...);
     }
 

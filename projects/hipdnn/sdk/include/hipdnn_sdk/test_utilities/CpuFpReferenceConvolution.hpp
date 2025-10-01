@@ -84,7 +84,7 @@ public:
         int64_t padW = padding[1];
 
         auto convolutionFunc = [&](auto g, auto n, auto k, auto ho, auto wo) {
-            auto accumulator = static_cast<AccumulatorType>(0);
+            auto accumulator = static_cast<AccumulatorType>(0.0f);
 
             auto gIdx = static_cast<int64_t>(g);
             auto nIdx = static_cast<int64_t>(n);
@@ -113,8 +113,9 @@ public:
                             int64_t weightIdx = (gIdx * outputChannelsPerGroup) + kIdx;
                             InputDataType weightVal = weight.getHostValue(weightIdx, c, y, x);
 
-                            accumulator += static_cast<AccumulatorType>(inputVal)
-                                           * static_cast<AccumulatorType>(weightVal);
+                            accumulator = accumulator
+                                          + (static_cast<AccumulatorType>(inputVal)
+                                             * static_cast<AccumulatorType>(weightVal));
                         }
                     }
                 }
@@ -187,7 +188,7 @@ public:
             auto hiIdx = static_cast<int64_t>(hi);
             auto wiIdx = static_cast<int64_t>(wi);
 
-            AccumulatorType vAcc = 0;
+            auto vAcc = static_cast<AccumulatorType>(0.0f);
 
             for(int64_t y = 0; y < kernelHeight; ++y)
             {
@@ -217,8 +218,9 @@ public:
 
                         InputDataType vWei = weight.getHostValue(outputChannelIdx, cIdx, y, x);
 
-                        vAcc += static_cast<AccumulatorType>(vOut)
-                                * static_cast<AccumulatorType>(vWei);
+                        vAcc = vAcc
+                               + (static_cast<AccumulatorType>(vOut)
+                                  * static_cast<AccumulatorType>(vWei));
                     }
                 }
             }

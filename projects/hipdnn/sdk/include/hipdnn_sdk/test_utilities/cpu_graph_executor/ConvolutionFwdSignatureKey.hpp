@@ -1,0 +1,71 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <functional>
+#include <hipdnn_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_sdk/data_objects/graph_generated.h>
+
+namespace hipdnn_sdk::test_utilities
+{
+
+struct ConvolutionFwdSignatureKey
+{
+    const hipdnn_sdk::data_objects::NodeAttributes nodeType{
+        hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes};
+    hipdnn_sdk::data_objects::DataType inputDataType;
+    hipdnn_sdk::data_objects::DataType accumulatorDataType;
+
+    constexpr ConvolutionFwdSignatureKey(hipdnn_sdk::data_objects::DataType input,
+                                         hipdnn_sdk::data_objects::DataType accumulator)
+        : inputDataType(input)
+        , accumulatorDataType(accumulator)
+    {
+    }
+
+    ConvolutionFwdSignatureKey(
+        const hipdnn_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+            tensorMap)
+    {
+        const auto* nodeAttributes = node.attributes_as_ConvolutionFwdAttributes();
+        if(nodeAttributes == nullptr)
+        {
+            throw std::runtime_error(
+                "Node attributes could not be cast to ConvolutionFwdAttributes");
+        }
+
+        auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
+        auto wTensorAttr = tensorMap.at(nodeAttributes->w_tensor_uid());
+        auto yTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
+
+        if(xTensorAttr == nullptr || wTensorAttr == nullptr || yTensorAttr == nullptr)
+        {
+            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
+                                     "failed to construct key");
+        }
+
+        inputDataType = xTensorAttr->data_type();
+
+        // TODO: We can't infer the data type from any of the incoming tensors, so for now we
+        // hardcode it to FLOAT. This means we won't be able to differentiate between
+        // convolution plans that differ only by accumulator type.
+        accumulatorDataType = hipdnn_sdk::data_objects::DataType::FLOAT;
+    }
+
+    constexpr std::size_t hashSelf() const
+    {
+        return static_cast<std::size_t>(static_cast<int>(nodeType))
+               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 4)
+               ^ (static_cast<std::size_t>(static_cast<int>(accumulatorDataType)) << 8);
+    }
+
+    bool operator==(const ConvolutionFwdSignatureKey& other) const noexcept
+    {
+        return nodeType == other.nodeType && inputDataType == other.inputDataType
+               && accumulatorDataType == other.accumulatorDataType;
+    }
+};
+
+}
