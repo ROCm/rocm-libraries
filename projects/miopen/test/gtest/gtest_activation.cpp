@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,7 @@
 #include <fusionHost.hpp>
 #include "verify.hpp"
 #include "gtest/gtest.h"
+#include <half/half.hpp>
 
 struct ActivationConfig
 {
@@ -51,7 +52,7 @@ struct ActivationConfig
     }
 };
 
-struct GPU_TestActivation_FP32
+struct GPU_TestActivation
     : public ::testing::TestWithParam<
           std::tuple<miopenDataType_t, miopenActivationMode_t, ActivationConfig>>
 {
@@ -66,8 +67,8 @@ protected:
         input = tensor<T>{activ_config.N, activ_config.C, activ_config.H, activ_config.W};
 
         std::get<tensor<T>>(input).generate(tensor_elem_gen_integer{17});
-        std::get<tensor<T>>(dinput_cpu) = std::get<tensor<T>>(input);
-        std::get<tensor<T>>(dinput_gpu) = std::get<tensor<T>>(input);
+        dinput_cpu = std::get<tensor<T>>(input);
+        dinput_gpu = std::get<tensor<T>>(input);
 
         miopenCreateActivationDescriptor(&activ_desc);
         miopenSetActivationDescriptor(activ_desc, activ_mode, alpha, beta, gamma);
@@ -82,12 +83,12 @@ protected:
 
         ASSERT_LT(total_mem, device_mem) << "Tensor exceeds system memory size";
 
-        std::get<tensor<T>>(output_gpu) =
+        output_gpu =
             tensor<T>{static_cast<size_t>(n), // n from miopenGetConvolutionForwardOutputDim ?
                       static_cast<size_t>(c),
                       static_cast<size_t>(h),
                       static_cast<size_t>(w)};
-        std::get<tensor<T>>(output_cpu_ref) =
+        output_cpu_ref =
             tensor<T>{static_cast<size_t>(n), // n from miopenGetConvolutionForwardOutputDim ?
                       static_cast<size_t>(c),
                       static_cast<size_t>(h),
@@ -109,7 +110,7 @@ protected:
                             std::get<tensor<T>>(output_cpu_ref).data); // Output
 
         // Infer on CPU, backward
-        std::get<tensor<T>>(doutput) = std::get<tensor<T>>(output_cpu_ref);
+        doutput = std::get<tensor<T>>(output_cpu_ref);
         std::get<tensor<T>>(doutput).generate([&](int n1, int c1, int h1, int w1) {
             float x = std::get<tensor<T>>(output_cpu_ref)(n1, c1, h1, w1);
             double y =
@@ -158,12 +159,16 @@ protected:
 
         if(data_type == miopenFloat)
             setup_impl<float>();
+        else if(data_type == miopenHalf)
+            setup_impl<half_float::half>();
     }
 
     void TearDown() override
     {
         if(data_type == miopenFloat)
             teardown_impl<float>();
+        else if(data_type == miopenHalf)
+            teardown_impl<half_float::half>();
     }
 
     template <class T1, class T2>
@@ -185,13 +190,13 @@ protected:
     bool isBwdActivation;
     miopenDataType_t data_type;
 
-    std::variant<tensor<float>, tensor<double>> input;          // x
-    std::variant<tensor<float>, tensor<double>> output_gpu;     // share
-    std::variant<tensor<float>, tensor<double>> output_cpu_ref; // y share
+    std::variant<tensor<float>, tensor<double>, tensor<half_float::half>> input;          // x
+    std::variant<tensor<float>, tensor<double>, tensor<half_float::half>> output_gpu;     // share
+    std::variant<tensor<float>, tensor<double>, tensor<half_float::half>> output_cpu_ref; // y share
 
-    std::variant<tensor<float>, tensor<double>> dinput_cpu; // dx
-    std::variant<tensor<float>, tensor<double>> dinput_gpu;
-    std::variant<tensor<float>, tensor<double>> doutput;
+    std::variant<tensor<float>, tensor<double>, tensor<half_float::half>> dinput_cpu; // dx
+    std::variant<tensor<float>, tensor<double>, tensor<half_float::half>> dinput_gpu;
+    std::variant<tensor<float>, tensor<double>, tensor<half_float::half>> doutput;
 
     ActivationConfig activ_config;
     miopenActivationMode_t activ_mode;
@@ -271,7 +276,7 @@ miopenStatus_t RunFwdBwdActivation(const miopen::Handle& handle,
         return bwdStatus;
 }
 
-TEST_P(GPU_TestActivation_FP32, ActivationFwdTest)
+TEST_P(GPU_TestActivation, ActivationFwdTest)
 {
     const float alpha = 1.0f, beta = 0;
     isBwdActivation = false;
@@ -289,11 +294,22 @@ TEST_P(GPU_TestActivation_FP32, ActivationFwdTest)
                                   std::get<0>(output_gpu).desc, // y
                                   out_dev.get());
     }
+    else if(data_type == miopenHalf)
+    {
+        status = RunFwdActivation(get_handle(),
+                                  activ_desc,
+                                  &alpha,
+                                  std::get<2>(input).desc, // x
+                                  in_dev.get(),
+                                  &beta,
+                                  std::get<2>(output_gpu).desc, // y
+                                  out_dev.get());
+    }
 
     EXPECT_EQ(status, miopenStatusSuccess) << "Forward activation failed. Config: " << activ_config;
 }
 
-TEST_P(GPU_TestActivation_FP32, ActivationBwdTest)
+TEST_P(GPU_TestActivation, ActivationBwdTest)
 {
     const float alpha = 1.0f, beta = 0;
     isBwdActivation = true;
@@ -315,14 +331,66 @@ TEST_P(GPU_TestActivation_FP32, ActivationBwdTest)
                                      std::get<0>(dinput_gpu).desc, // dx
                                      din_dev.get());
     }
+    else if(data_type == miopenHalf)
+    {
+        status = RunFwdBwdActivation(get_handle(),
+                                     activ_desc,
+                                     &alpha,
+                                     std::get<2>(input).desc, // x
+                                     in_dev.get(),
+                                     &beta,
+                                     std::get<2>(output_gpu).desc, // y
+                                     out_dev.get(),
+                                     std::get<2>(doutput).desc, // dy
+                                     dout_dev.get(),
+                                     std::get<2>(dinput_gpu).desc, // dx
+                                     din_dev.get());
+    }
 
     EXPECT_EQ(status, miopenStatusSuccess)
         << "Backward activation failed. Config: " << activ_config;
 }
 
+std::string GetActivationModeName(miopenActivationMode_t mode)
+{
+    switch(mode)
+    {
+    case miopenActivationPASTHRU: return "PASSTHRU";
+    case miopenActivationLOGISTIC: return "LOGISTIC";
+    case miopenActivationTANH: return "TANH";
+    case miopenActivationRELU: return "RELU";
+    case miopenActivationSOFTRELU: return "SOFTRELU";
+    case miopenActivationABS: return "ABS";
+    case miopenActivationPOWER: return "POWER";
+    case miopenActivationLEAKYRELU: return "LEAKYRELU";
+    case miopenActivationELU: return "ELU";
+    default: return "UNKNOWN";
+    }
+}
+
+struct PrintToStringParamName
+{
+    std::string
+    operator()(const testing::TestParamInfo<
+               std::tuple<miopenDataType_t, miopenActivationMode_t, ActivationConfig>>& info) const
+    {
+        auto data_type  = std::get<0>(info.param);
+        auto activ_mode = std::get<1>(info.param);
+        auto config     = std::get<2>(info.param);
+
+        std::string type_str = (data_type == miopenFloat) ? "FP32" : "FP16";
+        std::string mode_str = GetActivationModeName(activ_mode);
+
+        // return type_str + "_" + mode_str + "_N" + std::to_string(config.N) + "_C" +
+        //        std::to_string(config.C) + "_H" + std::to_string(config.H) + "_W" +
+        //        std::to_string(config.W);
+        return std::to_string(info.index) + "_" + type_str + "_" + mode_str;
+    }
+};
+
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_TestActivation_FP32,
-                         ::testing::Combine(::testing::Values(miopenFloat),
+                         GPU_TestActivation,
+                         ::testing::Combine(::testing::Values(miopenFloat, miopenHalf),
                                             // miopenDouble),
 
                                             ::testing::Values(miopenActivationPASTHRU,
@@ -342,4 +410,5 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                                               ActivationConfig{16, 32, 8, 8},
                                                               ActivationConfig{32, 16, 8, 8},
                                                               ActivationConfig{2, 16, 5, 4},
-                                                              ActivationConfig{2, 2, 2, 2})));
+                                                              ActivationConfig{2, 2, 2, 2})),
+                         PrintToStringParamName());
