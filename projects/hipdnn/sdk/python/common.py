@@ -22,11 +22,11 @@ class DTypeConverter:
         torch.int32: "int32"
     }
     __string_to_dtype = invertDict(__dtype_to_string)
-    
+
     @staticmethod
     def to_string(type: torch.dtype):
         return DTypeConverter.__dtype_to_string[type]
-    
+
     @staticmethod
     def from_string(type: str):
         return DTypeConverter.__string_to_dtype[type]
