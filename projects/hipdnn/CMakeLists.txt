@@ -9,6 +9,8 @@ set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING "Toolchain file")
@@ -53,6 +55,7 @@ option(HIP_DNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
 option(CODE_COVERAGE "Build with code coverage flags" OFF)
 option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 
 list(
     APPEND
