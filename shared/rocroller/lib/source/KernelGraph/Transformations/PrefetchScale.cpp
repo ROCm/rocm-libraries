@@ -171,28 +171,70 @@ namespace rocRoller
             }
         }
 
-        void prefetchScaleLoads(KernelGraph& graph, ContextPtr context)
+        void populateCopyInfo(KernelGraph const& graph,
+                              int                loadTag,
+                              DataType&          dataType,
+                              size_t&            numVGPRs,
+                              ContextPtr         context)
         {
-            auto root = graph.control.roots().only().value();
+            auto waveTileTag = graph.mapper.get<WaveTile>(loadTag);
+            auto waveTile    = graph.coordinates.get<WaveTile>(waveTileTag);
+            auto elements    = waveTile.value().elements();
 
+            auto varType = getVariableType(graph, loadTag);
+            // TODO: This assumes that eventually (after
+            // LoadPacked) the incoming data will be packed
+            auto maybePacked = DataTypeInfo::Get(varType).packedVariableType();
+            if(maybePacked)
+                varType = *maybePacked;
+            auto packFactor = DataTypeInfo::Get(varType).packing;
+
+            uint wfs = context->kernel()->wavefront_size();
+
+            dataType = varType.dataType;
+            numVGPRs = elements / wfs / packFactor;
+        }
+
+        std::pair<int, int> createCopy(KernelGraph& graph,
+                                       int          loadTag,
+                                       int          macTileTag,
+                                       DataType&    dataType,
+                                       size_t&      numVGPRs,
+                                       ContextPtr   context)
+        {
+
+            if(dataType == DataType::None || numVGPRs == -1)
+                populateCopyInfo(graph, loadTag, dataType, numVGPRs, context);
+
+            AssertFatal(dataType != DataType::None && numVGPRs != -1,
+                        ShowValue(dataType),
+                        ShowValue(numVGPRs));
+
+            // Copy loaded data into a new set of VGPRs
+            auto copyExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{macTileTag, Register::Type::Vector, dataType});
+            auto copyTag
+                = graph.control.addElement(Assign{Register::Type::Vector, copyExpr, numVGPRs});
+            auto destMacTileTag = graph.coordinates.addElement(MacroTile());
+            // macTile is being copied into destMacTile through this assign node
+            graph.coordinates.addElement(DataFlow(), {macTileTag}, {destMacTileTag});
+            graph.mapper.connect(copyTag, destMacTileTag, NaryArgument::DEST);
+
+            return std::make_pair(copyTag, destMacTileTag);
+        }
+
+        void prefetchScaleLoads(KernelGraph&            graph,
+                                std::vector<int> const& loads,
+                                UnrollColouring const&  colouring,
+                                ContextPtr              context)
+        {
             std::vector<int>                 preLoopLoads;
             std::map<int, std::vector<int>>  inLoopCopies;
             std::vector<std::pair<int, int>> inLoopLoads;
 
-            auto forLoop = -1;
-
-            // all loads that follow the root
-            auto loads
-                = filter(graph.control.isElemType<LoadTiled>(), graph.control.depthFirstVisit(root))
-                      .to<std::vector>();
-
-            auto colouring = colourByUnrollValue(graph);
-
-            // sort the loads
-            // this brings the first load in the sequence to the front
-            std::sort(loads.begin(),
-                      loads.end(),
-                      TopologicalCompare(std::make_shared<KernelGraph>(graph)));
+            auto     forLoop  = -1;
+            DataType dataType = DataType::None;
+            size_t   numVGPRs = -1;
 
             for(auto const loadTag : loads)
             {
@@ -207,37 +249,8 @@ namespace rocRoller
                     AssertFatal(forLoop == -1 || forLoop == maybeForLoop.value());
                     forLoop = maybeForLoop.value();
 
-                    // Copy loaded data into a new set of VGPRs
-                    DataType dataType;
-                    size_t   numVGPRs;
-                    {
-                        auto waveTileTag = graph.mapper.get<WaveTile>(loadTag);
-                        auto waveTile    = graph.coordinates.get<WaveTile>(waveTileTag);
-                        auto elements    = waveTile.value().elements();
-
-                        auto varType = getVariableType(graph, loadTag);
-                        // TODO: This assumes that eventually (after
-                        // LoadPacked) the incoming data will be
-                        // packed
-                        auto maybePacked = DataTypeInfo::Get(varType).packedVariableType();
-                        if(maybePacked)
-                            varType = *maybePacked;
-                        auto packFactor = DataTypeInfo::Get(varType).packing;
-
-                        uint wfs = context->kernel()->wavefront_size();
-
-                        dataType = varType.dataType;
-                        numVGPRs = elements / wfs / packFactor;
-                    }
-
-                    auto copyExpr = std::make_shared<Expression::Expression>(
-                        Expression::DataFlowTag{macTileTag, Register::Type::Vector, dataType});
-                    auto copyTag = graph.control.addElement(
-                        Assign{Register::Type::Vector, copyExpr, numVGPRs});
-                    auto destMacTileTag = graph.coordinates.addElement(MacroTile());
-                    // macTile is being copied into destMacTile through this assign node
-                    graph.coordinates.addElement(DataFlow(), {macTileTag}, {destMacTileTag});
-                    graph.mapper.connect(copyTag, destMacTileTag, NaryArgument::DEST);
+                    auto [copyTag, destMacTileTag]
+                        = createCopy(graph, loadTag, macTileTag, dataType, numVGPRs, context);
 
                     auto topOp = getTopSetCoordinate(graph, loadTag);
                     replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
@@ -329,23 +342,11 @@ namespace rocRoller
             return exchanges;
         }
 
-        void prefetchScaleLoadsPerUnroll(KernelGraph& graph, ContextPtr context)
+        void prefetchScaleLoadsPerUnroll(KernelGraph&            graph,
+                                         std::vector<int> const& loads,
+                                         UnrollColouring const&  colouring,
+                                         ContextPtr              context)
         {
-            auto root = graph.control.roots().only().value();
-
-            // all loads that follow the root
-            auto loads
-                = filter(graph.control.isElemType<LoadTiled>(), graph.control.depthFirstVisit(root))
-                      .to<std::vector>();
-
-            // sort the loads
-            // this brings the first load in the sequence to the front
-            std::sort(loads.begin(),
-                      loads.end(),
-                      TopologicalCompare(std::make_shared<KernelGraph>(graph)));
-
-            auto colouring = colourByUnrollValue(graph);
-
             std::vector<int>                prefetchPosition;
             std::vector<int>                exchangePosition;
             std::optional<int>              prevPosition;
@@ -354,7 +355,10 @@ namespace rocRoller
             std::map<int, std::vector<int>> nextIterPrefetch;
             std::map<int, std::vector<int>> exchangePrefetch;
             std::map<int, std::vector<int>> copy;
-            auto                            isInsideLoop = false;
+
+            auto     isInsideLoop = false;
+            DataType dataType     = DataType::None;
+            size_t   numVGPRs     = -1;
 
             for(auto const loadTag : loads)
             {
@@ -381,36 +385,8 @@ namespace rocRoller
 
                     if(context->kernelOptions()->scaleSkipPermlane)
                     {
-                        // Copy loaded data into a new set of VGPRs
-                        DataType dataType;
-                        size_t   numVGPRs;
-                        {
-                            auto waveTileTag = graph.mapper.get<WaveTile>(loadTag);
-                            auto waveTile    = graph.coordinates.get<WaveTile>(waveTileTag);
-                            auto elements    = waveTile.value().elements();
-
-                            auto varType = getVariableType(graph, loadTag);
-                            // TODO: This assumes that eventually (after
-                            // LoadPacked) the incoming data will be
-                            // packed
-                            auto maybePacked = DataTypeInfo::Get(varType).packedVariableType();
-                            if(maybePacked)
-                                varType = *maybePacked;
-                            auto packFactor = DataTypeInfo::Get(varType).packing;
-
-                            uint wfs = context->kernel()->wavefront_size();
-
-                            dataType = varType.dataType;
-                            numVGPRs = elements / wfs / packFactor;
-                        }
-                        auto copyExpr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{macTileTag, Register::Type::Vector, dataType});
-                        auto copyTag = graph.control.addElement(
-                            Assign{Register::Type::Vector, copyExpr, numVGPRs});
-                        auto destMacTileTag = graph.coordinates.addElement(MacroTile());
-                        // macTile is being copied into destMacTile through this assign node
-                        graph.coordinates.addElement(DataFlow(), {macTileTag}, {destMacTileTag});
-                        graph.mapper.connect(copyTag, destMacTileTag, NaryArgument::DEST);
+                        auto [copyTag, destMacTileTag]
+                            = createCopy(graph, loadTag, macTileTag, dataType, numVGPRs, context);
 
                         auto unrollKSize = getUnrollSize(graph, unrollKDim);
                         // update the indexes of the associated exchange macrotiles
@@ -573,11 +549,90 @@ namespace rocRoller
             }
         }
 
+        void prefetchScaleLoads(KernelGraph& graph, ContextPtr context)
+        {
+            auto root = graph.control.roots().only().value();
+
+            // all loads that follow the root
+            auto loads
+                = filter(graph.control.isElemType<LoadTiled>(), graph.control.depthFirstVisit(root))
+                      .to<std::vector>();
+
+            // sort the loads
+            // this brings the first load in the sequence to the front
+            std::sort(loads.begin(),
+                      loads.end(),
+                      TopologicalCompare(std::make_shared<KernelGraph>(graph)));
+
+            auto colouring = colourByUnrollValue(graph);
+
+            for(auto const loadTag : loads)
+            {
+                auto macTileTag = graph.mapper.get<MacroTile>(loadTag);
+                auto macTile    = graph.coordinates.getNode<MacroTile>(macTileTag);
+
+                // identify swizzle scale loads
+                if(macTile.memoryType == MemoryType::WAVE_SWIZZLE)
+                {
+                    AssertFatal(macTile.layoutType == LayoutType::MATRIX_A
+                                    || macTile.layoutType == LayoutType::MATRIX_B,
+                                ShowValue(macTile.layoutType));
+
+                    auto unroll0 = graph.mapper.get<Unroll>(loadTag, 0);
+                    auto unroll1 = graph.mapper.get<Unroll>(loadTag, 1);
+                    auto unroll2 = graph.mapper.get<Unroll>(loadTag, 2);
+
+                    unsigned int xyUnrollSize, macKUnrollSize;
+                    if(macTile.layoutType == LayoutType::MATRIX_A)
+                    {
+                        // A : M x K
+                        auto xyUnrollSize   = getUnrollSize(graph, unroll0);
+                        auto macKUnrollSize = getUnrollSize(graph, unroll1);
+                    }
+                    else
+                    {
+                        // B : K x N
+                        auto xyUnrollSize   = getUnrollSize(graph, unroll1);
+                        auto macKUnrollSize = getUnrollSize(graph, unroll0);
+                    }
+
+                    // if unroll2 is -1, this returns 1.
+                    auto unrollKSize = getUnrollSize(graph, unroll2);
+
+                    auto waveM = macTile.subTileSizes.at(0);
+                    auto waveN = macTile.subTileSizes.at(1);
+                    auto waveK = macTile.subTileSizes.at(2);
+                    AssertFatal(waveM == waveN,
+                                "waveM is not equal to waveN",
+                                ShowValue(waveM),
+                                ShowValue(waveN));
+                    auto miM = macTile.miTileSizes.at(0);
+                    auto miN = macTile.miTileSizes.at(1);
+                    auto miK = macTile.miTileSizes.at(2);
+                    AssertFatal(
+                        miM == miN, "miM is not equal to miN", ShowValue(miM), ShowValue(miN));
+
+                    auto factorMN = waveM / miM;
+                    auto factorK  = waveK / miK;
+
+                    std::cout << factorMN << " " << xyUnrollSize << std::endl;
+                    std::cout << factorK << " " << macKUnrollSize << std::endl;
+                    if(xyUnrollSize % factorMN == 0 && macKUnrollSize % factorK == 0)
+                        prefetchScaleLoadsPerUnroll(graph, loads, colouring, context);
+                    else if(xyUnrollSize % factorMN == 0
+                            && (macKUnrollSize * unrollKSize) % factorK == 0)
+                        prefetchScaleLoads(graph, loads, colouring, context);
+
+                    break;
+                }
+            }
+        }
+
         KernelGraph PrefetchScale::apply(KernelGraph const& original)
         {
             auto newGraph = original;
 
-            prefetchScaleLoadsPerUnroll(newGraph, m_context);
+            prefetchScaleLoads(newGraph, m_context);
 
             return newGraph;
         }

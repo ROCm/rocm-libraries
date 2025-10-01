@@ -580,7 +580,9 @@ namespace GEMMDriverTest
                     {gemm.macM, gemm.macK / gemm.scaleBlockSize},
                     LayoutType::MATRIX_A,
                     {gemm.waveM, gemm.waveN, gemm.waveK / gemm.scaleBlockSize, gemm.waveB},
-                    gemm.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
+                    gemm.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE,
+                    {gemm.waveM, gemm.waveN, gemm.waveK / gemm.scaleBlockSize, gemm.waveB},
+                    {gemm.swizzleM, gemm.swizzleN, gemm.swizzleK, gemm.swizzleB});
                 params->setDimensionInfo(*tagLoadScaleA, macTileAScale);
             }
 
@@ -603,7 +605,9 @@ namespace GEMMDriverTest
                     {gemm.macK / gemm.scaleBlockSize, gemm.macN},
                     LayoutType::MATRIX_B,
                     {gemm.waveM, gemm.waveN, gemm.waveK / gemm.scaleBlockSize, gemm.waveB},
-                    gemm.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
+                    gemm.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE,
+                    {gemm.waveM, gemm.waveN, gemm.waveK / gemm.scaleBlockSize, gemm.waveB},
+                    {gemm.swizzleM, gemm.swizzleN, gemm.swizzleK, gemm.swizzleB});
                 params->setDimensionInfo(*tagLoadScaleB, macTileBScale);
             }
 
@@ -2306,17 +2310,26 @@ namespace GEMMDriverTest
                 EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
                 if(unrollK == 0)
                 {
+                    gemm.swizzleM = 64;
+                    gemm.swizzleN = 64;
+                    gemm.swizzleK = 4;
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 4);
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
                 }
                 else if(unrollK == 2)
                 {
+                    gemm.swizzleM = 64;
+                    gemm.swizzleN = 64;
+                    gemm.swizzleK = 8;
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
                     // 2x2 wave config: NumAScaleLoadTiles = 256/2/64 = 2 and NumBScaleLoadTiles = 256/2/64 = 2
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 4);
                 }
                 else if(unrollK == 4)
                 {
+                    gemm.swizzleM = 64;
+                    gemm.swizzleN = 64;
+                    gemm.swizzleK = 16;
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
                 }
@@ -2364,6 +2377,9 @@ namespace GEMMDriverTest
             gemm.scaleTypeB = DataType::E8M0;
 
             gemm.swizzleScale  = true;
+            gemm.swizzleM      = 64;
+            gemm.swizzleN      = 64;
+            gemm.swizzleK      = 8;
             gemm.prefetchScale = true;
 
             gemm.scaleBlockSize = m_context->targetArchitecture().GetCapability(
@@ -2465,6 +2481,9 @@ namespace GEMMDriverTest
         gemm.scaleTypeB = DataType::E8M0;
 
         gemm.swizzleScale  = true;
+        gemm.swizzleM      = 64;
+        gemm.swizzleN      = 64;
+        gemm.swizzleK      = 8;
         gemm.prefetchScale = true;
 
         gemm.workgroupMappingDim   = 0;
@@ -2522,6 +2541,9 @@ namespace GEMMDriverTest
         gemm.scaleTypeB = DataType::E8M0;
 
         gemm.swizzleScale  = true;
+        gemm.swizzleM      = 64;
+        gemm.swizzleN      = 64;
+        gemm.swizzleK      = 8;
         gemm.prefetchScale = true;
 
         gemm.workgroupMappingDim   = 0;
@@ -2592,6 +2614,9 @@ namespace GEMMDriverTest
         gemm.scaleTypeB = DataType::E8M0;
 
         gemm.swizzleScale  = true;
+        gemm.swizzleM      = 64;
+        gemm.swizzleN      = 64;
+        gemm.swizzleK      = 8;
         gemm.prefetchScale = true;
 
         gemm.scaleBlockSize
