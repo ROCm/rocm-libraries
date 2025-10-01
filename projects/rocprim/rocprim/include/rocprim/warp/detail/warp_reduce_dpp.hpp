@@ -52,26 +52,26 @@ public:
         if(VirtualWaveSize > 1)
         {
             // quad_perm:[1,0,3,2] -> 10110001
-            output = reduce_op(warp_move_dpp<T, 0xb1>(output), output);
+            output = reduce_op(warp_move_dpp<T, 0xb1, 0xf, 0xf, true>(output), output);
         }
         if(VirtualWaveSize > 2)
         {
             // quad_perm:[2,3,0,1] -> 01001110
-            output = reduce_op(warp_move_dpp<T, 0x4e>(output), output);
+            output = reduce_op(warp_move_dpp<T, 0x4e, 0xf, 0xf, true>(output), output);
         }
         if(VirtualWaveSize > 4)
         {
             // row_ror:4
             // Use rotation instead of shift to avoid leaving invalid values in the destination
             // registers (asume warp size of at least hardware warp-size)
-            output = reduce_op(warp_move_dpp<T, 0x124>(output), output);
+            output = reduce_op(warp_move_dpp<T, 0x124, 0xf, 0xf, true>(output), output);
         }
         if(VirtualWaveSize > 8)
         {
             // row_ror:8
             // Use rotation instead of shift to avoid leaving invalid values in the destination
             // registers (asume warp size of at least hardware warp-size)
-            output = reduce_op(warp_move_dpp<T, 0x128>(output), output);
+            output = reduce_op(warp_move_dpp<T, 0x128, 0xf, 0xf, true>(output), output);
         }
 
         // Check for __builtin_amdgcn_permlane16; if it exists, the DPP equivalent is not available.
@@ -81,7 +81,7 @@ public:
             if(VirtualWaveSize > 16)
             {
                 // row_bcast:15
-                output = reduce_op(warp_swizzle<T, 0x1e0>(output), output);
+                output = reduce_op(warp_swizzle<T, 0x1e0, 0xf, 0xf, true>(output), output);
             }
 
 #if !ROCPRIM_TARGET_SPIRV
@@ -101,12 +101,12 @@ public:
             if(VirtualWaveSize > 16)
             {
                 // row_bcast:15
-                output = reduce_op(warp_move_dpp<T, 0x142>(output), output);
+                output = reduce_op(warp_move_dpp<T, 0x142, 0xf, 0xf, true>(output), output);
             }
             if(VirtualWaveSize > 32)
             {
                 // row_bcast:31
-                output = reduce_op(warp_move_dpp<T, 0x143>(output), output);
+                output = reduce_op(warp_move_dpp<T, 0x143, 0xf, 0xf, true>(output), output);
             }
 
 #if !ROCPRIM_TARGET_SPIRV
