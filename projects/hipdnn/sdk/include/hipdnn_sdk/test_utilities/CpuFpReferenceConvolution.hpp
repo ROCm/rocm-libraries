@@ -402,9 +402,7 @@ private:
 
             int64_t kernelSize = (dilations[idx] * (kernelDim - 1)) + 1;
             int64_t expectedOutputDim
-                = ((inputDim + prePadding[idx] + postPadding[idx] - kernelSize)
-                   / strides[idx])
-                  + 1;
+                = ((inputDim + prePadding[idx] + postPadding[idx] - kernelSize) / strides[idx]) + 1;
 
             if(expectedOutputDim != outputDim)
             {
