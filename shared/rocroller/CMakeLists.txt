@@ -178,7 +178,6 @@ target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(rocroller PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
