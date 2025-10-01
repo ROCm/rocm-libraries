@@ -1,20 +1,19 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "../utils/Helpers.hpp"
+#include <iostream>
+#include <string>
+#include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-
-#include <iostream>
-#include <string>
-#include <unordered_map>
+#include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk;
@@ -123,10 +122,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
         auto validator = test_utilities::CpuFpReferenceValidation<InputType>(
             static_cast<InputType>(tolerance), static_cast<InputType>(tolerance));
 
-        std::cout << "CPU reference validation "
-                  << (validator.allClose(yRefTensor.memory(), yTensor.memory()) ? "successful"
-                                                                                : "failed")
-                  << ".\n";
+        bool yValid = validator.allClose(yRefTensor.memory(), yTensor.memory());
+
+        std::cout << "CPU reference validation:\n";
+        std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
     }
 
     std::cout << "First 10 y values: ";
@@ -151,6 +150,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All batch normalization inference runs completed successfully.\n";
+    std::cout << "All batch normalization inference runs completed.\n";
     return 0;
 }

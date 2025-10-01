@@ -1,7 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "../utils/Helpers.hpp"
+#include <iostream>
+#include <string>
+#include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -10,9 +12,7 @@
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-#include <iostream>
-#include <string>
-#include <unordered_map>
+#include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk;
@@ -196,6 +196,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All batch normalization training runs completed successfully.\n";
+    std::cout << "All batch normalization training runs completed.\n";
     return 0;
 }

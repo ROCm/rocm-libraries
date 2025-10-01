@@ -1,20 +1,19 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "../utils/Helpers.hpp"
+#include <iostream>
+#include <string>
+#include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-
-#include <iostream>
-#include <string>
-#include <unordered_map>
+#include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk;
@@ -179,6 +178,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(hipdnnDestroy(handle));
-    std::cout << "All batch normalization backwards runs completed successfully.\n";
+    std::cout << "All batch normalization backwards runs completed.\n";
     return 0;
 }

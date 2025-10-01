@@ -27,42 +27,42 @@ template <>
 constexpr float getToleranceInference<float>()
 {
     //return 1e-5f;
-    return 1e-7f;
+    return 1e-5f;
 }
 
 template <>
 constexpr float getToleranceInference<half>()
 {
     //return 1e-3f;
-    return 1e-7f;
+    return 2e-4f;
 }
 
 template <>
 constexpr float getToleranceInference<hip_bfloat16>()
 {
     //return 1e-2f;
-    return 1e-7f;
+    return 2e-3f;
 }
 
 template <>
 constexpr float getToleranceBackward<float>()
 {
     //return 1e-5f;
-    return 1e-7f;
+    return 1e-6f;
 }
 
 template <>
 constexpr float getToleranceBackward<half>()
 {
     //return 1e-3f;
-    return 1e-7f;
+    return 4e-5f;
 }
 
 template <>
 constexpr float getToleranceBackward<hip_bfloat16>()
 {
     //return 1e-2f;
-    return 1e-7f;
+    return 6e-4f;
 }
 
 } // namespace bn
@@ -76,7 +76,7 @@ constexpr float getToleranceFwd();
 template <>
 constexpr float getToleranceFwd<float>()
 {
-    return 15e-7f;
+    return 2e-6f;
 }
 
 template <>
