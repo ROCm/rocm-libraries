@@ -26,7 +26,7 @@ constexpr float getToleranceFwd<float>()
 template <>
 constexpr float getToleranceFwd<half>()
 {
-    return 15e-4f;
+    return 2e-3f;
 }
 
 template <>
