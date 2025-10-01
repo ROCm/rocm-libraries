@@ -283,7 +283,7 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
         from.close();
         to.close();
 
-        fs::remove(filename);
+        // rename atomically deletes and replaces filename
         fs::rename(temp_name, filename);
         /// \todo What if rename fails? Thou shalt not loose the original file.
         fs::permissions(filename, FS_ENUM_PERMS_ALL);
