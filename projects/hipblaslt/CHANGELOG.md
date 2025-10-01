@@ -15,7 +15,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Support hipblaslt extop for gfx11xx/gfx12xx
 
 ### Changed
-* If the workspace size is insufficient, ``hipblasLtMatmul()`` would return an error rather than causing a segmentation fault.
+* ``hipblasLtMatmul()`` now returns an error when the workspace size is insufficient, rather than causing a segmentation fault.
 
 ## hipBLASLt 1.0.0 for ROCm 7.0.0
 
