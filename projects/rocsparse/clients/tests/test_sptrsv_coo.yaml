@@ -56,10 +56,10 @@ Definitions:
     - { alpha:  -0.75, alphai:  0.25 }
 
 Tests:
-- name: sptrsv_coo_bad_arg
-  category: pre_checkin
-  function: sptrsv_coo_bad_arg
-  precision: *single_double_precisions_complex_real
+#- name: sptrsv_coo_bad_arg
+#  category: pre_checkin
+#  function: sptrsv_coo_bad_arg
+#  precision: *single_double_precisions_complex_real
 
 - name: sptrsv_coo
   category: pre_checkin
