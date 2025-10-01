@@ -903,16 +903,17 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataGroupedAsymmetricKerne
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataStrides)
 {
-    // Basic convolution: 1x1x3x3 input, 1x1x2x2 weight -> 1x1x2x2 output
+    std::vector<int64_t> strides = {2, 2};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    // Basic convolution: 1x1x3x3 input, 1x1x2x2 weight -> 1x1x1x1 output with kernel strides
     Tensor<float> inputTensor({1, 1, 3, 3});
     Tensor<float> weightTensor({1, 1, 2, 2});
-    Tensor<float> outputTensor({1, 1, 2, 2});
+    Tensor<float> outputTensor({1, 1, 1, 1});
 
     // gradOutput values: simple pattern
     outputTensor.setHostValue(1.0f, 0, 0, 0, 0);
-    outputTensor.setHostValue(2.0f, 0, 0, 0, 1);
-    outputTensor.setHostValue(3.0f, 0, 0, 1, 0);
-    outputTensor.setHostValue(4.0f, 0, 0, 1, 1);
 
     // Weight values: simple 2x2 kernel
     std::array<float, 4> weightData = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -921,22 +922,18 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataStrides)
         weightTensor.memory().hostData()[i] = weightData[i];
     }
 
-    std::vector<int64_t> strides = {2, 2};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
     CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 0), 1.0f);
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 1), 2.0f);
-    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 2), 2.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 0, 2), 0.0f);
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 0), 3.0f);
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 1), 4.0f);
-    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 2), 6.0f);
-    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 0), 3.0f);
-    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 1), 6.0f);
-    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 2), 4.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 2), 0.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 0), 0.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 1), 0.0f);
+    EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 2), 0.0f);
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataDilation)
@@ -1035,15 +1032,15 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataPadding)
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataPaddingAsymmetric)
 {
     // Test backward data convolution with asymmetric padding
-    // Input: 1x1x3x4, Weight: 1x1x2x2, Output: 1x1x3x4 (asymmetric padding [1,1])
+    // Input: 1x1x3x4, Weight: 1x1x2x2, Output: 1x1x4x5 (with uniform padding [1,1])
     Tensor<float> inputTensor({1, 1, 3, 4});
     Tensor<float> weightTensor({1, 1, 2, 2});
-    Tensor<float> outputTensor({1, 1, 3, 4});
+    Tensor<float> outputTensor({1, 1, 4, 5});
 
     // Set gradient output values
-    for(int h = 0; h < 3; ++h)
+    for(int h = 0; h < 4; ++h)
     {
-        for(int w = 0; w < 4; ++w)
+        for(int w = 0; w < 5; ++w)
         {
             outputTensor.setHostValue(1.0f, 0, 0, h, w);
         }
@@ -1593,4 +1590,486 @@ TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionBwdData1D)
     EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 1), 2.5); // 1 * 1.5 + 2 * 0.5
     EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 2), 4.5); // 2 * 1.5 + 3 * 0.5
     EXPECT_DOUBLE_EQ(inputTensor.getHostValue(0, 0, 3), 4.5); // 3 * 1.5
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DExact)
+{
+    // Test 2D convolution with all weights = 1, varying input values
+    // This makes it easy to verify: output = sum of covered input values
+    Tensor<float> inputTensor({1, 1, 4, 4});
+    Tensor<float> weightTensor({1, 1, 2, 2});
+    Tensor<float> outputTensor({1, 1, 3, 3});
+
+    // Fill input with sequential values for easy verification
+    // Input:
+    // [ 1,  2,  3,  4]
+    // [ 5,  6,  7,  8]
+    // [ 9, 10, 11, 12]
+    // [13, 14, 15, 16]
+    float inputValue = 1.0f;
+    for(int h = 0; h < 4; ++h)
+    {
+        for(int w = 0; w < 4; ++w)
+        {
+            inputTensor.setHostValue(inputValue++, 0, 0, h, w);
+        }
+    }
+
+    // Fill weights with all 1s (2x2 kernel)
+    for(int i = 0; i < 4; ++i)
+    {
+        weightTensor.memory().hostData()[i] = 1.0f;
+    }
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify ALL output values
+    // Output[0,0] = 1+2+5+6 = 14
+    // Output[0,1] = 2+3+6+7 = 18
+    // Output[0,2] = 3+4+7+8 = 22
+    // Output[1,0] = 5+6+9+10 = 30
+    // Output[1,1] = 6+7+10+11 = 34
+    // Output[1,2] = 7+8+11+12 = 38
+    // Output[2,0] = 9+10+13+14 = 46
+    // Output[2,1] = 10+11+14+15 = 50
+    // Output[2,2] = 11+12+15+16 = 54
+
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 0), 14.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 1), 18.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 2), 22.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 0), 30.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 1), 34.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 2), 38.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 2, 0), 46.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 2, 1), 50.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 2, 2), 54.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DExact)
+{
+    // Test 3D convolution with all weights = 1
+    Tensor<float> inputTensor({1, 1, 3, 3, 3});
+    Tensor<float> weightTensor({1, 1, 2, 2, 2});
+    Tensor<float> outputTensor({1, 1, 2, 2, 2});
+
+    // Fill input with sequential values
+    float inputValue = 1.0f;
+    for(int d = 0; d < 3; ++d)
+    {
+        for(int h = 0; h < 3; ++h)
+        {
+            for(int w = 0; w < 3; ++w)
+            {
+                inputTensor.setHostValue(inputValue++, 0, 0, d, h, w);
+            }
+        }
+    }
+
+    // Fill weights with all 1s (2x2x2 kernel)
+    for(int i = 0; i < 8; ++i)
+    {
+        weightTensor.memory().hostData()[i] = 1.0f;
+    }
+
+    std::vector<int64_t> strides = {1, 1, 1};
+    std::vector<int64_t> dilations = {1, 1, 1};
+    std::vector<int64_t> padding = {0, 0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify ALL output values (2x2x2 outputs)
+    // Each output is sum of 2x2x2 = 8 input values
+    // Output[0,0,0] = 1+2+4+5+10+11+13+14 = 60
+    // Output[0,0,1] = 2+3+5+6+11+12+14+15 = 68
+    // Output[0,1,0] = 4+5+7+8+13+14+16+17 = 84
+    // Output[0,1,1] = 5+6+8+9+14+15+17+18 = 92
+    // Output[1,0,0] = 10+11+13+14+19+20+22+23 = 132
+    // Output[1,0,1] = 11+12+14+15+20+21+23+24 = 140
+    // Output[1,1,0] = 13+14+16+17+22+23+25+26 = 156
+    // Output[1,1,1] = 14+15+17+18+23+24+26+27 = 164
+
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 0, 0), 60.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 0, 1), 68.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 1, 0), 84.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 1, 1), 92.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 0, 0), 132.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 0, 1), 140.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 1, 0), 156.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 1, 1), 164.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DSymmetricPadding)
+{
+    // Test 2D convolution with symmetric padding
+    Tensor<float> inputTensor({1, 1, 3, 3});
+    Tensor<float> weightTensor({1, 1, 3, 3});
+    Tensor<float> outputTensor({1, 1, 3, 3});
+
+    // Fill input with simple pattern
+    // Input:
+    // [1, 2, 3]
+    // [4, 5, 6]
+    // [7, 8, 9]
+    float inputValue = 1.0f;
+    for(int h = 0; h < 3; ++h)
+    {
+        for(int w = 0; w < 3; ++w)
+        {
+            inputTensor.setHostValue(inputValue++, 0, 0, h, w);
+        }
+    }
+
+    // Fill weights with all 1s for easy calculation
+    for(int i = 0; i < 9; ++i)
+    {
+        weightTensor.memory().hostData()[i] = 1.0f;
+    }
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {1, 1}; // Symmetric padding
+
+    CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify ALL output values with padding
+    // With padding=1, we have implicit 0s around the input
+    // Output[0,0] = 0+0+0 + 0+1+2 + 0+4+5 = 12
+    // Output[0,1] = 0+0+0 + 1+2+3 + 4+5+6 = 21
+    // Output[0,2] = 0+0+0 + 2+3+0 + 5+6+0 = 16
+    // Output[1,0] = 0+1+2 + 0+4+5 + 0+7+8 = 27
+    // Output[1,1] = 1+2+3 + 4+5+6 + 7+8+9 = 45 (all input values)
+    // Output[1,2] = 2+3+0 + 5+6+0 + 8+9+0 = 33
+    // Output[2,0] = 0+4+5 + 0+7+8 + 0+0+0 = 24
+    // Output[2,1] = 4+5+6 + 7+8+9 + 0+0+0 = 39
+    // Output[2,2] = 5+6+0 + 8+9+0 + 0+0+0 = 28
+
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 0), 12.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 1), 21.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 2), 16.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 0), 27.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 1), 45.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 2), 33.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 2, 0), 24.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 2, 1), 39.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 2, 2), 28.0f);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DSymmetricPadding)
+{
+    // Test 3D convolution with symmetric padding
+    Tensor<float> inputTensor({1, 1, 2, 2, 2});
+    Tensor<float> weightTensor({1, 1, 2, 2, 2});
+    Tensor<float> outputTensor({1, 1, 3, 3, 3}); // Larger due to padding
+
+    // Fill input with sequential values 1-8
+    float inputValue = 1.0f;
+    for(int d = 0; d < 2; ++d)
+    {
+        for(int h = 0; h < 2; ++h)
+        {
+            for(int w = 0; w < 2; ++w)
+            {
+                inputTensor.setHostValue(inputValue++, 0, 0, d, h, w);
+            }
+        }
+    }
+
+    // Fill weights with all 1s for easy calculation
+    for(int i = 0; i < 8; ++i)
+    {
+        weightTensor.memory().hostData()[i] = 1.0f;
+    }
+
+    std::vector<int64_t> strides = {1, 1, 1};
+    std::vector<int64_t> dilations = {1, 1, 1};
+    std::vector<int64_t> padding = {1, 1, 1}; // Symmetric padding in all dimensions
+
+    CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Verify corner values (should have fewer contributions due to padding)
+    float corner = outputTensor.getHostValue(0, 0, 0, 0, 0);
+    EXPECT_GT(corner, 0.0f);
+    
+    // Verify center values (should have more contributions)
+    float center = outputTensor.getHostValue(0, 0, 1, 1, 1);
+    EXPECT_GT(center, corner);
+    
+    // The center value at (1,1,1) should be the sum of all input values
+    // since the 2x2x2 kernel covers the entire input when centered there
+    EXPECT_FLOAT_EQ(center, 36.0f); // 1+2+3+4+5+6+7+8 = 36
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DAsymmetricPadding)
+{
+    // Test 2D convolution with asymmetric padding
+    Tensor<float> inputTensor({1, 1, 3, 3});
+    Tensor<float> weightTensor({1, 1, 2, 2});
+    Tensor<float> outputTensor({1, 1, 4, 5}); // Different output size due to asymmetric padding
+
+    // Fill input with simple pattern
+    float inputValue = 1.0f;
+    for(int h = 0; h < 3; ++h)
+    {
+        for(int w = 0; w < 3; ++w)
+        {
+            inputTensor.setHostValue(inputValue++, 0, 0, h, w);
+        }
+    }
+
+    // Fill weights with simple pattern
+    weightTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    weightTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    weightTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    weightTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> prePadding = {1, 1};   // 1 padding at top/left
+    std::vector<int64_t> postPadding = {1, 2}; // 1 padding at bottom, 2 at right
+
+    CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+        inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
+
+    // Verify all output values (4x5 output)
+    // Row 0: includes top padding
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 0), 4.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 1), 11.0f); // 1*3 + 2*4
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 2), 18.0f); // 2*3 + 3*4
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 3), 9.0f); // 3*3 + 0*4
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 4), 0.0f); 
+
+    // Verify we have all 20 output values (4x5)
+    int count = 0;
+    for(int h = 0; h < 4; ++h)
+    {
+        for(int w = 0; w < 5; ++w)
+        {
+            float val = outputTensor.getHostValue(0, 0, h, w);
+            EXPECT_GE(val, 0.0f) << "Output at (" << h << "," << w << ") should be non-negative";
+            count++;
+        }
+    }
+    EXPECT_EQ(count, 20);
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd3DAsymmetricPadding)
+{
+    // Test 3D convolution with asymmetric padding
+    Tensor<float> inputTensor({1, 1, 2, 2, 2});
+    Tensor<float> weightTensor({1, 1, 2, 2, 2});
+    Tensor<float> outputTensor({1, 1, 3, 1, 4}); // Different dimensions due to asymmetric padding
+
+    // Fill input with sequential values
+    float inputValue = 1.0f;
+    for(int d = 0; d < 2; ++d)
+    {
+        for(int h = 0; h < 2; ++h)
+        {
+            for(int w = 0; w < 2; ++w)
+            {
+                inputTensor.setHostValue(inputValue++, 0, 0, d, h, w);
+            }
+        }
+    }
+
+    // Fill weights with all 1s
+    for(int i = 0; i < 8; ++i)
+    {
+        weightTensor.memory().hostData()[i] = 1.0f;
+    }
+
+    std::vector<int64_t> strides = {1, 1, 1};
+    std::vector<int64_t> dilations = {1, 1, 1};
+    std::vector<int64_t> prePadding = {1, 0, 1};   // Different padding for each dimension
+    std::vector<int64_t> postPadding = {1, 0, 2};  // Different padding for each dimension
+
+    CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+        inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
+
+    // Verify all values are computed
+    for(int d = 0; d < 3; ++d)
+    {
+        for(int h = 0; h < 1; ++h)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                float val = outputTensor.getHostValue(0, 0, d, h, w);
+                EXPECT_GE(val, 0.0f) << "Output at (" << d << "," << h << "," << w 
+                                    << ") should be non-negative";
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData2DAsymmetricPadding)
+{
+    // Test backward data convolution with asymmetric padding
+    Tensor<float> inputTensor({1, 1, 3, 3});
+    Tensor<float> weightTensor({1, 1, 2, 2});
+    Tensor<float> outputTensor({1, 1, 4, 5}); // Gradient output with asymmetric size
+
+    // Fill gradient output with simple pattern
+    float gradValue = 1.0f;
+    for(int h = 0; h < 4; ++h)
+    {
+        for(int w = 0; w < 5; ++w)
+        {
+            outputTensor.setHostValue(gradValue++, 0, 0, h, w);
+        }
+    }
+
+    // Fill weights
+    weightTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    weightTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    weightTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    weightTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> prePadding = {1, 1};
+    std::vector<int64_t> postPadding = {1, 2};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+        inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
+
+    // Verify all input gradients are computed
+    for(int h = 0; h < 3; ++h)
+    {
+        for(int w = 0; w < 3; ++w)
+        {
+            float grad = inputTensor.getHostValue(0, 0, h, w);
+            EXPECT_GT(grad, 0.0f) << "Input gradient at (" << h << "," << w 
+                                 << ") should be positive";
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DAsymmetricPadding)
+{
+    std::vector<int64_t> strides = {1, 1, 1};
+    std::vector<int64_t> dilations = {1, 1, 1};
+    std::vector<int64_t> prePadding = {1, 0, 1};
+    std::vector<int64_t> postPadding = {1, 0, 2};
+
+    // Test 3D backward data convolution with asymmetric padding
+    // 1, 1, 4, 2, 5 with paddings
+    Tensor<float> inputTensor({1, 1, 2, 2, 2});
+    Tensor<float> weightTensor({1, 1, 2, 2, 2});
+    Tensor<float> outputTensor({1, 1, 3, 1, 4}); // Gradient output with asymmetric size
+
+    // Fill gradient output
+    float gradValue = 1.0f;
+    for(int d = 0; d < 3; ++d)
+    {
+        for(int h = 0; h < 1; ++h)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                outputTensor.setHostValue(gradValue++, 0, 0, d, h, w);
+            }
+        }
+    }
+
+    // Fill weights with pattern
+    float weightValue = 0.1f;
+    for(int i = 0; i < 8; ++i)
+    {
+        weightTensor.memory().hostData()[i] = weightValue;
+        weightValue += 0.1f;
+    }
+
+    CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+        inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding);
+
+    // Verify all input gradients are computed
+    for(int d = 0; d < 2; ++d)
+    {
+        for(int h = 0; h < 2; ++h)
+        {
+            for(int w = 0; w < 2; ++w)
+            {
+                float grad = inputTensor.getHostValue(0, 0, d, h, w);
+                EXPECT_GT(grad, 0.0f) << "Input gradient at (" << d << "," << h << "," << w 
+                                     << ") should be positive";
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdData3DInvalidOutputDim)
+{
+    std::vector<int64_t> strides = {1, 1, 1};
+    std::vector<int64_t> dilations = {1, 1, 1};
+    std::vector<int64_t> prePadding = {1, 0, 1};
+    std::vector<int64_t> postPadding = {1, 0, 2};
+
+    // Test 3D backward data convolution with asymmetric padding
+    // The output tensor's height (2) is invalid for the given input (height 2) and kernel (height 2).
+    // The expected output height is 1. This test verifies that an exception is thrown.
+    Tensor<float> inputTensor({1, 1, 2, 2, 2});
+    Tensor<float> weightTensor({1, 1, 2, 2, 2});
+    Tensor<float> outputTensor({1, 1, 3, 2, 4}); // Gradient output with invalid height dimension
+
+    EXPECT_THROW(
+        (CpuFpReferenceConvolutionImpl<float, float>::convBwdData(
+            inputTensor, weightTensor, outputTensor, strides, dilations, prePadding, postPadding)),
+        std::invalid_argument);
+}
+
+
+// Additional test to verify exact calculations with small example
+TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwd2DExactCalculation)
+{
+    // Small test case where we can manually verify every calculation
+    Tensor<float> inputTensor({1, 1, 3, 3});
+    Tensor<float> weightTensor({1, 1, 2, 2});
+    Tensor<float> outputTensor({1, 1, 2, 2});
+
+    // Input:
+    // [1, 0, 1]
+    // [0, 1, 0]
+    // [1, 0, 1]
+    inputTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    inputTensor.setHostValue(0.0f, 0, 0, 0, 1);
+    inputTensor.setHostValue(1.0f, 0, 0, 0, 2);
+    inputTensor.setHostValue(0.0f, 0, 0, 1, 0);
+    inputTensor.setHostValue(1.0f, 0, 0, 1, 1);
+    inputTensor.setHostValue(0.0f, 0, 0, 1, 2);
+    inputTensor.setHostValue(1.0f, 0, 0, 2, 0);
+    inputTensor.setHostValue(0.0f, 0, 0, 2, 1);
+    inputTensor.setHostValue(1.0f, 0, 0, 2, 2);
+
+    // Weights:
+    // [1, -1]
+    // [-1, 1]
+    weightTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    weightTensor.setHostValue(-1.0f, 0, 0, 0, 1);
+    weightTensor.setHostValue(-1.0f, 0, 0, 1, 0);
+    weightTensor.setHostValue(1.0f, 0, 0, 1, 1);
+
+    std::vector<int64_t> strides = {1, 1};
+    std::vector<int64_t> dilations = {1, 1};
+    std::vector<int64_t> padding = {0, 0};
+
+    CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
+
+    // Manual calculation:
+    // Output[0,0] = 1*1 + 0*(-1) + 0*(-1) + 1*1 = 2
+    // Output[0,1] = 0*1 + 1*(-1) + 1*(-1) + 0*1 = -2
+    // Output[1,0] = 0*1 + 1*(-1) + 1*(-1) + 0*1 = -2
+    // Output[1,1] = 1*1 + 0*(-1) + 0*(-1) + 1*1 = 2
+
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 0), 2.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 0, 1), -2.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 0), -2.0f);
+    EXPECT_FLOAT_EQ(outputTensor.getHostValue(0, 0, 1, 1), 2.0f);
 }
