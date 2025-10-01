@@ -12,7 +12,7 @@
 #ifndef THRUST_DETAIL_CONFIG_DEPRECATED_H
 #define THRUST_DETAIL_CONFIG_DEPRECATED_H
 
-#include <thrust/detail/config/compiler.h>
+#include <thrust/detail/config/cpp_dialect.h>
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
@@ -22,33 +22,6 @@
 #  pragma system_header
 #endif // no system header
 
-// Check for deprecation opt-outs
-#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_DIALECT) || defined(CCCL_IGNORE_DEPRECATED_CPP_DIALECT) \
-  || defined(CUB_IGNORE_DEPRECATED_CPP_DIALECT)
-#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
-#    define THRUST_IGNORE_DEPRECATED_CPP_DIALECT
-#  endif
-#endif // suppress all dialect deprecation warnings
-#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_14) || defined(CCCL_IGNORE_DEPRECATED_CPP_14) \
-  || defined(CUB_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
-#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
-#    define THRUST_IGNORE_DEPRECATED_CPP_14
-#  endif
-#endif // suppress all c++14 dialect deprecation warnings
-#if defined(LIBCUDACXX_IGNORE_DEPRECATED_CPP_11) || defined(CCCL_IGNORE_DEPRECATED_CPP_11)  \
-  || defined(CUB_IGNORE_DEPRECATED_CPP_11) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) \
-  || defined(THRUST_IGNORE_DEPRECATED_CPP_14)
-#  if !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
-#    define THRUST_IGNORE_DEPRECATED_CPP_11
-#  endif
-#endif // suppress all c++11 dialect deprecation warnings
-#if defined(LIBCUDACXX_IGNORE_DEPRECATED_COMPILER) || defined(CCCL_IGNORE_DEPRECATED_COMPILER) \
-  || defined(CUB_IGNORE_DEPRECATED_COMPILER) || defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)  \
-  || defined(THRUST_IGNORE_DEPRECATED_CPP_14) || defined(THRUST_IGNORE_DEPRECATED_CPP_11)
-#  if !defined(THRUST_IGNORE_DEPRECATED_COMPILER)
-#    define THRUST_IGNORE_DEPRECATED_COMPILER
-#  endif
-#endif // suppress all compiler deprecation warnings
 #if defined(LIBCUDACXX_IGNORE_DEPRECATED_API) || defined(CCCL_IGNORE_DEPRECATED_API) \
   || defined(CUB_IGNORE_DEPRECATED_API)
 #  if !defined(THRUST_IGNORE_DEPRECATED_API)
