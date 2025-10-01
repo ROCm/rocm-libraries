@@ -2728,7 +2728,7 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     std::vector<size_t>    currentAntecedents = inputFFTItems;
 
     // using MPI sub-communicators for optimized pencil-to-pencil
-    if(pencil_to_pencil && batch == 1)
+    if(pencil_to_pencil)
     {
         // plan global transposes and local FFTs
         for(size_t i = 0; i < transpose_sequence.size(); ++i)
